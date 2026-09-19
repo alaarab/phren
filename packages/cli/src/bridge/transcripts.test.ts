@@ -19,6 +19,8 @@ const fixtures: Fixture[] = [
   { name: "Copilot assistant content", source: "copilot", event: image => ({ type: "assistant.message", data: { content: [text, image, text] } }) },
   { name: "Copilot tool result", source: "copilot", event: image => ({ type: "tool.execution_complete",
     data: { toolCallId: "tool-1", result: { content: [text, image, text], isError: false } } }) },
+  { name: "opencode tool result", source: "opencode", event: image => ({ type: "tool/results",
+    data: { message: { role: "user", content: [{ type: "tool_result", tool_use_id: "tool-1", content: [text, image, text] }] } } }) },
 ];
 
 describe("transcript image payloads", () => {
@@ -54,6 +56,19 @@ describe("transcript image payloads", () => {
       { ...events[0], payload: { ...events[0].payload, output: [text, { type: "input_image" }, { type: "unknown", data: url }] } },
       events[1], events[2],
     ]);
+  });
+
+  it("reads opencode plugin events through the shared shape", async () => {
+    const events = [
+      { seq: 0, time: "2026-09-18T18:12:30.306Z", type: "user/message", data: { source: "user", message: { role: "user", content: [{ type: "text", text: "hi" }] } } },
+      { seq: 1, time: "2026-09-18T18:12:30.480Z", type: "assistant/message", data: { stop_reason: "tool_use", message: { role: "assistant", content: [{ type: "text", text: "Working" }, { type: "tool_use", id: "call_1", name: "bash", input: { command: "ls" } }] }, usage: { input_tokens: 100, output_tokens: 20 } } },
+      { seq: 2, time: "2026-09-18T18:12:31.000Z", type: "tool/results", data: { message: { role: "user", content: [{ type: "tool_result", tool_use_id: "call_1", content: "a\nb" }] } } },
+      { seq: 3, time: "2026-09-18T18:12:32.000Z", type: "reasoning", data: { message: { role: "assistant", content: [{ type: "text", text: "secret" }] } } },
+    ];
+    await writeFile(file, events.map(event => JSON.stringify(event)).join("\n") + "\n");
+    const page = await new TranscriptReader(file, "opencode").read();
+    expect(page.entries.map(entry => entry.raw.type)).toEqual(["user/message", "assistant/message", "tool/results"]);
+    expect(page.entries[1].raw).toMatchObject({ data: { stop_reason: "tool_use" } });
   });
 
   it.each(["codex", "claude"] as const)("keeps %s direct image positions retrievable from the original row", async source => {

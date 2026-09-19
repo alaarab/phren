@@ -2,6 +2,25 @@ import XCTest
 
 final class WorkflowTests: XCTestCase {
     @MainActor
+    func testProjectsAndExploreRowsKeepACompactGroupedLayout() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing"]
+        app.launch()
+        XCTAssertTrue(app.tabBars.buttons["Projects"].waitForExistence(timeout: 15))
+        app.tabBars.buttons["Projects"].tap()
+        let project = app.buttons["project:sample/brain:demo"]
+        XCTAssertTrue(project.waitForExistence(timeout: 8))
+        XCTAssertLessThanOrEqual(project.frame.height, 60)
+        let graph = app.buttons["Memory graph"].firstMatch
+        XCTAssertTrue(graph.exists)
+        XCTAssertLessThanOrEqual(graph.frame.height, 60)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Compact grouped projects and Explore rows"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
+    @MainActor
     func testGlobalSearchPublishesLatestQueryAndClearsOldResults() {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing"]
@@ -49,7 +68,7 @@ final class WorkflowTests: XCTestCase {
         long.tap()
         XCTAssertTrue(app.navigationBars["Task details"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "END OF PLAN")).firstMatch.exists)
-        app.navigationBars.buttons["Done"].tap()
+        app.navigationBars["Task details"].buttons.element(boundBy: 0).tap()
         app.buttons["task-status"].tap()
         app.buttons["Active"].tap()
         XCTAssertTrue(app.staticTexts["No active tasks"].waitForExistence(timeout: 5))
@@ -97,8 +116,8 @@ final class WorkflowTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Date unknown"].firstMatch.exists)
         unknown.tap()
         XCTAssertTrue(app.navigationBars["Task details"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Date unknown"].exists)
-        app.navigationBars.buttons["Done"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Date unknown")).firstMatch.waitForExistence(timeout: 3))
+        app.navigationBars["Task details"].buttons.element(boundBy: 0).tap()
         app.buttons["task-filters"].tap()
         app.buttons["Clear filters"].tap()
         app.buttons["task-filters"].tap()
@@ -182,7 +201,7 @@ final class WorkflowTests: XCTestCase {
         XCTAssertFalse(app.buttons["Triage"].exists)
         app.staticTexts["Candidate for team memory"].tap()
         XCTAssertTrue(app.navigationBars["Memory entry"].waitForExistence(timeout: 5))
-        app.navigationBars["Memory entry"].buttons["Done"].tap()
+        app.navigationBars["Memory entry"].buttons.element(boundBy: 0).tap()
         app.buttons["Copy request for my agent"].tap()
         XCTAssertTrue(app.buttons["Agent request copied"].waitForExistence(timeout: 5))
         app.buttons["Select"].tap()

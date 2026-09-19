@@ -20,22 +20,30 @@ enum PhrenAppearanceStyle: String, CaseIterable, Identifiable {
             return .init(background: 0x1E1E1E, sunken: 0x141618, surface: 0x282A2C, raised: 0x3C3F42,
                          chatCanvas: 0x1E1E1E, chatPanel: 0x0E0E0E, text: 0xFFFFFF, secondary: 0xECEDEE,
                          muted: 0xA4A9B1, dim: 0x999FA8, accent: 0xB994F4, hover: 0xDCC5FF, solid: 0x7450A7,
-                         action: 0xB994F4, navigation: 0xB994F4, toolPanel: 0x121416, link: 0xC2AAFF)
+                         action: 0xB994F4, navigation: 0xB994F4, toolPanel: 0x121416, link: 0xC2AAFF,
+                         sessionProject: 0xC2AAFF, sessionTitle: 0xECEDEE, sessionMeta: 0xA4A9B1,
+                         stateWorking: 0xB994F4, stateWaiting: 0xE0BC7F, stateDone: 0x8AC8AC)
         case .amethyst:
             return .init(background: 0x17121F, sunken: 0x100C17, surface: 0x251E32, raised: 0x3A2E4D,
                          chatCanvas: 0x17121F, chatPanel: 0x100D17, text: 0xEEE3FF, secondary: 0xD8CAE9,
                          muted: 0xB8A6CE, dim: 0xA491BA, accent: 0xB994F4, hover: 0xDCC5FF, solid: 0x7450A7,
-                         action: 0xC39AF9, navigation: 0xDCC5FF)
+                         action: 0xC39AF9, navigation: 0xDCC5FF,
+                         sessionProject: 0xC39AF9, sessionTitle: 0xD8CAE9, sessionMeta: 0xB8A6CE,
+                         stateWorking: 0xC39AF9, stateWaiting: 0xE0BC7F, stateDone: 0x8AC8AC)
         case .graphite:
             return .init(background: 0x202020, sunken: 0x181818, surface: 0x2C2B2E, raised: 0x424045,
                          chatCanvas: 0x202020, chatPanel: 0x151416, text: 0xF2EEF6, secondary: 0xDDD8E3,
                          muted: 0xBEB7C6, dim: 0xA8A1B1, accent: 0xC0AAF2, hover: 0xE0CCFF, solid: 0x756096,
-                         action: 0xC0AAF2, navigation: 0xE4D9F3)
+                         action: 0xC0AAF2, navigation: 0xE4D9F3,
+                         sessionProject: 0xC0AAF2, sessionTitle: 0xDDD8E3, sessionMeta: 0xBEB7C6,
+                         stateWorking: 0xC0AAF2, stateWaiting: 0xE0BC7F, stateDone: 0x8AC8AC)
         case .slate:
             return .init(background: 0x292D3C, sunken: 0x242837, surface: 0x373D50, raised: 0x48516A,
                          chatCanvas: 0x272832, chatPanel: 0x1C1E27, text: 0xF3F2F8, secondary: 0xDCDFEF,
                          muted: 0xBCC3D8, dim: 0xABB3CA, accent: 0xB8AAF2, hover: 0xD2C5FF, solid: 0x71609E,
-                         action: 0x70DBE8, navigation: 0xE4E3F5)
+                         action: 0x70DBE8, navigation: 0xE4E3F5,
+                         sessionProject: 0x70DBE8, sessionTitle: 0xDCDFEF, sessionMeta: 0xBCC3D8,
+                         stateWorking: 0x70DBE8, stateWaiting: 0xE0BC7F, stateDone: 0x8AC8AC)
         }
     }
 }
@@ -46,6 +54,28 @@ struct PhrenPalette: Codable, Equatable {
     var accent, hover, solid, action, navigation: UInt32
     var toolPanel: UInt32? = nil
     var link: UInt32? = nil
+    var sessionProject: UInt32? = nil
+    var sessionTitle: UInt32? = nil
+    var sessionMeta: UInt32? = nil
+    var stateWorking: UInt32? = nil
+    var stateWaiting: UInt32? = nil
+    var stateDone: UInt32? = nil
+    var phrenCardSurface: UInt32? = nil
+    var phrenCardBorder: UInt32? = nil
+    var phrenCardAccent: UInt32? = nil
+    /// Inline code in chat (paths, commands, identifiers) — link-coloured by default.
+    var chatInlineCode: UInt32? = nil
+
+    // Blend with this theme's own panel, including light custom themes.
+    var resolvedPhrenCardAccent: UInt32 { phrenCardAccent ?? action }
+    var resolvedPhrenCardSurface: UInt32 { phrenCardSurface ?? Self.blend(toolPanel ?? chatPanel, resolvedPhrenCardAccent, 0.08) }
+    var resolvedPhrenCardBorder: UInt32 { phrenCardBorder ?? Self.blend(resolvedPhrenCardSurface, resolvedPhrenCardAccent, 0.3) }
+    private static func blend(_ base: UInt32, _ tint: UInt32, _ amount: Double) -> UInt32 {
+        [16, 8, 0].reduce(UInt32(0)) { result, shift in
+            let value = Double((base >> shift) & 255) * (1 - amount) + Double((tint >> shift) & 255) * amount
+            return result | (UInt32(value.rounded()) << shift)
+        }
+    }
 }
 
 struct PhrenCustomTheme: Codable, Identifiable, Equatable {

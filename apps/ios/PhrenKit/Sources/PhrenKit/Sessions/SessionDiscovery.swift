@@ -1,6 +1,6 @@
 import Foundation
 
-public struct SessionProject: Hashable, Sendable {
+public struct SessionProject: Codable, Hashable, Sendable {
     public let storeID: String
     public let name: String
     public init(storeID: String, name: String) { self.storeID = storeID; self.name = name }
@@ -38,7 +38,7 @@ extension LiveSessionPreferences {
 
 /// The tab selected on a known computer. Its destination comes from the hook's
 /// workspace and (when needed) tab IDs, never the agent `sessionId` or label.
-public struct LiveAgentSession: Equatable, Identifiable, Sendable {
+public struct LiveAgentSession: Codable, Equatable, Hashable, Identifiable, Sendable {
     public struct ID: Codable, Hashable, Sendable {
         public let hostID: UUID
         public let workspace: String
@@ -55,6 +55,27 @@ public struct LiveAgentSession: Equatable, Identifiable, Sendable {
     public let workspaceTabCount: Int?
     public let tab: LiveWorkspaces.Tab
     public var id: ID { ID(hostID: host.id, workspace: workspaceID, tab: tab.id, muxID: host.muxID) }
+    /// Navigation destinations hash sessions; equal sessions share an id, so
+    /// the id alone keeps Hashable consistent with Equatable.
+    public func hash(into hasher: inout Hasher) { hasher.combine(id) }
+
+    /// A human folder label for sessions whose cwd is not linked to a phren
+    /// project. Herdr workspace labels can be usernames or transport names.
+    public var folderName: String? {
+        guard let cwd = tab.cwd?.trimmingCharacters(in: .whitespacesAndNewlines), !cwd.isEmpty else { return nil }
+        let trimmed = cwd.count > 1 ? cwd.replacingOccurrences(of: #"/+$"#, with: "", options: .regularExpression) : cwd
+        guard let name = trimmed.split(separator: "/").last.map(String.init), !name.isEmpty else { return nil }
+        return name
+    }
+
+    public func projectDisplayName(_ mappedProject: String?) -> String {
+        if let mappedProject = mappedProject?.trimmingCharacters(in: .whitespacesAndNewlines), !mappedProject.isEmpty { return mappedProject }
+        return folderName ?? (workspaceName.isEmpty ? tab.displayTitle : workspaceName)
+    }
+
+    public func usesFolderFallback(mappedProject: String?) -> Bool {
+        mappedProject?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false && folderName != nil
+    }
 
     public func matches(_ query: String, projectName: String? = nil) -> Bool {
         let terms = query.split(whereSeparator: \.isWhitespace).map(String.init)

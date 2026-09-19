@@ -20,9 +20,17 @@ public actor GitHubClient {
     /// don't count against the REST rate limit.
     private var etags: [String: String] = [:]
 
-    public init(session: URLSession = .shared, token: String? = nil) {
+    public init(session: URLSession = GitHubClient.privateSession(), token: String? = nil) {
         self.session = session
         self.token = token
+    }
+
+    /// GitHub credentials and responses must never enter the disk URL cache.
+    public nonisolated static func privateSession() -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.urlCache = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSession(configuration: configuration)
     }
 
     public func setToken(_ token: String?) {

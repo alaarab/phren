@@ -1,160 +1,110 @@
-# Submitting phren for iOS
+# App Store / TestFlight submission
 
-Start here. Work top to bottom; each phase depends on the one above it.
-Everything in this folder is referenced from here.
+## Ready
+- Build settings: `ITSAppUsesNonExemptEncryption = NO` (standard algorithms),
+  privacy manifest declares UserDefaults (CA92.1) and file timestamps
+  (C617.1, 0A2A.1); no boot-time or disk-space APIs are used. Version and
+  build come from `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` in
+  project.yml (`deploy-phone.py` bumps the build).
+- Screenshots (6.9", 1320×2868, the only iPhone size App Store Connect
+  requires; it scales the rest) live outside the repo in
+  `~/Projects/phren-appstore-screenshots/`. Suggested order:
+  1. Complete-overview-after-coordinated-loading: Live sessions
+  2. Custom-chat-with-compact-activity: native chat with tool cards
+  3. Phren-memory-and-task-cards: phren memory calls
+  4. Inline-approval-in-Phren: approve a tool call from the phone
+  5. Claude-and-Codex-account-usage: usage limits
+  6. Projects-design: memory projects
+  7. Saved-graph-connections: memory graph
+  8. Integrated-composer-with-keyboard: composer
+  Regenerate with the UI tests named in each file's `capture(...)` call and
+  `xcrun xcresulttool export attachments`.
 
-| File | What it's for |
-|---|---|
-| `listing.md` | Name, subtitle, description, keywords, category, URLs |
-| `privacy-policy.md` | Publish to a public URL before submitting (required) |
-| `support.md` | Publish to a public URL before submitting (required) |
-| `review-notes.md` | Paste into App Review Information; includes the demo-account setup |
-| `privacy-label.md` | The App Privacy questionnaire answers |
-| `screenshots.md` | What to capture, in what order, and why |
+## Review notes (draft: paste into App Store Connect › App Review Information)
+> phren is a companion for the phren memory store (a git repository) and for
+> coding agents (Claude Code, Codex, Copilot) running on the reviewer's own
+> computers. Memory features need a GitHub token for a repository that holds a
+> phren store; agent features need a computer running Phren Hook
+> (`npx @phren/cli bridge install`) reachable over SSH/Tailscale.
+> For review we provide a demo GitHub token (read/write to a demo store
+> repository) in the sign-in field below. Agent screens can be explored without
+> a computer: the Agents tab explains how to add one; nothing else is gated.
+> No account is created by the app; the GitHub token is stored in the keychain
+> only.
 
----
+## Owner steps (cannot be done from this machine)
+1. **Review credentials:** create a GitHub account or fine-grained PAT scoped
+   to a demo store repository (findings/notes/tasks seeded, nothing private)
+   and enter it as the demo sign-in in App Review Information.
+2. **Upload:** Product › Archive in Xcode (Release, Automatic signing, team
+   LYB298P4U6) › Distribute › App Store Connect, or
+   `xcodebuild archive … && xcodebuild -exportArchive -exportOptionsPlist`
+   with an App Store Connect API key. The export-compliance question is
+   pre-answered by the plist key.
+3. **Connect metadata:** filled through the API on 2026-09-16; see
+   "Store record" below for what is set and what is still open.
+4. **Physical-device pass before submitting:** sign-in with the demo token,
+   add a computer (QR / key copy), open a chat, approve a request from the
+   Lock Screen activity, Control Center controls, Siri "What is phren doing",
+   Action button → "Talk to Phren".
 
-## Phase 0 — Code blockers
+## Store record (filled 2026-09-16)
 
-- [x] **Persistence hardening is in the app.** Unreadable queue/cache state
-      is preserved with a reported issue. Queue schemas 1 and 2 remain
-      readable by schema 3. Verify an actual upgrade with queued offline work
-      using [the device checklist](DEVICE_CHECKLIST.md).
-- [x] **Release configuration is present.** Export-compliance key, privacy
-      manifest, 1.0.0 versions, and app icon are in the repository.
-- [ ] Complete a signed Release archive and the device checklist.
-- [ ] Everything merged to `main` and pushed.
+Written through the App Store Connect API (`apps/ios/scripts/asc.py`, App
+Manager key). App 6811508141, version 73b06487-558d-4ec5-aab2-232e29007622.
+No build attached, nothing submitted.
 
-## Phase 1 — Apple Developer portal (manual, ~15 minutes)
+### Set and verified
+- **Version:** versionString `1.0.0`, copyright `2026 Ala Arab`, release
+  AFTER_APPROVAL. State PREPARE_FOR_SUBMISSION.
+- **App info:** primary category DEVELOPER_TOOLS, secondary PRODUCTIVITY;
+  content rights DOES_NOT_USE_THIRD_PARTY_CONTENT.
+- **App info localization (en-US):** name `Phren` (unchanged), subtitle
+  `Your memory. Your agents.` (the 41-char line from ios.html does not fit
+  the 30-char limit), privacy policy URL
+  `https://alaarab.github.io/phren/privacy.html`.
+- **Age rating:** every content descriptor NONE; advertising, gambling,
+  lootBox, healthOrWellnessTopics, messagingAndChat, parentalControls,
+  ageAssurance, socialMedia, userGeneratedContent, unrestrictedWebAccess
+  all false; kidsAgeBand null; override NONE. Computed rating: **4+**.
+  (messagingAndChat and userGeneratedContent are answered "no" because the
+  chat is with the user's own agents and store content lives in the user's
+  own GitHub repository; neither is user-to-user or hosted by us.)
+- **Version localization (en-US):** description (2839 chars, from README /
+  ios.html / CHANGELOG 1.0.0), keywords (96 chars:
+  `claude code,codex,copilot,ai agent,coding agent,terminal,ssh,developer,memory,notes,tasks,github`),
+  promotional text (144 chars), support URL
+  `https://alaarab.github.io/phren/support.html`, marketing URL
+  `https://alaarab.github.io/phren/ios.html`. **whatsNew is not editable on a
+  first version** (API 409 STATE_ERROR); Apple only shows it for updates.
+- **Screenshots:** set `ef6d70ca-7346-4bc5-8d51-4fc5044ff41f`, display type
+  APP_IPHONE_67 (the API has no APP_IPHONE_69; 1320×2868 is accepted there).
+  All eight uploaded in the order listed under "Ready", every asset
+  `COMPLETE` at 1320×2868, order confirmed by a listing.
+- **Price:** schedule created, base territory USA, manual price = the free
+  point (customerPrice 0.0); 174 automatic free equivalents.
+- **Availability (v2):** all 175 territories available,
+  availableInNewTerritories true. Every territory reports
+  CANNOT_SELL / AVAILABLE_FOR_SALE_UNRELEASED_APP, which is the normal
+  pre-release state.
 
-Xcode automatic provisioning can register identifiers and fetch profiles for
-an authenticated team. The September 2026 check obtained profiles for both
-targets with the App Group. Verify these for the account used to distribute:
-
-- [x] Register App ID **`com.phren.ios`** (Certificates, Identifiers &
-      Profiles → Identifiers → App IDs)
-- [x] Register App ID **`com.phren.ios.widgets`**
-- [x] Create App Group **`group.com.phren.ios`**
-- [x] Enable the App Groups capability on **both** App IDs and assign that
-      group to each
-- [x] Confirm a signed build succeeds with the declared entitlements.
-      Unsigned CI uses `CODE_SIGNING_ALLOWED=NO`; a release must retain the group.
-      `xcodegen generate` regenerates the entitlements files from
-      `project.yml` — never hand-edit them.
-
-Verified September 10 against both embedded profiles in the signed build 31:
-team LYB298P4U6, app group present in app and widget, profiles expire September
-7, 2027. This proves development-device signing; it does not prove App Store
-Connect upload or TestFlight installation.
-
-> **If you'd rather ship v1 without widgets**, remove the `PhrenWidgets`
-> target and the App Group entitlement from `project.yml` instead. Shipping
-> widgets that can't read the shared container means shipping a feature
-> that always shows placeholder content — worse than not shipping it.
-
-## Phase 2 — Publish the two required URLs
-
-- [x] Publish `privacy-policy.md` → `https://alaarab.github.io/phren/privacy.html`
-- [x] Publish `support.md` → `https://alaarab.github.io/phren/support.html`
-- [x] Retrieve both over HTTPS and confirm their content matches the source.
-      Verified September 10 after the GitHub Pages deployment. App Review does check,
-      and a 404 is a rejection.
-
-## Phase 3 — Demo account
-
-App Review cannot get past the sign-in screen without a token. Full
-instructions in `review-notes.md`.
-
-- [x] Public demo repository seeded with a small phren store, including
-      review-queue items so triage mode has content
-      — [alaarab/phren-ios-demo](https://github.com/alaarab/phren-ios-demo),
-      three synthetic projects with findings, tasks, notes, skills, and review items.
-- [ ] Fine-grained PAT for it: Contents Read and write, Metadata Read,
-      **expiry at least 90 days out**
-- [ ] Token pasted into App Store Connect's App Review Information
-      (**not** committed to this repository)
-
-## Phase 4 — App Store Connect record
-
-- [ ] Create the app; bundle ID `com.phren.ios`
-- [ ] **Primary category: Developer Tools** (see `listing.md` for why this
-      matters more than anything else here)
-- [ ] Name, subtitle, description, keywords, promotional text — all in
-      `listing.md`
-- [ ] Support and privacy policy URLs from Phase 2
-- [ ] Age rating 4+
-- [ ] **App Privacy → Data Not Collected** — see `privacy-label.md`
-- [ ] Paste App Review notes from `review-notes.md`
-
-## Phase 5 — Screenshots
-
-- [ ] Capture the 6.9" set per `screenshots.md`, **from the demo store**
-- [ ] Verify no employer names, colleagues' names, internal hostnames, or
-      ticket numbers appear anywhere in frame
-- [ ] Upload; confirm the first three tell the "agent memory" story
-
-## Phase 6 — Build and upload
-
-- [ ] Xcode → Product → Destination → **Any iOS Device**
-- [ ] Product → **Archive** (Release configuration)
-- [ ] Organizer → **Distribute App** → App Store Connect → Upload
-- [ ] Wait for processing (usually minutes), then confirm the build appears
-
-Alternatively, configure `Config/Local.xcconfig` and run
-`python3 scripts/release.py --build-number <next-number> --upload` from
-`apps/ios`. It checks the team/OAuth settings, archives with App Groups intact,
-and uploads. `--allow-token-sign-in` permits a build before OAuth registration.
-An `errSecInternalComponent` signing failure needs signing-key access resolved
-in the Mac's login keychain; do not strip entitlements to bypass it.
-
-## Phase 7 — TestFlight first, always
-
-- [ ] Install the TestFlight build on your own phone
-- [ ] **Make offline edits, then update to a newer TestFlight build over
-      the top of it, and confirm the pending queue survived.** This is the
-      specific regression Phase 0 fixes; it can only be verified by a real
-      update, and it is the one bug that would silently lose user data.
-- [ ] Exercise triage, Siri capture from the Lock Screen, voice capture,
-      widgets, and multi-store if you use it
-- [ ] Confirm sign-in works from a clean install using only the demo token
-
-## Phase 8 — Submit
-
-- [ ] Attach the build to the version
-- [ ] Submit for review
-- [ ] Expect 24–48 hours
-
----
-
-## Realistic risks
-
-**Guideline 4.3 (Spam / duplicate)** — the "another AI to-do app" read.
-Mitigated by the Developer Tools category, the memory-graph-first
-screenshots, and the review notes. Most likely rejection; easily argued.
-
-**Guideline 4.2 (Minimum Functionality)** — the "thin client for a web
-API" read. Mitigated by the offline sync engine, on-device search, App
-Intents, and widgets, all named explicitly in the review notes. Airplane
-Mode is the demonstration if challenged.
-
-**Guideline 2.1 (Incomplete Information)** — an expired or wrongly scoped
-demo token. The most common *avoidable* rejection. Check the token
-immediately before submitting.
-
-**Not a risk:** Guideline 4.8 (Sign in with Apple). Signing into GitHub to
-reach your own repository falls under the documented exemption for clients
-of a specific third-party service. Same basis every Git client ships on.
-
----
-
-## After approval
-
-- Tag the release in git and note the App Store version in `CHANGELOG.md`
-- Keep `privacy-label.md` honest — the moment analytics, a backend, or
-  push notifications land, the label must change **before** that build
-  ships
-- Register the GitHub OAuth app and set `PHREN_GITHUB_CLIENT_ID` in the
-  build configuration to enable a
-  proper device flow. It is the biggest remaining onboarding improvement,
-  and it is currently the first thing every new user has to struggle
-  through.
+### Still open (owner)
+1. **App Review Information: needs a real phone number.**
+   `POST /v1/appStoreReviewDetails` requires `contactPhone` and validates it
+   as a real number; `+10000000000` and `+1 555 010 0000` were both refused
+   ("must be in a valid format"), so no review detail exists yet. Run, with
+   your number and the demo token:
+   ```
+   python3 apps/ios/scripts/asc.py POST /v1/appStoreReviewDetails '{"data":{"type":"appStoreReviewDetails","attributes":{"contactFirstName":"Ala","contactLastName":"Arab","contactEmail":"alaarab@gmail.com","contactPhone":"+1 XXX XXX XXXX","demoAccountRequired":true,"demoAccountName":"<github account>","demoAccountPassword":"<fine-grained PAT for alaarab/phren-ios-demo>","notes":"<the Review notes block above, as plain text>"},"relationships":{"appStoreVersion":{"data":{"type":"appStoreVersions","id":"73b06487-558d-4ec5-aab2-232e29007622"}}}}}'
+   ```
+   or fill the same fields in App Store Connect › the version › App Review
+   Information. The demo token needs Contents: Read and write + Metadata:
+   Read on the demo store, expiring at least 90 days out.
+2. **App Privacy questionnaire** (App Store Connect › App Privacy): no API.
+   Answer per `privacy-label.md` (data not collected).
+3. **EU trader status (Digital Services Act):** the 27 EU territories report
+   `TRADER_STATUS_NOT_PROVIDED`; declare it under App Store Connect ›
+   Business (or the app's Availability page) or the app will not be sold in
+   the EU.
+4. Attach the build (99 / 1.0.0) once it finishes processing, run the
+   physical-device pass above, then Submit for Review.

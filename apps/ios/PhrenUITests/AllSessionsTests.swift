@@ -5,15 +5,51 @@ final class AllSessionsTests: XCTestCase {
     private let linux = "A1000000-0000-0000-0000-000000000002"
 
     @MainActor
+    func testFocusFilterFixtureScopesSessionsAndCanBeCleared() {
+        let app = launch(extra: ["--focus-filter-fixture"])
+        XCTAssertTrue(app.staticTexts["agents-focus-filter"].waitForExistence(timeout: 10))
+        XCTAssertFalse(row(app, host: mac).exists)
+        XCTAssertTrue(row(app, host: linux).exists)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label ==[c] %@", "Computers")).firstMatch.exists, "Computers must appear in the same reveal as the cards")
+        app.buttons["agents-focus-clear"].tap()
+        XCTAssertTrue(row(app, host: mac).waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["agents-focus-filter"].exists)
+    }
+
+    @MainActor
     func testInitialOverviewRevealsTogetherAfterTheSlowerComputerResponds() {
-        let app = launch(extra: ["--all-sessions-delayed"])
+        let app = launch(extra: ["--all-sessions-delayed", "--overview-disk-cache", "--overview-cache-expired"])
         let loading = app.descendants(matching: .any).matching(identifier: "agents-loading").firstMatch
         XCTAssertTrue(loading.exists)
         XCTAssertFalse(row(app, host: mac).exists, "The fast host must not appear as a partial page")
+        XCTAssertFalse(section(app, title: "Computers").exists, "Computer management must join the same first reveal")
+        XCTAssertFalse(section(app, title: "Working").exists, "No session section may appear before the batch is ready")
+        XCTAssertFalse(app.staticTexts["Connecting your sessions"].exists)
+        XCTAssertFalse(app.buttons["Add computer"].exists)
         XCTAssertTrue(row(app, host: mac).waitForExistence(timeout: 8))
         XCTAssertTrue(row(app, host: linux).exists)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label ==[c] %@", "Computers")).firstMatch.exists, "Computers must appear in the same reveal as the cards")
         XCTAssertFalse(loading.exists)
         capture(app, "Complete overview after coordinated loading")
+    }
+
+    @MainActor
+    func testFreshDiskCacheRevealsCardsAndComputersWhileRefreshingBehindThem() {
+        let app = launch(extra: ["--all-sessions-delayed", "--overview-disk-cache", "--overview-cache-fresh"])
+        XCTAssertTrue(row(app, host: mac).waitForExistence(timeout: 2))
+        XCTAssertTrue(row(app, host: linux).exists)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label ==[c] %@", "Computers")).firstMatch.exists)
+        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "agents-loading").firstMatch.exists)
+        capture(app, "Complete cached sessions screen")
+    }
+
+    @MainActor
+    func testSessionCardsShowReportedRelativeTime() {
+        let app = launch(extra: ["--session-relative-time-fixture"])
+        let time = app.staticTexts["overview-changed:\(mac):herdr:default:w1:w1:t1"]
+        XCTAssertTrue(time.waitForExistence(timeout: 10))
+        XCTAssertEqual(time.label, "· 2m ago")
+        capture(app, "Session activity times")
     }
 
     @MainActor
@@ -51,7 +87,7 @@ final class AllSessionsTests: XCTestCase {
         app.buttons["overview-detail:\(linux):herdr:default:w1:w1:t1"].tap()
         XCTAssertTrue(app.navigationBars["Session details"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Review Linux deployment"].exists)
-        app.navigationBars.buttons["Done"].tap()
+        app.navigationBars["Session details"].buttons.element(boundBy: 0).tap()
         XCUIDevice.shared.press(.home); app.activate()
         XCTAssertTrue(first.waitForExistence(timeout: 10)); XCTAssertTrue(second.waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["all-web-servers"].exists)
@@ -162,9 +198,12 @@ final class AllSessionsTests: XCTestCase {
         let first = row(app, host: mac)
         XCTAssertTrue(first.waitForExistence(timeout: 10))
         let title = app.staticTexts["Build the iPhone overview"]
-        let metadata = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "Working", "Test Mac")).firstMatch
+        // The state is the section's business; the computer rides the first
+        // line beside the branch, above the title.
+        let metadata = first.descendants(matching: .any)["on Test Mac"].firstMatch
         XCTAssertTrue(metadata.exists)
-        XCTAssertLessThanOrEqual(title.frame.maxY, metadata.frame.minY)
+        XCTAssertFalse(first.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Working")).firstMatch.exists)
+        XCTAssertLessThanOrEqual(metadata.frame.minY, title.frame.minY)
         XCTAssertGreaterThan(first.frame.height, 90)
         XCTAssertTrue(first.frame.contains(metadata.frame))
         let details = app.buttons["overview-detail:\(mac):herdr:default:w1:w1:t1"]
@@ -184,9 +223,44 @@ final class AllSessionsTests: XCTestCase {
         XCTAssertTrue(app.buttons["Add computer"].exists)
     }
 
+    /// Swipe → Close on a card closes that tab, not its neighbour, and the
+    /// card leaves without a manual refresh; the other computer's identical
+    /// tab ids are untouched.
+    @MainActor
+    func testClosingFromTheListRemovesExactlyThatCardAtOnce() {
+        let app = launch()
+        let target = row(app, host: mac, tab: "w1:t2"), neighbour = row(app, host: mac, tab: "w1:t1"), other = row(app, host: linux, tab: "w1:t2")
+        XCTAssertTrue(target.waitForExistence(timeout: 15)); XCTAssertTrue(neighbour.exists); XCTAssertTrue(other.exists)
+        target.swipeLeft()
+        let close = app.buttons["overview-close:\(mac):herdr:default:w1:w1:t2"]
+        XCTAssertTrue(close.waitForExistence(timeout: 5)); close.tap()
+        XCTAssertTrue(target.waitForNonExistence(timeout: 3), "The closed card leaves without a refresh")
+        XCTAssertTrue(neighbour.exists, "The neighbour stays"); XCTAssertTrue(other.exists, "The other computer's tab with the same id stays")
+        capture(app, "Closed from the list")
+    }
+
+    /// Hold → Close tab confirms first, naming the held tab, then that card
+    /// leaves at once.
+    @MainActor
+    func testClosingFromTheMenuConfirmsThenRemovesThatCard() {
+        let app = launch()
+        let target = row(app, host: mac, tab: "w1:t2"), neighbour = row(app, host: mac, tab: "w1:t1")
+        XCTAssertTrue(target.waitForExistence(timeout: 15))
+        target.press(forDuration: 1.2)
+        let close = app.buttons["Close tab"]
+        XCTAssertTrue(close.waitForExistence(timeout: 5)); close.tap()
+        let confirm = app.buttons["Close tab"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Check project status")).firstMatch.exists, "The dialog names the held tab")
+        confirm.tap()
+        XCTAssertTrue(target.waitForNonExistence(timeout: 3))
+        XCTAssertTrue(neighbour.exists, "The neighbour stays")
+    }
+
     @MainActor
     private func launch(extra: [String] = [], resetPins: Bool = true) -> XCUIApplication {
         let app = XCUIApplication()
+        app.launchEnvironment["PHREN_PERFORMANCE_LOG"] = "1"
         app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--all-sessions-fixture", "--native-chat-fixture"]
             + (resetPins ? ["--session-pins-reset"] : []) + extra
         app.launch()

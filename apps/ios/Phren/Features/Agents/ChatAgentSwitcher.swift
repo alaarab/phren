@@ -4,32 +4,33 @@ import SwiftUI
 /// Reuses live discovery and exact host/tab identities; selecting a row never
 /// launches a new agent or submits anything to a running conversation.
 struct ChatAgentSwitcher: View {
-    let session: LiveAgentSession
+    let session: LiveAgentSession?
     let panes: [AgentChatPanes.Pane]
     let selectedPaneID: String?
     let choosePane: (AgentChatPanes.Pane) -> Void
     let chooseSession: (LiveAgentSession) -> Void
-    @Environment(\.dismiss) private var dismiss
+    let close: () -> Void
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(AppModel.self) private var appModel
     @AppStorage("sessions.live.preferences.v1") private var data = Data()
-    @State private var overview = SessionOverviewMonitor()
+    private var overview: SessionOverviewMonitor { .shared }
     @State private var query = ""
+    @AppStorage("agents.drawer.recent.v1") private var recent = false
     private var preferences: LiveSessionPreferences? { try? LiveSessionPreferences.read(data) }
     private var hosts: [LiveHost] { preferences?.hosts ?? [] }
     private struct PollID: Equatable { let hosts: [LiveHost]; let active: Bool }
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { tick in
-            PhrenList {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 4) {
                 let eligiblePanes = panes.filter { pane in
-                    (try? pane.target(hostID: session.host.id, workspaceID: session.workspaceID, tabID: session.tab.id, muxID: session.host.muxID)) != nil
+                    guard let session else { return false }
+                    return (try? pane.target(hostID: session.host.id, workspaceID: session.workspaceID, tabID: session.tab.id, muxID: session.host.muxID)) != nil
                 }
                 let local = eligiblePanes.filter { query.isEmpty || "\($0.displayTitle) \($0.agent ?? "")".localizedCaseInsensitiveContains(query) }
                 if eligiblePanes.count > 1 && !local.isEmpty {
                     Section("In this tab") {
                         ForEach(local) { pane in
-                            Button { dismiss(); choosePane(pane) } label: {
+                            Button { choosePane(pane) } label: {
                                 HStack {
                                     VStack(alignment: .leading, spacing: 3) {
                                         Text(pane.displayTitle)
@@ -42,42 +43,45 @@ struct ChatAgentSwitcher: View {
                         }
                     }
                 }
-                if !overview.ready { HStack { ProgressView(); Text("Finding your agents…").font(.subheadline) } }
-                let groups = overview.groups(at: tick.date, query: query, preferences: preferences, projects: appModel.sessionProjects)
-                    .filter { $0.sessions.contains { $0.tab.agent != nil || ($0.tab.agentPaneCount ?? 0) > 0 } }
-                ForEach(groups) { group in
-                    let sessions = group.sessions.filter { $0.tab.agent != nil || ($0.tab.agentPaneCount ?? 0) > 0 }
-                    if !sessions.isEmpty {
-                        Section(group.title) {
-                            ForEach(sessions) { item in
-                                Button {
-                                    dismiss()
-                                    if item.id != session.id { chooseSession(item) }
-                                } label: {
-                                    HStack(spacing: 10) {
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            Text(item.tab.title ?? item.workspaceName).font(.subheadline.weight(.medium)).lineLimit(1)
-                                            Text("\(item.host.name) · \(item.workspaceName) · \(item.tab.agent ?? "Agents")")
-                                                .font(.caption).foregroundStyle(PhrenTheme.textMuted).lineLimit(2)
-                                        }
-                                        Spacer(minLength: 0)
-                                        if item.id == session.id { Image(systemName: "checkmark").foregroundStyle(PhrenTheme.cyan) }
-                                    }.padding(.vertical, 3)
-                                }.disabled(!group.fresh).accessibilityIdentifier("switch-session:\(item.host.id):\(item.host.muxID):\(item.workspaceID):\(item.tab.id)")
-                            }
-                        }
-                    }
+                Text("WORKSPACES").font(.caption2.weight(.semibold)).tracking(1)
+                    .foregroundStyle(PhrenTheme.textMuted).padding(.horizontal, 12).padding(.top, 12)
+                if !overview.ready { HStack { ProgressView(); Text("Finding your agents…").font(.subheadline) }.padding(12) }
+                if overview.ready {
+                    AgentWorkspaceTree(computers: overview.computers, query: query, current: session?.id, recent: recent, choose: chooseSession)
                 }
-                if overview.ready && groups.isEmpty && (eligiblePanes.count < 2 || local.isEmpty) {
+                let hasSessions = overview.computers.contains { computer in
+                    computer.monitor.snapshot?.sessions(on: computer.host).contains {
+                        ($0.tab.agent != nil || ($0.tab.agentPaneCount ?? 0) > 0) && $0.matches(query)
+                    } == true
+                }
+                if overview.ready && !hasSessions && (eligiblePanes.count < 2 || local.isEmpty) {
                     Text("No matching agents").foregroundStyle(PhrenTheme.textMuted)
                 }
             }
         }
-        .navigationTitle("Switch agent").navigationBarTitleDisplayMode(.inline)
-        .searchable(text: $query, prompt: "Agent, project, or computer")
-        .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
+        .safeAreaInset(edge: .top) {
+            VStack(spacing: 8) {
+                HStack {
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass").foregroundStyle(PhrenTheme.textMuted)
+                        TextField("Search workspaces, tabs…", text: $query)
+                            .font(.subheadline).textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .accessibilityIdentifier("agent-drawer-search")
+                    }.padding(12).phrenPanel()
+                    Button("Close", systemImage: "xmark") { close() }
+                        .labelStyle(.iconOnly).frame(width: 44, height: 44)
+                        .accessibilityIdentifier("agent-drawer-close")
+                }
+                Picker("Workspace order", selection: $recent) {
+                    Text("Recent").tag(true)
+                    Text("List").tag(false)
+                }.pickerStyle(.segmented).accessibilityIdentifier("agent-drawer-order")
+            }.padding(12).background(PhrenTheme.chatCanvas)
+        }
         .task(id: PollID(hosts: hosts, active: scenePhase == .active)) {
-            if scenePhase == .active { await overview.run(hosts: hosts) }
+            // The Agents list normally has this running already; if the chat
+            // was reached without it (Spotlight, Siri), start it here.
+            if scenePhase == .active { overview.ensureRunning(hosts: hosts) }
         }
     }
 }

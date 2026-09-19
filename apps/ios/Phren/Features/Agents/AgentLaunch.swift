@@ -48,12 +48,12 @@ enum AgentLaunch {
 
     /// Asks the Hook to create the workspace and start the agent, then waits
     /// for Herdr to list the new tab with its agent so the chat can target it.
-    static func launch(host: LiveHost, cwd: String, label: String, kind: Harness, progress: @MainActor (String) -> Void = { _ in }) async throws -> LiveAgentSession {
+    static func launch(host: LiveHost, cwd: String, label: String, kind: Harness, model: String? = nil, progress: @MainActor (String) -> Void = { _ in }) async throws -> LiveAgentSession {
         #if DEBUG && targetEnvironment(simulator)
         if AgentChatFixture.enabled { return try await AgentChatFixture.launch(host: host, cwd: cwd, label: label, kind: kind.rawValue) }
         #endif
         let key = try DeviceSSHKey.load(host.id)
-        let launched = try await PhrenConnection.launchSession(host: host, privateKey: key, cwd: cwd, label: label, kind: kind)
+        let launched = try await PhrenConnection.launchSession(host: host, privateKey: key, cwd: cwd, label: label, kind: kind, model: model)
         await progress("Waiting for \(kind.title) to be ready…")
         for _ in 0..<20 {
             if let session = try await PhrenConnection.fetch(host: host, privateKey: key).sessions(on: host)
@@ -90,19 +90,151 @@ enum AgentLaunch {
     // MARK: - A chat the app should open next (set by an intent, consumed by the Agents tab)
 
     static let pendingKey = "agents.pendingChat.v1"
+    static let pendingProjectKey = "projects.pendingOpen.v1"
+    static let pendingContentKey = "agents.pendingChatContent.v1"
+    /// `dictate` is the chat with the microphone already listening — the
+    /// Action button's "talk to the last session".
+    enum Destination: String, Codable { case chat, terminal, dictate }
     struct Pending: Codable {
         var hostID: UUID, workspaceID: String, tabID: String, label: String, agent: String, cwd: String
+        var muxID: String? = nil
+        var destination: Destination? = nil
     }
-    static func setPending(_ session: LiveAgentSession) {
-        let pending = Pending(hostID: session.host.id, workspaceID: session.workspaceID, tabID: session.tab.id, label: session.tab.displayTitle, agent: session.tab.agent ?? "codex", cwd: session.tab.cwd ?? "/")
+    struct PendingProject: Codable, Hashable {
+        let storeID: String
+        let project: String
+    }
+    static func setPending(_ session: LiveAgentSession, destination: Destination = .chat) {
+        clearPendingContent()
+        writePending(session, destination: destination)
+    }
+    static func setPending(_ session: LiveAgentSession, destination: Destination = .chat,
+                           draft: String, attachments: [AgentAttachment],
+                           attachmentStore: PendingChatAttachmentStore = .shared) throws {
+        let records = try attachments.map(attachmentStore.save)
+        clearPendingContent(store: attachmentStore)
+        let content = PendingChatContent(hostID: session.host.id, muxID: session.host.muxID,
+                                         workspaceID: session.workspaceID, tabID: session.tab.id,
+                                         draft: draft, attachments: records)
+        AppRuntime.defaults.set(try JSONEncoder().encode(content), forKey: pendingContentKey)
+        writePending(session, destination: destination)
+    }
+    private static func writePending(_ session: LiveAgentSession, destination: Destination) {
+        let pending = Pending(hostID: session.host.id, workspaceID: session.workspaceID, tabID: session.tab.id, label: session.tab.displayTitle, agent: session.tab.agent ?? "codex", cwd: session.tab.cwd ?? "/", muxID: session.host.muxID, destination: destination)
+        AppRuntime.defaults.removeObject(forKey: pendingProjectKey)
         AppRuntime.defaults.set(try? JSONEncoder().encode(pending), forKey: pendingKey)
+        restorePendingNavigation()
     }
-    /// The pending chat, once, as a session on one of the saved hosts.
-    static func takePending() -> LiveAgentSession? {
-        guard let data = AppRuntime.defaults.data(forKey: pendingKey), let pending = try? JSONDecoder().decode(Pending.self, from: data) else { return nil }
+    static func setPendingProject(storeID: String, project: String) {
+        clearPendingContent()
         AppRuntime.defaults.removeObject(forKey: pendingKey)
-        let hosts = (try? LiveSessionPreferences.read(AppRuntime.defaults.data(forKey: "sessions.live.preferences.v1") ?? Data()))?.hosts ?? []
-        guard let host = hosts.first(where: { $0.id == pending.hostID }) else { return nil }
-        return try? session(host: host, workspaceID: pending.workspaceID, tabID: pending.tabID, label: pending.label, agent: pending.agent, agentStatus: nil, cwd: pending.cwd)
+        AppRuntime.defaults.set(try? JSONEncoder().encode(PendingProject(storeID: storeID, project: project)), forKey: pendingProjectKey)
+        restorePendingNavigation()
+    }
+    static func restorePendingNavigation() {
+        if AppRuntime.defaults.data(forKey: pendingKey) != nil {
+            AppModel.current?.selectedTab = .agents
+            AppModel.current?.pendingChatVersion += 1
+        } else if AppRuntime.defaults.data(forKey: pendingProjectKey) != nil {
+            AppModel.current?.selectedTab = .projects
+            AppModel.current?.pendingProjectVersion += 1
+        }
+    }
+    static func takePendingProject() -> PendingProject? {
+        guard let data = AppRuntime.defaults.data(forKey: pendingProjectKey) else { return nil }
+        AppRuntime.defaults.removeObject(forKey: pendingProjectKey)
+        return try? JSONDecoder().decode(PendingProject.self, from: data)
+    }
+    /// Carry identity into the native view; chat/terminal performs its normal
+    /// fresh connection and pane validation before any remote interaction.
+    static func openIndexedSession(_ entity: AgentSessionEntity, destination: Destination) throws {
+        guard entity.isLive, let workspace = entity.workspaceID, let tab = entity.tabID,
+              let host = AgentSessions.hosts.first(where: { $0.id == entity.hostID && $0.muxID == entity.muxID }) else {
+            throw PhrenKitError.validation("That session's computer or terminal server is no longer saved.")
+        }
+        let live = try session(host: host, workspaceID: workspace, tabID: tab, label: entity.title,
+                               agent: entity.agent ?? "codex", agentStatus: nil, cwd: entity.folder ?? "/")
+        setPending(live, destination: destination)
+    }
+    static func takePendingOpen() -> (session: LiveAgentSession, destination: Destination)? {
+        guard let data = AppRuntime.defaults.data(forKey: pendingKey) else { return nil }
+        AppRuntime.defaults.removeObject(forKey: pendingKey)
+        guard let pending = try? JSONDecoder().decode(Pending.self, from: data),
+              let host = AgentSessions.hosts.first(where: { $0.id == pending.hostID && (pending.muxID == nil || $0.muxID == pending.muxID) }),
+              let live = try? session(host: host, workspaceID: pending.workspaceID, tabID: pending.tabID,
+                                      label: pending.label, agent: pending.agent, agentStatus: nil, cwd: pending.cwd) else {
+            clearPendingContent()
+            return nil
+        }
+        return (live, pending.destination ?? .chat)
+    }
+    static func takePendingContent(for session: LiveAgentSession,
+                                   store: PendingChatAttachmentStore = .shared) -> (draft: String, attachments: [AgentAttachment]) {
+        guard let data = AppRuntime.defaults.data(forKey: pendingContentKey) else { return ("", []) }
+        AppRuntime.defaults.removeObject(forKey: pendingContentKey)
+        guard let content = try? JSONDecoder().decode(PendingChatContent.self, from: data) else { return ("", []) }
+        guard content.hostID == session.host.id, content.muxID == session.host.muxID,
+              content.workspaceID == session.workspaceID, content.tabID == session.tab.id else {
+            store.discard(content.attachments)
+            return ("", [])
+        }
+        return (content.draft, content.attachments.compactMap(store.take))
+    }
+    private static func clearPendingContent(store: PendingChatAttachmentStore = .shared) {
+        if let data = AppRuntime.defaults.data(forKey: pendingContentKey),
+           let content = try? JSONDecoder().decode(PendingChatContent.self, from: data) {
+            store.discard(content.attachments)
+        }
+        AppRuntime.defaults.removeObject(forKey: pendingContentKey)
+    }
+    static func takePending() -> LiveAgentSession? { takePendingOpen()?.session }
+}
+
+struct PendingChatContent: Codable, Equatable {
+    let hostID: UUID
+    let muxID: String
+    let workspaceID: String
+    let tabID: String
+    let draft: String
+    let attachments: [PendingChatAttachmentStore.Record]
+}
+
+struct PendingChatAttachmentStore: Sendable {
+    struct Record: Codable, Equatable, Sendable {
+        let id: UUID
+        let name: String
+        let filename: String
+        let isImage: Bool
+    }
+
+    static let shared: Self = {
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        return Self(root: support.appendingPathComponent("PendingChatAttachments", isDirectory: true))
+    }()
+
+    let root: URL
+
+    func save(_ attachment: AgentAttachment) throws -> Record {
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let filename = attachment.id.uuidString.lowercased() + ".bin"
+        var protectedRoot = root
+        var values = URLResourceValues(); values.isExcludedFromBackup = true
+        try protectedRoot.setResourceValues(values)
+        try attachment.data.write(to: root.appendingPathComponent(filename), options: [.atomic, .completeFileProtection])
+        return Record(id: attachment.id, name: attachment.name, filename: filename, isImage: attachment.isImage)
+    }
+
+    func take(_ record: Record) -> AgentAttachment? {
+        guard record.filename == record.id.uuidString.lowercased() + ".bin" else { return nil }
+        let url = root.appendingPathComponent(record.filename)
+        defer { try? FileManager.default.removeItem(at: url) }
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? AgentAttachment(id: record.id, name: record.name, data: data, isImage: record.isImage)
+    }
+
+    func discard(_ records: [Record]) {
+        for record in records where record.filename == record.id.uuidString.lowercased() + ".bin" {
+            try? FileManager.default.removeItem(at: root.appendingPathComponent(record.filename))
+        }
     }
 }

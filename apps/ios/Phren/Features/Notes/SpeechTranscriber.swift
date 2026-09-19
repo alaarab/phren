@@ -54,7 +54,15 @@ final class SpeechTranscriber {
     }
 
     /// Live partial (or final) transcript of the *current* segment only.
+    /// A final result can come back shorter than the last partial (or empty
+    /// after a pause); `bestTranscript` keeps the longest non-empty text the
+    /// segment produced so nothing the person heard on screen is lost.
     private(set) var transcript = ""
+    private(set) var bestTranscript = ""
+    /// Continuous dictation restarts a segment right after each pause; leave
+    /// the audio session active between them so the restart cannot fail on
+    /// re-activation. One-shot capture keeps the default and releases it.
+    var keepsSessionBetweenSegments = false
     private(set) var isRecording = false
     /// Normalized 0...1 input level for the mic button's pulse.
     private(set) var audioLevel: Float = 0
@@ -140,6 +148,7 @@ final class SpeechTranscriber {
         try audioEngine.start()
 
         transcript = ""
+        bestTranscript = ""
         isRecording = true
 
         task = recognizer.recognitionTask(with: recognitionRequest) { [weak self] result, error in
@@ -147,11 +156,16 @@ final class SpeechTranscriber {
                 guard let self else { return }
                 if let result {
                     self.transcript = result.bestTranscription.formattedString
+                    if self.transcript.count >= self.bestTranscript.count || result.isFinal && !self.transcript.isEmpty {
+                        self.bestTranscript = self.transcript
+                    }
                 }
-                // A final result or an error both end this segment; the
-                // engine/session must not linger listening either way.
+                // A final result or an error both end this segment. Keep the
+                // audio session active: the owner restarts a segment straight
+                // away after a pause, and re-activating the session between
+                // segments is what made restarts fail. `stop()` deactivates.
                 if error != nil || (result?.isFinal ?? false) {
-                    self.stopEngine(deactivateSession: true)
+                    self.stopEngine(deactivateSession: !self.keepsSessionBetweenSegments)
                 }
             }
         }

@@ -94,6 +94,10 @@ private struct ThemeColorRow: View {
 
 enum ThemeColorField: String, CaseIterable, Identifiable {
     case background = "Background", text = "Text", panels = "Panels", accent = "Accent", links = "Links"
+    case sessionProject = "Session project", sessionTitle = "Session title", sessionMeta = "Session metadata"
+    case stateWorking = "Working state", stateWaiting = "Waiting state", stateDone = "Done state"
+    case phrenCardSurface = "Phren card surface", phrenCardBorder = "Phren card border", phrenCardAccent = "Phren card accent"
+    case chatInlineCode = "Inline code"
     var id: String { rawValue.lowercased() }
     func value(in p: PhrenPalette) -> UInt32 {
         switch self {
@@ -102,6 +106,16 @@ enum ThemeColorField: String, CaseIterable, Identifiable {
         case .panels: return p.chatPanel
         case .accent: return p.action
         case .links: return p.link ?? p.action
+        case .sessionProject: return p.sessionProject ?? p.link ?? p.action
+        case .sessionTitle: return p.sessionTitle ?? p.secondary
+        case .sessionMeta: return p.sessionMeta ?? p.muted
+        case .stateWorking: return p.stateWorking ?? p.action
+        case .stateWaiting: return p.stateWaiting ?? 0xE0BC7F
+        case .stateDone: return p.stateDone ?? 0x8AC8AC
+        case .phrenCardSurface: return p.resolvedPhrenCardSurface
+        case .phrenCardBorder: return p.resolvedPhrenCardBorder
+        case .phrenCardAccent: return p.resolvedPhrenCardAccent
+        case .chatInlineCode: return p.chatInlineCode ?? p.link ?? p.action
         }
     }
     func apply(_ color: UInt32, to p: inout PhrenPalette) {
@@ -118,6 +132,16 @@ enum ThemeColorField: String, CaseIterable, Identifiable {
             p.action = color; p.accent = color
             p.hover = Self.mix(color, 0xFFFFFF, 0.25); p.solid = Self.mix(color, 0, 0.4)
         case .links: p.link = color
+        case .sessionProject: p.sessionProject = color
+        case .sessionTitle: p.sessionTitle = color
+        case .sessionMeta: p.sessionMeta = color
+        case .stateWorking: p.stateWorking = color
+        case .stateWaiting: p.stateWaiting = color
+        case .stateDone: p.stateDone = color
+        case .phrenCardSurface: p.phrenCardSurface = color
+        case .phrenCardBorder: p.phrenCardBorder = color
+        case .phrenCardAccent: p.phrenCardAccent = color
+        case .chatInlineCode: p.chatInlineCode = color
         }
     }
     private static func mix(_ a: UInt32, _ b: UInt32, _ fraction: Double) -> UInt32 {

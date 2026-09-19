@@ -8,32 +8,64 @@ import type { PermissionMode } from "./permissions/types.js";
 
 export const SETTINGS_FILE = path.join(os.homedir(), ".phren-agent", "settings.json");
 
-export function loadInputMode(): InputMode {
+function readSettings(): Record<string, unknown> {
   try {
     const data = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8"));
-    if (data.inputMode === "queue") return "queue";
-  } catch {}
-  return "steering";
+    return data && typeof data === "object" && !Array.isArray(data) ? data as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeSettings(data: Record<string, unknown>): void {
+  try {
+    fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(data, null, 2) + "\n");
+  } catch { /* best effort */ }
+}
+
+function update(key: string, value: unknown): void {
+  const data = readSettings();
+  data[key] = value;
+  writeSettings(data);
+}
+
+export function loadInputMode(): InputMode {
+  return readSettings().inputMode === "queue" ? "queue" : "steering";
 }
 
 export function saveInputMode(mode: InputMode): void {
-  try {
-    const dir = path.dirname(SETTINGS_FILE);
-    fs.mkdirSync(dir, { recursive: true });
-    let data: Record<string, unknown> = {};
-    try { data = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8")); } catch {}
-    data.inputMode = mode;
-    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(data, null, 2) + "\n");
-  } catch {}
+  update("inputMode", mode);
 }
 
 export function savePermissionMode(mode: PermissionMode): void {
-  try {
-    const dir = path.dirname(SETTINGS_FILE);
-    fs.mkdirSync(dir, { recursive: true });
-    let data: Record<string, unknown> = {};
-    try { data = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8")); } catch {}
-    data.permissionMode = mode;
-    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(data, null, 2) + "\n");
-  } catch {}
+  update("permissionMode", mode);
+}
+
+export function loadPermissionMode(): PermissionMode | undefined {
+  const mode = readSettings().permissionMode;
+  if (mode === "suggest" || mode === "auto-confirm" || mode === "plan" || mode === "full-auto") {
+    return mode;
+  }
+  return undefined;
+}
+
+export function loadTheme(): string | undefined {
+  const name = readSettings().theme;
+  return typeof name === "string" && name ? name : undefined;
+}
+
+export function saveTheme(name: string): void {
+  update("theme", name);
+}
+
+export function loadInputHistory(): string[] {
+  const history = readSettings().inputHistory;
+  return Array.isArray(history)
+    ? history.filter((line): line is string => typeof line === "string").slice(-500)
+    : [];
+}
+
+export function saveInputHistory(lines: string[]): void {
+  update("inputHistory", lines.slice(-500));
 }

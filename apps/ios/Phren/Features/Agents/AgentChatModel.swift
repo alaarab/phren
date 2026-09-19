@@ -14,11 +14,14 @@ struct QueuedMessage: Identifiable, Equatable {
     let id = UUID()
     var text: String
     var attachments: [ChatAttachmentDraft]
+    var submittedAfterLine: Int? = nil
+    var submittedText: String? = nil
 }
 
 /// Queues survive switching agents within a chat, like drafts do.
 @MainActor enum AgentChatQueues {
     static var items: [String: [QueuedMessage]] = [:]
+    static var reconciledRows: [String: Set<String>] = [:]
 }
 
 @MainActor enum AgentChatDrafts {
@@ -67,10 +70,47 @@ final class AgentChatModel {
     var target: AgentChatTarget?
     var history = AgentChatHistory() {
         didSet {
-            if history.messages != oldValue.messages { timeline = ChatTimelineEntry.group(history.messages) }
+            if history.messages != oldValue.messages { prepareTranscript() }
         }
     }
     private(set) var timeline: [ChatTimelineEntry] = []
+    private(set) var timelineRevision = 0
+    private(set) var backgroundJobs: [ChatBackgroundJob] = []
+    private(set) var currentToolName: String?
+    private(set) var imagesByMessage: [String: [ChatAttachmentDraft]] = [:]
+    @ObservationIgnored private var preparation = ChatTranscriptPreparation()
+    @ObservationIgnored private var preparationTask: Task<Void, Never>?
+    @ObservationIgnored private var preparationID = UUID()
+
+    private func prepareTranscript() {
+        preparationTask?.cancel()
+        let id = UUID(); preparationID = id
+        let messages = history.messages
+        if messages.isEmpty {
+            preparation = .init(); timeline = []; backgroundJobs = []; currentToolName = nil
+            timelineRevision += 1; imagesByMessage = [:]; return
+        }
+        let previous = preparation
+        preparationTask = Task {
+            let value = await Task.detached(priority: .userInitiated) {
+                var value = previous; value.update(messages); return value
+            }.value
+            guard !Task.isCancelled, preparationID == id else { return }
+            preparation = value; timeline = value.entries; backgroundJobs = value.jobs
+            currentToolName = value.currentToolName; timelineRevision += 1
+            matchSentImages()
+        }
+    }
+    private func matchSentImages() {
+        var matches: [String: [ChatAttachmentDraft]] = [:]
+        if !sentImages.isEmpty {
+            for message in messages where message.role == .user {
+                let images = sentImages.filter { item in item.path.map { message.text.contains($0) } == true }
+                if !images.isEmpty { matches[message.id] = images }
+            }
+        }
+        imagesByMessage = matches
+    }
     var progress = AgentChatProgress()
     let reveal = ChatTextReveal()
     var animateReplies = true
@@ -134,13 +174,13 @@ final class AgentChatModel {
     private var draftRevision: UInt64 = 0
     var draft = "" { didSet { if !restoringDraft, let target { AgentChatDrafts.text[target.id] = draft; persistDraft() } } }
     var attachments: [ChatAttachmentDraft] = [] { didSet { if !restoringDraft, let target { AgentChatDrafts.attachments[target.id] = attachments; persistDraft() } } }
-    var sentImages: [ChatAttachmentDraft] = []
+    var sentImages: [ChatAttachmentDraft] = [] { didSet { matchSentImages() } }
     /// Messages waiting for the agent to finish its turn; the first goes out
     /// the moment it does.
     var queue: [QueuedMessage] = [] { didSet { if let target, !restoringDraft { AgentChatQueues.items[target.id] = queue } } }
     /// True while a send would interrupt the agent: it is working, or a reply
     /// is still on its way, and nothing is waiting on the person.
-    var isBusy: Bool { !needsAnswer && approval == nil && (awaitingReply || activityPhase == .working) }
+    var isBusy: Bool { !needsAnswer && approval == nil && (awaitingReply || (target?.isStarting != true && activityPhase == .working)) }
     private var drainTask: Task<Void, Never>?
     private var lastSession: LiveAgentSession?
     private var generation = UUID()
@@ -179,6 +219,7 @@ final class AgentChatModel {
             transcriptContext = .init(); statusBranch = nil
             connected = false; error = nil; deliveryError = nil
             sentImages = []; needsAnswer = false; approval = nil; question = nil; answeredQuestions = []
+            reconciledQueueRows = AgentChatQueues.reconciledRows[chosen.id] ?? []
             queue = AgentChatQueues.items[chosen.id] ?? []
         } catch { self.error = error.localizedDescription }
     }
@@ -260,23 +301,45 @@ final class AgentChatModel {
                     let supported = panes.filter { (try? $0.target(hostID: session.host.id, workspaceID: session.workspaceID, tabID: session.tab.id, muxID: session.host.muxID)) != nil }
                     if supported.count == 1 { choose(supported[0], session: session) }
                 }
-                if let target {
+                var newlyAttached: AgentChatTarget?
+                if let target, target.isStarting { newlyAttached = try list.attachedTarget(for: target) }
+                if let newlyAttached, !sending { attachStartingTarget(newlyAttached) }
+                if let target, newlyAttached == nil || !sending {
                     needsAnswer = try list.validate(target).needsAnswer || approval != nil
                     if !interactionConnected { acceptActivity(try list.validate(target).agentStatus) }
                     if needsAnswer { awaitingReply = false }
-                    if shouldBeginStream(target) { beginStream(session, target: target, run: run) }
+                    if target.isStarting { connected = true; error = nil }
+                    else if shouldBeginStream(target) { beginStream(session, target: target, run: run) }
                 }
                 loading = false
             } catch {
                 guard !Task.isCancelled, generation == run else { return }
                 handleConnectionFailure(error)
             }
-            do { try await Task.sleep(for: .seconds(3)) } catch { return }
+            do { try await Task.sleep(for: .seconds(target?.isStarting == true ? 2 : 3)) } catch { return }
         }
     }
 
+    /// Preserve the first optimistic bubble and current composer when the
+    /// transcript appears. `choose` would discard both and reload an empty draft.
+    func attachStartingTarget(_ attached: AgentChatTarget) {
+        guard let previous = target, previous.isStarting, !attached.isStarting,
+              previous.hostID == attached.hostID, previous.muxID == attached.muxID,
+              previous.workspaceID == attached.workspaceID, previous.tabID == attached.tabID,
+              previous.paneID == attached.paneID, previous.source == attached.source else { return }
+        persistDraft(immediately: true)
+        draftLoadTask?.cancel(); draftGeneration = UUID(); restoringDraft = false
+        target = attached
+        AgentChatQueues.items[previous.id] = nil
+        AgentChatQueues.items[attached.id] = queue
+        AgentChatDrafts.text[attached.id] = draft
+        AgentChatDrafts.attachments[attached.id] = attachments
+        persistDraft(immediately: true)
+        connected = false; error = nil
+    }
+
     func shouldBeginStream(_ target: AgentChatTarget) -> Bool {
-        streamTarget != target && rejectedStreamTarget != target
+        !target.isStarting && streamTarget != target && rejectedStreamTarget != target
     }
     func handleConnectionFailure(_ error: Error) {
         progressTask?.cancel(); progressTask = nil
@@ -309,7 +372,7 @@ final class AgentChatModel {
                     while !Task.isCancelled {
                         guard self.target == target, generation == run else { return }
                         let frame = try AgentChatFixture.transcript(target)
-                        if frame.kind != .append || !frame.messages.isEmpty || !frame.progressEvents.isEmpty { accept(frame) }
+                        if frame.kind != .append || !frame.messages.isEmpty || !frame.progressEvents.isEmpty || !frame.queueEvents.isEmpty { accept(frame) }
                         try await Task.sleep(for: .milliseconds(500))
                     }
                     return
@@ -341,7 +404,34 @@ final class AgentChatModel {
         if !progressConnected, !frame.progressEvents.isEmpty { acceptProgress(frame) }
         acceptContext(frame)
         mergeHistory(frame); hasTranscript = true; connected = true; receivedAt = .now; error = nil; loading = false
+        reconcileHandedOffQueue()
         scheduleDrain()
+    }
+
+    @ObservationIgnored private var reconciledQueueRows: Set<String> = []
+    private func reconcileHandedOffQueue() {
+        guard !queue.isEmpty else { return }
+        var observed = messages.filter { $0.role == .user && $0.localCommand == nil
+            && !reconciledQueueRows.contains($0.id) && !reconciledQueueRows.contains(history.acknowledgementID(for: $0.id)) }
+        queue.removeAll { item in
+            guard let after = item.submittedAfterLine, let text = item.submittedText else { return false }
+            let wanted = AgentQueuedMessages.normalizedText(text)
+            guard let index = observed.firstIndex(where: { row in
+                guard row.line > after else { return false }
+                if row.text == text { return true }
+                let have = AgentQueuedMessages.normalizedText(row.text)
+                if !wanted.isEmpty { return have == wanted }
+                // Pictures with no words of their own: the landed turn is the
+                // image blocks (or the placeholder the parser gives them).
+                return !item.attachments.isEmpty && have.isEmpty && (!row.imageBlocks.isEmpty || !row.uploadImages.isEmpty || row.text == "[Image attachment]")
+            }) else { return false }
+            let id = observed.remove(at: index).id
+            reconciledQueueRows.insert(id)
+            reconciledQueueRows.insert(history.acknowledgementID(for: id))
+            return true
+        }
+        if reconciledQueueRows.count > 4_000 { reconciledQueueRows.formIntersection(messages.flatMap { [$0.id, history.acknowledgementID(for: $0.id)] }) }
+        if let target { AgentChatQueues.reconciledRows[target.id] = reconciledQueueRows }
     }
 
     /// A backlog replaces what the transcript said (the conversation was
@@ -411,7 +501,9 @@ final class AgentChatModel {
         }
     }
 
-    func answer(_ session: LiveAgentSession, approval expected: AgentApproval? = nil, approve: Bool = false,
+    /// `updatedInput` answers a Claude AskUserQuestion approval: its own input
+    /// plus the chosen answers, sent with the approval.
+    func answer(_ session: LiveAgentSession, approval expected: AgentApproval? = nil, approve: Bool = false, updatedInput: [String: Any]? = nil,
                 question prompt: AgentQuestionPrompt? = nil, selections: [[Int]] = []) async {
         guard !answering, !sending, let target else { return }
         guard (expected != nil && expected == approval && interactionConnected)
@@ -421,10 +513,12 @@ final class AgentChatModel {
         if let expected { await ApprovalActivityController.shared.answered(target: target, actionID: expected.id) }
         do {
             #if DEBUG && targetEnvironment(simulator)
-            if AgentChatFixture.enabled { AgentChatFixture.answered = true; AgentChatFixture.denied = expected != nil && !approve }
-            else { try await submitAnswer(session, target: target, approval: expected, approve: approve, question: prompt, selections: selections) }
+            if AgentChatFixture.enabled {
+                AgentChatFixture.answered = true; AgentChatFixture.denied = expected != nil && !approve
+                AgentChatFixture.answeredInput = updatedInput
+            } else { try await submitAnswer(session, target: target, approval: expected, approve: approve, updatedInput: updatedInput, question: prompt, selections: selections) }
             #else
-            try await submitAnswer(session, target: target, approval: expected, approve: approve, question: prompt, selections: selections)
+            try await submitAnswer(session, target: target, approval: expected, approve: approve, updatedInput: updatedInput, question: prompt, selections: selections)
             #endif
             guard self.target == target else { return }
             if approval?.id == expected?.id { approval = nil }
@@ -434,13 +528,13 @@ final class AgentChatModel {
             guard self.target == target else { return }
             if approval?.id == expected?.id { approval = nil }
             if question?.id == prompt?.id { question = nil }
-            deliveryError = "Answer wasn't confirmed. Refresh or open Herdr to check the current prompt. Your answer hasn't been retried."
+            deliveryError = "Answer wasn't confirmed. Check the current prompt, then try again. Your answer hasn't been retried."
         }
     }
-    private func submitAnswer(_ session: LiveAgentSession, target: AgentChatTarget, approval: AgentApproval?, approve: Bool,
+    private func submitAnswer(_ session: LiveAgentSession, target: AgentChatTarget, approval: AgentApproval?, approve: Bool, updatedInput: [String: Any]?,
                               question: AgentQuestionPrompt?, selections: [[Int]]) async throws {
         let key = try DeviceSSHKey.load(session.host.id)
-        if let approval { try await PhrenConnection.answerApproval(host: session.host, privateKey: key, target: target, actionID: approval.actionId, approve: approve) }
+        if let approval { try await PhrenConnection.answerApproval(host: session.host, privateKey: key, target: target, actionID: approval.actionId, approve: approve, updatedInput: updatedInput) }
         else if let question { try await PhrenConnection.answerQuestions(host: session.host, privateKey: key, target: target, prompt: question, selections: selections) }
     }
 
@@ -466,6 +560,7 @@ final class AgentChatModel {
             #endif
             guard !Task.isCancelled, self.target == target else { return }
             mergeHistory(page)
+            await preparationTask?.value
         } catch is CancellationError {
         } catch {
             guard !Task.isCancelled, self.target == target else { return }
@@ -494,20 +589,28 @@ final class AgentChatModel {
     /// Delivers a queued message now, ahead of the agent finishing — the
     /// "steer" case. On failure the item stays queued with the error shown.
     func sendNow(_ item: QueuedMessage, _ session: LiveAgentSession) async {
-        guard !sending, connected, let index = queue.firstIndex(where: { $0.id == item.id }) else { return }
-        let result = await deliver(item.text, attachments: queue[index].attachments, session: session)
-        guard let index = queue.firstIndex(where: { $0.id == item.id }) else { return }
-        if result.delivered { queue.remove(at: index) } else { queue[index].attachments = result.attachments }
+        guard !sending, connected, let index = queue.firstIndex(where: { $0.id == item.id }), queue[index].submittedAfterLine == nil else { return }
+        let sendingTarget = target
+        let result = await deliver(item.text, attachments: queue[index].attachments, session: session) { text in
+            if self.target == sendingTarget, let index = self.queue.firstIndex(where: { $0.id == item.id }) {
+                self.queue[index].submittedAfterLine = self.history.totalLines - 1
+                self.queue[index].submittedText = text
+            }
+        }
+        guard target == sendingTarget, let index = queue.firstIndex(where: { $0.id == item.id }) else { return }
+        queue[index].attachments = result.attachments
+        if result.rejected { queue[index].submittedAfterLine = nil; queue[index].submittedText = nil }
+        reconcileHandedOffQueue()
         scheduleDrain()
     }
 
     func remove(_ item: QueuedMessage) {
-        queue.removeAll { $0.id == item.id }
+        queue.removeAll { $0.id == item.id && $0.submittedAfterLine == nil }
     }
 
     /// Pulls a queued message back into the composer to change it.
     func edit(_ item: QueuedMessage) {
-        guard let index = queue.firstIndex(where: { $0.id == item.id }) else { return }
+        guard let index = queue.firstIndex(where: { $0.id == item.id }), queue[index].submittedAfterLine == nil else { return }
         let item = queue.remove(at: index)
         draft = draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? item.text : draft + "\n" + item.text
         attachments += item.attachments.filter { queued in !attachments.contains { $0.id == queued.id } }
@@ -517,7 +620,7 @@ final class AgentChatModel {
     /// status stream and the transcript both report the turn ending, and a
     /// reply's last frames arrive a beat after the status flips.
     private func scheduleDrain() {
-        guard !queue.isEmpty, !isBusy, !sending, connected, drainTask == nil, let session = lastSession else { return }
+        guard let next = queue.first, next.submittedAfterLine == nil, !isBusy, !sending, connected, drainTask == nil, let session = lastSession else { return }
         drainTask = Task { @MainActor [weak self] in
             defer { self?.drainTask = nil }
             do { try await Task.sleep(for: .milliseconds(400)) } catch { return }
@@ -528,22 +631,35 @@ final class AgentChatModel {
 
     /// Uploads can be reused after failure; prompt delivery is never replayed.
     func send(_ session: LiveAgentSession) async {
-        guard !sending, connected, !needsAnswer, approval == nil, target != nil,
+        guard !sending, connected, approval == nil, target != nil,
+              !(needsAnswer && question != nil && questionsSupported),
               !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty else { return }
         guard !AgentSlashCommand.isCommand(draft) || attachments.isEmpty else {
             deliveryError = "Remove attachments before running a slash command."; return
         }
         lastSession = session
         let submitted = draft, items = attachments
-        // While the agent works, a message waits its turn rather than
-        // interrupting — as in Claude Code. Slash commands go straight through.
-        if isBusy, !AgentSlashCommand.isCommand(submitted) {
+        // Claude Code owns its mid-turn queue through the normal prompt RPC.
+        // Other harnesses keep an unsent local draft until they finish.
+        if isBusy, target?.source != "claude", !AgentSlashCommand.isCommand(submitted) {
             queue.append(QueuedMessage(text: submitted, attachments: items))
             draft = ""; attachments = []; deliveryError = nil
             persistDraft(immediately: true)
             return
         }
-        let result = await deliver(submitted, attachments: items, session: session)
+        let optimistic = QueuedMessage(text: submitted, attachments: items)
+        let sendingTarget = target
+        let result = await deliver(submitted, attachments: items, session: session) { text in
+            guard self.target == sendingTarget, !AgentSlashCommand.isCommand(submitted) else { return }
+            var pending = optimistic
+            pending.submittedAfterLine = self.history.totalLines - 1
+            pending.submittedText = text
+            self.queue.append(pending)
+        }
+        guard target == sendingTarget else { return }
+        if result.rejected { queue.removeAll { $0.id == optimistic.id } }
+        else if let index = queue.firstIndex(where: { $0.id == optimistic.id }) { queue[index].attachments = result.attachments }
+        reconcileHandedOffQueue()
         for uploaded in result.attachments {
             if let index = attachments.firstIndex(where: { $0.id == uploaded.id }) { attachments[index].path = uploaded.path }
         }
@@ -556,8 +672,9 @@ final class AgentChatModel {
     /// Uploads any attachments that still lack a path, then delivers the
     /// prompt. Returns the attachments with the paths that did upload, so a
     /// retry never re-uploads; prompt delivery itself is never replayed.
-    private func deliver(_ submitted: String, attachments items: [ChatAttachmentDraft], session: LiveAgentSession) async -> (delivered: Bool, attachments: [ChatAttachmentDraft]) {
-        guard let target else { return (false, items) }
+    private func deliver(_ submitted: String, attachments items: [ChatAttachmentDraft], session: LiveAgentSession,
+                         submittedToAgent: (String) -> Void = { _ in }) async -> (delivered: Bool, attachments: [ChatAttachmentDraft], rejected: Bool) {
+        guard let target else { return (false, items, true) }
         var sent = items
         sending = true; deliveryError = nil
         defer { sending = false; deliveryStatus = nil }
@@ -576,13 +693,14 @@ final class AgentChatModel {
             }
         } catch {
             deliveryError = "Attachment upload didn't finish. Your message hasn't been sent. \(error.localizedDescription)"
-            return (false, sent)
+            return (false, sent, true)
         }
         let paths = sent.compactMap { $0.path }.joined(separator: "\n")
         let text = paths.isEmpty ? submitted : submitted + "\n\nAttached files on this computer:\n" + paths
         deliveryStatus = "Sending…"
         submittedAfterLine = max(0, history.totalLines) - 1
         sentAt = .now; awaitingReply = true
+        submittedToAgent(text)
         do {
             #if DEBUG && targetEnvironment(simulator)
             if AgentChatFixture.enabled { try await AgentChatFixture.send(target, text: text) }
@@ -597,14 +715,17 @@ final class AgentChatModel {
                     ChatAttachmentPreparation.preview(item.attachment).map { ChatAttachmentDraft(attachment: $0, path: item.path) }
                 }
             }.value
-            guard self.target == target else { return (true, sent) }
+            guard self.target == target else { return (true, sent, false) }
             sentImages += previews
             if sentImages.count > 16 { sentImages.removeFirst(sentImages.count - 16) }
-            return (true, sent)
+            return (true, sent, false)
         } catch {
             awaitingReply = false
             deliveryError = "Delivery wasn't confirmed. Check the conversation before trying again. \(error.localizedDescription)"
-            return (false, sent)
+            let rejected: Bool
+            if case LiveConnectionError.gatewayRejection(let status, _) = error { rejected = (400..<500).contains(status) }
+            else { rejected = error is PhrenKitError }
+            return (false, sent, rejected)
         }
     }
     static func fetchPanes(_ session: LiveAgentSession) async throws -> AgentChatPanes {

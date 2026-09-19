@@ -22,6 +22,15 @@ final class AgentChatConnectionTests: XCTestCase {
         XCTAssertEqual(URLComponents(string: scoped.path)?.queryItems?.first { $0.name == "mux" }?.value, "herdr:work")
     }
 
+    func testUploadImageRejectsAnythingButAnAbsolutePathBeforeConnecting() async throws {
+        let host = try LiveHost(name: "Fixture", address: "fixture.invalid", username: "fixture")
+        for path in ["uploads/shot.png", "", "/work/shot\u{0}.png", String(repeating: "/a", count: 2_100)] {
+            do { _ = try await PhrenConnection.uploadImage(host: host, privateKey: Data(), path: path); XCTFail("Must reject \(path.prefix(20))") }
+            catch { XCTAssertTrue(error.localizedDescription.contains("Invalid image reference"), error.localizedDescription) }
+        }
+        XCTAssertEqual(PhrenConnection.uploadImageRoute("/work/a b+c&d.png"), "/v1/uploads/image?path=/work/a%20b%2Bc%26d.png")
+    }
+
 
     func testDifferentComputerRejectsBeforeConnectingOrUsingItsKey() async throws {
         let host = try LiveHost(name: "Other computer", address: "fixture.invalid", username: "fixture")
@@ -47,6 +56,20 @@ final class AgentChatConnectionTests: XCTestCase {
             for try await _ in PhrenConnection.chatUpdates(host: host, privateKey: Data(), target: target) { XCTFail("Must not subscribe") }
             XCTFail("A different computer must reject streaming")
         } catch { XCTAssertTrue(error.localizedDescription.contains("another computer")) }
+    }
+
+    func testFirstPromptCarriesPaneBindingWithoutInventingASessionID() throws {
+        let token = String(repeating: "a", count: 64)
+        let target = try AgentChatTarget(hostID: UUID(), workspaceID: "w", tabID: "w:t", paneID: "w:p", source: "claude", sessionID: "", startingToken: token)
+        let request = try GatewayRequest.prompt(target, text: "First prompt")
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(request.body)) as? [String: Any])
+        let route = try XCTUnwrap(body["target"] as? [String: Any])
+        XCTAssertEqual(request.path, "/v1/prompt")
+        XCTAssertEqual(route["starting"] as? Bool, true)
+        XCTAssertEqual(route["startingToken"] as? String, token)
+        XCTAssertNil(route["session"])
+        XCTAssertEqual(route["pane"] as? String, "w:p")
+        XCTAssertEqual(body["text"] as? String, "First prompt")
     }
 
     func testPromptEncodingKeepsTextOutOfTerminalCommands() throws {

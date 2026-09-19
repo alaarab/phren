@@ -43,7 +43,16 @@ struct ToolPresentation {
         // read like VS Code's "folder/file" and leave room for the counts.
         if let path { return Self.short(path) + (note.map { " · " + $0 } ?? "") }
         let start = body.firstIndex(where: { !$0.isNewline }) ?? body.endIndex
-        return String(body[start...].prefix(180).prefix { !$0.isNewline })
+        let first = String(body[start...].prefix(180).prefix { !$0.isNewline })
+        // A tool whose input is a bare JSON object has no summary field we
+        // know: read its first real field rather than the opening brace.
+        if ["{", "[", "{}", "[]"].contains(first) {
+            return body.components(separatedBy: "\n")
+                .lazy.map { $0.trimmingCharacters(in: .whitespaces) }
+                .first { !$0.isEmpty && !["{", "}", "[", "]"].contains($0) }
+                .map { String($0.prefix(180)) } ?? ""
+        }
+        return first
     }
 
     init(title rawTitle: String, text: String) {
@@ -56,17 +65,19 @@ struct ToolPresentation {
         if rawTitle == "Tool result" {
             body = Self.unwrap(text)
         } else if let fields {
-            path = fields["file_path"] as? String ?? fields["path"] as? String
+            path = fields["file_path"] as? String ?? fields["path"] as? String ?? fields["notebook_path"] as? String
             let edits = (fields["edits"] as? [[String: Any]] ?? []).compactMap { edit -> (String, String)? in
                 guard let old = edit["old_string"] as? String, let new = edit["new_string"] as? String else { return nil }
                 return (old, new)
             }
-            if let old = fields["old_string"] as? String, let new = fields["new_string"] as? String {
+            if let old = (fields["old_string"] ?? fields["old_str"]) as? String, let new = (fields["new_string"] ?? fields["new_str"]) as? String {
                 body = Self.updatePatch(path, edits: [(old, new)]); title = "Patch"
             } else if !edits.isEmpty {
                 // MultiEdit: one file, several replacements — one hunk each.
                 body = Self.updatePatch(path, edits: edits); title = "Patch"
-            } else if let content = fields["content"] as? String, path != nil {
+            } else if let source = fields["new_source"] as? String, name == "NotebookEdit" {
+                body = Self.updatePatch(path, edits: [("", source)]); title = "Patch"
+            } else if let content = (fields["content"] ?? fields["file_text"]) as? String, path != nil {
                 // Write: the whole file as it now stands, every line new.
                 body = "*** Add File: \(path!)\n"
                     + content.components(separatedBy: "\n").map { "+" + $0 }.joined(separator: "\n")
@@ -88,7 +99,7 @@ struct ToolPresentation {
                     return (status == "completed" ? "☑ " : status == "in_progress" ? "◐ " : "☐ ") + content
                 }.joined(separator: "\n")
             } else {
-                body = ["cmd", "command", "patch", "input", "query", "q", "url", "description", "prompt"].compactMap { fields[$0] as? String }.first ?? Self.pretty(fields)
+                body = ["cmd", "command", "patch", "input", "query", "q", "url", "description", "prompt", "summary", "message", "to", "recipient", "subject"].compactMap { fields[$0] as? String }.first ?? Self.pretty(fields)
             }
         } else if ["exec", "parallel"].contains(name) {
             // Extract only JSON string literals, without executing JavaScript.
@@ -134,6 +145,7 @@ struct ToolPresentation {
         if ["exec", "parallel"].contains(name) { return "Tools" }
         if name == "LS" { return "List" }
         if name == "WebFetch" { return "Fetch" }
+        if name == "WebSearch" { return "Search" }
         if name == "TodoWrite" { return "Todos" }
         if ["Task", "Agent"].contains(name) { return "Agent" }
         if name.contains("search") || name.contains("web") { return "Browse" }

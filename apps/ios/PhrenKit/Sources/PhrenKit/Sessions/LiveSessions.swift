@@ -2,14 +2,15 @@ import Foundation
 
 /// The Phren Hook v1 workspace contract. A child is a tab;
 /// it can aggregate several agent panes and is never claimed to be one agent.
-public struct LiveWorkspaces: Decodable, Equatable, Sendable {
-    public struct Tab: Decodable, Equatable, Sendable, Identifiable {
+public struct LiveWorkspaces: Codable, Equatable, Sendable {
+    public struct Tab: Codable, Equatable, Sendable, Identifiable {
         public let id: String
         public let label: String
         public let title: String?
         public let agentStatus: String?
         public let approvalPending: Bool?
         public let agent: String?
+        public let starting: Bool?
         public let cwd: String?
         /// The git branch of the agent's folder, when the Hook reports one.
         public let branch: String?
@@ -18,6 +19,10 @@ public struct LiveWorkspaces: Decodable, Equatable, Sendable {
         /// Herdr's state-change counter for the tab's panes: higher means the
         /// agent's status moved more recently. Not a timestamp; only an order.
         public let changedSeq: Int?
+        /// The Hook's persisted wall clock for the last title or activity change.
+        /// Older Hooks and malformed timestamps leave it unknown.
+        public var lastChangedAt: Date? { reportedLastChangedAt?.value }
+        private let reportedLastChangedAt: ActivityDate?
         private let reportedContextUsedPercent: ContextUsedPercent?
 
         /// Provider-reported percentage, when available. Missing or malformed
@@ -28,12 +33,32 @@ public struct LiveWorkspaces: Decodable, Equatable, Sendable {
         }
 
         private enum CodingKeys: String, CodingKey {
-            case id, label, title, agentStatus, approvalPending, agent, cwd, branch, agentPaneCount, paneCount, changedSeq
+            case id, label, title, agentStatus, approvalPending, agent, starting, cwd, branch, agentPaneCount, paneCount, changedSeq
             case reportedContextUsedPercent = "contextUsedPercent"
+            case reportedLastChangedAt = "lastChangedAt"
         }
 
-        private struct ContextUsedPercent: Decodable, Equatable, Sendable {
+        private struct ActivityDate: Codable, Equatable, Sendable {
+            let value: Date?
+            func encode(to encoder: Encoder) throws {
+                var container = encoder.singleValueContainer()
+                try container.encode(value?.formatted(Date.ISO8601FormatStyle(includingFractionalSeconds: true)))
+            }
+            init(from decoder: Decoder) throws {
+                let raw = try? decoder.singleValueContainer().decode(String.self)
+                value = raw.flatMap {
+                    (try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse($0))
+                        ?? (try? Date.ISO8601FormatStyle().parse($0))
+                }
+            }
+        }
+
+        private struct ContextUsedPercent: Codable, Equatable, Sendable {
             let value: Double?
+            func encode(to encoder: Encoder) throws {
+                var container = encoder.singleValueContainer()
+                try container.encode(value)
+            }
 
             init(from decoder: Decoder) throws {
                 let container = try decoder.singleValueContainer()
@@ -65,12 +90,13 @@ public struct LiveWorkspaces: Decodable, Equatable, Sendable {
         }
         public var status: String { approvalPending == true ? "Permission needed" : activity.rawValue }
     }
-    public struct Group: Decodable, Equatable, Sendable, Identifiable {
+    public struct Group: Codable, Equatable, Sendable, Identifiable {
         public let id: String
         public let label: String
         public let children: [Tab]
+        init(id: String, label: String, children: [Tab]) { self.id = id; self.label = label; self.children = children }
     }
-    public struct Focus: Decodable, Equatable, Sendable {
+    public struct Focus: Codable, Equatable, Sendable {
         public let workspaceID: String
         public let tabID: String
         public let paneID: String
@@ -78,6 +104,24 @@ public struct LiveWorkspaces: Decodable, Equatable, Sendable {
     public let kind: String
     public let groups: [Group]
     public let focus: Focus?
+
+    /// The snapshot as it will read once Herdr has closed a tab (or a whole
+    /// workspace when `tab` is nil): the card leaves the list the moment the
+    /// close is confirmed instead of on the next poll.
+    public func closing(workspace: String, tab: String?) -> Self {
+        let groups = groups.compactMap { group -> Group? in
+            guard group.id == workspace else { return group }
+            guard let tab else { return nil }
+            let children = group.children.filter { $0.id != tab }
+            return children.isEmpty ? nil : Group(id: group.id, label: group.label, children: children)
+        }
+        let focus = focus.flatMap { focus -> Focus? in
+            focus.workspaceID == workspace && (tab == nil || focus.tabID == tab) ? nil : focus
+        }
+        return Self(kind: kind, groups: groups, focus: focus)
+    }
+
+    init(kind: String, groups: [Group], focus: Focus?) { self.kind = kind; self.groups = groups; self.focus = focus }
 
     public static func read(_ data: Data) throws -> Self {
         guard data.count <= 1_048_576 else { throw PhrenKitError.validation("The session response is too large.") }

@@ -10,43 +10,54 @@ public struct AgentChatTarget: Codable, Equatable, Hashable, Sendable, Identifia
     public let source: String
     public let sessionID: String
     public let muxID: String
-    public var id: String { [hostID.uuidString, muxID, workspaceID, tabID, paneID, source, sessionID].joined(separator: "/") }
+    /// Present only before a transcript exists; binds the first prompt to the
+    /// Hook's verified terminal/process. Never substitute a made-up session ID.
+    public let startingToken: String?
+    public var isStarting: Bool { startingToken != nil && sessionID.isEmpty }
+    public var id: String { [hostID.uuidString, muxID, workspaceID, tabID, paneID, source, isStarting ? "starting-" + (startingToken ?? "") : sessionID].joined(separator: "/") }
 
-    public init(hostID: UUID, workspaceID: String, tabID: String, paneID: String, source: String, sessionID: String, muxID: String = "herdr:default") throws {
-        guard [workspaceID, tabID, paneID, sessionID, muxID].allSatisfy(Self.validID), muxID.hasPrefix("herdr:"), Self.sources.contains(source),
-              !["copilot", "phren"].contains(source) || UUID(uuidString: sessionID) != nil else {
-            throw PhrenKitError.validation("Native chat needs a recognized Codex, Claude Code, GitHub Copilot, or Phren conversation in this pane.")
+    public init(hostID: UUID, workspaceID: String, tabID: String, paneID: String, source: String, sessionID: String, muxID: String = "herdr:default", startingToken: String? = nil) throws {
+        let starting = sessionID.isEmpty && startingToken?.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil
+        guard [workspaceID, tabID, paneID, muxID].allSatisfy(Self.validID), muxID.hasPrefix("herdr:"), Self.sources.contains(source),
+              starting || (startingToken == nil && Self.validID(sessionID) && (!["copilot", "phren", "opencode"].contains(source) || Self.validSessionID(sessionID))) else {
+            throw PhrenKitError.validation("Native chat needs a recognized Codex, Claude Code, GitHub Copilot, Phren, or opencode conversation in this pane.")
         }
         self.hostID = hostID; self.workspaceID = workspaceID; self.tabID = tabID
         self.paneID = paneID; self.source = source; self.sessionID = sessionID
-        self.muxID = muxID
+        self.muxID = muxID; self.startingToken = startingToken
     }
 
     /// Agents the app can chat with natively. `phren` is the experimental
     /// phren-agent; its panes appear once Herdr reports that agent kind.
-    public static let sources = ["codex", "claude", "copilot", "phren"]
+    public static let sources = ["codex", "claude", "copilot", "phren", "opencode"]
 
     public var providerName: String {
         switch source {
         case "claude": return "Claude"
         case "copilot": return "Copilot"
         case "phren": return "Phren"
+        case "opencode": return "opencode"
         default: return "Codex"
         }
     }
 
-    private enum CodingKeys: String, CodingKey { case hostID, workspaceID, tabID, paneID, source, sessionID, muxID }
+    private enum CodingKeys: String, CodingKey { case hostID, workspaceID, tabID, paneID, source, sessionID, muxID, startingToken }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         try self.init(hostID: values.decode(UUID.self, forKey: .hostID),
                       workspaceID: values.decode(String.self, forKey: .workspaceID), tabID: values.decode(String.self, forKey: .tabID),
                       paneID: values.decode(String.self, forKey: .paneID), source: values.decode(String.self, forKey: .source),
-                      sessionID: values.decode(String.self, forKey: .sessionID), muxID: values.decode(String.self, forKey: .muxID))
+                      sessionID: values.decode(String.self, forKey: .sessionID), muxID: values.decode(String.self, forKey: .muxID), startingToken: values.decodeIfPresent(String.self, forKey: .startingToken))
     }
 
     public static func validID(_ value: String) -> Bool {
         !value.isEmpty && value.utf8.count <= 200
             && value.range(of: #"^[A-Za-z0-9_%:.-]+$"#, options: .regularExpression) != nil
+    }
+
+    public static func validSessionID(_ value: String) -> Bool {
+        UUID(uuidString: value) != nil
+            || value.range(of: #"^ses_[0-9A-Za-z]{1,64}$"#, options: .regularExpression) != nil
     }
 }
 
@@ -57,13 +68,16 @@ public struct AgentChatPanes: Decodable, Equatable, Sendable {
         public let agent: String?
         public let agentStatus: String?
         public let sessionId: String?
+        public let starting: Bool?
+        public let startingToken: String?
         public let title: String?
         public let cwd: String?
         public var displayTitle: String { title?.isEmpty == false ? title! : label }
         public var needsAnswer: Bool { ["blocked", "waiting"].contains(agentStatus ?? "") }
         public func target(hostID: UUID, workspaceID: String, tabID: String, muxID: String = "herdr:default") throws -> AgentChatTarget {
             try AgentChatTarget(hostID: hostID, workspaceID: workspaceID, tabID: tabID,
-                                paneID: id, source: agent ?? "", sessionID: sessionId ?? "", muxID: muxID)
+                                paneID: id, source: agent ?? "", sessionID: sessionId ?? "", muxID: muxID,
+                                startingToken: starting == true && sessionId == nil ? startingToken : nil)
         }
     }
     public let kind: String
@@ -82,10 +96,31 @@ public struct AgentChatPanes: Decodable, Equatable, Sendable {
         return value
     }
 
+    /// Attach only to the same starting terminal/process, preserving the pane
+    /// selection even when other agents appear while the first prompt runs.
+    public func attachedTarget(for target: AgentChatTarget) throws -> AgentChatTarget? {
+        guard target.isStarting else { return nil }
+        guard groupId == target.workspaceID, childId == target.tabID,
+              let pane = panes.first(where: { $0.id == target.paneID }), pane.agent == target.source else {
+            throw PhrenKitError.validation("The starting agent changed. Reopen chat before sending.")
+        }
+        // Once the pane reports a conversation, attach to it even if the
+        // starting token changed: the agent may have restarted in the same pane
+        // (new PIDs), which is still the conversation the person opened.
+        if pane.sessionId != nil {
+            return try pane.target(hostID: target.hostID, workspaceID: target.workspaceID, tabID: target.tabID, muxID: target.muxID)
+        }
+        guard pane.startingToken == target.startingToken else {
+            throw PhrenKitError.validation("The starting agent changed. Reopen chat before sending.")
+        }
+        return nil
+    }
+
     public func validate(_ target: AgentChatTarget, sending: Bool = false) throws -> Pane {
         guard groupId == target.workspaceID, childId == target.tabID,
               let pane = panes.first(where: { $0.id == target.paneID }),
-              pane.agent == target.source, pane.sessionId == target.sessionID else {
+              pane.agent == target.source,
+              target.isStarting ? (pane.starting == true && pane.sessionId == nil && pane.startingToken == target.startingToken) : pane.sessionId == target.sessionID else {
             throw PhrenKitError.validation("The agent in this pane changed. Reopen chat to choose its current conversation.")
         }
         if sending && pane.needsAnswer {
@@ -102,11 +137,34 @@ public struct AgentChatMessage: Equatable, Sendable, Identifiable {
     public let role: Role
     public let title: String?
     public let text: String
+    /// Computed when a transcript part is decoded, never while a row scrolls.
+    /// Includes content, so an edited row of the same length invalidates caches.
+    public let renderKey: String
+    public let textByteCount: Int
     public var imageBlocks: [Int] = []
     /// Images inside a tool result — a Read of a screenshot, say — as the
     /// transcript's `blob` route addresses them.
     public var resultImages: [ImageRef] = []
+    /// Pictures the phone sent that Claude Code recorded only by path — a
+    /// `[Image: source: …]` marker per picture, no image block — as the
+    /// Hook's uploads route serves them back. Stripped from `text`.
+    public var uploadImages: [String] = []
     public var toolCallID: String? = nil
+    /// When the transcript row was written, where the source stamps one.
+    public var timestamp: Date? = nil
+    public var wasQueued = false
+    public var isQueued = false
+    public var queueKey: String? = nil
+    public var isToolError = false
+    init(id: String, line: Int, role: Role, title: String?, text: String,
+         imageBlocks: [Int] = [], resultImages: [ImageRef] = [], uploadImages: [String] = [], toolCallID: String? = nil) {
+        self.id = id; self.line = line; self.role = role; self.title = title; self.text = text
+        self.imageBlocks = imageBlocks; self.resultImages = resultImages; self.uploadImages = uploadImages; self.toolCallID = toolCallID
+        localCommand = role == .user ? LocalCommand(text) : nil
+        textByteCount = text.utf8.count
+        renderKey = "\(id)|\(role.rawValue)|\(title ?? "")|\(textByteCount)|\(text.hashValue)"
+            + (uploadImages.isEmpty ? "" : "|u\(uploadImages.count):\(uploadImages.hashValue)")
+    }
     public struct ImageRef: Hashable, Sendable {
         /// The message content block (Claude/phren: the tool_result; Codex: the output item).
         public let block: Int
@@ -118,6 +176,41 @@ public struct AgentChatMessage: Equatable, Sendable, Identifiable {
     /// A file a shell call changed, attached by Phren Hook — shown under the
     /// call as a diff rather than counted as a call of its own.
     public var isChange: Bool { role == .tool && title == "Changes" }
+    /// A slash command or `!` shell line typed at Claude Code's own prompt,
+    /// which the transcript records as a user turn wrapped in tags — shown
+    /// as a system line rather than a bubble of angle brackets.
+    public let localCommand: LocalCommand?
+    public struct LocalCommand: Equatable, Sendable {
+        public enum Kind: Sendable { case command, shell, output }
+        public let kind: Kind
+        /// The typed line (`/model`, `pwd`) or the command's output.
+        public let text: String
+        init(kind: Kind, text: String) { self.kind = kind; self.text = text }
+        init?(_ raw: String) {
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.hasPrefix("<command-name>") || trimmed.hasPrefix("<local-command-stdout>") || trimmed.hasPrefix("<local-command-stderr>")
+                    || trimmed.hasPrefix("<bash-input>") || trimmed.hasPrefix("<bash-stdout>") || trimmed.hasPrefix("<bash-stderr>") else { return nil }
+            func tag(_ name: String) -> String? {
+                guard let open = trimmed.range(of: "<\(name)>"), let close = trimmed.range(of: "</\(name)>", range: open.upperBound..<trimmed.endIndex) else { return nil }
+                return String(trimmed[open.upperBound..<close.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            if let name = tag("command-name") {
+                let args = tag("command-args") ?? ""
+                kind = .command; text = args.isEmpty ? name : name + " " + args
+            } else if let input = tag("bash-input") {
+                kind = .shell; text = input
+            } else {
+                kind = .output
+                text = [tag("local-command-stdout"), tag("local-command-stderr"), tag("bash-stdout"), tag("bash-stderr")]
+                    .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
+            }
+        }
+    }
+}
+
+public struct AgentQueueConsumption: Hashable, Sendable {
+    public let line: Int
+    public let key: String
 }
 
 /// Normalize only visible conversation content. Encrypted reasoning, system
@@ -131,6 +224,9 @@ public struct AgentChatTranscript: Equatable, Sendable {
         }
     }
     static let maximumMessages = 4_000
+    private static func validQueueKey(_ key: String) -> Bool {
+        key.utf8.count == 64 && key.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
+    }
     public let kind: Kind
     public let messages: [AgentChatMessage]
     public let hasMore: Bool
@@ -138,6 +234,7 @@ public struct AgentChatTranscript: Equatable, Sendable {
     public let startLine: Int?
     public var questionEvents: [AgentQuestionEvent] = []
     public var progressEvents: [AgentChatProgressEvent] = []
+    public var queueEvents: [AgentQueueConsumption] = []
     /// What the newest rows say about the session itself: the model
     /// answering and the branch the agent was on.
     public var context = AgentSessionContext()
@@ -155,13 +252,19 @@ public struct AgentChatTranscript: Equatable, Sendable {
         var messages: [AgentChatMessage] = []
         var questionEvents: [AgentQuestionEvent] = []
         var progressEvents: [AgentChatProgressEvent] = []
+        var queueEvents: [AgentQueueConsumption] = []
         var context = AgentSessionContext()
         var seen: Set<String> = []
         for entry in entries {
             guard let line = entry["line"] as? Int, line >= 0, let raw = entry["raw"] as? [String: Any] else { continue }
+            if source == "claude", raw["type"] as? String == "phren_queue_consumed",
+               let key = raw["key"] as? String, Self.validQueueKey(key) {
+                queueEvents.append(.init(line: line, key: key)); continue
+            }
             context.merge(AgentSessionContext.read(raw, source: source, line: line))
-            var parts = try source == "codex" ? codex(raw) : source == "copilot" ? copilot(raw) : source == "phren" ? phren(raw)
+            var parts = try source == "codex" ? codex(raw) : source == "copilot" ? copilot(raw) : source == "phren" || source == "opencode" ? phren(raw)
                 : claude(raw, maximumParts: maximumMessages - messages.count)
+            parts = mergedUserParts(withUploadImages(parts))
             parts += changes(raw, after: parts)
             questionEvents += AgentQuestionEvent.read(raw, source: source)
             if let event = AgentChatProgressEvent.read(raw, source: source, line: line) { progressEvents.append(event) }
@@ -169,24 +272,127 @@ public struct AgentChatTranscript: Equatable, Sendable {
                 let id = "\(line):\(part.idIndex ?? index)"
                 guard (!part.text.isEmpty || part.role == .tool), seen.insert(id).inserted else { continue }
                 let toolCallID = part.toolCallID.flatMap { !$0.isEmpty && $0.utf8.count <= 512 ? $0 : nil }
-                messages.append(.init(id: id, line: line, role: part.role, title: part.title,
-                                      text: String(part.text.prefix(64_000)), imageBlocks: part.imageBlocks, resultImages: part.resultImages, toolCallID: toolCallID))
+                var message = AgentChatMessage(id: id, line: line, role: part.role, title: part.title,
+                                               text: String(part.text.prefix(64_000)), imageBlocks: part.imageBlocks, resultImages: part.resultImages,
+                                               uploadImages: part.uploadImages, toolCallID: toolCallID)
+                message.timestamp = Self.timestamp(raw)
+                message.isToolError = part.isToolError
+                if part.role == .user {
+                    message.queueKey = (raw["phrenQueueKey"] as? String).flatMap { Self.validQueueKey($0) ? $0 : nil }
+                }
+                if source == "claude", part.role == .user, raw["phrenQueued"] as? Bool == true {
+                    message.wasQueued = true; message.isQueued = true
+                    message.queueKey = (raw["phrenQueueKey"] as? String).flatMap { Self.validQueueKey($0) ? $0 : nil }
+                }
+                messages.append(message)
             }
         }
         return Self(kind: kind, messages: messages.sorted { $0.line < $1.line }, hasMore: frame["hasMore"] as? Bool ?? false,
                     totalLines: frame["totalLines"] as? Int ?? 0,
                     startLine: frame["startLine"] as? Int ?? entries.compactMap { $0["line"] as? Int }.min(), questionEvents: questionEvents,
-                    progressEvents: progressEvents, context: context)
+                    progressEvents: progressEvents, queueEvents: queueEvents, context: context)
     }
 
-    private struct Part {
+    struct Part {
         let role: AgentChatMessage.Role
         var title: String? = nil
-        let text: String
+        var text: String
         var imageBlocks: [Int] = []
         var resultImages: [AgentChatMessage.ImageRef] = []
+        var uploadImages: [String] = []
         var toolCallID: String? = nil
         var idIndex: Int? = nil
+        var isToolError = false
+    }
+    /// At most this many pictures are drawn for one turn from the phone.
+    static let maximumUploadImages = 8
+    private static let uploadImageMarker = try! NSRegularExpression(pattern: #"\[Image: source: ([^\]\n]+)\]"#)
+    private static let imageExtensions: Set<String> = ["png", "jpg", "jpeg", "gif", "webp"]
+    /// A picture the phone sent lands in Claude Code's transcript as the text
+    /// `[Image: source: /path/to/it.png]` — no image block — so the words
+    /// would show the marker and no picture. Record the paths that name an
+    /// image (the Hook only ever serves those) and take the markers out of
+    /// the words; a marker naming anything else stays as it was written.
+    static func uploadImageMarkers(in text: String) -> (text: String, paths: [String]) {
+        guard text.contains("[Image: source: ") else { return (text, []) }
+        var paths: [String] = []
+        var stripped = "", cursor = text.startIndex
+        for match in uploadImageMarker.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+            guard let whole = Range(match.range, in: text), let inner = Range(match.range(at: 1), in: text) else { continue }
+            let path = text[inner].trimmingCharacters(in: .whitespaces)
+            let ext = (path as NSString).pathExtension.lowercased()
+            guard path.hasPrefix("/"), path.utf8.count <= 4_096, imageExtensions.contains(ext),
+                  !path.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else { continue }
+            if paths.count < maximumUploadImages { paths.append(path) }
+            stripped += text[cursor..<whole.lowerBound]; cursor = whole.upperBound
+        }
+        guard !paths.isEmpty else { return (text, []) }
+        stripped += text[cursor...]
+        return (stripped.trimmingCharacters(in: .whitespacesAndNewlines), paths)
+    }
+    /// The person's parts with their upload markers turned into pictures; a
+    /// part that was nothing but markers keeps the placeholder the image
+    /// blocks use, so the turn still has a bubble to draw them in.
+    static func withUploadImages(_ parts: [Part]) -> [Part] {
+        parts.map { part in
+            guard part.role == .user else { return part }
+            let (text, paths) = uploadImageMarkers(in: part.text)
+            guard !paths.isEmpty else { return part }
+            var updated = part
+            updated.text = text.isEmpty ? "[Image attachment]" : text
+            updated.uploadImages = paths
+            return updated
+        }
+    }
+    /// One turn from the person is one bubble: a row's text and image blocks
+    /// arrive as separate parts, and drawn apart the picture floats under
+    /// the words it came with. Fold them into the first user part, dropping
+    /// the "[Image attachment]" placeholders the pictures stood in for.
+    static func mergedUserParts(_ parts: [Part]) -> [Part] {
+        let users = parts.indices.filter { parts[$0].role == .user }
+        guard users.count > 1, let first = users.first else { return parts }
+        var merged = parts[first]
+        var texts: [String] = []
+        var imageBlocks: [Int] = [], uploadImages: [String] = []
+        for index in users {
+            let part = parts[index]
+            imageBlocks += part.imageBlocks
+            uploadImages += part.uploadImages
+            if part.text != "[Image attachment]", !part.text.isEmpty { texts.append(part.text) }
+        }
+        merged = Part(role: .user, title: merged.title, text: texts.isEmpty ? "[Image attachment]" : texts.joined(separator: "\n\n"),
+                      imageBlocks: imageBlocks, resultImages: merged.resultImages, uploadImages: Array(uploadImages.prefix(maximumUploadImages)),
+                      toolCallID: merged.toolCallID, idIndex: merged.idIndex)
+        var result: [Part] = []
+        for (index, part) in parts.enumerated() {
+            if index == first { result.append(merged) } else if part.role != .user { result.append(part) }
+        }
+        return result
+    }
+    /// Text a harness injects into the conversation as if the person typed it:
+    /// Codex's environment/filesystem/permission context, system reminders.
+    static func isHarnessPreamble(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return ["<environment_context>", "<filesystem>", "<permission_profile", "<system-reminder>", "<user_instructions>", "<turn_context>"]
+            .contains { trimmed.hasPrefix($0) }
+    }
+    /// A user turn that is nothing but Claude Code's background completion
+    /// envelope (optionally inside a system-reminder wrapper).
+    static func isTaskNotification(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.contains("<task-notification>"), trimmed.contains("<tool-use-id>") else { return false }
+        return trimmed.hasPrefix("<task-notification>") || trimmed.hasPrefix("<system-reminder>")
+    }
+    private static let isoTimestamp: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter(); formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]; return formatter
+    }()
+    private static let isoTimestampPlain: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter(); formatter.formatOptions = [.withInternetDateTime]; return formatter
+    }()
+    static func timestamp(_ raw: [String: Any]) -> Date? {
+        if let value = raw["timestamp"] as? String { return isoTimestamp.date(from: value) ?? isoTimestampPlain.date(from: value) }
+        if let value = raw["timestamp"] as? Double { return Date(timeIntervalSince1970: value > 1e12 ? value / 1000 : value) }
+        return nil
     }
     /// Where the images sit inside a tool result's content array.
     private static func innerImages(_ content: Any?) -> [Int] {
@@ -236,7 +442,11 @@ public struct AgentChatTranscript: Equatable, Sendable {
             let images = (payload["content"] as? [[String: Any]] ?? []).enumerated().compactMap { index, block in
                 ["input_image", "image"].contains(block["type"] as? String ?? "") ? index : nil
             }
-            return [Part(role: role, text: text(payload["content"]), imageBlocks: images)]
+            let body = text(payload["content"])
+            // Codex writes its own environment/permission preamble as the first
+            // "user" turn; that is the harness talking, not the person.
+            if role == .user, images.isEmpty, Self.isHarnessPreamble(body) { return [] }
+            return [Part(role: role, text: body, imageBlocks: images)]
         case "function_call", "custom_tool_call":
             return [Part(role: .tool, title: payload["name"] as? String ?? "Tool", text: readable(payload["arguments"] ?? payload["input"]), toolCallID: payload["call_id"] as? String)]
         case "function_call_output", "custom_tool_call_output":
@@ -275,7 +485,7 @@ public struct AgentChatTranscript: Equatable, Sendable {
             case "tool_result":
                 return Part(role: .tool, title: "Tool result", text: text(block["content"]),
                             resultImages: innerImages(block["content"]).map { AgentChatMessage.ImageRef(block: index, inner: $0) },
-                            toolCallID: block["tool_use_id"] as? String, idIndex: index)
+                            toolCallID: block["tool_use_id"] as? String, idIndex: index, isToolError: block["is_error"] as? Bool == true)
             default: return nil
             }
         }
@@ -296,10 +506,21 @@ public struct AgentChatTranscript: Equatable, Sendable {
         }
     }
     private static func claude(_ raw: [String: Any], maximumParts: Int) throws -> [Part] {
+        if raw["phrenBackground"] as? Bool == true,
+           let message = raw["message"] as? [String: Any], let content = message["content"] as? String {
+            return [Part(role: .tool, title: "Background notification", text: content)]
+        }
         guard raw["isMeta"] as? Bool != true, raw["isSidechain"] as? Bool != true,
               let message = raw["message"] as? [String: Any],
               let role = AgentChatMessage.Role(rawValue: message["role"] as? String ?? ""), role != .tool else { return [] }
         if let content = message["content"] as? String {
+            // Claude Code also records a background job's completion as a user
+            // turn wrapped in <task-notification>; that is the Background row's
+            // business, not a bubble of angle brackets.
+            if role == .user, Self.isTaskNotification(content) {
+                return [Part(role: .tool, title: "Background notification", text: content)]
+            }
+            if role == .user, Self.isHarnessPreamble(content) { return [] }
             guard content.isEmpty || maximumParts > 0 else { throw LimitError.tooManyMessages }
             return [Part(role: role, text: content)]
         }
@@ -327,12 +548,15 @@ public struct AgentChatTranscript: Equatable, Sendable {
             switch block["type"] as? String {
             case "text":
                 guard let text = block["text"] as? String, !text.isEmpty else { return nil }
+                if role == .user, Self.isTaskNotification(text) {
+                    return Part(role: .tool, title: "Background notification", text: text, idIndex: idIndex)
+                }
                 return Part(role: role, text: text, idIndex: idIndex)
             case "image": return Part(role: role, text: "[Image attachment]", imageBlocks: [index], idIndex: idIndex)
             case "tool_use": return Part(role: .tool, title: block["name"] as? String ?? "Tool", text: readable(block["input"]), toolCallID: block["id"] as? String, idIndex: idIndex)
             case "tool_result": return Part(role: .tool, title: "Tool result", text: text(block["content"]),
                                             resultImages: innerImages(block["content"]).map { AgentChatMessage.ImageRef(block: index, inner: $0) },
-                                            toolCallID: block["tool_use_id"] as? String, idIndex: idIndex)
+                                            toolCallID: block["tool_use_id"] as? String, idIndex: idIndex, isToolError: block["is_error"] as? Bool == true)
             default: return nil
             }
         }

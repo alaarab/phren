@@ -11,8 +11,19 @@ struct ApprovalActivityAttributes: ActivityAttributes {
         let host: String
         let explanation: String
         let expiresAt: Date
+        /// Claude Code's AskUserQuestion: the activity offers Open, never a
+        /// blind Approve — the answer is chosen in the app.
+        var question = false
     }
     let requestID: String
+
+    /// Opens the app on this request's conversation (`PhrenApp.onOpenURL`).
+    var openURL: URL? {
+        var components = URLComponents()
+        components.scheme = "phren"; components.host = "approval"
+        components.queryItems = [URLQueryItem(name: "request", value: requestID)]
+        return components.url
+    }
 }
 
 struct AnswerApprovalIntent: LiveActivityIntent {

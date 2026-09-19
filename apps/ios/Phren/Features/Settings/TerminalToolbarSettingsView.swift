@@ -54,7 +54,7 @@ struct TerminalToolbarSettingsView: View {
                     .disabled(saved == nil || preferences.items.count >= TerminalToolbarPreferences.maximumItems)
                     .accessibilityIdentifier("toolbar-add:\(item.rawValue)")
                 }
-                Text("Choose up to eight controls. Changes apply to every terminal on this iPhone.")
+                Text("Choose up to nine controls. Changes apply to every terminal on this iPhone.")
                     .font(.footnote).foregroundStyle(PhrenTheme.textMuted)
             }
             Section {

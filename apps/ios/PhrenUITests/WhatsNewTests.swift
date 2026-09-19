@@ -20,7 +20,7 @@ final class WhatsNewTests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 5))
         row.tap()
         XCTAssertTrue(app.navigationBars["What's new"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["0.0.8"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["1.0.0"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.staticTexts["0.0.7"].exists)
         XCTAssertTrue(app.staticTexts["Earlier"].exists)
     }

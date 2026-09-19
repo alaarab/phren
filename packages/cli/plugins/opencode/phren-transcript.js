@@ -1,0 +1,232 @@
+import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import path from "node:path";
+
+const PHREN_STORE = "__PHREN_STORE__";
+const FLUSH_MS = 250;
+const MAX_TOOL_OUTPUT = 200_000;
+const STOP_REASONS = { stop: "end_turn", "tool-calls": "tool_use", length: "max_tokens" };
+const OPENCODE_SESSION = /^ses_[0-9A-Za-z]+$/;
+const APPROVAL_POLL_MS = 200;
+const APPROVAL_DEADLINE_MS = 50_000;
+
+function storeRoot() {
+  if (PHREN_STORE && !PHREN_STORE.startsWith("__")) return PHREN_STORE;
+  const configured = process.env.PHREN_PATH?.trim();
+  if (!configured) return path.join(homedir(), ".phren");
+  const expanded = configured === "~" ? homedir() : configured.startsWith("~/") ? path.join(homedir(), configured.slice(2)) : configured;
+  return path.resolve(expanded);
+}
+
+function text(value) {
+  return typeof value === "string" ? value : "";
+}
+
+function approvalDirectory() {
+  return path.join(storeRoot(), ".runtime", "approvals");
+}
+
+function approvalPaths(sessionID) {
+  const base = path.join(approvalDirectory(), `opencode-${sessionID}`);
+  return { request: `${base}.request.json`, answer: `${base}.answer.json` };
+}
+
+function writeJsonAtomic(file, value) {
+  const staging = `${file}.${process.pid}.tmp`;
+  writeFileSync(staging, JSON.stringify(value));
+  renameSync(staging, file);
+}
+
+function removeFile(file) {
+  try { unlinkSync(file); } catch {}
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function setStatus(output, status) {
+  if (output && typeof output === "object") output.status = status;
+}
+
+function permissionMessage(input) {
+  const type = text(input?.type) || "action";
+  const pattern = Array.isArray(input?.pattern)
+    ? input.pattern.filter(value => typeof value === "string").join(", ")
+    : text(input?.pattern);
+  const metadata = input?.metadata && typeof input.metadata === "object" ? input.metadata : {};
+  const detail = [pattern, text(metadata.command), text(metadata.description), text(metadata.path), text(metadata.url)].find(value => value);
+  return (detail ? `${type}: ${detail}` : `opencode asks to use ${type}.`).slice(0, 2000);
+}
+
+function toolOutput(state) {
+  if (!state || typeof state !== "object") return "";
+  const output = state.output ?? state.metadata?.output ?? state.result ?? "";
+  const value = typeof output === "string" ? output : JSON.stringify(output ?? "");
+  return value.length > MAX_TOOL_OUTPUT ? value.slice(0, MAX_TOOL_OUTPUT) : value;
+}
+
+function blocksFor(message) {
+  const blocks = [];
+  for (const id of message.partOrder) {
+    const part = message.parts.get(id);
+    if (!part || typeof part !== "object") continue;
+    if (part.type === "text" && typeof part.text === "string" && part.text.length) {
+      blocks.push({ type: "text", text: part.text });
+    } else if (part.type === "tool" && typeof part.callID === "string") {
+      blocks.push({ type: "tool_use", id: part.callID, name: text(part.tool) || "tool", input: part.state?.input ?? {} });
+    }
+  }
+  return blocks;
+}
+
+function toolResults(message) {
+  const results = [];
+  for (const id of message.partOrder) {
+    const part = message.parts.get(id);
+    if (!part || part.type !== "tool" || typeof part.callID !== "string") continue;
+    const status = part.state?.status;
+    if (status !== "completed" && status !== "error") continue;
+    results.push({ type: "tool_result", tool_use_id: part.callID, content: toolOutput(part.state), is_error: status === "error" });
+  }
+  return results;
+}
+
+function linesFor(session) {
+  const messages = session.order
+    .map(id => session.messages.get(id))
+    .filter(Boolean)
+    .sort((a, b) => (a.info?.time?.created ?? 0) - (b.info?.time?.created ?? 0) || String(a.info?.id).localeCompare(String(b.info?.id)));
+  const lines = [];
+  let seq = 0;
+  const emit = (type, data, created) => {
+    lines.push(JSON.stringify({ seq: seq++, time: new Date(created || Date.now()).toISOString(), type, data }));
+  };
+  for (const message of messages) {
+    const info = message.info ?? {};
+    if (info.role === "user") {
+      const blocks = blocksFor(message);
+      if (blocks.length) emit("user/message", { source: "user", message: { role: "user", content: blocks } }, info.time?.created);
+    } else if (info.role === "assistant") {
+      const blocks = blocksFor(message);
+      const data = { stop_reason: STOP_REASONS[info.finish] || info.finish || "end_turn", message: { role: "assistant", content: blocks } };
+      if (info.tokens && (typeof info.tokens.input === "number" || typeof info.tokens.output === "number")) {
+        data.usage = { input_tokens: info.tokens.input ?? 0, output_tokens: info.tokens.output ?? 0 };
+      }
+      if (blocks.length) emit("assistant/message", data, info.time?.created);
+      const results = toolResults(message);
+      if (results.length) emit("tool/results", { message: { role: "user", content: results } }, info.time?.updated ?? info.time?.created);
+    }
+  }
+  return lines;
+}
+
+export const PhrenTranscriptPlugin = async () => {
+  const sessions = new Map();
+  const timers = new Map();
+  const written = new Map();
+
+  const sessionState = sessionID => {
+    let state = sessions.get(sessionID);
+    if (!state) { state = { messages: new Map(), order: [] }; sessions.set(sessionID, state); }
+    return state;
+  };
+
+  const messageState = (sessionID, messageID) => {
+    const state = sessionState(sessionID);
+    let message = state.messages.get(messageID);
+    if (!message) { message = { info: { id: messageID }, parts: new Map(), partOrder: [] }; state.messages.set(messageID, message); state.order.push(messageID); }
+    return message;
+  };
+
+  const flush = sessionID => {
+    const state = sessions.get(sessionID);
+    if (!state) return;
+    const body = linesFor(state);
+    const content = body.length ? body.join("\n") + "\n" : "";
+    if (written.get(sessionID) === content) return;
+    written.set(sessionID, content);
+    const directory = path.join(storeRoot(), ".runtime", "sessions");
+    mkdirSync(directory, { recursive: true });
+    const file = path.join(directory, `opencode-${sessionID}.events.jsonl`);
+    const staging = `${file}.${process.pid}.tmp`;
+    writeFileSync(staging, content);
+    renameSync(staging, file);
+  };
+
+  const schedule = sessionID => {
+    if (!sessionID || timers.has(sessionID)) return;
+    timers.set(sessionID, setTimeout(() => {
+      timers.delete(sessionID);
+      try { flush(sessionID); } catch {}
+    }, FLUSH_MS));
+  };
+
+  const rememberInfo = (sessionID, info) => {
+    if (!info || typeof info.id !== "string") return;
+    const message = messageState(sessionID, info.id);
+    message.info = { ...message.info, ...info };
+    schedule(sessionID);
+  };
+
+  const rememberPart = (sessionID, messageID, part) => {
+    if (!part || typeof part.id !== "string" || typeof messageID !== "string") return;
+    const message = messageState(sessionID, messageID);
+    if (!message.parts.has(part.id)) message.partOrder.push(part.id);
+    message.parts.set(part.id, part);
+    schedule(sessionID);
+  };
+
+  return {
+    "chat.message": async (input, output) => {
+      if (!input?.sessionID || !output?.message) return;
+      rememberInfo(input.sessionID, output.message);
+      for (const part of output.parts ?? []) rememberPart(input.sessionID, output.message.id, part);
+    },
+    "permission.ask": async (input, output) => {
+      let request, answer;
+      try {
+        const sessionID = text(input?.sessionID), id = text(input?.id);
+        if (!OPENCODE_SESSION.test(sessionID) || !id) { setStatus(output, "ask"); return; }
+        const paths = approvalPaths(sessionID);
+        request = paths.request; answer = paths.answer;
+        mkdirSync(approvalDirectory(), { recursive: true });
+        removeFile(answer);
+        const created = Date.now();
+        writeJsonAtomic(request, { id, sessionID, type: text(input.type) || "action",
+          title: text(input.title) || `Allow ${text(input.type) || "action"}?`, message: permissionMessage(input),
+          createdAt: new Date(created).toISOString(), expiresAt: new Date(created + APPROVAL_DEADLINE_MS).toISOString() });
+        const deadline = created + APPROVAL_DEADLINE_MS;
+        let decision;
+        while (Date.now() < deadline) {
+          await sleep(APPROVAL_POLL_MS);
+          try {
+            const value = JSON.parse(readFileSync(answer, "utf8"));
+            if (value && value.id === id) { decision = value.decision; break; }
+          } catch {}
+        }
+        setStatus(output, decision === "approve" ? "allow" : decision === "deny" ? "deny" : "ask");
+      } catch {
+        setStatus(output, "ask");
+      } finally {
+        if (answer) removeFile(answer);
+        if (request) removeFile(request);
+      }
+    },
+    event: async ({ event }) => {
+      const properties = event?.properties ?? {};
+      const sessionID = typeof properties.sessionID === "string" ? properties.sessionID : properties.info?.sessionID ?? properties.part?.sessionID;
+      if (!sessionID) return;
+      if (event.type === "message.updated") rememberInfo(sessionID, properties.info);
+      else if (event.type === "message.part.updated") rememberPart(sessionID, properties.part?.messageID, properties.part);
+      else if (event.type === "message.removed") {
+        const state = sessions.get(sessionID);
+        if (state && typeof properties.messageID === "string") {
+          state.messages.delete(properties.messageID);
+          state.order = state.order.filter(id => id !== properties.messageID);
+          schedule(sessionID);
+        }
+      } else if (event.type === "session.idle") flush(sessionID);
+    },
+  };
+};

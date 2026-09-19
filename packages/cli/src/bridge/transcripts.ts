@@ -1,12 +1,31 @@
 import { realpath } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import path from "node:path";
 import { glob } from "glob";
 import { withTranscriptIndex } from "./transcript-index.js";
-import { BridgeError, object, objects, type Json, type Provider } from "./protocol.js";
-import { outputCallIds, type ChangeLookup } from "./changes.js";
+import { BridgeError, object, objects, sessionId, type Json, type Provider } from "./protocol.js";
+import { namedPaths, SHELL_TOOLS, outputCallIds, type ChangeLookup } from "./changes.js";
 
 export interface Entry { line: number; raw: Json }
+
+const CLAUDE_KEYS = new Set(["type", "uuid", "parentUuid", "timestamp", "message", "gitBranch", "cwd", "requestId", "isMeta", "isSidechain", "isCompactSummary", "phrenQueued", "phrenQueueKey", "phrenBackground"]);
+const harnessPreamble = (text: string) => /^<(?:environment_context>|user_instructions>|permission_profile|system-reminder>|turn_context>)/.test(text.trimStart());
+
+function taskNotification(content: string): string | undefined {
+  const envelope = /<task-notification>([\s\S]*?)<\/task-notification>/.exec(content)?.[1];
+  if (!envelope) return;
+  // Only plain tag values are public. Never copy nested output envelopes.
+  const values = new Map<string, string>();
+  for (const match of envelope.matchAll(/<([a-z-]+)(?:\s[^<>]*)?>([\s\S]*?)<\/\1>/g)) {
+    if (["task-id", "tool-use-id", "status", "summary"].includes(match[1]) && !match[2].includes("<") && !values.has(match[1])) values.set(match[1], match[2]);
+  }
+  const tags = ["task-id", "tool-use-id", "status", "summary"].flatMap(tag => {
+    const value = values.get(tag);
+    return value === undefined ? [] : [`<${tag}>${value.slice(0, tag === "summary" ? 500 : 200)}</${tag}>`];
+  });
+  return tags.some(tag => tag.startsWith("<tool-use-id>")) ? `<task-notification>\n${tags.join("\n")}\n</task-notification>` : undefined;
+}
 
 /** Preserve content positions and image types; original bytes stay in the
  * transcript for the separate image route. Only provider content blocks are
@@ -42,7 +61,7 @@ export function phrenStoreRoot(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 function chatFrame(raw: Json, source: Provider): Json {
-  if (source === "phren") {
+  if (source === "phren" || source === "opencode") {
     const data = object(raw.data), message = object(data.message);
     return Array.isArray(message.content)
       ? { ...raw, data: { ...data, message: { ...message, content: imageReferences(message.content, true) } } } : raw;
@@ -63,14 +82,14 @@ function chatFrame(raw: Json, source: Provider): Json {
     ? { ...raw, [key]: { ...message, content: imageReferences(message.content, source === "claude") } } : raw;
 }
 export async function transcriptPath(source: Provider, session: string): Promise<string> {
-  if (!/^[a-f0-9-]{36}$/i.test(session)) throw new BridgeError(400, "Invalid conversation identity.");
+  if (!sessionId.safeParse(session).success) throw new BridgeError(400, "Invalid conversation identity.");
   const base = source === "codex" ? path.join(process.env.CODEX_HOME || path.join(homedir(), ".codex"), "sessions")
     : source === "claude" ? path.join(process.env.CLAUDE_CONFIG_DIR || path.join(homedir(), ".claude"), "projects")
-    : source === "phren" ? path.join(phrenStoreRoot(), ".runtime", "sessions")
+    : source === "phren" || source === "opencode" ? path.join(phrenStoreRoot(), ".runtime", "sessions")
     : path.join(process.env.COPILOT_HOME || path.join(homedir(), ".copilot"), "session-state");
   const root = await realpath(base);
   const pattern = source === "codex" ? `*/*/*/rollout-*-${session}.jsonl` : source === "claude" ? `*/${session}.jsonl`
-    : source === "phren" ? `session-${session}.events.jsonl` : `${session}/events.jsonl`;
+    : source === "phren" ? `session-${session}.events.jsonl` : source === "opencode" ? `opencode-${session}.events.jsonl` : `${session}/events.jsonl`;
   const matches = await glob(pattern, { cwd: root, absolute: true, follow: false });
   if (matches.length !== 1) throw new BridgeError(404, "The transcript is not available for this conversation.");
   const file = await realpath(matches[0]);
@@ -80,7 +99,7 @@ export async function transcriptPath(source: Provider, session: string): Promise
 
 /** Public conversation/tool events and real usage only. Never export private reasoning. */
 export function visibleEvent(raw: Json, source: Provider): Json | undefined {
-  if (source === "phren") {
+  if (source === "phren" || source === "opencode") {
     // phren-agent's event log (experimental/agent/src/session/log.ts): the
     // header and log/replace splices are bookkeeping; the three message
     // events are the conversation. Reasoning blocks stay on the computer.
@@ -98,15 +117,49 @@ export function visibleEvent(raw: Json, source: Provider): Json | undefined {
     // The model answering this turn is the only field of turn_context the
     // phone shows; its policies and instructions stay on the computer.
     if (raw.type === "turn_context") return typeof p.model === "string" ? { type: "turn_context", timestamp: raw.timestamp, payload: { model: p.model } } : undefined;
+    if (raw.type === "event_msg" && p.type === "error") return { type: raw.type, timestamp: raw.timestamp,
+      payload: { type: "error", ...(typeof p.message === "string" ? { message: p.message } : {}) } };
     if (raw.type === "event_msg" && ["token_count", "task_started", "task_complete", "task_completed", "turn_aborted", "task_aborted", "error"].includes(String(p.type))) return raw;
     if (raw.type !== "response_item") return undefined;
-    if (p.type === "message" && ["user", "assistant"].includes(String(p.role)) && p.channel !== "analysis") return raw;
+    if (p.type === "message" && ["user", "assistant"].includes(String(p.role)) && p.channel !== "analysis") {
+      const text = typeof p.content === "string" ? p.content : objects(p.content).map(b => typeof b.text === "string" ? b.text : "").join("\n");
+      return p.role === "user" && harnessPreamble(text) ? undefined : raw;
+    }
     if (["function_call", "custom_tool_call", "function_call_output", "custom_tool_call_output"].includes(String(p.type))) return raw;
   } else if (source === "claude") {
+    if (raw.type === "queue-operation" && raw.operation === "remove" && typeof raw.content === "string") {
+      return { type: "phren_queue_consumed", key: createHash("sha256").update(raw.content).digest("hex"), timestamp: raw.timestamp };
+    }
+    // Claude Code records background completion as an internal queue row,
+    // outside the ordinary user/assistant transcript. Export only the small
+    // task-notification envelope; other internal events remain private.
+    if (raw.type === "queue-operation" && typeof raw.content === "string"
+        && raw.content.length <= 65_536 && raw.content.includes("<task-notification>")
+        && raw.content.includes("<tool-use-id>")) {
+      const content = taskNotification(raw.content);
+      return content ? { type: "system", phrenBackground: true, timestamp: raw.timestamp,
+        message: { role: "user", content } } : undefined;
+    }
+    // A message sent while the agent was mid-turn is only ever a queue row:
+    // Claude Code hands it to the model inside a later tool result and never
+    // writes a user turn for it. Export the enqueue as the person's message so
+    // the phone can draw the bubble it sent. Consumption exposes only a digest.
+    if (raw.type === "queue-operation" && ["enqueue", "remove"].includes(String(raw.operation))
+        && !raw.isMeta && !raw.isSidechain && typeof raw.content === "string"
+        && raw.content.length <= 65_536 && !raw.content.includes("<task-notification>")
+        && !raw.content.trimStart().startsWith("<")) {
+      const key = createHash("sha256").update(raw.content).digest("hex");
+      // Only the identity crosses the wire on consumption: no queue payload,
+      // tool envelope, private metadata, or reasoning is exported.
+      if (raw.operation === "remove") return { type: "phren_queue_consumed", key, timestamp: raw.timestamp };
+      return { type: "user", phrenQueued: true, phrenQueueKey: key, timestamp: raw.timestamp,
+        message: { role: "user", content: raw.content } };
+    }
     if (raw.isMeta || raw.isSidechain || !["user", "assistant", "system"].includes(String(raw.type))) return undefined;
+    raw = Object.fromEntries(Object.entries(raw).filter(([key]) => CLAUDE_KEYS.has(key)));
     const message = object(raw.message);
     // Keep indexes for historical images while removing thinking contents.
-    if (typeof message.content === "string") return raw;
+    if (typeof message.content === "string") return raw.type === "user" && harnessPreamble(message.content) ? undefined : raw;
     if (Array.isArray(message.content)) return { ...raw, message: { ...message, content: objects(message.content).map(b =>
       ["text", "image", "tool_use", "tool_result"].includes(String(b.type)) ? b : { type: "redacted" }) } };
   } else {
@@ -132,6 +185,12 @@ export class TranscriptReader {
       const end = Math.min(before ?? index.lines, index.lines);
       const lower = this.imageLine ?? (reset || before !== undefined ? 0 : this.nextLine);
       const entries: Entry[] = [];
+      // The first page of a conversation is what the phone parses and lays
+      // out before anything shows; keep it light and let scrolling fetch the
+      // rest in fuller pages. A live tail (nextLine known) stays small too.
+      const opening = before === undefined && (reset || this.nextLine === 0);
+      const entryBudget = opening ? 60 : 200;
+      const byteBudget = opening ? 1_048_576 : 4_194_304;
       let bytes = 0, cursor = end, held: number | undefined;
       for await (const row of index.rows(handle, end, lower, signal)) {
         signal?.throwIfAborted();
@@ -154,12 +213,12 @@ export class TranscriptReader {
           const size = Buffer.byteLength(JSON.stringify(entry));
           if (this.imageLine !== undefined || size < 2_097_152) {
             // Leave an entry that doesn't fit for the following history page.
-            if (this.imageLine === undefined && bytes + size > 4_194_304) break;
+            if (this.imageLine === undefined && bytes + size > byteBudget) break;
             entries.push(entry); bytes += size;
           }
         }
         cursor = row.line;
-        if (entries.length >= 200) break;
+        if (entries.length >= entryBudget) break;
       }
       if (before === undefined) { this.revision = index.revision; this.nextLine = held ?? index.lines; }
       return { entries: entries.reverse(), totalLines: index.lines, startLine: cursor, hasMore: cursor > 0, reset };
@@ -177,7 +236,7 @@ export async function historicalImage(file: string, line: number, block: number,
   const page = await reader.read(line + 1);
   const row = page.entries.find(e => e.line === line)?.raw;
   if (!row) throw new BridgeError(404, "This image is no longer in the transcript.");
-  const payload = source === "codex" ? object(row.payload) : source === "phren" ? object(object(row.data).message) : object(row.message);
+  const payload = source === "codex" ? object(row.payload) : source === "phren" || source === "opencode" ? object(object(row.data).message) : object(row.message);
   const content = objects(source === "codex" && Array.isArray(payload.output) ? payload.output : payload.content);
   let image = content[block];
   if (inner !== undefined) image = objects(image?.content)[inner];
@@ -187,4 +246,32 @@ export async function historicalImage(file: string, line: number, block: number,
   const bytes = Buffer.from(base64, "base64");
   if (bytes.length > 8_388_608) throw new BridgeError(413, "This image is too large.");
   return bytes;
+}
+
+/** Derive optional diff scope from local tool-call rows, never phone commands. */
+export async function conversationNamedPaths(file: string, source: Provider, cwd: string, signal?: AbortSignal): Promise<string[]> {
+  return withTranscriptIndex(file, async (handle, index) => {
+    const paths = new Set<string>();
+    for await (const row of index.rows(handle, index.lines, 0, signal)) {
+      signal?.throwIfAborted();
+      try {
+        const raw = row.bytes && visibleEvent(object(JSON.parse(row.bytes.toString())), source);
+        if (!raw) continue;
+        const payload = object(raw.payload), data = object(raw.data);
+        const calls = source === "codex" ? (["function_call", "custom_tool_call"].includes(String(payload.type)) ? [payload] : [])
+          : source === "copilot" ? (raw.type === "tool.execution_start" ? [data] : [])
+          : objects(object(source === "phren" || source === "opencode" ? data.message : raw.message).content).filter(b => b.type === "tool_use");
+        for (const call of calls) {
+          if (!SHELL_TOOLS.has(String(call.name ?? call.toolName))) continue;
+          const args = call.arguments ?? call.input;
+          const input = typeof args === "string" ? object(JSON.parse(args)) : object(args);
+          const command = input.command ?? input.cmd;
+          if (typeof command !== "string") continue;
+          const base = [input.workdir, input.cwd, raw.cwd, cwd].find(v => typeof v === "string" && path.isAbsolute(v)) as string;
+          for (const named of namedPaths(command)) paths.add(named.startsWith("~/") ? path.join(homedir(), named.slice(2)) : path.resolve(base, named));
+        }
+      } catch { /* Malformed or private rows grant no additional scope. */ }
+    }
+    return [...paths];
+  }, signal);
 }

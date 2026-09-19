@@ -50,14 +50,31 @@ final class PhrenAgentTranscriptTests: XCTestCase {
             event(1, "assistant/message", ["turn": 2, "stop_reason": "end_turn", "message": ["role": "assistant", "content": [["type": "text", "text": ""], ["type": "text", "text": "Done."]]]]),
             event(2, "user/message", ["source": "steer", "turn": 3, "message": ["role": "user", "content": [["type": "text", "text": "Also lint"], ["type": "image", "source": ["type": "base64"]]]]]),
         ])
-        XCTAssertEqual(value.messages.map(\.text), ["Done.", "Also lint", "[Image attachment]"])
-        XCTAssertEqual(value.messages[2].imageBlocks, [1])
+        // The steer's words and picture are one bubble.
+        XCTAssertEqual(value.messages.map(\.text), ["Done.", "Also lint"])
+        XCTAssertEqual(value.messages[1].imageBlocks, [1])
         if case .finished = value.progressEvents[0].value {} else { XCTFail("end_turn without usage still finishes the turn") }
     }
 
     func testSlashCommandsForPhren() {
         XCTAssertEqual(AgentSlashCommand.suggestions(source: "phren", draft: "/p"), ["/provider", "/plan", "/permissions"])
         XCTAssertEqual(AgentSlashCommand.menu(source: "phren").first { $0.name == "/cost" }?.detail, "See this session's cost")
+    }
+
+    func testTargetAcceptsOpenCodeWithASesSession() throws {
+        let session = "ses_f4a6b5c11ffe6nZrRlGZbXXNli"
+        let target = try AgentChatTarget(hostID: UUID(), workspaceID: "w1", tabID: "w1:t1", paneID: "w1:p1", source: "opencode", sessionID: session)
+        XCTAssertEqual(target.providerName, "opencode")
+        XCTAssertThrowsError(try AgentChatTarget(hostID: UUID(), workspaceID: "w1", tabID: "w1:t1", paneID: "w1:p1", source: "opencode", sessionID: "not-a-session"))
+        XCTAssertTrue(AgentChatTarget.validSessionID(session))
+        XCTAssertFalse(AgentChatTarget.validSessionID("ses_has spaces"))
+    }
+
+    func testOpenCodeTranscriptReadsTheSharedEventShape() throws {
+        let entries = [["line": 1, "raw": event(1, "user/message", ["source": "user", "turn": 1, "message": ["role": "user", "content": "Hello"]])]]
+        let data = try JSONSerialization.data(withJSONObject: ["type": "backlog", "source": "opencode", "entries": entries, "totalLines": 2, "hasMore": false])
+        let value = try AgentChatTranscript.read(data, source: "opencode")
+        XCTAssertEqual(value.messages.map(\.text), ["Hello"])
     }
 }
 

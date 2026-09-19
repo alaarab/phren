@@ -7,10 +7,9 @@ struct PhrenApp: App {
     @State private var appearance = PhrenAppearance.shared
     @State private var approvals = ApprovalActivityController.shared
     @Environment(\.scenePhase) private var scenePhase
+    private let launchedAt = CFAbsoluteTimeGetCurrent()
 
-    init() {
-        Self.applyPhrenChrome()
-    }
+    init() { Self.applyPhrenChrome() }
 
     var body: some Scene {
         WindowGroup {
@@ -23,7 +22,18 @@ struct PhrenApp: App {
                 .preferredColorScheme(.dark)
                 .onChange(of: appearance.palette) { _, _ in Self.applyPhrenChrome() }
                 .modifier(ExternalURLTestCapture())
-                .task { await model.bootstrap() }
+                .task {
+                    // ActivityKit reconciliation can wait until SwiftUI has
+                    // produced the first scene.
+                    _ = SessionWorkingActivityController.shared
+                    #if DEBUG
+                    if ProcessInfo.processInfo.environment["PHREN_PERFORMANCE_LOG"] == "1" {
+                        print("[PhrenPerformance] first scene task: \(String(format: "%.3f", (CFAbsoluteTimeGetCurrent() - launchedAt) * 1_000)) ms")
+                    }
+                    #endif
+                    await model.bootstrap()
+                    AgentLaunch.restorePendingNavigation()
+                }
                 .alert("Permission request", isPresented: $approvals.message.isPresent()) {
                     Button("OK") { approvals.message = nil }
                 } message: { Text(approvals.message ?? "") }
@@ -48,6 +58,14 @@ struct PhrenApp: App {
                         model.showingMemoryMaintenance = true
                     case "projects": model.selectedTab = .projects
                     case "agents": model.selectedTab = .agents
+                    case "approval":
+                        guard let requestID = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                            .queryItems?.first(where: { $0.name == "request" })?.value else { return }
+                        approvals.open(requestID: requestID)
+                    case "session":
+                        guard let routeID = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                            .queryItems?.first(where: { $0.name == "route" })?.value else { return }
+                        try? SessionWorkingActivityController.shared.open(routeID: routeID)
                     case "tasks": model.selectedTab = .tasks
                     default: break
                     }
@@ -146,7 +164,7 @@ struct MainTabView: View {
             }
                 .tabItem { Label("Projects", systemImage: "square.grid.2x2") }
                 .tag(AppTab.projects)
-            NavigationStack { LiveSessionsView() }
+            PhrenNavigationStack { LiveSessionsView() }
                 .tabItem { Label("Agents", systemImage: "waveform.path") }
                 .tag(AppTab.agents)
             Group {
@@ -165,7 +183,6 @@ struct MainTabView: View {
                 .tabItem { Label("Settings", systemImage: "gearshape") }
                 .tag(AppTab.settings)
         }
-        .sheet(isPresented: $model.showingMemoryMaintenance) { MemoryMaintenanceView() }
         .sheet(isPresented: $showingWhatsNew) { WhatsNewSheet() }
         // This version's notes, once — after the store is connected, so the
         // sheet never lands on top of onboarding.

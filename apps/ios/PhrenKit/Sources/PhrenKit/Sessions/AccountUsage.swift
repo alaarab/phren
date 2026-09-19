@@ -6,7 +6,15 @@ public struct AccountUsageSnapshot: Decodable, Equatable, Sendable {
         public let name: String
         public let usedPercent: Double
         public let resetsAt: String?
+        /// When this window was last read, if it is older than the account
+        /// as a whole (Claude's per-model windows come from Claude Code's own
+        /// usage snapshot, refreshed when it opens /usage).
+        public let asOf: String?
         public var resetDate: Date? { AccountUsageSnapshot.date(resetsAt) }
+        public var asOfDate: Date? { AccountUsageSnapshot.date(asOf) }
+        public init(id: String, name: String, usedPercent: Double, resetsAt: String?, asOf: String? = nil) {
+            self.id = id; self.name = name; self.usedPercent = usedPercent; self.resetsAt = resetsAt; self.asOf = asOf
+        }
     }
     public struct Account: Decodable, Equatable, Sendable, Identifiable {
         public let source: String
@@ -36,6 +44,7 @@ public struct AccountUsageSnapshot: Decodable, Equatable, Sendable {
                       !window.id.isEmpty && window.id.utf8.count <= 200 && window.name.utf8.count <= 200
                       && window.usedPercent.isFinite && (0...100).contains(window.usedPercent)
                       && (window.resetsAt == nil || window.resetDate != nil)
+                      && (window.asOf == nil || window.asOfDate != nil)
                   }
               }) else { throw PhrenKitError.validation("The computer returned invalid account usage. Refresh to try again.") }
         return value

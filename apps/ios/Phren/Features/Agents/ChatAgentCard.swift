@@ -1,0 +1,78 @@
+import PhrenKit
+import SwiftUI
+
+/// A subagent the agent delegated to: who it was, what it was asked in one
+/// line, the model, whether it is still out there, and its report — the
+/// first screenful, the rest in the reader. The prompt can be enormous, so it
+/// stays behind Show prompt.
+struct ChatAgentCard: View {
+    let agent: AgentSubagentPresentation
+    let entry: ChatTimelineEntry
+    @Environment(\.openToolOutput) private var openOutput
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var showPrompt = false
+
+    private var status: ToolCardStatus {
+        switch agent.state {
+        case .running: return .running
+        case .done: return .done
+        case .failed: return .failed
+        }
+    }
+    private var stateLabel: String {
+        switch agent.state {
+        case .running: return "running"
+        case .done: return "done"
+        case .failed: return "failed"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
+            ToolCardHeader(icon: "person.2", title: agent.name, status: status)
+            if !agent.description.isEmpty {
+                Text(agent.description).font(.subheadline).foregroundStyle(PhrenTheme.textSecondary)
+                    .lineLimit(3).frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if agent.model != nil || agent.background {
+                HStack(spacing: 6) {
+                    if let model = agent.model { ToolCardChip(text: model) }
+                    if agent.background { ToolCardChip(text: "background") }
+                }
+            }
+            if let summary = agent.summary {
+                Text(summary).font(.caption.weight(.medium)).lineLimit(2)
+                    .foregroundStyle(agent.state == .failed ? PhrenTheme.danger : PhrenTheme.phrenCardAccent)
+            }
+            if let preview = entry.card?.markdownPreview {
+                ChatRichText(text: preview.text, cacheKey: entry.cardMarkdownKey).equatable()
+                if preview.truncated {
+                    Button("Read full report") { openOutput(.init(title: agent.name, text: agent.report)) }
+                        .font(.caption).foregroundStyle(PhrenTheme.accent)
+                        .accessibilityIdentifier("chat-agent-report:\(entry.callID)")
+                }
+            } else if agent.state == .running {
+                Text(agent.background ? "Working in the background…" : "Working…")
+                    .font(.caption).foregroundStyle(PhrenTheme.textMuted)
+            }
+            if !agent.prompt.isEmpty {
+                Button(showPrompt ? "Hide prompt" : "Show prompt") {
+                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { showPrompt.toggle() }
+                }
+                .font(.caption).foregroundStyle(PhrenTheme.accent)
+                .accessibilityIdentifier("chat-agent-prompt:\(entry.callID)")
+                if showPrompt {
+                    let prompt = ToolOutputPreview(agent.prompt, lines: 12, characters: 2_000)
+                    Text(prompt.text).font(.system(.caption, design: .monospaced)).foregroundStyle(PhrenTheme.chatText)
+                        .lineLimit(12).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
+                    if prompt.truncated {
+                        Button("Read full prompt") { openOutput(.init(title: "Prompt for \(agent.name)", text: agent.prompt)) }
+                            .font(.caption).foregroundStyle(PhrenTheme.accent)
+                    }
+                }
+            }
+        }
+        .toolCard()
+        .toolCardMarker("chat-agent-card:\(entry.callID)", label: "\(agent.name), \(agent.description), \(stateLabel)")
+    }
+}

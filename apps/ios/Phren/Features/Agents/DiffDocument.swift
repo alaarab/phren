@@ -1,4 +1,4 @@
-import SwiftUI
+import Foundation
 
 /// A unified patch prepared the way VS Code's diff editor presents one: full
 /// rows with old/new line numbers, changed blocks (a run of removed lines

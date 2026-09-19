@@ -25,9 +25,29 @@ struct LaunchSessionView: View {
     @State private var status: String?
     @State private var error: String?
     @State private var chatSession: LiveAgentSession?
+    @State private var modelName = ""
 
     private typealias Harness = PhrenConnection.LaunchKind
     private var harness: Harness? { Harness(rawValue: kind) }
+    /// Harnesses whose CLI accepts a model at startup.
+    private var supportsModel: Bool { ["codex", "claude", "opencode"].contains(kind) }
+    private var modelSuggestions: [String] {
+        switch kind {
+        case "opencode": return ["openrouter/deepseek/deepseek-v4.1-flash", "openrouter/deepseek/deepseek-v4-pro"]
+        case "claude": return ["opus", "sonnet", "haiku"]
+        case "codex": return ["gpt-5-codex", "gpt-5"]
+        default: return []
+        }
+    }
+    private var modelPlaceholder: String {
+        switch kind {
+        case "opencode": return "provider/model"
+        case "claude": return "opus, sonnet, or haiku"
+        case "codex": return "e.g. gpt-5-codex"
+        default: return "model"
+        }
+    }
+    private func storedModel(_ kind: String) -> String { UserDefaults.standard.string(forKey: "launch.model.\(kind)") ?? "" }
     private var preferences: LiveSessionPreferences? { try? LiveSessionPreferences.read(data) }
     private var hosts: [LiveHost] { preferences?.hosts ?? [] }
     private var registry: MachineRegistry { model.machineRegistry(storeId: storeID) }
@@ -71,7 +91,7 @@ struct LaunchSessionView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        PhrenNavigationStack {
             PhrenList {
                 Section {
                     if hosts.isEmpty {
@@ -145,6 +165,26 @@ struct LaunchSessionView: View {
                     }
                 } header: { Text("Harness") }
 
+                if supportsModel {
+                    Section {
+                        TextField(modelPlaceholder, text: $modelName)
+                            .font(.system(.body, design: .monospaced)).autocorrectionDisabled().textInputAutocapitalization(.never)
+                            .accessibilityIdentifier("launch-model")
+                        ForEach(modelSuggestions, id: \.self) { suggestion in
+                            Button { modelName = suggestion } label: {
+                                HStack(spacing: 8) {
+                                    Text(suggestion).font(.system(.caption, design: .monospaced)).foregroundStyle(PhrenTheme.text)
+                                    Spacer()
+                                    if modelName == suggestion { Image(systemName: "checkmark").foregroundStyle(PhrenTheme.cyan) }
+                                }
+                            }
+                            .accessibilityIdentifier("launch-model-suggestion:\(suggestion)")
+                        }
+                    } header: { Text("Model") } footer: {
+                        Text("Optional. Passed to \(harness?.title ?? kind) as --model when it starts; leave blank for its default.")
+                    }
+                }
+
                 Section {
                     Button {
                         Task { await open() }
@@ -168,9 +208,11 @@ struct LaunchSessionView: View {
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(launching) } }
             .phrenScreen()
             .modifier(SessionLaunchAlert(error: $error))
-            .sheet(item: $chatSession, onDismiss: { dismiss() }) { AgentChatSheet(session: $0) }
+            .navigationDestination(item: $chatSession) { AgentChatSheet(session: $0) }
             .interactiveDismissDisabled(launching)
-            .task { await prepare() }
+            .task { modelName = storedModel(kind); await prepare() }
+            .onChange(of: kind) { _, newKind in modelName = storedModel(newKind) }
+            .onChange(of: modelName) { _, newValue in UserDefaults.standard.set(newValue, forKey: "launch.model.\(kind)") }
         }
     }
 
@@ -207,7 +249,8 @@ struct LaunchSessionView: View {
         defer { launching = false; status = nil }
         do {
             status = "Starting \(harness.title) in \(project)…"
-            let session = try await AgentLaunch.launch(host: host, cwd: cwd, label: project, kind: harness) { status = $0 }
+            let chosen = supportsModel ? modelName.trimmingCharacters(in: .whitespacesAndNewlines) : ""
+            let session = try await AgentLaunch.launch(host: host, cwd: cwd, label: project, kind: harness, model: chosen.isEmpty ? nil : chosen) { status = $0 }
             // Remember the folder for this project on this computer, so the
             // next session is found without asking.
             data = (try? LiveSessionPreferences.assigning(hostID: host.id, directory: cwd, storeID: storeID, project: project, in: data)) ?? data

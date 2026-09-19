@@ -1,65 +1,105 @@
 import PhrenKit
 import SwiftUI
 
-struct ChatTimelineEntry: Identifiable {
-    var messages: [AgentChatMessage]
-    var id: String { messages[0].id }
-    var isActivity: Bool { messages[0].role == .tool }
-
-    static func group(_ messages: [AgentChatMessage]) -> [Self] {
-        var entries: [Self] = []
-        var previousMessageID: String?
-        var calls: [String: Int] = [:], ambiguous: Set<String> = []
-        for message in messages {
-            guard message.role == .tool else {
-                entries.append(.init(messages: [message]))
-                calls.removeAll(keepingCapacity: true); ambiguous.removeAll(keepingCapacity: true)
-                previousMessageID = message.id
-                continue
-            }
-            // A result — or what the call changed on disk — joins its call.
-            if message.isToolResult || message.isChange {
-                if let key = message.toolCallID, !key.isEmpty, !ambiguous.contains(key), let index = calls[key] {
-                    entries[index].messages.append(message)
-                    previousMessageID = message.id
-                    continue
+struct ChatBackgroundJobsView: View {
+    let jobs: [ChatBackgroundJob]
+    @State private var expanded: Set<String> = []
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { tick in
+            let jobs = jobs.filter { $0.finishedAt.map { tick.date.timeIntervalSince($0) <= ChatBackgroundJobs.finishedLinger } ?? true }
+            if !jobs.isEmpty {
+            VStack(alignment: .leading, spacing: 5) {
+                let running = jobs.filter { $0.state == .running }.count
+                HStack {
+                    Label("Background", systemImage: "clock.arrow.circlepath").font(.caption.weight(.semibold))
+                    Spacer()
+                    Text(running > 0 ? "\(running) running" : "done").font(.caption.monospacedDigit()).foregroundStyle(PhrenTheme.chatNeutralDim)
+                        .accessibilityIdentifier("chat-background-count")
                 }
-                // Older transcripts lack IDs. Only pair an immediately adjacent,
-                // unidentified call/result; never guess among parallel calls.
-                if message.toolCallID == nil, let previous = entries.last,
-                   previous.messages.count == 1, let call = previous.messages.first,
-                   call.role == .tool, !call.isToolResult, call.toolCallID == nil,
-                   call.id == previousMessageID {
-                    entries[entries.count - 1].messages.append(message)
-                    previousMessageID = message.id
-                    continue
+                ForEach(jobs) { job in
+                    Button { if expanded.contains(job.id) { expanded.remove(job.id) } else { expanded.insert(job.id) } } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 6) {
+                                Circle().fill(job.state == .running ? PhrenTheme.cyan : PhrenTheme.success).frame(width: 6, height: 6)
+                                Text(job.title).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                                Text(status(job, at: tick.date)).foregroundStyle(PhrenTheme.chatNeutralDim)
+                                Image(systemName: "chevron.down").rotationEffect(.degrees(expanded.contains(job.id) ? 180 : 0))
+                            }
+                            if expanded.contains(job.id) {
+                                Text(ToolOutputPreview(job.command, lines: 4, characters: 640).text).foregroundStyle(PhrenTheme.chatNeutral).lineLimit(4)
+                                if !job.output.isEmpty { Text(ToolOutputPreview(job.output, lines: 8, characters: 1_200).text).foregroundStyle(PhrenTheme.chatText).lineLimit(8) }
+                            }
+                        }.font(.system(.caption, design: .monospaced)).contentShape(Rectangle())
+                    }.buttonStyle(.plain).accessibilityIdentifier("chat-background-job:\(job.id)")
                 }
-            } else if let key = message.toolCallID, !key.isEmpty {
-                if calls[key] != nil { ambiguous.insert(key) }
-                else { calls[key] = entries.count }
+            }.padding(PhrenTheme.Space.medium).phrenPanel(tool: true)
+                .padding(.horizontal, 12).padding(.vertical, 4)
+                .accessibilityIdentifier("chat-background-jobs")
             }
-            entries.append(.init(messages: [message]))
-            previousMessageID = message.id
         }
-        return entries
+    }
+    private func status(_ job: ChatBackgroundJob, at date: Date) -> String {
+        let elapsed = Int(max(0, (job.finishedAt ?? date).timeIntervalSince(job.startedAt)))
+        let duration = elapsed < 60 ? "\(elapsed)s" : "\(elapsed / 60)m \(elapsed % 60)s"
+        switch job.state {
+        case .running: return "running · \(duration)"
+        case .finished(let code): return "finished" + (code.map { " · exit \($0)" } ?? "") + " · \(duration)"
+        }
     }
 }
 
-struct ChatToolSummary {
-    let title: String
-    let icon: String
-    let preview: String
-    let count: Int
-
-    init(_ messages: [AgentChatMessage]) {
-        // What a call changed on disk is listed under it, not counted as a call.
-        let calls = messages.filter { $0.title != "Tool result" && !$0.isChange }
-        let presentations = calls.map { ToolPresentation(title: $0.title ?? "Tool", text: $0.text) }
-        let names = presentations.map(\.title)
-        title = Set(names).count == 1 ? names[0] : calls.isEmpty ? "Tool results" : "Activity"
-        icon = title == "Shell" ? "terminal" : title == "Browse" ? "globe" : title == "Patch" ? "pencil.line" : title == "Write" ? "doc.badge.plus" : "wrench.and.screwdriver"
-        count = max(1, calls.isEmpty ? messages.count : calls.count)
-        preview = presentations.last?.preview ?? messages.last.map { ToolPresentation(title: $0.title ?? "Tool result", text: $0.text).preview } ?? ""
+struct ChatReadRun: View, Equatable {
+    let messages: [AgentChatMessage]
+    var resultImages: ((AgentChatMessage) -> AnyView)? = nil
+    var imageContext = ""
+    @State private var expanded = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.messages == rhs.messages && lhs.imageContext == rhs.imageContext }
+    private let groups: [ChatTimelineEntry]
+    private let title: String
+    private let preview: String
+    init(messages: [AgentChatMessage], resultImages: ((AgentChatMessage) -> AnyView)? = nil, imageContext: String = "") {
+        self.messages = messages; self.resultImages = resultImages; self.imageContext = imageContext
+        // The outer grouping has already established the run. Re-grouping
+        // restores the exact call/result cards shown before it was folded.
+        groups = ChatTimelineEntry.group(messages, foldingReads: false)
+        let calls = groups.compactMap { $0.messages.first(where: { !$0.isToolResult && !$0.isChange }) }
+        // What the agent did, in the order it did it: "Shell ×4 · Read ×2".
+        var counts: [(name: String, count: Int)] = []
+        for name in calls.map({ ToolPresentationCache.value($0).title }) {
+            if let index = counts.firstIndex(where: { $0.name == name }) { counts[index].count += 1 }
+            else { counts.append((name, 1)) }
+        }
+        title = counts.prefix(3).map { $0.count > 1 ? "\($0.name) ×\($0.count)" : $0.name }.joined(separator: " · ")
+            + (counts.count > 3 ? " …" : "")
+        // The last command, so the row still says where the agent got to.
+        preview = calls.last.map { ToolPresentationCache.value($0).preview } ?? ""
+    }
+    var body: some View { ChatPerformance.measure("read-run row") { content } }
+    @ViewBuilder private var content: some View {
+        VStack(alignment: .leading, spacing: expanded ? 8 : 0) {
+            Button {
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { expanded.toggle() }
+            } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: "doc.text.magnifyingglass").foregroundStyle(PhrenTheme.chatNeutralDim).frame(width: 14)
+                    Text(title).fontWeight(.semibold).foregroundStyle(PhrenTheme.chatText).lineLimit(1)
+                    Text(preview).foregroundStyle(PhrenTheme.chatNeutral).lineLimit(1).truncationMode(.middle)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
+                        .rotationEffect(.degrees(expanded ? 180 : 0)).foregroundStyle(PhrenTheme.chatNeutralDim)
+                }.font(.system(.caption, design: .monospaced)).padding(.horizontal, 12).frame(height: 44)
+            }.buttonStyle(.plain)
+                .accessibilityLabel("\(title), \(groups.count) read operations")
+                .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+                .accessibilityIdentifier("chat-read-run:\(messages[0].id)")
+            if expanded {
+                ForEach(groups) { group in
+                    ChatToolActivity(messages: group.messages, resultImages: resultImages, imageContext: imageContext).equatable()
+                }.padding(.horizontal, 8)
+            }
+        }.padding(.bottom, expanded ? 8 : 0)
+            .phrenPanel(tool: true)
     }
 }
 
@@ -68,11 +108,31 @@ struct ChatToolActivity: View, Equatable {
     /// Draws the images a tool result carries (a Read of a screenshot), given
     /// the live session; nil where a card is shown without one.
     var resultImages: ((AgentChatMessage) -> AnyView)? = nil
-    static func == (lhs: Self, rhs: Self) -> Bool { lhs.messages == rhs.messages }
+    var imageContext = ""
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.messages == rhs.messages && lhs.imageContext == rhs.imageContext }
     @State private var expanded = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
+        ChatPerformance.measure("tool row") { content }
+    }
+    @ViewBuilder private var content: some View {
+        // A fetch or search folds into a read run like a Read does, so it
+        // can reach this row from an expanded run: it keeps its card there.
+        // Skills and other MCP servers never fold; they are dispatched here
+        // too so the card shows wherever the activity row is drawn.
+        if let web = WebToolCard.presentation(messages) {
+            WebToolCard(presentation: web, messages: messages)
+        } else if let skill = SkillChip.presentation(messages) {
+            SkillChip(presentation: skill, messages: messages)
+        } else if let mcp = MCPToolCard.presentation(messages) {
+            MCPToolCard(presentation: mcp, messages: messages)
+        } else { pill }
+    }
+    @ViewBuilder private var pill: some View {
         let summary = ChatToolSummary(messages)
+        #if DEBUG
+        let _ = ProcessInfo.processInfo.environment["PHREN_PERFORMANCE_LOG"] == "1" ? Self._printChanges() : ()
+        #endif
         VStack(alignment: .leading, spacing: 0) {
             Button {
                 withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { expanded.toggle() }
@@ -90,7 +150,7 @@ struct ChatToolActivity: View, Equatable {
                         .rotationEffect(.degrees(expanded ? 180 : 0)).foregroundStyle(PhrenTheme.chatNeutralDim)
                 }
                 .font(.system(.caption, design: .monospaced))
-                .padding(.horizontal, 12).padding(.vertical, 4).frame(minHeight: 34)
+                .padding(.horizontal, 12).frame(height: 44)
                 .contentShape(Rectangle().inset(by: -5))
             }.buttonStyle(.plain)
                 .accessibilityLabel("\(summary.title), \(summary.count) \(summary.count == 1 ? "operation" : "operations")")
@@ -98,15 +158,14 @@ struct ChatToolActivity: View, Equatable {
                 .accessibilityHint("Expand this call and its output")
                 .accessibilityIdentifier("chat-tool-group:\(messages[0].id)")
             // What the command changed, right there under the call without
-            // opening the card — the way a terminal shows "Updated file
-            // (+n −m)" and the lines beneath it.
+            // opening the card — each file folded to its title bar, so this
+            // costs a row per file, not a diff. (An earlier decision the
+            // round-10 "defer until tapped" pass had undone.)
             let changed = messages.filter(\.isChange)
             if !expanded, !changed.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(changed.prefix(4)) { change in
-                        CodeDiffView(patch: change.text, previewLineLimit: 12, collapsible: true)
-                            .accessibilityElement(children: .contain)
-                            .accessibilityIdentifier("chat-tool-change:\(change.id)")
+                        CodeDiffView(patch: change.text, cacheKey: change.renderKey, previewLineLimit: 12, collapsible: true)
                     }
                     if changed.count > 4 {
                         Text("+\(changed.count - 4) more files").font(.system(.caption, design: .monospaced)).foregroundStyle(PhrenTheme.chatNeutralDim)
@@ -114,50 +173,78 @@ struct ChatToolActivity: View, Equatable {
                 }
                 .padding(.horizontal, 10).padding(.bottom, 10)
             }
+            // The pictures a result carries — a Read of a screenshot, every
+            // frame of it — under the pill without opening the card, side by
+            // side and scrolling sideways when there are more than fit.
+            let pictured = messages.filter { $0.isToolResult && !$0.resultImages.isEmpty }
+            if !expanded, !pictured.isEmpty, let resultImages {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 8) {
+                        ForEach(pictured) { resultImages($0) }
+                    }.padding(.horizontal, 10)
+                }
+                .environment(\.chatImageLayout, .thumbnail)
+                .padding(.bottom, 10)
+            }
+            if !expanded, changed.isEmpty {
+                // Older Hooks and non-Git folders still provide Edit/Write inputs.
+                // Use the already cached presentation; defer the diff's body until tapped.
+                ForEach(messages.filter { !$0.isToolResult && !$0.isChange }) { message in
+                    let presentation = ToolPresentationCache.value(message)
+                    if let patch = presentation.patch {
+                        CodeDiffView(patch: patch, cacheKey: message.renderKey, previewLineLimit: 12, collapsible: true)
+                            .padding(.horizontal, 10).padding(.bottom, 10)
+                    }
+                }
+            }
             if expanded {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(messages) { message in
                         // The call and its output, both in full: the command
                         // is what tells you what happened, so it is never
                         // folded behind a disclosure.
-                        ToolDetailView(presentation: ToolPresentation(title: message.title ?? "Tool activity", text: message.text),
-                                       id: message.id, isResult: message.isToolResult, collapsible: message.isChange)
+                        ToolDetailView(presentation: ToolPresentationCache.value(message),
+                                       id: message.id, renderKey: message.renderKey, isResult: message.isToolResult, collapsible: message.isChange)
                         if message.isToolResult, !message.resultImages.isEmpty, let resultImages { resultImages(message) }
                     }
                 }.padding(.horizontal, 10).padding(.bottom, 10)
             }
         }
-        .background(PhrenTheme.toolPanel, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(PhrenTheme.border, lineWidth: 0.5))
+        .phrenPanel(tool: true)
     }
 }
 
 private struct ToolDetailView: View {
     let presentation: ToolPresentation
     let id: String
+    let renderKey: String
     var isResult = false
     var collapsible = false
     @AppStorage(ChatSettings.wrapKey) private var wrap = false
-    @State private var fullOutput: FullToolOutput?
+    @Environment(\.openToolOutput) private var openToolOutput
     @State private var showMore = false
-    /// Six lines in the card, eighty once opened; the sheet has the rest.
-    private static let previewLines = 6, moreLines = 80
+    /// Six lines in the card, twenty once opened; the pushed reader has the rest.
+    private static let previewLines = 6, moreLines = 20
 
     private var lineCount: Int { presentation.body.components(separatedBy: "\n").count }
     private var hasMore: Bool { lineCount > Self.previewLines || presentation.body.count > 640 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            if let patch = presentation.patch { CodeDiffView(patch: patch, previewLineLimit: collapsible ? 12 : 8, collapsible: collapsible) }
+            if let patch = presentation.patch {
+                // No identifier on the container: it would be stamped onto the
+                // diff's own rows and hide their `chat-patch-file:` ids.
+                CodeDiffView(patch: patch, cacheKey: renderKey, previewLineLimit: collapsible ? 12 : 8, collapsible: collapsible)
+            }
             else {
                 HStack(spacing: 8) {
                     Text(isResult ? "Output" : presentation.title).fontWeight(.medium)
                     Spacer()
                     Button("View full output", systemImage: "arrow.up.left.and.arrow.down.right") {
-                        fullOutput = .init(title: isResult ? "Tool Result" : presentation.title, text: presentation.body)
+                        openToolOutput(.init(title: isResult ? "Tool Result" : presentation.title, text: presentation.body))
                     }.frame(width: 36, height: 32).contentShape(Rectangle())
                         .accessibilityIdentifier("chat-tool-output:\(id)")
-                    Button("Copy tool details", systemImage: "doc.on.doc") { UIPasteboard.general.string = presentation.body }
+                    Button("Copy tool details", systemImage: "doc.on.doc") { ChatClipboard.copy(presentation.body) }
                         .frame(width: 36, height: 32).contentShape(Rectangle())
                 }.font(.caption2).foregroundStyle(PhrenTheme.chatNeutral)
                     .labelStyle(.iconOnly).buttonStyle(.plain).frame(minHeight: 32)
@@ -167,9 +254,9 @@ private struct ToolDetailView: View {
                     ScrollView(wrap ? [] : [.horizontal]) {
                         Text(presentation.body.isEmpty ? "No output"
                              : ToolOutputPreview(presentation.body, lines: showMore ? Self.moreLines : Self.previewLines,
-                                                 characters: showMore ? 16_000 : 640).text)
+                                                 characters: showMore ? 4_000 : 640).text)
                             .font(.system(.caption, design: .monospaced)).foregroundStyle(PhrenTheme.chatText)
-                            .fixedSize(horizontal: !wrap, vertical: false).textSelection(.enabled)
+                            .lineLimit(showMore ? Self.moreLines : Self.previewLines)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .accessibilityIdentifier("chat-tool-preview:\(id)")
                     }
@@ -177,9 +264,9 @@ private struct ToolDetailView: View {
                     // A command wraps — every character of it matters more
                     // than its columns.
                     Text(presentation.body.isEmpty ? "No input"
-                         : ToolOutputPreview(presentation.body, lines: showMore ? Self.moreLines : 12, characters: showMore ? 16_000 : 2_000).text)
+                         : ToolOutputPreview(presentation.body, lines: showMore ? Self.moreLines : 12, characters: showMore ? 4_000 : 2_000).text)
                         .font(.system(.caption, design: .monospaced)).foregroundStyle(PhrenTheme.chatText)
-                        .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                        .lineLimit(showMore ? Self.moreLines : 12).frame(maxWidth: .infinity, alignment: .leading)
                         .accessibilityIdentifier("chat-tool-input:\(id)")
                 }
                 if hasMore {
@@ -191,36 +278,37 @@ private struct ToolDetailView: View {
                 }
             }
             if presentation.raw != presentation.body {
-                Button("Raw details") { fullOutput = .init(title: "Raw details", text: presentation.raw) }
+                Button("Raw details") { openToolOutput(.init(title: "Raw details", text: presentation.raw)) }
                     .font(.caption2).foregroundStyle(PhrenTheme.chatNeutralDim).padding(.vertical, 4)
             }
         }
-        .sheet(item: $fullOutput) { output in FullToolOutputView(output: output) }
     }
 }
 
-private struct FullToolOutput: Identifiable {
+struct FullToolOutput: Identifiable, Hashable {
     let id = UUID()
     let title: String
     let contents: ToolOutputPages
     init(title: String, text: String) {
         self.title = title; contents = .init(text)
     }
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
-private struct FullToolOutputView: View {
+struct FullToolOutputView: View {
     let output: FullToolOutput
     @State private var page = 0
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         let contents = output.contents
         let current = contents.pages[page]
-        NavigationStack {
-            ScrollView([.horizontal, .vertical]) {
+        ScrollView([.horizontal, .vertical]) {
                 Text(current.displayText).font(.system(.caption, design: .monospaced))
                     .foregroundStyle(PhrenTheme.chatText).textSelection(.enabled)
                     .fixedSize(horizontal: true, vertical: true).padding(16)
             }
+            .confirmsWebLinks()
             .id(page)
             .background(PhrenTheme.chatPanel).navigationTitle(output.title).navigationBarTitleDisplayMode(.inline)
             .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -247,10 +335,9 @@ private struct FullToolOutputView: View {
                     Button("Done") { dismiss() }.accessibilityIdentifier("chat-tool-output-done")
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    Button("Copy output", systemImage: "doc.on.doc") { UIPasteboard.general.string = contents.source }
+                    Button("Copy output", systemImage: "doc.on.doc") { ChatClipboard.copy(contents.source) }
                 }
             }
-        }.presentationDetents([.large])
     }
     private func pageButton(_ title: String, _ icon: String, _ id: String, destination: Int) -> some View {
         Button { page = destination } label: {
@@ -297,13 +384,3 @@ struct ToolOutputPages {
 
 /// Bound layout work as well as visible height. Full provider text is retained
 /// separately, so expanding a row never lays out thousands of output lines.
-struct ToolOutputPreview {
-    let text: String
-    init(_ output: String, lines maximumLines: Int = 6, characters: Int = 640) {
-        let bounded = output.prefix(characters + 1)
-        let prefix = String(bounded.prefix(characters))
-        let lines = prefix.components(separatedBy: .newlines)
-        let visible = lines.prefix(maximumLines).joined(separator: "\n")
-        text = visible + (bounded.count > characters || lines.count > maximumLines ? "…" : "")
-    }
-}

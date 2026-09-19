@@ -47,10 +47,10 @@ struct ChatSettingsView: View {
             } header: { Text("Reading") }
             Section {
                 HStack(spacing: 14) {
-                    ForEach(["claude", "codex", "copilot", "phren"], id: \.self) { source in
+                    ForEach(["claude", "codex", "copilot", "phren", "opencode"], id: \.self) { source in
                         VStack(spacing: 6) {
                             AgentProviderGlyph(source: source, size: 28)
-                            Text(source == "claude" ? "Claude Code" : source == "phren" ? "phren-agent" : source.capitalized).font(.caption2).foregroundStyle(PhrenTheme.textMuted)
+                            Text(source == "claude" ? "Claude Code" : source == "phren" ? "phren-agent" : source == "opencode" ? "opencode" : source.capitalized).font(.caption2).foregroundStyle(PhrenTheme.textMuted)
                         }.frame(maxWidth: .infinity)
                     }
                 }.padding(.vertical, 6)

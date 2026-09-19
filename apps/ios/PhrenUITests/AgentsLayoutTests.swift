@@ -14,9 +14,12 @@ final class AgentsLayoutTests: XCTestCase {
         XCTAssertGreaterThan(title.frame.height, 0)
         XCTAssertTrue(app.navigationBars.firstMatch.frame.contains(title.frame))
         assertRenderedTitle(app, title: "Live sessions")
-        let intro = app.staticTexts["agents-introduction"]
-        XCTAssertTrue(intro.waitForExistence(timeout: 5))
-        XCTAssertGreaterThanOrEqual(intro.frame.minY, app.navigationBars.firstMatch.frame.maxY)
+        // No caption above the sessions once a computer is connected; the
+        // first section label sits directly under the search field.
+        let firstHeader = app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", "(?i)^(working|needs input|done|idle|other sessions|last seen) · \\d+$")).firstMatch
+        XCTAssertTrue(firstHeader.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["agents-introduction"].exists)
+        XCTAssertGreaterThanOrEqual(firstHeader.frame.minY, app.navigationBars.firstMatch.frame.maxY)
         capture(app, name: "Agents root")
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Test Mac,")).firstMatch.tap()
         let first = app.staticTexts["Build phone app"]
@@ -28,14 +31,14 @@ final class AgentsLayoutTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(first.frame.minY, app.navigationBars.firstMatch.frame.maxY)
         capture(app, name: "Computer sessions after returning")
         app.navigationBars.buttons.firstMatch.tap()
-        XCTAssertTrue(intro.waitForExistence(timeout: 5))
+        XCTAssertTrue(firstHeader.waitForExistence(timeout: 5))
         // Larger text requires scrolling to reach the computer. Navigation
         // correctly restores that offset; return to the top before checking it.
-        for _ in 0..<4 where intro.frame.minY < app.navigationBars.firstMatch.frame.maxY {
+        for _ in 0..<4 where firstHeader.frame.minY < app.navigationBars.firstMatch.frame.maxY {
             app.collectionViews.firstMatch.swipeDown()
         }
         // Give the pop animation a moment to settle before reading the frame.
-        let settled = NSPredicate { _, _ in intro.frame.minY >= app.navigationBars.firstMatch.frame.maxY }
+        let settled = NSPredicate { _, _ in firstHeader.frame.minY >= app.navigationBars.firstMatch.frame.maxY }
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: settled, object: nil)], timeout: 5), .completed)
         assertRenderedTitle(app, title: "Live sessions")
         capture(app, name: "Agents after navigating back")

@@ -5,6 +5,8 @@ import { userInfo } from "node:os";
 import { homeDirectory } from "./changes.js";
 import { realpath, stat } from "node:fs/promises";
 import path from "node:path";
+import { phrenStoreRoot } from "./transcripts.js";
+import { locateProject } from "./locate.js";
 import { BridgeError, type Json } from "./protocol.js";
 
 const exec = promisify(execFile);
@@ -20,7 +22,7 @@ async function gitRoot(dir: string): Promise<string | undefined> {
 /** `git status` as the app lists it: one record per file, a staged and an
  * unstaged section where each has a patch. Limited to `pathspecs` when given. */
 async function statusFiles(root: string, pathspecs: string[] = []): Promise<Json[]> {
-  const status = (await git(root, "status", "--porcelain=v1", "-z", "--untracked-files=normal", "--", ...pathspecs)).split("\0");
+  const status = (await git(root, "status", "--porcelain=v1", "-z", "--untracked-files=normal", "--", ...pathspecs.map(spec => `:(literal)${spec}`))).split("\0");
   const files: Json[] = [];
   for (let index = 0; index < status.length && files.length < 500; index++) {
     const record = status[index]; if (!record) continue;
@@ -29,7 +31,7 @@ async function statusFiles(root: string, pathspecs: string[] = []): Promise<Json
     const sections: Json[] = [];
     for (const [kind, staged] of [["staged", true], ["unstaged", false]] as const) {
       if (code === "??") continue;
-      const patch = await git(root, "diff", "--no-ext-diff", "--no-textconv", ...(staged ? ["--cached"] : []), "--", file);
+      const patch = await git(root, "diff", "--no-ext-diff", "--no-textconv", ...(staged ? ["--cached"] : []), "--", `:(literal)${file}`);
       if (patch) sections.push({ id: `${kind}:${file}`, kind, binary: patch.includes("Binary files"), loadState: "loaded", patch });
     }
     files.push({ path: file, status: code, sections });
@@ -41,7 +43,7 @@ async function statusFiles(root: string, pathspecs: string[] = []): Promise<Json
  * command changed when a hook (phren's own Stop hook, say) committed it before
  * anyone looked. */
 async function committed(root: string, pathspec: string): Promise<Json | undefined> {
-  const log = await git(root, "log", "-1", "--since=30.minutes", "--format=%h%x1f%s%x1f%cr", "-p", "--no-ext-diff", "--no-textconv", "--no-color", "--", pathspec).catch(() => "");
+  const log = await git(root, "log", "-1", "--since=30.minutes", "--format=%h%x1f%s%x1f%cr", "-p", "--no-ext-diff", "--no-textconv", "--no-color", "--", `:(literal)${pathspec}`).catch(() => "");
   const newline = log.indexOf("\n"); if (newline < 0) return undefined;
   const [hash, subject, when] = log.slice(0, newline).split("\x1f");
   const patch = log.slice(newline + 1).replace(/^\n+/, "");
@@ -50,10 +52,10 @@ async function committed(root: string, pathspec: string): Promise<Json | undefin
 }
 
 /** A path a command named, made absolute and real — `~/` expanded, relative
- * ones taken from the pane — and confined to the user's home or the pane's
- * repository. Missing files resolve through their nearest existing parent so
+ * ones taken from the pane. The caller checks conversation scope after
+ * resolution. Missing files resolve through their nearest existing parent so
  * a deleted file still finds its repository. */
-async function resolveTouched(raw: string, cwd: string, primaryRoot: string): Promise<string | undefined> {
+async function resolveTouched(raw: string, cwd: string): Promise<string | undefined> {
   if (typeof raw !== "string" || !raw || raw.length > 4096 || raw.includes("\0")) return undefined;
   const home = homeDirectory();
   const absolute = raw === "~" || raw.startsWith("~/") ? path.join(home, raw.slice(1)) : path.resolve(cwd, raw);
@@ -63,24 +65,30 @@ async function resolveTouched(raw: string, cwd: string, primaryRoot: string): Pr
     rest.unshift(path.basename(existing)); existing = parent;
   }
   const real = path.join(await realpath(existing), ...rest);
-  const inside = (base: string) => real === base || real.startsWith(base + path.sep);
-  return inside(home) || inside(primaryRoot) ? real : undefined;
+  return real;
 }
 
 /** The pane's working tree, plus anything the command named: files in the
  * same repository that a hook already committed, and files in other
  * repositories — the phren store, a sibling checkout — grouped by root. */
-export async function repositoryDiff(cwd: string, touched: unknown[] = []): Promise<Json> {
+export async function repositoryDiff(cwd: string, touched: unknown[] = [], allowedPaths: string[] = []): Promise<Json> {
   const root = await gitRoot(cwd);
   if (!root) throw new BridgeError(409, "This pane is not in a Git repository.");
+  const allowed = (await Promise.all([root, phrenStoreRoot(), ...allowedPaths].map(raw => resolveTouched(raw, cwd)))).filter((p): p is string => !!p);
+  const requested: string[] = [];
+  for (const raw of touched.slice(0, 24)) {
+    const file = await resolveTouched(raw as string, cwd);
+    if (!file || !allowed.some(base => file === base || file.startsWith(base + path.sep))) throw new BridgeError(403, "This path is outside the conversation's recorded changes and commands.");
+    requested.push(file);
+  }
   const branch = (await git(root, "branch", "--show-current")).trim();
   const files = await statusFiles(root);
   const byRoot = new Map<string, string[]>();
-  for (const raw of touched.slice(0, 24)) {
-    const file = await resolveTouched(raw as string, cwd, root); if (!file) continue;
+  for (const file of requested) {
     const owner = await gitRoot((await stat(file).catch(() => undefined))?.isDirectory() ? file : path.dirname(file)); if (!owner) continue;
     // git speaks forward slashes on every platform.
     const rel = (path.relative(owner, file) || ".").split(path.sep).join("/");
+    if (rel.startsWith(":")) throw new BridgeError(400, "Invalid diff pathspec.");
     const list = byRoot.get(owner) ?? []; if (!list.includes(rel)) list.push(rel); byRoot.set(owner, list);
   }
   const related: Json[] = [];
@@ -207,4 +215,25 @@ export async function webServers(): Promise<LocalServer[]> {
     }));
   }
   return found.sort((a, b) => a.port - b.port);
+}
+
+/** Launch only in real local directories under home or a locator candidate. */
+export async function launchDirectory(raw: unknown, activity: Json[] = [], located: Iterable<string> = []): Promise<string> {
+  if (typeof raw !== "string" || raw.length > 4096 || !path.isAbsolute(raw) || /[\x00-\x1f\x7f]/.test(raw)) throw new BridgeError(400, "Invalid workspace directory.");
+  let dir: string;
+  try { dir = await realpath(raw); if (!(await stat(dir)).isDirectory()) throw new Error(); }
+  catch { throw new BridgeError(400, "Workspace directory does not exist."); }
+  const home = await realpath(homeDirectory());
+  if (dir === home || dir.startsWith(home + path.sep)) return dir;
+  for (const candidate of located) {
+    const real = await realpath(candidate).catch(() => undefined);
+    if (real && (dir === real || dir.startsWith(real + path.sep))) return dir;
+  }
+  const names = [...new Set(dir.split(path.sep).filter(name => /^[a-z0-9][a-z0-9-]{0,99}$/.test(name)))];
+  for (const name of names) {
+    for (const candidate of await locateProject(name, activity)) {
+      if (dir === candidate.directory || dir.startsWith(candidate.directory + path.sep)) return dir;
+    }
+  }
+  throw new BridgeError(403, "Workspace directory must be under home or a located project.");
 }

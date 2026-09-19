@@ -1,11 +1,12 @@
 import { execFile } from "node:child_process";
 import { usageStatusLine } from "./usage.js";
-import { chmod, copyFile, mkdir, readFile, rename, symlink, unlink, lstat, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, open, readFile, rename, symlink, unlink, lstat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { bridgeRoot, object, objects } from "./protocol.js";
+import { herdrRoot } from "./herdr.js";
 import { health } from "./transport.js";
 
 const exec = promisify(execFile);
@@ -86,8 +87,11 @@ async function startService() {
 export async function install(version: string, noService = false): Promise<void> {
   if (!["darwin", "linux"].includes(process.platform)) throw new Error("Phren Hook supports macOS and Linux.");
   if (!/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(version)) throw new Error("Invalid helper version.");
-  const root = bridgeRoot(), versions = path.join(root, "versions");
+  const root = bridgeRoot(), herdr = herdrRoot(), versions = path.join(root, "versions");
   await mkdir(versions, { recursive: true, mode: 0o700 }); await chmod(root, 0o700);
+  const serviceLog = path.join(root, "service.log");
+  const log = await open(serviceLog, "a", 0o600);
+  try { await log.chmod(0o600); } finally { await log.close(); }
   const hookEdits = await planAgentHooks(path.join(root, "current/bridge-hook.mjs"));
   const own = fileURLToPath(import.meta.url);
   const bundle = own.endsWith("bridge-hook.mjs") ? own : path.join(path.dirname(own), "..", "bridge-hook.mjs");
@@ -98,16 +102,16 @@ export async function install(version: string, noService = false): Promise<void>
   const stagedBundle = installedBundle + `.phren-${process.pid}`;
   await copyFile(bundle, stagedBundle); await rename(stagedBundle, installedBundle);
   const previous = await readFile(path.join(root, "installed.json"), "utf8").then(v => JSON.parse(v) as { version: string; previous?: string }).catch(() => null);
-  await atomic(path.join(root, "dispatch"), `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(path.join(root, "current/bridge-hook.mjs"))} ssh\n`, 0o700);
+  await atomic(path.join(root, "dispatch"), `#!/bin/sh\nexport PHREN_BRIDGE_HOME=${quote(root)}\nexport PHREN_HERDR_HOME=${quote(herdr)}\nexec ${quote(process.execPath)} ${quote(path.join(root, "current/bridge-hook.mjs"))} ssh\n`, 0o700);
   const environmentPath = [path.dirname(process.execPath), path.join(homedir(), ".local/bin"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin"].join(":");
   const program = path.join(root, "current/bridge-hook.mjs");
   if (!noService) {
     if (process.platform === "darwin") {
       const folder = path.join(homedir(), "Library/LaunchAgents"); await mkdir(folder, { recursive: true });
-      await atomic(path.join(folder, `${label}.plist`), `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>Label</key><string>${label}</string><key>ProgramArguments</key><array><string>${xml(process.execPath)}</string><string>${xml(program)}</string><string>serve</string></array><key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>ThrottleInterval</key><integer>5</integer><key>EnvironmentVariables</key><dict><key>PATH</key><string>${xml(environmentPath)}</string><key>PHREN_BRIDGE_HOME</key><string>${xml(root)}</string></dict><key>StandardErrorPath</key><string>${xml(path.join(root, "service.log"))}</string></dict></plist>\n`);
+      await atomic(path.join(folder, `${label}.plist`), `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>Label</key><string>${label}</string><key>ProgramArguments</key><array><string>${xml(process.execPath)}</string><string>${xml(program)}</string><string>serve</string></array><key>Umask</key><integer>63</integer><key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>ThrottleInterval</key><integer>5</integer><key>EnvironmentVariables</key><dict><key>PATH</key><string>${xml(environmentPath)}</string><key>PHREN_BRIDGE_HOME</key><string>${xml(root)}</string><key>PHREN_HERDR_HOME</key><string>${xml(herdr)}</string></dict><key>StandardErrorPath</key><string>${xml(path.join(root, "service.log"))}</string></dict></plist>\n`);
     } else {
       const folder = path.join(homedir(), ".config/systemd/user"); await mkdir(folder, { recursive: true });
-      await atomic(path.join(folder, unit), `[Unit]\nDescription=Phren Hook\n[Service]\nExecStart=${systemdQuote(process.execPath)} ${systemdQuote(program)} serve\nEnvironment=${systemdQuote("PATH=" + environmentPath)} ${systemdQuote("PHREN_BRIDGE_HOME=" + root)}\nRestart=on-failure\nRestartSec=3\nUMask=0077\n[Install]\nWantedBy=default.target\n`);
+      await atomic(path.join(folder, unit), `[Unit]\nDescription=Phren Hook\n[Service]\nExecStart=${systemdQuote(process.execPath)} ${systemdQuote(program)} serve\nEnvironment=${systemdQuote("PATH=" + environmentPath)} ${systemdQuote("PHREN_BRIDGE_HOME=" + root)} ${systemdQuote("PHREN_HERDR_HOME=" + herdr)}\nRestart=on-failure\nRestartSec=3\nUMask=0077\n[Install]\nWantedBy=default.target\n`);
     }
     await stopService();
   }
@@ -124,6 +128,9 @@ export async function install(version: string, noService = false): Promise<void>
       if (!ready) throw new Error("The new Phren Hook did not become ready.");
     }
     await applyAgentHooks(hookEdits);
+    if (await applyOpencodePlugin()) {
+      console.log("opencode chat: restart any opencode session started before now so it loads the transcript plugin.");
+    }
     const keys = path.join(homedir(), ".ssh/authorized_keys");
     const keyStat = await lstat(keys).catch(() => null);
     if (keyStat && !keyStat.isSymbolicLink() && keyStat.isFile()) {
@@ -157,6 +164,7 @@ export async function uninstall() {
   if (process.platform === "darwin") await unlink(path.join(homedir(), "Library/LaunchAgents", `${label}.plist`)).catch(() => {});
   else { await exec("systemctl", ["--user", "disable", unit]).catch(() => {}); await unlink(path.join(homedir(), ".config/systemd/user", unit)).catch(() => {}); await exec("systemctl", ["--user", "daemon-reload"]).catch(() => {}); }
   await applyAgentHooks(await planAgentHooks(path.join(bridgeRoot(), "current/bridge-hook.mjs"), true));
+  await applyOpencodePlugin(true);
   // Preserve journal, settings, uploaded images, rollback version and SSH backups.
   console.log("Phren Hook stopped and its background service removed. Remove phren-iphone keys from authorized_keys to revoke iPhone access. Local data remains in " + bridgeRoot());
 }
@@ -203,12 +211,11 @@ export async function planAgentHooks(program: string, remove = false): Promise<S
     } else {
       for (const event of ["SessionStart", "UserPromptSubmit", "Stop", "PermissionRequest", "PreToolUse", "PostToolUse"]) {
         const groups = objects(hooks[event]).map(group => ({ ...group, hooks: objects(group.hooks).filter(h => !ownHook(h.command)) })).filter(group => group.hooks.length);
-        // Tool hooks snapshot the working tree around shell calls, so the phone
-        // can show what a command changed; other tools carry their own patch.
-        // Claude Code matches the tool by name here; Codex names its shell
-        // tool differently across versions, so its hook runs for every tool
-        // and the Hook itself keeps only shell calls.
-        const group = event.endsWith("ToolUse") ? { ...(source === "claude" ? { matcher: "Bash" } : {}), hooks: [{ type: "command", command, timeout: 10 }] }
+        // Snapshot shell and file-edit calls so every card can show actual
+        // changed-file rows, including files outside the original cwd.
+        // Codex names tools differently across versions; filter its callbacks
+        // inside the Hook. Claude can narrow its registration here.
+        const group = event.endsWith("ToolUse") ? { ...(source === "claude" ? { matcher: "Bash|Write|Edit|MultiEdit|NotebookEdit|apply_patch|str_replace_editor" } : {}), hooks: [{ type: "command", command, timeout: 10 }] }
           : { hooks: [{ type: "command", command, timeout: event === "PermissionRequest" ? 60 : 3 }] };
         hooks[event] = remove ? groups : [...groups, group];
       }
@@ -223,6 +230,29 @@ export async function planAgentHooks(program: string, remove = false): Promise<S
     edits.push({ file, before, after });
   }
   return edits;
+}
+
+const opencodePluginsDir = () => path.join(process.env.XDG_CONFIG_HOME || path.join(homedir(), ".config"), "opencode", "plugins");
+async function opencodePluginSource(): Promise<string | undefined> {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  for (const candidate of [
+    path.join(here, "..", "..", "plugins", "opencode", "phren-transcript.js"),
+    path.join(here, "..", "plugins", "opencode", "phren-transcript.js"),
+  ]) {
+    const source = await missingFile(readFile(candidate, "utf8"));
+    if (source !== undefined) return source;
+  }
+  return undefined;
+}
+async function applyOpencodePlugin(remove = false): Promise<boolean> {
+  const dir = opencodePluginsDir(), file = path.join(dir, "phren-transcript.js");
+  if (remove) { await unlink(file).catch(() => {}); return false; }
+  if (!(await lstat(path.dirname(dir)).catch(() => null))?.isDirectory()) return false;
+  const source = await opencodePluginSource();
+  if (source === undefined) return false;
+  await mkdir(dir, { recursive: true });
+  await atomic(file, source, 0o644);
+  return true;
 }
 
 async function applyAgentHooks(edits: SettingsEdit[]) {

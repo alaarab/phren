@@ -12,6 +12,9 @@ final class ApprovalActivityController {
     @ObservationIgnored private var observed: [AgentChatTarget: (actionID: String, expiresAt: Date)] = [:]
     @ObservationIgnored private var handled: [String: Date] = [:]
     @ObservationIgnored private var generation = UUID()
+    /// Where an activity's Open lands: the session behind each request, so a
+    /// question opens its own conversation rather than the Agents tab.
+    @ObservationIgnored private var routes: [String: AgentSessionEntity] = [:]
 
     func wasHandled(_ approval: AgentApproval, target: AgentChatTarget) -> Bool {
         (handled[key(target, approval.id)] ?? .distantPast) > .now
@@ -37,13 +40,20 @@ final class ApprovalActivityController {
         let run = generation
         do {
             if let previous = observed[target] { await remove(target: target, actionID: previous.actionID) }
+            let question = approval.questionPrompt
             let record = try await store.save(.init(id: UUID().uuidString, actionID: approval.id, host: session.host,
-                                                    target: target, expiresAt: min(expiration, Date().addingTimeInterval(55))))
+                                                    target: target, expiresAt: min(expiration, Date().addingTimeInterval(55)), question: question != nil))
             guard run == generation, !wasHandled(approval, target: target) else { await remove(target: target, actionID: approval.id); return }
+            let live = Set(Activity<ApprovalActivityAttributes>.activities.map { $0.attributes.requestID })
+            routes = routes.filter { $0.key == record.id || live.contains($0.key) }
+            routes[record.id] = AgentSessionEntity(session)
             let content = ActivityContent(state: ApprovalActivityAttributes.ContentState(
-                provider: target.providerName, project: String(session.workspaceName.prefix(80)), host: String(session.host.name.prefix(80)),
-                explanation: String((approval.explanation ?? approval.title ?? "Allow this action?").prefix(500)), expiresAt: record.expiresAt),
-                staleDate: record.expiresAt)
+                provider: target.providerName, project: String(session.projectDisplayName(nil).prefix(80)), host: String(session.host.name.prefix(80)),
+                explanation: String((question?.questions.first?.question ?? approval.explanation ?? approval.title ?? "Allow this action?").prefix(500)),
+                expiresAt: record.expiresAt, question: question != nil),
+                // A permission request outranks the working summary for the
+                // island: the system shows the most relevant activity there.
+                staleDate: record.expiresAt, relevanceScore: 1)
             if let existing = Activity<ApprovalActivityAttributes>.activities.first(where: { $0.attributes.requestID == record.id }) {
                 await existing.update(content)
             } else if IntegrationSettings.enabled(IntegrationSettings.liveActivityKey) { // Settings → Notifications
@@ -69,6 +79,14 @@ final class ApprovalActivityController {
             let preferences = try LiveSessionPreferences.read(AppRuntime.defaults.data(forKey: "sessions.live.preferences.v1") ?? Data())
             let record = try await store.claim(requestID, preferences: preferences)
             guard run == generation else { return }
+            if record.question == true, approve {
+                // The claimed record is spent, but the question itself is still
+                // pending on the computer: the conversation shows it to answer.
+                observed.removeValue(forKey: record.target)
+                await end([requestID]); open(requestID: record.id)
+                message = "\(record.target.providerName) has a question. Choose the answer in the conversation."
+                return
+            }
             handled[key(record.target, record.actionID)] = Date().addingTimeInterval(60)
             observed.removeValue(forKey: record.target)
             await end([requestID])
@@ -89,8 +107,15 @@ final class ApprovalActivityController {
         }
     }
 
+    /// An activity's Open (`phren://approval?request=`): the conversation the
+    /// request came from, or the Agents tab when it is no longer known.
+    func open(requestID: String) {
+        AppModel.current?.selectedTab = .agents
+        guard let entity = routes[requestID] else { return }
+        try? AgentLaunch.openIndexedSession(entity, destination: .chat)
+    }
     func clear() async {
-        generation = UUID(); observed.removeAll(); handled.removeAll()
+        generation = UUID(); observed.removeAll(); handled.removeAll(); routes.removeAll()
         _ = try? await store.remove()
         await end(Activity<ApprovalActivityAttributes>.activities.map { $0.attributes.requestID })
     }

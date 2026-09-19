@@ -1,10 +1,17 @@
 import SwiftUI
 import PhrenKit
 
+struct MemoryMaintenanceRoute: Hashable { }
+
 struct ProjectsView: View {
     @Environment(AppModel.self) private var model
     @State private var filter = ""
+    @State private var navigationPath = NavigationPath()
     @State private var showVoiceCapture = false
+    @State private var showAddProject = false
+    @State private var connectingComputer = false
+    @AppStorage("sessions.live.preferences.v1") private var livePreferences = Data()
+    private var hasComputer: Bool { !((try? LiveSessionPreferences.read(livePreferences))?.hosts.isEmpty ?? true) }
 
     private var projects: [StoreProject] {
         guard !filter.isEmpty else { return model.mergedProjects }
@@ -21,7 +28,7 @@ struct ProjectsView: View {
 
     var body: some View {
         @Bindable var model = model
-        NavigationStack {
+        PhrenNavigationStack(path: $navigationPath) {
             VStack(spacing: 0) {
                 LiveStatusBar()
                 ActionErrorBanner()
@@ -29,8 +36,9 @@ struct ProjectsView: View {
                     Section("Explore") {
                         NavigationLink { GraphView() } label: {
                             PhrenMenuRow(title: "Memory graph", subtitle: "Explore how your knowledge connects",
-                                         icon: "circle.hexagongrid", color: PhrenTheme.cyan)
+                                         icon: "circle.hexagongrid", color: PhrenTheme.cyan, compact: true)
                         }.accessibilityLabel("Memory graph")
+                        .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
                     }
                     Section("Projects") {
                         ForEach(projects) { item in
@@ -59,26 +67,28 @@ struct ProjectsView: View {
                                     .labelStyle(PhrenMetadataLabelStyle())
                                     .foregroundStyle(.secondary)
                                 }
-                                .padding(.vertical, 8)
+                                .padding(.vertical, 2)
                             }
+                            .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
                             .accessibilityIdentifier("project:\(item.storeId):\(item.project.name)")
                         }
                     }
                     Section("Agent setup") {
                         NavigationLink { LiveSessionsView() } label: {
                             PhrenMenuRow(title: "Live sessions", subtitle: "Pick up where your agents left off",
-                                         icon: "waveform.path")
+                                         icon: "waveform.path", compact: true)
                         }.accessibilityLabel("Live sessions")
                         NavigationLink { SkillsView() } label: {
-                            PhrenMenuRow(title: "Skills", icon: "wand.and.stars", color: PhrenTheme.lavender)
+                            PhrenMenuRow(title: "Skills", icon: "wand.and.stars", color: PhrenTheme.lavender, compact: true)
                         }
                         NavigationLink { AgentsView() } label: {
-                            PhrenMenuRow(title: "Agent instructions", icon: "person.crop.rectangle.stack")
+                            PhrenMenuRow(title: "Agent instructions", icon: "person.crop.rectangle.stack", compact: true)
                         }
                     }
+                    .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
                     Section {
-                        Button("Memory maintenance", systemImage: "wrench.and.screwdriver") {
-                            model.showingMemoryMaintenance = true
+                        NavigationLink(value: MemoryMaintenanceRoute()) {
+                            Label("Memory maintenance", systemImage: "wrench.and.screwdriver")
                         }
                         .foregroundStyle(.secondary)
                     } footer: {
@@ -86,8 +96,23 @@ struct ProjectsView: View {
                     }
                 }
                 .overlay {
-                    if model.mergedProjects.isEmpty && model.storeDescriptors.isEmpty {
-                        PhrenEmptyState(title: "No projects yet", message: "Projects appear here once your phren store has content.")
+                    // First run: the store is connected but empty, or not
+                    // connected at all. Either way the next step is a computer
+                    // with a repository on it, so say so and offer it.
+                    if model.mergedProjects.isEmpty {
+                        PhrenEmptyState(title: "Add your first project",
+                                        message: hasComputer
+                                            ? "Pick a repository on your computer, or clone one from GitHub. Phren adds it and your agents start remembering."
+                                            : "Connect a computer running Phren Hook, then add a repository from it. Your agents start remembering from there.") {
+                            if !hasComputer {
+                                Button { connectingComputer = true } label: { Label("Connect a computer", systemImage: "desktopcomputer.and.arrow.down") }
+                                    .buttonStyle(.bordered).tint(PhrenTheme.cyan)
+                                    .accessibilityIdentifier("projects-connect-computer")
+                            }
+                            Button { showAddProject = true } label: { Label("Add a project", systemImage: "plus") }
+                                .buttonStyle(.borderedProminent).tint(PhrenTheme.cyan).foregroundStyle(PhrenTheme.chatPanel)
+                                .accessibilityIdentifier("projects-add-first")
+                        }
                     }
                 }
                 .searchable(text: $filter, prompt: "Filter projects")
@@ -96,6 +121,11 @@ struct ProjectsView: View {
             }
             .navigationTitle("Projects")
             .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button { showAddProject = true } label: { Image(systemName: "plus") }
+                        .accessibilityLabel("Add project")
+                        .accessibilityIdentifier("projects-add")
+                }
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
                         NavigationLink { GraphView() } label: {
@@ -154,19 +184,40 @@ struct ProjectsView: View {
             .navigationDestination(for: StoreProject.self) { item in
                 ProjectDetailView(storeId: item.storeId, project: item.project.name)
             }
-            // Archive destinations are registered here, at the stack root,
-            // rather than on the pushed views that link to them — a
-            // .navigationDestination declared on an already-pushed view
-            // resolves a tap twice and stacks duplicates behind you.
-            .navigationDestination(for: ArchiveRoute.self) { route in
-                ArchiveBrowserView(storeId: route.storeId, project: route.project)
+            .navigationDestination(for: AgentLaunch.PendingProject.self) { target in
+                ProjectDetailView(storeId: target.storeID, project: target.project)
             }
-            .navigationDestination(for: ArchiveTopicRoute.self) { route in
-                ArchiveTopicView(storeId: route.storeId, topic: route.topic)
+            .navigationDestination(for: MemoryMaintenanceRoute.self) { _ in MemoryMaintenanceView() }
+            .onChange(of: model.showingMemoryMaintenance, initial: true) { _, showing in
+                guard showing else { return }
+                model.showingMemoryMaintenance = false
+                navigationPath = NavigationPath()
+                navigationPath.append(MemoryMaintenanceRoute())
+            }
+            .onChange(of: model.pendingProjectVersion, initial: true) { _, _ in
+                guard let target = AgentLaunch.takePendingProject() else { return }
+                guard model.storeContexts.contains(where: { context in
+                    context.id == target.storeID && context.snapshot.projects.contains { $0.name == target.project }
+                }) else {
+                    model.lastActionError = "That project is no longer available on this iPhone."
+                    return
+                }
+                navigationPath = NavigationPath()
+                navigationPath.append(target)
             }
             .sheet(isPresented: $showVoiceCapture) {
                 VoiceCaptureView(targets: voiceCaptureTargets)
             }
+            .sheet(isPresented: $showAddProject) {
+                AddProjectView { project in
+                    // Straight into the new project; "Open on a computer" is
+                    // one tap from there.
+                    guard let item = model.mergedProjects.first(where: { $0.project.name == project }) else { return }
+                    navigationPath = NavigationPath()
+                    navigationPath.append(item)
+                }
+            }
+            .sheet(isPresented: $connectingComputer) { NavigationStack { LiveHostEditor() } }
         }
     }
 }
@@ -241,6 +292,14 @@ struct ProjectDetailView: View {
             }
         }
         .background(PhrenTheme.bg)
+        // An identifier on the stack itself would be stamped onto every
+        // child (hiding "project-skills" and the rest); a zero-size marker
+        // names the page instead.
+        .overlay(alignment: .topLeading) {
+            Color.clear.frame(width: 1, height: 1)
+                .accessibilityElement().accessibilityLabel("Project page")
+                .accessibilityIdentifier("project-detail:\(storeId):\(project)")
+        }
         .navigationTitle(model.hasMultipleStores ? "\(project) · \(model.storeName(for: storeId))" : project)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -253,10 +312,8 @@ struct ProjectDetailView: View {
                 }
             }
         }
-        .sheet(isPresented: $showingSkills) {
-            NavigationStack {
-                SkillsView(project: project, storeId: storeId, returnToProject: { showingSkills = false })
-            }
+        .navigationDestination(isPresented: $showingSkills) {
+            SkillsView(project: project, storeId: storeId, returnToProject: { showingSkills = false })
             .id(skillsPresentationID)
         }
     }

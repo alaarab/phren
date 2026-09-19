@@ -15,8 +15,10 @@ The restricted SSH dispatcher accepts `phren-hook v1 pipe`,
 The pipe relays HTTP/WebSocket bytes to a mode-0600 Unix socket in a mode-0700
 directory. Terminal attaches an existing Herdr server through an SSH PTY.
 The web command relays bytes only to the literal loopback address `127.0.0.1`
-or `::1` and a decimal TCP port from 1 through 65535. Supplied commands are
-never executed as shell text. Device keys keep SSH's `restrict` option and
+or `::1` and a decimal TCP port from 1 through 65535 — that is any loopback TCP
+listener on the computer, not only web previews, so the device key is worth as
+much as a local login (the terminal command already grants one). Supplied
+commands are never executed as shell text. Device keys keep SSH's `restrict` option and
 explicit PTY permission; generic SSH forwarding stays disabled.
 
 Local web previews use a separate authenticated HTTP CONNECT proxy on a random
@@ -87,13 +89,20 @@ Unbound or conflicting identities remain unavailable for chat and attachments.
 - `GET /v1/projects/locate?project=<name>`: where the project lives on that
   computer (activity journal, Herdr's saved workspaces, phren's registration,
   search roots), existing folders only.
+- `GET /v1/projects/repos` and `POST /v1/projects/add`: "Add project" — the
+  computer's untracked checkouts, and enrolling one (or cloning a GitHub URL)
+  with `phren add` there; the computer pushes its store so the phone can pull.
 - `WS /v1/transcripts`: backlog, append, and older frames with provider JSON rows
   and stable line numbers. History requests include `beforeLine`.
 - `GET /v1/transcripts/history`: the same exact target tuple plus a positive
   `beforeLine`, returning one older page without first reading the latest page.
-- Provider `source` values: `codex`, `claude`, `copilot`, and `phren` (the
+- Provider `source` values: `codex`, `claude`, `copilot`, `phren` (the
   experimental phren-agent — its `session-<uuid>.events.jsonl` under the store's
-  `.runtime/sessions` is the transcript; active once Herdr labels the pane `phren`).
+  `.runtime/sessions` is the transcript; active once Herdr labels the pane `phren`),
+  and `opencode` — session ids are `ses_…`, and the Phren-installed opencode
+  plugin mirrors its session to `opencode-<session>.events.jsonl` in the same
+  event shape phren-agent uses. opencode loads plugins at startup, so a session
+  started before the install has no transcript or session id until restarted.
 - `WS /v1/status`: exact-conversation activity, pending approval, capabilities,
   and the pane's current git `branch` (read on the computer, cached ~10s).
   The model name comes from the transcript instead: Claude rows carry
@@ -101,11 +110,19 @@ Unbound or conflicting identities remain unavailable for chat and attachments.
   with only their `model`.
 - `POST /v1/prompt`, `/v1/keys`, `/v1/upload`, `/v1/diff`
 - `POST /v1/approvals/answer`: one exact pending callback, with approve or deny.
+  When the pending tool is Claude Code's `AskUserQuestion`, approve with
+  `updatedInput` — the request's own input plus `answers` keyed by question
+  text (a label; labels for multiSelect; any other string is a typed "Other")
+  and an optional free-text `response` — and the hook allows the call with
+  that input. The questions themselves must be unchanged.
 - `GET /v1/transcripts/blob`: bounded images from an exact transcript row/block.
+- `GET /v1/uploads/image?path=`: the bytes of an image the phone uploaded, which a
+  Claude transcript names only by path (`[Image: source: …]`); the Hook serves it
+  only from inside its own uploads folder.
 - `POST /v1/workspaces/{create,rename,focus,close}` with an explicit server.
 - `POST /v1/workspaces/launch`: `{cwd, label, kind, workspaceId?, name?, timeoutMs?}`
   creates a workspace (or a tab in `workspaceId`) in `cwd`, starts `kind`
-  (codex/claude/copilot) in its pane and waits for Herdr to detect it; returns
+  (codex/claude/copilot/opencode) in its pane and waits for Herdr to detect it; returns
   `{workspaceId, tabId, paneId, agent, agentStatus?, sessionId?}`. The session
   id is normally still unknown at that point — poll `/v1/workspaces/panes`.
 - `GET /v1/web-servers`, `/v1/activity`
@@ -241,8 +258,15 @@ external-app preferences are ignored. Existing third-party helpers remain intact
 Uploads are private, validate common image headers, cap individual images at
 8 MiB and total retained storage at 256 MiB, and expire after 14 days when another
 image is uploaded. The local activity journal retains two files of roughly 2 MiB
-and contains status/provenance, not prompts or transcript text. Uninstall leaves
+and contains status/provenance (agent, state, directory), not prompts or
+transcript text; tab-activity signatures are stored hashed. Uninstall leaves
 local data and SSH backups available for manual recovery.
+
+The Hook's own reference — every route, what a transcript export carries and
+strips (Claude top-level allowlist, reduced task-notification envelopes,
+queue rows, `phren_changes` with secret-name redaction), the simulator
+helper's confinement, and the same-user trust boundary of `agent.sock` — is
+`packages/cli/src/bridge/AGENT_CONNECTIONS.md`.
 
 Chat drafts use an ordered actor repository. Immutable image digests are
 computed once; text edits avoid rescanning or rewriting unchanged image files.

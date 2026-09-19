@@ -7,78 +7,99 @@ struct LiveSessionsView: View {
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("sessions.live.preferences.v1") private var data = Data()
     @State private var adding = false
-    @State private var visible = false
+    @State private var lastRefreshID = UUID()
     @State private var query = ""
     @State private var refreshID = UUID()
-    @State private var overview = SessionOverviewMonitor()
+    private var overview: SessionOverviewMonitor { .shared }
     @State private var selected: OverviewSelection?
-    @State private var chatSession: LiveAgentSession?
+    @State private var sessionOpen: SessionOpen?
+    @State private var closeRequest: SessionCloseRequest?
+    @State private var closeError: String?
+    @State private var focusFilter = AgentFocusFilterStore.load()
+    private struct SessionOpen: Identifiable, Hashable {
+        let session: LiveAgentSession
+        let destination: AgentLaunch.Destination
+        var draft = ""
+        var attachments: [AgentAttachment] = []
+        var id: String { "\(session.id.hostID)|\(session.id.muxID)|\(session.id.workspace)|\(session.id.tab)|\(destination.rawValue)" }
+        static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id && lhs.draft == rhs.draft && lhs.attachments.count == rhs.attachments.count }
+        func hash(into hasher: inout Hasher) { hasher.combine(id) }
+    }
     private var preferences: LiveSessionPreferences? { try? LiveSessionPreferences.read(data) }
     private var hosts: [LiveHost] { preferences?.hosts ?? [] }
 
-    private struct OverviewSelection: Identifiable {
+    private struct OverviewSelection: Identifiable, Hashable {
         let session: LiveAgentSession
         let monitor: LiveHostMonitor
         var id: LiveAgentSession.ID { session.id }
+        static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id && lhs.monitor === rhs.monitor }
+        func hash(into hasher: inout Hasher) { hasher.combine(id) }
     }
     private struct PollID: Equatable { let hosts: [LiveHost]; let active: Bool; let refresh: UUID }
+    private var configuration: SessionOverviewMonitor.Configuration {
+        .init(query: query, preferences: preferences, projects: model.sessionProjects, focusFilter: focusFilter,
+              metadataReady: model.phase != .loading && model.phase != .initialSync, memoryConnected: model.phase == .ready)
+    }
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-            PhrenList {
-                sessionSections(at: context.date)
+        let screen = overview.screen
+        Group {
+            if !hosts.isEmpty && !overview.ready {
+                ProgressView().tint(PhrenTheme.cyan)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(PhrenTheme.bg).accessibilityLabel("Loading sessions")
+                    .accessibilityIdentifier("agents-loading")
+                    .transition(.opacity)
+            } else {
+            PhrenList(plain: true) {
+                sessionSections(screen)
                 Section {
-                    if let preferences = try? LiveSessionPreferences.read(data) {
-                        ForEach(preferences.hosts) { host in
-                            NavigationLink { LiveHostView(hostID: host.id) } label: {
-                                let monitor = overview.computers.first { $0.id == host.id }?.monitor
-                                PhrenMenuRow(title: host.name, subtitle: monitor?.snapshot == nil && monitor?.message == nil ? "Connecting…" : host.address, icon: "desktopcomputer")
+                    if screen.preferencesReadable {
+                        ForEach(screen.computers) { computer in
+                            NavigationLink { LiveHostView(hostID: computer.id) } label: {
+                                PhrenMenuRow(title: computer.host.name, subtitle: computer.connecting ? "Connecting…" : computer.host.address, icon: "desktopcomputer")
                             }
-                            .accessibilityIdentifier("live-host:\(host.id)")
+                            .accessibilityIdentifier("live-host:\(computer.id)")
+                            .plainListCardRow()
                         }
                         Button("Add computer", systemImage: "plus") { adding = true }
+                            .plainListCardRow()
                     } else {
                         Text("Saved connections couldn't be read. They have been preserved; update phren before editing them.")
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(.orange).plainListCardRow()
                     }
                 } header: {
-                    Text("Computers")
+                    Text("Computers").plainListSectionLabel()
                 } footer: {
                     Text("Keep Tailscale connected on both devices when you're away. Phren Hook connects your existing agents.")
+                        .font(.caption).foregroundStyle(PhrenTheme.textMuted).padding(.horizontal, 14).padding(.top, 4)
+                        .listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
                 }
-                Section("Agent setup") {
-                    if model.phase == .ready {
+                Section {
+                    if screen.memoryConnected {
                     NavigationLink { SkillsView() } label: {
                         PhrenMenuRow(title: "Skills", icon: "wand.and.stars", color: PhrenTheme.lavender)
-                    }
+                    }.plainListCardRow()
                     NavigationLink { AgentsView() } label: {
                         PhrenMenuRow(title: "Agent instructions", icon: "person.crop.rectangle.stack")
-                    }
+                    }.plainListCardRow()
                     } else {
                         Button {
                             model.showingMemoryConnection = true
                         } label: {
                             Label("Connect memory for skills & instructions", systemImage: "brain")
-                        }
+                        }.plainListCardRow()
                     }
-                }
+                } header: { Text("Agent setup").plainListSectionLabel() }
             }
-            .listSectionSpacing(12)
-            .opacity(hosts.isEmpty || overview.ready ? 1 : 0)
-            .allowsHitTesting(hosts.isEmpty || overview.ready)
-            .accessibilityHidden(!hosts.isEmpty && !overview.ready)
-            .overlay {
-                if !hosts.isEmpty && !overview.ready {
-                    VStack(spacing: 14) {
-                        ProgressView().tint(PhrenTheme.cyan)
-                        Text("Connecting your sessions").font(.subheadline.weight(.medium))
-                        Text("Across \(hosts.count) \(hosts.count == 1 ? "computer" : "computers")")
-                            .font(.caption).foregroundStyle(PhrenTheme.textMuted)
-                    }.frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(PhrenTheme.bg).accessibilityIdentifier("agents-loading")
-                }
+            .listSectionSpacing(6)
+            .modifier(SessionCloseDialogs(request: $closeRequest, error: $closeError,
+                                          monitor: { session in overview.computers.first { $0.id == session.host.id }?.monitor }))
+                .transition(.opacity)
             }
         }
+        .animation(.easeOut(duration: 0.2), value: overview.ready)
+        .onChange(of: configuration, initial: true) { _, value in overview.configure(value) }
         .navigationTitle("Live sessions")
         // Keep the title in the navigation bar rather than the collapsible
         // large-title region when this list is hosted directly by a tab.
@@ -87,8 +108,7 @@ struct LiveSessionsView: View {
         .textInputAutocapitalization(.never).autocorrectionDisabled()
         .phrenScreen()
         .toolbar {
-            NavigationLink { AccountUsageView() } label: { Label("Account usage", systemImage: "chart.bar") }
-                .accessibilityIdentifier("all-account-usage")
+            AccountUsageRings(hosts: hosts)
             // Settings → Show on Agents chooses these.
             if IntegrationSettings.enabled(IntegrationSettings.showWebServersKey) {
                 NavigationLink { WebServersView() } label: { Label("Web servers", systemImage: "globe") }
@@ -106,21 +126,51 @@ struct LiveSessionsView: View {
         }
         .onAppear { if IntegrationSettings.enabled(IntegrationSettings.agentsKeepScreenOnKey, default: false) { UIApplication.shared.isIdleTimerDisabled = true } }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
+        .task(id: scenePhase) {
+            if scenePhase == .active { focusFilter = await AgentFocusFilterStore.refreshFromSystem() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: AgentFocusFilterStore.changed)) { _ in
+            focusFilter = AgentFocusFilterStore.load()
+        }
         .refreshable { refreshID = UUID() }
         .sheet(isPresented: $adding) { NavigationStack { LiveHostEditor() } }
-        .sheet(item: $selected) { selection in
+        .navigationDestination(item: $selected) { selection in
             LiveSessionDetailView(sessionID: selection.id, monitor: selection.monitor)
         }
-        .sheet(item: $chatSession) { AgentChatSheet(session: $0) }
-        // A Siri "open … in Phren" leaves the session to show here.
-        .onChange(of: model.pendingChatVersion, initial: true) { _, _ in
-            if let pending = AgentLaunch.takePending() { chatSession = pending }
+        .navigationDestination(item: $sessionOpen) { open in
+            switch open.destination {
+            case .chat, .dictate:
+                AgentChatSheet(session: open.session, attachments: open.attachments, draft: open.draft,
+                               startsDictation: open.destination == .dictate).id(open.id)
+            case .terminal: HerdrTerminalView(host: open.session.host, session: open.session).id(open.id)
+            }
         }
-        .onAppear { visible = true }
-        .onDisappear { visible = false }
-        .task(id: PollID(hosts: hosts, active: visible && scenePhase == .active && !adding, refresh: refreshID)) {
-            guard visible, scenePhase == .active, !adding else { return }
-            await overview.run(hosts: hosts)
+        // Siri and Spotlight leave an exact session and destination here.
+        .onChange(of: model.pendingChatVersion, initial: true) { _, _ in
+            if let pending = AgentLaunch.takePendingOpen() {
+                selected = nil
+                let content = AgentLaunch.takePendingContent(for: pending.session)
+                sessionOpen = SessionOpen(session: pending.session, destination: pending.destination,
+                                          draft: content.draft, attachments: content.attachments)
+            }
+        }
+        // The poll is a task this view owns, not a `.task` modifier: SwiftUI
+        // cancels those when a pushed screen covers the list, which froze the
+        // sessions behind an open chat. It runs while the app is active and
+        // this list has appeared at least once; only leaving the foreground,
+        // changing computers, or editing them restarts it.
+        .onChange(of: PollID(hosts: hosts, active: scenePhase == .active && !adding, refresh: refreshID), initial: true) { _, id in
+            guard id.active else { overview.stopRunning(); return }
+            overview.configure(configuration)
+            let currentHosts = hosts
+            Task {
+                await Task.yield()
+                SpotlightIndex.shared.reconcileHosts(currentHosts)
+                await WidgetBridge.reconcileSessionHosts(currentHosts)
+            }
+            // A manual refresh restarts the run; otherwise keep the one that's going.
+            if id.refresh != lastRefreshID { lastRefreshID = id.refresh; overview.stopRunning() }
+            overview.ensureRunning(hosts: currentHosts)
         }
         // Once the sessions are known, Siri can name them ("message phren on mini in phren").
         .onChange(of: overview.ready, initial: true) { _, ready in
@@ -129,55 +179,74 @@ struct LiveSessionsView: View {
         }
     }
 
-    /// The one-line status above the sessions. It rides in the first
-    /// section's header rather than a section of its own, which used to put
-    /// a row's worth of space above and below a single caption.
-    private func caption(at date: Date) -> some View {
-        let connected = overview.connectedCount(at: date)
-        return Text(hosts.isEmpty ? "Connect a computer to see its sessions here."
-                    : "Sessions across your computers · \(connected)/\(hosts.count) connected")
-            .font(.caption).foregroundStyle(PhrenTheme.textMuted).textCase(nil)
-            .accessibilityIdentifier("agents-introduction")
+    /// Only what needs saying above the sessions: the hint when there is no
+    /// computer yet, a Focus filter when one is on. The connected count lives
+    /// in the Computers section; the sections say the rest.
+    @ViewBuilder
+    private func caption(_ screen: SessionOverviewMonitor.Screen) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            if screen.computers.isEmpty {
+                Text("Connect a computer to see its sessions here.")
+                    .accessibilityIdentifier("agents-introduction")
+            }
+            if let focusFilter = screen.focusFilter {
+                HStack(spacing: 5) {
+                    Text("Filtered by Focus · \(focusFilter.label)").accessibilityIdentifier("agents-focus-filter")
+                    Button("Clear Focus filter", systemImage: "xmark.circle.fill") {
+                        AgentFocusFilterStore.save(nil); self.focusFilter = nil
+                    }.labelStyle(.iconOnly).accessibilityIdentifier("agents-focus-clear")
+                }
+            }
+        }.font(.caption).foregroundStyle(PhrenTheme.textMuted).textCase(nil)
     }
 
     @ViewBuilder
-    private func sessionSections(at date: Date) -> some View {
-        let groups = overview.groups(at: date, query: query, preferences: preferences, projects: model.sessionProjects)
+    private func sessionSections(_ screen: SessionOverviewMonitor.Screen) -> some View {
+        let groups = screen.groups
         if groups.isEmpty {
             Section {
-                if hosts.isEmpty {
+                if screen.computers.isEmpty {
                     // Nothing to report yet; the caption header says what to do.
-                } else if overview.computers.isEmpty || overview.computers.contains(where: { $0.monitor.snapshot == nil && $0.monitor.refreshing }) {
+                } else if screen.computers.contains(where: \.connecting) {
                     HStack { ProgressView(); Text("Finding sessions…") }.font(.subheadline)
                 } else {
-                    Text(!query.isEmpty ? "No matching sessions"
-                         : overview.connectedCount(at: date) == 0 && overview.computers.contains(where: { $0.monitor.message != nil })
+                    Text(!screen.query.isEmpty ? "No matching sessions"
+                         : screen.connectedCount == 0 && screen.computers.contains(where: { $0.message != nil })
                          ? "No computers connected" : "No sessions running on the connected computers")
                         .font(.subheadline).foregroundStyle(PhrenTheme.textMuted)
                 }
-            } header: { caption(at: date) }
+            } header: { caption(screen) }
         }
         ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
             Section {
                 ForEach(group.sessions) { session in
-                    LiveSessionCard(session: session, fresh: overview.isFresh(session, at: date), showHost: true, onChat: { chatSession = session }) {
-                        if let computer = overview.computers.first(where: { $0.id == session.host.id }) {
-                            selected = OverviewSelection(session: session, monitor: computer.monitor)
-                        }
-                    }
-                    .separatedSessionRow()
+                        LiveSessionCard(session: session, fresh: screen.computers.first { $0.id == session.host.id }?.fresh == true,
+                                        showHost: true, resolvedProject: screen.projects[session.id], resolvedPin: screen.pinned.contains(session.id),
+                                        onChat: { sessionOpen = SessionOpen(session: session, destination: .chat) }, onDetails: {
+                            if let computer = overview.computers.first(where: { $0.id == session.host.id }) {
+                                selected = OverviewSelection(session: session, monitor: computer.monitor)
+                            }
+                        }, onClose: { request, confirm in
+                            if confirm { closeRequest = request }
+                            else { SessionCloseDialogs.perform(request, monitor: overview.computers.first { $0.id == request.session.host.id }?.monitor) { closeError = $0 } }
+                        })
+                        .equatable().separatedSessionRow()
                 }
             } header: {
-                VStack(alignment: .leading, spacing: 10) {
-                    if index == 0 { caption(at: date) }
+                VStack(alignment: .leading, spacing: 6) {
+                    if index == 0 { caption(screen) }
+                    // Small, quiet, upper-case — the section label Moshi uses.
                     Text("\(group.title) · \(group.sessions.count)")
+                        .font(.caption.weight(.semibold)).foregroundStyle(PhrenTheme.textMuted).textCase(.uppercase).tracking(0.6)
+                        .padding(.leading, 14).padding(.top, 2)
                 }
+                .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 2, trailing: 0))
             }
             footer: {
                 if group.id == "previous" { Text("These computers aren't connected. Reconnect before opening a session.") }
             }
         }
-        let problems = overview.computers.filter { $0.monitor.message != nil }
+        let problems = screen.computers.filter { $0.message != nil }
         if !problems.isEmpty {
             Section("Connections") {
                 ForEach(problems) { computer in
@@ -185,7 +254,7 @@ struct LiveSessionsView: View {
                         HStack {
                             Text(computer.host.name)
                             Spacer()
-                            Text(computer.monitor.fingerprint != nil ? "Verify connection" : "Offline")
+                            Text(computer.needsVerification ? "Verify connection" : "Offline")
                                 .font(.caption).foregroundStyle(PhrenTheme.warning)
                         }
                     }.accessibilityIdentifier("overview-reconnect:\(computer.id)")
@@ -204,8 +273,36 @@ final class LiveHostMonitor {
     var refreshing = false
     var polling = false
     private var generation = UUID()
+    @ObservationIgnored private var refreshRequested = false
     @ObservationIgnored private let fetchSnapshot: (LiveHost, Date?) async throws -> LiveWorkspaces
     @ObservationIgnored private let pollInterval: Duration
+    @ObservationIgnored var onSnapshotChanged: (() -> Void)?
+    @ObservationIgnored private var publishing: Task<Void, Never>?
+
+    /// Fetch again now rather than at the end of the poll interval — after a
+    /// close, a launch, anything the person just did to the computer.
+    func refreshNow() { refreshRequested = true }
+
+    /// For a screen pushed over the list: take over polling as soon as the
+    /// list's own task is cancelled (that happens after this screen appears),
+    /// and keep going until this screen leaves.
+    func keepRunning(host: LiveHost) async {
+        while !Task.isCancelled {
+            if polling {
+                do { try await Task.sleep(for: .milliseconds(200)) } catch { return }
+            } else {
+                await run(host: host)
+            }
+        }
+    }
+
+    /// Herdr confirmed a close: drop the tab (or workspace) from the snapshot
+    /// at once, then fetch so the truth replaces the guess.
+    func closed(workspace: String, tab: String?) {
+        snapshot = snapshot?.closing(workspace: workspace, tab: tab)
+        onSnapshotChanged?()
+        refreshNow()
+    }
 
     init(pollInterval: Duration = .seconds(10), fetch: @escaping (LiveHost, Date?) async throws -> LiveWorkspaces = { try await LiveHostMonitor.fetch($0, previousUpdate: $1) }) {
         self.pollInterval = pollInterval; self.fetchSnapshot = fetch
@@ -227,17 +324,38 @@ final class LiveHostMonitor {
                 lastUpdated = Date()
                 message = nil
                 fingerprint = nil
+                // UI publication must not wait for Spotlight/WidgetKit disk
+                // writes or ActivityKit. Coalesce obsolete side effects.
+                publishing?.cancel()
+                publishing = Task {
+                    await Task.yield()
+                    guard !Task.isCancelled else { return }
+                    let sessions = value.sessions(on: host)
+                    SpotlightIndex.shared.refreshSessions(sessions, on: host)
+                    await WidgetBridge.publishSessions(sessions, on: host)
+                }
             } catch {
                 guard !Task.isCancelled, generation == run else { return }
                 message = (error as? LiveConnectionError)?.localizedDescription
                     ?? (error as? PhrenKitError)?.localizedDescription
                     ?? "Couldn't reach the computer. Check the address, Tailscale, SSH, and Phren Hook."
                 if case LiveConnectionError.untrustedHost(let key) = error { fingerprint = key }
+                #if DEBUG && targetEnvironment(simulator)
+                if AppRuntime.isUITesting && ProcessInfo.processInfo.arguments.contains("--all-sessions-offline") {
+                    lastUpdated = .now.addingTimeInterval(-91)
+                }
+                #endif
             }
             refreshing = false
             if first { first = false; onFirstRefresh?() }
+            onSnapshotChanged?()
             if fingerprint != nil { return }
-            do { try await Task.sleep(for: pollInterval) } catch { return }
+            // Sleep in slices so refreshNow() cuts the wait short.
+            refreshRequested = false
+            let slices = max(1, Int(pollInterval / .milliseconds(250)))
+            for _ in 0..<slices where !refreshRequested {
+                do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+            }
         }
     }
 
@@ -254,14 +372,39 @@ final class LiveHostMonitor {
             if remote && previousUpdate != nil && ProcessInfo.processInfo.arguments.contains("--all-sessions-offline") {
                 throw LiveConnectionError.disconnected
             }
-            let title = remote ? "Review Linux deployment" : "Build the iPhone overview"
+            if ProcessInfo.processInfo.arguments.contains("--trailer-fixture") {
+                // The product video: two computers, all three harnesses, one
+                // session working on each and one that needs you.
+                let changed = ",\"lastChangedAt\":\"\(UITestFixtures.sessionActivityDate.ISO8601Format())\""
+                let closed = await UITestFixtures.closedTabs
+                let tabs = (remote
+                    ? [#"{"id":"w1:t1","label":"1","title":"Fix the queue strip","agent":"codex","agentStatus":"working","cwd":"/work/phren","branch":"ios/chat","contextUsedPercent":62\#(changed)}"#,
+                       #"{"id":"w1:t2","label":"2","title":"Write the changelog","agent":"claude","agentStatus":"idle","cwd":"/work/phren","branch":"ios/chat"}"#]
+                    : [#"{"id":"w1:t1","label":"1","title":"Ship the onboarding flow","agent":"claude","agentStatus":"working","cwd":"/work/ledger","branch":"main","contextUsedPercent":37\#(changed)}"#,
+                       #"{"id":"w1:t2","label":"2","title":"Review release notes","agent":"copilot","agentStatus":"waiting","approvalPending":true,"cwd":"/work/hub","branch":"main"}"#])
+                    .enumerated().filter { !closed.contains("\(host.id):w1:t\($0.offset + 1)") }.map(\.element)
+                return try LiveWorkspaces.read(Data("""
+                {"kind":"herdr","groups":[{"id":"w1","label":"\(remote ? "phren" : "ledger")","children":[\(tabs.joined(separator: ","))]}]}
+                """.utf8))
+            }
+            let tour = ProcessInfo.processInfo.arguments.contains("--store-tour-fixture")
+            let title = tour ? (remote ? "Review the deployment" : "Ship the onboarding flow") : remote ? "Review Linux deployment" : "Build the iPhone overview"
             let finished = previousUpdate != nil && ProcessInfo.processInfo.arguments.contains("--all-sessions-change")
             let status = remote ? "waiting" : finished ? "done" : "working"
-            let other = remote ? "Inspect logs" : "Check project status"
+            let other = tour ? (remote ? "Fix the widget timeline" : "Write the release notes") : remote ? "Inspect logs" : "Check project status"
+            let changed = ProcessInfo.processInfo.arguments.contains("--session-relative-time-fixture") || tour
+                ? ",\"lastChangedAt\":\"\(UITestFixtures.sessionActivityDate.ISO8601Format())\"" : ""
+            let closed = await UITestFixtures.closedTabs
+            // The tour names real projects and shows all three harnesses.
+            let project = tour ? (remote ? "mina" : "phren") : "phone"
+            let agents = tour ? (remote ? ("codex", "claude") : ("claude", "copilot")) : ("codex", "claude")
+            let branch = tour ? (remote ? "feature/widgets" : "release/1.0") : "feature/settings"
+            let tabs = [
+                #"{"id":"w1:t1","label":"1","title":"\#(title)","agent":"\#(agents.0)","agentStatus":"\#(status)","cwd":"/work/\#(project)","branch":"main","contextUsedPercent":\#(remote ? 62 : 37)\#(changed)}"#,
+                #"{"id":"w1:t2","label":"2","title":"\#(other)","agent":"\#(agents.1)","agentStatus":"idle","cwd":"/work/\#(project)","branch":"\#(branch)"}"#,
+            ].enumerated().filter { !closed.contains("\(host.id):w1:t\($0.offset + 1)") }.map(\.element)
             return try LiveWorkspaces.read(Data("""
-            {"kind":"herdr","groups":[{"id":"w1","label":"Shared project","children":[
-            {"id":"w1:t1","label":"1","title":"\(title)","agent":"codex","agentStatus":"\(status)","cwd":"/work/phone","branch":"main","contextUsedPercent":\(remote ? 62 : 37)},
-            {"id":"w1:t2","label":"2","title":"\(other)","agent":"claude","agentStatus":"idle","cwd":"/work/phone","branch":"feature/settings"}]}]}
+            {"kind":"herdr","groups":[{"id":"w1","label":"\(tour ? project : "Shared project")","children":[\(tabs.joined(separator: ","))]}]}
             """.utf8))
         }
         if AppModel.isUITesting && ProcessInfo.processInfo.arguments.contains("--automatic-sessions-fixture") {
@@ -270,8 +413,17 @@ final class LiveHostMonitor {
                 if previousUpdate != nil && ProcessInfo.processInfo.arguments.contains("--session-details-removed") {
                     return try LiveWorkspaces.read(Data(#"{"kind":"herdr","groups":[]}"#.utf8))
                 }
+                if ProcessInfo.processInfo.arguments.contains("--starting-session-fixture") {
+                    return try LiveWorkspaces.read(Data(#"{"kind":"herdr","groups":[{"id":"w7","label":"Phone work","children":[{"id":"w7:t9","label":"1","title":"New session","agent":"codex","agentStatus":"idle","starting":true,"cwd":"/work/phone","agentPaneCount":1,"paneCount":1}]}]}"#.utf8))
+                }
                 if ProcessInfo.processInfo.arguments.contains("--terminal-uploads-fixture") {
                     return try LiveWorkspaces.read(Data(#"{"kind":"herdr","focus":{"workspaceID":"w8","tabID":"w8:t1","paneID":"w8:p1"},"groups":[{"id":"w7","label":"Phone work","children":[{"id":"w7:t9","label":"1","title":"Original tab","agent":"codex"}]},{"id":"w8","label":"Other work","children":[{"id":"w8:t1","label":"1","title":"Current terminal tab","agent":"codex"}]}]}"#.utf8))
+                }
+                if ProcessInfo.processInfo.arguments.contains("--trailer-fixture") {
+                    return try LiveWorkspaces.read(Data(#"{"kind":"herdr","groups":[{"id":"w7","label":"ledger","children":[{"id":"w7:t9","label":"1","title":"Ship the onboarding flow","agent":"claude","agentStatus":"working","cwd":"/work/ledger","branch":"main","agentPaneCount":2,"paneCount":3}]},{"id":"w8","label":"hub","children":[{"id":"w8:t1","label":"1","title":"Review release notes","agent":"copilot","agentStatus":"waiting","cwd":"/work/hub","branch":"main"}]}]}"#.utf8))
+                }
+                if ProcessInfo.processInfo.arguments.contains("--store-tour-fixture") {
+                    return try LiveWorkspaces.read(Data(#"{"kind":"herdr","groups":[{"id":"w7","label":"phren","children":[{"id":"w7:t9","label":"1","title":"Ship the onboarding flow","agent":"claude","agentStatus":"working","cwd":"/work/phren","branch":"main","agentPaneCount":2,"paneCount":3}]},{"id":"w8","label":"mina","children":[{"id":"w8:t1","label":"1","title":"Review the deployment","agent":"codex","agentStatus":"waiting","cwd":"/work/mina","branch":"main"}]}]}"#.utf8))
                 }
                 return try LiveWorkspaces.read(Data(#"{"kind":"herdr","groups":[{"id":"w7","label":"Phone work","children":[{"id":"w7:t9","label":"1","title":"Polish the phone app","agent":"codex","agentStatus":"working","cwd":"/work/phone/src","agentPaneCount":2,"paneCount":3}]},{"id":"w8","label":"Other work","children":[{"id":"w8:t1","label":"1","title":"Choose the deployment target","agent":"claude","agentStatus":"waiting","cwd":"/work/other"}]},{"id":"w9","label":"Shell","children":[{"id":"w9:t1","label":"1"}]}]}"#.utf8))
             }
@@ -312,6 +464,8 @@ private struct LiveHostView: View {
     @State private var query = ""
     @State private var mode: SessionViewMode = .workspaces
     @State private var selected: LiveAgentSession?
+    @State private var closeRequest: SessionCloseRequest?
+    @State private var closeError: String?
     let hostID: UUID
 
     private enum SessionViewMode: String, CaseIterable {
@@ -381,6 +535,7 @@ private struct LiveHostView: View {
             .padding(.horizontal, 16).padding(.vertical, 8)
         }
         .background(PhrenTheme.bg)
+        .modifier(SessionCloseDialogs(request: $closeRequest, error: $closeError, monitor: { _ in monitor }))
         .navigationTitle(host?.name ?? "Computer removed")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search sessions")
@@ -411,7 +566,7 @@ private struct LiveHostView: View {
         .sheet(isPresented: $editing) {
             if let host { NavigationStack { LiveHostEditor(existing: host) } }
         }
-        .sheet(item: $selected) { selection in
+        .navigationDestination(item: $selected) { selection in
             LiveSessionDetailView(sessionID: selection.id, monitor: monitor)
         }
         .task(id: PollIdentity(host: host, active: scenePhase == .active && !editing, refresh: refreshID)) {
@@ -473,7 +628,10 @@ private struct LiveHostView: View {
     private func sessionCards(_ entries: [LiveAgentSession]) -> some View {
         ForEach(entries) { session in
             TimelineView(.periodic(from: .now, by: 1)) { context in
-                LiveSessionCard(session: session, fresh: monitor.isFresh(at: context.date)) { selected = session }
+                LiveSessionCard(session: session, fresh: monitor.isFresh(at: context.date), onDetails: { selected = session }, onClose: { request, confirm in
+                    if confirm { closeRequest = request } else { SessionCloseDialogs.perform(request, monitor: monitor) { closeError = $0 } }
+                })
+                .equatable().separatedSessionRow()
             }
         }
     }
@@ -496,7 +654,7 @@ private struct LiveHostView: View {
 
 extension LiveHostMonitor {
     func isFresh(at date: Date) -> Bool {
-        polling && message == nil && lastUpdated.map { date.timeIntervalSince($0) < 25 } == true
+        lastUpdated.map { date.timeIntervalSince($0) < 90 } == true
     }
 }
 
@@ -515,58 +673,118 @@ private struct SessionStatusIcon: View {
     }
 }
 
-private struct LiveSessionCard: View {
+/// A close asked for from a card, answered by the list that owns the dialog.
+struct SessionCloseRequest: Identifiable {
+    enum Scope { case tab, workspace }
+    let session: LiveAgentSession
+    let scope: Scope
+    var id: String { "\(session.id.hostID):\(session.workspaceID):\(scope == .tab ? session.tab.id : "*")" }
+}
+
+/// The one confirmation dialog for closing sessions from a list, plus the
+/// error alert. On Herdr's confirmation the card leaves at once and the
+/// computer is asked again right away.
+private struct SessionCloseDialogs: ViewModifier {
+    @Binding var request: SessionCloseRequest?
+    @Binding var error: String?
+    let monitor: (LiveAgentSession) -> LiveHostMonitor?
+
+    /// Close on the computer, then take the card out of the list at once and
+    /// ask that computer again so the truth replaces the guess.
+    static func perform(_ what: SessionCloseRequest, monitor: LiveHostMonitor?, failed: @escaping (String) -> Void) {
+        let session = what.session, tab = what.scope == .tab ? session.tab.id : nil
+        Task { @MainActor in
+            do {
+                #if DEBUG && targetEnvironment(simulator)
+                if AppModel.isUITesting {
+                    for id in tab.map({ [$0] }) ?? ["w1:t1", "w1:t2"] { UITestFixtures.closedTabs.insert("\(session.host.id):\(id)") }
+                } else {
+                    try await PhrenConnection.herdrAction(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), operation: .close,
+                                                         workspaceID: session.workspaceID, tabID: tab)
+                }
+                #else
+                try await PhrenConnection.herdrAction(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), operation: .close,
+                                                     workspaceID: session.workspaceID, tabID: tab)
+                #endif
+                withAnimation { monitor?.closed(workspace: session.workspaceID, tab: tab) }
+            } catch let failure { failed(failure.localizedDescription) }
+        }
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .confirmationDialog(request?.scope == .workspace ? "Close the whole workspace?" : "Close this tab?",
+                                isPresented: $request.isPresent(), titleVisibility: .visible, presenting: request) { what in
+                Button(what.scope == .workspace ? "Close workspace" : "Close tab", role: .destructive) {
+                    Self.perform(what, monitor: monitor(what.session)) { error = $0 }
+                }
+            } message: { what in
+                Text(what.scope == .workspace
+                     ? "Every tab in \u{201C}\(what.session.workspaceName)\u{201D} on \(what.session.host.name) closes; running agents in them stop."
+                     : "\u{201C}\(what.session.tab.displayTitle)\u{201D} on \(what.session.host.name) closes; an agent running in it stops.")
+            }
+            .alert("Couldn't close", isPresented: $error.isPresent()) { Button("OK") { error = nil } } message: { Text(error ?? "") }
+    }
+}
+
+private struct LiveSessionCard: View, Equatable {
     @Environment(AppModel.self) private var model
     @AppStorage("sessions.live.preferences.v1") private var data = Data()
     let session: LiveAgentSession
     let fresh: Bool
     var showHost = false
+    var resolvedProject: String? = nil
+    var resolvedPin: Bool? = nil
     var onChat: (() -> Void)? = nil
     let onDetails: () -> Void
-    /// Swipe or hold closes the tab (or its whole workspace) on the computer.
-    @State private var closing: Closing?
-    @State private var closeError: String?
-    private enum Closing: Identifiable { case tab, workspace; var id: Self { self } }
+    /// The swipe's red Close acts at once, the way Mail's does — the person
+    /// already swiped and hit a red button. Hold → Close tab / Close
+    /// workspace confirm first, through the one dialog the list owns: a dialog
+    /// per row inside a list that re-renders every second presented for the
+    /// wrong row, and deleting a row after its swipe action ran under a dialog
+    /// tripped UIKit's batch-update check.
+    let onClose: (SessionCloseRequest, _ confirm: Bool) -> Void
+    @State private var assigningProject = false
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.session == rhs.session && lhs.fresh == rhs.fresh && lhs.showHost == rhs.showHost
+            && lhs.resolvedProject == rhs.resolvedProject && lhs.resolvedPin == rhs.resolvedPin
+    }
 
     var body: some View {
         let preferences = try? LiveSessionPreferences.read(data)
-        let project = preferences?.projectMatch(hostID: session.host.id, cwd: session.tab.cwd,
+        let project = showHost ? resolvedProject : preferences?.projectMatch(hostID: session.host.id, cwd: session.tab.cwd,
                                                 projects: model.sessionProjects)?.project.name
         let prefix = showHost ? "overview" : "live"
         HStack(spacing: 0) {
             AgentConversationLink(session: session, onOpenInPhren: onChat) {
-                SessionCardContent(session: session, fresh: fresh, project: project ?? session.workspaceName,
+                SessionCardContent(session: session, fresh: fresh, project: project,
                                    computer: showHost ? session.host.name : nil, identifierPrefix: prefix, onDetails: onDetails)
+                    .equatable()
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier(showHost ? "overview-chat:\(session.accessibilityKey)"
                                      : "live-chat:\(session.workspaceID):\(session.tab.id)")
             .disabled(!fresh)
-            SessionPinButton(session: session, pinned: preferences?.isPinned(session.id) == true,
+            SessionPinButton(session: session, pinned: resolvedPin ?? (preferences?.isPinned(session.id) == true),
                              identifierPrefix: prefix, data: $data)
         }
         .sessionCard()
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            Button("Close", systemImage: "xmark", role: .destructive) { closing = .tab }
+            Button("Close", systemImage: "xmark", role: .destructive) { onClose(.init(session: session, scope: .tab), false) }
                 .accessibilityIdentifier("\(prefix)-close:\(session.accessibilityKey)")
         }
         .contextMenu {
-            Button("Close tab", systemImage: "xmark", role: .destructive) { closing = .tab }
-            Button("Close workspace \u{201C}\(session.workspaceName)\u{201D}", systemImage: "xmark.square", role: .destructive) { closing = .workspace }
-        }
-        .confirmationDialog(closing == .workspace ? "Close the whole workspace?" : "Close this tab?", isPresented: $closing.isPresent(), titleVisibility: .visible, presenting: closing) { what in
-            Button(what == .workspace ? "Close workspace" : "Close tab", role: .destructive) {
-                Task {
-                    do {
-                        try await PhrenConnection.herdrAction(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), operation: .close,
-                                                             workspaceID: session.workspaceID, tabID: what == .tab ? session.tab.id : nil)
-                    } catch { closeError = error.localizedDescription }
-                }
+            if project == nil, session.tab.cwd != nil {
+                Button("Link to project", systemImage: "link") { assigningProject = true }
             }
-        } message: { what in
-            Text(what == .workspace ? "Every tab in \u{201C}\(session.workspaceName)\u{201D} on \(session.host.name) closes; running agents in them stop." : "\u{201C}\(session.tab.displayTitle)\u{201D} on \(session.host.name) closes; an agent running in it stops.")
+            Button("Close tab", systemImage: "xmark", role: .destructive) { onClose(.init(session: session, scope: .tab), true) }
+            Button("Close workspace \u{201C}\(session.workspaceName)\u{201D}", systemImage: "xmark.square", role: .destructive) { onClose(.init(session: session, scope: .workspace), true) }
         }
-        .alert("Couldn't close", isPresented: $closeError.isPresent()) { Button("OK") { closeError = nil } } message: { Text(closeError ?? "") }
+        .sheet(isPresented: $assigningProject) {
+            NavigationStack { LiveProjectPicker(hostID: session.host.id, cwd: session.tab.cwd ?? "",
+                                                existing: preferences?.mapping(hostID: session.host.id, cwd: session.tab.cwd)) }
+        }
     }
 }
 
@@ -591,8 +809,7 @@ private struct LiveSessionDetailView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            TimelineView(.periodic(from: .now, by: 1)) { context in
+        TimelineView(.periodic(from: .now, by: 1)) { context in
                 let fresh = monitor.isFresh(at: context.date)
                 if let session {
                     let project = match?.project
@@ -606,16 +823,16 @@ private struct LiveSessionDetailView: View {
                                 Text(session.tab.displayTitle).font(.title2.weight(.bold)).multilineTextAlignment(.center)
                                     .fixedSize(horizontal: false, vertical: true)
                                 HStack(spacing: 6) {
-                                    Text(project?.name ?? session.workspaceName).font(.system(.subheadline, design: .monospaced)).foregroundStyle(PhrenTheme.success)
+                                    if project == nil { Image(systemName: "folder").foregroundStyle(PhrenTheme.textMuted) }
+                                    Text(session.projectDisplayName(project?.name)).font(.system(.subheadline, design: .monospaced)).foregroundStyle(project == nil ? PhrenTheme.textMuted : PhrenTheme.success)
                                     if let branch = session.tab.branch, !branch.isEmpty {
                                         Text("·").foregroundStyle(PhrenTheme.textDim)
                                         Label(branch, systemImage: "arrow.triangle.branch").font(.system(.caption, design: .monospaced)).foregroundStyle(PhrenTheme.chatNeutral)
                                     }
                                     Text("·").foregroundStyle(PhrenTheme.textDim)
                                     Text(session.host.name).font(.subheadline).foregroundStyle(PhrenTheme.textMuted)
-                                    if let date = monitor.lastUpdated {
-                                        Text("·").foregroundStyle(PhrenTheme.textDim)
-                                        Text(date, style: .relative).font(.subheadline).foregroundStyle(PhrenTheme.textMuted)
+                                    if let date = session.tab.lastChangedAt {
+                                        SessionRelativeTimeLabel(changedAt: date)
                                     }
                                 }.lineLimit(1).minimumScaleFactor(0.8)
                                 Text((session.tab.status + (fresh ? "" : " · stale")).uppercased())
@@ -623,10 +840,9 @@ private struct LiveSessionDetailView: View {
                                     .foregroundStyle(fresh ? session.tab.activity.color : PhrenTheme.textMuted)
                                     .padding(.horizontal, 14).padding(.vertical, 6)
                                     .background((fresh ? session.tab.activity.color : PhrenTheme.textMuted).opacity(0.14), in: Capsule())
-                                    .overlay(Capsule().strokeBorder((fresh ? session.tab.activity.color : PhrenTheme.textMuted).opacity(0.7), lineWidth: 1))
                             }
                             .frame(maxWidth: .infinity).padding(.vertical, 28).padding(.horizontal, 20)
-                            .background(session.tab.activity.color.opacity(fresh ? 0.08 : 0.03), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                            .background(session.tab.activity.color.opacity(fresh ? 0.08 : 0.03), in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.large, style: .continuous))
 
                             // The two ways in.
                             AgentConversationLink(session: session) {
@@ -642,6 +858,12 @@ private struct LiveSessionDetailView: View {
                             }
                             .buttonStyle(.plain).disabled(!fresh)
                             if !fresh { Text("Reconnect this computer to resume its session.").font(.caption).foregroundStyle(PhrenTheme.textMuted) }
+
+                            SessionAwaySummaryCard(
+                                session: session,
+                                project: session.projectDisplayName(project?.name),
+                                state: session.tab.activity.rawValue
+                            )
 
                             SessionUsageCard(host: session.host, source: session.tab.agent)
 
@@ -707,28 +929,28 @@ private struct LiveSessionDetailView: View {
             }
             .navigationTitle("Session details")
             .navigationBarTitleDisplayMode(.inline)
-            .navigationDestination(for: ArchiveRoute.self) { route in
-                ArchiveBrowserView(storeId: route.storeId, project: route.project)
-            }
-            .navigationDestination(for: ArchiveTopicRoute.self) { route in
-                ArchiveTopicView(storeId: route.storeId, topic: route.topic)
+            // Pushed over the list, this page is what's on screen, and SwiftUI
+            // cancels the list's polling task when it disappears. Keep the
+            // computer's monitor running from here; the list picks it back up
+            // when it reappears.
+            .task(id: host) {
+                guard let host else { return }
+                await monitor.keepRunning(host: host)
             }
             .onChange(of: session?.tab.cwd) { _, _ in
                 copiedFolder = false
                 assigning = false
             }
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
             .sheet(isPresented: $assigning) {
                 NavigationStack {
                     LiveProjectPicker(hostID: sessionID.hostID, cwd: session?.tab.cwd ?? "",
                                       existing: preferences?.mapping(hostID: sessionID.hostID, cwd: session?.tab.cwd))
                 }
             }
-        }
     }
 }
 
-private struct LiveProjectPicker: View {
+struct LiveProjectPicker: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @AppStorage("sessions.live.preferences.v1") private var data = Data()
@@ -797,10 +1019,10 @@ private func factRow(_ key: String, _ value: String, monospaced: Bool = false, c
 private struct SessionUsageCard: View {
     let host: LiveHost
     let source: String?
-    @State private var snapshot: AccountUsageSnapshot?
+    private let cache = AccountUsageCache.shared
     var body: some View {
         Group {
-            if let account = snapshot?.accounts.first(where: { $0.source == source }) ?? snapshot?.accounts.first, !account.windows.isEmpty {
+            if let account = cache.snapshot(for: host)?.accounts.first(where: { $0.source == source }), !account.windows.isEmpty {
                 VStack(spacing: 10) {
                     HStack { Text("Account").foregroundStyle(PhrenTheme.textMuted); Spacer(); Text(account.source.capitalized).foregroundStyle(PhrenTheme.text) }
                     ForEach(account.windows) { window in
@@ -822,10 +1044,7 @@ private struct SessionUsageCard: View {
             }
         }
         .task {
-            #if DEBUG && targetEnvironment(simulator)
-            if AppModel.isUITesting { return }
-            #endif
-            snapshot = try? await PhrenConnection.accountUsage(host: host, privateKey: DeviceSSHKey.load(host.id))
+            _ = try? await cache.refresh(host)
         }
     }
     private static func short(_ name: String) -> String {

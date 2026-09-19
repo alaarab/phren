@@ -241,3 +241,128 @@ final class AgentChatTests: XCTestCase {
         try JSONSerialization.data(withJSONObject: ["type": "backlog", "source": source, "entries": rows.enumerated().map { ["line": $0.offset, "raw": $0.element] }, "hasMore": true, "totalLines": rows.count])
     }
 }
+
+final class LocalCommandTests: XCTestCase {
+    private func message(_ text: String) -> AgentChatMessage { .init(id: "1:0", line: 1, role: .user, title: nil, text: text) }
+    func testSlashCommandReadsNameAndArguments() {
+        let command = message("<command-name>/model</command-name>\n            <command-message>model</command-message>\n            <command-args></command-args>").localCommand
+        XCTAssertEqual(command?.kind, .command); XCTAssertEqual(command?.text, "/model")
+        XCTAssertEqual(message("<command-name>/review</command-name><command-message>review</command-message><command-args>ultra 12</command-args>").localCommand?.text, "/review ultra 12")
+    }
+    func testShellLineAndOutput() {
+        XCTAssertEqual(message("<bash-input>pwd</bash-input>").localCommand, .init(kind: .shell, text: "pwd"))
+        let output = message("<bash-stdout>/home/alaarab/Projects/hub</bash-stdout><bash-stderr></bash-stderr>").localCommand
+        XCTAssertEqual(output?.kind, .output); XCTAssertEqual(output?.text, "/home/alaarab/Projects/hub")
+        XCTAssertEqual(message("<bash-stdout></bash-stdout><bash-stderr></bash-stderr>").localCommand?.text, "")
+        XCTAssertEqual(message("<local-command-stdout>Set model to Opus 5</local-command-stdout>").localCommand, .init(kind: .output, text: "Set model to Opus 5"))
+    }
+    func testOrdinaryMessagesAreNotCommands() {
+        XCTAssertNil(message("Say \"go\" and I'll cut v0.11.27").localCommand)
+        XCTAssertNil(message("look at <command-name> in the docs").localCommand)
+        XCTAssertNil(AgentChatMessage(id: "1:0", line: 1, role: .assistant, title: nil, text: "<bash-input>pwd</bash-input>").localCommand)
+    }
+}
+
+final class MergedUserTurnTests: XCTestCase {
+    private func read(_ entries: [[String: Any]]) throws -> AgentChatTranscript {
+        let frame: [String: Any] = ["type": "backlog", "source": "claude", "entries": entries]
+        return try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: frame), source: "claude")
+    }
+    func testTextAndImageBlocksOfOneTurnBecomeOneBubble() throws {
+        let raw: [String: Any] = ["type": "user", "message": ["role": "user", "content": [
+            ["type": "text", "text": "[Image #3]Look at this\n\nAttached files on this computer:\n/tmp/shot.png"],
+            ["type": "image", "source": ["type": "base64", "data": ""]],
+            ["type": "image", "source": ["type": "base64", "data": ""]],
+        ]]]
+        let transcript = try read([["line": 4, "raw": raw]])
+        XCTAssertEqual(transcript.messages.count, 1)
+        let message = try XCTUnwrap(transcript.messages.first)
+        XCTAssertEqual(message.id, "4:0")
+        XCTAssertEqual(message.role, .user)
+        XCTAssertEqual(message.imageBlocks, [1, 2])
+        XCTAssertTrue(message.text.hasPrefix("[Image #3]Look at this"))
+    }
+    func testImageOnlyTurnKeepsItsPlaceholder() throws {
+        let raw: [String: Any] = ["type": "user", "message": ["role": "user", "content": [
+            ["type": "image", "source": ["type": "base64", "data": ""]],
+            ["type": "image", "source": ["type": "base64", "data": ""]],
+        ]]]
+        let message = try XCTUnwrap(read([["line": 1, "raw": raw]]).messages.first)
+        XCTAssertEqual(message.text, "[Image attachment]")
+        XCTAssertEqual(message.imageBlocks, [0, 1])
+    }
+    /// A picture the phone sent: Claude Code writes a `[Image: source: …]`
+    /// text block per picture, no image block. The path becomes an upload
+    /// image and the marker leaves the words.
+    func testUploadMarkerBecomesAnUploadImageAndLeavesTheText() throws {
+        let path = "/Users/x/.local/share/phren/bridge/uploads/aaaa-1111/0f0f-phren-1a1a.png"
+        let raw: [String: Any] = ["type": "user", "message": ["role": "user", "content": [
+            ["type": "text", "text": "[Image: source: \(path)]"],
+            ["type": "text", "text": "Why does this header wrap?"],
+        ]]]
+        let transcript = try read([["line": 6, "raw": raw]])
+        XCTAssertEqual(transcript.messages.count, 1)
+        let message = try XCTUnwrap(transcript.messages.first)
+        XCTAssertEqual(message.id, "6:0")
+        XCTAssertEqual(message.uploadImages, [path])
+        XCTAssertEqual(message.text, "Why does this header wrap?")
+        XCTAssertFalse(message.text.contains("[Image: source:"))
+        XCTAssertTrue(message.imageBlocks.isEmpty)
+        // The same words without the picture draw differently, so the render key must differ.
+        let plain = try XCTUnwrap(read([["line": 6, "raw": ["type": "user", "message": ["role": "user", "content": "Why does this header wrap?"]]]]).messages.first)
+        XCTAssertNotEqual(message.renderKey, plain.renderKey)
+        XCTAssertNotEqual(message, plain)
+    }
+    func testThreeUploadMarkersInOneTextBecomeThreePictures() throws {
+        let text = "Look at these [Image: source: /work/phone/uploads/a.png] [Image: source: /work/phone/uploads/b.JPEG]\n[Image: source: /work/phone/uploads/c.webp]"
+        let message = try XCTUnwrap(read([["line": 2, "raw": ["type": "user", "message": ["role": "user", "content": text]]]]).messages.first)
+        XCTAssertEqual(message.uploadImages, ["/work/phone/uploads/a.png", "/work/phone/uploads/b.JPEG", "/work/phone/uploads/c.webp"])
+        XCTAssertEqual(message.text, "Look at these")
+        // Only markers: the bubble keeps the placeholder the image blocks use.
+        let only = try XCTUnwrap(read([["line": 3, "raw": ["type": "user", "message": ["role": "user", "content": [
+            ["type": "text", "text": "[Image: source: /work/phone/uploads/a.png]"], ["type": "text", "text": "[Image: source: /work/phone/uploads/b.png]"]]]]]]).messages.first)
+        XCTAssertEqual(only.text, "[Image attachment]")
+        XCTAssertEqual(only.uploadImages.count, 2)
+        // Never more than eight for one turn.
+        let many = (0..<12).map { "[Image: source: /work/phone/uploads/\($0).png]" }.joined(separator: " ")
+        XCTAssertEqual(try XCTUnwrap(read([["line": 4, "raw": ["type": "user", "message": ["role": "user", "content": many]]]]).messages.first).uploadImages.count, 8)
+    }
+    func testUploadMarkerNamingSomethingOtherThanAnImageIsLeftAlone() throws {
+        let text = "[Image: source: /work/phone/uploads/notes.pdf] see the notes [Image: source: relative/shot.png] and [Image: source: /work/phone/uploads/shot.png]"
+        let message = try XCTUnwrap(read([["line": 5, "raw": ["type": "user", "message": ["role": "user", "content": text]]]]).messages.first)
+        XCTAssertEqual(message.uploadImages, ["/work/phone/uploads/shot.png"])
+        XCTAssertEqual(message.text, "[Image: source: /work/phone/uploads/notes.pdf] see the notes [Image: source: relative/shot.png] and")
+        // No image path at all: nothing changes, and no picture is promised.
+        let none = try XCTUnwrap(read([["line": 7, "raw": ["type": "user", "message": ["role": "user", "content": "[Image: source: /work/phone/uploads/notes.pdf] read this"]]]]).messages.first)
+        XCTAssertTrue(none.uploadImages.isEmpty)
+        XCTAssertEqual(none.text, "[Image: source: /work/phone/uploads/notes.pdf] read this")
+        // The agent's own words are never scanned for markers.
+        let reply = try XCTUnwrap(read([["line": 8, "raw": ["type": "assistant", "message": ["role": "assistant", "content": "I saw [Image: source: /work/phone/uploads/shot.png]"]]]]).messages.first)
+        XCTAssertTrue(reply.uploadImages.isEmpty)
+    }
+    func testToolResultsInTheSameRowStayApart() throws {
+        let raw: [String: Any] = ["type": "user", "message": ["role": "user", "content": [
+            ["type": "tool_result", "tool_use_id": "t1", "content": "done"],
+            ["type": "text", "text": "and now this"],
+        ]]]
+        let messages = read_(raw)
+        XCTAssertEqual(messages.map(\.role), [.tool, .user])
+    }
+    private func read_(_ raw: [String: Any]) -> [AgentChatMessage] {
+        (try? read([["line": 1, "raw": raw]]).messages) ?? []
+    }
+
+    func testHarnessPreambleTurnsAreNotBubbles() throws {
+        let codex: [String: Any] = ["type": "backlog", "source": "codex", "entries": [
+            ["line": 0, "raw": ["type": "response_item", "payload": ["type": "message", "role": "user", "content": [["type": "input_text", "text": "<environment_context>\n  <cwd>/home/a/p</cwd>\n</environment_context>"]]]]],
+            ["line": 1, "raw": ["type": "response_item", "payload": ["type": "message", "role": "user", "content": [["type": "input_text", "text": "Fix the header"]]]]],
+        ]]
+        let read = try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: codex), source: "codex")
+        XCTAssertEqual(read.messages.map(\.text), ["Fix the header"])
+        let claude: [String: Any] = ["type": "backlog", "source": "claude", "entries": [
+            ["line": 0, "raw": ["type": "user", "message": ["role": "user", "content": "<system-reminder>internal</system-reminder>"]]],
+            ["line": 1, "raw": ["type": "user", "message": ["role": "user", "content": "hello"]]],
+        ]]
+        XCTAssertEqual(try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: claude), source: "claude").messages.map(\.text), ["hello"])
+    }
+}

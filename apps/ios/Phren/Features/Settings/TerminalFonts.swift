@@ -1,3 +1,5 @@
+import PhrenKit
+import CryptoKit
 import CoreText
 import SwiftUI
 import UniformTypeIdentifiers
@@ -18,13 +20,16 @@ final class TerminalFonts {
         let file: String
         let url: URL
         let detail: String
+        let sha256: String
         var id: String { file }
     }
-    /// Open-licence monospace fonts served straight from their repositories.
+    /// SHA-256 pins verified from these repository files, 2026-09-15.
+    /// Fira Code removed binaries from master; use its last committed TTF.
+    /// Update the URL and digest together when refreshing a curated font.
     static let curated: [Curated] = [
-        .init(name: "JetBrains Mono", file: "JetBrainsMono-Regular.ttf", url: URL(string: "https://raw.githubusercontent.com/JetBrains/JetBrainsMono/master/fonts/ttf/JetBrainsMono-Regular.ttf")!, detail: "Ligatures for code · OFL"),
-        .init(name: "Fira Code", file: "FiraCode-Regular.ttf", url: URL(string: "https://raw.githubusercontent.com/tonsky/FiraCode/master/distr/ttf/FiraCode-Regular.ttf")!, detail: "Ligatures for code · OFL"),
-        .init(name: "Hack", file: "Hack-Regular.ttf", url: URL(string: "https://raw.githubusercontent.com/source-foundry/Hack/master/build/ttf/Hack-Regular.ttf")!, detail: "Based on DejaVu · MIT"),
+        .init(name: "JetBrains Mono", file: "JetBrainsMono-Regular.ttf", url: URL(string: "https://raw.githubusercontent.com/JetBrains/JetBrainsMono/master/fonts/ttf/JetBrainsMono-Regular.ttf")!, detail: "Ligatures for code · OFL", sha256: "e6fd0d7e91550b3ed2b735d4312474362c4716edc4fc0577a0f61ed782d5aed1"),
+        .init(name: "Fira Code", file: "FiraCode-Regular.ttf", url: URL(string: "https://raw.githubusercontent.com/tonsky/FiraCode/f1f97679985487deaa1f7f178f36f4a1a7910154/distr/ttf/FiraCode-Regular.ttf")!, detail: "Ligatures for code · OFL", sha256: "28c3ae21a853f1d74673384c7a0d620abb0e877b8c6cd8b64173a95512476824"),
+        .init(name: "Hack", file: "Hack-Regular.ttf", url: URL(string: "https://raw.githubusercontent.com/source-foundry/Hack/master/build/ttf/Hack-Regular.ttf")!, detail: "Based on DejaVu · MIT", sha256: "15f55cc0c85a2988d2b4b3a8cdb5d77fdfbaf319e1bb5309d725db9818fb7125"),
     ]
 
     struct Installed: Identifiable, Equatable {
@@ -84,9 +89,16 @@ final class TerminalFonts {
             guard (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? true, data.count > 10_000, data.count < 20_000_000 else {
                 throw URLError(.badServerResponse)
             }
+            guard Self.matchesPin(data, for: font) else {
+                throw PhrenKitError.validation("The font failed its integrity check. Nothing was installed.")
+            }
             try data.write(to: Self.directory.appending(path: font.file), options: .atomic)
             registerAll(); selectedFile = font.file
         } catch { self.error = "Couldn't download \(font.name): \(error.localizedDescription)" }
+    }
+
+    static func matchesPin(_ data: Data, for font: Curated) -> Bool {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() == font.sha256
     }
 
     /// A font the user picked in Files, copied in and registered.

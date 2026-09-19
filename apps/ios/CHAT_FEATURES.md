@@ -9,7 +9,7 @@ configured computer's pinned SSH connection. Moshi on the iPhone is optional.
 
 | Capability | Phren behavior | Reference |
 | --- | --- | --- |
-| Existing agent conversation | Exact computer/workspace/tab/pane/provider/session selection; Codex and Claude Code | [Chat View](https://getmoshi.app/docs/chat-view) |
+| Existing agent conversation | Exact computer/workspace/tab/pane/provider/session selection; Codex, Claude Code, and opencode | [Chat View](https://getmoshi.app/docs/chat-view) |
 | Live replies | Foreground WebSocket updates; progressively reveal new words, show waiting/working/finished states, preserve scroll position and drafts on reconnect | [Gateway](https://getmoshi.app/docs/debug-gateway) |
 | Response token counts | Actual provider-reported input/output/cache counts through a restricted SSH reader; updated when recorded by the provider | Phren feature; [setup](README.md#live-token-counts) |
 | Earlier history | Load earlier numbered pages; keep loaded pages on reconnect, with memory bounds | [Chat debugging](https://getmoshi.app/docs/debug-chat-view) |
@@ -21,7 +21,7 @@ configured computer's pinned SSH connection. Moshi on the iPhone is optional.
 | Keyboard send | Command-Return; ordinary Return remains available for multiline text | [Chat controls](https://getmoshi.app/docs/chat-view) |
 | Herdr terminal | Native SwiftTerm terminal over the existing SSH connection; keyboard, Ctrl/Esc/Tab/arrows, resize, reconnect and safe detachment | [Herdr](https://getmoshi.app/docs/herdr) |
 | Herdr management | Discover and select named servers; browse workspaces/tabs/panes; create workspaces, tabs and panes; rename/close workspaces and tabs | [Multiplexer chooser](https://getmoshi.app/docs/debug-multiplexer-chooser) |
-| Approvals and questions | Permission explanation, Open terminal, and persistent Approve/Deny above the composer; single/multiple-choice questions; exact action IDs and stale-request rejection | [Chat controls](https://getmoshi.app/docs/chat-view) |
+| Approvals and questions | Permission explanation, Open terminal, and persistent Approve/Deny above the composer; single/multiple-choice questions; Claude Code's AskUserQuestion shown as choice cards (options with descriptions, multi-select, a typed "Other…", Skip) and answered inside the approval's `updatedInput`; exact action IDs and stale-request rejection | [Chat controls](https://getmoshi.app/docs/chat-view) |
 | Permission Live Activity | Requests received in chat can show Lock Screen and Dynamic Island actions; authenticate and open Phren to send the exact answer over SSH; expires with the helper request | Phren feature |
 | Historical images | Fetch original image bytes by conversation, JSONL line and original content block; bounded cache and downsampled preview | [Chat debugging](https://getmoshi.app/docs/debug-chat-view) |
 | Repository diffs | Fresh pane directory, independent diff session, changed-file list and colored patch text; read-only | [Diff Viewer](https://getmoshi.app/docs/diff-viewer) |
