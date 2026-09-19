@@ -81,8 +81,11 @@ struct SessionSubagentsCard: View {
             }
         }
         .task(id: session.id) {
-            if let snapshot = try? await SessionSubagentSnapshot.load(session) {
-                target = snapshot.target; agents = snapshot.agents
+            while !Task.isCancelled {
+                if let snapshot = try? await SessionSubagentSnapshot.load(session) {
+                    target = snapshot.target; agents = snapshot.agents
+                }
+                try? await Task.sleep(for: .seconds(10))
             }
         }
     }

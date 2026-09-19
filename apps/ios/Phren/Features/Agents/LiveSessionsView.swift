@@ -811,15 +811,18 @@ private struct LiveSessionCard: View, Equatable {
         .sheet(isPresented: $showingChildAgents) {
             if let childTarget { ChatSubagentsView(session: session, target: childTarget, agents: childAgents) }
         }
-        .task(id: "\(session.id):\(session.tab.status):\(session.tab.lastChangedAt?.timeIntervalSince1970 ?? 0)") {
-            do {
-                if let snapshot = try await SessionSubagentSnapshot.load(session) {
-                    childTarget = snapshot.target; childAgents = snapshot.agents
-                } else {
-                    childTarget = nil; childAgents = []
+        .task(id: session.id) {
+            while !Task.isCancelled {
+                do {
+                    if let snapshot = try await SessionSubagentSnapshot.load(session) {
+                        childTarget = snapshot.target; childAgents = snapshot.agents
+                    } else {
+                        childTarget = nil; childAgents = []
+                    }
+                } catch {
+                    if !Task.isCancelled { childTarget = nil; childAgents = [] }
                 }
-            } catch {
-                if !Task.isCancelled { childTarget = nil; childAgents = [] }
+                try? await Task.sleep(for: .seconds(10))
             }
         }
     }
