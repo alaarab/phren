@@ -67,6 +67,8 @@ WebSockets on the same socket.
 | `POST /v1/workspaces/launch` | Create a workspace/tab and start the selected agent. |
 | `POST /v1/workspaces/create`, `/focus`, `/rename`, `/close` | Existing workspace actions. Creation uses the same launch admission limits. |
 | `GET /v1/projects/locate` | Existing project candidates from activity, Herdr, store registration and local search roots. |
+| `GET /v1/projects/repos` | Git checkouts on this computer for "Add project" — activity, Herdr, then one level under the project roots — each marked whether phren already tracks it. |
+| `POST /v1/projects/add` | Enroll a checkout (`directory`) or clone a GitHub URL (`cloneUrl`) into the projects folder first, then `phren add`; commits and pushes the store when it has a remote. Uses the launch admission limits. |
 | `GET /v1/activity`, `/v1/usage` | Activity metadata and agent-reported account limits. |
 | `WS /v1/transcripts`, `/v1/status` | Bounded transcript backlog/tail/history and live status. |
 | `GET /v1/transcripts/history`, `/v1/transcripts/blob` | Target-bound older rows and separately requested original embedded images. |

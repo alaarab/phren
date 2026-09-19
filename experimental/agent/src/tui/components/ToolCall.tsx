@@ -33,10 +33,12 @@ export function ToolCall({ name, input, output, isError, durationMs, diffRendere
     <Box>
       <Text color={statusColor}>{isError ? "\u2717" : "\u25c7"} </Text>
       <Text bold color={nameColor}>{name}</Text>
-      {preview ? <Text color={previewColor}>({preview})</Text> : null}
+      {preview ? <Text color={previewColor}> ({preview})</Text> : null}
       <Text color={durationColor} dimColor>  {dur}</Text>
     </Box>
   );
+
+  const bodyColor = isError ? "red" : outputColor;
 
   if (!verbose) {
     const previewLine = output.split("\n").find((line) => line.trim())?.slice(0, 120);
@@ -46,7 +48,7 @@ export function ToolCall({ name, input, output, isError, durationMs, diffRendere
         {diffRendered
           ? <Text>{"  \u23bf  "}{diffRendered}</Text>
           : previewLine
-            ? <Text color={outputColor} dimColor>{"  \u23bf  "}{previewLine}</Text>
+            ? <Text color={bodyColor} dimColor={!isError}>{"  \u23bf  "}{previewLine}</Text>
             : null}
       </Box>
     );
@@ -69,10 +71,10 @@ export function ToolCall({ name, input, output, isError, durationMs, diffRendere
       ) : (
         <>
           {shown.map((line, i) => (
-            <Text key={i} color={outputColor} dimColor>{i === 0 ? "  \u23bf  " : "     "}{line.slice(0, 120)}</Text>
+            <Text key={i} color={bodyColor} dimColor={!isError}>{i === 0 ? "  \u23bf  " : "     "}{line.slice(0, 120)}</Text>
           ))}
           {!expanded && overflow > 0 && (
-            <Text color={outputColor} dimColor>{"     \u2026 +"}{overflow}{" lines (ctrl+o to expand)"}</Text>
+            <Text color={bodyColor} dimColor={!isError}>{"     \u2026 +"}{overflow}{" lines (ctrl+o to expand)"}</Text>
           )}
         </>
       )}
