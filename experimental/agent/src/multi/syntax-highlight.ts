@@ -42,6 +42,8 @@ export type SyntaxColors = {
   type: string;
   variable: string;
   operator: string;
+  function?: string;
+  punctuation?: string;
   reset: string;
 };
 
@@ -53,11 +55,18 @@ type Highlighter = (line: string, colors?: SyntaxColors) => string;
 function colorize(line: string, rules: [RegExp, string][], resetSeq = RESET): string {
   // We process rules sequentially; each rule operates on uncolored segments only.
   // Segments already colored are wrapped in \x1b and end with RESET.
+  const tokens: string[] = [];
   let result = line;
   for (const [re, color] of rules) {
-    result = result.replace(re, (match) => `${color}${match}${resetSeq}`);
+    result = result.replace(re, (match) => {
+      const token = `\uE000${String.fromCharCode(0xE100 + tokens.length)}\uE001`;
+      tokens.push(`${color}${match}${resetSeq}`);
+      return token;
+    });
   }
-  return result;
+  return result.replace(/\uE000([\uE100-\uF8FF])\uE001/g, (_match, ch: string) => {
+    return tokens[ch.charCodeAt(0) - 0xE100] ?? "";
+  });
 }
 
 // ── TypeScript / JavaScript ─────────────────────────────────────────
@@ -87,9 +96,13 @@ function highlightTSCode(line: string, colors?: SyntaxColors): string {
   return colorize(line, [
     [/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`/g, colors?.string ?? GREEN],   // strings
     [/\b\d+(\.\d+)?\b/g, colors?.number ?? YELLOW],                                         // numbers
-    [TS_KEYWORDS, colors?.keyword ?? MAGENTA],                                               // keywords
+    [/(?<=\bfunction\s+)[A-Za-z_$][\w$]*/g, colors?.function ?? colors?.type ?? CYAN],
+    [/(?<=\.)[A-Za-z_$][\w$]*(?=\s*\()/g, colors?.function ?? colors?.type ?? CYAN],
     [/(?<=[:]\s*)\b[A-Z]\w*/g, colors?.type ?? CYAN],                                       // types after :
     [/(?<=\bas\s+)\b[A-Z]\w*/g, colors?.type ?? CYAN],                                      // types after as
+    [TS_KEYWORDS, colors?.keyword ?? MAGENTA],                                               // keywords
+    [/[{}()[\]]/g, colors?.punctuation ?? colors?.type ?? CYAN],
+    [/[+\-*/%=<>!&|^~?]+/g, colors?.operator ?? CYAN],
   ], rst);
 }
 
@@ -120,7 +133,11 @@ function highlightPYCode(line: string, colors?: SyntaxColors): string {
   return colorize(line, [
     [/""".*?"""|'''.*?'''|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, colors?.string ?? GREEN],  // strings
     [/\b\d+(\.\d+)?\b/g, colors?.number ?? YELLOW],                                         // numbers
+    [/(?<=\bdef\s+)[A-Za-z_]\w*/g, colors?.function ?? colors?.type ?? CYAN],
+    [/(?<=\.)[A-Za-z_]\w*(?=\s*\()/g, colors?.function ?? colors?.type ?? CYAN],
     [PY_KEYWORDS, colors?.keyword ?? MAGENTA],                                               // keywords
+    [/[{}()[\]]/g, colors?.punctuation ?? colors?.type ?? CYAN],
+    [/[+\-*/%=<>!&|^~@]+/g, colors?.operator ?? CYAN],
   ], rst);
 }
 
@@ -149,7 +166,9 @@ function highlightBashCode(line: string, colors?: SyntaxColors): string {
     [/\$\{?\w+\}?/g, colors?.variable ?? CYAN],                // variables
     [/\b\d+\b/g, colors?.number ?? YELLOW],                    // numbers
     [BASH_KEYWORDS, colors?.keyword ?? MAGENTA],               // keywords
-    [/(?<=\|\s*)\w+/g, BOLD],                                  // commands after pipe
+    [/(?<=\|\s*)\w+/g, colors?.function ?? BOLD],              // commands after pipe
+    [/[{}()[\]]/g, colors?.punctuation ?? colors?.type ?? CYAN],
+    [/[|&<>]+/g, colors?.operator ?? CYAN],
   ], rst);
 }
 
@@ -162,6 +181,7 @@ const jsonHighlight: Highlighter = (line, colors) => {
     [/:\s*"[^"]*"/g, colors?.string ?? GREEN],                             // string values
     [/\b\d+(\.\d+)?([eE][+-]?\d+)?\b/g, colors?.number ?? YELLOW],        // numbers
     [/\b(true|false|null)\b/g, colors?.keyword ?? MAGENTA],                // literals
+    [/[{}[\],:]/g, colors?.punctuation ?? colors?.type ?? CYAN],
   ], rst);
 };
 
@@ -198,6 +218,9 @@ const genericHighlight: Highlighter = (line, colors) => {
     [/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, colors?.string ?? GREEN],   // strings
     [/\/\/.*$|#.*$/g, colors?.comment ?? GRAY],                           // comments
     [/\b\d+(\.\d+)?\b/g, colors?.number ?? YELLOW],                      // numbers
+    [/(?<=\.)[A-Za-z_$][\w$]*(?=\s*\()/g, colors?.function ?? colors?.type ?? CYAN],
+    [/[{}()[\]]/g, colors?.punctuation ?? colors?.type ?? CYAN],
+    [/[+\-*/%=<>!&|^~?]+/g, colors?.operator ?? CYAN],
   ], rst);
 };
 

@@ -1,6 +1,7 @@
 import type { LlmProvider, LlmMessage, AgentToolDef, LlmResponse, ContentBlock, StreamDelta } from "./types.js";
 import { toolResultText } from "./types.js";
 import { stripForeignReasoning, IMAGE_OMITTED_MARKER } from "./history.js";
+import { lookupContextWindow } from "../models.js";
 
 const PROVIDER_NAME = "ollama";
 
@@ -47,7 +48,7 @@ function toOllamaMessages(system: string, messages: LlmMessage[]) {
 
 export class OllamaProvider implements LlmProvider {
   name = PROVIDER_NAME;
-  contextWindow = 32_000;
+  contextWindow: number;
   maxOutputTokens: number;
   private baseUrl: string;
   model: string;
@@ -56,6 +57,7 @@ export class OllamaProvider implements LlmProvider {
     this.baseUrl = baseUrl ?? "http://localhost:11434";
     this.model = model ?? "qwen2.5-coder:14b";
     this.maxOutputTokens = maxOutputTokens ?? 8192;
+    this.contextWindow = lookupContextWindow(this.model, this.name);
   }
 
   /** Thinking models (deepseek-r1 etc.) need think:true to separate reasoning from answer. */
@@ -63,7 +65,7 @@ export class OllamaProvider implements LlmProvider {
     return /deepseek-r1|qwen3|gpt-oss/i.test(this.model);
   }
 
-  async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[]): Promise<LlmResponse> {
+  async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[], signal?: AbortSignal): Promise<LlmResponse> {
     const body: Record<string, unknown> = {
       model: this.model,
       messages: toOllamaMessages(system, messages),
@@ -77,6 +79,7 @@ export class OllamaProvider implements LlmProvider {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal,
     });
 
     if (!res.ok) {
@@ -113,7 +116,7 @@ export class OllamaProvider implements LlmProvider {
     return { content, stop_reason };
   }
 
-  async *chatStream(system: string, messages: LlmMessage[], tools: AgentToolDef[]): AsyncIterable<StreamDelta> {
+  async *chatStream(system: string, messages: LlmMessage[], tools: AgentToolDef[], signal?: AbortSignal): AsyncIterable<StreamDelta> {
     const body: Record<string, unknown> = {
       model: this.model,
       messages: toOllamaMessages(system, messages),
@@ -127,6 +130,7 @@ export class OllamaProvider implements LlmProvider {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal,
     });
 
     if (!res.ok) {

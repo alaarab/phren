@@ -6,10 +6,18 @@ import { ToolSpinner } from "./ToolSpinner.js";
 import { ThinkingIndicator } from "./ThinkingIndicator.js";
 import { SteerQueue } from "./SteerQueue.js";
 import { InputArea, PermissionsLine, type AgentTab } from "./InputArea.js";
+import { StatusBar } from "./StatusBar.js";
+import { ApprovalPanel, type ApprovalInfo } from "./ApprovalPanel.js";
+import { ModelPicker, type ModelPickerState } from "./ModelPicker.js";
+import { ToolDetail, type ToolDetailState } from "./ToolDetail.js";
+import { PlanReview } from "./PlanReview.js";
 import type { PermissionMode } from "../../permissions/types.js";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts.js";
 import type { Theme } from "../themes.js";
 import { renderMarkdown } from "../../multi/markdown.js";
+import { getPlan } from "../../tools/update-plan.js";
+import { COMMAND_NAMES } from "../../commands.js";
+import * as fs from "node:fs";
 import { useSearch, highlightMatches } from "../hooks/useSearch.js";
 
 // ── Message types for Static history ─────────────────────────────────────────
@@ -52,6 +60,7 @@ export interface AppState {
   version: string;
   model?: string;
   contextWindow?: number;
+  contextTokens?: number;
   reasoningEffort?: string;
 }
 
@@ -90,6 +99,21 @@ export interface AppProps {
   onSelectAgent?: (agentId: string | null) => void;
   /** Callback when user presses Esc to cancel agent work */
   onCancelAgent?: () => void;
+  /** Pending permission request to show as an approval panel. */
+  approval?: ApprovalInfo | null;
+  /** Open model picker overlay. */
+  modelPicker?: ModelPickerState | null;
+  onModelPickerMove?: (delta: number) => void;
+  onModelPickerReasoning?: (delta: number) => void;
+  onModelPickerSelect?: () => void;
+  onModelPickerCancel?: () => void;
+  /** Ctrl+O with no current-turn tool opens the tool detail overlay. */
+  onInspectTool?: () => void;
+  toolDetail?: ToolDetailState | null;
+  onToolDetailMove?: (delta: number) => void;
+  onToolDetailClose?: () => void;
+  /** Plan text awaiting approve/revise while in plan mode. */
+  planReview?: string | null;
 }
 
 export function App({
@@ -117,6 +141,17 @@ export function App({
   selectedAgentId,
   onSelectAgent,
   onCancelAgent,
+  approval,
+  modelPicker,
+  onModelPickerMove,
+  onModelPickerReasoning,
+  onModelPickerSelect,
+  onModelPickerCancel,
+  onInspectTool,
+  toolDetail,
+  onToolDetailMove,
+  onToolDetailClose,
+  planReview,
 }: AppProps) {
   const { exit } = useApp();
   const [inputValue, setInputValue] = useState("");
@@ -131,9 +166,29 @@ export function App({
   const [historySearchQuery, setHistorySearchQuery] = useState("");
   const [historySearchIndex, setHistorySearchIndex] = useState(0);
   const [expandedTools, setExpandedTools] = useState<Set<number>>(new Set());
+  const [completionIndex, setCompletionIndex] = useState(0);
 
   // ── Ctrl+F content search ────────────────────────────────────────────────
   const search = useSearch();
+
+  // Slash-command and @file completion candidates for the current input.
+  const completions = (() => {
+    if (inputValue.startsWith("/") && !/\s/.test(inputValue)) {
+      return COMMAND_NAMES.filter((name) => name.startsWith(inputValue) && name !== inputValue).slice(0, 8);
+    }
+    const match = inputValue.match(/(?:^|\s)@([^\s@]*)$/);
+    if (!match) return [];
+    const partial = match[1];
+    const tokenStart = inputValue.length - partial.length - 1;
+    try {
+      return fs.readdirSync(process.cwd())
+        .filter((entry) => entry.startsWith(partial))
+        .slice(0, 8)
+        .map((entry) => `${inputValue.slice(0, tokenStart)}@${entry}`);
+    } catch { return []; }
+  })();
+
+  useEffect(() => { setCompletionIndex(0); }, [inputValue]);
 
   // When the query changes, recompute total match count across all completed messages
   useEffect(() => {
@@ -289,18 +344,21 @@ export function App({
       search.activate();
     },
     onExpandTool: () => {
-      const lastIndex = completedToolCalls.length - 1;
-      if (lastIndex < 0) return;
-      setExpandedTools((prev) => {
-        const next = new Set(prev);
-        if (next.has(lastIndex)) {
-          next.delete(lastIndex);
-        } else {
-          next.add(lastIndex);
-        }
-        return next;
-      });
-      onExpandTool?.();
+      if (completedToolCalls.length > 0) {
+        const lastIndex = completedToolCalls.length - 1;
+        setExpandedTools((prev) => {
+          const next = new Set(prev);
+          if (next.has(lastIndex)) {
+            next.delete(lastIndex);
+          } else {
+            next.add(lastIndex);
+          }
+          return next;
+        });
+        onExpandTool?.();
+        return;
+      }
+      onInspectTool?.();
     },
     onOpenEditor: () => {
       // Write input to temp file, open $EDITOR, read back
@@ -337,6 +395,15 @@ export function App({
       onSelectAgent?.(nextId === "__main__" ? null : nextId);
     } : undefined,
     onToggleTaskList: () => setShowTaskList(v => !v),
+    enabled: !modelPicker && !toolDetail,
+    completionOpen: completions.length > 0,
+    completionCount: completions.length,
+    onCompletionMove: (delta) => setCompletionIndex((i) => (i + delta + completions.length) % completions.length),
+    onCompletionAccept: () => {
+      if (completions.length === 0) return;
+      setInputValue(completions[completionIndex % completions.length]);
+      setCompletionIndex(0);
+    },
   });
 
   // Helper: apply search highlighting to a text string (ANSI only works in
@@ -440,13 +507,22 @@ export function App({
       {/* Steer queue display */}
       <SteerQueue items={steerQueue} theme={theme} />
 
-        {/* Task list (Ctrl+T) */}
-        {showTaskList && (
-          <Box flexDirection="column" marginTop={1}>
-            <Text dimColor>{"  "}Tasks: (ctrl+t to hide)</Text>
-            <Text dimColor>{"  "}No shared task list in this session.</Text>
-          </Box>
-        )}
+        {/* Plan (ctrl+t) */}
+        {showTaskList && (() => {
+          const plan = getPlan();
+          return (
+            <Box flexDirection="column" marginTop={1}>
+              <Text dimColor>{"  "}Plan (ctrl+t to hide)</Text>
+              {plan.length === 0
+                ? <Text dimColor>{"  "}No plan yet.</Text>
+                : plan.map((item, i) => (
+                    <Text key={i} color={item.status === "completed" ? "green" : item.status === "in_progress" ? "yellow" : undefined} dimColor={item.status === "completed"}>
+                      {"  "}{item.status === "completed" ? "\u2713" : item.status === "in_progress" ? "\u25cf" : "\u25cb"} {item.content}
+                    </Text>
+                  ))}
+            </Box>
+          );
+        })()}
 
         {/* Content search bar (Ctrl+F) */}
         {search.state.active && (
@@ -480,12 +556,53 @@ export function App({
         )}
 
         {/* Input + permissions */}
+        {planReview !== null && planReview !== undefined ? <PlanReview text={planReview} theme={theme} /> : null}
+        {toolDetail ? (
+          <ToolDetail
+            detail={toolDetail}
+            theme={theme}
+            onMove={onToolDetailMove ?? (() => {})}
+            onClose={onToolDetailClose ?? (() => {})}
+          />
+        ) : null}
+        {modelPicker ? (
+          <ModelPicker
+            state={modelPicker}
+            theme={theme}
+            onMove={onModelPickerMove ?? (() => {})}
+            onReasoning={onModelPickerReasoning ?? (() => {})}
+            onSelect={onModelPickerSelect ?? (() => {})}
+            onCancel={onModelPickerCancel ?? (() => {})}
+          />
+        ) : null}
+        {completions.length > 0 && (
+          <Box flexDirection="column" paddingLeft={2}>
+            {completions.map((candidate, i) => (
+              <Text key={candidate} color={i === completionIndex ? theme.statusBar.accent : undefined} dimColor={i !== completionIndex}>
+                {i === completionIndex ? "\u25b8 " : "  "}{candidate}
+              </Text>
+            ))}
+          </Box>
+        )}
+        {approval ? <ApprovalPanel info={approval} theme={theme} /> : null}
+        <StatusBar
+          provider={state.provider}
+          model={state.model}
+          project={state.project}
+          turns={state.turns}
+          cost={state.cost}
+          contextTokens={state.contextTokens}
+          contextLimit={state.contextWindow}
+          reasoningEffort={state.reasoningEffort}
+          theme={theme}
+        />
         <InputArea
           value={inputValue}
           onChange={setInputValue}
           onSubmit={handleSubmit}
           bashMode={bashMode}
-          focus={!isAnyModeActive}
+          focus={!isAnyModeActive && !modelPicker && !toolDetail}
+          completionOpen={completions.length > 0}
           separatorColor={theme.separator}
           theme={theme}
         />

@@ -96,6 +96,7 @@
   },
   "files": [
     "dist",
+    "plugins",
     "starter",
     "skills",
     "scripts/preuninstall.mjs"

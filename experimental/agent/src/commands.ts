@@ -7,10 +7,11 @@ import type { AgentSpawner } from "./multi/spawner.js";
 import type { PickerResult } from "./multi/model-picker.js";
 import type { PhrenContext } from "./memory/context.js";
 import type { ReasoningEffort } from "./models.js";
+import type { CostTracker } from "./cost.js";
 
 // Sub-module handlers
 import { helpCommand, turnsCommand, clearCommand, cwdCommand, filesCommand, costCommand, planCommand, undoCommand, contextCommand } from "./commands/info.js";
-import { sessionCommand, historyCommand, compactCommand, diffCommand, gitCommand, resumeCommand } from "./commands/session.js";
+import { sessionCommand, historyCommand, compactCommand, diffCommand, gitCommand, resumeCommand, rewindCommand } from "./commands/session.js";
 import { memCommand, askCommand } from "./commands/memory.js";
 import { reviewCommand } from "./commands/review.js";
 import { findSkill, getScopedSkills } from "@phren/cli/skill/registry";
@@ -18,13 +19,14 @@ import { modelCommand, providerCommand, presetCommand } from "./commands/model.j
 import { configCommand } from "./commands/config.js";
 import type { PermissionMode, PermissionConfig } from "./permissions/types.js";
 import { loadInputMode, saveInputMode, savePermissionMode } from "./settings.js";
+import { addAllow } from "./permissions/allowlist.js";
 
 const DIM = "\x1b[2m";
 const RESET = "\x1b[0m";
 
 export interface CommandContext {
   session: AgentSession;
-  costTracker?: { totalCost: number; inputTokens: number; outputTokens: number };
+  costTracker?: CostTracker | null;
   contextLimit: number;
   undoStack: LlmMessage[][];
   spawner?: AgentSpawner;
@@ -36,6 +38,8 @@ export interface CommandContext {
   currentReasoning?: ReasoningEffort | null;
   /** Callback when model/reasoning changes */
   onModelChange?: (result: PickerResult) => void;
+  /** Open the host UI's interactive model picker. */
+  pickModel?: () => Promise<PickerResult | null>;
   /** LLM provider for /ask side-channel queries */
   provider?: LlmProvider;
   /** System prompt for /ask queries */
@@ -50,6 +54,8 @@ export interface CommandContext {
   phrenCtx?: PhrenContext | null;
   /** Tool registry for /permissions command */
   registry?: { permissionConfig: PermissionConfig; setPermissions: (cfg: PermissionConfig) => void };
+  /** Fork the session at the current point into a new durable log. */
+  forkSession?: () => { ok: boolean; sessionId?: string; message: string };
 }
 
 export function createCommandContext(session: AgentSession, contextLimit: number): CommandContext {
@@ -68,7 +74,8 @@ export const COMMAND_NAMES: readonly string[] = [
   "/help", "/turns", "/clear", "/cwd", "/files", "/cost", "/plan", "/undo",
   "/context", "/model", "/provider", "/preset", "/session", "/history",
   "/compact", "/diff", "/git", "/mem", "/ask", "/resume", "/review", "/config", "/spawn", "/agents",
-  "/mode", "/permissions", "/verbose", "/theme", "/agent",
+  "/allow",
+  "/mode", "/permissions", "/verbose", "/theme", "/agent", "/rewind", "/fork",
   "/exit", "/quit", "/q",
 ];
 
@@ -133,6 +140,17 @@ export function handleCommand(input: string, ctx: CommandContext): boolean | Pro
     case "/resume":   return resumeCommand(parts, ctx);
     case "/review":   return reviewCommand(parts, ctx);
     case "/config":   return configCommand(parts, ctx);
+    case "/rewind":   return rewindCommand(parts, ctx);
+
+    case "/fork": {
+      const result = ctx.forkSession?.();
+      if (!result) {
+        process.stderr.write(`${DIM}Fork is not available here.${RESET}\n`);
+        return true;
+      }
+      process.stderr.write(`${result.ok ? "\x1b[32m" : "\x1b[31m"}${result.message}${RESET}\n`);
+      return true;
+    }
 
     case "/mode": {
       const current = loadInputMode();
@@ -157,18 +175,73 @@ export function handleCommand(input: string, ctx: CommandContext): boolean | Pro
       return true;
     }
 
+    case "/allow": {
+      const toolName = parts[1];
+      if (!toolName) {
+        process.stderr.write(`${DIM}Usage: /allow <tool> [pattern] [--global]${RESET}\n`);
+        return true;
+      }
+      const global = parts.includes("--global");
+      const pattern = parts.slice(2).find((p) => p !== "--global");
+      if (toolName === "shell" && !pattern) {
+        process.stderr.write(`${DIM}shell rules need a command/prefix, e.g. /allow shell git${RESET}\n`);
+        return true;
+      }
+      const input: Record<string, unknown> = {};
+      if (pattern) {
+        if (toolName === "shell") input.command = pattern;
+        else input.path = pattern;
+      }
+      const scope = global ? "global" : "project";
+      addAllow(toolName, input, scope, process.cwd());
+      process.stderr.write(`${DIM}Allowed ${toolName}${pattern ? ` (${pattern})` : ""} [${scope}]${RESET}\n`);
+      return true;
+    }
+
     case "/spawn": {
       if (!ctx.spawner) {
         process.stderr.write(`${DIM}Spawner not available. Start with --multi or --team to enable.${RESET}\n`);
         return true;
       }
-      const spawnName = parts[1];
-      const spawnTask = parts.slice(2).join(" ");
+      const rest = parts.slice(1);
+      const spawnName = rest[0];
+      let isolation: "worktree" | undefined;
+      let agentType: string | undefined;
+      let provider: string | undefined;
+      let model: string | undefined;
+      let permissions: PermissionMode | undefined;
+      const taskParts: string[] = [];
+      const VALID_MODES: PermissionMode[] = ["suggest", "auto-confirm", "plan", "full-auto"];
+      for (let i = 1; i < rest.length; i++) {
+        const token = rest[i];
+        if (token === "--worktree") { isolation = "worktree"; }
+        else if (token === "--agent" && rest[i + 1]) { agentType = rest[++i]; }
+        else if (token === "--provider" && rest[i + 1]) { provider = rest[++i]; }
+        else if (token === "--model" && rest[i + 1]) { model = rest[++i]; }
+        else if (token === "--permissions" && rest[i + 1]) {
+          const mode = rest[++i] as PermissionMode;
+          if (VALID_MODES.includes(mode)) permissions = mode;
+        }
+        else { taskParts.push(token); }
+      }
+      const spawnTask = taskParts.join(" ");
       if (!spawnName || !spawnTask) {
-        process.stderr.write(`${DIM}Usage: /spawn <name> <task>${RESET}\n`);
+        process.stderr.write(`${DIM}Usage: /spawn <name> <task> [--worktree] [--agent <type>] [--provider <p>] [--model <m>] [--permissions <mode>]${RESET}\n`);
         return true;
       }
-      const agentId = ctx.spawner.spawn({ task: spawnTask, cwd: process.cwd() });
+      const perms = ctx.registry?.permissionConfig;
+      const agentId = ctx.spawner.spawn({
+        task: spawnTask,
+        displayName: spawnName,
+        cwd: perms?.projectRoot ?? process.cwd(),
+        isolation,
+        agentType,
+        provider,
+        model,
+        permissions: permissions ?? perms?.mode,
+        sandboxMode: perms?.sandboxMode,
+        allowedPaths: perms?.allowedPaths,
+      });
       process.stderr.write(`${DIM}Spawned agent "${spawnName}" (${agentId}): ${spawnTask}${RESET}\n`);
       return true;
     }

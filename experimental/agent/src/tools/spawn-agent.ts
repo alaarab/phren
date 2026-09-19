@@ -6,6 +6,7 @@
  */
 import type { AgentTool, AgentToolResult } from "./types.js";
 import type { AgentSpawner } from "../multi/spawner.js";
+import type { PermissionConfig, PermissionMode } from "../permissions/types.js";
 
 export function createSendMessageTool(spawner: AgentSpawner): AgentTool {
   return {
@@ -90,7 +91,12 @@ export function createListAgentsTool(spawner: AgentSpawner): AgentTool {
   };
 }
 
-export function createSpawnAgentTool(spawner: AgentSpawner): AgentTool {
+const VALID_PERMISSION_MODES: PermissionMode[] = ["suggest", "auto-confirm", "plan", "full-auto"];
+
+export function createSpawnAgentTool(
+  spawner: AgentSpawner,
+  getPermissions?: () => PermissionConfig | undefined,
+): AgentTool {
   return {
     name: "spawn_agent",
     // The foreground subagent wait is 300s; without a wider scheduler budget
@@ -120,11 +126,33 @@ export function createSpawnAgentTool(spawner: AgentSpawner): AgentTool {
           type: "boolean",
           description: "If true, spawn as TeamAgent on idle (no task yet, waits for instructions). Implies background=true.",
         },
+        isolation: {
+          type: "string",
+          enum: ["worktree"],
+          description: "Set to 'worktree' to run the child in its own git worktree, isolated from your working tree.",
+        },
+        agent_type: {
+          type: "string",
+          description: "Agent type name (e.g. 'explore', 'plan', 'general') to restrict the child's tools and prompt.",
+        },
+        provider: {
+          type: "string",
+          description: "Override the child's provider (openrouter, anthropic, openai, openai-codex, ollama).",
+        },
+        model: {
+          type: "string",
+          description: "Override the child's model.",
+        },
+        permissions: {
+          type: "string",
+          enum: ["suggest", "auto-confirm", "plan", "full-auto"],
+          description: "Permission mode for the child. Defaults to the parent's current mode.",
+        },
       },
       required: ["name"],
     },
 
-    async execute(input: Record<string, unknown>): Promise<AgentToolResult> {
+    async execute(input: Record<string, unknown>, signal?: AbortSignal): Promise<AgentToolResult> {
       const name = input.name as string;
       const task = (input.task as string) || "";
       const idle = input.idle as boolean;
@@ -133,16 +161,33 @@ export function createSpawnAgentTool(spawner: AgentSpawner): AgentTool {
       if (!name) {
         return { output: "Agent name is required.", is_error: true };
       }
+      if (!spawner.canSpawn()) {
+        return { output: "Maximum subagent depth reached — this agent cannot spawn more children.", is_error: true };
+      }
 
       const agentTask = idle
         ? `You are agent "${name}". You have been spawned on idle. Wait for instructions.`
         : task || `You are agent "${name}". Work on any tasks assigned to you.`;
 
+      const perms = getPermissions?.();
+      const requestedPermissions = input.permissions as PermissionMode | undefined;
+      const permissions = requestedPermissions && VALID_PERMISSION_MODES.includes(requestedPermissions)
+        ? requestedPermissions
+        : perms?.mode;
+      const isolation = input.isolation === "worktree" ? "worktree" as const : undefined;
+
       const agentId = spawner.spawn({
         task: agentTask,
         displayName: name,
-        cwd: process.cwd(),
+        cwd: perms?.projectRoot ?? process.cwd(),
         verbose: false,
+        isolation,
+        agentType: input.agent_type as string | undefined,
+        provider: input.provider as string | undefined,
+        model: input.model as string | undefined,
+        permissions,
+        sandboxMode: perms?.sandboxMode,
+        allowedPaths: perms?.allowedPaths,
       });
 
       // TeamAgent (background): return immediately, agent lives in tab bar
@@ -155,28 +200,52 @@ export function createSpawnAgentTool(spawner: AgentSpawner): AgentTool {
 
       // Subagent (foreground): wait for completion, return result inline
       return new Promise<AgentToolResult>((resolve) => {
-        const onDone = (doneId: string, result: { finalText: string; turns: number; toolCalls: number }) => {
-          if (doneId !== agentId) return;
+        let settled = false;
+        let timer: NodeJS.Timeout | undefined;
+
+        const cleanup = () => {
+          if (timer) clearTimeout(timer);
           spawner.removeListener("done", onDone);
           spawner.removeListener("error", onError);
-          resolve({
+          signal?.removeEventListener("abort", onAbort);
+        };
+        const finish = (result: AgentToolResult) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve(result);
+        };
+
+        const onDone = (doneId: string, result: { finalText: string; turns: number; toolCalls: number }) => {
+          if (doneId !== agentId) return;
+          finish({
             output: result.finalText || `Agent "${name}" completed (${result.turns} turns, ${result.toolCalls} tool calls)`,
           });
         };
         const onError = (errId: string, error: string) => {
           if (errId !== agentId) return;
-          spawner.removeListener("done", onDone);
-          spawner.removeListener("error", onError);
-          resolve({ output: `Agent "${name}" failed: ${error}`, is_error: true });
+          finish({ output: `Agent "${name}" failed: ${error}`, is_error: true });
         };
+        const onAbort = () => {
+          spawner.cancel(agentId);
+          finish({ output: `Agent "${name}" cancelled.`, is_error: true });
+        };
+
         spawner.on("done", onDone);
         spawner.on("error", onError);
 
+        if (signal) {
+          if (signal.aborted) {
+            onAbort();
+            return;
+          }
+          signal.addEventListener("abort", onAbort, { once: true });
+        }
+
         // Timeout after 5 minutes
-        setTimeout(() => {
-          spawner.removeListener("done", onDone);
-          spawner.removeListener("error", onError);
-          resolve({ output: `Agent "${name}" timed out after 5 minutes`, is_error: true });
+        timer = setTimeout(() => {
+          spawner.cancel(agentId);
+          finish({ output: `Agent "${name}" timed out after 5 minutes`, is_error: true });
         }, 300_000);
       });
     },

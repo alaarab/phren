@@ -66,8 +66,15 @@ describe("indexed transcript pages", () => {
   it("does not lose the message that would exceed the page byte budget", async () => {
     await writeFile(file, Array.from({ length: 9 }, (_, i) => row(`${i} ` + "a".repeat(700_000))).join("\n") + "\n");
     const first = await new TranscriptReader(file, "codex").read();
-    const previous = await new TranscriptReader(file, "codex").read(first.startLine);
-    expect([...previous.entries, ...first.entries].map(e => e.line)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+    const entries = [...first.entries];
+    let page = first;
+    while (page.hasMore) {
+      const before = page.startLine;
+      page = await new TranscriptReader(file, "codex").read(before);
+      expect(page.startLine).toBeLessThan(before);
+      entries.unshift(...page.entries);
+    }
+    expect(entries.map(e => e.line)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
   });
 
   it("cancels an indexed read without poisoning later requests", async () => {

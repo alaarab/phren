@@ -92,7 +92,9 @@ not conversation text. See [Phren Hook](phren-hook.md).
 The installer adds `~/Library/LaunchAgents/com.phren.hook.plist` on macOS, or
 `~/.config/systemd/user/phren-hook.service` on Linux. Agent callbacks are merged
 into `~/.codex/hooks.json`, `~/.claude/settings.json`, and
-`~/.copilot/hooks/phren.json`. Recognized `phren-iphone` entries in
+`~/.copilot/hooks/phren.json`. Where an opencode config exists, the installer
+also writes `~/.config/opencode/plugins/phren-transcript.js`, which mirrors
+opencode sessions into the store's `.runtime/sessions`. Recognized `phren-iphone` entries in
 `~/.ssh/authorized_keys` are migrated to the restricted Phren dispatcher with
 PTY support. Other hooks and keys remain intact. Changed settings and key files
 receive sibling `.phren-hook-<timestamp>.bak` backups. Codex requires review of

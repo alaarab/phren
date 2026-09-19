@@ -117,7 +117,7 @@ try {
     entryPoints: [path.join(srcRoot, "bridge/hook-main.ts")],
     outfile: path.join(tempRoot, "bridge-hook.mjs"), bundle: true,
     platform: "node", target: "node20", format: "esm",
-    banner: { js: 'import { createRequire } from "node:module"; const require = createRequire(import.meta.url);' },
+    banner: { js: 'import { createRequire as __phrenCreateRequire } from "node:module"; const require = __phrenCreateRequire(import.meta.url);' },
     external: ["bufferutil", "utf-8-validate"],
     define: {
       PHREN_HOOK_VERSION: JSON.stringify(JSON.parse(fs.readFileSync(path.join(cliRoot, "package.json"), "utf8")).version),

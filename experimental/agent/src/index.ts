@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { parseArgs, printHelp } from "./config.js";
+import { parseArgs, printHelp, resolveStartupPermissions } from "./config.js";
+import { loadPersistentAllowlist } from "./permissions/allowlist.js";
 import { resolveProvider } from "./providers/resolve.js";
 import { ToolRegistry } from "./tools/registry.js";
 import { readFileTool } from "./tools/read-file.js";
@@ -18,6 +19,7 @@ import { createPhrenSearchTool } from "./tools/phren-search.js";
 import { createPhrenFindingTool } from "./tools/phren-finding.js";
 import { createPhrenGetTasksTool, createPhrenCompleteTaskTool } from "./tools/phren-tasks.js";
 import { gitStatusTool, gitDiffTool, gitCommitTool } from "./tools/git.js";
+import { updatePlanTool } from "./tools/update-plan.js";
 import { listMcpResourcesTool, readMcpResourceTool } from "./tools/mcp-resources.js";
 import { buildPhrenContext, buildContextSnippet } from "./memory/context.js";
 import { startSession, endSession, getPriorSummary, saveSessionMessages, loadLastSessionSnapshot, writeSessionNote } from "./memory/session.js";
@@ -121,6 +123,8 @@ export async function runAgentCli(raw: string[]) {
   }
 
   const args = parseArgs(raw);
+  resolveStartupPermissions(args);
+  loadPersistentAllowlist(process.cwd());
 
   if (args.help) { printHelp(); process.exit(0); }
   if (args.version) { console.log(`phren-agent v${VERSION}`); process.exit(0); }
@@ -244,6 +248,7 @@ export async function runAgentCli(raw: string[]) {
   registry.register(gitStatusTool);
   registry.register(gitDiffTool);
   registry.register(gitCommitTool);
+  registry.register(updatePlanTool);
   registry.register(listMcpResourcesTool);
   registry.register(readMcpResourceTool);
 
@@ -335,7 +340,7 @@ export async function runAgentCli(raw: string[]) {
     return undefined;
   };
 
-  const resumedLog = args.resume && !args.interactive && !args.multi && !args.team ? makeResumedLog() : undefined;
+  const resumedLog = args.resume ? makeResumedLog() : undefined;
 
   const agentConfig = {
     provider,
@@ -378,8 +383,8 @@ export async function runAgentCli(raw: string[]) {
       // Ink TUI with spawner — LLM can spawn agents via spawn_agent tool
       const { AgentSpawner } = await import("./multi/spawner.js");
       const { createSpawnAgentTool, createSendMessageTool, createListAgentsTool } = await import("./tools/spawn-agent.js");
-      const spawner = new AgentSpawner();
-      registry.register(createSpawnAgentTool(spawner));
+      const spawner = new AgentSpawner({ costTracker, getPermissionDefaults: () => registry.permissionConfig });
+      registry.register(createSpawnAgentTool(spawner, () => registry.permissionConfig));
       registry.register(createSendMessageTool(spawner));
       registry.register(createListAgentsTool(spawner));
       // Publish this process's agents so a phren graph in another terminal can
@@ -447,8 +452,8 @@ export async function runAgentCli(raw: string[]) {
   if (!args.noSubagents) {
     const { AgentSpawner } = await import("./multi/spawner.js");
     const { createSpawnAgentTool, createSendMessageTool, createListAgentsTool } = await import("./tools/spawn-agent.js");
-    oneShotSpawner = new AgentSpawner();
-    registry.register(createSpawnAgentTool(oneShotSpawner));
+    oneShotSpawner = new AgentSpawner({ costTracker, getPermissionDefaults: () => registry.permissionConfig });
+    registry.register(createSpawnAgentTool(oneShotSpawner, () => registry.permissionConfig));
     registry.register(createSendMessageTool(oneShotSpawner));
     registry.register(createListAgentsTool(oneShotSpawner));
   }

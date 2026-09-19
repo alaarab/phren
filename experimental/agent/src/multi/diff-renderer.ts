@@ -93,7 +93,7 @@ const MAX_FIRST_CHUNK = 20;
 const CONTEXT_LINES = 3;
 const SBS_MAX_OUTPUT_LINES = 40;
 const SBS_COLLAPSE_THRESHOLD = 3;
-const SBS_MIN_WIDTH = 70;
+const SBS_MIN_WIDTH = 100;
 
 /**
  * Render a colored inline diff between old and new file content.
@@ -112,8 +112,9 @@ export function renderInlineDiff(
   newContent: string,
   filePath?: string,
   colors?: DiffColors,
+  width?: number,
 ): string {
-  const termWidth = process.stdout.columns || 80;
+  const termWidth = width ?? (process.stdout.columns || 80);
   if (termWidth >= SBS_MIN_WIDTH) {
     return renderSideBySideDiff(oldContent, newContent, filePath ?? "", termWidth, colors);
   }

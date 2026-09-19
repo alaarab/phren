@@ -10,6 +10,7 @@ import { planPrune } from "../context/pruner.js";
 import { compactWithLlm } from "../context/compactor.js";
 import { renderMarkdown } from "../multi/markdown.js";
 import { saveSessionMessages, loadLastSessionSnapshot } from "../memory/session.js";
+import { listCheckpoints, restoreCheckpoint } from "../checkpoint.js";
 import { execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -250,6 +251,25 @@ export function resumeCommand(_parts: string[], ctx: CommandContext): boolean | 
   process.stderr.write(`${DIM}   Saved: ${snapshot.savedAt}${RESET}\n`);
   process.stderr.write(`${DIM}   Use /history to review. The LLM will see the full prior conversation on your next message.${RESET}\n`);
 
+  return true;
+}
+
+export function rewindCommand(parts: string[], _ctx: CommandContext): boolean {
+  const arg = parts[1];
+  const list = listCheckpoints();
+  if (!arg) {
+    if (list.length === 0) { process.stderr.write(`${DIM}No checkpoints.${RESET}\n`); return true; }
+    const lines = list.map((c, i) => `  ${i + 1}. ${c.label}  ${c.createdAt.slice(0, 19).replace("T", " ")}`).join("\n");
+    process.stderr.write(`${DIM}Checkpoints (newest first):\n${lines}\n  /rewind <n> to restore${RESET}\n`);
+    return true;
+  }
+  const index = Number(arg);
+  const target = Number.isInteger(index) && index >= 1 && index <= list.length
+    ? list[index - 1]
+    : list.find((c) => c.ref === arg || c.label === arg);
+  if (!target) { process.stderr.write(`${RED}No checkpoint "${arg}".${RESET}\n`); return true; }
+  const result = restoreCheckpoint(process.cwd(), target.ref);
+  process.stderr.write(`${result.ok ? GREEN : RED}${result.message}${RESET}\n`);
   return true;
 }
 

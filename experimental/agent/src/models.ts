@@ -137,6 +137,27 @@ const BUILTIN_MODELS: Record<ProviderId, ModelCatalogEntry[]> = {
       pricing: { inputPer1M: 0.15, outputPer1M: 0.6 },
     },
     {
+      id: "deepseek/deepseek-v4.1-flash",
+      vision: true,
+      provider: "openrouter",
+      label: "DeepSeek V4.1 Flash",
+      contextWindow: 1_000_000,
+      maxOutputTokens: 65_536,
+      reasoningDefault: "medium",
+      reasoningRange: ["low", "medium", "high"],
+      pricing: { inputPer1M: 0.15, outputPer1M: 0.6 },
+    },
+    {
+      id: "deepseek/deepseek-v4-pro",
+      provider: "openrouter",
+      label: "DeepSeek V4 Pro",
+      contextWindow: 1_000_000,
+      maxOutputTokens: 65_536,
+      reasoningDefault: "medium",
+      reasoningRange: ["low", "medium", "high"],
+      pricing: { inputPer1M: 1.6, outputPer1M: 3.2 },
+    },
+    {
       id: "deepseek/deepseek-r1",
       provider: "openrouter",
       label: "DeepSeek R1",
@@ -324,9 +345,31 @@ const LEGACY_OUTPUT_LIMITS: Array<[string, number]> = [
   ["o3", 100_000],
   ["o4-mini", 100_000],
   ["gemini-2.5", 8_192],
+  ["deepseek-v4", 65_536],
   ["deepseek", 8_192],
   ["llama-4", 8_192],
   ["qwen", 8_192],
+];
+
+const LEGACY_CONTEXT_LIMITS: Array<[string, number]> = [
+  ["claude-fable-5", 1_000_000],
+  ["claude-opus-5", 1_000_000],
+  ["claude-sonnet-5", 1_000_000],
+  ["claude-opus-4", 200_000],
+  ["claude-sonnet-4", 200_000],
+  ["claude-haiku-4", 200_000],
+  ["claude-3", 200_000],
+  ["gpt-5", 400_000],
+  ["gpt-4.1", 1_000_000],
+  ["gpt-4o", 128_000],
+  ["gpt-4", 128_000],
+  ["o3", 200_000],
+  ["o4-mini", 200_000],
+  ["gemini", 1_000_000],
+  ["deepseek", 128_000],
+  ["llama", 128_000],
+  ["qwen", 128_000],
+  ["mistral", 32_000],
 ];
 
 const LEGACY_PRICING: Array<[string, ModelPricing]> = [
@@ -356,6 +399,9 @@ const LEGACY_PRICING: Array<[string, ModelPricing]> = [
   ["openai/gpt-4o", { inputPer1M: 2.5, outputPer1M: 10 }],
   ["google/gemini-2.5-pro", { inputPer1M: 1.25, outputPer1M: 10 }],
   ["google/gemini-2.5-flash", { inputPer1M: 0.15, outputPer1M: 0.6 }],
+  ["deepseek/deepseek-v4.1-flash", { inputPer1M: 0.15, outputPer1M: 0.6 }],
+  ["deepseek/deepseek-v4-flash", { inputPer1M: 0.05, outputPer1M: 0.1 }],
+  ["deepseek/deepseek-v4-pro", { inputPer1M: 1.6, outputPer1M: 3.2 }],
   ["deepseek/deepseek-r1", { inputPer1M: 0.55, outputPer1M: 2.19 }],
   ["deepseek/deepseek-v3", { inputPer1M: 0.27, outputPer1M: 1.1 }],
   ["deepseek-r1", { inputPer1M: 0.55, outputPer1M: 2.19 }],
@@ -368,6 +414,7 @@ const LEGACY_PRICING: Array<[string, ModelPricing]> = [
 ];
 
 LEGACY_OUTPUT_LIMITS.sort((a, b) => b[0].length - a[0].length);
+LEGACY_CONTEXT_LIMITS.sort((a, b) => b[0].length - a[0].length);
 LEGACY_PRICING.sort((a, b) => b[0].length - a[0].length);
 
 export function normalizeProviderId(provider: string | undefined): ProviderId | undefined {
@@ -443,6 +490,17 @@ export function lookupMaxOutputTokens(model: string, provider?: string): number 
     if (lower.startsWith(prefix)) return limit;
   }
   return 8_192;
+}
+
+export function lookupContextWindow(model: string, provider?: string): number {
+  const metadata = getModelMetadata(provider, model);
+  if (metadata) return metadata.contextWindow;
+
+  const lower = model.toLowerCase();
+  for (const [prefix, limit] of LEGACY_CONTEXT_LIMITS) {
+    if (lower.startsWith(prefix)) return limit;
+  }
+  return 200_000;
 }
 
 export function lookupPricing(model: string, provider?: string): { pricing: ModelPricing; metered: boolean } {

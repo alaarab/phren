@@ -10,6 +10,8 @@ export interface PhrenInputProps {
   onSubmit: (value: string) => void;
   placeholder?: string;
   focus?: boolean;
+  /** A completion menu is open; leave Up/Down/Tab to the shortcut hook. */
+  completionOpen?: boolean;
 }
 
 /** Map a flat cursor offset to { line, col } within a multi-line string. */
@@ -42,7 +44,7 @@ function posToOffset(lines: string[], line: number, col: number): number {
  * Replaces ink-text-input to enable cursor positioning, word jump,
  * kill-line, Shift+Enter multi-line, and other readline-style keybindings.
  */
-export function PhrenInput({ value, onChange, onSubmit, placeholder, focus = true }: PhrenInputProps) {
+export function PhrenInput({ value, onChange, onSubmit, placeholder, focus = true, completionOpen = false }: PhrenInputProps) {
   const [cursor, setCursor] = useState(value.length);
 
   // Keep cursor within bounds when value changes externally
@@ -55,6 +57,8 @@ export function PhrenInput({ value, onChange, onSubmit, placeholder, focus = tru
 
   useInput(
     (input, key) => {
+      if (completionOpen && (key.upArrow || key.downArrow || (key.tab && !key.shift))) return;
+
       // Bracketed paste: strip \x1b[200~ (start) and \x1b[201~ (end) markers.
       // If markers are present, insert the cleaned text at cursor as a single paste.
       const PASTE_START = "\x1b[200~";

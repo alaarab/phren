@@ -43,6 +43,9 @@ No extra request per iPhone row is needed.
   The experimental phren-agent is wired the same way (its `.runtime/sessions`
   event log is the transcript, and it reports SessionStart/UserPromptSubmit/Stop
   to the Hook itself) and switches on once Herdr reports the `phren` agent kind.
+  opencode is supported too: its session ids are `ses_…`, identity comes from
+  Herdr's opencode integration, and a Phren-installed opencode plugin mirrors the
+  session into the same `.runtime/sessions` event log.
 - Chat history, incremental transcript updates, real token counts, image uploads,
   stop, and project context from Phren's memory and skills.
 - Native Herdr terminals, named servers, workspaces, tabs, and pane navigation.
@@ -54,8 +57,8 @@ No extra request per iPhone row is needed.
 
 From a project, the iPhone can open a new session on a computer:
 `POST /v1/workspaces/launch` creates a Herdr workspace (or a tab in one) in
-the project's directory and starts the chosen agent — Codex, Claude Code, or
-Copilot — in its pane, returning once Herdr has detected it ready. Otherwise
+the project's directory and starts the chosen agent — Codex, Claude Code,
+Copilot, or opencode — in its pane, returning once Herdr has detected it ready. Otherwise
 the helper does not start coding agents for you. Text updates depend on when
 that agent writes its transcript; usage numbers are never estimated. In Codex,
 review the installed Phren callbacks in `/hooks`. Resume existing sessions if
@@ -67,6 +70,17 @@ session ran in, newest first), Herdr's saved workspaces, phren's registered
 path, then the usual project roots. The phone's "Open on a computer" fills its
 folder from this rather than from the store's `sourcePath`, which belongs to
 whichever machine added the project.
+
+`GET /v1/projects/repos` lists the git checkouts on that computer for the
+phone's "Add project": where agents have worked, Herdr's saved workspaces,
+then one level under the usual project roots, each marked whether phren there
+already tracks it. `POST /v1/projects/add` with `{"directory"}` enrolls an
+existing checkout, or with `{"cloneUrl"}` (https or `git@` GitHub-style URLs
+only) clones it into `$PROJECTS_DIR` or the first usual root first — with the
+computer's own git credentials, never a token from the phone. Either way it is
+`phren add` with the store's default ownership, followed by a commit and, when
+the store has a remote, a pull and push so the phone can fetch the new project.
+The reply says `store: pushed | committed | unchanged | error`.
 
 The iPhone explicitly renews a 25-second approval watch with
 `GET /v1/workspaces?watchApprovals=1`. Ordinary overview reads do not hold prompts.

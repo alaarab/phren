@@ -39,7 +39,11 @@ func raise() {
     AXUIElementPerformAction(window, kAXRaiseAction as CFString)
     usleep(120_000)
 }
-func post(_ event: CGEvent?) { event?.post(tap: .cghidEventTap); usleep(40_000) }
+func post(_ event: CGEvent?) {
+    guard NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier else { fail(6, "focus lost") }
+    event?.postToPid(app.processIdentifier)
+    usleep(40_000)
+}
 
 switch command {
 case "raise": raise()
@@ -63,7 +67,11 @@ case "key":
     down?.flags = flags; up?.flags = flags
     post(down); post(up)
 case "type":
-    guard args.count >= 4 else { fail(2, "type needs text") }
+    guard args.count >= 4, !args[3].isEmpty, args[3].utf16.count <= 500 else { fail(2, "type needs at most 500 characters") }
+    let submit = args.count == 5 && args[4] == "submit"
+    guard args[3].unicodeScalars.allSatisfy({ scalar in
+        (scalar.value >= 32 && scalar.value != 127) || (scalar.value == 10 && submit)
+    }) else { fail(2, "invalid type controls; newline needs submit") }
     raise()
     for scalar in args[3].unicodeScalars {
         var chars = Array(String(scalar).utf16)

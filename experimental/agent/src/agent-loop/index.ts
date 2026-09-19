@@ -12,7 +12,7 @@ import { resetRepeatChain } from "../guards/repeat-tool-reminder.js";
 
 import type { AgentConfig, AgentSession, AgentResult, TurnResult, TurnHooks } from "./types.js";
 import { createSession } from "./types.js";
-import { consumeStream, executeToolBlocks } from "./stream.js";
+import { consumeStream, executeToolBlocks, prefetchFirst } from "./stream.js";
 export type { AgentConfig, AgentResult, AgentSession, TurnResult, TurnHooks };
 export { createSession };
 
@@ -121,17 +121,23 @@ export async function runTurn(
     let stopReason: "end_turn" | "tool_use" | "max_tokens";
 
     if (useStream) {
-      // Streaming path — retry the initial connection (before consuming deltas)
-      const stream = await withRetry(
-        async () => provider.chatStream!(systemPrompt, session.messages, turnTools),
+      // Streaming path — retry the initial connection. The async generator does
+      // no work until first read, so the first next() runs inside withRetry.
+      const opening = await withRetry(
+        async () => {
+          const iterator = provider.chatStream!(systemPrompt, session.messages, turnTools, signal)[Symbol.asyncIterator]();
+          const first = await iterator.next();
+          return { iterator, first };
+        },
         undefined,
         verbose,
+        signal,
       );
       const onReasoningDelta =
         hooks?.onReasoningDelta ??
         (verbose ? (text: string) => process.stderr.write(`\x1b[2m${text}\x1b[0m`) : undefined);
       const result = await consumeStream(
-        stream,
+        prefetchFirst(opening.iterator, opening.first),
         costTracker,
         { onTextDelta: hooks?.onTextDelta, onReasoningDelta, providerName: provider.name },
         signal,
@@ -142,9 +148,10 @@ export async function runTurn(
       // Batch path
       spinner.start("Thinking...");
       const response = await withRetry(
-        () => provider.chat(systemPrompt, session.messages, turnTools),
+        () => provider.chat(systemPrompt, session.messages, turnTools, signal),
         undefined,
         verbose,
+        signal,
       );
       spinner.stop();
 
@@ -173,6 +180,14 @@ export async function runTurn(
       for (const block of assistantContent) {
         if (block.type === "reasoning" && block.text) hooks.onReasoningDone(block.text);
       }
+    }
+
+    // Defensive: a provider may report tool_use with no tool blocks (e.g. a
+    // malformed call dropped upstream). Executing zero blocks would append an
+    // empty tool/results message, which 400s on Anthropic, so treat it as a
+    // normal end of turn.
+    if (stopReason === "tool_use" && !assistantContent.some((b) => b.type === "tool_use")) {
+      stopReason = "end_turn";
     }
 
     session.log.append("assistant/message", {
@@ -239,6 +254,14 @@ export async function runTurn(
     // Execute tool calls with concurrency
     const toolUseBlocks = assistantContent.filter((b): b is ToolUseBlock => b.type === "tool_use");
 
+    // Checkpoint BEFORE the mutating batch: the tool names are known now, and
+    // the snapshot must be the true pre-turn tree so /rewind can restore it.
+    const mutatingTools = new Set(["edit_file", "write_file"]);
+    const hasMutation = toolUseBlocks.some(b => mutatingTools.has(b.name));
+    if (hasMutation) {
+      createCheckpoint(process.cwd(), `turn-${session.turns}`);
+    }
+
     // Log all tool calls upfront
     if (hooks?.onToolStart) {
       for (const block of toolUseBlocks) hooks.onToolStart(block.name, block.input, toolUseBlocks.length);
@@ -248,7 +271,7 @@ export async function runTurn(
 
     if (!hooks?.onToolStart) spinner.start(`Running ${toolUseBlocks.length} tool${toolUseBlocks.length > 1 ? "s" : ""}...`);
     const { results: toolResults, toolCallCount } = await executeToolBlocks(toolUseBlocks, {
-      registry, verbose, status, hooks,
+      registry, verbose, status, hooks, signal,
       antiPatterns: session.antiPatterns,
       captureState: session.captureState,
       phrenCtx: config.phrenCtx,
@@ -261,8 +284,6 @@ export async function runTurn(
     turnToolCalls += toolCallCount;
 
     // Post-edit lint/test check
-    const mutatingTools = new Set(["edit_file", "write_file"]);
-    const hasMutation = toolUseBlocks.some(b => mutatingTools.has(b.name));
     if (hasMutation && config.lintTestConfig) {
       const cwd = process.cwd();
       const lintCmd = config.lintTestConfig.lintCmd ?? detectLintCommand(cwd);
@@ -283,11 +304,6 @@ export async function runTurn(
           text: lintFailures.join("\n\n"),
         } as ContentBlock);
       }
-    }
-
-    // Create checkpoint before mutating tool results are committed to conversation
-    if (hasMutation) {
-      createCheckpoint(process.cwd(), `turn-${session.turns}`);
     }
 
     // Add tool results as a user message

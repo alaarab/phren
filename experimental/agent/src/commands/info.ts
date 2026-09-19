@@ -54,7 +54,9 @@ export function helpCommand(_parts: string[], _ctx: CommandContext): boolean {
 export function turnsCommand(_parts: string[], ctx: CommandContext): boolean {
   const tokens = estimateMessageTokens(ctx.session.messages);
   const pct = ctx.contextLimit > 0 ? ((tokens / ctx.contextLimit) * 100).toFixed(1) : "?";
-  const costLine = ctx.costTracker ? `  Cost: $${ctx.costTracker.totalCost.toFixed(4)}` : "";
+  const costLine = ctx.costTracker
+    ? `  Cost: ${ctx.costTracker.metered ? `$${ctx.costTracker.totalCost.toFixed(4)}` : "included"}`
+    : "";
   process.stderr.write(
     `${DIM}Turns: ${ctx.session.turns}  Tool calls: ${ctx.session.toolCalls}  ` +
     `Messages: ${ctx.session.messages.length}  Tokens: ~${tokens} (${pct}%)${costLine}${RESET}\n`
@@ -63,7 +65,10 @@ export function turnsCommand(_parts: string[], ctx: CommandContext): boolean {
 }
 
 export function clearCommand(_parts: string[], ctx: CommandContext): boolean {
-  ctx.session.messages.length = 0;
+  const count = ctx.session.messages.length;
+  if (count > 0) {
+    ctx.session.log.replaceMessageRange(0, count - 1, { role: "user", content: "[conversation cleared]" });
+  }
   ctx.session.turns = 0;
   ctx.session.toolCalls = 0;
   ctx.undoStack.length = 0;
@@ -105,7 +110,8 @@ export function filesCommand(_parts: string[], _ctx: CommandContext): boolean {
 export function costCommand(_parts: string[], ctx: CommandContext): boolean {
   const ct = ctx.costTracker;
   if (ct) {
-    process.stderr.write(`${DIM}Tokens — input: ${ct.inputTokens}  output: ${ct.outputTokens}  est. cost: $${ct.totalCost.toFixed(4)}${RESET}\n`);
+    const cost = ct.metered ? `$${ct.totalCost.toFixed(4)}` : "included";
+    process.stderr.write(`${DIM}Tokens — input: ${ct.totalInputTokens}  output: ${ct.totalOutputTokens}  est. cost: ${cost}${RESET}\n`);
   } else {
     process.stderr.write(`${DIM}Cost tracking not available.${RESET}\n`);
   }
@@ -132,17 +138,22 @@ export function planCommand(_parts: string[], ctx: CommandContext): boolean {
 }
 
 export function undoCommand(_parts: string[], ctx: CommandContext): boolean {
-  if (ctx.session.messages.length < 2) {
+  const messages = ctx.session.messages;
+  let start = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message.role !== "user") continue;
+    const hasText = typeof message.content === "string"
+      || (Array.isArray(message.content) && message.content.some((b) => b.type === "text"));
+    if (hasText) { start = i; break; }
+  }
+  if (start < 0 || messages.length < 2) {
     process.stderr.write(`${DIM}Nothing to undo.${RESET}\n`);
     return true;
   }
-  let removed = 0;
-  while (ctx.session.messages.length > 0) {
-    const last = ctx.session.messages.pop();
-    removed++;
-    if (last?.role === "user" && typeof last.content === "string") break;
-  }
-  process.stderr.write(`${DIM}Undid ${removed} messages.${RESET}\n`);
+  const removed = messages.length - start;
+  ctx.session.log.replaceMessageRange(start, messages.length - 1, { role: "user", content: "[undone]" });
+  process.stderr.write(`${DIM}Undid ${removed} message${removed === 1 ? "" : "s"}.${RESET}\n`);
   return true;
 }
 

@@ -109,10 +109,12 @@ export interface LlmProvider {
     system: string,
     messages: LlmMessage[],
     tools: AgentToolDef[],
+    signal?: AbortSignal,
   ): Promise<LlmResponse>;
   chatStream?(
     system: string,
     messages: LlmMessage[],
     tools: AgentToolDef[],
+    signal?: AbortSignal,
   ): AsyncIterable<StreamDelta>;
 }
