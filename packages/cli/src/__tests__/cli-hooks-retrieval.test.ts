@@ -24,7 +24,7 @@ describe("rankResults", () => {
   it("uses boost not hard filter for project relevance", () => {
     const rows: DocRow[] = [
       makeDocRow("other-project", "FINDINGS.md", "findings", "## 2025-01-01\n- Some insight"),
-      makeDocRow("myapp", "CLAUDE.md", "claude", "# myapp\nProject description"),
+      makeDocRow("myapp", "AGENTS.md", "claude", "# myapp\nProject description"),
       makeDocRow("myapp", "FINDINGS.md", "findings", "## 2025-06-01\n- Recent insight"),
     ];
 
@@ -38,7 +38,7 @@ describe("rankResults", () => {
   it("prioritizes findings type over non-findings types", () => {
     const rows: DocRow[] = [
       makeDocRow("myapp", "FINDINGS.md", "findings", "## 2025-01-01\n- An insight"),
-      makeDocRow("myapp", "CLAUDE.md", "claude", "# myapp\nSetup instructions"),
+      makeDocRow("myapp", "AGENTS.md", "claude", "# myapp\nSetup instructions"),
     ];
 
     const ranked = rankResults(rows, "general", null, "myapp", tmpPhren, null);
@@ -203,7 +203,7 @@ describe("applyRelevanceFloor", () => {
   });
 
   it("keeps a canonical doc for the detected project even with no overlap", () => {
-    const rows = [makeDocRow("myapp", "CLAUDE.md", "canonical", "unrelated project overview text")];
+    const rows = [makeDocRow("myapp", "AGENTS.md", "canonical", "unrelated project overview text")];
     const kept = applyRelevanceFloor(rows, KEYWORDS, null, "myapp");
     expect(kept).toHaveLength(1);
   });

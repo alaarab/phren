@@ -136,7 +136,7 @@ function renderBottomBar(state: ShellState, navMode: "navigate" | "input", input
   // Only what you reach for constantly. Everything else is one `?` away, so
   // the bar never costs more than a single row.
   const essentials: Record<string, string[]> = {
-    Projects: [`${k("↑↓")} ${d("move")}`, `${k("↵")} ${d("open")}`, `${k("e")} ${d("edit CLAUDE.md")}`],
+    Projects: [`${k("↑↓")} ${d("move")}`, `${k("↵")} ${d("open")}`, `${k("e")} ${d("edit AGENTS.md")}`],
     Tasks: [`${k("↑↓")} ${d("move")}`, `${k("a")} ${d("add")}`, `${k("↵")} ${d("done")}`],
     Findings: [`${k("↑↓")} ${d("move")}`, `${k("a")} ${d("add")}`],
     "Review Queue": [`${k("↑↓")} ${d("move")}`, `${k("↵")} ${d("inspect")}`],

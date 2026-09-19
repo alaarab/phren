@@ -18,11 +18,11 @@ describe("cli-hooks-globs", () => {
   });
 
   describe("getProjectGlobBoost", () => {
-    it("returns 1.0 when project CLAUDE.md has no globs", () => {
+    it("returns 1.0 when project AGENTS.md has no globs", () => {
       const project = "my-project";
       fs.mkdirSync(path.join(tmpRoot, project), { recursive: true });
       fs.writeFileSync(
-        path.join(tmpRoot, project, "CLAUDE.md"),
+        path.join(tmpRoot, project, "AGENTS.md"),
         "# My Project\nNo frontmatter here.\n"
       );
 
@@ -39,7 +39,7 @@ describe("cli-hooks-globs", () => {
       const project = "web-app";
       fs.mkdirSync(path.join(tmpRoot, project), { recursive: true });
       fs.writeFileSync(
-        path.join(tmpRoot, project, "CLAUDE.md"),
+        path.join(tmpRoot, project, "AGENTS.md"),
         `---
 globs:
   - src/**/*.ts
@@ -57,7 +57,7 @@ globs:
       const project = "web-app";
       fs.mkdirSync(path.join(tmpRoot, project), { recursive: true });
       fs.writeFileSync(
-        path.join(tmpRoot, project, "CLAUDE.md"),
+        path.join(tmpRoot, project, "AGENTS.md"),
         `---
 globs:
   - src/**/*.ts
@@ -74,7 +74,7 @@ globs:
       const project = "my-lib";
       fs.mkdirSync(path.join(tmpRoot, project), { recursive: true });
       fs.writeFileSync(
-        path.join(tmpRoot, project, "CLAUDE.md"),
+        path.join(tmpRoot, project, "AGENTS.md"),
         `---
 globs:
   - lib/**/*.js
@@ -92,7 +92,7 @@ globs:
       const project = "inline";
       fs.mkdirSync(path.join(tmpRoot, project), { recursive: true });
       fs.writeFileSync(
-        path.join(tmpRoot, project, "CLAUDE.md"),
+        path.join(tmpRoot, project, "AGENTS.md"),
         `---
 globs: [src/**/*.ts, tests/**/*.ts]
 ---
@@ -108,7 +108,7 @@ globs: [src/**/*.ts, tests/**/*.ts]
       const project = "cached";
       fs.mkdirSync(path.join(tmpRoot, project), { recursive: true });
       fs.writeFileSync(
-        path.join(tmpRoot, project, "CLAUDE.md"),
+        path.join(tmpRoot, project, "AGENTS.md"),
         "# No frontmatter\n"
       );
 
@@ -123,14 +123,14 @@ globs: [src/**/*.ts, tests/**/*.ts]
     it("clears cached globs so re-read happens", () => {
       const project = "clearing";
       fs.mkdirSync(path.join(tmpRoot, project), { recursive: true });
-      fs.writeFileSync(path.join(tmpRoot, project, "CLAUDE.md"), "# No globs\n");
+      fs.writeFileSync(path.join(tmpRoot, project, "AGENTS.md"), "# No globs\n");
 
       getProjectGlobBoost(tmpRoot, project, "/a", undefined);
       clearProjectGlobCache();
 
       // After clearing, writing new globs should take effect
       fs.writeFileSync(
-        path.join(tmpRoot, project, "CLAUDE.md"),
+        path.join(tmpRoot, project, "AGENTS.md"),
         `---
 globs:
   - src/**

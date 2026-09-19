@@ -243,7 +243,7 @@ export const DEFAULT_INDEX_POLICY: IndexPolicy = {
   // Skills are instructions you invoke by name, not knowledge to retrieve:
   // indexed, they crowd the findings out of a prompt's context budget (nine of
   // twelve injections in one session were skill files). They stay reachable
-  // through list_skills and the global CLAUDE.md.
+  // through list_skills and the global AGENTS.md.
   includeGlobs: ["**/*.md"],
   excludeGlobs: ["**/.git/**", "**/node_modules/**", "**/dist/**", "**/build/**", "**/skills/**", "**/.claude/skills/**"],
   includeHidden: false,

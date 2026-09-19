@@ -400,7 +400,7 @@ describe("buildIndex", () => {
     grantAdmin(phren);
     writeFile(path.join(phren, "global", "shared", "shared-snippet.md"), "imported snippet about testing");
     makeProject(phren, "proj", {
-      "CLAUDE.md": "# Config\n@import shared/shared-snippet.md",
+      "AGENTS.md": "# Config\n@import shared/shared-snippet.md",
     });
     const db = await buildIndex(phren);
     const rows = queryRows(db, "SELECT * FROM docs WHERE docs MATCH ?", ["imported"]);
@@ -408,16 +408,16 @@ describe("buildIndex", () => {
     db.close();
   });
 
-  it("indexes repo-owned CLAUDE.md for repo-managed projects instead of the phren copy", async () => {
+  it("indexes repo-owned AGENTS.md for repo-managed projects instead of the phren copy", async () => {
     const phren = makePhren();
     grantAdmin(phren);
     const projectsDir = path.join(phren, "..", "repos");
     process.env.PROJECTS_DIR = projectsDir;
     fs.mkdirSync(path.join(projectsDir, "proj"), { recursive: true });
-    writeFile(path.join(projectsDir, "proj", "CLAUDE.md"), "# Repo Instructions\nrepoownedtoken");
+    writeFile(path.join(projectsDir, "proj", "AGENTS.md"), "# Repo Instructions\nrepoownedtoken");
 
     makeProject(phren, "proj", {
-      "CLAUDE.md": "# Phren Instructions\nphrencopytoken",
+      "AGENTS.md": "# Phren Instructions\nphrencopytoken",
       "FINDINGS.md": "- searchable finding",
       "phren.project.yaml": yaml.dump({ ownership: "repo-managed", sourcePath: path.join(projectsDir, "proj") }, { lineWidth: 1000 }),
     });
@@ -425,7 +425,7 @@ describe("buildIndex", () => {
     const db = await buildIndex(phren);
     const repoRows = queryRows(db, "SELECT * FROM docs WHERE docs MATCH ?", ["repoownedtoken"]);
     const phrenRows = queryRows(db, "SELECT * FROM docs WHERE docs MATCH ?", ["phrencopytoken"]);
-    const claudeDoc = queryDocBySourceKey(db, phren, "proj/CLAUDE.md");
+    const claudeDoc = queryDocBySourceKey(db, phren, "proj/AGENTS.md");
 
     expect(repoRows).not.toBeNull();
     expect(phrenRows).toBeNull();

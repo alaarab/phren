@@ -195,6 +195,7 @@ async function _drainEmbQueue(): Promise<void> {
 }
 
 const FILE_TYPE_MAP: Record<string, string> = {
+  "agents.md": "claude",
   "claude.md": "claude",
   "summary.md": "summary",
   "findings.md": "findings",
@@ -355,7 +356,7 @@ function computePhrenHash(phrenPath: string, profile?: string, preGlobbed?: stri
           for (const f of mdFiles) matched.add(f);
         }
         for (const f of matched) {
-          if (ownership === "repo-managed" && path.basename(f).toLowerCase() === "claude.md") continue;
+          if (ownership === "repo-managed" && path.basename(f).toLowerCase() === "agents.md") continue;
           files.push(path.join(dir, f));
         }
         if (ownership === "repo-managed") {
@@ -586,7 +587,7 @@ function getEntrySourceDocKey(entry: FileEntry, phrenPath: string): string {
 function getRepoManagedInstructionEntries(phrenPath: string, project: string): FileEntry[] {
   const repoDir = getProjectSourcePath(phrenPath, project);
   if (!repoDir) return [];
-  const candidates = ["CLAUDE.md", path.join(".claude", "CLAUDE.md")];
+  const candidates = ["AGENTS.md", "CLAUDE.md", path.join(".claude", "CLAUDE.md")];
   const entries: FileEntry[] = [];
   for (const relFile of candidates) {
     const fullPath = path.join(repoDir, relFile);
@@ -628,7 +629,7 @@ function globAllFiles(phrenPath: string, profile?: string): { filePaths: string[
     const relFiles = [...mdFilesSet].sort();
     for (const relFile of relFiles) {
       const filename = path.basename(relFile);
-      if (ownership === "repo-managed" && filename.toLowerCase() === "claude.md") continue;
+      if (ownership === "repo-managed" && ["agents.md", "claude.md"].includes(filename.toLowerCase())) continue;
       const fullPath = path.join(dir, relFile);
       const type = classifyFile(filename, relFile);
       entries.push({ fullPath, project: projectName, filename, type, relFile });
@@ -730,7 +731,7 @@ function extractLegacyTopicSlug(entry: FileEntry): string | null {
  * Build-scoped memo for `readProjectTopics()`.
  *
  * `readProjectTopics` derives adaptive topics by reading and tokenising the
- * *whole* project corpus — CLAUDE.md, FINDINGS.md and every reference/*.md —
+ * *whole* project corpus — AGENTS.md, FINDINGS.md and every reference/*.md —
  * on each call (see `buildTopicContentSignal` in project-topics.ts). It is
  * called once per reference document, so a project with R reference docs read
  * and tokenised its own corpus R times per rebuild. Measured on a 1892-file

@@ -25,7 +25,7 @@
  * home skill symlinks under ~/.claude/skills are not covered, and
  * `repairPreexistingInstall()` — which rewrites the same global surfaces and
  * runs on every SessionStart hook, from the web UI, and from `phren doctor` —
- * never calls into this module at all. The CLAUDE.md symlink case is handled
+ * never calls into this module at all. The AGENTS.md symlink case is handled
  * at its own write site in init/setup.ts (repairGlobalClaudeSymlink) using the
  * helpers exported here, so it holds on those paths too.
  */
@@ -73,13 +73,13 @@ export function isLiveForeignPhrenRoot(candidate: string, newPhrenPath: string):
 
 /**
  * Recover the phren root that owns a `~/.claude/CLAUDE.md` symlink, from the
- * link target's shape (`<root>/global/CLAUDE.md`). Returns null when the
+ * link target's shape (`<root>/global/AGENTS.md`). Returns null when the
  * target is not structured like a phren global file, i.e. it belongs to
  * something that is not phren and must not be touched.
  */
 export function phrenRootFromGlobalClaudeLink(target: string): string | null {
   const resolved = path.resolve(target);
-  if (path.basename(resolved) !== "CLAUDE.md") return null;
+  if (!["AGENTS.md", "CLAUDE.md"].includes(path.basename(resolved))) return null;
   const globalDir = path.dirname(resolved);
   if (path.basename(globalDir) !== "global") return null;
   const root = path.dirname(globalDir);
@@ -152,7 +152,7 @@ export function findConflictingGlobalWiring(newPhrenPath: string): WiringConflic
     record(`~/.local/bin/${process.platform === "win32" ? "phren.cmd" : "phren"} wrapper`, wrapperPath);
   }
 
-  // ~/.claude/CLAUDE.md is a symlink into <root>/global/CLAUDE.md, i.e. it is
+  // ~/.claude/CLAUDE.md is a symlink into <root>/global/AGENTS.md, i.e. it is
   // global wiring exactly like the wrapper is — but it was not scanned, so
   // `phren init` with a throwaway PHREN_PATH would repoint the user's real one
   // and the guard would report no conflict.

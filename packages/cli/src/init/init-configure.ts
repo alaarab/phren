@@ -340,7 +340,7 @@ export async function runProjectLocalInit(opts: InitOptions = {}): Promise<void>
   const detectedRoot = detectProjectDir(process.cwd(), path.join(process.cwd(), ".phren")) || process.cwd();
   const hasWorkspaceMarker =
     fs.existsSync(path.join(detectedRoot, ".git")) ||
-    fs.existsSync(path.join(detectedRoot, "CLAUDE.md")) ||
+    fs.existsSync(path.join(detectedRoot, "AGENTS.md")) ||
     fs.existsSync(path.join(detectedRoot, "AGENTS.md")) ||
     fs.existsSync(path.join(detectedRoot, ".claude", "CLAUDE.md"));
   if (!hasWorkspaceMarker) {
@@ -398,9 +398,9 @@ export async function runProjectLocalInit(opts: InitOptions = {}): Promise<void>
       ].join("\n")
     );
   }
-  if (!fs.existsSync(path.join(phrenPath, "global", "CLAUDE.md"))) {
+  if (!fs.existsSync(path.join(phrenPath, "global", "AGENTS.md"))) {
     atomicWriteText(
-      path.join(phrenPath, "global", "CLAUDE.md"),
+      path.join(phrenPath, "global", "AGENTS.md"),
       "# Global Context\n\nRepo-local Phren instructions shared across this workspace.\n"
     );
   }

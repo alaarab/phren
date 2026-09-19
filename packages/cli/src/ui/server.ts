@@ -534,7 +534,7 @@ function handleGetProjectContent(res: Res, url: string, ctx: RouteCtx): void {
   const project = String(qs.project || "");
   const file = String(qs.file || "");
   if (!project || !isValidProjectName(project) || !file) return jsonErr(res, "Invalid project or file", 400);
-  const allowedFiles = [FINDINGS_FILENAME, TASKS_FILENAME, "CLAUDE.md", "summary.md"];
+  const allowedFiles = [FINDINGS_FILENAME, TASKS_FILENAME, "AGENTS.md", "summary.md"];
   if (!allowedFiles.includes(file)) return jsonErr(res, `File not allowed: ${file}`, 400);
   const basePath = resolveProjectBasePath(ctx.phrenPath, project);
   const filePath = safeProjectPath(basePath, project, file);
@@ -681,7 +681,7 @@ function handleGetSettings(res: Res, url: string, ctx: RouteCtx): void {
         diskPath: projConfig.sourcePath || projectDir, ownership: projConfig.ownership || "default",
         configFile, configExists: fs.existsSync(configFile), hasFindings: fs.existsSync(findingsPath),
         hasTasks: fs.existsSync(taskPath), hasSummary: fs.existsSync(path.join(projectDir, "summary.md")),
-        hasClaudeMd: fs.existsSync(path.join(projectDir, "CLAUDE.md")), findingCount, taskCount,
+        hasClaudeMd: fs.existsSync(path.join(projectDir, "AGENTS.md")), findingCount, taskCount,
       };
     }
     const indexPolicy = getIndexPolicy(ctx.phrenPath);

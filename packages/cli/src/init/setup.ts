@@ -51,6 +51,7 @@ import { writeSkillMd } from "../link/skills.js";
 import { syncScopeSkillsToDir } from "../skill/files.js";
 import { detectInstalledTools } from "../hooks.js";
 import { logger } from "../logger.js";
+import { migrateStoreAgentInstructions } from "../agent-instructions.js";
 
 export interface PostInitCheck {
   name: string;
@@ -244,11 +245,11 @@ function ensureGlobalStarterAssets(phrenPath: string): string[] {
   const targetGlobalDir = path.join(phrenPath, "global");
   fs.mkdirSync(targetGlobalDir, { recursive: true });
 
-  const starterClaude = path.join(starterGlobal, "CLAUDE.md");
-  const targetClaude = path.join(targetGlobalDir, "CLAUDE.md");
+  const starterClaude = path.join(starterGlobal, "AGENTS.md");
+  const targetClaude = path.join(targetGlobalDir, "AGENTS.md");
   if (fs.existsSync(starterClaude) && !fs.existsSync(targetClaude)) {
     fs.copyFileSync(starterClaude, targetClaude);
-    created.push("global/CLAUDE.md");
+    created.push("global/AGENTS.md");
   }
 
   const starterSkillsDir = path.join(starterGlobal, "skills");
@@ -413,7 +414,8 @@ export function repairPreexistingInstall(
   const caps = opts?.caps ?? resolveManagementCapabilities(phrenPath);
   const preset = opts?.preset ?? getManagementPreset(phrenPath);
   const createdGovernanceAssets = ensureGovernanceFiles(phrenPath);
-  const createdGlobalAssets = ensureGlobalStarterAssets(phrenPath);
+  const migratedInstructions = migrateStoreAgentInstructions(phrenPath);
+  const createdGlobalAssets = [...migratedInstructions, ...ensureGlobalStarterAssets(phrenPath)];
   const createdRuntimeAssets = [...createdGovernanceAssets, ...ensureRuntimeAssets(phrenPath)];
   const createdFeatureDefaults = ensureDefaultFeatureFlags(phrenPath, preset);
   const profileRepair = pruneLegacySampleProjectsFromProfiles(phrenPath);
@@ -442,7 +444,7 @@ export function repairPreexistingInstall(
  * is missing or broken.
  *
  * The ownership test used to be `target.includes(".phren") ||
- * target.endsWith("global/CLAUDE.md")`, which treats *any* live phren root's
+ * target.endsWith("global/AGENTS.md")`, which treats *any* live phren root's
  * global file as fair game to unlink. That is how a run with
  * `PHREN_PATH=/tmp/…` — a smoke test, or phren's own web UI — leaves the
  * user's real `~/.claude/CLAUDE.md` pointing into a temp directory that then
@@ -459,7 +461,7 @@ export function repairPreexistingInstall(
  * repaired, which is the case this function exists for.
  */
 function repairGlobalClaudeSymlink(phrenPath: string): boolean {
-  const src = path.join(phrenPath, "global", "CLAUDE.md");
+  const src = path.join(phrenPath, "global", "AGENTS.md");
   if (!fs.existsSync(src)) return false;
   const dest = homePath(".claude", "CLAUDE.md");
   try {
@@ -473,7 +475,7 @@ function repairGlobalClaudeSymlink(phrenPath: string): boolean {
         return false;
       }
       // Stale phren wiring — safe to replace. `.includes(".phren")` stays for
-      // links that are not shaped like <root>/global/CLAUDE.md.
+      // links that are not shaped like <root>/global/AGENTS.md.
       if (owningRoot || target.includes(".phren")) fs.unlinkSync(dest);
       else return false; // not ours, don't touch
     } else {
@@ -485,10 +487,10 @@ function repairGlobalClaudeSymlink(phrenPath: string): boolean {
   try {
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     fs.symlinkSync(src, dest);
-    debugLog(`repaired global CLAUDE.md symlink: ${dest} -> ${src}`);
+    debugLog(`repaired global AGENTS.md symlink: ${dest} -> ${src}`);
     return true;
   } catch (err) {
-    debugLog(`failed to repair global CLAUDE.md symlink: ${errorMessage(err)}`);
+    debugLog(`failed to repair global AGENTS.md symlink: ${errorMessage(err)}`);
     return false;
   }
 }
@@ -599,8 +601,8 @@ export function applyStarterTemplateUpdates(phrenPath: string): string[] {
   const starterGlobal = path.join(STARTER_DIR, "global");
   if (!fs.existsSync(starterGlobal)) return updates;
 
-  const starterClaude = path.join(starterGlobal, "CLAUDE.md");
-  const targetClaude = path.join(phrenPath, "global", "CLAUDE.md");
+  const starterClaude = path.join(starterGlobal, "AGENTS.md");
+  const targetClaude = path.join(phrenPath, "global", "AGENTS.md");
   if (fs.existsSync(starterClaude)) {
     const written = copyStarterFile(phrenPath, starterClaude, targetClaude);
     if (written) updates.push(path.relative(phrenPath, written));
@@ -1156,9 +1158,9 @@ export function ensureProjectScaffold(
     );
   }
 
-  if (!fs.existsSync(path.join(projectDir, "CLAUDE.md"))) {
+  if (!fs.existsSync(path.join(projectDir, "AGENTS.md"))) {
     atomicWriteText(
-      path.join(projectDir, "CLAUDE.md"),
+      path.join(projectDir, "AGENTS.md"),
       getDomainClaudeTemplate(projectName, inference?.domain ?? domain, inference)
     );
   }
@@ -1239,7 +1241,7 @@ export function ensureLocalGitRepo(phrenPath: string): LocalGitRepoStatus {
   }
 }
 
-/** Bootstrap a phren project from an existing project directory with CLAUDE.md.
+/** Bootstrap a phren project from an existing project directory with AGENTS.md.
  * @param profile - if provided, only this profile YAML is updated (avoids leaking project to unrelated profiles).
  */
 /**
@@ -1329,7 +1331,7 @@ export function bootstrapFromExisting(
 
   let claudeMdPath: string | null = null;
   const candidates = [
-    path.join(sourceRoot, "CLAUDE.md"),
+    path.join(sourceRoot, "AGENTS.md"),
     path.join(sourceRoot, ".claude", "CLAUDE.md"),
   ];
   for (const c of candidates) {
@@ -1363,14 +1365,14 @@ export function bootstrapFromExisting(
     ? (parseProjectOwnershipMode(existingConfig.ownership) ?? getProjectOwnershipDefault(phrenPath))
     : (opts.ownership ?? parseProjectOwnershipMode(existingConfig.ownership) ?? getProjectOwnershipDefault(phrenPath));
 
-  const claudePath = path.join(projDir, "CLAUDE.md");
+  const claudePath = path.join(projDir, "AGENTS.md");
   if (ownership !== "repo-managed") {
     if (claudeContent) {
       if (!fs.existsSync(claudePath)) {
         atomicWriteText(claudePath, claudeContent);
       }
     } else {
-      // No CLAUDE.md found — create a starter one
+      // No AGENTS.md found — create a starter one
       if (!fs.existsSync(claudePath)) {
         atomicWriteText(
           claudePath,
@@ -1400,7 +1402,7 @@ export function bootstrapFromExisting(
     }
   }
 
-  const sourceInfo = claudeMdPath ? `**Source CLAUDE.md:** ${claudeMdPath}` : `**Source:** ${sourceRoot}`;
+  const sourceInfo = claudeMdPath ? `**Source AGENTS.md:** ${claudeMdPath}` : `**Source:** ${sourceRoot}`;
   const summaryPath = path.join(projDir, "summary.md");
   if (!fs.existsSync(summaryPath)) {
     atomicWriteText(
@@ -1482,7 +1484,7 @@ export function updateMachinesYaml(phrenPath: string, machine?: string, profile?
  * Returns the path if it qualifies, null otherwise.
  * A directory qualifies if it:
  * - Is not the home directory or phren directory
- * - Has a CLAUDE.md, AGENTS.md, .claude/CLAUDE.md, or .git directory
+ * - Has an AGENTS.md, legacy CLAUDE.md, .claude/CLAUDE.md, or .git directory
  *
  * A git worktree resolves to the repository it belongs to. Without this a
  * throwaway agent worktree under `.claude/worktrees/<codename>` looks like its
@@ -1654,12 +1656,12 @@ export function runPostInitVerify(phrenPath: string): { ok: boolean; checks: Pos
     });
   }
 
-  const globalClaude = path.join(phrenPath, "global", "CLAUDE.md");
+  const globalClaude = path.join(phrenPath, "global", "AGENTS.md");
   const globalOk = fs.existsSync(globalClaude);
   checks.push({
     name: "global-claude",
     ok: globalOk,
-    detail: globalOk ? "global/CLAUDE.md exists" : "global/CLAUDE.md missing",
+    detail: globalOk ? "global/AGENTS.md exists" : "global/AGENTS.md missing",
     fix: globalOk ? undefined : "Run `phren init` to create starter files",
   });
 

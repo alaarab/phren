@@ -88,7 +88,7 @@ describe("entryScoreKey stability", () => {
   it("produces different keys for different filenames", () => {
     const content = "Some finding text";
     const keyA = entryScoreKey("proj", "FINDINGS.md", content);
-    const keyB = entryScoreKey("proj", "CLAUDE.md", content);
+    const keyB = entryScoreKey("proj", "AGENTS.md", content);
     expect(keyA).not.toBe(keyB);
   });
 });

@@ -219,7 +219,7 @@ export function rebuildMemory(phrenPath: string, projects: string[]) {
   }
   managed += "\n<!-- phren:projects:end -->";
 
-  const freshHeader = "# Root Memory\n\n## Machine Context\nRead `~/.phren-context.md` for profile, active projects, last sync date.\n\n## Cross-Project Notes\n- Read a project's CLAUDE.md before making changes.\n- Per-project memory files (MEMORY-{name}.md) have commands, versions, findings.\n\n";
+  const freshHeader = "# Root Memory\n\n## Machine Context\nRead `~/.phren-context.md` for profile, active projects, last sync date.\n\n## Cross-Project Notes\n- Read a project's AGENTS.md before making changes.\n- Per-project memory files (MEMORY-{name}.md) have commands, versions, findings.\n\n";
   fs.writeFileSync(memoryFile, (header || freshHeader) + managed + "\n");
   log(`  rebuilt ${memoryFile} (pointer format)`);
 

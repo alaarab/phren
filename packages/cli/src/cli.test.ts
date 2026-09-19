@@ -477,7 +477,7 @@ describe("CLI integration: search edge cases", () => {
     fs.writeFileSync(path.join(projDir, "summary.md"), "# alpha\n\n**What:** A caching project\n");
     fs.writeFileSync(path.join(projDir, "tasks.md"), "# alpha Task\n\n## Active\n\n- Implement retry logic\n\n## Queue\n\n- Refactor config loader\n\n## Done\n\n- Initial setup\n");
     fs.writeFileSync(path.join(projDir, "truths.md"), "# Truths\n\n- Always use UTC timestamps (pinned)\n");
-    fs.writeFileSync(path.join(projDir, "CLAUDE.md"), "# alpha\n\nProject-level instructions for alpha.\n");
+    fs.writeFileSync(path.join(projDir, "AGENTS.md"), "# alpha\n\nProject-level instructions for alpha.\n");
   });
 
   afterEach(() => cleanup());
@@ -1976,27 +1976,27 @@ describe("CLI integration: uninstall", () => {
     expect(after.mcpServers?.phren).toBeUndefined();
   });
 
-  it("removes global CLAUDE.md and copilot-instructions.md symlinks", () => {
-    // Create the global CLAUDE.md source that init would have created
+  it("removes global AGENTS.md and copilot-instructions.md symlinks", () => {
+    // Create the global AGENTS.md source that init would have created
     const globalDir = path.join(phrenDir, "global");
     fs.mkdirSync(globalDir, { recursive: true });
-    fs.writeFileSync(path.join(globalDir, "CLAUDE.md"), "# Global instructions");
+    fs.writeFileSync(path.join(globalDir, "AGENTS.md"), "# Global instructions");
 
     // Create the symlinks that linkGlobal creates
     const claudeDir = path.join(homeDir, ".claude");
     fs.mkdirSync(claudeDir, { recursive: true });
-    fs.symlinkSync(path.join(globalDir, "CLAUDE.md"), path.join(claudeDir, "CLAUDE.md"));
+    fs.symlinkSync(path.join(globalDir, "AGENTS.md"), path.join(claudeDir, "CLAUDE.md"));
 
     const githubDir = path.join(homeDir, ".github");
     fs.mkdirSync(githubDir, { recursive: true });
-    fs.symlinkSync(path.join(globalDir, "CLAUDE.md"), path.join(githubDir, "copilot-instructions.md"));
+    fs.symlinkSync(path.join(globalDir, "AGENTS.md"), path.join(githubDir, "copilot-instructions.md"));
 
     const { exitCode, stdout } = runCli(
       ["uninstall"],
       { PHREN_PATH: phrenDir, HOME: homeDir, USERPROFILE: homeDir }
     );
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("Removed global CLAUDE.md symlink");
+    expect(stdout).toContain("Removed global AGENTS.md symlink");
     expect(stdout).toContain("Removed copilot-instructions.md symlink");
     expect(fs.existsSync(path.join(claudeDir, "CLAUDE.md"))).toBe(false);
     expect(fs.existsSync(path.join(githubDir, "copilot-instructions.md"))).toBe(false);

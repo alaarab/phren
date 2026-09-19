@@ -67,8 +67,8 @@ describe("saveEditedFile", () => {
     expect(fs.readFileSync(skill, "utf8")).toBe(SKILL);
   });
 
-  it("writes a CLAUDE.md without demanding frontmatter", () => {
-    const claude = path.join(tmp.path, "hub", "CLAUDE.md");
+  it("writes an AGENTS.md without demanding frontmatter", () => {
+    const claude = path.join(tmp.path, "hub", "AGENTS.md");
     fs.mkdirSync(path.dirname(claude), { recursive: true });
     fs.writeFileSync(claude, "# hub\n");
     const result = saveEditedFile(claude, "# hub\n\nNow with guidance.\n", "claude");
@@ -77,7 +77,7 @@ describe("saveEditedFile", () => {
   });
 
   it("creates a file that does not exist yet", () => {
-    const fresh = path.join(tmp.path, "new", "CLAUDE.md");
+    const fresh = path.join(tmp.path, "new", "AGENTS.md");
     expect(saveEditedFile(fresh, "# new\n", "claude").ok).toBe(true);
     expect(fs.readFileSync(fresh, "utf8")).toBe("# new\n");
   });
@@ -88,7 +88,7 @@ describe("saveEditedFile", () => {
     // Windows and a /proc path does not do quickly on Linux.
     const blocker = path.join(tmp.path, "not-a-directory");
     fs.writeFileSync(blocker, "");
-    const result = saveEditedFile(path.join(blocker, "nope", "CLAUDE.md"), "x\n", "claude");
+    const result = saveEditedFile(path.join(blocker, "nope", "AGENTS.md"), "x\n", "claude");
     expect(result.ok).toBe(false);
     expect(result.error).toBeTruthy();
   });

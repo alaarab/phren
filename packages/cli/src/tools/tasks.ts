@@ -508,7 +508,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           if (!repo) {
             return mcpResponse({
               ok: false,
-              error: "Could not infer a GitHub repo. Add a GitHub URL to CLAUDE.md or summary.md, or link an existing issue instead.",
+              error: "Could not infer a GitHub repo. Add a GitHub URL to AGENTS.md or summary.md, or link an existing issue instead.",
             });
           }
           const created = createGithubIssueForTask({

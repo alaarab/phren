@@ -5,20 +5,20 @@
 Yes — pick a lower-touch **management preset**. Phren ships three:
 
 - **managed** (default) — the full experience: MCP + hooks + `~/.claude/CLAUDE.md` and skills symlinks + `~/.local/bin` wrappers + repo mirroring, re-healed every session.
-- **assisted** — hooks and MCP stay on (you keep context injection, auto-capture, and store git sync), but phren **never writes outside its own store and your agent's settings**. No CLAUDE.md symlink, no skills symlinks, no wrappers, no self-heal. It prints a snippet so you can reference `global/CLAUDE.md` and skills from your own files (re-print with `phren snippet`).
+- **assisted** — hooks and MCP stay on (you keep context injection, auto-capture, and store git sync), but phren **never writes outside its own store and your agent's settings**. No AGENTS.md symlink, no skills symlinks, no wrappers, no self-heal. It prints a snippet so you can reference `global/AGENTS.md` and skills from your own files (re-print with `phren snippet`).
 - **manual** — phren runs as an MCP server only. No hooks, no automations, no auto-commit. A pull-based knowledge base your agent calls on demand.
 
 Set it at install with `phren init --preset assisted` (or `manual`), switch anytime with `phren preset assisted`, and see exactly what phren touches on your machine with `phren status`. Full path-by-path breakdown: [footprint.md](footprint.md).
 
 Individual capabilities can still be fine-tuned via `install-preferences.json` (they override the preset), and the `PHREN_FEATURE_*` env flags always win at runtime.
 
-## How is this different from just using CLAUDE.md?
+## How is this different from just using AGENTS.md?
 
-`CLAUDE.md` loads the entire file on every prompt. If your file is 2,000 tokens, you pay 2,000 tokens every single time, whether the content is relevant or not. With five agents running in parallel, that's 10,000 tokens of context before anyone types a word.
+`AGENTS.md` loads the entire file on every prompt. If your file is 2,000 tokens, you pay 2,000 tokens every single time, whether the content is relevant or not. With five agents running in parallel, that's 10,000 tokens of context before anyone types a word.
 
 Phren searches what you wrote and injects only what matches the current prompt. By default it targets roughly 550 tokens with `PHREN_CONTEXT_TOKEN_BUDGET`, regardless of how large your knowledge base grows. You can run more agents in parallel for the same cost, and they're not reading noise.
 
-`CLAUDE.md` is also static. Phren learns as you work. Every bug traced, every decision made, every pattern discovered gets saved automatically. The next session starts with that knowledge already in context.
+`AGENTS.md` is also static. Phren learns as you work. Every bug traced, every decision made, every pattern discovered gets saved automatically. The next session starts with that knowledge already in context.
 
 ## Does this slow down my prompts?
 

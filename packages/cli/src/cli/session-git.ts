@@ -123,7 +123,7 @@ export const TEAM_STORE_PATHSPECS = [
   "*/FINDINGS.md.bak",
   "*/summary.md",
   "*/review.md",
-  "*/CLAUDE.md",
+  "*/AGENTS.md",
   "*/topic-config.json",
   "*/phren.project.yaml",
   "*/reference/**",

@@ -31,7 +31,7 @@ describe("init setup onboarding helpers", () => {
     fs.writeFileSync(path.join(phrenPath, "profiles", "personal.yaml"), "name: personal\nprojects:\n  - app-api\n");
     fs.writeFileSync(path.join(phrenPath, "profiles", "work.yaml"), "name: work\nprojects:\n  - global\n");
     fs.mkdirSync(path.join(projectRoot, ".git"), { recursive: true });
-    fs.writeFileSync(path.join(projectRoot, "CLAUDE.md"), "# app\n\nApp project.\n");
+    fs.writeFileSync(path.join(projectRoot, "AGENTS.md"), "# app\n\nApp project.\n");
   });
 
   afterEach(() => {
@@ -89,9 +89,9 @@ describe("init setup onboarding helpers", () => {
     expect(fs.readFileSync(summaryPath, "utf8")).not.toContain("Bootstrapped from");
   });
 
-  it("does not overwrite an existing CLAUDE.md when re-adding a project", () => {
+  it("does not overwrite an existing AGENTS.md when re-adding a project", () => {
     bootstrapFromExisting(phrenPath, projectRoot, "work");
-    const claudePath = path.join(phrenPath, "app", "CLAUDE.md");
+    const claudePath = path.join(phrenPath, "app", "AGENTS.md");
     fs.writeFileSync(claudePath, "# app\n\nCurated phren CLAUDE.\n");
 
     bootstrapFromExisting(phrenPath, projectRoot, "work");
@@ -100,13 +100,13 @@ describe("init setup onboarding helpers", () => {
     expect(fs.readFileSync(claudePath, "utf8")).not.toContain("App project.");
   });
 
-  it("supports repo-managed ownership without creating a competing phren CLAUDE.md", () => {
+  it("supports repo-managed ownership without creating a competing phren AGENTS.md", () => {
     const result = bootstrapFromExisting(phrenPath, projectRoot, { profile: "work", ownership: "repo-managed" });
 
     expect(result.project).toBe("app");
     expect(result.ownership).toBe("repo-managed");
-    expect(result.claudePath).toBe(path.join(projectRoot, "CLAUDE.md"));
-    expect(fs.existsSync(path.join(phrenPath, "app", "CLAUDE.md"))).toBe(false);
+    expect(result.claudePath).toBe(path.join(projectRoot, "AGENTS.md"));
+    expect(fs.existsSync(path.join(phrenPath, "app", "AGENTS.md"))).toBe(false);
     expect(fs.readFileSync(path.join(phrenPath, "app", "phren.project.yaml"), "utf8")).toContain("ownership: repo-managed");
   });
 
@@ -171,7 +171,7 @@ describe("init setup onboarding helpers", () => {
 
     const config = JSON.parse(fs.readFileSync(path.join(projectDir, "topic-config.json"), "utf8"));
     expect(config.topics.some((topic: { name: string }) => topic.name === "Embeddings")).toBe(true);
-    const claude = fs.readFileSync(path.join(projectDir, "CLAUDE.md"), "utf8");
+    const claude = fs.readFileSync(path.join(projectDir, "AGENTS.md"), "utf8");
     expect(claude).toContain("## Reference Structure");
     expect(claude).toContain("README.md");
   });
@@ -234,13 +234,13 @@ describe.sequential("web-ui onboarding repair", () => {
   });
 
   it("self-repairs baseline assets before serving requests", async () => {
-    expect(fs.existsSync(path.join(phrenPath, "global", "CLAUDE.md"))).toBe(false);
+    expect(fs.existsSync(path.join(phrenPath, "global", "AGENTS.md"))).toBe(false);
     expect(fs.existsSync(path.join(phrenPath, ".sessions"))).toBe(false);
     expect(fs.existsSync(path.join(phrenPath, ".env"))).toBe(false);
 
     server = createWebUiServer(phrenPath, undefined, "default");
 
-    expect(fs.existsSync(path.join(phrenPath, "global", "CLAUDE.md"))).toBe(true);
+    expect(fs.existsSync(path.join(phrenPath, "global", "AGENTS.md"))).toBe(true);
     expect(fs.existsSync(path.join(phrenPath, ".sessions"))).toBe(true);
     expect(fs.readFileSync(path.join(phrenPath, ".env"), "utf8")).toContain("PHREN_FEATURE_AUTO_CAPTURE=1");
   });

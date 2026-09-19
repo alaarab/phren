@@ -226,7 +226,7 @@ The agent is deeply integrated with phren's memory layer:
 **On startup:**
 - Loads project truths (always-injected facts)
 - Loads active tasks and recent findings
-- Reads CLAUDE.md for project conventions
+- Reads AGENTS.md for project conventions
 - Restores prior session summary (with `--resume`)
 
 **During a session:**

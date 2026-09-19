@@ -140,7 +140,7 @@ All state stays local as files (markdown/json), with git as transport in shared 
   machines.yaml
   profiles/*.yaml
   <project>/
-    CLAUDE.md
+    AGENTS.md
     summary.md
     FINDINGS.md
     notes/
@@ -151,7 +151,7 @@ All state stays local as files (markdown/json), with git as transport in shared 
     reference/
     skills/
   global/
-    CLAUDE.md
+    AGENTS.md
     FINDINGS.md
     skills/
 

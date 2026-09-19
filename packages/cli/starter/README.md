@@ -9,10 +9,10 @@ Each subdirectory is a project. Add one for every codebase you work on.
 ```
 ~/.phren/
 ├── global/          # context that applies to every project
-│   ├── CLAUDE.md
+│   ├── AGENTS.md
 │   └── skills/      # personal workflow skills
 ├── my-project/
-│   ├── CLAUDE.md    # architecture, commands, key patterns
+│   ├── AGENTS.md    # architecture, commands, key patterns
 │   ├── summary.md   # five-line project card
 │   ├── FINDINGS.md  # fragments accumulated over time
 │   ├── tasks.md     # task queue that persists across sessions
@@ -28,13 +28,13 @@ New to phren? Here's what each file does and when it matters.
 
 **summary.md** is the elevator pitch. Phren shows this to Claude first so it knows what project it's working on. Keep it to 5 lines: what, stack, status, run command, biggest insight.
 
-**CLAUDE.md** is the project bible. Commands, architecture, key patterns, things to never do. Claude reads this before making changes. The better this file is, the fewer mistakes Claude makes.
+**AGENTS.md** is the project bible. Commands, architecture, key patterns, things to never do. Claude reads this before making changes. The better this file is, the fewer mistakes Claude makes.
 
 **FINDINGS.md** fills itself. As Claude discovers insights, patterns, and decisions during your sessions, it tells phren and entries land here grouped by date. Old entries fade from retrieval over time. Wrong entries can be removed with `remove_finding()`.
 
 **tasks.md** is your task board file. It keeps Active (working now), Queue (up next), and Done (finished) in one place so the work history stays with the project. You can also manage it from `phren shell`.
 
-**global/CLAUDE.md** applies everywhere. Your style preferences, tool choices, things Claude should always know regardless of which project you're in.
+**global/AGENTS.md** applies everywhere. Your style preferences, tool choices, things Claude should always know regardless of which project you're in.
 
 **profiles/** and **machines.yaml** handle multi-machine setups. Map hostnames to profiles, and profiles to project lists. Your work laptop sees work projects, your home machine sees personal ones.
 

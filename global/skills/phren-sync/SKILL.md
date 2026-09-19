@@ -19,9 +19,9 @@ This skill requires a phren repository. If you don't have one yet, see "New mach
 ~/.phren/               # or wherever your phren repo lives
   global/               # skills and config for all projects
     skills/             # global skill files (.md)
-    CLAUDE.md           # global Claude instructions
+    AGENTS.md           # global Claude instructions
   <project>/            # per-project config
-    CLAUDE.md
+    AGENTS.md
     skills/
     summary.md
   profiles/             # machine profile definitions
@@ -140,7 +140,7 @@ After syncing, check each active project in the phren directory for missing file
 
 **Required files** (warn if missing):
 - `summary.md`: project description used by context file and memory
-- `CLAUDE.md`: project-level Claude instructions
+- `AGENTS.md`: project-level Claude instructions
 
 **Recommended files** (note if missing, don't warn):
 - `tasks.md`: persistent task queue
@@ -152,7 +152,7 @@ For each project in the profile, check `$PHREN_DIR/<project>/` for these files a
 Project health:
   + my-app: all files present
   ~ backend: missing recommended: FINDINGS.md
-  ! new-project: missing required: summary.md, CLAUDE.md
+  ! new-project: missing required: summary.md, AGENTS.md
 ```
 
 Legend: `+` all good, `~` missing recommended files, `!` missing required files.
@@ -165,9 +165,9 @@ Skip the "global" entry since it has a different structure. Only check actual pr
 phren-sync down: <machine-name> (<profile-name>)
 
 Synced:
-  - myapp (CLAUDE.md + 3 skills)
-  - api-server (CLAUDE.md + 1 skill)
-  - global (CLAUDE.md + 11 skills)
+  - myapp (AGENTS.md + 3 skills)
+  - api-server (AGENTS.md + 1 skill)
+  - global (AGENTS.md + 11 skills)
 
 Skipped (not in profile):
   - old-project
@@ -186,7 +186,7 @@ When the user says "sync this back", "push to phren", "save this to my phren":
 ### 1. Find what changed
 
 ```bash
-diff "$PHREN_DIR/<project>/CLAUDE.md" ./<project-path>/CLAUDE.md
+diff "$PHREN_DIR/<project>/AGENTS.md" ./<project-path>/AGENTS.md
 diff -r "$PHREN_DIR/<project>/skills/" ./<project-path>/.claude/skills/
 
 Remember: `.claude/skills/` is a generated mirror. The source-of-truth lives in Phren `skills/`, and the project mirror also includes inherited global skills after resolution.
@@ -248,7 +248,7 @@ When two machines edit the same phren file before syncing, `git pull` will hit a
 
 **FINDINGS.md**: Take both changes. Keep entries in chronological order. If both machines added entries on the same date, interleave or group them under the same date heading.
 
-**CLAUDE.md**: Manual merge. Ask the user which version they want, or show both and let them pick. These files contain preferences and instructions where intent matters, so don't auto-resolve.
+**AGENTS.md**: Manual merge. Ask the user which version they want, or show both and let them pick. These files contain preferences and instructions where intent matters, so don't auto-resolve.
 
 **skills/ files**: If the same skill was edited on both machines, show the user a diff and let them choose. If different skills were edited, git handles this automatically (no conflict).
 

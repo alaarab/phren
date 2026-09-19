@@ -495,7 +495,7 @@ export async function runInit(opts: InitOptions = {}) {
         log(`  Would offer to add current project directory (${pendingBootstrap.path})`);
       }
       if (opts.applyStarterUpdate) {
-        log(`  Apply starter template updates to global/CLAUDE.md and global skills`);
+        log(`  Apply starter template updates to global/AGENTS.md and global skills`);
       }
       log(`  Run post-init verification checks`);
       log(`\nDry run complete.\n`);
@@ -561,7 +561,7 @@ export async function runInit(opts: InitOptions = {}) {
       const previousVersion = prefs.installedVersion;
       if (isVersionNewer(VERSION, previousVersion)) {
         log(`\n  Starter template update available: v${previousVersion} -> v${VERSION}`);
-        log(`  Run \`phren init --apply-starter-update\` to refresh global/CLAUDE.md and global skills.`);
+        log(`  Run \`phren init --apply-starter-update\` to refresh global/AGENTS.md and global skills.`);
       }
       if (opts.applyStarterUpdate) {
         const updated = applyStarterTemplateUpdates(phrenPath);
@@ -705,7 +705,7 @@ export async function runInit(opts: InitOptions = {}) {
     fs.mkdirSync(path.join(phrenPath, "global", "skills"), { recursive: true });
     fs.mkdirSync(path.join(phrenPath, "profiles"), { recursive: true });
     atomicWriteText(
-      path.join(phrenPath, "global", "CLAUDE.md"),
+      path.join(phrenPath, "global", "AGENTS.md"),
       `# Global Context\n\nThis file is loaded in every project.\n\n## General preferences\n\n<!-- Your coding style, preferred tools, things Claude should always know -->\n`
     );
     if (useTemplateProject) {
@@ -778,7 +778,7 @@ export async function runInit(opts: InitOptions = {}) {
   }
 
   log(`\nWhat was created:`);
-  log(`  ${phrenPath}/global/CLAUDE.md    Global instructions loaded in every session`);
+  log(`  ${phrenPath}/global/AGENTS.md    Global instructions loaded in every session`);
   log(`  ${phrenPath}/global/skills/      Phren slash commands`);
   log(`  ${phrenPath}/profiles/           Machine-to-project mappings`);
   log(`  ${phrenPath}/.config/        Memory quality settings and config`);

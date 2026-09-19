@@ -268,7 +268,7 @@ Key File Locations:
   ~/.phren/machines.yaml             - hostname-to-profile mapping
   ~/.phren/profiles/                 - profile YAML files listing projects per profile
   ~/.phren/<project>/summary.md      - five-line project summary card
-  ~/.phren/<project>/CLAUDE.md       - full project context (architecture, commands, conventions)
+  ~/.phren/<project>/AGENTS.md       - full project context (architecture, commands, conventions)
   ~/.phren/<project>/topic-config.json - project-owned archive topic definitions
   ~/.phren/<project>/reference/      - deep reference docs and archived topic buckets
   ~/.phren/<project>/reference/topics/ - machine-managed topic docs for archived findings
@@ -281,7 +281,7 @@ Key File Locations:
   ~/.phren/.sessions/                - task checkpoint files for cross-session resume
   ~/.phren/.config/                  - governance policy JSON: retention/workflow/index policy, access-control.json
   ~/.phren/global/skills/            - personal workflow slash commands
-  ~/.phren/global/CLAUDE.md          - user-level agent instructions
+  ~/.phren/global/AGENTS.md          - user-level agent instructions
 
 Finding Tags:
 

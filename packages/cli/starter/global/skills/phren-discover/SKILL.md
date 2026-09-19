@@ -41,7 +41,7 @@ for dir in "$PHREN_DIR"/*/; do
   PROJECT=$(basename "$dir")
   [ "$PROJECT" = "global" ] || [ "$PROJECT" = "profiles" ] && continue
 
-  [ -f "$dir/CLAUDE.md" ]    && echo "$PROJECT: has CLAUDE.md"    || echo "$PROJECT: MISSING CLAUDE.md"
+  [ -f "$dir/AGENTS.md" ]    && echo "$PROJECT: has AGENTS.md"    || echo "$PROJECT: MISSING AGENTS.md"
   [ -f "$dir/summary.md" ]   && echo "$PROJECT: has summary.md"   || echo "$PROJECT: MISSING summary.md"
   [ -f "$dir/FINDINGS.md" ] && echo "$PROJECT: has FINDINGS.md" || echo "$PROJECT: MISSING FINDINGS.md"
   [ -f "$dir/tasks.md" ]   && echo "$PROJECT: has tasks.md"   || echo "$PROJECT: MISSING tasks.md"
@@ -63,9 +63,9 @@ for dir in */; do
     echo "$PROJECT/FINDINGS.md: last updated $LAST_MODIFIED"
   fi
 
-  if [ -f "$dir/CLAUDE.md" ]; then
-    LAST_MODIFIED=$(git log -1 --format="%cr" -- "$dir/CLAUDE.md" 2>/dev/null || stat -c %Y "$dir/CLAUDE.md" 2>/dev/null || stat -f %m "$dir/CLAUDE.md" 2>/dev/null)
-    echo "$PROJECT/CLAUDE.md: last updated $LAST_MODIFIED"
+  if [ -f "$dir/AGENTS.md" ]; then
+    LAST_MODIFIED=$(git log -1 --format="%cr" -- "$dir/AGENTS.md" 2>/dev/null || stat -c %Y "$dir/AGENTS.md" 2>/dev/null || stat -f %m "$dir/AGENTS.md" 2>/dev/null)
+    echo "$PROJECT/AGENTS.md: last updated $LAST_MODIFIED"
   fi
 done
 ```
@@ -121,7 +121,7 @@ phren-discover
 
 Projects without core files:
 
-| Project | CLAUDE.md | summary.md | FINDINGS.md | tasks.md |
+| Project | AGENTS.md | summary.md | FINDINGS.md | tasks.md |
 |---------|-----------|------------|--------------|------------|
 | myapp   | ok        | MISSING    | MISSING      | ok         |
 | api     | ok        | ok         | ok           | MISSING    |
@@ -130,7 +130,7 @@ Projects without core files:
 
 Files not updated in 30+ days:
 - my-app/FINDINGS.md: last updated 45 days ago
-- frontend/CLAUDE.md: last updated 62 days ago
+- frontend/AGENTS.md: last updated 62 days ago
 
 ## Section 3: Skill gaps
 

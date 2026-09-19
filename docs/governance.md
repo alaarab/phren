@@ -194,5 +194,5 @@ Findings age out of `FINDINGS.md` into `reference/topics/<topic>.md`, and a stor
 
 Background maintenance (the stop hook) refreshes the structural summaries for files that changed and moves done tasks past thirty into `.config/task-archive/<project>.md`. Tasks are injected into prompts only when the prompt is about building or asks about the work itself.
 
-`phren status` prints the store's weight by kind, and `phren doctor`'s `context-cost` check warns when the global CLAUDE.md passes 600 words, the MCP profile is `full`, or the median hook injection passes 1,500 tokens.
+`phren status` prints the store's weight by kind, and `phren doctor`'s `context-cost` check warns when the global AGENTS.md passes 600 words, the MCP profile is `full`, or the median hook injection passes 1,500 tokens.
 

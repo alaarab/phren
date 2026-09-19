@@ -357,9 +357,9 @@ export function registerProjectCommands(ctx: ExtensionContext): vscode.Disposabl
 
       const ownershipPick = await vscode.window.showQuickPick(
         [
-          { label: "detached", description: "Phren stores findings & tasks; your repo keeps its own CLAUDE.md (recommended)" },
-          { label: "phren-managed", description: "Phren creates and manages CLAUDE.md, skills, and agents in ~/.phren" },
-          { label: "repo-managed", description: "Phren reads CLAUDE.md from your repo instead of creating its own copy" },
+          { label: "detached", description: "Phren stores findings & tasks; your repo keeps its own AGENTS.md (recommended)" },
+          { label: "phren-managed", description: "Phren creates and manages AGENTS.md, skills, and agents in ~/.phren" },
+          { label: "repo-managed", description: "Phren reads AGENTS.md from your repo instead of creating its own copy" },
         ],
         { placeHolder: "Select ownership mode" },
       );

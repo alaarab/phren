@@ -64,7 +64,7 @@ describe("mcp-data: export/import round-trip", () => {
       path.join(projectDir, "tasks.md"),
       "# test-proj task\n\n## Active\n\n- [ ] Add caching\n\n## Queue\n\n## Done\n\n- [x] Setup CI\n"
     );
-    writeFile(path.join(projectDir, "CLAUDE.md"), "# Instructions\nUse vitest.");
+    writeFile(path.join(projectDir, "AGENTS.md"), "# Instructions\nUse vitest.");
 
     register(server as any, makeCtx(tmp.path));
 
@@ -91,7 +91,7 @@ describe("mcp-data: export/import round-trip", () => {
       path.join(projectDir, "tasks.md"),
       "# orig task\n\n## Active\n\n- [ ] Task one\n\n## Queue\n\n## Done\n"
     );
-    writeFile(path.join(projectDir, "CLAUDE.md"), "# Claude\nBe concise.");
+    writeFile(path.join(projectDir, "AGENTS.md"), "# Claude\nBe concise.");
 
     register(server as any, makeCtx(tmp.path));
 
@@ -106,14 +106,14 @@ describe("mcp-data: export/import round-trip", () => {
     expect(importRes.ok).toBe(true);
     expect(importRes.data.project).toBe("imported");
     expect(importRes.data.files).toContain("summary.md");
-    expect(importRes.data.files).toContain("CLAUDE.md");
+    expect(importRes.data.files).toContain("AGENTS.md");
     expect(importRes.data.files).toContain("FINDINGS.md");
 
     // Verify files on disk
     const importedDir = path.join(tmp.path, "imported");
     expect(fs.existsSync(importedDir)).toBe(true);
     expect(fs.readFileSync(path.join(importedDir, "summary.md"), "utf8")).toContain("Original project.");
-    expect(fs.readFileSync(path.join(importedDir, "CLAUDE.md"), "utf8")).toContain("Be concise.");
+    expect(fs.readFileSync(path.join(importedDir, "AGENTS.md"), "utf8")).toContain("Be concise.");
     expect(fs.readFileSync(path.join(importedDir, "FINDINGS.md"), "utf8")).toContain("Finding alpha");
   });
 

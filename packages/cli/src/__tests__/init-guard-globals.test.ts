@@ -45,9 +45,9 @@ function writeWrapper(homeDir: string, defaultPhrenPath: string): string {
 
 const wrapperLocationLabel = `~/.local/bin/${process.platform === "win32" ? "phren.cmd" : "phren"} wrapper`;
 
-/** Point ~/.claude/CLAUDE.md at <phrenRoot>/global/CLAUDE.md, as init does. */
+/** Point ~/.claude/CLAUDE.md at <phrenRoot>/global/AGENTS.md, as init does. */
 function linkClaudeMd(homeDir: string, phrenRoot: string): string {
-  const src = path.join(phrenRoot, "global", "CLAUDE.md");
+  const src = path.join(phrenRoot, "global", "AGENTS.md");
   fs.mkdirSync(path.dirname(src), { recursive: true });
   if (!fs.existsSync(src)) fs.writeFileSync(src, "# Global Context\n");
   const claudeDir = path.join(homeDir, ".claude");
@@ -218,10 +218,10 @@ describe("init guard against repointing global wiring", () => {
   it("does not flag a CLAUDE.md symlink into something that is not a phren store", () => {
     const dotfiles = path.join(tmp, "dotfiles");
     fs.mkdirSync(dotfiles, { recursive: true });
-    fs.writeFileSync(path.join(dotfiles, "CLAUDE.md"), "# mine\n");
+    fs.writeFileSync(path.join(dotfiles, "AGENTS.md"), "# mine\n");
     const claudeDir = path.join(tmp, ".claude");
     fs.mkdirSync(claudeDir, { recursive: true });
-    fs.symlinkSync(path.join(dotfiles, "CLAUDE.md"), path.join(claudeDir, "CLAUDE.md"));
+    fs.symlinkSync(path.join(dotfiles, "AGENTS.md"), path.join(claudeDir, "CLAUDE.md"));
 
     expect(findConflictingGlobalWiring(makeRealRoot(tmp, "new-phren"))).toEqual([]);
   });
@@ -230,16 +230,16 @@ describe("init guard against repointing global wiring", () => {
 // ── link-target helpers ──────────────────────────────────────────────────────
 
 describe("phrenRootFromGlobalClaudeLink", () => {
-  it("recovers the root from a <root>/global/CLAUDE.md target", () => {
-    expect(phrenRootFromGlobalClaudeLink("/home/me/.phren/global/CLAUDE.md")).toBe(
+  it("recovers the root from a <root>/global/AGENTS.md target", () => {
+    expect(phrenRootFromGlobalClaudeLink("/home/me/.phren/global/AGENTS.md")).toBe(
       path.resolve("/home/me/.phren"),
     );
   });
 
   it("returns null for a target that is not a phren global file", () => {
-    expect(phrenRootFromGlobalClaudeLink("/home/me/dotfiles/CLAUDE.md")).toBeNull();
+    expect(phrenRootFromGlobalClaudeLink("/home/me/dotfiles/AGENTS.md")).toBeNull();
     expect(phrenRootFromGlobalClaudeLink("/home/me/global/NOTES.md")).toBeNull();
-    expect(phrenRootFromGlobalClaudeLink("/home/me/.phren/CLAUDE.md")).toBeNull();
+    expect(phrenRootFromGlobalClaudeLink("/home/me/.phren/AGENTS.md")).toBeNull();
   });
 });
 

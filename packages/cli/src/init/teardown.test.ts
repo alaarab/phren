@@ -29,16 +29,16 @@ describe.sequential("teardown helpers", () => {
     const infoDir = path.join(repo, ".git", "info");
     fs.mkdirSync(infoDir, { recursive: true });
     const excludePath = path.join(infoDir, "exclude");
-    fs.writeFileSync(excludePath, "node_modules/\n*.log\n# phren-managed\nCLAUDE.md\nAGENTS.md\n");
+    fs.writeFileSync(excludePath, "node_modules/\n*.log\n# phren-managed\nAGENTS.md\nCLAUDE.md\n");
 
-    removeGitExcludes(repo, ["CLAUDE.md", "AGENTS.md"]);
+    removeGitExcludes(repo, ["AGENTS.md", "CLAUDE.md"]);
 
     const content = fs.readFileSync(excludePath, "utf8");
     expect(content).toContain("node_modules/");
     expect(content).toContain("*.log");
     expect(content).not.toContain("# phren-managed");
-    expect(content).not.toContain("CLAUDE.md");
     expect(content).not.toContain("AGENTS.md");
+    expect(content).not.toContain("CLAUDE.md");
   });
 
   it("removePhrenHomeSymlinks removes phren symlinks but never regular files", () => {
@@ -46,7 +46,7 @@ describe.sequential("teardown helpers", () => {
     fs.mkdirSync(claudeDir, { recursive: true });
     const store = path.join(tmpRoot, "phren", "global");
     fs.mkdirSync(store, { recursive: true });
-    const src = path.join(store, "CLAUDE.md");
+    const src = path.join(store, "AGENTS.md");
     fs.writeFileSync(src, "# global\n");
 
     // A phren-owned symlink...

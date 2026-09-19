@@ -77,7 +77,7 @@ synthesize?: boolean       - Generate a synthesis paragraph from top results usi
 
 ### get_project_summary
 
-Returns a project's summary.md content, path to its CLAUDE.md, and a list of indexed files.
+Returns a project's summary.md content, path to its AGENTS.md, and a list of indexed files.
 
 ```
 name: string      - Project name (e.g. "my-app", "backend")
@@ -98,7 +98,7 @@ No parameters.
 5. Builds an in-memory SQLite FTS5 index with Porter stemming
 6. Serves tools over stdio using the MCP protocol
 
-File types are derived from filenames and directories: `CLAUDE.md` -> "claude", `summary.md` -> "summary", `FINDINGS.md` -> "findings", `tasks.md` -> "task", files under `notes/` -> "notes", files under `reference/` -> "reference", files under `skills/` -> "skill".
+File types are derived from filenames and directories: `AGENTS.md` -> "claude", `summary.md` -> "summary", `FINDINGS.md` -> "findings", `tasks.md` -> "task", files under `notes/` -> "notes", files under `reference/` -> "reference", files under `skills/` -> "skill".
 
 ## Development
 

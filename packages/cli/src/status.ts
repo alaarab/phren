@@ -115,7 +115,7 @@ export async function runStatus() {
   try {
     const w = storeWeight(phrenPath, profile);
     const k = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n));
-    console.log(`  ${DIM}weight${RESET}   ${k(w.findings)} words of findings · ${k(w.reference)} archived · ${k(w.tasks)} in tasks · ${k(w.skills)} in skills · CLAUDE.md ${w.globalClaude} words`);
+    console.log(`  ${DIM}weight${RESET}   ${k(w.findings)} words of findings · ${k(w.reference)} archived · ${k(w.tasks)} in tasks · ${k(w.skills)} in skills · AGENTS.md ${w.globalClaude} words`);
   } catch (err: unknown) {
     logger.debug("status", `weight: ${errorMessage(err)}`);
   }

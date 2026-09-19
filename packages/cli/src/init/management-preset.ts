@@ -11,7 +11,7 @@
  *              automations, and SessionStart self-heal of the above.
  *   - assisted: MCP + hooks (context injection, capture, store git sync) but
  *              phren writes NOTHING outside its own store and agent settings —
- *              no CLAUDE.md symlink, no skills symlinks, no ~/.local/bin
+ *              no AGENTS.md symlink, no skills symlinks, no ~/.local/bin
  *              wrappers, no self-heal. Project ownership defaults to detached.
  *              Init prints a self-wiring snippet so users wire their own files.
  *   - manual:   MCP server registration only. No hooks, no automations, no
@@ -38,7 +38,7 @@ export const DEFAULT_MANAGEMENT_PRESET: ManagementPreset = "managed";
 
 /** Structural + behavioral capabilities a preset expands into. */
 export interface ManagementCapabilities {
-  /** Symlink global/CLAUDE.md into ~/.claude/CLAUDE.md (+ copilot instructions). */
+  /** Symlink global/AGENTS.md into ~/.claude/CLAUDE.md (+ copilot instructions). */
   linkGlobalClaudeMd: boolean;
   /** Symlink managed skills into ~/.claude/skills (+ other agent skill dirs). */
   installSkillLinks: boolean;
@@ -146,7 +146,7 @@ export function presetSummaryLines(preset: ManagementPreset): string {
     case "managed":
       return "phren wires everything: MCP, hooks, ~/.claude symlinks, skills, self-heal (recommended)";
     case "assisted":
-      return "MCP + hooks only — phren never writes outside its store; you wire CLAUDE.md/skills yourself";
+      return "MCP + hooks only — phren never writes outside its store; you wire AGENTS.md/skills yourself";
     case "manual":
       return "MCP server only — pull-based knowledge base, no hooks or automations";
   }

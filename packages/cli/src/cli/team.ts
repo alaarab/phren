@@ -91,7 +91,7 @@ async function handleTeamInit(args: string[]): Promise<void> {
   const globalDir = path.join(storePath, "global");
   fs.mkdirSync(globalDir, { recursive: true });
   atomicWriteText(
-    path.join(globalDir, "CLAUDE.md"),
+    path.join(globalDir, "AGENTS.md"),
     `# ${name} Team Store\n\nShared knowledge for the ${name} team.\n`,
   );
   atomicWriteText(

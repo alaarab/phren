@@ -29,7 +29,7 @@ implementation does not have to rediscover them by reading regexes.
     review.md              # queue awaiting human judgement
     truths.md              # pinned entries that never decay
     summary.md             # human-written project overview
-    CLAUDE.md              # agent-facing project instructions
+    AGENTS.md              # agent-facing project instructions
     notes/YYYY-MM-DD.md    # dated scratch, never injected
     reference/topics/*.md  # archived findings, by topic
     journal/*.md           # team-store append-only finding ingest
@@ -39,6 +39,11 @@ implementation does not have to rediscover them by reading regexes.
 
 Reserved top-level directory names that are **not** projects: `global`,
 `profiles`, `scripts`, `templates`, and anything ending `.archived`.
+
+`AGENTS.md` is canonical. On upgrade, Phren copies a legacy `CLAUDE.md` to
+`AGENTS.md` only when the canonical file is absent and retains the legacy file.
+When both exist, readers prefer `AGENTS.md`; Claude-specific mirrors may still
+be named `CLAUDE.md` because that filename is part of Claude Code's contract.
 
 ---
 

@@ -135,8 +135,14 @@ export async function handleProjectsNamespace(args: string[], profile: string) {
       const taskRawPath = resolveTaskFilePath(storePath, name);
       if (taskRawPath && fs.existsSync(taskRawPath)) exported.taskRaw = fs.readFileSync(taskRawPath, "utf8");
     }
-    const claudePath = path.join(projectDir, "CLAUDE.md");
-    if (fs.existsSync(claudePath)) exported.claudeMd = fs.readFileSync(claudePath, "utf8");
+    const agentsPath = path.join(projectDir, "AGENTS.md");
+    const legacyPath = path.join(projectDir, "CLAUDE.md");
+    const instructionsPath = fs.existsSync(agentsPath) ? agentsPath : legacyPath;
+    if (fs.existsSync(instructionsPath)) {
+      const instructions = fs.readFileSync(instructionsPath, "utf8");
+      exported.agentsMd = instructions;
+      exported.claudeMd = instructions; // Deprecated export alias for older clients.
+    }
     process.stdout.write(JSON.stringify(exported, null, 2) + "\n");
     return;
   }
@@ -196,9 +202,10 @@ export async function handleProjectsNamespace(args: string[], profile: string) {
         fs.writeFileSync(path.join(stagedProjectDir, "summary.md"), decoded.summary);
         imported.push("summary.md");
       }
-      if (typeof decoded.claudeMd === "string") {
-        fs.writeFileSync(path.join(stagedProjectDir, "CLAUDE.md"), decoded.claudeMd);
-        imported.push("CLAUDE.md");
+      const instructions = typeof decoded.agentsMd === "string" ? decoded.agentsMd : decoded.claudeMd;
+      if (typeof instructions === "string") {
+        fs.writeFileSync(path.join(stagedProjectDir, "AGENTS.md"), instructions);
+        imported.push("AGENTS.md");
       }
       if (typeof decoded.findingsRaw === "string") {
         fs.writeFileSync(path.join(stagedProjectDir, FINDINGS_FILENAME), decoded.findingsRaw);

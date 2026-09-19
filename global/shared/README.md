@@ -1,6 +1,6 @@
 # Shared context
 
-Files in this directory contain reference material that applies to multiple projects. Instead of duplicating the same information in each project's CLAUDE.md, put it here and reference it.
+Files in this directory contain reference material that applies to multiple projects. Instead of duplicating the same information in each project's AGENTS.md, put it here and reference it.
 
 ## How to use
 
@@ -20,6 +20,6 @@ The import path is relative to `~/.phren/global/`. Imports are resolved recursiv
 
 ## What doesn't go here
 
-- Project-specific config (that stays in `<project>/CLAUDE.md`)
+- Project-specific config (that stays in `<project>/AGENTS.md`)
 - Findings (those go in FINDINGS.md files and get consolidated by `phren-consolidate`)
 - Skills (those go in `global/skills/`)

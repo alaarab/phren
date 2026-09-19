@@ -32,7 +32,7 @@ export function extractGithubRepoFromText(content: string): string | undefined {
 }
 
 export function resolveProjectGithubRepo(phrenPath: string, project: string): string | undefined {
-  for (const file of ["CLAUDE.md", "summary.md"]) {
+  for (const file of ["AGENTS.md", "summary.md"]) {
     const fullPath = path.join(phrenPath, project, file);
     if (!fs.existsSync(fullPath)) continue;
     const repo = extractGithubRepoFromText(fs.readFileSync(fullPath, "utf8"));
