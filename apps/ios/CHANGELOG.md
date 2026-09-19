@@ -307,6 +307,14 @@ number counts up on its own.
 
 ### Fixed
 
+- Expired permission activities stop showing the raised-hand alert. Returning
+  to Phren clears expired activities and requests already resolved on the computer.
+- Permission requests discovered on the Agents overview now create Live
+  Activities without opening each conversation first.
+- Image uploads remain available while an agent waits for an answer. A blocked
+  send keeps its draft and uploaded attachment for an explicit retry, and
+  follow-ups leave the queue when the agent's current turn finishes.
+
 - "Couldn't move skill" for files containing base64 secrets.
 
 ## Earlier
