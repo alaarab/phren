@@ -360,26 +360,34 @@ struct FindingsTab: View {
     }
 
     var body: some View {
-        PhrenList {
+        PhrenList(plain: true) {
             // Pinned first, because that is what pinning means: the CLI
             // injects these into every session regardless of what else it
             // retrieves (shared/retrieval.ts, "always-inject").
             if !truths.isEmpty {
-                Section {
-                    ForEach(truths) { truth in
-                        TruthRow(truth: truth)
-                    }
-                } header: {
-                    Label("Pinned truths", systemImage: "pin.fill")
-                } footer: {
-                    Text("Always injected, never decayed. Pin one from your computer: phren pin \(project) \"…\"")
+                Text("Pinned truths").plainListSectionLabel()
+                ForEach(truths) { truth in
+                    TruthRow(truth: truth)
+                        .padding(.horizontal, 12).padding(.vertical, 8)
+                        .sessionCard()
+                        .overlay(alignment: .leading) { PhrenRail(color: PhrenTheme.cyan).padding(.vertical, 10) }
+                        .separatedSessionRow()
                 }
+                Text("Always injected, never decayed. Pin one from your computer: phren pin \(project) \"…\"")
+                    .font(.caption2).foregroundStyle(PhrenTheme.textMuted)
+                    .padding(.horizontal, 16).padding(.bottom, 6)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 4, trailing: 0))
+                    .listRowSeparator(.hidden, edges: .all)
+                    .listRowBackground(Color.clear)
             }
             ForEach(groupedByDate, id: \.date) { group in
-                Section(group.date) {
-                    ForEach(group.items) { finding in
-                        ExpandableFindingRow(finding: finding, expandedIds: $expandedFindingIds)
-                            .swipeActions(edge: .trailing) {
+                Text(group.date).plainListSectionLabel()
+                ForEach(group.items) { finding in
+                    ExpandableFindingRow(finding: finding, expandedIds: $expandedFindingIds)
+                        .padding(.horizontal, 12).padding(.vertical, 8)
+                        .sessionCard()
+                        .separatedSessionRow()
+                        .swipeActions(edge: .trailing) {
                                 // A journal entry has no edit or delete: the
                                 // CLI's `edit_finding`/`remove_finding` splice
                                 // FINDINGS.md in every store, team or not
@@ -401,7 +409,6 @@ struct FindingsTab: View {
                                 }
                             }
                     }
-                }
             }
             ArchiveFooter(storeId: storeId, project: project)
             if isJournalled {
@@ -616,10 +623,10 @@ struct NotesTab: View {
     }
 
     var body: some View {
-        PhrenList {
+        PhrenList(plain: true) {
             ForEach(groupedByDay, id: \.date) { group in
-                Section(group.date) {
-                    ForEach(group.items) { note in
+                Text(group.date).plainListSectionLabel()
+                ForEach(group.items) { note in
                         VStack(alignment: .leading, spacing: 4) {
                             Text(note.text)
                                 .font(.callout)
@@ -638,6 +645,9 @@ struct NotesTab: View {
                                 }
                             }
                         }
+                        .padding(.horizontal, 12).padding(.vertical, 8)
+                        .sessionCard()
+                        .separatedSessionRow()
                         .contentShape(Rectangle())
                         .onTapGesture {
                             withAnimation(.easeInOut(duration: 0.2)) {
@@ -674,7 +684,6 @@ struct NotesTab: View {
                             }
                         }
                     }
-                }
             }
         }
         .overlay {
