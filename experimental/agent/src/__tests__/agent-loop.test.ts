@@ -33,7 +33,6 @@ vi.mock("../plan.js", () => ({
 vi.mock("../tools/lint-test.js", () => ({
   detectLintCommand: () => null,
   detectTestCommand: () => null,
-  runPostEditCheck: () => ({ passed: true, output: "" }),
 }));
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
