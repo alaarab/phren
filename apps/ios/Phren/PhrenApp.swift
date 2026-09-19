@@ -3,6 +3,7 @@ import PhrenKit
 
 @main
 struct PhrenApp: App {
+    @UIApplicationDelegateAdaptor(PhrenAppDelegate.self) private var appDelegate
     @State private var model = AppModel()
     @State private var appearance = PhrenAppearance.shared
     @State private var approvals = ApprovalActivityController.shared
@@ -33,6 +34,7 @@ struct PhrenApp: App {
                     #endif
                     await approvals.retireExpired()
                     await model.bootstrap()
+                    await ApprovalPushNotifications.registerSavedHosts()
                     AgentLaunch.restorePendingNavigation()
                 }
                 .alert("Permission request", isPresented: $approvals.message.isPresent()) {
@@ -42,7 +44,7 @@ struct PhrenApp: App {
                     // Live sync runs only while the app is visible; returning
                     // to the foreground triggers an immediate catch-up pull.
                     switch phase {
-                    case .active: Task { await approvals.retireExpired(); await model.enterForeground() }
+                    case .active: Task { await approvals.retireExpired(); await ApprovalPushNotifications.registerSavedHosts(); await model.enterForeground() }
                     case .background, .inactive: Task { await model.enterBackground() }
                     @unknown default: break
                     }

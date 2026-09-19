@@ -99,6 +99,7 @@ targets:
     entitlements:
       path: Phren/Phren.entitlements
       properties:
+        aps-environment: "$(APS_ENVIRONMENT)"
         com.apple.security.application-groups:
           - group.com.phren.ios
     # Only what has no INFOPLIST_KEY_ build-setting form lives here.
@@ -161,8 +162,12 @@ targets:
         # self-classification report still applies to exempt apps.
         INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: false
         SWIFT_VERSION: "5.9"
+        APS_ENVIRONMENT: development
         TARGETED_DEVICE_FAMILY: "1"
         ENABLE_USER_SCRIPT_SANDBOXING: true
+      configs:
+        Release:
+          APS_ENVIRONMENT: production
 
   PhrenWidgets:
     type: app-extension

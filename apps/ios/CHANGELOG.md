@@ -10,6 +10,9 @@ number counts up on its own.
 
 ### New
 
+- Agent permission requests can reach the lock screen while Phren is suspended
+  when direct APNs delivery is configured on the computer. Approve or deny from
+  the notification; questions open in Phren for their full answer.
 - Codex async questions stay visible above chat input after acknowledgement,
   including older pending questions, and can be answered with choices or typed
   text through Codex's exact-conversation inbox. Pending prompts no longer say

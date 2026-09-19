@@ -227,7 +227,32 @@ Requests received in chat or the overview can create a Live Activity: actions
 authenticate and open the app before using its protected SSH key. The widget
 receives display text and an opaque local ID, while a private protected record binds the host, pane, conversation, action and expiry. Claims
 are consumed before sending and never automatically retried. New requests while
-iOS suspends the app require a push relay; this integration does not supply one.
+iOS suspends the app use direct Hook-to-APNs delivery when configured. The phone
+registers its device token with each Hook over the authenticated SSH gateway.
+APNs receives a generic provider label, host UUID and one-time 55-second binding;
+it never receives the command, tool input, conversation or provider action ID.
+Approve/Deny from the notification resolves that binding over SSH. Questions only
+offer Open because they require a structured answer in Phren.
+
+This is an ordinary time-sensitive remote notification, not ActivityKit remote
+push-to-start or push-to-update. After Phren is already running, foreground
+discovery still creates the richer Live Activity. To enable suspended delivery:
+
+1. Enable Push Notifications for `com.phren.ios` in Certificates, Identifiers &
+   Profiles and regenerate the development/distribution profiles.
+2. Create an APNs token key in the Apple Developer portal and copy its `.p8`
+   file to the computer. Keep both it and the config below mode `0600`.
+3. Write `~/.local/share/phren/bridge/apns.json`:
+
+   ```json
+   {"keyId":"ABCDEFGHIJ","teamId":"LYB298P4U6","topic":"com.phren.ios","privateKeyPath":"/absolute/path/AuthKey_ABCDEFGHIJ.p8"}
+   ```
+
+4. Rebuild/install Phren Hook, restart it, then install and open the newly signed
+   app once. Accept notifications; Phren registers the APNs token with every
+   saved computer automatically. The Hook falls back immediately to the normal
+   terminal permission flow if APNs is unavailable and no foreground watcher is
+   connected.
 
 Question dialogs and unsupported interactions stay in Phren's native terminal.
 The protocol reports these capabilities explicitly. No blind terminal keystrokes

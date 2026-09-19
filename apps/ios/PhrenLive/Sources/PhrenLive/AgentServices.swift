@@ -2,6 +2,24 @@ import Foundation
 import PhrenKit
 
 extension PhrenConnection {
+    public static func registerApprovalPush(host: LiveHost, privateKey: Data, deviceID: UUID, token: String, production: Bool) async throws {
+        guard token.range(of: #"^[0-9a-f]{64}$"#, options: .regularExpression) != nil else {
+            throw PhrenKitError.validation("Apple returned an invalid notification token.")
+        }
+        let body = try JSONSerialization.data(withJSONObject: ["deviceID": deviceID.uuidString.lowercased(),
+                                                               "hostID": host.id.uuidString.lowercased(), "token": token,
+                                                               "environment": production ? "production" : "development"])
+        try requireOK(await fetchData(host: host, key: .init(rawRepresentation: privateKey),
+                                      request: .init(path: "/v1/push/register", body: body)))
+    }
+
+    public static func answerApprovalPush(host: LiveHost, privateKey: Data, binding: UUID, approve: Bool) async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["binding": binding.uuidString.lowercased(),
+                                                               "decision": approve ? "approve" : "deny"])
+        try requireOK(await fetchData(host: host, key: .init(rawRepresentation: privateKey),
+                                      request: .init(path: "/v1/push/answer", body: body)))
+    }
+
     public static func accountUsage(host: LiveHost, privateKey: Data) async throws -> AccountUsageSnapshot {
         do {
             let bytes = try await fetchData(host: host, key: .init(rawRepresentation: privateKey),
