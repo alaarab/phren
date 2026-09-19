@@ -15,6 +15,7 @@ public enum LiveConnectionError: LocalizedError, Equatable {
     case response(Int)
     case gatewayRejection(status: Int, reason: String)
     case oversized
+    case deliveryUnconfirmed
 
     public var errorDescription: String? {
         switch self {
@@ -25,6 +26,7 @@ public enum LiveConnectionError: LocalizedError, Equatable {
         case .disconnected: return "The connection to the computer closed."
         case .response(let status): return "The computer returned HTTP \(status)."
         case .gatewayRejection(let status, let reason): return "\(reason) (HTTP \(status))"
+        case .deliveryUnconfirmed: return "The computer did not confirm message delivery."
         case .oversized: return "The Phren Hook response exceeded this request's size limit."
         }
     }

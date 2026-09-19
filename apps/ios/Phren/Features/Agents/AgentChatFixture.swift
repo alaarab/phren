@@ -107,6 +107,7 @@ import UIKit
     }
     static func upload(_ attachment: AgentAttachment) throws -> String {
         uploads += 1
+        if flag("--chat-send-blocked-once"), uploads > 1 { throw PhrenKitError.validation("Attachment was uploaded twice.") }
         if flag("--chat-upload-fails") { throw LiveConnectionError.disconnected }
         return "/tmp/phren-fixture/" + attachment.uploadName
     }
@@ -125,7 +126,7 @@ import UIKit
         let launchedKind = launches.last.map(\.kind).flatMap { session.workspaceID == "w9" ? $0 : nil }
         let agent = launchedKind ?? (flag("--chat-copilot") ? "copilot" : (trailer || flag("--chat-claude-queue") || flag("--chat-claude-image") || flag("--chat-read-images") || flag("--chat-approval-question") || flag("--chat-agent-card") || flag("--chat-todos") || flag("--chat-plan-mode") || flag("--chat-web-tools") || flag("--chat-skill-chip") || flag("--chat-mcp-card") || (tour && flag("--chat-phren-tools"))) ? "claude" : "codex")
         var panes: [[String: Any]] = [["id": "\(session.workspaceID):p1", "label": "1", "title": tour ? "Ship the onboarding flow" : "Polish the phone app", "agent": agent,
-                                     "agentStatus": ((flag("--chat-blocked") || flag("--chat-approval") || flag("--chat-approval-question") || flag("--chat-plan-mode") || flag("--chat-question")) && !answered) ? "blocked" : (flag("--chat-working") && !stopped ? "working" : "idle"), "sessionId": agent == "copilot" ? "00000000-0000-0000-0000-000000000023" : "fixture-\(agent)-session", "cwd": root]]
+                                     "agentStatus": ((flag("--chat-blocked") || flag("--chat-approval") || flag("--chat-approval-question") || flag("--chat-plan-mode") || flag("--chat-question")) && !answered) ? "blocked" : (flag("--chat-queue-completion") || (flag("--chat-working") && !stopped) ? "working" : "idle"), "sessionId": agent == "copilot" ? "00000000-0000-0000-0000-000000000023" : "fixture-\(agent)-session", "cwd": root]]
         if flag("--starting-session-fixture") {
             panes[0]["startingToken"] = startingToken
             if startingAttachedAt == nil || Date.now < startingAttachedAt! {
@@ -148,6 +149,7 @@ import UIKit
             heavyFrames[target.source] = frame
             return frame
         }
+        if flag("--chat-queue-completion") { return try queueCompletionTranscript(target) }
         if flag("--chat-streaming") { return try streamingTranscript(target) }
         var entries: [[String: Any]] = []
         func append(_ role: String, _ text: String) {
@@ -503,6 +505,9 @@ import UIKit
     static func send(_ target: AgentChatTarget, text: String) async throws {
         try await Task.sleep(for: .milliseconds(250))
         sendAttempts += 1
+        if flag("--chat-send-blocked-once"), sendAttempts == 1 {
+            throw LiveConnectionError.gatewayRejection(status: 409, reason: "Answer the pending question before sending another message.")
+        }
         if flag("--chat-send-rejected"), sendAttempts == 1 {
             throw LiveConnectionError.gatewayRejection(status: 422, reason: "The selected terminal is unavailable.")
         }
@@ -510,6 +515,33 @@ import UIKit
         sent.append((target.id, text))
         if flag("--starting-session-fixture"), target.isStarting { startingAttachedAt = Date.now.addingTimeInterval(3) }
         if flag("--chat-streaming") { streamStarts[target.id] = .now }
+    }
+    /// The terminal keeps reporting working after Codex's actual completion.
+    /// Each queued prompt is acknowledged and finished in the next frame.
+    private static func queueCompletionTranscript(_ target: AgentChatTarget) throws -> AgentChatTranscript {
+        let kind = streamed.insert(target.id).inserted ? "backlog" : "append"
+        var entries: [[String: Any]] = []
+        func message(_ role: String, _ text: String) {
+            entries.append(["line": entries.count, "raw": ["type": "response_item", "payload": ["type": "message", "role": role, "content": text]]])
+        }
+        func event(_ type: String) {
+            entries.append(["line": entries.count, "raw": ["type": "event_msg", "payload": ["type": type]]])
+        }
+        message("assistant", "Working after the terminal answer.")
+        event("task_started")
+        if stopped {
+            event("task_completed")
+            for (id, text) in sent where id == target.id {
+                message("user", text)
+                message("assistant", "Received: " + text)
+                event("task_completed")
+            }
+        }
+        let previousLine = lastStreamLine[target.id] ?? -1
+        lastStreamLine[target.id] = entries.count - 1
+        return try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: ["type": kind, "source": target.source,
+            "entries": kind == "backlog" ? entries : entries.filter { ($0["line"] as? Int ?? -1) > previousLine },
+            "totalLines": entries.count, "hasMore": false]), source: target.source)
     }
     private static func streamingTranscript(_ target: AgentChatTarget) throws -> AgentChatTranscript {
         let kind = streamed.insert(target.id).inserted ? "backlog" : "append"

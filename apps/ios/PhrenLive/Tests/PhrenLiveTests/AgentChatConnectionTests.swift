@@ -12,6 +12,16 @@ import XCTest
 final class AgentChatConnectionTests: XCTestCase {
 
 
+    func testUnconfirmedDeliveryIsNotClassifiedAsAValidationRejection() throws {
+        try PhrenConnection.confirmChatDelivery(Data(#"{"ok":true}"#.utf8))
+        for reply in [#"{"ok":false}"#, #"{}"#, #"{"ok":true,"deliveryUncertain":true}"#] {
+            XCTAssertThrowsError(try PhrenConnection.confirmChatDelivery(Data(reply.utf8))) { error in
+                XCTAssertEqual(error as? LiveConnectionError, .deliveryUnconfirmed)
+                XCTAssertFalse(error is PhrenKitError)
+            }
+        }
+    }
+
     func testNamedServerIsolationBeforeTransportAndWorkspaceQueryScoping() async throws {
         var host = try LiveHost(name: "Fixture", address: "fixture.invalid", username: "fixture")
         host.herdrSession = "work"

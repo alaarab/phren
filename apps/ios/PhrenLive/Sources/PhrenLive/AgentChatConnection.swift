@@ -49,7 +49,9 @@ extension PhrenConnection {
 
     public static func uploadChatAttachment(host: LiveHost, privateKey: Data, target: AgentChatTarget, attachment: AgentAttachment) async throws -> String {
         guard target.hostID == host.id && target.muxID == host.muxID else { throw PhrenKitError.validation("The chat belongs to another computer.") }
-        _ = try await chatPanes(host: host, privateKey: privateKey, workspaceID: target.workspaceID, tabID: target.tabID).validate(target, sending: true)
+        // Uploading a file does not send input to the agent. Still validate
+        // the conversation binding; sendChat separately gates prompt delivery.
+        _ = try await chatPanes(host: host, privateKey: privateKey, workspaceID: target.workspaceID, tabID: target.tabID).validate(target)
         if target.isStarting {
             // Before there is a conversation directory, use the existing
             // computer-file upload. Prompt delivery still revalidates the pane.
@@ -100,8 +102,15 @@ extension PhrenConnection {
         let request = try GatewayRequest.prompt(target, text: text)
         // Exactly one attempt. An interrupted reply must not replay terminal input.
         let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: request)
-        guard let result = try JSONSerialization.jsonObject(with: data) as? [String: Any], result["ok"] as? Bool == true else {
-            throw PhrenKitError.validation("Delivery was not confirmed. Check the conversation before sending again.")
+        try confirmChatDelivery(data)
+    }
+
+    static func confirmChatDelivery(_ data: Data) throws {
+        guard let result = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              result["ok"] as? Bool == true, result["deliveryUncertain"] as? Bool != true else {
+            // This is after prompt dispatch. Never label it a preflight
+            // validation rejection or make the pending prompt safe to replay.
+            throw LiveConnectionError.deliveryUnconfirmed
         }
     }
 }

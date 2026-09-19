@@ -104,8 +104,11 @@ chevron.
 While an agent is working, a new message **queues** instead of interrupting —
 the Send control becomes Queue, and queued messages sit above the composer
 with Send now (steer the agent immediately), Edit (back into the composer),
-and remove. The first queued message goes out on its own when the turn ends.
-Slash commands still go straight through.
+and remove. The first queued message goes out on its own when the turn ends,
+and remaining messages continue after each reply. Pending approvals or questions
+pause delivery. A rejected send keeps its draft and attachments for explicit
+retry; files already uploaded are reused. Upload failures and blocked messages
+have separate explanations. Slash commands still go straight through.
 
 Chat uses compact tool activity and a full-width composer. Its smaller Send
 control becomes Stop while an agent works and the draft is empty; typing a new

@@ -67,6 +67,25 @@ final class ChatDeliveryTests: XCTestCase {
         try await ssh.close(); try await helper.channel.close()
     }
 
+    func testUploadWhileQuestionIsPendingDoesNotSendOrBypassPromptGate() async throws {
+        let helper = try await DeliveryHelper.start(agentStatus: "waiting")
+        let ssh = try await ChatRelaySSH.start(forwardPorts: [24543: helper.channel.localAddress!.port!])
+        defer { Task { try await ssh.close(); try await helper.channel.close() } }
+        var host = try ssh.host(); host.herdrSession = "phone-test"
+        let target = try AgentChatTarget(hostID: host.id, workspaceID: "w1", tabID: "w1:t1", paneID: "w1:p1",
+                                        source: "codex", sessionID: "current-session", muxID: host.muxID)
+        let attachment = try AgentAttachment(name: "notes.txt", data: Data("Keep this draft".utf8))
+        let path = try await PhrenConnection.uploadChatAttachment(host: host, privateKey: ssh.deviceKey.rawRepresentation,
+                                                                target: target, attachment: attachment)
+        XCTAssertEqual(path, "/tmp/phren-upload-fixture/notes.txt")
+        do {
+            try await PhrenConnection.sendChat(host: host, privateKey: ssh.deviceKey.rawRepresentation, target: target, text: "New prompt")
+            XCTFail("A pending question must still block prompt delivery")
+        } catch { XCTAssertTrue(error is PhrenKitError) }
+        XCTAssertEqual(helper.promptCount, 0)
+        XCTAssertTrue(helper.messages.isEmpty)
+    }
+
     func testErrorBodiesAreBoundedAndOnlyPlainJSONReasonsAreDisplayed() throws {
         for (body, expected) in [
             (Data(#"{"error":"target\npane\u0000 not found"}"#.utf8), LiveConnectionError.gatewayRejection(status: 422, reason: "target pane not found")),
@@ -93,6 +112,8 @@ final class ChatDeliveryTests: XCTestCase {
 /// unusable terminal record; the live route requires the exact named server.
 private final class DeliveryHelper: @unchecked Sendable {
     var channel: Channel!
+    let agentStatus: String
+    init(agentStatus: String) { self.agentStatus = agentStatus }
     private let lock = NSLock()
     private var accepted: [String] = []
     private var count = 0
@@ -108,7 +129,13 @@ private final class DeliveryHelper: @unchecked Sendable {
         var value: [String: Any] = [:]
         if parts.path == "/v1/workspaces/panes" && query == ["mux": "herdr:phone-test", "groupId": "w1", "childId": "w1:t1"] {
             value = ["kind": "herdr", "groupId": "w1", "childId": "w1:t1", "panes": [
-                ["id": "w1:p1", "label": "codex", "agent": "codex", "agentStatus": "working", "sessionId": "current-session"]]]
+                ["id": "w1:p1", "label": "codex", "agent": "codex", "agentStatus": agentStatus, "sessionId": "current-session"]]]
+        } else if parts.path == "/v1/upload" {
+            let request = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] ?? [:]
+            let target = request["target"] as? [String: String] ?? [:]
+            if target == ["server": "phone-test", "workspace": "w1", "tab": "w1:t1", "pane": "w1:p1", "source": "codex", "session": "current-session"] {
+                value = ["ok": true, "path": "/tmp/phren-upload-fixture/notes.txt"]
+            } else { status = .conflict; value = ["error": "wrong destination"] }
         } else if parts.path == "/v1/transcripts/history" {
             historyRequests += 1
             var destination = query; destination.removeValue(forKey: "beforeLine")
@@ -137,8 +164,8 @@ private final class DeliveryHelper: @unchecked Sendable {
         } else { status = .notFound; value = ["error": "unknown route"] }
         return (status, try! JSONSerialization.data(withJSONObject: value))
     }
-    static func start() async throws -> DeliveryHelper {
-        let helper = DeliveryHelper()
+    static func start(agentStatus: String = "working") async throws -> DeliveryHelper {
+        let helper = DeliveryHelper(agentStatus: agentStatus)
         helper.channel = try await ServerBootstrap(group: MultiThreadedEventLoopGroup.singleton).childChannelInitializer { channel in
             channel.pipeline.configureHTTPServerPipeline().flatMap { channel.pipeline.addHandler(DeliveryHandler(helper: helper)) }
         }.bind(host: "127.0.0.1", port: 0).get()

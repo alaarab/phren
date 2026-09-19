@@ -37,6 +37,47 @@ final class ChatStreamingTests: XCTestCase {
         model.accept(done)
         XCTAssertEqual(model.activityPhase, .finished)
     }
+    func testRepeatedWorkingStatusCannotReviveCompletedTurnAfterAnswering() throws {
+        let model = AgentChatModel()
+        model.acceptActivity("waiting")
+        model.acceptActivity("working")
+        model.accept(try lifecycle("task_started", kind: "append", line: 1))
+        XCTAssertTrue(model.isBusy)
+        model.accept(try lifecycle("task_completed", kind: "append", line: 2))
+        XCTAssertFalse(model.isBusy)
+        model.acceptActivity("working")
+        XCTAssertEqual(model.activityPhase, .finished)
+        XCTAssertFalse(model.isBusy, "A stale status tick must not leave follow-ups queued after completion")
+        model.acceptActivity("idle")
+        model.acceptActivity("working")
+        XCTAssertTrue(model.isBusy, "A real new turn still queues follow-ups")
+    }
+
+    func testHistoricalStartDoesNotOverrideCurrentIdleStatus() throws {
+        let model = AgentChatModel()
+        model.acceptActivity("idle")
+        model.accept(try lifecycle("task_started", kind: "backlog", line: 1))
+        model.acceptActivity("idle")
+        XCTAssertFalse(model.isBusy)
+        model.accept(try lifecycle("task_started", kind: "append", line: 2))
+        XCTAssertTrue(model.isBusy, "A fresh lifecycle event still starts a new turn")
+    }
+
+    func testReopeningDiscoversCompletionWhileTerminalStillSaysWorking() throws {
+        let model = AgentChatModel()
+        model.acceptActivity("working")
+        model.accept(try lifecycle("task_started", kind: "backlog", line: 1))
+        XCTAssertTrue(model.isBusy)
+        model.accept(try lifecycle("task_completed", kind: "backlog", line: 2))
+        model.acceptActivity("working")
+        XCTAssertFalse(model.isBusy)
+    }
+
+    private func lifecycle(_ type: String, kind: String, line: Int) throws -> AgentChatTranscript {
+        try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: ["type": kind, "source": "codex", "totalLines": line + 1,
+            "entries": [["line": line, "raw": ["type": "event_msg", "payload": ["type": type]]]]]), source: "codex")
+    }
+
     func testNewTextAppearsProgressivelyAndAdditionalTextKeepsItsVisiblePrefix() throws {
         let model = AgentChatModel()
         model.accept(try frame("backlog", text: "History", line: 0))

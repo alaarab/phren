@@ -1103,6 +1103,67 @@ final class AgentChatTests: XCTestCase {
     }
 
     @MainActor
+    func testBlockedDeliveryRetainsDraftAndReusesSuccessfulUploadOnExplicitRetry() {
+        let app = launch(extra: ["--chat-send-blocked-once"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        XCTAssertTrue(app.staticTexts["The project screen is ready. What would you like to change?"].waitForExistence(timeout: 5))
+        attachImage(app)
+        let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
+        composer.tap(); composer.typeText("Keep this attachment")
+        app.buttons["chat-send"].tap()
+        let error = app.staticTexts["chat-delivery-error"]
+        XCTAssertTrue(error.waitForExistence(timeout: 5))
+        XCTAssertTrue(error.label.hasPrefix("Your message hasn't been sent."))
+        XCTAssertTrue(error.label.contains("pending question"))
+        XCTAssertFalse(error.label.contains("upload"))
+        XCTAssertEqual(composer.value as? String, "Keep this attachment")
+        XCTAssertTrue(app.buttons["Remove Screenshot.png"].exists)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Received in codex")).firstMatch.exists)
+        app.buttons["chat-send"].tap()
+        XCTAssertTrue(app.buttons["View attached Screenshot.png"].waitForExistence(timeout: 8))
+        XCTAssertFalse(error.exists, "The fixture rejects a duplicate upload, so a successful retry proves the path was reused")
+        XCTAssertFalse(app.buttons["Remove Screenshot.png"].exists)
+        XCTAssertEqual(composer.value as? String, "")
+    }
+
+    @MainActor
+    func testCompletedTurnDrainsFollowUpsDespiteRepeatedStaleWorkingStatus() {
+        let app = launch(extra: ["--chat-working", "--chat-queue-completion"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        XCTAssertTrue(app.staticTexts["Working after the terminal answer."].waitForExistence(timeout: 5))
+        let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
+        for text in ["First", "Second"] {
+            composer.tap(); composer.typeText(text)
+            XCTAssertTrue(app.buttons["chat-queue"].waitForExistence(timeout: 3))
+            app.buttons["chat-queue"].tap()
+        }
+        // Finish the fixture's active turn once both messages are queued;
+        // its status snapshots deliberately keep saying working.
+        app.buttons["chat-stop"].tap()
+        XCTAssertTrue(app.staticTexts["Received: First"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["Received: Second"].waitForExistence(timeout: 8))
+        composer.tap(); composer.typeText("Third")
+        XCTAssertTrue(app.buttons["chat-send"].waitForExistence(timeout: 3), "A follow-up after completion sends directly")
+        app.buttons["chat-send"].tap()
+        XCTAssertTrue(app.staticTexts["Received: Third"].waitForExistence(timeout: 8))
+    }
+
+    @MainActor
+    func testRejectedAutomaticQueueDeliveryWaitsForExplicitRetry() {
+        let app = launch(extra: ["--chat-working", "--chat-queue-completion", "--chat-send-rejected"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        XCTAssertTrue(app.staticTexts["Working after the terminal answer."].waitForExistence(timeout: 5))
+        let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
+        composer.tap(); composer.typeText("Retry explicitly")
+        app.buttons["chat-queue"].tap()
+        app.buttons["chat-stop"].tap()
+        XCTAssertTrue(app.staticTexts["chat-delivery-error"].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.staticTexts["Received: Retry explicitly"].waitForExistence(timeout: 2), "Repeated status ticks must not retry a failed send")
+        app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-queued-send:")).firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Received: Retry explicitly"].waitForExistence(timeout: 8))
+    }
+
+    @MainActor
     func testEarlierHistorySurvivesLiveRefresh() {
         let app = launch(extra: ["--chat-history"])
         app.buttons["live-chat:w7:w7:t9"].tap()

@@ -285,6 +285,7 @@ describe("Phren Hook boundaries", () => {
 describe.skipIf(process.platform === "win32")("standalone Phren service", () => {
   let root: string, hook: ChildProcess, herdr: Server, log: string, record: string, commands: { method: string; params: Record<string, unknown> }[];
   let current = session;
+  let agentStatus = "working";
   let reportIdentity = true, foregroundPID = process.pid, terminalID = "term-one";
   let holdSnapshot = false, releaseSnapshot: (() => void) | undefined;
   let replaceBeforeMutation = false;
@@ -316,7 +317,7 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     if (root.length > 55) {
       const short = await mkdtemp("/tmp/phren-hook-"); await rm(root, { recursive: true }); root = short;
     }
-    commands = []; current = session; reportIdentity = true; foregroundPID = process.pid; terminalID = "term-one"; log = ""; holdSnapshot = false; releaseSnapshot = undefined;
+    commands = []; current = session; agentStatus = "working"; reportIdentity = true; foregroundPID = process.pid; terminalID = "term-one"; log = ""; holdSnapshot = false; releaseSnapshot = undefined;
     replaceBeforeMutation = false; deliveries = [];
     extraWorkspaces = []; extraTabs = []; extraPanes = []; failAgentStart = false;
     await mkdir(path.join(root, "herdr"));
@@ -352,7 +353,7 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
           if (failAgentStart || !target) { socket.end(JSON.stringify({ id: req.id, error: { code: 1, message: "agent not detected" } }) + "\n"); return; }
           target.agent = req.params.kind; target.agent_status = "idle";
         }
-        const pane = { pane_id: "w1:p1", tab_id: "w1:t1", workspace_id: "w1", terminal_id: terminalID, agent: "codex", agent_status: "working",
+        const pane = { pane_id: "w1:p1", tab_id: "w1:t1", workspace_id: "w1", terminal_id: terminalID, agent: "codex", agent_status: agentStatus,
           agent_session: reportIdentity ? { kind: "id", agent: "codex", value: current } : undefined, cwd: root };
         const snapshot = { panes: [pane, ...extraPanes], workspaces: [{ workspace_id: "w1", label: "Project" }, ...extraWorkspaces],
           tabs: [{ tab_id: "w1:t1", workspace_id: "w1", label: "1" }, ...extraTabs] };
@@ -728,6 +729,19 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     expect(await readFile(response.data.path)).toEqual(bytes);
     expect((await api("/v1/upload", { target, name: "../../settings.json", data: "AAAA" })).status).toBe(400);
     expect((await api("/v1/upload", { target, name: "script.png", data: Buffer.from("#!/bin/sh").toString("base64") })).status).toBe(400);
+  });
+  it("uploads while input is pending without sending a prompt, and still rejects a changed conversation", async () => {
+    for (const status of ["blocked", "waiting", "unknown"]) {
+      agentStatus = status;
+      const bytes = Buffer.from(`Notes while ${status}`);
+      const upload = await api("/v1/upload", { target, name: `${status}.txt`, data: bytes.toString("base64") });
+      expect(upload.status).toBe(200);
+      expect(await readFile(upload.data.path)).toEqual(bytes);
+      expect((await api("/v1/prompt", { target, text: "Do not answer the pending question" })).status).toBe(409);
+    }
+    expect(commands.some(c => c.method === "agent.prompt")).toBe(false);
+    current = "bbbbbbbb-1111-4111-8111-111111111111";
+    expect((await api("/v1/upload", { target, name: "changed.txt", data: Buffer.from("Draft").toString("base64") })).status).toBe(409);
   });
   it("only resolves the live approval on an explicitly watched conversation", async () => {
     const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);

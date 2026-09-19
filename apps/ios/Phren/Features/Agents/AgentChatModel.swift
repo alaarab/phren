@@ -132,7 +132,13 @@ final class AgentChatModel {
     }
     func acceptActivity(_ activity: String?) {
         guard let activity else { return }
-        liveActivity = activity; preferProgressActivity = false
+        // A repeated terminal snapshot must not overwrite a newer transcript
+        // completion. Only an actual status transition changes precedence.
+        if liveActivity != activity {
+            preferProgressActivity = false
+            if ["working", "idle", "done", "waiting", "blocked"].contains(activity) { awaitingReply = false }
+        }
+        liveActivity = activity
         scheduleDrain()
     }
     var modelName: String?
@@ -185,6 +191,7 @@ final class AgentChatModel {
     /// is still on its way, and nothing is waiting on the person.
     var isBusy: Bool { !needsAnswer && approval == nil && (awaitingReply || (target?.isStarting != true && activityPhase == .working)) }
     private var drainTask: Task<Void, Never>?
+    private var failedQueueItem: UUID?
     private var lastSession: LiveAgentSession?
     private var generation = UUID()
     private var streamTask: Task<Void, Never>?
@@ -449,7 +456,11 @@ final class AgentChatModel {
     func acceptProgress(_ frame: AgentChatTranscript) {
         let previous = progress.activityLine
         progress.receive(frame)
-        if progress.activityLine != previous { preferProgressActivity = true }
+        if progress.activityLine != previous {
+            // Reopening may reveal a completion that arrived in the terminal.
+            // An old start, however, must not revive work after a current idle.
+            preferProgressActivity = frame.kind != .backlog || liveActivity == nil || progress.phase != .working
+        }
         if frame.progressEvents.contains(where: { event in
             guard event.line > submittedAfterLine else { return false }
             switch event.value { case .started, .finished, .stopped: return true; default: return false }
@@ -590,8 +601,10 @@ final class AgentChatModel {
 
     /// Delivers a queued message now, ahead of the agent finishing — the
     /// "steer" case. On failure the item stays queued with the error shown.
-    func sendNow(_ item: QueuedMessage, _ session: LiveAgentSession) async {
-        guard !sending, connected, let index = queue.firstIndex(where: { $0.id == item.id }), queue[index].submittedAfterLine == nil else { return }
+    @discardableResult
+    func sendNow(_ item: QueuedMessage, _ session: LiveAgentSession) async -> Bool {
+        guard !sending, connected, !needsAnswer, approval == nil, question == nil,
+              let index = queue.firstIndex(where: { $0.id == item.id }), queue[index].submittedAfterLine == nil else { return false }
         let sendingTarget = target
         let result = await deliver(item.text, attachments: queue[index].attachments, session: session) { text in
             if self.target == sendingTarget, let index = self.queue.firstIndex(where: { $0.id == item.id }) {
@@ -599,11 +612,15 @@ final class AgentChatModel {
                 self.queue[index].submittedText = text
             }
         }
-        guard target == sendingTarget, let index = queue.firstIndex(where: { $0.id == item.id }) else { return }
-        queue[index].attachments = result.attachments
-        if result.rejected { queue[index].submittedAfterLine = nil; queue[index].submittedText = nil }
+        guard target == sendingTarget else { return false }
+        failedQueueItem = result.delivered ? nil : item.id
+        if let index = queue.firstIndex(where: { $0.id == item.id }) {
+            queue[index].attachments = result.attachments
+            if result.rejected { queue[index].submittedAfterLine = nil; queue[index].submittedText = nil }
+        }
         reconcileHandedOffQueue()
-        scheduleDrain()
+        if result.delivered { scheduleDrain() }
+        return result.delivered
     }
 
     func remove(_ item: QueuedMessage) {
@@ -622,12 +639,19 @@ final class AgentChatModel {
     /// status stream and the transcript both report the turn ending, and a
     /// reply's last frames arrive a beat after the status flips.
     private func scheduleDrain() {
-        guard let next = queue.first, next.submittedAfterLine == nil, !isBusy, !sending, connected, drainTask == nil, let session = lastSession else { return }
+        guard let next = queue.first, next.submittedAfterLine == nil, next.id != failedQueueItem,
+              !needsAnswer, approval == nil, question == nil, !isBusy, !sending, connected,
+              drainTask == nil, let session = lastSession else { return }
         drainTask = Task { @MainActor [weak self] in
-            defer { self?.drainTask = nil }
+            var delivered = false
+            defer {
+                self?.drainTask = nil
+                if delivered { self?.scheduleDrain() }
+            }
             do { try await Task.sleep(for: .milliseconds(400)) } catch { return }
-            guard let self, let next = queue.first, !isBusy, !sending, connected, lastSession == session else { return }
-            await sendNow(next, session)
+            guard let self, let next = queue.first, next.id != failedQueueItem,
+                  !needsAnswer, approval == nil, question == nil, !isBusy, !sending, connected, lastSession == session else { return }
+            delivered = await sendNow(next, session)
         }
     }
 
@@ -693,7 +717,15 @@ final class AgentChatModel {
                 sent[index].path = path
             }
         } catch {
-            deliveryError = "Attachment upload didn't finish. Your message hasn't been sent. \(error.localizedDescription)"
+            // Older Hooks may reject uploads while input is pending. That is
+            // a conversation conflict, not a failed file transfer.
+            if case LiveConnectionError.gatewayRejection(status: 409, reason: _) = error {
+                deliveryError = "Your message hasn't been sent. \(error.localizedDescription)"
+            } else if error is PhrenKitError {
+                deliveryError = "Your message hasn't been sent. \(error.localizedDescription)"
+            } else {
+                deliveryError = "Attachment upload didn't finish. Your message hasn't been sent. \(error.localizedDescription)"
+            }
             return (false, sent, true)
         }
         let paths = sent.compactMap { $0.path }.joined(separator: "\n")
@@ -722,10 +754,12 @@ final class AgentChatModel {
             return (true, sent, false)
         } catch {
             awaitingReply = false
-            deliveryError = "Delivery wasn't confirmed. Check the conversation before trying again. \(error.localizedDescription)"
             let rejected: Bool
             if case LiveConnectionError.gatewayRejection(let status, _) = error { rejected = (400..<500).contains(status) }
             else { rejected = error is PhrenKitError }
+            deliveryError = rejected
+                ? "Your message hasn't been sent. \(error.localizedDescription)"
+                : "Delivery wasn't confirmed. Check the conversation before trying again. \(error.localizedDescription)"
             return (false, sent, rejected)
         }
     }
