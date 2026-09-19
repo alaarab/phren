@@ -1426,13 +1426,15 @@ final class AgentChatTests: XCTestCase {
     }
 
     @MainActor
-    func testBlockedAgentRequiresTerminalAndCannotSend() {
+    func testBlockedAgentCanBeAnsweredInChatOrTerminal() {
         let app = launch(extra: ["--chat-blocked"])
         app.buttons["live-chat:w7:w7:t9"].tap()
         XCTAssertTrue(app.buttons["chat-answer-terminal"].waitForExistence(timeout: 5))
         let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
         composer.tap(); composer.typeText("Keep this for later")
-        XCTAssertFalse(app.buttons["chat-send"].isEnabled)
+        XCTAssertTrue(app.buttons["chat-send"].isEnabled, "A blocked agent can be answered from the composer")
+        app.buttons["chat-send"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Received in codex")).firstMatch.waitForExistence(timeout: 8))
     }
 
     @MainActor

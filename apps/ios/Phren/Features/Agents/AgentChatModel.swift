@@ -528,7 +528,7 @@ final class AgentChatModel {
             guard self.target == target else { return }
             if approval?.id == expected?.id { approval = nil }
             if question?.id == prompt?.id { question = nil }
-            deliveryError = "Answer wasn't confirmed. Refresh or open Herdr to check the current prompt. Your answer hasn't been retried."
+            deliveryError = "Answer wasn't confirmed. Check the current prompt, then try again. Your answer hasn't been retried."
         }
     }
     private func submitAnswer(_ session: LiveAgentSession, target: AgentChatTarget, approval: AgentApproval?, approve: Bool, updatedInput: [String: Any]?,
@@ -631,7 +631,8 @@ final class AgentChatModel {
 
     /// Uploads can be reused after failure; prompt delivery is never replayed.
     func send(_ session: LiveAgentSession) async {
-        guard !sending, connected, !needsAnswer, approval == nil, target != nil,
+        guard !sending, connected, approval == nil, target != nil,
+              !(needsAnswer && question != nil && questionsSupported),
               !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty else { return }
         guard !AgentSlashCommand.isCommand(draft) || attachments.isEmpty else {
             deliveryError = "Remove attachments before running a slash command."; return

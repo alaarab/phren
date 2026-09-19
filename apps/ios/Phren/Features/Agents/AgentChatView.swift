@@ -807,10 +807,16 @@ struct AgentChatView: View {
                                  choose: { model.draft = $0 + " " }, openAll: openCommandMenu)
             }
             if model.needsAnswer && model.approval == nil {
-                NavigationLink { HerdrTerminalView(host: session.host, session: session, target: model.target) } label: {
-                    Label(model.question != nil ? "Or answer in Herdr" : "Answer in Herdr terminal", systemImage: "terminal")
-                        .font(.caption).foregroundStyle(PhrenTheme.warning)
-                }.accessibilityIdentifier("chat-answer-terminal")
+                HStack(spacing: 8) {
+                    if answersInComposer {
+                        Text(model.question != nil ? "Waiting for your answer — type below" : "Waiting for your reply — type below")
+                            .font(.caption).foregroundStyle(PhrenTheme.warning)
+                    }
+                    NavigationLink { HerdrTerminalView(host: session.host, session: session, target: model.target) } label: {
+                        Label(model.question != nil ? "Or answer in the terminal" : "Open terminal", systemImage: "terminal")
+                            .font(.caption).foregroundStyle(PhrenTheme.warning)
+                    }.accessibilityIdentifier("chat-answer-terminal")
+                }
             }
             if let error = model.deliveryError { Text(error).font(.caption).foregroundStyle(PhrenTheme.warning).accessibilityIdentifier("chat-delivery-error") }
             if let error = model.draftStorageError { Text(error).font(.caption).foregroundStyle(PhrenTheme.warning).accessibilityIdentifier("chat-draft-storage-error") }
@@ -966,8 +972,15 @@ struct AgentChatView: View {
     private var primaryActionEnabled: Bool {
         showsStop ? active && model.connected && !model.sending && !model.stopping && !model.answering : canSend
     }
+    /// The agent is waiting but the app has no card to answer with — a plain
+    /// prompt, or a question type the Hook cannot structure. Then the
+    /// composer is the answer, not just a link out to the terminal.
+    private var answersInComposer: Bool {
+        model.needsAnswer && model.approval == nil && !(model.question != nil && model.questionsSupported)
+    }
     private var canSend: Bool {
-        active && model.connected && !model.sending && !model.stopping && !model.answering && !model.needsAnswer && model.approval == nil
+        active && model.connected && !model.sending && !model.stopping && !model.answering && model.approval == nil
+            && (!model.needsAnswer || answersInComposer)
             && (!model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !model.attachments.isEmpty)
     }
 }
