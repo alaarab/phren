@@ -29,7 +29,7 @@ export async function* prefetchFirst<T>(iterator: AsyncIterator<T>, first: Itera
 /** Default per-call budget when the tool declares none. */
 const DEFAULT_TOOL_TIMEOUT_MS = 120_000;
 
-type ToolExecResult = { block: ToolUseBlock; output: string; is_error: boolean; durationMs: number; images?: AgentToolImage[]; cancelled?: boolean };
+type ToolExecResult = { block: ToolUseBlock; output: string; is_error: boolean; durationMs: number; images?: AgentToolImage[]; cancelled?: boolean; permissionDenied?: boolean };
 
 /** Results that were synthesized by the loop rather than produced by a tool. */
 function isSyntheticResult(output: string): boolean {
@@ -98,6 +98,7 @@ export async function runToolsConcurrently(
             output: result.output,
             is_error: !!result.is_error,
             durationMs: Date.now() - start,
+            ...(result.permissionDenied ? { permissionDenied: true } : {}),
             ...(result.images && result.images.length > 0 ? { images: result.images } : {}),
           };
         } catch (err) {

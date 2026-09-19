@@ -9,6 +9,8 @@ export interface AgentToolImage {
 export interface AgentToolResult {
   output: string;
   is_error?: boolean;
+  /** The command was refused before execution; automatic checks must not retry it. */
+  permissionDenied?: boolean;
   /** Images to attach to the tool result (only meaningful on vision models). */
   images?: AgentToolImage[];
 }

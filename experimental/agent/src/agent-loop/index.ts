@@ -6,14 +6,14 @@ import { estimateMessageTokens } from "../context/token-counter.js";
 import { withRetry } from "../providers/retry.js";
 import { checkFlushNeeded } from "../memory/context-flush.js";
 import { injectPlanPrompt, requestPlanApproval } from "../plan.js";
-import { detectLintCommand, detectTestCommand, runPostEditCheck } from "../tools/lint-test.js";
+import { detectLintCommand, detectTestCommand } from "../tools/lint-test.js";
 import { createCheckpoint } from "../checkpoint.js";
 import { resetRepeatChain } from "../guards/repeat-tool-reminder.js";
 import { runLifecycleHooks } from "../user-hooks.js";
 
 import type { AgentConfig, AgentSession, AgentResult, TurnResult, TurnHooks } from "./types.js";
 import { createSession } from "./types.js";
-import { consumeStream, executeToolBlocks, prefetchFirst } from "./stream.js";
+import { consumeStream, executeToolBlocks, prefetchFirst, runToolsConcurrently } from "./stream.js";
 export type { AgentConfig, AgentResult, AgentSession, TurnResult, TurnHooks };
 export { createSession };
 
@@ -50,6 +50,8 @@ export async function runTurn(
 
   let turnToolCalls = 0;
   const turnStart = session.turns;
+  // A refusal applies to automatic checks for this entire user turn.
+  const deniedChecks = new Set<string>();
 
   const signal = hooks?.signal;
   const hookConfig = config.hookConfig ?? null;
@@ -287,16 +289,32 @@ export async function runTurn(
     session.toolCalls += toolCallCount;
     turnToolCalls += toolCallCount;
 
-    // Post-edit lint/test check
-    if (hasMutation && config.lintTestConfig) {
-      const cwd = process.cwd();
+    // Only successful write/edit results justify checks; requested, denied,
+    // failed, or cancelled mutations must never launch a follow-up command.
+    const successfulMutation = toolUseBlocks.some((block) => mutatingTools.has(block.name)
+      && toolResults.some((result) => result.type === "tool_result"
+        && result.tool_use_id === block.id && !result.is_error));
+    if (successfulMutation && !signal?.aborted && config.lintTestConfig) {
+      const cwd = registry.permissionConfig.projectRoot;
       const lintCmd = config.lintTestConfig.lintCmd ?? detectLintCommand(cwd);
       const testCmd = config.lintTestConfig.testCmd ?? detectTestCommand(cwd);
 
       const lintFailures: string[] = [];
-      for (const cmd of [lintCmd, testCmd].filter(Boolean) as string[]) {
-        const check = runPostEditCheck(cmd, cwd);
-        if (!check.passed) {
+      for (const cmd of new Set([lintCmd, testCmd].filter(Boolean) as string[])) {
+        if (signal?.aborted) break;
+        if (deniedChecks.has(cmd)) continue;
+        const input = { command: cmd, cwd, timeout: 60_000, description: "Verify the completed edit" };
+        hooks?.onToolStart?.("shell", input, 1);
+        // The same registry and scheduler preserve shell approval, hooks,
+        // kernel sandbox, secret scrubbing, timeout, and turn cancellation.
+        const [check] = await runToolsConcurrently([{
+          type: "tool_use", id: `post-edit-${session.turns}`, name: "shell", input,
+        }], registry, signal);
+        session.toolCalls++;
+        turnToolCalls++;
+        if (!check.cancelled) hooks?.onToolEnd?.("shell", input, check.output, check.is_error, check.durationMs);
+        if (check.permissionDenied) deniedChecks.add(cmd);
+        if (check.is_error) {
           if (verbose) status(`\x1b[33m[post-edit check failed: ${cmd}]\x1b[0m\n`);
           lintFailures.push(`Post-edit check failed (${cmd}):\n${check.output.slice(0, 2000)}`);
         }

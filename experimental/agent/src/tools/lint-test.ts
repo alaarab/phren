@@ -1,15 +1,9 @@
 import * as fs from "fs";
 import * as path from "path";
-import { execFileSync } from "child_process";
 
 export interface LintTestConfig {
   lintCmd?: string;
   testCmd?: string;
-}
-
-interface CheckResult {
-  passed: boolean;
-  output: string;
 }
 
 /** Detect test command from project config files. */
@@ -66,25 +60,4 @@ export function detectLintCommand(cwd: string): string | null {
   }
 
   return null;
-}
-
-/** Run a command and return pass/fail + output. */
-export function runPostEditCheck(command: string, cwd: string): CheckResult {
-  try {
-    const output = execFileSync("bash", ["-c", command], {
-      cwd,
-      encoding: "utf-8",
-      timeout: 60_000,
-      maxBuffer: 200_000,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    return { passed: true, output: output.trim() || "(passed)" };
-  } catch (err: unknown) {
-    if (err && typeof err === "object" && "stdout" in err) {
-      const e = err as { stdout?: string; stderr?: string };
-      const combined = [e.stdout, e.stderr].filter(Boolean).join("\n").trim();
-      return { passed: false, output: combined || "Check failed" };
-    }
-    return { passed: false, output: err instanceof Error ? err.message : String(err) };
-  }
 }
