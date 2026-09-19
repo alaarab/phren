@@ -1,8 +1,9 @@
-import { useState, useEffect } from "react";
-import { Box, Text, useInput } from "ink";
 import * as fs from "fs";
-import * as nodePath from "path";
+import { Box, Text, useInput } from "ink";
 import * as os from "os";
+import * as nodePath from "path";
+import { useEffect, useState } from "react";
+import { isHelpKey } from "../help.js";
 
 export interface PhrenInputProps {
   value: string;
@@ -57,6 +58,7 @@ export function PhrenInput({ value, onChange, onSubmit, placeholder, focus = tru
 
   useInput(
     (input, key) => {
+      if (isHelpKey(input, value)) return;
       if (completionOpen && (key.upArrow || key.downArrow || (key.tab && !key.shift))) return;
 
       // Bracketed paste: strip \x1b[200~ (start) and \x1b[201~ (end) markers.

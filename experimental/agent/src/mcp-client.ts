@@ -2,12 +2,18 @@
  * MCP client — connects to MCP servers, discovers tools, wraps them as AgentTools.
  * Supports stdio, streamable HTTP, and legacy HTTP+SSE transports.
  */
-import { spawn, type ChildProcess } from "child_process";
+
+import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
+import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
+import { type ChildProcess, spawn } from "child_process";
 import * as fs from "fs";
 import * as readline from "readline";
-import type { AgentTool, AgentToolResult } from "./tools/types.js";
+import { type McpOAuthOptions, McpOAuthProvider } from "./mcp-oauth.js";
 import { VERSION } from "./package-metadata.js";
 import { scrubEnv } from "./permissions/shell-safety.js";
+import type { AgentTool, AgentToolResult } from "./tools/types.js";
 
 /** JSON-RPC 2.0 message types for MCP protocol. */
 interface JsonRpcResponse {
@@ -76,6 +82,7 @@ export interface McpConfigEntry {
   env?: Record<string, string>;
   url?: string;
   headers?: Record<string, string>;
+  oauth?: boolean | McpOAuthOptions;
 }
 
 interface McpTransport {
@@ -102,76 +109,6 @@ function asStringRecord(value: unknown): Record<string, string> | undefined {
     if (typeof entry === "string") out[key] = entry;
   }
   return out;
-}
-
-function combineSignals(...signals: Array<AbortSignal | undefined>): AbortSignal {
-  const list = signals.filter((s): s is AbortSignal => Boolean(s));
-  if (list.length === 0) return new AbortController().signal;
-  if (list.length === 1) return list[0];
-  const controller = new AbortController();
-  const abort = () => controller.abort();
-  for (const signal of list) {
-    if (signal.aborted) {
-      controller.abort();
-      return controller.signal;
-    }
-    signal.addEventListener("abort", abort, { once: true });
-  }
-  return controller.signal;
-}
-
-function parseSseBlock(raw: string): { event: string; data?: string } {
-  let event = "message";
-  const dataLines: string[] = [];
-  for (const line of raw.split(/\r?\n/)) {
-    if (line.startsWith(":")) continue;
-    const colon = line.indexOf(":");
-    const field = colon === -1 ? line : line.slice(0, colon);
-    let value = colon === -1 ? "" : line.slice(colon + 1);
-    if (value.startsWith(" ")) value = value.slice(1);
-    if (field === "event") event = value;
-    else if (field === "data") dataLines.push(value);
-  }
-  return { event, data: dataLines.length > 0 ? dataLines.join("\n") : undefined };
-}
-
-async function readSse(
-  body: ReadableStream<Uint8Array> | null,
-  onEvent: (event: string, data: string) => boolean | void,
-): Promise<void> {
-  if (!body) return;
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      while (true) {
-        const match = buffer.match(/\r?\n\r?\n/);
-        if (!match || match.index === undefined) break;
-        const raw = buffer.slice(0, match.index);
-        buffer = buffer.slice(match.index + match[0].length);
-        const { event, data } = parseSseBlock(raw);
-        if (data === undefined) continue;
-        if (onEvent(event, data) === true) {
-          await reader.cancel().catch(() => {});
-          return;
-        }
-      }
-    }
-  } finally {
-    reader.releaseLock();
-  }
-}
-
-function resolveEndpoint(endpoint: string, base: string): string {
-  try {
-    return new URL(endpoint, base).toString();
-  } catch {
-    return endpoint;
-  }
 }
 
 class StdioTransport implements McpTransport {
@@ -256,158 +193,64 @@ class StdioTransport implements McpTransport {
   }
 }
 
-class HttpTransport implements McpTransport {
-  private readonly url: string;
-  private readonly headers: Record<string, string>;
-  private readonly onMessage: (msg: JsonRpcIncoming) => void;
-  private readonly abort = new AbortController();
-  private sessionId: string | undefined;
+class RemoteTransport implements McpTransport {
+  private transport: StreamableHTTPClientTransport | SSEClientTransport;
+  private oauth?: McpOAuthProvider;
+  private ready: Promise<void>;
   private closed = false;
+  private accepted = new Set<number>();
 
-  constructor(url: string, headers: Record<string, string>, onMessage: (msg: JsonRpcIncoming) => void) {
-    this.url = url;
-    this.headers = headers;
-    this.onMessage = onMessage;
-  }
-
-  private requestHeaders(): Record<string, string> {
-    return {
-      "content-type": "application/json",
-      accept: "application/json, text/event-stream",
-      ...this.headers,
-      ...(this.sessionId ? { "mcp-session-id": this.sessionId } : {}),
-    };
-  }
-
-  async post(message: Record<string, unknown>, signal?: AbortSignal, expectedId?: number): Promise<void> {
-    if (this.closed) throw new Error("MCP connection closed");
-    const res = await fetch(this.url, {
-      method: "POST",
-      headers: this.requestHeaders(),
-      body: JSON.stringify(message),
-      signal: combineSignals(this.abort.signal, signal),
-    });
-    const sessionId = res.headers.get("mcp-session-id");
-    if (sessionId) this.sessionId = sessionId;
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      throw new Error(`MCP HTTP ${res.status}${body ? `: ${body.slice(0, 200)}` : ""}`);
+  constructor(config: McpConfigEntry, onMessage: (msg: JsonRpcIncoming) => void, onError: (err: Error) => void) {
+    const url = new URL(config.url!);
+    if (!["https:", "http:"].includes(url.protocol) || url.username || url.password) throw new Error("Invalid MCP server URL");
+    if (config.oauth) {
+      if (url.protocol !== "https:" && !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) throw new Error("MCP OAuth requires HTTPS except on loopback");
+      this.oauth = new McpOAuthProvider(url.href, typeof config.oauth === "object" ? config.oauth : {});
     }
-    const contentType = (res.headers.get("content-type") ?? "").toLowerCase();
-    if (contentType.includes("text/event-stream")) {
-      await this.consumeSse(res.body, expectedId);
-      return;
-    }
-    const text = await res.text();
-    if (!text.trim()) return;
-    try {
-      this.onMessage(JSON.parse(text) as JsonRpcIncoming);
-    } catch {
-      return;
-    }
-  }
-
-  private async consumeSse(body: ReadableStream<Uint8Array> | null, expectedId?: number): Promise<void> {
-    await readSse(body, (event, data) => {
-      if (event === "endpoint" || !data) return;
-      let parsed: JsonRpcIncoming;
-      try {
-        parsed = JSON.parse(data) as JsonRpcIncoming;
-      } catch {
-        return;
-      }
-      this.onMessage(parsed);
-      if (expectedId !== undefined && (parsed as { id?: unknown }).id === expectedId) return true;
-      return;
-    });
-  }
-
-  close(): void {
-    if (this.closed) return;
-    this.closed = true;
-    this.abort.abort();
-  }
-}
-
-class SseTransport implements McpTransport {
-  private readonly url: string;
-  private readonly headers: Record<string, string>;
-  private readonly onMessage: (msg: JsonRpcIncoming) => void;
-  private readonly abort = new AbortController();
-  private readonly ready: Promise<void>;
-  private endpoint: string | undefined;
-  private resolveReady: (() => void) | undefined;
-  private rejectReady: ((err: Error) => void) | undefined;
-  private closed = false;
-
-  constructor(
-    url: string,
-    headers: Record<string, string>,
-    onMessage: (msg: JsonRpcIncoming) => void,
-    onError: (err: Error) => void,
-  ) {
-    this.url = url;
-    this.headers = headers;
-    this.onMessage = onMessage;
-    this.ready = new Promise<void>((resolve, reject) => {
-      this.resolveReady = resolve;
-      this.rejectReady = reject;
-    });
+    const options = { authProvider: this.oauth, requestInit: { headers: config.headers },
+      fetch: async (input: string | URL, init?: RequestInit) => {
+        const response = await fetch(input, { ...init, redirect: "error" });
+        if (response.status === 202 && init?.method === "POST" && typeof init.body === "string") {
+          const message = JSON.parse(init.body);
+          if (typeof message.id === "number") this.accepted.add(message.id);
+        }
+        return response;
+      } };
+    this.transport = config.type === "sse" ? new SSEClientTransport(url, options) : new StreamableHTTPClientTransport(url, options);
+    this.transport.onmessage = message => onMessage(message as JsonRpcIncoming);
+    this.transport.onerror = error => { if (!(error instanceof UnauthorizedError) && !this.closed) onError(error); };
+    this.transport.onclose = () => { if (!this.closed) onError(new Error("MCP stream closed")); };
+    this.ready = this.withAuth(() => this.transport.start());
     this.ready.catch(() => {});
-    void this.openStream(onError);
   }
 
-  private async openStream(onError: (err: Error) => void): Promise<void> {
-    try {
-      const res = await fetch(this.url, {
-        method: "GET",
-        headers: { accept: "text/event-stream", ...this.headers },
-        signal: this.abort.signal,
-      });
-      if (!res.ok) throw new Error(`MCP SSE ${res.status}`);
-      await readSse(res.body, (event, data) => {
-        if (event === "endpoint") {
-          this.endpoint = resolveEndpoint(data, this.url);
-          this.resolveReady?.();
-          return;
-        }
-        if (!data) return;
-        try {
-          this.onMessage(JSON.parse(data) as JsonRpcIncoming);
-        } catch {
-          return;
-        }
-      });
-      if (!this.closed && !this.endpoint) throw new Error("MCP SSE stream closed before advertising a message endpoint");
-    } catch (err) {
-      if (this.closed) return;
-      const error = err instanceof Error ? err : new Error(String(err));
-      this.rejectReady?.(error);
-      onError(error);
+  private async withAuth(operation: () => Promise<void>): Promise<void> {
+    try { await operation(); }
+    catch (error) {
+      if (!(error instanceof UnauthorizedError) || !this.oauth || this.closed) throw error;
+      const code = await this.oauth.authorizationCode();
+      if (this.closed) throw new Error("MCP connection closed");
+      await this.transport.finishAuth(code);
+      await operation();
     }
   }
 
   async post(message: Record<string, unknown>, signal?: AbortSignal): Promise<void> {
-    if (this.closed) throw new Error("MCP connection closed");
     await this.ready;
-    if (!this.endpoint) throw new Error("MCP SSE server did not advertise a message endpoint");
-    const res = await fetch(this.endpoint, {
-      method: "POST",
-      headers: { "content-type": "application/json", ...this.headers },
-      body: JSON.stringify(message),
-      signal: combineSignals(this.abort.signal, signal),
-    });
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      throw new Error(`MCP SSE POST ${res.status}${body ? `: ${body.slice(0, 200)}` : ""}`);
+    if (this.closed || signal?.aborted) throw new Error("MCP call aborted");
+    await this.withAuth(() => this.transport.send(message as JSONRPCMessage));
+    if (typeof message.id === "number" && this.accepted.delete(message.id) && message.method === "initialize"
+        && this.transport instanceof StreamableHTTPClientTransport) {
+      // Some older servers accept initialization itself and answer on GET SSE.
+      await this.transport.resumeStream("");
     }
   }
-
+  setProtocolVersion(version: string): void { this.transport.setProtocolVersion?.(version); }
   close(): void {
     if (this.closed) return;
     this.closed = true;
-    this.abort.abort();
-    this.rejectReady?.(new Error("Connection closed"));
+    this.oauth?.close();
+    void this.transport.close().catch(() => {});
   }
 }
 
@@ -430,12 +273,9 @@ class McpConnection {
     const onError = (err: Error) => this.failAll(err);
     const type = config.type ?? (config.url ? "http" : "stdio");
 
-    if (type === "http") {
-      if (!config.url) throw new Error(`MCP server "${name}" has type http but no url`);
-      this.transport = new HttpTransport(config.url, config.headers ?? {}, onMessage);
-    } else if (type === "sse") {
-      if (!config.url) throw new Error(`MCP server "${name}" has type sse but no url`);
-      this.transport = new SseTransport(config.url, config.headers ?? {}, onMessage, onError);
+    if (type === "http" || type === "sse") {
+      if (!config.url) throw new Error(`MCP server "${name}" has type ${type} but no url`);
+      this.transport = new RemoteTransport({ ...config, type }, onMessage, onError);
     } else {
       if (!config.command) throw new Error(`MCP server "${name}" has type stdio but no command`);
       this.transport = new StdioTransport(config, onMessage, onError);
@@ -480,8 +320,8 @@ class McpConnection {
         settled = true;
         this.pending.delete(id);
         signal?.removeEventListener("abort", onAbort);
-        reject(new Error(`MCP call ${method} timed out (30s)`));
-      }, REQUEST_TIMEOUT_MS);
+        reject(new Error(`MCP call ${method} timed out`));
+      }, method === "initialize" ? 330_000 : REQUEST_TIMEOUT_MS);
       const onAbort = () => {
         if (settled) return;
         settled = true;
@@ -526,18 +366,19 @@ class McpConnection {
     });
   }
 
-  private notify(method: string, params?: Record<string, unknown>): void {
+  private async notify(method: string, params?: Record<string, unknown>): Promise<void> {
     if (this.closed) return;
-    void this.transport.post({ jsonrpc: "2.0", method, params }).catch(() => {});
+    await this.transport.post({ jsonrpc: "2.0", method, params });
   }
 
   async initialize(): Promise<void> {
-    await this.send("initialize", {
-      protocolVersion: "2024-11-05",
+    const result = await this.send("initialize", {
+      protocolVersion: "2025-11-25",
       capabilities: {},
       clientInfo: { name: "phren-agent", version: VERSION },
     });
-    this.notify("notifications/initialized");
+    if (this.transport instanceof RemoteTransport && isPlainObject(result) && typeof result.protocolVersion === "string") this.transport.setProtocolVersion(result.protocolVersion);
+    await this.notify("notifications/initialized");
   }
 
   async listTools(): Promise<McpToolDef[]> {
@@ -755,7 +596,13 @@ export function loadMcpConfig(configPath: string): Record<string, McpConfigEntry
         result[name] = { command, args, env };
       } else if (type === "http" || type === "sse") {
         if (!url) continue;
-        result[name] = { type, url, headers };
+        const oauth = entry.oauth === true ? true : isPlainObject(entry.oauth) ? {
+          clientId: typeof entry.oauth.clientId === "string" ? entry.oauth.clientId : undefined,
+          clientSecret: typeof entry.oauth.clientSecret === "string" ? entry.oauth.clientSecret : undefined,
+          scope: typeof entry.oauth.scope === "string" ? entry.oauth.scope : undefined,
+          callbackPort: typeof entry.oauth.callbackPort === "number" ? entry.oauth.callbackPort : undefined,
+        } : undefined;
+        result[name] = { type, url, headers, ...(oauth ? { oauth } : {}) };
       }
     }
     return result;
