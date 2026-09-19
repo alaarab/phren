@@ -63,6 +63,9 @@ No extra request per iPhone row is needed.
 - Chat history, incremental transcript updates, real token counts, image uploads,
   stop, and project context from Phren's memory and skills.
 - Native Herdr terminals, named servers, workspaces, tabs, and pane navigation.
+- Without Herdr: "Open a terminal instead" starts a shell or the chosen agent
+  straight over SSH in the project folder. Terminal only; it ends with the
+  connection and has no chat, transcript, or approvals.
 - Codex/Claude approvals through Phren's lifecycle callbacks while you watch a
   conversation or the foreground session overview. Codex asynchronous questions
   can be answered in chat when the installed Codex supports its exact-thread
