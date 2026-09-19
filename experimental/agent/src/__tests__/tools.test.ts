@@ -11,7 +11,7 @@ import { grepTool } from "../tools/grep.js";
 // Mock sandbox validation so tool execute() doesn't reject temp-dir paths.
 // The permission checker tests cover sandbox logic; tool tests focus on functionality.
 vi.mock("../permissions/sandbox.js", () => ({
-  validatePath: () => ({ ok: true, resolved: "" }),
+  validatePath: (value: string) => ({ ok: true, resolved: path.resolve(value) }),
   checkSensitivePath: () => ({ sensitive: false }),
 }));
 

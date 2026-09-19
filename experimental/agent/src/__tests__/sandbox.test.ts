@@ -8,7 +8,7 @@ describe("validatePath", () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sandbox-test-"));
+    tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sandbox-test-")));
   });
 
   afterEach(() => {
@@ -62,6 +62,31 @@ describe("validatePath", () => {
       expect(result.ok).toBe(false);
     } finally {
       fs.rmSync(outsideDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects new files through a symlinked ancestor outside the root", () => {
+    const root = path.join(tmpDir, "project"), outside = path.join(tmpDir, "outside");
+    fs.mkdirSync(root); fs.mkdirSync(outside);
+    fs.symlinkSync(outside, path.join(root, "escape"), "dir");
+    expect(validatePath("escape/new/nested.txt", root, []).ok).toBe(false);
+    expect(validatePath("escape/../new.txt", root, []).ok).toBe(false);
+    const allowed = validatePath("escape/new/nested.txt", root, [outside]);
+    expect(allowed).toEqual({ ok: true, resolved: path.join(outside, "new/nested.txt") });
+  });
+
+  it("canonicalizes symlinked project roots and missing descendants consistently", () => {
+    const real = path.join(tmpDir, "real"), alias = path.join(tmpDir, "alias");
+    fs.mkdirSync(real); fs.symlinkSync(real, alias, "dir");
+    expect(validatePath("new/nested.txt", alias, [])).toEqual({ ok: true, resolved: path.join(real, "new/nested.txt") });
+    expect(validatePath(path.join(real, "new/nested.txt"), alias, []).ok).toBe(true);
+  });
+
+  it("fails closed on dangling and looping symlinks", () => {
+    fs.symlinkSync(path.join(tmpDir, "missing"), path.join(tmpDir, "dangling"));
+    fs.symlinkSync("loop", path.join(tmpDir, "loop"));
+    for (const name of ["dangling", "dangling/new.txt", "loop", "loop/new.txt"]) {
+      expect(validatePath(name, tmpDir, []).ok, name).toBe(false);
     }
   });
 

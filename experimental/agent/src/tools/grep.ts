@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { AgentTool } from "./types.js";
-import { validatePath } from "../permissions/sandbox.js";
+import { checkSensitivePath, validatePath } from "../permissions/sandbox.js";
 
 function searchFile(filePath: string, regex: RegExp, contextBefore: number, contextAfter: number): { line: number; text: string }[] {
   let content: string;
@@ -26,8 +26,9 @@ function searchFileMultiline(filePath: string, regex: RegExp): { line: number; t
   let content: string;
   try { content = fs.readFileSync(filePath, "utf-8"); } catch { return []; }
   const matches: { line: number; text: string }[] = [];
-  let match: RegExpExecArray | null;
-  while ((match = regex.exec(content)) !== null) {
+  // matchAll advances after empty matches (anchors/lookarounds), unlike exec.
+  // It also leaves the shared expression ready for the next file.
+  for (const match of content.matchAll(regex)) {
     const beforeMatch = content.slice(0, match.index);
     const lineNo = beforeMatch.split("\n").length;
     matches.push({ line: lineNo, text: match[0].slice(0, 200) });
@@ -109,6 +110,10 @@ export const grepTool: AgentTool = {
       return { output: `Path outside sandbox: ${pathResult.error}`, is_error: true };
     }
 
+    if (checkSensitivePath(path.resolve(searchPath)).sensitive || checkSensitivePath(pathResult.resolved).sensitive) {
+      return { output: "Access denied: sensitive path.", is_error: true };
+    }
+
     let regex: RegExp;
     try {
       const flags = (caseInsensitive ? "i" : "") + (multiline ? "gs" : "");
@@ -117,14 +122,14 @@ export const grepTool: AgentTool = {
       return { output: `Invalid regex: ${pattern}`, is_error: true };
     }
 
-    const stat = fs.statSync(searchPath, { throwIfNoEntry: false });
+    const stat = fs.statSync(pathResult.resolved, { throwIfNoEntry: false });
     if (!stat) return { output: `Path not found: ${searchPath}`, is_error: true };
 
     // Single file
     if (stat.isFile()) {
       const results = multiline
-        ? searchFileMultiline(searchPath, regex)
-        : searchFile(searchPath, regex, contextB, contextA);
+        ? searchFileMultiline(pathResult.resolved, regex)
+        : searchFile(pathResult.resolved, regex, contextB, contextA);
       if (outputMode === "files_with_matches") return { output: results.length > 0 ? searchPath : "No matches." };
       if (outputMode === "count") return { output: `${results.filter((r) => r.line > 0).length}` };
       return { output: results.length > 0 ? `${searchPath}:\n${results.map((r) => r.line > 0 ? `${r.line}\t${r.text}` : r.text).join("\n")}` : "No matches." };
@@ -159,9 +164,13 @@ export const grepTool: AgentTool = {
     for (const file of files) {
       if (output.length >= headLimit + offset) break;
 
+      const checked = validatePath(file, process.cwd(), []);
+      if (!checked.ok || checkSensitivePath(file).sensitive || checkSensitivePath(checked.resolved).sensitive) continue;
+      // Ignore devices, pipes and directories, including symlinks to them.
+      try { if (!fs.statSync(checked.resolved).isFile()) continue; } catch { continue; }
       const results = multiline
-        ? searchFileMultiline(file, regex)
-        : searchFile(file, regex, contextB, contextA);
+        ? searchFileMultiline(checked.resolved, regex)
+        : searchFile(checked.resolved, regex, contextB, contextA);
 
       if (results.length === 0) continue;
       _totalMatches++;
