@@ -71,7 +71,7 @@ export function resolveProvider(
   if (explicit === "openrouter" || (!explicit && openRouterKey)) {
     if (!openRouterKey) throw new Error("OpenRouter credentials are required. Set OPENROUTER_API_KEY or run 'phren auth set-key openrouter'.");
     const model = normalizedModel ?? getDefaultModel("openrouter");
-    return new OpenRouterProvider(openRouterKey, model, undefined, resolveLimit("openrouter", model));
+    return new OpenRouterProvider(openRouterKey, model, undefined, resolveLimit("openrouter", model), resolveReasoning("openrouter", model));
   }
 
   if (explicit === "anthropic" || (!explicit && anthropicKey)) {

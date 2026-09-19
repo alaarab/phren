@@ -351,6 +351,27 @@ const LEGACY_OUTPUT_LIMITS: Array<[string, number]> = [
   ["qwen", 8_192],
 ];
 
+const LEGACY_CONTEXT_LIMITS: Array<[string, number]> = [
+  ["claude-fable-5", 1_000_000],
+  ["claude-opus-5", 1_000_000],
+  ["claude-sonnet-5", 1_000_000],
+  ["claude-opus-4", 200_000],
+  ["claude-sonnet-4", 200_000],
+  ["claude-haiku-4", 200_000],
+  ["claude-3", 200_000],
+  ["gpt-5", 400_000],
+  ["gpt-4.1", 1_000_000],
+  ["gpt-4o", 128_000],
+  ["gpt-4", 128_000],
+  ["o3", 200_000],
+  ["o4-mini", 200_000],
+  ["gemini", 1_000_000],
+  ["deepseek", 128_000],
+  ["llama", 128_000],
+  ["qwen", 128_000],
+  ["mistral", 32_000],
+];
+
 const LEGACY_PRICING: Array<[string, ModelPricing]> = [
   ["claude-fable-5", { inputPer1M: 10, outputPer1M: 50 }],
   ["claude-opus-5", { inputPer1M: 5, outputPer1M: 25 }],
@@ -393,6 +414,7 @@ const LEGACY_PRICING: Array<[string, ModelPricing]> = [
 ];
 
 LEGACY_OUTPUT_LIMITS.sort((a, b) => b[0].length - a[0].length);
+LEGACY_CONTEXT_LIMITS.sort((a, b) => b[0].length - a[0].length);
 LEGACY_PRICING.sort((a, b) => b[0].length - a[0].length);
 
 export function normalizeProviderId(provider: string | undefined): ProviderId | undefined {
@@ -468,6 +490,17 @@ export function lookupMaxOutputTokens(model: string, provider?: string): number 
     if (lower.startsWith(prefix)) return limit;
   }
   return 8_192;
+}
+
+export function lookupContextWindow(model: string, provider?: string): number {
+  const metadata = getModelMetadata(provider, model);
+  if (metadata) return metadata.contextWindow;
+
+  const lower = model.toLowerCase();
+  for (const [prefix, limit] of LEGACY_CONTEXT_LIMITS) {
+    if (lower.startsWith(prefix)) return limit;
+  }
+  return 200_000;
 }
 
 export function lookupPricing(model: string, provider?: string): { pricing: ModelPricing; metered: boolean } {

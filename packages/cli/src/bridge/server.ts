@@ -12,6 +12,7 @@ import { paneChatState, validateStartingTarget, paneIdentity, panes, rpc, server
 import { BridgeError, bridgeRoot, id, MAX_FRAME, object, objects, PROTOCOL, serverName, socketPath, targetFromURL, targetSchema, startingTargetSchema, type Json } from "./protocol.js";
 import { launchDirectory, repositoryBranch, repositoryDiff, webServers } from "./projects.js";
 import { locateProject } from "./locate.js";
+import { candidateRepos, enrollProject } from "./enroll.js";
 import { conversationNamedPaths, historicalImage, TranscriptReader, transcriptPath } from "./transcripts.js";
 import { AgentHooks } from "./agent-hooks.js";
 import { listUploads, saveUpload, uploadImage } from "./uploads.js";
@@ -119,6 +120,7 @@ export async function serve(version: string): Promise<void> {
             }
             result = { candidates }; break;
           }
+          case "/v1/projects/repos": result = { repos: await candidateRepos(await journal.recent()) }; break;
           case "/v1/workspaces": {
             const server = selectedServer(url), s = await snapshot(server);
             const lastChanged = await tabActivity.observe(server, s);
@@ -164,6 +166,10 @@ export async function serve(version: string): Promise<void> {
           // Files the phone keeps on this computer, outside any session.
           const { name, bytes } = uploadBody(data);
           result = { ok: true, path: await saveUpload("files", name, bytes) };
+        } else if (url.pathname === "/v1/projects/add") {
+          // Enrolling a repository with phren from the phone: an existing
+          // checkout, or a clone. Serialized like launches — one at a time.
+          result = await launches.run(async () => enrollProject(z.object({ directory: z.string().max(4096).optional(), cloneUrl: z.string().max(512).optional() }).parse(data)));
         } else if (url.pathname === "/v1/simulators/action") {
           result = await simulatorAct(z.string().parse(data.udid), z.object({ action: z.string(), bundleId: z.string().optional(), url: z.string().optional(), x: z.number().optional(), y: z.number().optional(), text: z.string().optional(), submit: z.boolean().optional() }).parse(data) as unknown as SimulatorAction);
         } else {

@@ -7,7 +7,7 @@ import { toolResultText } from "./types.js";
 import { getAccessToken } from "./codex-auth.js";
 import { stripForeignReasoning, IMAGE_OMITTED_MARKER } from "./history.js";
 import type { ReasoningEffort } from "../models.js";
-import { lookupMaxOutputTokens, modelSupportsVision } from "../models.js";
+import { lookupContextWindow, lookupMaxOutputTokens, modelSupportsVision } from "../models.js";
 
 const CODEX_API = "https://chatgpt.com/backend-api/codex/responses";
 const PROVIDER_NAME = "openai-codex";
@@ -213,7 +213,7 @@ export function parseResponsesOutput(data: Record<string, unknown>): LlmResponse
 
 export class CodexProvider implements LlmProvider {
   name = "openai-codex";
-  contextWindow = 1_050_000;
+  contextWindow: number;
   maxOutputTokens: number;
   model: string;
   reasoningEffort?: ReasoningEffort;
@@ -222,6 +222,7 @@ export class CodexProvider implements LlmProvider {
     this.model = model ?? "gpt-5.4";
     this.maxOutputTokens = maxOutputTokens ?? lookupMaxOutputTokens(this.model, this.name);
     this.reasoningEffort = reasoningEffort;
+    this.contextWindow = lookupContextWindow(this.model, this.name);
   }
 
   async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[], signal?: AbortSignal): Promise<LlmResponse> {

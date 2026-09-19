@@ -71,6 +71,17 @@ path, then the usual project roots. The phone's "Open on a computer" fills its
 folder from this rather than from the store's `sourcePath`, which belongs to
 whichever machine added the project.
 
+`GET /v1/projects/repos` lists the git checkouts on that computer for the
+phone's "Add project": where agents have worked, Herdr's saved workspaces,
+then one level under the usual project roots, each marked whether phren there
+already tracks it. `POST /v1/projects/add` with `{"directory"}` enrolls an
+existing checkout, or with `{"cloneUrl"}` (https or `git@` GitHub-style URLs
+only) clones it into `$PROJECTS_DIR` or the first usual root first — with the
+computer's own git credentials, never a token from the phone. Either way it is
+`phren add` with the store's default ownership, followed by a commit and, when
+the store has a remote, a pull and push so the phone can fetch the new project.
+The reply says `store: pushed | committed | unchanged | error`.
+
 The iPhone explicitly renews a 25-second approval watch with
 `GET /v1/workspaces?watchApprovals=1`. Ordinary overview reads do not hold prompts.
 Pending tabs expose `approvalPending`; the exact conversation's status stream

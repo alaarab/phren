@@ -76,6 +76,16 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     return lines.length > max ? lines.slice(0, max).join("\n") + "\n\u2026" : text;
   }
 
+  function renderDiffCapped(oldContent: string, newContent: string, filePath: string): string {
+    const limit = 2_000;
+    const cap = (content: string) => {
+      const lines = content.split("\n");
+      return lines.length > limit ? lines.slice(0, limit).join("\n") + `\n\u2026 (${lines.length - limit} more lines)` : content;
+    };
+    const width = Math.max(40, (process.stdout.columns || 80) - 6);
+    return renderInlineDiff(cap(oldContent), cap(newContent), filePath, theme.diff, width);
+  }
+
   function previewDiff(toolName: string, input: Record<string, unknown>): string | undefined {
     const filePath = input.path;
     if (typeof filePath !== "string" || !filePath) return undefined;
@@ -103,7 +113,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     if (newContent === undefined) return undefined;
     if (oldContent.split("\n").length > 3_000 || newContent.split("\n").length > 3_000) return "(diff too large to preview)";
     try {
-      return capLines(renderInlineDiff(oldContent, newContent, abs, theme.diff), 24);
+      return capLines(renderDiffCapped(oldContent, newContent, abs), 24);
     } catch { return undefined; }
   }
 
@@ -671,7 +681,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       activeTool = null;
       const diffData = (name === "edit_file" || name === "write_file") ? decodeDiffPayload(output) : null;
       const cleanOutput = diffData ? output.slice(0, output.indexOf(DIFF_MARKER)) : output;
-      const diffRendered = diffData ? renderInlineDiff(diffData.oldContent, diffData.newContent, diffData.filePath, theme.diff) : undefined;
+      const diffRendered = diffData ? renderDiffCapped(diffData.oldContent, diffData.newContent, diffData.filePath) : undefined;
       const call = { name, input, output: cleanOutput, isError, durationMs: dur, diffRendered };
       currentToolCalls.push(call);
       toolHistory.push(call);
@@ -721,7 +731,9 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       await runTurn(userInput, session, config, { ...tuiHooks, signal: turnAbort?.signal });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (!/abort/i.test(msg)) streamingText += `\nError: ${msg}`;
+      if (!/abort/i.test(msg)) {
+        completedMessages.push({ id: nextId(), kind: "status", text: `\x1b[31mError: ${msg}\x1b[0m` });
+      }
     } finally {
       emitHerdrHook("Stop");
     }
@@ -856,7 +868,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       convo.activeTool = null;
       const diffData = (toolName === "edit_file" || toolName === "write_file") ? decodeDiffPayload(output) : null;
       const cleanOutput = diffData ? output.slice(0, output.indexOf(DIFF_MARKER)) : output;
-      const diffRendered = diffData ? renderInlineDiff(diffData.oldContent, diffData.newContent, diffData.filePath, theme.diff) : undefined;
+      const diffRendered = diffData ? renderDiffCapped(diffData.oldContent, diffData.newContent, diffData.filePath) : undefined;
       const call = { name: toolName, input, output: cleanOutput, isError, durationMs, diffRendered };
       convo.toolCalls.push(call);
       toolHistory.push(call);

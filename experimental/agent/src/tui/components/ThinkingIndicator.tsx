@@ -12,8 +12,9 @@ const THINKING_VERBS = [
   "recalling", "connecting", "reasoning", "threading", "mapping", "synthesizing",
 ];
 
-export function ThinkingIndicator({ startTime: _startTime, theme }: ThinkingIndicatorProps) {
+export function ThinkingIndicator({ startTime, theme }: ThinkingIndicatorProps) {
   const [frame, setFrame] = useState(0);
+  const [elapsed, setElapsed] = useState(0);
 
   // Pick a random verb once per mount
   const verb = useMemo(
@@ -24,9 +25,10 @@ export function ThinkingIndicator({ startTime: _startTime, theme }: ThinkingIndi
   useEffect(() => {
     const timer = setInterval(() => {
       setFrame((f) => f + 1);
+      setElapsed(Math.max(0, Math.floor((Date.now() - (startTime || Date.now())) / 1000)));
     }, 500);
     return () => clearInterval(timer);
-  }, []);
+  }, [startTime]);
 
   // Gentle sine-wave interpolation between theme thinking colors
   const t = (Math.sin(frame * 0.4) + 1) / 2;
@@ -40,6 +42,7 @@ export function ThinkingIndicator({ startTime: _startTime, theme }: ThinkingIndi
   return (
     <Text>
       {"  "}<Text color={hex}>{"\u25c6"} {verb}{"\u2026"}</Text>
+      {elapsed > 0 ? <Text dimColor>{` ${elapsed}s`}</Text> : null}
     </Text>
   );
 }

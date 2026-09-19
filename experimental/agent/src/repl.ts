@@ -44,6 +44,7 @@ function saveHistory(lines: string[]): void {
 export async function startRepl(config: AgentConfig): Promise<AgentSession> {
   const contextLimit = config.provider.contextWindow ?? 200_000;
   const session = createSession(contextLimit, { log: config.sessionLog });
+  const startTime = Date.now();
   const history = loadHistory();
   let inputMode = loadInputMode();
 
@@ -71,6 +72,9 @@ export async function startRepl(config: AgentConfig): Promise<AgentSession> {
     undoStack: [],
     costTracker: config.costTracker,
     phrenCtx: config.phrenCtx,
+    sessionId: config.sessionId,
+    startTime,
+    phrenPath: config.phrenCtx?.phrenPath,
     forkSession: () => {
       if (!config.phrenCtx?.phrenPath || !config.sessionId) return { ok: false, message: "Fork needs a phren store." };
       try {
