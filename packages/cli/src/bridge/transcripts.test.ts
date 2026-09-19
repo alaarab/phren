@@ -71,6 +71,19 @@ describe("transcript image payloads", () => {
     expect(page.entries[1].raw).toMatchObject({ data: { stop_reason: "tool_use" } });
   });
 
+  it("reads redacted raw opencode run events from verified fan-out logs", async () => {
+    const events = [
+      { type: "text", part: { type: "text", text: "Review complete", reasoning: "private" } },
+      { type: "tool_use", part: { type: "tool", tool: "bash", callID: "call-1", state: { status: "completed", input: { secret: true }, output: "private" } } },
+    ];
+    await writeFile(file, events.map(JSON.stringify).join("\n") + "\n");
+    const page = await new TranscriptReader(file, "opencode").read();
+    expect(page.entries).toHaveLength(2);
+    expect(JSON.stringify(page)).toContain("Review complete");
+    expect(JSON.stringify(page)).not.toContain("private");
+    expect(JSON.stringify(page)).not.toContain("secret");
+  });
+
   it.each(["codex", "claude"] as const)("keeps %s direct image positions retrievable from the original row", async source => {
     const bytes = Buffer.alloc(2_048, 37);
     const image = source === "codex" ? { type: "input_image", image_url: "data:image/png;base64," + bytes.toString("base64") }
@@ -139,5 +152,23 @@ describe("child agent relationships", () => {
       expect((await new TranscriptReader(childFile, "claude", undefined, undefined, true).read()).entries).toHaveLength(2);
       expect((await new TranscriptReader(childFile, "claude").read()).entries).toHaveLength(0);
     } finally { process.env.CLAUDE_CONFIG_DIR = old; await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("merges parent-bound opencode fan-outs into the provider-neutral tree", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "phren-opencode-child-")), job = "review-job";
+    const parent = "dddddddd-4444-4444-8444-444444444444", directory = path.join(root, ".runtime/agent-fanouts", job);
+    await mkdir(directory, { recursive: true }); await writeFile(path.join(directory, "events.jsonl"), "");
+    await writeFile(path.join(directory, "manifest.json"), JSON.stringify({ schemaVersion: 1, id: job,
+      parent: { provider: "copilot", session: parent }, provider: "opencode", taskLabel: "DeepSeek review",
+      cwd: "/repo", worktree: "/repo-wt", model: "deepseek", eventLog: "events.jsonl",
+      createdAt: "2026-09-19T19:00:00.000Z", startedAt: "2026-09-19T19:00:00.000Z",
+      updatedAt: "2026-09-19T19:00:00.000Z", status: "running" }));
+    const old = process.env.PHREN_PATH; process.env.PHREN_PATH = root;
+    try {
+      const tree = await childAgentTree("copilot", parent);
+      expect(tree).toHaveLength(1);
+      expect(tree[0]).toMatchObject({ provider: "opencode", path: "DeepSeek review", state: "running" });
+      expect(publicChildAgents(tree)[0]).not.toHaveProperty("transcript");
+    } finally { process.env.PHREN_PATH = old; await rm(root, { recursive: true, force: true }); }
   });
 });

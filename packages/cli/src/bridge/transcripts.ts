@@ -8,6 +8,7 @@ import { glob } from "glob";
 import { withTranscriptIndex } from "./transcript-index.js";
 import { BridgeError, object, objects, sessionId, type Json, type Provider } from "./protocol.js";
 import { namedPaths, SHELL_TOOLS, outputCallIds, type ChangeLookup } from "./changes.js";
+import { fanoutChildren, visibleOpenCodeRunEvent } from "./fanouts.js";
 
 export interface Entry { line: number; raw: Json }
 export interface ChildAgentRelation {
@@ -69,9 +70,12 @@ async function directChildAgents(file: string): Promise<DirectRelation[]> {
 export async function childAgentTree(source: Provider, session: string, depth = 0, seen = new Set<string>()): Promise<ChildAgentRelation[]> {
   if (depth >= 4 || seen.size >= 128 || seen.has(session)) return [];
   seen.add(session);
-  if (!["codex", "claude"].includes(source)) return [];
+  const fanouts: ChildAgentRelation[] = (await fanoutChildren(source, session)).map(child => ({
+    ...child, session: child.session ?? child.id, children: [],
+  }));
+  if (!["codex", "claude"].includes(source)) return fanouts;
   const file = await transcriptPath(source, session);
-  if (source === "claude") return claudeChildAgents(file, session);
+  if (source === "claude") return [...await claudeChildAgents(file, session), ...fanouts];
   const relations = await directChildAgents(file), verified: ChildAgentRelation[] = [];
   for (const relation of relations) {
     const childFile = await transcriptPath(source, relation.session).catch(() => undefined);
@@ -80,7 +84,7 @@ export async function childAgentTree(source: Provider, session: string, depth = 
       id: createHash("sha256").update(`${source}\0${session}\0${relation.session}`).digest("hex").slice(0, 32),
       children: await childAgentTree(source, relation.session, depth + 1, seen).catch(() => []) });
   }
-  return verified;
+  return [...verified, ...fanouts];
 }
 
 const claudeRelationCache = new Map<string, { signature: string; relations: ChildAgentRelation[] }>();
@@ -244,6 +248,9 @@ export async function transcriptPath(source: Provider, session: string): Promise
 
 /** Public conversation/tool events and real usage only. Never export private reasoning. */
 export function visibleEvent(raw: Json, source: Provider, includeSidechain = false): Json | undefined {
+  if (source === "opencode") {
+    const runEvent = visibleOpenCodeRunEvent(raw); if (runEvent) return runEvent;
+  }
   if (source === "phren" || source === "opencode") {
     // phren-agent's event log (experimental/agent/src/session/log.ts): the
     // header and log/replace splices are bookkeeping; the three message
