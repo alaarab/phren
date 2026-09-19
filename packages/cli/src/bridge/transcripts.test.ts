@@ -111,7 +111,33 @@ describe("child agent relationships", () => {
       expect(tree[0]).toMatchObject({ session: child, state: "completed" });
       expect(publicChildAgents(tree)[0]).not.toHaveProperty("session");
       expect(childAgent(tree, tree[0].id)?.path).toBe("/root/tester");
-      expect(await childAgentTree("claude", parent)).toEqual([]);
+      expect(await childAgentTree("opencode", parent)).toEqual([]);
     } finally { process.env.CODEX_HOME = old; await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("relation-gates Claude sidechain transcripts and tracks completion", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "phren-claude-children-"));
+    const old = process.env.CLAUDE_CONFIG_DIR; process.env.CLAUDE_CONFIG_DIR = root;
+    const parent = "cccccccc-3333-4333-8333-333333333333", agentId = "a1234worker";
+    const project = path.join(root, "projects/project"); await mkdir(path.join(project, parent, "subagents"), { recursive: true });
+    const launch = { type: "user", toolUseResult: { status: "async_launched", agentId, description: "Review scripts" },
+      message: { role: "user", content: [{ type: "tool_result", tool_use_id: "tool-claude", content: "launched" }] } };
+    const finished = { type: "queue-operation", operation: "enqueue",
+      content: `<task-notification><task-id>${agentId}</task-id><status>completed</status></task-notification>` };
+    await writeFile(path.join(project, `${parent}.jsonl`), [launch, finished].map(JSON.stringify).join("\n") + "\n");
+    const childFile = path.join(project, parent, "subagents", `agent-${agentId}.jsonl`);
+    await writeFile(childFile, [{ type: "user", isSidechain: true, sessionId: parent, agentId,
+      message: { role: "user", content: "Inspect the scripts" } }, { type: "assistant", isSidechain: true,
+      sessionId: parent, agentId, message: { role: "assistant", content: "Review complete" } }].map(JSON.stringify).join("\n") + "\n");
+    try {
+      const tree = await childAgentTree("claude", parent);
+      expect(tree).toHaveLength(1);
+      expect(tree[0]).toMatchObject({ provider: "claude", path: "Review scripts", callId: "tool-claude", state: "completed" });
+      expect(tree[0].transcript).toMatch(new RegExp(`/subagents/agent-${agentId}\\.jsonl$`));
+      expect(publicChildAgents(tree)[0]).not.toHaveProperty("session");
+      expect(publicChildAgents(tree)[0]).not.toHaveProperty("transcript");
+      expect((await new TranscriptReader(childFile, "claude", undefined, undefined, true).read()).entries).toHaveLength(2);
+      expect((await new TranscriptReader(childFile, "claude").read()).entries).toHaveLength(0);
+    } finally { process.env.CLAUDE_CONFIG_DIR = old; await rm(root, { recursive: true, force: true }); }
   });
 });
