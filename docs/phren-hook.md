@@ -29,6 +29,20 @@ inaccessible through SSH forwarding. Update the helper and authorization lines
 on every computer before installing the updated phone app, then reconnect SSH.
 An older helper produces an explicit update instruction in the app.
 
+For unreleased fixes from a local checkout, build and install that checkout's
+helper instead of reinstalling the published package:
+
+```sh
+pnpm --filter @phren/cli build
+node packages/cli/dist/index.js bridge install
+node packages/cli/dist/index.js bridge doctor
+```
+
+Install the helper on every connected computer before updating the phone app.
+The installer restarts its user service and preserves existing authorization and
+agent configuration. Review new or changed Codex hook definitions in `/hooks`;
+Phren does not bypass Codex's trust checks.
+
 ## What connects
 
 Workspace snapshots optionally include `contextUsedPercent` for a tab with one
@@ -50,8 +64,10 @@ No extra request per iPhone row is needed.
   stop, and project context from Phren's memory and skills.
 - Native Herdr terminals, named servers, workspaces, tabs, and pane navigation.
 - Codex/Claude approvals through Phren's lifecycle callbacks while you watch a
-  conversation or the foreground session overview. Questions and unsupported
-  interactions open in Phren's terminal.
+  conversation or the foreground session overview. Codex asynchronous questions
+  can be answered in chat when the installed Codex supports its exact-thread
+  inbox command (`codex queue --thread … --message …`). Synchronous questions
+  and unsupported provider interactions open in Phren's terminal.
 - Git diffs, local HTTP app discovery, and SSH browser previews.
 - Local project activity history, retained on the computer.
 
@@ -89,8 +105,9 @@ provides the action ID, input and expiry. Requests wait at most 55 seconds, then
 return to the agent's terminal prompt without approving anything. Answers are
 single use and validated against the exact provider conversation.
 
-On iOS, a request received in an open chat can create a Live Activity with Deny
-and Approve on the Lock Screen and Dynamic Island. Tapping either authenticates
+On iOS, a request received in an open chat or discovered from the foreground
+session overview can create a Live Activity with Deny and Approve on the Lock
+Screen and Dynamic Island. Tapping either authenticates
 and opens Phren, which uses its existing pinned SSH connection and protected
 Keychain key. The widget contains no credentials or executable tool input.
 Expired requests lose their buttons. New requests while the app is suspended
