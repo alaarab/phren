@@ -19,6 +19,7 @@ import { modelCommand, providerCommand, presetCommand } from "./commands/model.j
 import { configCommand } from "./commands/config.js";
 import type { PermissionMode, PermissionConfig } from "./permissions/types.js";
 import { loadInputMode, saveInputMode, savePermissionMode } from "./settings.js";
+import { addAllow } from "./permissions/allowlist.js";
 
 const DIM = "\x1b[2m";
 const RESET = "\x1b[0m";
@@ -73,6 +74,7 @@ export const COMMAND_NAMES: readonly string[] = [
   "/help", "/turns", "/clear", "/cwd", "/files", "/cost", "/plan", "/undo",
   "/context", "/model", "/provider", "/preset", "/session", "/history",
   "/compact", "/diff", "/git", "/mem", "/ask", "/resume", "/review", "/config", "/spawn", "/agents",
+  "/allow",
   "/mode", "/permissions", "/verbose", "/theme", "/agent", "/rewind", "/fork",
   "/exit", "/quit", "/q",
 ];
@@ -173,18 +175,73 @@ export function handleCommand(input: string, ctx: CommandContext): boolean | Pro
       return true;
     }
 
+    case "/allow": {
+      const toolName = parts[1];
+      if (!toolName) {
+        process.stderr.write(`${DIM}Usage: /allow <tool> [pattern] [--global]${RESET}\n`);
+        return true;
+      }
+      const global = parts.includes("--global");
+      const pattern = parts.slice(2).find((p) => p !== "--global");
+      if (toolName === "shell" && !pattern) {
+        process.stderr.write(`${DIM}shell rules need a command/prefix, e.g. /allow shell git${RESET}\n`);
+        return true;
+      }
+      const input: Record<string, unknown> = {};
+      if (pattern) {
+        if (toolName === "shell") input.command = pattern;
+        else input.path = pattern;
+      }
+      const scope = global ? "global" : "project";
+      addAllow(toolName, input, scope, process.cwd());
+      process.stderr.write(`${DIM}Allowed ${toolName}${pattern ? ` (${pattern})` : ""} [${scope}]${RESET}\n`);
+      return true;
+    }
+
     case "/spawn": {
       if (!ctx.spawner) {
         process.stderr.write(`${DIM}Spawner not available. Start with --multi or --team to enable.${RESET}\n`);
         return true;
       }
-      const spawnName = parts[1];
-      const spawnTask = parts.slice(2).join(" ");
+      const rest = parts.slice(1);
+      const spawnName = rest[0];
+      let isolation: "worktree" | undefined;
+      let agentType: string | undefined;
+      let provider: string | undefined;
+      let model: string | undefined;
+      let permissions: PermissionMode | undefined;
+      const taskParts: string[] = [];
+      const VALID_MODES: PermissionMode[] = ["suggest", "auto-confirm", "plan", "full-auto"];
+      for (let i = 1; i < rest.length; i++) {
+        const token = rest[i];
+        if (token === "--worktree") { isolation = "worktree"; }
+        else if (token === "--agent" && rest[i + 1]) { agentType = rest[++i]; }
+        else if (token === "--provider" && rest[i + 1]) { provider = rest[++i]; }
+        else if (token === "--model" && rest[i + 1]) { model = rest[++i]; }
+        else if (token === "--permissions" && rest[i + 1]) {
+          const mode = rest[++i] as PermissionMode;
+          if (VALID_MODES.includes(mode)) permissions = mode;
+        }
+        else { taskParts.push(token); }
+      }
+      const spawnTask = taskParts.join(" ");
       if (!spawnName || !spawnTask) {
-        process.stderr.write(`${DIM}Usage: /spawn <name> <task>${RESET}\n`);
+        process.stderr.write(`${DIM}Usage: /spawn <name> <task> [--worktree] [--agent <type>] [--provider <p>] [--model <m>] [--permissions <mode>]${RESET}\n`);
         return true;
       }
-      const agentId = ctx.spawner.spawn({ task: spawnTask, cwd: process.cwd() });
+      const perms = ctx.registry?.permissionConfig;
+      const agentId = ctx.spawner.spawn({
+        task: spawnTask,
+        displayName: spawnName,
+        cwd: perms?.projectRoot ?? process.cwd(),
+        isolation,
+        agentType,
+        provider,
+        model,
+        permissions: permissions ?? perms?.mode,
+        sandboxMode: perms?.sandboxMode,
+        allowedPaths: perms?.allowedPaths,
+      });
       process.stderr.write(`${DIM}Spawned agent "${spawnName}" (${agentId}): ${spawnTask}${RESET}\n`);
       return true;
     }

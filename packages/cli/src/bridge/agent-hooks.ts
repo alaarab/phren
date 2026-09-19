@@ -1,11 +1,29 @@
 import { request, createServer, type Server, type ServerResponse } from "node:http";
 import { mkdir, writeFile, readFile, rename, chmod, unlink, lstat } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { BridgeError, bridgeRoot, object, objects, provider, serverName, sessionId, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
 import { herdrRoot, rpc, snapshot, trustedDirectory, validateTarget } from "./herdr.js";
 import { capturesChanges, ToolChanges } from "./changes.js";
+import { phrenStoreRoot } from "./transcripts.js";
+
+const opencodeSession = /^ses_[0-9A-Za-z]{1,64}$/;
+function opencodeApprovalFile(session: string, kind: "request" | "answer"): string | undefined {
+  if (!opencodeSession.test(session)) return undefined;
+  return path.join(phrenStoreRoot(), ".runtime", "approvals", `opencode-${session}.${kind}.json`);
+}
+function opencodeRequest(session: string): Json | undefined {
+  const file = opencodeApprovalFile(session, "request");
+  if (!file) return undefined;
+  try {
+    const value = object(JSON.parse(readFileSync(file, "utf8")));
+    if (typeof value.id !== "string" || !value.id || value.sessionID !== session) return undefined;
+    if (typeof value.expiresAt === "string" && Date.parse(value.expiresAt) <= Date.now()) return undefined;
+    return value;
+  } catch { return undefined; }
+}
 
 const localSocket = () => path.join(bridgeRoot(), "agent.sock");
 const bindingPath = (server: string, pane: string) => path.join(bridgeRoot(), "bindings", encodeURIComponent(serverName.parse(server)), encodeURIComponent(pane) + ".json");
@@ -72,17 +90,39 @@ export class AgentHooks {
   }
   approval(target: Target): Json | undefined {
     const pending = [...this.pending.entries()].find(([, p]) => JSON.stringify(p.target) === JSON.stringify(target));
-    return pending ? { actionId: pending[0], toolName: pending[1].tool, title: `Allow ${pending[1].tool}?`, message: pending[1].message, expiresAt: pending[1].expiresAt } : undefined;
+    if (pending) return { actionId: pending[0], toolName: pending[1].tool, title: `Allow ${pending[1].tool}?`, message: pending[1].message, expiresAt: pending[1].expiresAt };
+    if (target.source !== "opencode") return undefined;
+    const request = opencodeRequest(target.session);
+    return request ? { actionId: request.id, toolName: request.type, title: request.title, message: request.message, expiresAt: request.expiresAt } : undefined;
   }
   pendingPanes(server: string, state: Json): Set<string> {
     const panes = objects(state.panes);
-    return new Set([...this.pending.values()].filter(p => p.target.server === server && panes.some(pane => {
+    const pending = new Set([...this.pending.values()].filter(p => p.target.server === server && panes.some(pane => {
       if (pane.pane_id !== p.target.pane || pane.workspace_id !== p.target.workspace || pane.tab_id !== p.target.tab || pane.agent !== p.target.source) return false;
       const reported = object(pane.agent_session);
       return reported.kind !== "id" || (reported.agent === p.target.source && reported.value === p.target.session);
     })).map(p => p.target.pane));
+    for (const pane of panes) {
+      if (pane.agent !== "opencode") continue;
+      const reported = object(pane.agent_session);
+      if (reported.kind === "id" && reported.agent === "opencode" && typeof reported.value === "string" && opencodeRequest(reported.value)) {
+        pending.add(String(pane.pane_id));
+      }
+    }
+    return pending;
   }
   async answer(target: Target, id: string, decision: unknown, updatedInput?: unknown) {
+    if (target.source === "opencode") {
+      if (!["approve", "deny"].includes(String(decision))) throw new BridgeError(400, "The approval answer is not valid.");
+      const file = opencodeApprovalFile(target.session, "answer");
+      if (!file) throw new BridgeError(400, "Invalid conversation identity.");
+      await validateTarget(target);
+      await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+      const temporary = file + "." + randomUUID();
+      await writeFile(temporary, JSON.stringify({ id, decision }), { mode: 0o600, flag: "wx" });
+      await rename(temporary, file);
+      return;
+    }
     const entry = this.pending.get(id);
     if (!entry || JSON.stringify(entry.target) !== JSON.stringify(target) || !["approve", "deny"].includes(String(decision))) throw new BridgeError(409, "This approval is no longer pending.");
     if (updatedInput !== undefined && decision !== "approve") throw new BridgeError(400, "Answers go with an approval.");

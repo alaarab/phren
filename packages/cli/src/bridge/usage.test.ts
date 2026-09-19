@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { AccountUsageReader, claudeScopedWindows, claudeUsage, codexUsage, readCodexLimits, usageStatusLine } from "./usage.js";
+import { AccountUsageReader, claudeOAuthUsage, claudeScopedWindows, claudeUsage, codexUsage, fetchClaudeUsage, readClaudeToken, readCodexLimits, usageStatusLine } from "./usage.js";
 
 const now = new Date("2026-09-12T08:00:00Z");
 const reset = now.getTime() / 1000 + 3600;
@@ -83,6 +83,69 @@ describe("account usage", () => {
     expect(calls).toBe(1);
     time = 59_999; await reader.read(); expect(calls).toBe(1);
     time = 60_000; await reader.read(); expect(calls).toBe(2);
+  });
+  it("maps the OAuth usage endpoint's structured limits without leaking the token", () => {
+    const value = claudeOAuthUsage({ limits: [
+      { kind: "session", percent: 2, resets_at: "2026-09-19T05:40:00.713784+00:00" },
+      { kind: "weekly_all", percent: 99, resets_at: "2026-09-19T20:00:00.713803+00:00" },
+      { kind: "weekly_scoped", percent: 100, resets_at: "2026-09-19T19:59:59.713983+00:00", scope: { model: { display_name: "Fable" } } },
+      { kind: "weekly_scoped", percent: 7, scope: { model: { display_name: "Opus 5" } } },
+      { kind: "extra_usage", percent: 50 },
+      { kind: "weekly_scoped", percent: 200, scope: { model: { display_name: "Broken" } } },
+    ], access_token: "private" }, now);
+    expect(value.windows.map(w => [w.id, w.name, w.usedPercent])).toEqual([
+      ["five_hour", "5-hour limit", 2],
+      ["seven_day", "7-day limit", 99],
+      ["seven_day_fable", "7-day · Fable", 100],
+      ["seven_day_opus_5", "7-day · Opus 5", 7],
+    ]);
+    expect(JSON.stringify(value)).not.toContain("private");
+    expect(value.updatedAt).toBe(now.toISOString());
+  });
+  it("reads the local sign-in token and rejects an expired one", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "phren-cred-"));
+    const noKeychain = async () => { throw new Error("no keychain"); };
+    try {
+      const file = path.join(dir, ".credentials.json");
+      const previous = process.env.CLAUDE_CONFIG_DIR;
+      process.env.CLAUDE_CONFIG_DIR = dir;
+      await writeFile(file, JSON.stringify({ claudeAiOauth: { accessToken: "tok", expiresAt: Date.now() + 3_600_000 } }));
+      expect(await readClaudeToken(noKeychain)).toBe("tok");
+      await writeFile(file, JSON.stringify({ claudeAiOauth: { accessToken: "tok", expiresAt: Date.now() - 1 } }));
+      expect(await readClaudeToken(noKeychain)).toBeUndefined();
+      if (previous === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = previous;
+    } finally { await rm(dir, { recursive: true, force: true }); }
+  });
+  it("fetches live Claude limits with the bearer token, falling back when it fails", async () => {
+    let seen: { url: string; auth?: string } | undefined;
+    const fetchImpl = (async (url: string | URL, init?: RequestInit) => {
+      seen = { url: String(url), auth: (init?.headers as Record<string, string>)?.authorization };
+      return { ok: true, status: 200, json: async () => ({ limits: [{ kind: "session", percent: 5, resets_at: null }] }) } as unknown as Response;
+    }) as unknown as typeof fetch;
+    const live = await fetchClaudeUsage("secret-token", fetchImpl, now);
+    expect(live.windows.map(w => [w.id, w.usedPercent])).toEqual([["five_hour", 5]]);
+    expect(seen?.url).toBe("https://api.anthropic.com/api/oauth/usage");
+    expect(seen?.auth).toBe("Bearer secret-token");
+    expect(JSON.stringify(live)).not.toContain("secret-token");
+
+    let claudeCalls = 0;
+    const reader = new AccountUsageReader(async () => codexUsage({ rateLimits: limits }, now), () => 0,
+      async () => { claudeCalls++; return claudeUsage({ rate_limits: { five_hour: { used_percentage: 42 } } }, now); });
+    const first = await reader.read();
+    expect(first.accounts[1].windows[0].usedPercent).toBe(42);
+    await reader.read(); expect(claudeCalls).toBe(1);
+
+    const fallback = new AccountUsageReader(async () => codexUsage({ rateLimits: limits }, now), () => 0, async () => undefined);
+    const empty = await mkdtemp(path.join(tmpdir(), "phren-empty-"));
+    const previousBridge = process.env.PHREN_BRIDGE_HOME, previousConfig = process.env.CLAUDE_CONFIG_DIR;
+    process.env.PHREN_BRIDGE_HOME = empty; process.env.CLAUDE_CONFIG_DIR = empty;
+    try {
+      expect((await fallback.read()).accounts[1].message).toContain("after Claude Code replies");
+    } finally {
+      if (previousBridge === undefined) delete process.env.PHREN_BRIDGE_HOME; else process.env.PHREN_BRIDGE_HOME = previousBridge;
+      if (previousConfig === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = previousConfig;
+      await rm(empty, { recursive: true, force: true });
+    }
   });
 });
 

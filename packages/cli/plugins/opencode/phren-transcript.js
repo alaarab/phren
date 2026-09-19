@@ -1,4 +1,4 @@
-import { mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 
@@ -6,6 +6,9 @@ const PHREN_STORE = "__PHREN_STORE__";
 const FLUSH_MS = 250;
 const MAX_TOOL_OUTPUT = 200_000;
 const STOP_REASONS = { stop: "end_turn", "tool-calls": "tool_use", length: "max_tokens" };
+const OPENCODE_SESSION = /^ses_[0-9A-Za-z]+$/;
+const APPROVAL_POLL_MS = 200;
+const APPROVAL_DEADLINE_MS = 50_000;
 
 function storeRoot() {
   if (PHREN_STORE && !PHREN_STORE.startsWith("__")) return PHREN_STORE;
@@ -17,6 +20,43 @@ function storeRoot() {
 
 function text(value) {
   return typeof value === "string" ? value : "";
+}
+
+function approvalDirectory() {
+  return path.join(storeRoot(), ".runtime", "approvals");
+}
+
+function approvalPaths(sessionID) {
+  const base = path.join(approvalDirectory(), `opencode-${sessionID}`);
+  return { request: `${base}.request.json`, answer: `${base}.answer.json` };
+}
+
+function writeJsonAtomic(file, value) {
+  const staging = `${file}.${process.pid}.tmp`;
+  writeFileSync(staging, JSON.stringify(value));
+  renameSync(staging, file);
+}
+
+function removeFile(file) {
+  try { unlinkSync(file); } catch {}
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function setStatus(output, status) {
+  if (output && typeof output === "object") output.status = status;
+}
+
+function permissionMessage(input) {
+  const type = text(input?.type) || "action";
+  const pattern = Array.isArray(input?.pattern)
+    ? input.pattern.filter(value => typeof value === "string").join(", ")
+    : text(input?.pattern);
+  const metadata = input?.metadata && typeof input.metadata === "object" ? input.metadata : {};
+  const detail = [pattern, text(metadata.command), text(metadata.description), text(metadata.path), text(metadata.url)].find(value => value);
+  return (detail ? `${type}: ${detail}` : `opencode asks to use ${type}.`).slice(0, 2000);
 }
 
 function toolOutput(state) {
@@ -142,6 +182,36 @@ export const PhrenTranscriptPlugin = async () => {
       if (!input?.sessionID || !output?.message) return;
       rememberInfo(input.sessionID, output.message);
       for (const part of output.parts ?? []) rememberPart(input.sessionID, output.message.id, part);
+    },
+    "permission.ask": async (input, output) => {
+      let request, answer;
+      try {
+        const sessionID = text(input?.sessionID), id = text(input?.id);
+        if (!OPENCODE_SESSION.test(sessionID) || !id) { setStatus(output, "ask"); return; }
+        const paths = approvalPaths(sessionID);
+        request = paths.request; answer = paths.answer;
+        mkdirSync(approvalDirectory(), { recursive: true });
+        removeFile(answer);
+        const created = Date.now();
+        writeJsonAtomic(request, { id, sessionID, type: text(input.type) || "action",
+          title: text(input.title) || `Allow ${text(input.type) || "action"}?`, message: permissionMessage(input),
+          createdAt: new Date(created).toISOString(), expiresAt: new Date(created + APPROVAL_DEADLINE_MS).toISOString() });
+        const deadline = created + APPROVAL_DEADLINE_MS;
+        let decision;
+        while (Date.now() < deadline) {
+          await sleep(APPROVAL_POLL_MS);
+          try {
+            const value = JSON.parse(readFileSync(answer, "utf8"));
+            if (value && value.id === id) { decision = value.decision; break; }
+          } catch {}
+        }
+        setStatus(output, decision === "approve" ? "allow" : decision === "deny" ? "deny" : "ask");
+      } catch {
+        setStatus(output, "ask");
+      } finally {
+        if (answer) removeFile(answer);
+        if (request) removeFile(request);
+      }
     },
     event: async ({ event }) => {
       const properties = event?.properties ?? {};

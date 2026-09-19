@@ -1,4 +1,5 @@
 import type { PermissionMode } from "./permissions/types.js";
+import { loadPermissionMode } from "./settings.js";
 
 export interface CliArgs {
   task: string;
@@ -7,6 +8,7 @@ export interface CliArgs {
   reasoning?: "low" | "medium" | "high" | "xhigh";
   project?: string;
   permissions: PermissionMode;
+  permissionsExplicit: boolean;
   maxTurns: number;
   maxOutput?: number;
   budget: number | null;
@@ -89,6 +91,7 @@ export function parseArgs(argv: string[]): CliArgs {
   const args: CliArgs = {
     task: "",
     permissions: "suggest",
+    permissionsExplicit: false,
     maxTurns: 50,
     budget: null,
     plan: false,
@@ -140,11 +143,12 @@ export function parseArgs(argv: string[]): CliArgs {
     else if (arg === "--max-turns" && argv[i + 1]) { args.maxTurns = parseInt(argv[++i], 10) || 50; }
     else if (arg === "--max-output" && argv[i + 1]) { args.maxOutput = parseInt(argv[++i], 10) || undefined; }
     else if (arg === "--budget" && argv[i + 1]) { args.budget = parseFloat(argv[++i]) || null; }
-    else if (arg === "--yolo") { args.permissions = "full-auto"; }
+    else if (arg === "--yolo") { args.permissions = "full-auto"; args.permissionsExplicit = true; }
     else if (arg === "--permissions" && argv[i + 1]) {
       const mode = argv[++i];
       if (mode === "suggest" || mode === "auto-confirm" || mode === "full-auto") {
         args.permissions = mode;
+        args.permissionsExplicit = true;
       }
     }
     else if (!arg.startsWith("-")) { positional.push(arg); }
@@ -164,6 +168,12 @@ export function parseArgs(argv: string[]): CliArgs {
   }
 
   return args;
+}
+
+export function resolveStartupPermissions(args: CliArgs): void {
+  if (args.permissionsExplicit) return;
+  const saved = loadPermissionMode();
+  if (saved) args.permissions = saved;
 }
 
 export function printHelp(): void {

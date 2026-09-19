@@ -42,6 +42,14 @@ export function savePermissionMode(mode: PermissionMode): void {
   update("permissionMode", mode);
 }
 
+export function loadPermissionMode(): PermissionMode | undefined {
+  const mode = readSettings().permissionMode;
+  if (mode === "suggest" || mode === "auto-confirm" || mode === "plan" || mode === "full-auto") {
+    return mode;
+  }
+  return undefined;
+}
+
 export function loadTheme(): string | undefined {
   const name = readSettings().theme;
   return typeof name === "string" && name ? name : undefined;
