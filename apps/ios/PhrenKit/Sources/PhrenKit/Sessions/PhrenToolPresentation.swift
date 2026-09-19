@@ -86,6 +86,23 @@ public struct PhrenToolPresentation: Equatable, Sendable {
         resultSummary = summary; titles = resultTitles
     }
 
+    /// The full-output view of a phren call: MCP's `content` text blocks and
+    /// the JSON string phren returns inside them, unwrapped and pretty-printed
+    /// so a recalled memory reads as text rather than an escaped blob. Text
+    /// that is not JSON comes back untouched.
+    public static func readable(_ text: String) -> String {
+        guard let parsed = object(text) else { return text }
+        let value = unwrap(parsed)
+        if let string = value as? String { return string }
+        guard JSONSerialization.isValidJSONObject(value),
+              let data = try? JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]),
+              let pretty = String(data: data, encoding: .utf8) else { return text }
+        // phren's `message` is the human line; put it first, then the data.
+        if let dict = value as? [String: Any], let message = dict["message"] as? String, !message.isEmpty {
+            return message + "\n\n" + pretty
+        }
+        return pretty
+    }
     private static func object(_ text: String) -> Any? {
         guard text.utf8.count <= 524_288 else { return nil }
         return try? JSONSerialization.jsonObject(with: Data(text.utf8), options: .fragmentsAllowed)

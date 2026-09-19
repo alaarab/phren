@@ -9,7 +9,8 @@ struct PhrenToolCard: View {
     var body: some View {
         Button {
             let raw = messages.map { message in
-                (message.isToolResult ? "Output" : message.isChange ? "Changes" : "Input") + "\n" + message.text
+                (message.isToolResult ? "Output" : message.isChange ? "Changes" : "Input") + "\n"
+                    + (message.isToolResult ? PhrenToolPresentation.readable(message.text) : message.text)
             }.joined(separator: "\n\n")
             openOutput(.init(title: presentation.verb, text: raw))
         } label: {

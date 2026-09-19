@@ -15,6 +15,10 @@ number counts up on its own.
   **Expand** (or **Show all**) opens the whole set as a sheet — every
   description and Claude's option previews included — that keeps the answers
   you already picked and sends from there. Option previews render monospaced.
+- Full tool output wraps. Recalled memories, findings and any long line now
+  read on screen; a toolbar toggle brings back sideways scrolling for code
+  and tables. phren's own results open unwrapped and pretty-printed, with the
+  message first, instead of as escaped JSON inside JSON.
 - **Open a terminal instead** on the launch form when Herdr is not running:
   the agent (or a shell) starts straight over SSH in the project folder.
   Terminal only — no chat or approvals — and it ends with the connection.

@@ -49,3 +49,16 @@ final class PhrenToolPresentationTests: XCTestCase {
         XCTAssertEqual(PhrenToolPresentation(name: "mcp__phren__add_finding", input: input)?.body, String(text.prefix(1_200)).trimmingCharacters(in: .whitespacesAndNewlines))
     }
 }
+
+extension PhrenToolPresentationTests {
+    func testReadableUnwrapsContentBlocksAndPrettyPrintsPhrenResults() {
+        let inner = #"{"ok":true,"data":{"count":1,"results":[{"title":"Interactive back"}]},"message":"Found 1 result(s)."}"#
+        let raw = #"{"content":[{"type":"text","text":"\#(inner.replacingOccurrences(of: "\"", with: "\\\""))"}]}"#
+        let readable = PhrenToolPresentation.readable(raw)
+        XCTAssertTrue(readable.hasPrefix("Found 1 result(s).\n\n{"), readable)
+        XCTAssertTrue(readable.contains("\"title\" : \"Interactive back\""), readable)
+        XCTAssertFalse(readable.contains("\\\""), "No escaped JSON-in-JSON remains")
+        XCTAssertEqual(PhrenToolPresentation.readable("plain prose, not JSON"), "plain prose, not JSON")
+        XCTAssertEqual(PhrenToolPresentation.readable(#"{"content":[{"type":"text","text":"just text"}]}"#), "just text")
+    }
+}

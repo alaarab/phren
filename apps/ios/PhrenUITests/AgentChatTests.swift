@@ -44,6 +44,20 @@ final class AgentChatTests: XCTestCase {
         }
         XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-read-run:")).firstMatch.exists)
         capture(app, "Phren memory and task cards")
+        app.buttons["chat-phren-card:phren-search"].tap()
+        XCTAssertTrue(app.buttons["chat-tool-output-done"].waitForExistence(timeout: 5))
+        // Recalled memories wrap by default: the whole line fits the screen instead of running off it.
+        let text = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "one long line the phone must wrap")).firstMatch
+        XCTAssertTrue(text.waitForExistence(timeout: 5))
+        XCTAssertLessThanOrEqual(text.frame.maxX, app.frame.maxX + 1, "Wrapped output must not extend past the screen")
+        capture(app, "Recalled memories wrapped")
+        let wrapToggle = app.buttons["chat-tool-output-wrap"]
+        XCTAssertTrue(wrapToggle.exists)
+        wrapToggle.tap()
+        XCTAssertTrue(text.waitForExistence(timeout: 3))
+        XCTAssertGreaterThan(text.frame.maxX, app.frame.maxX, "Long lines mode lets the line run past the screen")
+        wrapToggle.tap()
+        app.buttons["chat-tool-output-done"].tap()
         app.buttons["chat-phren-card:phren-finding"].tap()
         XCTAssertTrue(app.buttons["chat-tool-output-done"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "findingType")).firstMatch.exists)

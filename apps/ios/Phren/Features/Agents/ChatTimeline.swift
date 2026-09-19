@@ -299,17 +299,21 @@ struct FullToolOutput: Identifiable, Hashable {
 struct FullToolOutputView: View {
     let output: FullToolOutput
     @State private var page = 0
+    /// Wrapped by default: recalled memories, JSON and prose are read, not
+    /// scrolled sideways. Off keeps code and tables on their own lines.
+    @AppStorage("chat.toolOutput.wrap") private var wrap = true
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         let contents = output.contents
         let current = contents.pages[page]
-        ScrollView([.horizontal, .vertical]) {
+        ScrollView(wrap ? [.vertical] : [.horizontal, .vertical]) {
                 Text(current.displayText).font(.system(.caption, design: .monospaced))
                     .foregroundStyle(PhrenTheme.chatText).textSelection(.enabled)
-                    .fixedSize(horizontal: true, vertical: true).padding(16)
+                    .fixedSize(horizontal: !wrap, vertical: true)
+                    .frame(maxWidth: wrap ? .infinity : nil, alignment: .leading).padding(16)
             }
             .confirmsWebLinks()
-            .id(page)
+            .id("\(page)-\(wrap)")
             .background(PhrenTheme.chatPanel).navigationTitle(output.title).navigationBarTitleDisplayMode(.inline)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if contents.pages.count > 1 {
@@ -334,7 +338,9 @@ struct FullToolOutputView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }.accessibilityIdentifier("chat-tool-output-done")
                 }
-                ToolbarItem(placement: .primaryAction) {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button(wrap ? "Show long lines" : "Wrap lines", systemImage: wrap ? "arrow.left.and.right.text.vertical" : "text.justify.leading") { wrap.toggle() }
+                        .accessibilityIdentifier("chat-tool-output-wrap")
                     Button("Copy output", systemImage: "doc.on.doc") { ChatClipboard.copy(contents.source) }
                 }
             }

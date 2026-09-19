@@ -294,7 +294,7 @@ import UIKit
                 ("finding", "add_finding", ["project": project, "findingType": "pitfall", "finding": saved], ["ok": true]),
                 ("task", "add_task", ["project": project, "task": "Verify pasted images in chat"], ["ok": true]),
                 ("complete", "manage_task", ["project": project, "action": "complete", "item": "Pin curated font downloads"], ["ok": true]),
-                ("search", "search_knowledge", ["project": project, "query": "chat navigation"], ["ok": true, "data": ["count": 4, "results": [["title": "Interactive back"], ["title": "Stable chat scroll"], ["title": "One image bubble"], ["title": "Fourth match"]]]]),
+                ("search", "search_knowledge", ["project": project, "query": "chat navigation"], ["ok": true, "message": "Found 4 result(s): a recalled memory is one long line the phone must wrap to stay readable, since findings, decisions and pitfalls are written as paragraphs rather than code.", "data": ["count": 4, "results": [["title": "Interactive back"], ["title": "Stable chat scroll"], ["title": "One image bubble"], ["title": "Fourth match"]]]]),
             ]
             for (id, tool, input, result) in calls {
                 let arguments = String(decoding: try JSONSerialization.data(withJSONObject: input), as: UTF8.self)
