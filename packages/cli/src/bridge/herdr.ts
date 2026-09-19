@@ -183,10 +183,10 @@ export async function validateStartingTarget(target: StartingTarget): Promise<Js
   return pane;
 }
 
-export async function validateTarget(target: Target, sending = false): Promise<Json> {
+export async function validateTarget(target: Target, sending = false, refreshIdentity = sending): Promise<Json> {
   const s = await snapshot(target.server);
   const pane = objects(s.panes).find(p => p.pane_id === target.pane && p.tab_id === target.tab && p.workspace_id === target.workspace && p.agent === target.source);
-  if (!pane || await paneIdentity(target.server, pane, sending) !== target.session) throw new BridgeError(409, "This pane's conversation changed. Reopen the chat.");
+  if (!pane || await paneIdentity(target.server, pane, refreshIdentity) !== target.session) throw new BridgeError(409, "This pane's conversation changed. Reopen the chat.");
   if (sending && ["blocked", "waiting", "unknown"].includes(String(pane.agent_status))) throw new BridgeError(409, "This agent needs input in the terminal first.");
   return pane;
 }

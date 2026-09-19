@@ -198,7 +198,10 @@ export async function serve(version: string): Promise<void> {
             result = { ok: true, ...(!confirmed ? { deliveryUncertain: true } : {}) };
           } else {
           const target = targetSchema.parse(data.target);
-          const pane = await validateTarget(target, ["/v1/prompt", "/v1/upload", "/v1/keys"].includes(url.pathname));
+          // Uploads store bytes without answering or interrupting the agent.
+          // They still require fresh identity, just like prompt mutations.
+          const sendsInput = ["/v1/prompt", "/v1/keys"].includes(url.pathname);
+          const pane = await validateTarget(target, sendsInput, sendsInput || url.pathname === "/v1/upload");
           if (url.pathname === "/v1/prompt") {
             const text = z.string().min(1).max(32768).refine(t => !/[\x00-\x08\x0b-\x1f\x7f]/.test(t)).parse(data.text);
             await rpc(target.server, "agent.prompt", { target: target.pane, text });
