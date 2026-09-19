@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { historicalImage, TranscriptReader } from "./transcripts.js";
+import { childAgent, childAgentTree, historicalImage, publicChildAgents, TranscriptReader } from "./transcripts.js";
 import type { Json, Provider } from "./protocol.js";
 
 const text = { type: "text", text: "Keep this text and data:image/png;base64,AAAA unchanged." };
@@ -82,5 +82,36 @@ describe("transcript image payloads", () => {
     const message = page.entries[0].raw[source === "codex" ? "payload" : "message"] as Json;
     expect(message.content).toEqual([text, { type: image.type }, text]);
     expect(await historicalImage(file, 0, 1, source)).toEqual(bytes);
+  });
+});
+
+describe("child agent relationships", () => {
+  it("builds a bounded tree from explicit Codex start/completion events", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "phren-children-"));
+    const old = process.env.CODEX_HOME; process.env.CODEX_HOME = root;
+    const parent = "aaaaaaaa-1111-4111-8111-111111111111", child = "bbbbbbbb-2222-4222-8222-222222222222";
+    const dir = path.join(root, "sessions/2026/09/19"); await mkdir(dir, { recursive: true });
+    const event = (kind: string) => ({ type: "event_msg", payload: { type: "item_completed", item: {
+      type: "SubAgentActivity", id: "call-1", kind, agent_thread_id: child, agent_path: "/root/tester" } } });
+    const parentFile = path.join(dir, `rollout-parent-${parent}.jsonl`);
+    const unrelated = Array.from({ length: 2_000 }, (_, sequence) => JSON.stringify({ type: "event_msg", payload: { type: "token_count", sequence } }));
+    await writeFile(parentFile, [...unrelated, event("started"), event("interacted")].map(JSON.stringify).join("\n") + "\n");
+    await writeFile(path.join(dir, `rollout-child-${child}.jsonl`), JSON.stringify({ type: "session_meta", payload: {
+      source: { subagent: { thread_spawn: { parent_thread_id: parent } } } } }) + "\n");
+    try {
+      const running = await childAgentTree("codex", parent);
+      expect(running).toHaveLength(1);
+      expect(running[0]).toMatchObject({ session: child, provider: "codex", path: "/root/tester", callId: "call-1", state: "running", children: [] });
+      expect(running[0].id).toMatch(/^[a-f0-9]{32}$/);
+      // An unchanged repeat uses the stat cache. An append consumes only the
+      // new complete JSONL rows and advances the existing relation.
+      expect(await childAgentTree("codex", parent)).toEqual(running);
+      await appendFile(parentFile, JSON.stringify(event("completed")) + "\n");
+      const tree = await childAgentTree("codex", parent);
+      expect(tree[0]).toMatchObject({ session: child, state: "completed" });
+      expect(publicChildAgents(tree)[0]).not.toHaveProperty("session");
+      expect(childAgent(tree, tree[0].id)?.path).toBe("/root/tester");
+      expect(await childAgentTree("claude", parent)).toEqual([]);
+    } finally { process.env.CODEX_HOME = old; await rm(root, { recursive: true, force: true }); }
   });
 });
