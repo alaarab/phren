@@ -92,6 +92,10 @@ Unbound or conflicting identities remain unavailable for chat and attachments.
 - `GET /v1/projects/repos` and `POST /v1/projects/add`: "Add project" — the
   computer's untracked checkouts, and enrolling one (or cloning a GitHub URL)
   with `phren add` there; the computer pushes its store so the phone can pull.
+- `GET /v1/projects/files?project=<name>&directory=<located folder>&path=<relative path>`:
+  browse a discovered checkout read-only. Roots are revalidated on every request;
+  traversal, symlinks, `.git`, and special files are refused. Listings have at most
+  500 entries and file responses contain at most 2 MB of base64-encoded bytes.
 - `WS /v1/transcripts`: backlog, append, and older frames with provider JSON rows
   and stable line numbers. History requests include `beforeLine`.
 - `GET /v1/transcripts/history`: the same exact target tuple plus a positive

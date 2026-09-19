@@ -3,6 +3,35 @@ import Foundation
 import PhrenKit
 
 extension PhrenConnection {
+    public struct RepositoryFile: Decodable, Identifiable, Sendable {
+        public let name: String
+        public let path: String
+        public let kind: String
+        public var id: String { path }
+    }
+
+    public struct RepositoryFileResponse: Decodable, Sendable {
+        public let path: String
+        public let kind: String
+        public let entries: [RepositoryFile]?
+        public let truncated: Bool?
+        public let data: String?
+    }
+
+    public static func repositoryFiles(host: LiveHost, privateKey: Data, project: String, directory: String, path: String = "") async throws -> RepositoryFileResponse {
+        try host.validate()
+        let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey),
+                                      request: GatewayRequest(path: GatewayRequest.path("/v1/projects/files", ["project": project, "directory": directory, "path": path]), maximumResponseBytes: 3_000_000))
+        try Task.checkCancellation()
+        return try JSONDecoder().decode(RepositoryFileResponse.self, from: data)
+    }
+
+    public static func uploadedImage(host: LiveHost, privateKey: Data, path: String) async throws -> Data {
+        try host.validate()
+        return try await fetchData(host: host, key: .init(rawRepresentation: privateKey),
+                                   request: GatewayRequest(path: GatewayRequest.path("/v1/uploads/image", ["path": path]), maximumResponseBytes: 8_388_608))
+    }
+
     /// Phren Hook's version on a computer, or nil when it is not reachable.
     public static func hookVersion(host: LiveHost, privateKey: Data) async throws -> String? {
         try host.validate()

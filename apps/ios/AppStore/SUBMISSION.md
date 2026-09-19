@@ -32,27 +32,23 @@
 > No account is created by the app; the GitHub token is stored in the keychain
 > only.
 
-## Owner steps (cannot be done from this machine)
+## Remaining owner checks
 1. **Review credentials:** create a GitHub account or fine-grained PAT scoped
    to a demo store repository (findings/notes/tasks seeded, nothing private)
    and enter it as the demo sign-in in App Review Information.
-2. **Upload:** Product › Archive in Xcode (Release, Automatic signing, team
-   LYB298P4U6) › Distribute › App Store Connect, or
-   `xcodebuild archive … && xcodebuild -exportArchive -exportOptionsPlist`
-   with an App Store Connect API key. The export-compliance question is
-   pre-answered by the plist key.
-3. **Connect metadata:** filled through the API on 2026-09-16; see
-   "Store record" below for what is set and what is still open.
+2. **Declarations:** complete App Privacy and declare EU trader status in
+   App Store Connect. These need the owner’s answers.
+3. **Build:** build 99 is processed and attached, verified 2026-09-19.
 4. **Physical-device pass before submitting:** sign-in with the demo token,
    add a computer (QR / key copy), open a chat, approve a request from the
    Lock Screen activity, Control Center controls, Siri "What is phren doing",
    Action button → "Talk to Phren".
 
-## Store record (filled 2026-09-16)
+## Store record (filled 2026-09-16, rechecked 2026-09-19)
 
 Written through the App Store Connect API (`apps/ios/scripts/asc.py`, App
 Manager key). App 6811508141, version 73b06487-558d-4ec5-aab2-232e29007622.
-No build attached, nothing submitted.
+Build 99 is attached and VALID; nothing submitted.
 
 ### Set and verified
 - **Version:** versionString `1.0.0`, copyright `2026 Ala Arab`, release
@@ -79,8 +75,10 @@ No build attached, nothing submitted.
   first version** (API 409 STATE_ERROR); Apple only shows it for updates.
 - **Screenshots:** set `ef6d70ca-7346-4bc5-8d51-4fc5044ff41f`, display type
   APP_IPHONE_67 (the API has no APP_IPHONE_69; 1320×2868 is accepted there).
-  All eight uploaded in the order listed under "Ready", every asset
-  `COMPLETE` at 1320×2868, order confirmed by a listing.
+  As of 2026-09-19, all ten screenshots are `COMPLETE` at 1320×2868.
+  Marketing frame 03 now reads “Approve, answer, steer / from anywhere”
+  without the em dash and remains third in the set. All three app previews
+  are also `COMPLETE`. The list under “Ready” is the original capture list.
 - **Price:** schedule created, base territory USA, manual price = the free
   point (customerPrice 0.0); 174 automatic free equivalents.
 - **Availability (v2):** all 175 territories available,
@@ -89,22 +87,16 @@ No build attached, nothing submitted.
   pre-release state.
 
 ### Still open (owner)
-1. **App Review Information: needs a real phone number.**
-   `POST /v1/appStoreReviewDetails` requires `contactPhone` and validates it
-   as a real number; `+10000000000` and `+1 555 010 0000` were both refused
-   ("must be in a valid format"), so no review detail exists yet. Run, with
-   your number and the demo token:
-   ```
-   python3 apps/ios/scripts/asc.py POST /v1/appStoreReviewDetails '{"data":{"type":"appStoreReviewDetails","attributes":{"contactFirstName":"Ala","contactLastName":"Arab","contactEmail":"alaarab@gmail.com","contactPhone":"+1 XXX XXX XXXX","demoAccountRequired":true,"demoAccountName":"<github account>","demoAccountPassword":"<fine-grained PAT for alaarab/phren-ios-demo>","notes":"<the Review notes block above, as plain text>"},"relationships":{"appStoreVersion":{"data":{"type":"appStoreVersions","id":"73b06487-558d-4ec5-aab2-232e29007622"}}}}}'
-   ```
-   or fill the same fields in App Store Connect › the version › App Review
-   Information. The demo token needs Contents: Read and write + Metadata:
-   Read on the demo store, expiring at least 90 days out.
+1. **App Review Information: replace the demo-token placeholder.**
+   Review contact details, including a phone number, now exist. On
+   2026-09-19 the demo password was still `SET-BY-OWNER`. Enter a token
+   scoped to the demo store directly in App Store Connect › the version ›
+   App Review Information; do not put it in chat or this repository.
 2. **App Privacy questionnaire** (App Store Connect › App Privacy): no API.
    Answer per `privacy-label.md` (data not collected).
-3. **EU trader status (Digital Services Act):** the 27 EU territories report
-   `TRADER_STATUS_NOT_PROVIDED`; declare it under App Store Connect ›
-   Business (or the app's Availability page) or the app will not be sold in
-   the EU.
-4. Attach the build (99 / 1.0.0) once it finishes processing, run the
-   physical-device pass above, then Submit for Review.
+3. **EU trader status (Digital Services Act):** owner confirmation remains
+   pending. Declare whether distribution is part of a business or profession
+   under App Store Connect › Business › Agreements › Compliance. See
+   [Apple’s guidance](https://developer.apple.com/help/app-store-connect/manage-compliance-information/manage-european-union-digital-services-act-trader-requirements).
+4. Confirm the physical-device pass above, then Submit for Review. Simulator
+   checks do not establish that the physical-device checklist has passed.

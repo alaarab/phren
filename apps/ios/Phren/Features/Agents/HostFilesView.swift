@@ -1,6 +1,7 @@
 import PhrenKit
 import PhrenLive
 import SwiftUI
+import ImageIO
 
 /// Files the phone has put on a computer through Phren Hook — upload from
 /// Files or Photos, then copy the path to hand it to an agent.
@@ -41,6 +42,7 @@ private struct HostFilesSection: View {
                         UIPasteboard.general.string = file.path; copied = file.id
                     } label: {
                         HStack {
+                            HostFileThumbnail(host: host, file: file)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(file.name).foregroundStyle(PhrenTheme.text).lineLimit(1)
                                 Text("\(ByteCountFormatter.string(fromByteCount: Int64(file.size), countStyle: .file)) · \(file.path)")
@@ -77,5 +79,31 @@ private struct HostFilesSection: View {
             #endif
             files = try await PhrenConnection.files(host: host, privateKey: DeviceSSHKey.load(host.id)); error = nil
         } catch { if !Task.isCancelled { self.error = error.localizedDescription } }
+    }
+}
+
+private struct HostFileThumbnail: View {
+    let host: LiveHost
+    let file: HostFile
+    @State private var image: UIImage?
+    var body: some View {
+        Group {
+            if let image { Image(uiImage: image).resizable().scaledToFill() }
+            else { PhrenFileTypeIcon(path: file.name) }
+        }.frame(width: 44, height: 44).clipped()
+            .background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: 8))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .accessibilityHidden(true)
+            .task(id: file.path) {
+                guard ["png", "jpg", "jpeg", "gif", "webp"].contains((file.name as NSString).pathExtension.lowercased()), file.size <= 8_388_608 else { return }
+                guard let bytes = try? await PhrenConnection.uploadedImage(host: host, privateKey: DeviceSSHKey.load(host.id), path: file.path), !Task.isCancelled else { return }
+                guard let source = CGImageSourceCreateWithData(bytes as CFData, nil),
+                      let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                        kCGImageSourceCreateThumbnailFromImageAlways: true,
+                        kCGImageSourceCreateThumbnailWithTransform: true,
+                        kCGImageSourceThumbnailMaxPixelSize: 132,
+                      ] as CFDictionary) else { return }
+                image = UIImage(cgImage: thumbnail)
+            }
     }
 }

@@ -1,4 +1,5 @@
 import PhrenKit
+import PhrenLive
 import SwiftUI
 
 struct FilesView: View {
@@ -6,6 +7,8 @@ struct FilesView: View {
     @State private var storeId: String?
     @State private var query = ""
     @State private var target: FileTarget?
+    @AppStorage("sessions.live.preferences.v1") private var hostData = Data()
+    private var hosts: [LiveHost] { (try? LiveSessionPreferences.read(hostData))?.hosts ?? [] }
 
     struct FileTarget: Identifiable, Hashable {
         let storeId: String
@@ -36,6 +39,14 @@ struct FilesView: View {
 
     var body: some View {
         PhrenScrollScreen(spacing: 4) {
+            if !hosts.isEmpty {
+                PhrenSectionHeader(title: "Computers", count: hosts.count)
+                ForEach(hosts) { host in
+                    NavigationLink { RepositoryProjectsView(host: host) } label: {
+                        PhrenMenuRow(title: host.name, subtitle: "Browse project files", icon: "desktopcomputer", compact: true)
+                    }.buttonStyle(.plain)
+                }
+            }
             if contexts.isEmpty {
                 PhrenEmptyState(title: "No store", message: "Connect a store to browse its files.")
             } else {
@@ -114,39 +125,15 @@ struct FileViewerView: View {
     let path: String
 
     @Environment(AppModel.self) private var model
-    @State private var mode = Mode.preview
     @State private var editing = false
     @State private var copied = false
 
-    enum Mode: Hashable { case preview, source }
-
     private var context: StoreContext? { model.storeContexts.first { $0.id == storeId } }
     private var content: String { context?.store.read(path) ?? "" }
-    private var language: SyntaxTokenizer.Language { SyntaxTokenizer.Language.detect(path) }
-    private var isMarkdown: Bool { language == .markdown }
-    private var isWritable: Bool { LocalStore.isWritablePath(path) }
+    private var isWritable: Bool { model.canPush(storeId: storeId) && LocalStore.isWritablePath(path) }
 
     var body: some View {
-        VStack(spacing: 0) {
-            if isMarkdown {
-                PhrenIconSegment(items: [
-                    .init(value: Mode.preview, icon: "doc.richtext", label: "Preview"),
-                    .init(value: Mode.source, icon: "chevron.left.forwardslash.chevron.right", label: "Source"),
-                ], selection: $mode)
-                .padding(.horizontal, PhrenTheme.Space.large).padding(.top, PhrenTheme.Space.small)
-            }
-            if mode == .preview, isMarkdown {
-                ScrollView {
-                    ChatRichText(text: content)
-                        .padding(PhrenTheme.Space.large)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            } else {
-                ScrollView([.horizontal, .vertical]) {
-                    CodeTextView(code: content, language: language)
-                }
-            }
-        }
+        DocumentContentView(path: path, content: content)
         .phrenScreen()
         .navigationTitle((path as NSString).lastPathComponent)
         .navigationBarTitleDisplayMode(.inline)
@@ -168,6 +155,116 @@ struct FileViewerView: View {
             DocumentEditorSheet(title: (path as NSString).lastPathComponent, storeId: storeId,
                                 draft: DocumentDraft(path: path, content: content))
         }
+    }
+}
+
+/// Shared preview/source presentation for store documents and computer files.
+struct DocumentContentView: View {
+    let path: String
+    let content: String
+    var embedded = false
+    @State private var source = false
+    private var language: SyntaxTokenizer.Language { SyntaxTokenizer.Language.detect(path) }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if language == .markdown {
+                PhrenIconSegment(items: [
+                    .init(value: false, icon: "doc.richtext", label: "Preview"),
+                    .init(value: true, icon: "chevron.left.forwardslash.chevron.right", label: "Source"),
+                ], selection: $source).padding(.horizontal, 12)
+            }
+            if !source && language == .markdown {
+                if embedded { ChatRichText(text: content).frame(maxWidth: .infinity, alignment: .leading) }
+                else { ScrollView { ChatRichText(text: content).padding(PhrenTheme.Space.large).frame(maxWidth: .infinity, alignment: .leading) } }
+            } else if embedded {
+                ScrollView(.horizontal) { CodeTextView(code: content, language: language) }
+            } else {
+                ScrollView([.horizontal, .vertical]) { CodeTextView(code: content, language: language) }
+            }
+        }
+    }
+}
+
+private struct RepositoryProjectsView: View {
+    let host: LiveHost
+    @Environment(AppModel.self) private var model
+    var body: some View {
+        PhrenList {
+            ForEach(model.mergedProjects.filter { $0.project.name != "global" }) { item in
+                NavigationLink { RepositoryLocationsView(host: host, project: item.project.name) } label: {
+                    Label(item.project.name, systemImage: "folder")
+                }
+            }
+        }.navigationTitle(host.name).phrenScreen()
+    }
+}
+
+private struct RepositoryLocationsView: View {
+    let host: LiveHost
+    let project: String
+    @State private var folders: [PhrenConnection.LocatedFolder]?
+    @State private var error: String?
+    var body: some View {
+        PhrenList {
+            if let folders {
+                if folders.isEmpty { Text("No checkout found on this computer.") }
+                ForEach(folders) { folder in
+                    NavigationLink { RepositoryBrowserView(host: host, project: project, directory: folder.directory) } label: {
+                        Label(folder.directory, systemImage: "folder").lineLimit(2)
+                    }
+                }
+            } else if let error { Text(error).foregroundStyle(PhrenTheme.warning) }
+            else { ProgressView("Finding project…") }
+        }.navigationTitle(project).phrenScreen()
+            .task {
+                do { folders = try await PhrenConnection.locateProject(host: host, privateKey: DeviceSSHKey.load(host.id), project: project) }
+                catch { if !Task.isCancelled { self.error = error.localizedDescription } }
+            }
+    }
+}
+
+private struct RepositoryBrowserView: View {
+    let host: LiveHost
+    let project: String
+    let directory: String
+    var path = ""
+    @State private var response: PhrenConnection.RepositoryFileResponse?
+    @State private var error: String?
+    @State private var refresh = UUID()
+    var body: some View {
+        Group {
+            if let response {
+                if response.kind == "directory" {
+                    PhrenList {
+                        ForEach(response.entries ?? []) { entry in
+                            NavigationLink { RepositoryBrowserView(host: host, project: project, directory: directory, path: entry.path) } label: {
+                                HStack {
+                                    if entry.kind == "directory" { Image(systemName: "folder").foregroundStyle(PhrenTheme.cyan) }
+                                    else { PhrenFileTypeIcon(path: entry.path) }
+                                    Text(entry.name).font(.system(.subheadline, design: .monospaced))
+                                }
+                            }
+                        }
+                        if response.entries?.isEmpty == true { Text("Empty folder").foregroundStyle(PhrenTheme.textMuted) }
+                        if response.truncated == true { Text("Showing the first 500 entries.").foregroundStyle(PhrenTheme.textMuted) }
+                    }
+                } else if let encoded = response.data, let bytes = Data(base64Encoded: encoded) {
+                    if let image = UIImage(data: bytes) {
+                        ScrollView([.horizontal, .vertical]) { Image(uiImage: image).resizable().scaledToFit().frame(maxWidth: 800) }
+                    } else if let text = String(data: bytes, encoding: .utf8), !text.contains("\0") {
+                        DocumentContentView(path: path, content: text)
+                    } else { Text("This binary file cannot be previewed.").foregroundStyle(PhrenTheme.textMuted) }
+                }
+            } else if let error { Text(error).foregroundStyle(PhrenTheme.warning).padding() }
+            else { ProgressView("Loading files…") }
+        }.navigationTitle(path.isEmpty ? project : (path as NSString).lastPathComponent)
+            .navigationBarTitleDisplayMode(.inline).phrenScreen()
+            .toolbar { Button("Refresh", systemImage: "arrow.clockwise") { refresh = UUID() } }
+            .task(id: refresh) {
+                response = nil; error = nil
+                do { response = try await PhrenConnection.repositoryFiles(host: host, privateKey: DeviceSSHKey.load(host.id), project: project, directory: directory, path: path) }
+                catch { if !Task.isCancelled { self.error = error.localizedDescription } }
+            }
     }
 }
 

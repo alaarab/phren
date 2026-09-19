@@ -13,11 +13,11 @@ struct ApprovalActivityWidget: Widget {
                     Spacer()
                     mark(context)
                 }.font(.caption).lineLimit(1)
-                Text(context.isStale ? "Request expired" : headline(context))
+                Text(context.isStale ? "Check current request" : headline(context))
                     .font(.headline)
-                Text(context.isStale ? "Open Phren to check the current request." : context.state.explanation)
+                Text(context.isStale ? "Phone controls timed out. Open Phren to check whether the agent is still waiting." : context.state.explanation)
                     .font(.subheadline).foregroundStyle(.secondary).lineLimit(2).privacySensitive()
-                if !context.isStale { actions(context) }
+                actions(context)
             }.padding(16).activityBackgroundTint(.black).activitySystemActionForegroundColor(.white)
                 .widgetURL(context.attributes.openURL ?? URL(string: "phren://agents"))
         } dynamicIsland: { context in
@@ -26,17 +26,17 @@ struct ApprovalActivityWidget: Widget {
                 DynamicIslandExpandedRegion(.trailing) { Text(context.state.project).font(.caption).lineLimit(1) }
                 DynamicIslandExpandedRegion(.bottom) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(context.isStale ? "Request expired" : headline(context)).font(.headline)
+                        Text(context.isStale ? "Check current request" : headline(context)).font(.headline)
                         if !context.isStale {
                             Text(context.state.explanation).font(.caption).lineLimit(2).privacySensitive()
-                            actions(context)
                         }
+                        actions(context)
                     }
                 }
             } compactLeading: {
                 mark(context)
             } compactTrailing: {
-                Text(context.isStale ? "Expired" : context.state.question ? "Question" : "Approve?").font(.caption2)
+                Text(context.isStale ? "Open" : context.state.question ? "Question" : "Approve?").font(.caption2)
             } minimal: {
                 mark(context)
             }.widgetURL(context.attributes.openURL ?? URL(string: "phren://agents"))
@@ -51,11 +51,11 @@ struct ApprovalActivityWidget: Widget {
             .foregroundStyle(context.isStale ? Color.secondary : context.state.question ? WidgetTheme.accent : .orange)
     }
     @ViewBuilder private func actions(_ context: ActivityViewContext<ApprovalActivityAttributes>) -> some View {
-        if context.state.question {
+        if context.isStale || context.state.question {
             // A question is answered in the app, where the choices are shown.
             Link(destination: context.attributes.openURL ?? URL(string: "phren://agents")!) {
                 Text("Open").frame(maxWidth: .infinity, minHeight: 32)
-            }.buttonStyle(.borderedProminent).tint(WidgetTheme.accent).disabled(context.isStale)
+            }.buttonStyle(.borderedProminent).tint(WidgetTheme.accent)
         } else {
             HStack(spacing: 12) {
                 Button(intent: AnswerApprovalIntent(requestID: context.attributes.requestID, approve: false)) {

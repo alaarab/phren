@@ -32,8 +32,9 @@ struct ProjectsView: View {
             VStack(spacing: 0) {
                 LiveStatusBar()
                 ActionErrorBanner()
-                PhrenList {
-                    Section("Explore") {
+                PhrenScrollScreen {
+                    PhrenSectionHeader(title: "Explore")
+                    VStack(spacing: 4) {
                         NavigationLink { GraphView() } label: {
                             PhrenMenuRow(title: "Memory graph", subtitle: "Explore how your knowledge connects",
                                          icon: "circle.hexagongrid", color: PhrenTheme.cyan, compact: true)
@@ -45,7 +46,12 @@ struct ProjectsView: View {
                         }.accessibilityLabel("Files")
                         .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
                     }
-                    Section("Projects") {
+                    .padding(8).background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium))
+                    PhrenSectionHeader(title: "Projects", count: projects.count)
+                    if projects.isEmpty && !model.mergedProjects.isEmpty {
+                        Text("No matching projects.").font(.footnote).foregroundStyle(PhrenTheme.textMuted)
+                    }
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 10)], spacing: 10) {
                         ForEach(projects) { item in
                             NavigationLink(value: item) {
                                 VStack(alignment: .leading, spacing: 3) {
@@ -72,13 +78,17 @@ struct ProjectsView: View {
                                     .labelStyle(PhrenMetadataLabelStyle())
                                     .foregroundStyle(.secondary)
                                 }
-                                .padding(.vertical, 2)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(PhrenTheme.Space.medium)
+                                .background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium))
                             }
+                            .buttonStyle(.plain)
                             .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
                             .accessibilityIdentifier("project:\(item.storeId):\(item.project.name)")
                         }
                     }
-                    Section("Agent setup") {
+                    PhrenSectionHeader(title: "Agent setup")
+                    VStack(spacing: 4) {
                         NavigationLink { LiveSessionsView() } label: {
                             PhrenMenuRow(title: "Live sessions", subtitle: "Pick up where your agents left off",
                                          icon: "waveform.path", compact: true)
@@ -90,15 +100,16 @@ struct ProjectsView: View {
                             PhrenMenuRow(title: "Agent instructions", icon: "person.crop.rectangle.stack", compact: true)
                         }
                     }
+                    .padding(8).background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium))
                     .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
-                    Section {
+                    Group {
                         NavigationLink(value: MemoryMaintenanceRoute()) {
                             Label("Memory maintenance", systemImage: "wrench.and.screwdriver")
                         }
                         .foregroundStyle(.secondary)
-                    } footer: {
-                        Text("Your agents build memory as you work. Maintenance is here when you need it.")
                     }
+                    Text("Your agents build memory as you work. Maintenance is here when you need it.")
+                        .font(.caption).foregroundStyle(PhrenTheme.textMuted)
                 }
                 .overlay {
                     // First run: the store is connected but empty, or not

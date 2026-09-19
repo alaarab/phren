@@ -64,11 +64,19 @@ must support the chosen combination. Changes stay on this iPhone.
 
 **Agents → Account usage** (the chart icon), also available in Settings, shows
 Claude and Codex account limits, percentages used, and reset dates/countdowns
-for each connected computer. Codex refreshes up to once a minute. Claude reports
-usage after a response through its status-line integration, installed by
-`phren bridge install`. Last-reported times distinguish older observations from
+for each connected computer. Both refresh up to once a minute. Claude uses the
+computer's existing sign-in token against its usage endpoint, including per-model
+weekly limits; an unavailable endpoint falls back to its local status-line and
+usage snapshots. Tokens stay on the computer. Last-reported times distinguish older observations from
 current readings. These are account allowances shared across computers signed
 into the same account, separate from the chat's per-response token details.
+
+Projects uses a card dashboard. Files includes store documents and a Computers
+section for browsing discovered project checkouts through Phren Hook. Computer
+files are read-only, with image previews and the same markdown preview/source
+viewer used by skills and agent instructions. Hook limits previews to 2 MB and
+directory listings to 500 entries. Uploaded images have thumbnails; repository
+changes group files into expandable folders within staged/unstaged sections.
 
 Herdr uses a single compact header for back, computer/status, and reconnect.
 The terminal starts directly below it; the keyboard stays hidden until requested.

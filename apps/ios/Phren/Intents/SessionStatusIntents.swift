@@ -169,7 +169,7 @@ enum SessionStatusService {
            let expires = approval.expiration, expires > .now {
             let record = try? await SessionApprovalAction.sharedStore.save(.init(
                 id: UUID().uuidString, actionID: approval.id, host: session.host,
-                target: target, expiresAt: min(expires, Date().addingTimeInterval(55)), question: question != nil
+                target: target, expiresAt: expires, question: question != nil
             ))
             requestID = record?.id
         }

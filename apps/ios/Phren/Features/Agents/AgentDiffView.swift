@@ -31,6 +31,30 @@ struct AgentDiffView: View {
         func hash(into hasher: inout Hasher) { hasher.combine(id) }
     }
 
+    private struct FileNode: Identifiable {
+        let id: String
+        let name: String
+        var entry: Entry?
+        var children: [FileNode]?
+
+        static func tree(_ entries: [Entry], prefix: String = "") -> [FileNode] {
+            let groups = Dictionary(grouping: entries) { entry in
+                String(entry.file.path.dropFirst(prefix.count).split(separator: "/").first ?? "")
+            }
+            return groups.keys.sorted().map { name in
+                let path = prefix + name
+                let values = groups[name] ?? []
+                if let file = values.first(where: { $0.file.path == path }) {
+                    return FileNode(id: file.id, name: name, entry: file)
+                }
+                return FileNode(id: "folder:\(path)", name: name, children: tree(values, prefix: path + "/"))
+            }.sorted {
+                if ($0.children != nil) != ($1.children != nil) { return $0.children != nil }
+                return $0.name.localizedStandardCompare($1.name) == .orderedAscending
+            }
+        }
+    }
+
     private func entries(_ files: [AgentRepositoryDiff.File], kind: String) -> [Entry] {
         files.flatMap { file -> [Entry] in
             if kind == "unstaged", file.status == "??" {
@@ -129,14 +153,19 @@ struct AgentDiffView: View {
     /// path, the counts and a five-block bar — and no disclosure chevrons.
     private func group(_ title: String, _ entries: [Entry]) -> some View {
         Section {
-            ForEach(entries) { entry in
-                Button { opened = entry } label: {
-                    FileChangeRow(file: entry.file, counts: counts[entry.section.id], note: entry.section.note)
+            OutlineGroup(FileNode.tree(entries), children: \.children) { node in
+                if let entry = node.entry {
+                    Button { opened = entry } label: {
+                        FileChangeRow(file: entry.file, counts: counts[entry.section.id], note: entry.section.note)
+                    }
+                    .buttonStyle(.plain)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                    .listRowBackground(PhrenTheme.surface)
+                    .accessibilityIdentifier("diff-file:\(entry.section.id)")
+                } else {
+                    Label(node.name, systemImage: "folder").font(.system(.subheadline, design: .monospaced))
+                        .foregroundStyle(PhrenTheme.chatNeutral)
                 }
-                .buttonStyle(.plain)
-                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-                .listRowBackground(PhrenTheme.surface)
-                .accessibilityIdentifier("diff-file:\(entry.section.id)")
             }
         } header: {
             HStack {

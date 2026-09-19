@@ -96,7 +96,7 @@ final class ProjectSkillsTests: XCTestCase {
     @MainActor
     private func launch() -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["--ui-testing", "--project-skills-fixture"]
+        app.launchArguments = ["--ui-testing", "--project-skills-fixture", "-phren-tab", "projects"]
         app.launch()
         let project = app.buttons["project:sample/brain:demo"]
         XCTAssertTrue(project.waitForExistence(timeout: 15))
@@ -113,4 +113,3 @@ final class ProjectSkillsTests: XCTestCase {
         add(attachment)
     }
 }
-

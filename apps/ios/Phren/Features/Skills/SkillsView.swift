@@ -135,7 +135,7 @@ struct SkillEditorView: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
-                Section("Instructions") { DocumentPreview(content: current.skill.content) }
+                Section("Instructions") { DocumentContentView(path: current.skill.path, content: current.skill.content, embedded: true) }
                 Section {
                     if let preferences = try? model.skillPreferences(in: entry.storeId) {
                         if let enabled = preferences.explicitSetting(scope: current.skill.scope.source, name: current.skill.name) {

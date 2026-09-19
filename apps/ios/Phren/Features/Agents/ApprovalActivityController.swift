@@ -42,7 +42,7 @@ final class ApprovalActivityController {
             if let previous = observed[target] { await remove(target: target, actionID: previous.actionID) }
             let question = approval.questionPrompt
             let record = try await store.save(.init(id: UUID().uuidString, actionID: approval.id, host: session.host,
-                                                    target: target, expiresAt: min(expiration, Date().addingTimeInterval(55)), question: question != nil))
+                                                    target: target, expiresAt: expiration, question: question != nil))
             guard run == generation, !wasHandled(approval, target: target) else { await remove(target: target, actionID: approval.id); return }
             let live = Set(Activity<ApprovalActivityAttributes>.activities.map { $0.attributes.requestID })
             routes = routes.filter { $0.key == record.id || live.contains($0.key) }

@@ -89,7 +89,7 @@ struct AgentContextView: View {
                 }
             }
             Section("Instructions") {
-                if let content { DocumentPreview(content: content) }
+                if let content { DocumentContentView(path: "\(scope)/CLAUDE.md", content: content, embedded: true) }
                 else {
                     Text("Add the conventions, tools, and working rules your agents should follow.")
                         .foregroundStyle(.secondary)
