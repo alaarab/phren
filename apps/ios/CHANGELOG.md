@@ -22,6 +22,8 @@ number counts up on its own.
   the last model you used per harness is remembered.
 - Paste a copied screenshot straight into the chat: when an image is on the
   clipboard, a paste control appears beside the message box and attaches it.
+- The keyboard button in Herdr resizes the terminal once it settles, so showing
+  and hiding the keyboard no longer stutters.
 - Hold a paragraph to copy only it, or the whole reply; double-tap a word to
   select it with native handles and copy exactly as much as you want.
 - The agent's own bookkeeping has cards of its own in the chat. A subagent

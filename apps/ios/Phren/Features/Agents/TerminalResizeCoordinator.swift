@@ -11,12 +11,20 @@ final class TerminalResizeCoordinator {
     private var generation = UUID()
     private var send: ((Size) async throws -> Void)?
     private var task: Task<Void, Never>?
+    private var debounce: Task<Void, Never>?
 
     func update(columns: Int, rows: Int) {
         guard columns > 0, rows > 0 else { return }
         latest = Size(columns: columns, rows: rows)
         revision += 1
-        drain()
+        // The keyboard animation lays the terminal out on every frame; only the
+        // settled grid should reach the remote PTY, or it reflows in a storm.
+        debounce?.cancel()
+        debounce = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(120))
+            guard !Task.isCancelled else { return }
+            self?.drain()
+        }
     }
     func attach(send: @escaping (Size) async throws -> Void) {
         detach()
@@ -25,6 +33,7 @@ final class TerminalResizeCoordinator {
         drain()
     }
     func detach() {
+        debounce?.cancel(); debounce = nil
         generation = UUID()
         task?.cancel(); task = nil; send = nil
     }

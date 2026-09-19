@@ -91,8 +91,9 @@ final class TouchTerminalView: TerminalView, UIGestureRecognizerDelegate, UIEdit
     func toggleKeyboard() {
         if isFirstResponder { _ = resignFirstResponder(); return }
         requestingKeyboard = true
-        defer { requestingKeyboard = false }
-        _ = becomeFirstResponder()
+        let became = becomeFirstResponder()
+        requestingKeyboard = false
+        if became { reloadInputViews() }
     }
 
     @objc private func twoFingerSwipe(_ gesture: UISwipeGestureRecognizer) {
