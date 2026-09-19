@@ -25,6 +25,29 @@ struct TaskListRow: Identifiable, Hashable {
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
+/// The complete, reviewable instruction handed to an agent started from a
+/// task. Keep this formatting in one place so every launch sends the same
+/// store/project identity and the task's full text.
+struct TaskAgentRequest: Equatable {
+    let row: TaskListRow
+
+    var title: String {
+        TasksFile.stripPinnedTag(TasksFile.stripPriorityTag(row.task.line))
+    }
+
+    var prompt: String {
+        var parts = [
+            "Work on this Phren task and continue until it is complete:",
+            "Store: \(row.storeId)\nProject: \(row.project)",
+            "Task:\n\(title)"
+        ]
+        if let context = row.task.context?.trimmingCharacters(in: .whitespacesAndNewlines), !context.isEmpty {
+            parts.append("Context:\n\(context)")
+        }
+        return parts.joined(separator: "\n\n")
+    }
+}
+
 /// Task list: cross-store + cross-project in the Tasks tab, or scoped to one
 /// store's project inside project detail.
 struct TaskListView: View {
@@ -595,6 +618,7 @@ extension PhrenTask.Priority {
 private struct TaskDetailsSheet: View {
     @Environment(AppModel.self) private var model
     @State private var editing = false
+    @State private var launchingAgent = false
     let row: TaskListRow
 
     private var currentRow: TaskListRow {
@@ -616,6 +640,20 @@ private struct TaskDetailsSheet: View {
                 if let context = row.task.context {
                     Section("Context") { Text(.init(context)).textSelection(.enabled) }
                 }
+                if !row.task.checked {
+                    Section {
+                        Button {
+                            launchingAgent = true
+                        } label: {
+                            Label("Start an agent on this task", systemImage: "sparkles")
+                        }
+                        .accessibilityIdentifier("task-start-agent")
+                    } header: {
+                        Text("Agent")
+                    } footer: {
+                        Text("Choose a computer and harness. Phren sends this task to the new agent and marks backlog work active after delivery succeeds.")
+                    }
+                }
                 Section {
                     LabeledContent("Project", value: row.project)
                     LabeledContent("Store", value: row.storeId)
@@ -635,6 +673,10 @@ private struct TaskDetailsSheet: View {
             }
             .phrenScreen()
             .sheet(isPresented: $editing) { TaskEditSheet(row: row) }
+            .sheet(isPresented: $launchingAgent) {
+                LaunchSessionView(storeID: row.storeId, project: row.project,
+                                  taskRequest: TaskAgentRequest(row: row))
+            }
     }
 }
 

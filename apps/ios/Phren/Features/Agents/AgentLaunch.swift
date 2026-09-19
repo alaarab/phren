@@ -67,6 +67,30 @@ enum AgentLaunch {
         return try session(host: host, workspaceID: launched.workspaceID, tabID: launched.tabID, label: label, agent: kind.rawValue, agentStatus: launched.agentStatus, cwd: cwd)
     }
 
+    /// Delivers the first instruction to the one supported agent pane in a
+    /// newly launched session. Pane identity is resolved and revalidated by
+    /// the normal chat transport before the prompt reaches the terminal.
+    static func sendInitialPrompt(_ prompt: String, to session: LiveAgentSession) async throws {
+        let panes: AgentChatPanes
+        #if DEBUG && targetEnvironment(simulator)
+        if AgentChatFixture.enabled { panes = try AgentChatFixture.panes(session) }
+        else { panes = try await PhrenConnection.chatPanes(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), workspaceID: session.workspaceID, tabID: session.tab.id) }
+        #else
+        panes = try await PhrenConnection.chatPanes(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), workspaceID: session.workspaceID, tabID: session.tab.id)
+        #endif
+        let targets = panes.panes.compactMap {
+            try? $0.target(hostID: session.host.id, workspaceID: session.workspaceID,
+                           tabID: session.tab.id, muxID: session.host.muxID)
+        }
+        guard targets.count == 1, let target = targets.first else {
+            throw PhrenKitError.validation("The new workspace did not expose exactly one agent conversation.")
+        }
+        #if DEBUG && targetEnvironment(simulator)
+        if AgentChatFixture.enabled { try await AgentChatFixture.send(target, text: prompt); return }
+        #endif
+        try await PhrenConnection.sendChat(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, text: prompt)
+    }
+
     /// A session object from its identifiers alone.
     static func session(host: LiveHost, workspaceID: String, tabID: String, label: String, agent: String, agentStatus: String?, cwd: String) throws -> LiveAgentSession {
         let escape = { (s: String) in s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") }

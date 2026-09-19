@@ -53,6 +53,24 @@ final class TaskBrowsingTests: XCTestCase {
         XCTAssertEqual(TaskMove.done.operation(for: item), .completeTask(project: "demo", match: "deadbeef"))
     }
 
+    func testTaskAgentRequestIncludesExactVisibleTaskContextAndIdentity() {
+        let item = row("deadbeef", tags: "[high] [pinned]", store: "team/brain")
+        let request = TaskAgentRequest(row: item)
+        XCTAssertEqual(request.title, "Task deadbeef")
+        XCTAssertEqual(request.prompt, """
+        Work on this Phren task and continue until it is complete:
+
+        Store: team/brain
+        Project: demo
+
+        Task:
+        Task deadbeef
+
+        Context:
+        release planning
+        """)
+    }
+
     func testAgeRangesAndMissingDates() throws {
         let now = try XCTUnwrap(TaskBrowsing.creationDate("2026-09-10T12:00:00Z"))
         func daysAgo(_ days: Int) -> Date { Calendar.current.date(byAdding: .day, value: -days, to: now)! }

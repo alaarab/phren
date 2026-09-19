@@ -10,6 +10,7 @@ import SwiftUI
 struct LaunchSessionView: View {
     let storeID: String
     let project: String
+    var taskRequest: TaskAgentRequest? = nil
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @AppStorage("sessions.live.preferences.v1") private var data = Data()
@@ -191,7 +192,9 @@ struct LaunchSessionView: View {
                     } label: {
                         HStack {
                             if launching { ProgressView().tint(PhrenTheme.chatPanel).padding(.trailing, 6) }
-                            Text(launching ? (status ?? "Opening…") : "Open \(project) with \(harness?.title ?? kind)")
+                            Text(launching ? (status ?? "Opening…") : taskRequest == nil
+                                 ? "Open \(project) with \(harness?.title ?? kind)"
+                                 : "Start \(harness?.title ?? kind) on task")
                                 .fontWeight(.semibold)
                         }
                         .frame(maxWidth: .infinity, minHeight: 44)
@@ -200,7 +203,9 @@ struct LaunchSessionView: View {
                     .disabled(!canOpen)
                     .accessibilityIdentifier("launch-open")
                 } footer: {
-                    Text("Creates a Herdr workspace on the computer, starts the agent in it, and opens the chat here. Starting can take up to a minute.")
+                    Text(taskRequest == nil
+                         ? "Creates a Herdr workspace on the computer, starts the agent in it, and opens the chat here. Starting can take up to a minute."
+                         : "Creates a workspace, sends the task and its context, then opens the working agent. The task moves to Active only after delivery succeeds.")
                 }
             }
             .listSectionSpacing(12)
@@ -254,6 +259,23 @@ struct LaunchSessionView: View {
             // Remember the folder for this project on this computer, so the
             // next session is found without asking.
             data = (try? LiveSessionPreferences.assigning(hostID: host.id, directory: cwd, storeID: storeID, project: project, in: data)) ?? data
+            if let request = taskRequest {
+                status = "Sending task to \(harness.title)…"
+                do {
+                    try await AgentLaunch.sendInitialPrompt(request.prompt, to: session)
+                } catch {
+                    throw PhrenKitError.validation("The agent session was created, but Phren couldn't send the task. The task remains in \(request.row.task.section == .queue ? "Backlog" : request.row.task.section.rawValue). Find the new session in Agents and try again. \(error.localizedDescription)")
+                }
+                if request.row.task.section == .queue {
+                    status = "Marking task active…"
+                    do {
+                        try await model.enqueue(TaskMove.start.operation(for: request.row), in: request.row.storeId)
+                        await model.refresh()
+                    } catch {
+                        model.lastActionError = "The agent is working, but the task couldn't move to Active. \(error.localizedDescription)"
+                    }
+                }
+            }
             chatSession = session
         } catch {
             self.error = error.localizedDescription

@@ -78,6 +78,55 @@ final class WorkflowTests: XCTestCase {
     }
 
     @MainActor
+    func testTaskDetailsCanStartAnAgentAndActivateTheTask() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--workflow-fixture", "--automatic-sessions-fixture", "--native-chat-fixture"]
+        app.launch()
+        XCTAssertTrue(app.tabBars.buttons["Tasks"].waitForExistence(timeout: 15))
+        app.tabBars.buttons["Tasks"].tap()
+        let task = app.buttons["task-detail:sample/brain/demo/dead0001"]
+        XCTAssertTrue(task.waitForExistence(timeout: 8)); task.tap()
+        let start = app.buttons["task-start-agent"]
+        XCTAssertTrue(start.waitForExistence(timeout: 5)); start.tap()
+        XCTAssertTrue(app.buttons["launch-computer:A1000000-0000-0000-0000-000000000001"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["launch-harness:codex"].exists)
+        app.swipeUp()
+        let launch = app.buttons["launch-open"]
+        XCTAssertTrue(launch.waitForExistence(timeout: 5)); XCTAssertTrue(launch.label.contains("on task")); launch.tap()
+        let close = app.buttons["chat-close"]
+        XCTAssertTrue(close.waitForExistence(timeout: 12))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Work on this Phren task")).firstMatch.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Keep the full plan available from task details.")).firstMatch.exists)
+        close.tap()
+        XCTAssertTrue(app.buttons["launch-open"].waitForExistence(timeout: 5))
+        app.buttons["Cancel"].tap()
+        XCTAssertTrue(app.navigationBars["Task details"].waitForExistence(timeout: 5))
+        app.navigationBars["Task details"].buttons.element(boundBy: 0).tap()
+        app.buttons["task-status"].tap(); app.buttons["Active"].tap()
+        XCTAssertTrue(task.waitForExistence(timeout: 5), "A backlog task becomes active only after its prompt is delivered")
+    }
+
+    @MainActor
+    func testTaskStaysInBacklogWhenAgentPromptDeliveryFails() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--workflow-fixture", "--automatic-sessions-fixture", "--native-chat-fixture", "--chat-send-fails"]
+        app.launch()
+        XCTAssertTrue(app.tabBars.buttons["Tasks"].waitForExistence(timeout: 15)); app.tabBars.buttons["Tasks"].tap()
+        let task = app.buttons["task-detail:sample/brain/demo/dead0001"]
+        XCTAssertTrue(task.waitForExistence(timeout: 8)); task.tap()
+        app.buttons["task-start-agent"].tap()
+        XCTAssertTrue(app.buttons["launch-computer:A1000000-0000-0000-0000-000000000001"].waitForExistence(timeout: 5))
+        app.swipeUp()
+        let launch = app.buttons["launch-open"]
+        XCTAssertTrue(launch.waitForExistence(timeout: 5)); launch.tap()
+        XCTAssertTrue(app.staticTexts["Couldn't open session"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "task remains in Backlog")).firstMatch.exists)
+        app.buttons["OK"].tap(); app.buttons["Cancel"].tap()
+        app.navigationBars["Task details"].buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(task.waitForExistence(timeout: 5))
+    }
+
+    @MainActor
     func testCompactTaskControlsDatesSearchAndSorting() {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--workflow-fixture"]
