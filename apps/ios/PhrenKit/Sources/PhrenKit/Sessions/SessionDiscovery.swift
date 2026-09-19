@@ -25,6 +25,10 @@ extension LiveSessionPreferences {
         }
         var parts = directory.split(separator: "/").map(String.init)
         while !parts.isEmpty {
+            let candidate = "/" + parts.joined(separator: "/")
+            // A home folder is never a project, even when a project shares the
+            // user's name: /home/sam/Projects/hub must not resolve to "sam".
+            if Self.isHomeDirectory(candidate) { break }
             let matches = Set(projects.filter { $0.name != "global" && $0.name.caseInsensitiveCompare(parts.last!) == .orderedSame })
             if !matches.isEmpty {
                 guard matches.count == 1, let project = matches.first else { return nil }
@@ -33,6 +37,11 @@ extension LiveSessionPreferences {
             parts.removeLast()
         }
         return nil
+    }
+
+    /// `/home/<user>`, `/Users/<user>`, `/root`, and the mount points above them.
+    static func isHomeDirectory(_ path: String) -> Bool {
+        path == "/root" || path.range(of: #"^/(home|Users)(/[^/]+)?$"#, options: .regularExpression) != nil
     }
 }
 

@@ -19,6 +19,25 @@ final class SessionDiscoveryTests: XCTestCase {
         XCTAssertNil(preferences.projectMatch(hostID: UUID(), cwd: "/work/phren", projects: [project]))
     }
 
+    /// A project named after the user (a portfolio site, a dotfiles repo)
+    /// must not claim every folder under that user's home.
+    func testHomeDirectoryNamedLikeAProjectIsNotAMatch() throws {
+        let host = try LiveHost(name: "Desk", address: "desk.example", username: "sam")
+        let preferences = try LiveSessionPreferences.read(LiveSessionPreferences.saving(host, in: Data()))
+        let portfolio = SessionProject(storeID: "personal/brain", name: "sam")
+        let hub = SessionProject(storeID: "personal/brain", name: "hub")
+        for path in ["/home/sam/Projects/hub", "/Users/sam/hub", "/home/sam", "/home/sam/Downloads"] {
+            XCTAssertNil(preferences.projectMatch(hostID: host.id, cwd: path, projects: [portfolio]), path)
+        }
+        XCTAssertEqual(preferences.projectMatch(hostID: host.id, cwd: "/home/sam/Projects/hub", projects: [portfolio, hub])?.project, hub)
+        // The same name below home is still a project.
+        XCTAssertEqual(preferences.projectMatch(hostID: host.id, cwd: "/home/sam/Projects/sam/src", projects: [portfolio])?.project, portfolio)
+        XCTAssertEqual(preferences.projectMatch(hostID: host.id, cwd: "/root/sam", projects: [portfolio])?.project, portfolio)
+        // An explicit choice of the home folder still wins.
+        let chosen = try LiveSessionPreferences.assigning(hostID: host.id, directory: "/home/sam", storeID: "personal/brain", project: "sam", in: LiveSessionPreferences.saving(host, in: Data()))
+        XCTAssertEqual(try LiveSessionPreferences.read(chosen).projectMatch(hostID: host.id, cwd: "/home/sam/notes", projects: [portfolio])?.automatic, false)
+    }
+
     func testDuplicateStoreNamesNeedAChoiceAndExplicitMappingWins() throws {
         let host = try LiveHost(name: "Mac", address: "mac.example", username: "dev")
         let team = SessionProject(storeID: "team/brain", name: "phren")

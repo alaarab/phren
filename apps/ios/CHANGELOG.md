@@ -15,6 +15,9 @@ number counts up on its own.
   **Expand** (or **Show all**) opens the whole set as a sheet — every
   description and Claude's option previews included — that keeps the answers
   you already picked and sends from there. Option previews render monospaced.
+- A session in a folder under your home no longer shows a project named
+  after you (`/home/sam/Projects/hub` read as "sam"); the home folder
+  is never a project, so the row says "hub" until the folder is linked.
 - Full tool output wraps. Recalled memories, findings and any long line now
   read on screen; a toolbar toggle brings back sideways scrolling for code
   and tables. phren's own results open unwrapped and pretty-printed, with the
