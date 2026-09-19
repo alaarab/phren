@@ -1,31 +1,32 @@
+import { randomUUID } from "node:crypto";
+import { chmod, lstat, mkdir, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage } from "node:http";
-import { chmod, mkdir, lstat, unlink, writeFile, readFile, rm } from "node:fs/promises";
 import { hostname } from "node:os";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
-import { WebSocketServer, WebSocket } from "ws";
+import { WebSocket, WebSocketServer } from "ws";
 import { z } from "zod";
-import { LaunchLimiter } from "./limits.js";
-import { homeDirectory, startChangeRetention } from "./changes.js";
 import { ActivityJournal } from "./activity.js";
-import { paneChatState, validateStartingTarget, paneIdentity, panes, rpc, servers, snapshot, trustedDirectory, validateTarget, workspaceSnapshot } from "./herdr.js";
-import { BridgeError, bridgeRoot, id, MAX_FRAME, object, objects, PROTOCOL, serverName, socketPath, targetFromURL, targetSchema, startingTargetSchema, type Json } from "./protocol.js";
-import { launchDirectory, repositoryBranch, repositoryDiff, webServers } from "./projects.js";
-import { locateProject } from "./locate.js";
-import { candidateRepos, enrollProject } from "./enroll.js";
-import { conversationNamedPaths, historicalImage, TranscriptReader, transcriptPath } from "./transcripts.js";
 import { AgentHooks } from "./agent-hooks.js";
-import { listUploads, saveUpload, uploadImage } from "./uploads.js";
-import { bootedSimulators, simulatorScreenshot, simulatorAct, simulatorApps, type SimulatorAction } from "./simulators.js";
+import { homeDirectory, startChangeRetention } from "./changes.js";
 import { WorkspaceContextUsage } from "./context.js";
-import { AccountUsageReader } from "./usage.js";
+import { candidateRepos, enrollProject } from "./enroll.js";
+import { browseFiles } from "./files.js";
+import { paneChatState, paneIdentity, panes, rpc, servers, snapshot, trustedDirectory, validateStartingTarget, validateTarget, workspaceSnapshot } from "./herdr.js";
+import { LaunchLimiter } from "./limits.js";
+import { locateProject } from "./locate.js";
+import { launchDirectory, repositoryBranch, repositoryDiff, webServers } from "./projects.js";
+import { BridgeError, bridgeRoot, id, type Json, MAX_FRAME, object, objects, PROTOCOL, serverName, socketPath, startingTargetSchema, targetFromURL, targetSchema } from "./protocol.js";
 import { CodexQuestions } from "./questions.js";
+import { bootedSimulators, type SimulatorAction, simulatorAct, simulatorApps, simulatorScreenshot } from "./simulators.js";
 import { TabActivityStore } from "./tab-activity.js";
+import { conversationNamedPaths, historicalImage, TranscriptReader, transcriptPath } from "./transcripts.js";
+import { listUploads, saveUpload, uploadImage } from "./uploads.js";
+import { AccountUsageReader } from "./usage.js";
 
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", herdr: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, simulators: process.platform === "darwin" };
+  files: true, repositoryFiles: true, simulators: process.platform === "darwin" };
 
 /** A file from the phone: a plain name and base64 bytes, bounded. */
 function uploadBody(data: Json): { name: string; bytes: Buffer } {
@@ -107,6 +108,13 @@ export async function serve(version: string): Promise<void> {
             response.setHeader("Content-Type", "image/png"); response.end(bytes); return;
           }
           case "/v1/files": result = { files: await listUploads("files") }; break;
+          case "/v1/projects/files": {
+            const candidates = await locateProject(String(url.searchParams.get("project") ?? ""), await journal.recent());
+            const directory = url.searchParams.get("directory");
+            const candidate = directory ? candidates.find(item => item.directory === directory) : candidates[0];
+            if (!candidate) throw new BridgeError(404, "This project folder is not available on this computer.");
+            result = await browseFiles(candidate.directory, url.searchParams.get("path") ?? ""); break;
+          }
           case "/v1/uploads/image": {
             // A picture the phone sent, as the transcript names it by path.
             const bytes = await uploadImage(String(url.searchParams.get("path") ?? ""));

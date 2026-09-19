@@ -1,24 +1,24 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createServer as createNetServer, type Server } from "node:net";
-import { request } from "node:http";
-import { execFile, spawn, type ChildProcess } from "node:child_process";
-import { promisify } from "node:util";
-import { mkdtemp, mkdir, readFile, writeFile, appendFile, rm, chmod, symlink, open, stat, utimes, realpath as realpathAsync } from "node:fs/promises";
+import { type ChildProcess, execFile, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
+import { once } from "node:events";
 import { realpathSync } from "node:fs";
+import { appendFile, chmod, mkdir, mkdtemp, open, readFile, realpath as realpathAsync, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
+import { request } from "node:http";
+import { createServer as createNetServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { once } from "node:events";
-import { createHash } from "node:crypto";
+import { promisify } from "node:util";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
-import { planAgentHooks, upgradeKeys } from "./install.js";
-import { TranscriptReader, transcriptPath, visibleEvent, historicalImage, phrenStoreRoot } from "./transcripts.js";
-import { dispatch } from "./transport.js";
-import { workspaceSnapshot } from "./herdr.js";
-import { repositoryBranch, repositoryDiff } from "./projects.js";
-import { locateProject } from "./locate.js";
-import { ToolChanges, namedPaths, outputCallIds, capturesChanges } from "./changes.js";
 import { ApprovalWatchLeases } from "./agent-hooks.js";
+import { capturesChanges, namedPaths, outputCallIds, ToolChanges } from "./changes.js";
+import { workspaceSnapshot } from "./herdr.js";
+import { planAgentHooks, upgradeKeys } from "./install.js";
+import { locateProject } from "./locate.js";
+import { repositoryBranch, repositoryDiff } from "./projects.js";
 import { object } from "./protocol.js";
+import { historicalImage, phrenStoreRoot, TranscriptReader, transcriptPath, visibleEvent } from "./transcripts.js";
+import { dispatch } from "./transport.js";
 
 const execFileAsync = promisify(execFile);
 const session = "aaaaaaaa-1111-4111-8111-111111111111";
@@ -381,6 +381,16 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     if (root) await rm(root, { recursive: true, force: true });
   });
   it("discovers workspaces through a private protocol without any TCP helper", async () => {
+    const checkout = path.join(root, "Projects", "browser-test");
+    await mkdir(checkout, { recursive: true });
+    await writeFile(path.join(checkout, "readme.md"), "# checkout");
+    const listing = await api("/v1/projects/files?project=browser-test");
+    expect(listing.status).toBe(200);
+    expect(listing.data.entries).toEqual([{ name: "readme.md", path: "readme.md", kind: "file" }]);
+    const read = await api("/v1/projects/files?project=browser-test&path=readme.md");
+    expect(Buffer.from(read.data.data, "base64").toString()).toBe("# checkout");
+    expect((await api("/v1/projects/files?project=browser-test&directory=/etc")).status).toBe(404);
+    expect((await api("/v1/projects/files?project=browser-test&path=../secret")).status).toBe(400);
     // Files the phone keeps on the computer, and the simulator routes.
     const upload = await api("/v1/files", { name: "notes.md", data: Buffer.from("# hi\n").toString("base64") });
     expect(upload.status, JSON.stringify(upload.data)).toBe(200); expect(upload.data.path).toMatch(/uploads\/files\/[0-9a-f-]{36}-notes\.md$/);

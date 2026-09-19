@@ -3,9 +3,12 @@
 Phren Hook is a local daemon installed separately with `phren bridge install`.
 The iPhone reaches its private HTTP/WebSocket Unix socket through a forced-command
 SSH key. Protocol version 1 and the existing phone message shapes are preserved.
-The daemon does not log requests, prompts, transcripts, or tool arguments, and it
-does not read or forward provider sign-in credentials. Account usage comes from
-agent-reported limits and local usage snapshots.
+The daemon does not log requests, prompts, transcripts, or tool arguments.
+Claude account usage uses the computer's existing sign-in token only against
+Anthropic's HTTPS usage endpoint. On macOS the login keychain takes precedence;
+headless installs use Claude's credentials file. Tokens never reach the phone.
+Reads are cached for a minute and fall back to dated local snapshots on failure.
+Codex account limits come from its local app server.
 
 ## Transport and trust boundaries
 
@@ -69,7 +72,8 @@ WebSockets on the same socket.
 | `GET /v1/projects/locate` | Existing project candidates from activity, Herdr, store registration and local search roots. |
 | `GET /v1/projects/repos` | Git checkouts on this computer for "Add project" — activity, Herdr, then one level under the project roots — each marked whether phren already tracks it. |
 | `POST /v1/projects/add` | Enroll a checkout (`directory`) or clone a GitHub URL (`cloneUrl`) into the projects folder first, then `phren add`; commits and pushes the store when it has a remote. Uses the launch admission limits. |
-| `GET /v1/activity`, `/v1/usage` | Activity metadata and agent-reported account limits. |
+| `GET /v1/activity`, `/v1/usage` | Activity metadata and account limits. |
+| `GET /v1/projects/files?project=…&directory=…&path=…` | Read-only checkout browser. The directory must match a fresh project-location result; path is relative. Returns `kind: directory` with at most 500 entries or `kind: file` with base64 `data`, at most 2 MB. Symlinks, traversal, `.git`, and non-regular files are refused. `repositoryFiles` advertises support. |
 | `WS /v1/transcripts`, `/v1/status` | Bounded transcript backlog/tail/history and live status. |
 | `GET /v1/transcripts/history`, `/v1/transcripts/blob` | Target-bound older rows and separately requested original embedded images. |
 | `POST /v1/prompt`, `/v1/keys` | Send text or Escape after validating the live destination. |
