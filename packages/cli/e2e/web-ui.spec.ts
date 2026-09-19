@@ -71,7 +71,7 @@ test.describe.serial("web-ui browser e2e", () => {
     await page.locator(".project-detail-tab").filter({ hasText: "Task" }).click();
     await expect(page.locator("#project-content")).toContainText("Queue browser task");
 
-    await page.locator(".project-detail-tab").filter({ hasText: "CLAUDE.md" }).click();
+    await page.locator(".project-detail-tab").filter({ hasText: "AGENTS.md" }).click();
     await expect(page.locator("#project-content")).toContainText("Repo A instructions for browser smoke coverage.");
 
     await page.locator(".project-detail-tab").filter({ hasText: "Reference" }).click();

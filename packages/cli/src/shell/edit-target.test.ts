@@ -1,6 +1,6 @@
 /**
  * Which file `e` and `E` open. Skills edit their own markdown; a project edits
- * the CLAUDE.md the store owns and symlinks into the repo, so editing it here
+ * the AGENTS.md the store owns and symlinks into the repo, so editing it here
  * reaches every linked checkout.
  */
 
@@ -21,7 +21,7 @@ describe("editTargetFor", () => {
   beforeEach(() => {
     tmp = makeTempDir("phren-edit-target-");
     grantAdmin(tmp.path);
-    writeFile(path.join(tmp.path, "hub", "CLAUDE.md"), "# hub\n");
+    writeFile(path.join(tmp.path, "hub", "AGENTS.md"), "# hub\n");
   });
   afterEach(() => tmp.cleanup());
 
@@ -31,23 +31,23 @@ describe("editTargetFor", () => {
     expect(target).toEqual({ path: skillPath, label: "phren-sync", kind: "skill" });
   });
 
-  it("edits the store's CLAUDE.md for a project, not a copy in the repo", () => {
+  it("edits the store's AGENTS.md for a project, not a copy in the repo", () => {
     const target = editTargetFor(host(tmp.path, "Projects"), { name: "hub" });
     expect(target?.kind).toBe("claude");
-    expect(target?.path).toBe(path.join(tmp.path, "hub", "CLAUDE.md"));
-    expect(target?.label).toBe("hub/CLAUDE.md");
+    expect(target?.path).toBe(path.join(tmp.path, "hub", "AGENTS.md"));
+    expect(target?.label).toBe("hub/AGENTS.md");
     // The store's copy is the real file the repo symlinks to.
     expect(fs.existsSync(target!.path)).toBe(true);
   });
 
   it("falls back to the active project when no row is selected", () => {
     const target = editTargetFor(host(tmp.path, "Projects", "hub"), undefined);
-    expect(target?.path).toBe(path.join(tmp.path, "hub", "CLAUDE.md"));
+    expect(target?.path).toBe(path.join(tmp.path, "hub", "AGENTS.md"));
   });
 
-  it("offers a path for a CLAUDE.md that does not exist yet, so the editor can create it", () => {
+  it("offers a path for an AGENTS.md that does not exist yet, so the editor can create it", () => {
     const target = editTargetFor(host(tmp.path, "Projects"), { name: "brand-new" });
-    expect(target?.path).toBe(path.join(tmp.path, "brand-new", "CLAUDE.md"));
+    expect(target?.path).toBe(path.join(tmp.path, "brand-new", "AGENTS.md"));
     expect(fs.existsSync(target!.path)).toBe(false);
   });
 

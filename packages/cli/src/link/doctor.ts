@@ -341,19 +341,19 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
   // Under presets that don't symlink into ~/.claude, the "missing" links are
   // expected — report them as ok with a preset note instead of failures.
   if (caps.linkGlobalClaudeMd) {
-    const globalClaudeSrc = path.join(phrenPath, "global", "CLAUDE.md");
+    const globalClaudeSrc = path.join(phrenPath, "global", "AGENTS.md");
     const globalClaudeDest = homePath(".claude", "CLAUDE.md");
     let globalLinkOk = false;
     try {
       globalLinkOk = fs.existsSync(globalClaudeDest) && fs.realpathSync(globalClaudeDest) === fs.realpathSync(globalClaudeSrc);
     } catch (err: unknown) {
-      debugLog(`doctor: global CLAUDE.md symlink check failed: ${errorMessage(err)}`);
+      debugLog(`doctor: global AGENTS.md symlink check failed: ${errorMessage(err)}`);
       globalLinkOk = false;
     }
     checks.push({
       name: "global-link",
       ok: globalLinkOk,
-      detail: globalLinkOk ? "global CLAUDE.md symlink ok" : "global CLAUDE.md link drifted/missing",
+      detail: globalLinkOk ? "global AGENTS.md symlink ok" : "global AGENTS.md link drifted/missing",
     });
   } else {
     checks.push({
@@ -398,7 +398,7 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
       checks.push({ name: `project-path:${project}`, ok: false, detail: "project directory not found on disk" });
       continue;
     }
-    for (const f of ["CLAUDE.md", "REFERENCE.md", FINDINGS_FILENAME]) {
+    for (const f of ["AGENTS.md", "REFERENCE.md", FINDINGS_FILENAME]) {
       const src = path.join(phrenPath, project, f);
       if (!fs.existsSync(src)) continue;
       const dest = path.join(target, f);
@@ -596,7 +596,7 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
     const profile = resolveMcpProfile(phrenPath);
     const injection = medianHookInjectionTokens(phrenPath);
     const problems: string[] = [];
-    if (weight.globalClaude > CONTEXT_COST_LIMITS.globalClaudeWords) problems.push(`global CLAUDE.md is ${weight.globalClaude} words (aim under ${CONTEXT_COST_LIMITS.globalClaudeWords})`);
+    if (weight.globalClaude > CONTEXT_COST_LIMITS.globalClaudeWords) problems.push(`global AGENTS.md is ${weight.globalClaude} words (aim under ${CONTEXT_COST_LIMITS.globalClaudeWords})`);
     if (profile === "full") problems.push("MCP profile is full (61 tools, ~53k chars of schema per session); `phren config mcp-profile core` is ~17k");
     if (injection.medianTokens > CONTEXT_COST_LIMITS.medianInjectionTokens) problems.push(`median hook injection is ${injection.medianTokens} tokens over the last ${injection.prompts} prompts`);
     checks.push({
@@ -604,7 +604,7 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
       ok: problems.length === 0,
       detail: problems.length
         ? problems.join("; ")
-        : `global CLAUDE.md ${weight.globalClaude} words · MCP profile ${profile} (${profile === "core" ? "10 tools, ~17k chars" : "61 tools, ~53k chars"})${injection.prompts ? ` · median injection ${injection.medianTokens} tokens over ${injection.prompts} prompts` : ""} · store: findings ${weight.findings.toLocaleString("en-US")} words, archive ${weight.reference.toLocaleString("en-US")}, tasks ${weight.tasks.toLocaleString("en-US")}, skills ${weight.skills.toLocaleString("en-US")}`,
+        : `global AGENTS.md ${weight.globalClaude} words · MCP profile ${profile} (${profile === "core" ? "10 tools, ~17k chars" : "61 tools, ~53k chars"})${injection.prompts ? ` · median injection ${injection.medianTokens} tokens over ${injection.prompts} prompts` : ""} · store: findings ${weight.findings.toLocaleString("en-US")} words, archive ${weight.reference.toLocaleString("en-US")}, tasks ${weight.tasks.toLocaleString("en-US")}, skills ${weight.skills.toLocaleString("en-US")}`,
     });
   } catch (err: unknown) {
     logger.debug("doctor", `context-cost: ${errorMessage(err)}`);
@@ -836,7 +836,7 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
       const projectName = path.basename(projectDir);
       if (projectName === "global") continue;
 
-      for (const mdFile of [FINDINGS_FILENAME, ...TASK_FILE_ALIASES, "review.md", "CLAUDE.md", "REFERENCE.md"]) {
+      for (const mdFile of [FINDINGS_FILENAME, ...TASK_FILE_ALIASES, "review.md", "AGENTS.md", "REFERENCE.md"]) {
         const filePath = path.join(projectDir, mdFile);
         if (!fs.existsSync(filePath)) continue;
         const content = fs.readFileSync(filePath, "utf8");

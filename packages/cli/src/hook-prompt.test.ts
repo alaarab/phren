@@ -224,7 +224,7 @@ describe("applyTrustFilter", () => {
   it("passes through non-findings rows unchanged", () => {
     const rows = [
       { project: "proj", filename: "summary.md", type: "summary", content: "project summary text", path: "/path" },
-      { project: "proj", filename: "CLAUDE.md", type: "claude", content: "instructions", path: "/path2" },
+      { project: "proj", filename: "AGENTS.md", type: "claude", content: "instructions", path: "/path2" },
     ];
     const result = applyTrustFilter(rows, 365, 0.5, { enabled: false });
     expect(result.rows).toHaveLength(2);

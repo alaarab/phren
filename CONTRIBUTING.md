@@ -83,7 +83,7 @@ Test files: `*.test.ts` in `packages/cli/src/` and `packages/agent/src/`. When a
 
 ## Code Style
 
-Read `CLAUDE.md` for the full set of conventions. The highlights:
+Read `AGENTS.md` for the full set of conventions. The highlights:
 
 - **No AI voice.** No "robust", "seamless", "leverage", "comprehensive". Write like a person.
 - **No em dashes.** Use a colon, a comma, or rewrite the sentence.

@@ -1,12 +1,12 @@
 ---
 name: phren-init
-description: Set up a new project in phren with summary, CLAUDE.md, task, and skill templates.
+description: Set up a new project in phren with summary, AGENTS.md, task, and skill templates.
 dependencies:
   - git
 ---
 # phren-init - Scaffold a new project
 
-> Set up a new project in phren with summary, CLAUDE.md, task, and skill templates.
+> Set up a new project in phren with summary, AGENTS.md, task, and skill templates.
 
 Add a new project to your phren instance, or bootstrap phren itself if you're starting fresh.
 
@@ -68,7 +68,7 @@ Watch out: <the one thing that trips people up>
 
 Ask the user for these if you can't figure them out from the project directory. If the project directory exists on disk (e.g. `~/<project-name>/`), read its package.json, pyproject.toml, README, or similar to pre-fill.
 
-### 4. Create CLAUDE.md
+### 4. Create AGENTS.md
 
 ```markdown
 # <project-name>
@@ -177,7 +177,7 @@ phren-init <project-name>
 
 Created:
   $PHREN_DIR/<project-name>/summary.md
-  $PHREN_DIR/<project-name>/CLAUDE.md
+  $PHREN_DIR/<project-name>/AGENTS.md
   $PHREN_DIR/<project-name>/tasks.md
   $PHREN_DIR/<project-name>/skills/README.md
 

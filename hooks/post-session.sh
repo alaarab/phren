@@ -35,7 +35,7 @@ if [ -z "$CWD" ]; then
 fi
 
 # Check if the current directory is a phren-managed project.
-# Walk up the directory tree looking for a CLAUDE.md that's a symlink
+# Walk up the directory tree looking for an AGENTS.md that's a symlink
 # pointing back into phren.
 detect_project() {
   _dp_dir="$1"
@@ -47,9 +47,9 @@ detect_project() {
     return 0
   fi
 
-  # Symlink check: is CLAUDE.md a symlink to phren?
-  if [ -L "$_dp_dir/CLAUDE.md" ]; then
-    _dp_target="$(readlink -f "$_dp_dir/CLAUDE.md")"
+  # Symlink check: is AGENTS.md a symlink to phren?
+  if [ -L "$_dp_dir/AGENTS.md" ]; then
+    _dp_target="$(readlink -f "$_dp_dir/AGENTS.md")"
     case "$_dp_target" in
       "$PHREN_DIR"/*)
         echo "$_dp_basename"

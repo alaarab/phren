@@ -126,7 +126,7 @@ export function seedBigStore(phrenDir: string, profile = "work"): void {
     const dir = path.join(phrenDir, project);
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, "summary.md"), `# ${project}\n\n${project} is a core service in the platform. It owns its data and exposes HTTP/gRPC APIs.\n`);
-    fs.writeFileSync(path.join(dir, "CLAUDE.md"), `# ${project}\n\nConventions and entry points for working in ${project}.\n`);
+    fs.writeFileSync(path.join(dir, "AGENTS.md"), `# ${project}\n\nConventions and entry points for working in ${project}.\n`);
     fs.writeFileSync(path.join(dir, "FINDINGS.md"), findingsFor(project, others));
     fs.writeFileSync(path.join(dir, "tasks.md"), tasksFor(project));
     for (const ref of referenceDocs(project)) {

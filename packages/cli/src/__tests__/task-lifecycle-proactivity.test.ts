@@ -56,7 +56,7 @@ describe("task lifecycle suppression", () => {
       taskMode: "auto",
     }, null, 2) + "\n");
     writeFile(path.join(tmp.path, project, "tasks.md"), `# ${project} tasks\n\n## Active\n\n## Queue\n\n## Done\n`);
-    writeFile(path.join(tmp.path, project, "CLAUDE.md"), "Repo: https://github.com/alaarab/phren\n");
+    writeFile(path.join(tmp.path, project, "AGENTS.md"), "Repo: https://github.com/alaarab/phren\n");
     delete process.env.PHREN_PROACTIVITY;
     delete process.env.PHREN_PROACTIVITY_TASKS;
   });
@@ -126,7 +126,7 @@ describe("task lifecycle task proactivity gating", () => {
       taskMode: "auto",
     }, null, 2) + "\n");
     writeFile(path.join(tmp.path, project, "tasks.md"), `# ${project} tasks\n\n## Active\n\n## Queue\n\n## Done\n`);
-    writeFile(path.join(tmp.path, project, "CLAUDE.md"), "Repo: https://github.com/alaarab/phren\n");
+    writeFile(path.join(tmp.path, project, "AGENTS.md"), "Repo: https://github.com/alaarab/phren\n");
     delete process.env.PHREN_PROACTIVITY;
     delete process.env.PHREN_PROACTIVITY_TASKS;
   });

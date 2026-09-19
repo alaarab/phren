@@ -273,7 +273,7 @@ export function shellHelpText(): string {
     `  ${k("/")} ${d("filter")}    ${k(":")} ${d("command palette")}    ${k("Esc")} ${d("cancel / clear filter")}    ${k("?")} ${d("toggle this help")}`,
     "",
     hdr("View-specific keys"),
-    `  ${style.bold("Projects")}     ${k("↵")} ${d("open project tasks")}  ${k("e")}${d("/")}${k("E")} ${d("edit CLAUDE.md")}  ${k("i")} ${d("cycle intro mode")}`,
+    `  ${style.bold("Projects")}     ${k("↵")} ${d("open project tasks")}  ${k("e")}${d("/")}${k("E")} ${d("edit AGENTS.md")}  ${k("i")} ${d("cycle intro mode")}`,
     `  ${style.bold("Tasks")}        ${k("a")} ${d("add task")}  ${k("d")} ${d("toggle active/queue")}  ${k("↵")} ${d("mark complete")}`,
     `  ${style.bold("Findings")}    ${k("a")} ${d("tell phren")}  ${k("d")} ${d("delete selected")}`,
     `  ${style.bold("Review Queue")} ${k("↵")} ${d("inspect selected item")}  ${d("(read-only)")}`,

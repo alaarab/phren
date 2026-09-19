@@ -60,7 +60,7 @@ function readTruths(phrenPath: string, project: string): string[] {
 const CLAUDE_MD_MAX_CHARS = 4000;
 
 /**
- * Collect project rule files (CLAUDE.md and AGENTS.md) by walking up from cwd
+ * Collect project rule files (AGENTS.md and legacy CLAUDE.md) by walking up from cwd
  * to the filesystem root, then checking the user-level ~/.claude/CLAUDE.md.
  * Returns entries most-specific first (cwd → parent → ... → user-level).
  */
@@ -80,8 +80,8 @@ function collectRuleFiles(): { filePath: string; content: string }[] {
 
   let dir = process.cwd();
   while (true) {
-    read(path.resolve(dir, "CLAUDE.md"));
     read(path.resolve(dir, "AGENTS.md"));
+    read(path.resolve(dir, "CLAUDE.md"));
     const parent = path.dirname(dir);
     if (parent === dir) break; // reached root
     dir = parent;
@@ -141,7 +141,7 @@ export async function buildContextSnippet(ctx: PhrenContext, taskKeywords: strin
     } catch { /* silent */ }
   }
 
-  // Section 4: project rule files (CLAUDE.md / AGENTS.md), cwd → parents → ~/.claude/CLAUDE.md
+  // Section 4: project rule files (AGENTS.md / legacy CLAUDE.md), cwd → parents → ~/.claude/CLAUDE.md
   try {
     const ruleFiles = collectRuleFiles();
     if (ruleFiles.length > 0) {

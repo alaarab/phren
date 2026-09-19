@@ -1,5 +1,5 @@
 <!-- tokens: ~900 -->
-# CLAUDE.md
+# AGENTS.md
 
 Open-source knowledge layer for AI agents. Published as `@phren/cli` on npm.
 
@@ -65,7 +65,7 @@ Outside the pnpm workspace:
 | `packages/cli/starter/` | Bundled starter templates (4 project types, copied to ~/.phren on init) |
 | `packages/cli/starter/templates/` | Project templates: python-project, monorepo, library, frontend |
 | `docs/index.html` | GitHub Pages site |
-| `global/CLAUDE.md` | User-level instructions shipped with the package |
+| `global/AGENTS.md` | User-level instructions shipped with the package |
 
 ## Commands
 

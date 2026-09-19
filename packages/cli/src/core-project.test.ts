@@ -22,7 +22,7 @@ describe("addProjectFromPath", () => {
       expect(result.data.project).toBe("repo");
       expect(result.data.profile).toBe("work");
       expect(result.data.ownership).toBe("phren-managed");
-      expect(result.data.files.claude).toBe(path.join(phrenPath, "repo", "CLAUDE.md"));
+      expect(result.data.files.claude).toBe(path.join(phrenPath, "repo", "AGENTS.md"));
       expect(fs.readFileSync(path.join(phrenPath, "profiles", "work.yaml"), "utf8")).toContain("- repo");
       expect(fs.readFileSync(path.join(phrenPath, "profiles", "personal.yaml"), "utf8")).not.toContain("- repo");
     } finally {
@@ -49,15 +49,15 @@ describe("addProjectFromPath", () => {
       fs.mkdirSync(path.join(phrenPath, "profiles"), { recursive: true });
       fs.writeFileSync(path.join(phrenPath, "profiles", "work.yaml"), "name: work\nprojects:\n  - global\n");
       fs.mkdirSync(path.join(repoPath, ".git"), { recursive: true });
-      fs.writeFileSync(path.join(repoPath, "CLAUDE.md"), "# Repo\n");
+      fs.writeFileSync(path.join(repoPath, "AGENTS.md"), "# Repo\n");
 
       const result = addProjectFromPath(phrenPath, repoPath, "work", "repo-managed");
       expect(result.ok).toBe(true);
       if (!result.ok) return;
 
       expect(result.data.ownership).toBe("repo-managed");
-      expect(result.data.files.claude).toBe(path.join(repoPath, "CLAUDE.md"));
-      expect(fs.existsSync(path.join(phrenPath, "repo", "CLAUDE.md"))).toBe(false);
+      expect(result.data.files.claude).toBe(path.join(repoPath, "AGENTS.md"));
+      expect(fs.existsSync(path.join(phrenPath, "repo", "AGENTS.md"))).toBe(false);
     } finally {
       tmp.cleanup();
     }

@@ -210,6 +210,11 @@ setup_sparse_checkout() {
 # ── Symlinking ───────────────────────────────────────────────────────────
 
 link_global() {
+  # AGENTS.md is canonical. Copy once and retain the legacy
+  # source so upgrades and older clients cannot lose user-authored content.
+  if [ ! -f "$SCRIPT_DIR/global/AGENTS.md" ] && [ -f "$SCRIPT_DIR/global/CLAUDE.md" ]; then
+    cp -p "$SCRIPT_DIR/global/CLAUDE.md" "$SCRIPT_DIR/global/AGENTS.md"
+  fi
   echo "  global skills -> ~/.claude/skills/"
   mkdir -p "$HOME/.claude/skills"
 
@@ -218,8 +223,8 @@ link_global() {
     ln -sf "$f" "$HOME/.claude/skills/$(basename "$f")"
   done
 
-  if [ -f "$SCRIPT_DIR/global/CLAUDE.md" ]; then
-    ln -sf "$SCRIPT_DIR/global/CLAUDE.md" "$HOME/.claude/CLAUDE.md"
+  if [ -f "$SCRIPT_DIR/global/AGENTS.md" ]; then
+    ln -sf "$SCRIPT_DIR/global/AGENTS.md" "$HOME/.claude/CLAUDE.md"
   fi
 }
 
@@ -235,8 +240,12 @@ link_project() {
 
   echo "  $project -> $target"
 
-  # Symlink CLAUDE.md and other knowledge files
-  for f in CLAUDE.md KNOWLEDGE.md LEARNINGS.md; do
+  if [ ! -f "$SCRIPT_DIR/$project/AGENTS.md" ] && [ -f "$SCRIPT_DIR/$project/CLAUDE.md" ]; then
+    cp -p "$SCRIPT_DIR/$project/CLAUDE.md" "$SCRIPT_DIR/$project/AGENTS.md"
+  fi
+
+  # Symlink AGENTS.md and other knowledge files
+  for f in AGENTS.md KNOWLEDGE.md LEARNINGS.md; do
     if [ -f "$SCRIPT_DIR/$project/$f" ]; then
       ln -sf "$SCRIPT_DIR/$project/$f" "$target/$f"
     fi
@@ -247,8 +256,8 @@ link_project() {
     [ -f "$f" ] && ln -sf "$f" "$target/$(basename "$f")"
   done
 
-  # Add token budget annotation to CLAUDE.md if it's large
-  local claude_file="$SCRIPT_DIR/$project/CLAUDE.md"
+  # Add token budget annotation to AGENTS.md if it's large
+  local claude_file="$SCRIPT_DIR/$project/AGENTS.md"
   if [ -f "$claude_file" ]; then
     local file_size
     file_size=$(wc -c < "$claude_file")
@@ -422,7 +431,7 @@ rebuild_memory() {
       echo 'Read `~/.phren-context.md` for profile, active projects, last sync date.'
       echo ""
       echo "## Cross-Project Notes"
-      echo "- Read a project's CLAUDE.md before making changes."
+      echo "- Read a project's AGENTS.md before making changes."
       echo "- Per-project memory files (MEMORY-{name}.md) have commands, versions, gotchas."
       echo ""
       printf '%s\n' "$managed"

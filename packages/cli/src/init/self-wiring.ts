@@ -12,7 +12,7 @@ import { getManagementPreset, type ManagementPreset } from "./management-preset.
 
 /** Build the self-wiring instructions as lines (testable without stdout). */
 export function buildSelfWiringSnippet(phrenPath: string, preset: ManagementPreset): string[] {
-  const globalClaude = path.join(phrenPath, "global", "CLAUDE.md");
+  const globalClaude = path.join(phrenPath, "global", "AGENTS.md");
   const globalSkills = path.join(phrenPath, "global", "skills");
   const lines: string[] = [];
   lines.push("");

@@ -317,7 +317,7 @@ export function removeProjectFromProfile(phrenPath: string, profile: string, pro
 function buildProjectCard(dir: string): ProjectCard {
   const name = path.basename(dir);
   const summaryFile = path.join(dir, "summary.md");
-  const claudeFile = path.join(dir, "CLAUDE.md");
+  const claudeFile = path.join(dir, "AGENTS.md");
   const summarySource = fs.existsSync(summaryFile)
     ? fs.readFileSync(summaryFile, "utf8")
     : fs.existsSync(claudeFile)
@@ -327,7 +327,7 @@ function buildProjectCard(dir: string): ProjectCard {
     .split("\n")
     .map((line) => line.trim())
     .find((line) => line && !line.startsWith("#")) || "";
-  const docs = ["CLAUDE.md", FINDINGS_FILENAME, "summary.md", "review.md"]
+  const docs = ["AGENTS.md", FINDINGS_FILENAME, "summary.md", "review.md"]
     .filter((file) => fs.existsSync(path.join(dir, file)));
   const taskFile = TASK_FILE_ALIASES.find((file) => fs.existsSync(path.join(dir, file)));
   if (taskFile) docs.push(taskFile);

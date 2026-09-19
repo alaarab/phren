@@ -1,6 +1,6 @@
 # Instructions for the agent
 
-<!-- phren copies this to ~/.phren/global/CLAUDE.md and links it as ~/.claude/CLAUDE.md. Every session reads it, so keep it short and addressed to the agent. Fill in "How I work"; leave the rest. -->
+<!-- phren copies this to ~/.phren/global/AGENTS.md and links it as ~/.claude/CLAUDE.md. Every session reads it, so keep it short and addressed to the agent. Fill in "How I work"; leave the rest. -->
 
 ## Memory lives in phren
 
@@ -32,4 +32,4 @@ Every agent follows these rules, and tells phren about non-obvious findings befo
 
 ## Where things are
 
-`~/.phren` (or `$PHREN_PATH`) is a git repo: `global/` for everything-everywhere, `<project>/` for each project's CLAUDE.md, findings, tasks and skills, `profiles/` and `machines.yaml` for which projects belong on which machine. `phren doctor` explains anything that is off. If the MCP server is not running, phren still injects context through hooks; the CLI (`phren search`, `phren add-finding`) does the rest.
+`~/.phren` (or `$PHREN_PATH`) is a git repo: `global/` for everything-everywhere, `<project>/` for each project's AGENTS.md, findings, tasks and skills, `profiles/` and `machines.yaml` for which projects belong on which machine. `phren doctor` explains anything that is off. If the MCP server is not running, phren still injects context through hooks; the CLI (`phren search`, `phren add-finding`) does the rest.

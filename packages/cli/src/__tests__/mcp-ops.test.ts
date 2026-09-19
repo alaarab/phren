@@ -374,12 +374,12 @@ describe("mcp-ops: add_project", () => {
   it("accepts an explicit ownership mode", async () => {
     const externalRepo = path.join(tmp.path, "workspace", "repo-managed");
     fs.mkdirSync(path.join(externalRepo, ".git"), { recursive: true });
-    fs.writeFileSync(path.join(externalRepo, "CLAUDE.md"), "# repo\n");
+    fs.writeFileSync(path.join(externalRepo, "AGENTS.md"), "# repo\n");
 
     const res = parseResult(await server.call("add_project", { path: externalRepo, ownership: "repo-managed" }));
     expect(res.ok).toBe(true);
     expect(res.data.ownership).toBe("repo-managed");
-    expect(fs.existsSync(path.join(tmp.path, "repo-managed", "CLAUDE.md"))).toBe(false);
+    expect(fs.existsSync(path.join(tmp.path, "repo-managed", "AGENTS.md"))).toBe(false);
     expect(fs.readFileSync(path.join(tmp.path, "repo-managed", "phren.project.yaml"), "utf8")).toContain("ownership: repo-managed");
   });
 
