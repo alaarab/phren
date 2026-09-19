@@ -179,7 +179,7 @@ export async function serve(version: string): Promise<void> {
             const tree = await childAgentTree(target.source, target.session);
             const relation = childAgent(tree, child);
             if (!relation) throw new BridgeError(404, "This child agent does not belong to the selected conversation.");
-            const reader = new TranscriptReader(await transcriptPath(relation.provider, relation.session), relation.provider);
+            const reader = new TranscriptReader(relation.transcript, relation.provider, undefined, undefined, relation.provider === "claude");
             const page = await reader.read();
             result = { ...page, type: "backlog", source: relation.provider, session: relation.id }; break;
           }
