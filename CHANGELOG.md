@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- Direct APNs delivery for agent permission requests while the iPhone app is
+  suspended. Phones register over the authenticated SSH gateway; notification
+  actions use one-time expiring bindings and never expose commands or provider
+  action identities to APNs.
 - opencode joins Codex, Claude Code, and Copilot as a supported agent. Phren
   Hook can launch it, and `phren bridge install` writes an opencode plugin that
   mirrors sessions into the store's `.runtime/sessions` so the iOS app can read
