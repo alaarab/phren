@@ -33,6 +33,20 @@ final class AccountUsageTests: XCTestCase {
         XCTAssertTrue(value.accounts[0].windows.isEmpty)
         XCTAssertNil(value.accounts[0].updatedDate)
     }
+    func testOpenCodeCostsSumAndDuplicateOpenRouterKeysCountOnce() throws {
+        let now = try XCTUnwrap(ISO8601Dates.parse("2026-09-19T18:30:00Z"))
+        let keyA = String(repeating: "a", count: 64), keyB = String(repeating: "b", count: 64)
+        let mac = try AccountUsageSnapshot.read(Data(#"{"accounts":[{"source":"opencode","updatedAt":"2026-09-19T18:29:00Z","windows":[],"spend":{"amountUSD":4.39,"period":"rolling_7_days"}},{"source":"openrouter","accountId":"\#(keyA)","updatedAt":"2026-09-19T18:29:00Z","windows":[],"spend":{"amountUSD":5.0,"period":"calendar_week"}}]}"#.utf8))
+        let omarchy = try AccountUsageSnapshot.read(Data(#"{"accounts":[{"source":"opencode","updatedAt":"2026-09-19T18:29:30Z","windows":[],"spend":{"amountUSD":0.61,"period":"rolling_7_days"}},{"source":"openrouter","accountId":"\#(keyA)","updatedAt":"2026-09-19T18:29:30Z","windows":[],"spend":{"amountUSD":5.08,"period":"calendar_week"}}]}"#.utf8))
+        let server = try AccountUsageSnapshot.read(Data(#"{"accounts":[{"source":"openrouter","accountId":"\#(keyB)","updatedAt":"2026-09-19T18:29:20Z","windows":[],"spend":{"amountUSD":1.12,"period":"calendar_week"}}]}"#.utf8))
+        let merged = MergedAccountUsage.merge([("Mac", mac), ("Omarchy", omarchy), ("Server", server)], at: now)
+        let openCode = try XCTUnwrap(merged.first { $0.source == "opencode" })
+        XCTAssertEqual(try XCTUnwrap(openCode.spend).amountUSD, 5.0, accuracy: 0.000_001)
+        XCTAssertEqual(openCode.spend?.periodLabel, "Past 7 days")
+        let openRouter = try XCTUnwrap(merged.first { $0.source == "openrouter" })
+        XCTAssertEqual(try XCTUnwrap(openRouter.spend).amountUSD, 6.2, accuracy: 0.000_001)
+        XCTAssertEqual(openRouter.spend?.periodLabel, "This week · UTC")
+    }
     func testInvalidProviderPercentDateAndDuplicateWindowsAreRejected() throws {
         let valid = #"{"accounts":[{"source":"codex","windows":[{"id":"primary","name":"5-hour limit","usedPercent":0,"resetsAt":"2026-09-12T09:00:00Z"}]}]}"#
         for invalid in [valid.replacingOccurrences(of: "codex", with: "unknown"),

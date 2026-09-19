@@ -13,6 +13,10 @@ final class UsageAndToolbarTests: XCTestCase {
         XCTAssertTrue(usage.waitForExistence(timeout: 10)); usage.tap()
         XCTAssertTrue(app.staticTexts["Codex"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["Claude"].exists)
+        XCTAssertTrue(app.staticTexts["OpenCode"].exists)
+        XCTAssertTrue(app.staticTexts["OpenRouter"].exists)
+        XCTAssertTrue(app.staticTexts["$4.39"].exists)
+        XCTAssertTrue(app.staticTexts["$5.08"].exists)
         XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label == %@", "23.5%")).count, 2)
         XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label == %@", "41.2%")).count, 2)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "resets in ")).firstMatch.exists)
@@ -93,4 +97,3 @@ final class UsageAndToolbarTests: XCTestCase {
         shot.name = name; shot.lifetime = .keepAlways; add(shot)
     }
 }
-

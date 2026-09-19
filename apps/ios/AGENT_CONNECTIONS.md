@@ -130,7 +130,8 @@ Unbound or conflicting identities remain unavailable for chat and attachments.
   `{workspaceId, tabId, paneId, agent, agentStatus?, sessionId?}`. The session
   id is normally still unknown at that point — poll `/v1/workspaces/panes`.
 - `GET /v1/web-servers`, `/v1/activity`
-- `GET /v1/usage`: account-limit percentages and reset times, grouped by provider.
+- `GET /v1/usage`: account-limit percentages, reset times, and provider spend,
+  grouped by provider.
 
 Account usage is separate from conversation token counts. Codex uses the installed
 CLI's read-only `account/rateLimits/read` app-server method; Phren initializes that
@@ -142,9 +143,16 @@ observer stores only percentages, reset times, and the observation timestamp in 
 private file; data first appears after Claude replies with subscription limits.
 Old observations and passed reset times remain labeled as last reported instead
 of being presented as a fresh zero. An unavailable account stays unavailable.
+OpenCode cost comes from its local `stats --days 7` ledger and is summed across
+computers. If OpenCode has an OpenRouter key, the Hook also reads that key's live
+`usage_weekly` value from OpenRouter. The key never leaves the computer except in
+the request to OpenRouter; only its one-way fingerprint is returned so the phone
+does not count a shared key twice. OpenRouter defines this as the current UTC
+calendar week, while OpenCode's total is the rolling past seven days.
 
-Provider contracts: [Codex app server](https://learn.chatgpt.com/docs/app-server)
-and [Claude status line](https://code.claude.com/docs/en/statusline).
+Provider contracts: [Codex app server](https://learn.chatgpt.com/docs/app-server),
+[Claude status line](https://code.claude.com/docs/en/statusline), and
+[OpenRouter current-key usage](https://openrouter.ai/docs/api/api-reference/api-keys/get-current-key).
 
 Transcript readers retain bounded pages, wait for complete JSONL rows, detect
 truncation/rotation, skip individual legacy rows over 64 MiB, exclude private reasoning and sidechain messages, and close

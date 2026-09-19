@@ -112,6 +112,8 @@ number counts up on its own.
   line, dated from Claude Code's own usage check; Codex's Spark lane is left
   out of the report. The page shows each account once — computers sharing a
   sign-in are merged, and every window is one short line.
+- Account usage also shows OpenCode's rolling seven-day dollar cost and live
+  OpenRouter calendar-week spend, without sending provider keys to the phone.
 - The working Live Activity's island is trimmed: the elapsed timer no longer
   stretches it across the screen and the phren mark is the sprite itself.
 - Privacy manifest declares the file-timestamp reads, the terminal's

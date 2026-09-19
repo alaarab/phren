@@ -2,9 +2,8 @@ import PhrenKit
 import PhrenLive
 import SwiftUI
 
-/// One card per account. Computers signed into the same Claude or Codex
-/// account share one allowance, so their reports are merged and each window
-/// is a single line: name, percentage, bar, and when it resets.
+/// One card per provider. Shared allowance reports are merged, OpenCode's
+/// local ledgers are summed, and duplicate OpenRouter keys count once.
 struct AccountUsageView: View {
     var hostID: UUID? = nil
     @AppStorage("sessions.live.preferences.v1") private var data = Data()
@@ -18,7 +17,7 @@ struct AccountUsageView: View {
     var body: some View {
         PhrenList {
             if hosts.isEmpty {
-                Text("Connect a computer in Agents to see Claude and Codex usage.")
+                Text("Connect a computer in Agents to see Claude, Codex, OpenCode, and OpenRouter usage.")
             } else {
                 TimelineView(.periodic(from: .now, by: 30)) { context in
                     let accounts = MergedAccountUsage.merge(hosts.map { ($0.name, cache.snapshot(for: $0)) }, at: context.date)
@@ -31,7 +30,7 @@ struct AccountUsageView: View {
                     Text("\(host.name): \(errors[host.id] ?? "")").font(.footnote).foregroundStyle(PhrenTheme.warning)
                 }
                 Section {
-                    Text("Limits belong to the accounts signed in on each computer; computers sharing an account share its allowance.")
+                    Text("OpenCode is the rolling seven-day cost recorded in local sessions. OpenRouter is live charged usage for the current UTC week. Account limits are merged across computers.")
                         .font(.footnote).foregroundStyle(PhrenTheme.textMuted)
                 }
             }
@@ -59,11 +58,25 @@ private struct AccountUsageCard: View {
             HStack(alignment: .firstTextBaseline) {
                 Text(account.name).font(.headline)
                 Spacer()
-                if account.stale, !account.windows.isEmpty {
+                if account.stale, !account.windows.isEmpty || account.spend != nil {
                     Text("Last reported").font(.caption).foregroundStyle(PhrenTheme.warning)
                 } else {
                     Text(account.computers.joined(separator: " · ")).font(.caption).foregroundStyle(PhrenTheme.textMuted).lineLimit(1)
                 }
+            }
+            if let spend = account.spend {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(spend.periodLabel).font(.subheadline)
+                        Text(account.source == "opencode" ? "Recorded by OpenCode" : "Reported live by OpenRouter")
+                            .font(.caption).foregroundStyle(PhrenTheme.textMuted)
+                    }
+                    Spacer()
+                    Text(spend.amountUSD, format: .currency(code: "USD").precision(.fractionLength(2)))
+                        .font(.title2.monospacedDigit().weight(.semibold))
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("usage-spend:\(account.source)")
             }
             ForEach(account.windows) { window in
                 VStack(alignment: .leading, spacing: 4) {
@@ -83,7 +96,7 @@ private struct AccountUsageCard: View {
             if let message = account.message {
                 Text(message).font(.footnote).foregroundStyle(PhrenTheme.textMuted)
             }
-            if let updated = account.updatedAt, !account.windows.isEmpty {
+            if let updated = account.updatedAt, !account.windows.isEmpty || account.spend != nil {
                 Text("Updated \(updated, style: .relative) ago").font(.caption2).foregroundStyle(PhrenTheme.textMuted)
             }
         }

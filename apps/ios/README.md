@@ -63,8 +63,10 @@ Modified special keys use distinct terminal sequences; the remote application
 must support the chosen combination. Changes stay on this iPhone.
 
 **Agents → Account usage** (the chart icon), also available in Settings, shows
-Claude and Codex account limits, percentages used, and reset dates/countdowns
-for each connected computer. Both refresh up to once a minute. Claude uses the
+Claude and Codex account limits plus OpenCode and OpenRouter dollar usage.
+OpenCode shows the cost recorded across local sessions for the rolling past
+seven days; OpenRouter shows live usage for its current UTC week. All refresh
+up to once a minute. Claude uses the
 computer's existing sign-in token against its usage endpoint, including per-model
 weekly limits; an unavailable endpoint falls back to its local status-line and
 usage snapshots. Tokens stay on the computer. Last-reported times distinguish older observations from

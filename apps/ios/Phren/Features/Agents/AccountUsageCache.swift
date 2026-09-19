@@ -44,12 +44,18 @@ final class AccountUsageCache {
             }
             if ProcessInfo.processInfo.arguments.contains("--usage-delayed") { try await Task.sleep(for: .milliseconds(800)) }
             let now = Date()
-            let payload: [String: Any] = ["accounts": ["codex", "claude"].map { source in
+            var accounts = ["codex", "claude"].map { source in
                 ["source": source, "updatedAt": now.ISO8601Format(), "windows": [
                     ["id": "five_hour", "name": "5-hour limit", "usedPercent": 23.5, "resetsAt": now.addingTimeInterval(7200).ISO8601Format()],
                     ["id": "seven_day", "name": "7-day limit", "usedPercent": 41.2, "resetsAt": now.addingTimeInterval(172800).ISO8601Format()]
                 ]] as [String: Any]
-            }]
+            }
+            accounts.append(["source": "opencode", "updatedAt": now.ISO8601Format(), "windows": [],
+                             "spend": ["amountUSD": 4.39, "period": "rolling_7_days"]])
+            accounts.append(["source": "openrouter", "accountId": String(repeating: "a", count: 64),
+                             "updatedAt": now.ISO8601Format(), "windows": [],
+                             "spend": ["amountUSD": 5.08, "period": "calendar_week"]])
+            let payload: [String: Any] = ["accounts": accounts]
             return try AccountUsageSnapshot.read(JSONSerialization.data(withJSONObject: payload))
         }
         #endif
