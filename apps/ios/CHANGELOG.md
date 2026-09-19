@@ -24,6 +24,9 @@ number counts up on its own.
   clipboard, a paste control appears beside the message box and attaches it.
 - The keyboard button in Herdr resizes the terminal once it settles, so showing
   and hiding the keyboard no longer stutters.
+- Tasks, Findings, and Notes read as dense cards with section counts instead of
+  plain list rows, and a new **Files** browser opens the store's markdown and
+  config in a syntax-highlighted viewer.
 - Hold a paragraph to copy only it, or the whole reply; double-tap a word to
   select it with native handles and copy exactly as much as you want.
 - The agent's own bookkeeping has cards of its own in the chat. A subagent

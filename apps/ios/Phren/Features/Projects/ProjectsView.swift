@@ -39,6 +39,11 @@ struct ProjectsView: View {
                                          icon: "circle.hexagongrid", color: PhrenTheme.cyan, compact: true)
                         }.accessibilityLabel("Memory graph")
                         .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
+                        NavigationLink { FilesView() } label: {
+                            PhrenMenuRow(title: "Files", subtitle: "Browse the store's markdown and config",
+                                         icon: "folder", color: PhrenTheme.success, compact: true)
+                        }.accessibilityLabel("Files")
+                        .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
                     }
                     Section("Projects") {
                         ForEach(projects) { item in
