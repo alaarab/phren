@@ -1,9 +1,9 @@
 
 import { Box, Text, useStdout } from "ink";
-import { PhrenInput } from "./PhrenInput.js";
-import { PERMISSION_LABELS, PERMISSION_ICONS } from "../ansi.js";
 import type { PermissionMode } from "../../permissions/types.js";
+import { PERMISSION_ICONS, PERMISSION_LABELS } from "../ansi.js";
 import type { Theme } from "../themes.js";
+import { PhrenInput } from "./PhrenInput.js";
 
 export interface InputAreaProps {
   value: string;
@@ -107,9 +107,9 @@ export function PermissionsLine({ mode, theme, running, agents, selectedAgentId,
   return (
     <Box>
       {showPerm ? (
-        <Text>{"  "}<Text color={color}>{icon} {label}</Text><Text dimColor> (shift+tab to cycle){running ? " \u00b7 esc to interrupt" : ""}</Text></Text>
+        <Text>{"  "}<Text color={color}>{icon} {label}</Text><Text dimColor> (shift+tab to cycle) · ?/F1 help{running ? " \u00b7 esc to interrupt" : ""}</Text></Text>
       ) : (
-        <Text>{"  "}<Text dimColor>shift+tab permissions · ctrl+o tools · ctrl+f find · ctrl+t plan{running ? " · esc to interrupt" : ""}</Text></Text>
+        <Text>{"  "}<Text dimColor>?/F1 help · shift+tab permissions · ctrl+o tools · ctrl+f find · ctrl+t plan{running ? " · esc to interrupt" : ""}</Text></Text>
       )}
       {hasAgents ? (
         <Text>

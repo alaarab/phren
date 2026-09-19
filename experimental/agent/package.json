@@ -19,6 +19,7 @@
     "lint": "biome lint --config-path ../../biome.json src/"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@phren/cli": "workspace:*",
     "ink": "^7.1.1",
     "react": "^19.2.8"
