@@ -17,6 +17,14 @@ Generic SSH forwarding is disabled. The dispatcher accepts only:
 
 - `phren-hook v1 pipe`: byte relay to `hook.sock`.
 - `phren-hook v1 terminal <server>`: an existing Herdr terminal through SSH PTY.
+- `phren-hook v1 shell <base64url folder> [codex|claude|copilot|opencode]`: a
+  login shell, or one agent, started directly on the SSH PTY in that folder.
+  This needs no Herdr. The folder must decode to a canonical absolute path and
+  pass the same rules as workspace creation (under home or a located project).
+  `HERDR_*` variables are stripped and PATH is pinned. The process lives only as
+  long as the SSH session: nothing persists, and chat, transcripts, prompts and
+  identity are not available for it. The phone offers it as a fallback when no
+  Herdr server is running.
 - `phren-hook v1 web <127.0.0.1|::1> <port>`: byte relay to **any loopback TCP
   port** from 1 through 65535. This is not limited to discovered HTTP servers;
   the key holder can reach other services listening on those ports.

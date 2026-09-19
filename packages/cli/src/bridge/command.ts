@@ -19,11 +19,12 @@ export async function runBridge(args: string[], version: string): Promise<number
     case "status": console.log(JSON.stringify(await health(), null, 2)); break;
     case "doctor": {
       const helper = await health(), muxes = await servers();
-      console.log(JSON.stringify({ ok: muxes.length > 0, helper, herdr: muxes, checks: {
+      // Chat needs Herdr; a plain project shell or agent over SSH does not.
+      console.log(JSON.stringify({ ok: true, helper, herdr: muxes, checks: {
         privateSocket: true, protocol: true, independentHelper: true,
         herdrRunning: muxes.length > 0, terminal: "SSH PTY; authorize the Phren device key with pty",
+        shell: muxes.length > 0 ? "available" : "Herdr is not running: chat is unavailable, project shells and agents still open over SSH",
       } }, null, 2));
-      return muxes.length > 0 ? 0 : 1;
     }
     default: throw new Error("Usage: phren bridge <install|status|doctor|usage|update|rollback|uninstall>");
   }

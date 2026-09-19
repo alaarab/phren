@@ -24,7 +24,7 @@ import { listUploads, saveUpload, uploadImage } from "./uploads.js";
 import { AccountUsageReader } from "./usage.js";
 
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
-  terminal: "ssh-pty", herdr: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
+  terminal: "ssh-pty", shell: "ssh-pty", herdr: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
   files: true, repositoryFiles: true, subagents: true, approvalPush: "direct-apns", simulators: process.platform === "darwin" };
 
