@@ -18,6 +18,11 @@ number counts up on its own.
 - A session in a folder under your home no longer shows a project named
   after you (`/home/sam/Projects/hub` read as "sam"); the home folder
   is never a project, so the row says "hub" until the folder is linked.
+- Hold a session for **Link to project** / **Change project** (fix a wrong
+  automatic match, or name an unlinked folder) and **Rename workspace**,
+  which renames the Herdr workspace on the computer.
+- Messages you send from the phone while the agent is mid-turn now stay in
+  the chat instead of appearing only in the terminal (Phren Hook update).
 - Full tool output wraps. Recalled memories, findings and any long line now
   read on screen; a toolbar toggle brings back sideways scrolling for code
   and tables. phren's own results open unwrapped and pretty-printed, with the

@@ -751,6 +751,9 @@ private struct LiveSessionCard: View, Equatable {
     /// tripped UIKit's batch-update check.
     let onClose: (SessionCloseRequest, _ confirm: Bool) -> Void
     @State private var assigningProject = false
+    @State private var renaming = false
+    @State private var newLabel = ""
+    @State private var renameError: String?
     @State private var childTarget: AgentChatTarget?
     @State private var childAgents: [AgentChild] = []
     @State private var showingChildAgents = false
@@ -796,9 +799,13 @@ private struct LiveSessionCard: View, Equatable {
                 .accessibilityIdentifier("\(prefix)-close:\(session.accessibilityKey)")
         }
         .contextMenu {
-            if project == nil, session.tab.cwd != nil {
-                Button("Link to project", systemImage: "link") { assigningProject = true }
+            // The folder decides the name on the row. Linking overrides the
+            // automatic match (or fixes a wrong one); renaming changes Herdr's
+            // workspace label, which the row shows when there is no folder.
+            if session.tab.cwd != nil {
+                Button(project == nil ? "Link to project" : "Change project", systemImage: "link") { assigningProject = true }
             }
+            Button("Rename workspace", systemImage: "pencil") { newLabel = session.workspaceName; renameError = nil; renaming = true }
             Button("Close tab", systemImage: "xmark", role: .destructive) { onClose(.init(session: session, scope: .tab), true) }
             Button("Close workspace \u{201C}\(session.workspaceName)\u{201D}", systemImage: "xmark.square", role: .destructive) { onClose(.init(session: session, scope: .workspace), true) }
         }
@@ -806,6 +813,21 @@ private struct LiveSessionCard: View, Equatable {
             NavigationStack { LiveProjectPicker(hostID: session.host.id, cwd: session.tab.cwd ?? "",
                                                 existing: preferences?.mapping(hostID: session.host.id, cwd: session.tab.cwd)) }
         }
+        .alert("Rename workspace", isPresented: $renaming) {
+            TextField("Workspace name", text: $newLabel).accessibilityIdentifier("\(prefix)-rename-field")
+            Button("Cancel", role: .cancel) {}
+            Button("Rename") {
+                let label = newLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !label.isEmpty, label != session.workspaceName else { return }
+                Task {
+                    do { try await PhrenConnection.herdrAction(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), operation: .rename, workspaceID: session.workspaceID, label: label) }
+                    catch { renameError = error.localizedDescription }
+                }
+            }.accessibilityIdentifier("\(prefix)-rename-confirm")
+        } message: { Text("Changes the workspace label in Herdr on \(session.host.name).") }
+        .alert("Couldn't rename", isPresented: Binding(get: { renameError != nil }, set: { if !$0 { renameError = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: { Text(renameError ?? "") }
         .sheet(isPresented: $showingChildAgents) {
             if let childTarget { ChatSubagentsView(session: session, target: childTarget, agents: childAgents) }
         }

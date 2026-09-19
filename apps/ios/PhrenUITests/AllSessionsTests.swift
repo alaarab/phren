@@ -257,6 +257,31 @@ final class AllSessionsTests: XCTestCase {
         XCTAssertTrue(neighbour.exists, "The neighbour stays")
     }
 
+    /// Hold → the row can be relinked to a project even when a folder already
+    /// matched one (the match can be wrong), and the Herdr workspace renamed.
+    @MainActor
+    func testHoldMenuOffersProjectLinkAndWorkspaceRename() {
+        let app = launch()
+        let target = row(app, host: mac, tab: "w1:t2")
+        XCTAssertTrue(target.waitForExistence(timeout: 15))
+        target.press(forDuration: 1.2)
+        let link = app.buttons["Link to project"].exists ? app.buttons["Link to project"] : app.buttons["Change project"]
+        XCTAssertTrue(link.waitForExistence(timeout: 5))
+        let rename = app.buttons["Rename workspace"]
+        XCTAssertTrue(rename.exists)
+        rename.tap()
+        XCTAssertTrue(app.alerts["Rename workspace"].waitForExistence(timeout: 5))
+        let field = app.alerts["Rename workspace"].textFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        XCTAssertFalse((field.value as? String ?? "").isEmpty, "The field starts with the current workspace name")
+        app.buttons["Cancel"].tap()
+        XCTAssertTrue(field.waitForNonExistence(timeout: 3))
+        target.press(forDuration: 1.2)
+        XCTAssertTrue(link.waitForExistence(timeout: 5)); link.tap()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "live-project:")).firstMatch.waitForExistence(timeout: 5))
+        capture(app, "Relink a session from the hold menu")
+    }
+
     @MainActor
     private func launch(extra: [String] = [], resetPins: Bool = true) -> XCUIApplication {
         let app = XCUIApplication()
