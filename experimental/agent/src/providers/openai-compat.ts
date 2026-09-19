@@ -97,8 +97,23 @@ export function toOpenAiMessages(system: string, messages: LlmMessage[], provide
   return out;
 }
 
+/** HTTP 200 can still carry an upstream error, including inside SSE data events. */
+function throwProviderError(data: Record<string, unknown>): void {
+  const choice = (data.choices as Record<string, unknown>[])?.[0];
+  if (data.error == null && choice?.finish_reason !== "error") return;
+  const detail = data.error;
+  const error = detail && typeof detail === "object" ? detail as Record<string, unknown> : undefined;
+  const code = error?.code;
+  // Preserve the numeric status so the existing retry policy can classify it.
+  const status = /^(?:[45]\d{2})$/.test(String(code)) ? ` ${code}` : "";
+  const message = typeof error?.message === "string" ? error.message
+    : typeof detail === "string" ? detail : "Provider reported a generation error";
+  throw new Error(`API error${status}: ${message}`);
+}
+
 /** Parse OpenAI response into Anthropic content blocks. */
 export function parseOpenAiResponse(data: Record<string, unknown>, providerName?: string): LlmResponse {
+  throwProviderError(data);
   const choice = (data.choices as Record<string, unknown>[])?.[0] ?? {};
   const message = choice.message as Record<string, unknown> | undefined;
   const content: ContentBlock[] = [];
@@ -160,85 +175,91 @@ export async function* parseOpenAiStream(res: Response): AsyncIterable<StreamDel
   let stopReason: LlmResponse["stop_reason"] = "end_turn";
   let usage: { input_tokens: number; output_tokens: number } | undefined;
 
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
 
-    const lines = buf.split("\n");
-    buf = lines.pop()!;
+      const lines = buf.split("\n");
+      buf = lines.pop()!;
 
-    for (const line of lines) {
-      if (!line.startsWith("data: ")) continue;
-      const raw = line.slice(6).trim();
-      if (raw === "[DONE]") {
-        // Close out any active tool calls before signaling done
-        for (const [, toolId] of activeTools) {
-          yield { type: "tool_use_end", id: toolId };
-        }
-        activeTools.clear();
-        yield { type: "done", stop_reason: stopReason, usage };
-        return;
-      }
-
-      let chunk: Record<string, unknown>;
-      try { chunk = JSON.parse(raw); } catch { continue; }
-
-      // Usage from final chunk (OpenAI includes it when stream_options.include_usage is set)
-      const u = chunk.usage as Record<string, number> | undefined;
-      if (u) {
-        usage = { input_tokens: u.prompt_tokens ?? 0, output_tokens: u.completion_tokens ?? 0 };
-      }
-
-      const choice = (chunk.choices as Record<string, unknown>[])?.[0];
-      if (!choice) continue;
-
-      const finishReason = choice.finish_reason as string | null;
-      if (finishReason === "tool_calls") stopReason = "tool_use";
-      else if (finishReason === "length") stopReason = "max_tokens";
-
-      const delta = choice.delta as Record<string, unknown> | undefined;
-      if (!delta) continue;
-
-      // Reasoning content (DeepSeek/Qwen reasoning_content, OpenRouter reasoning)
-      const reasoningDelta = typeof delta.reasoning_content === "string"
-        ? delta.reasoning_content
-        : typeof delta.reasoning === "string" ? delta.reasoning : "";
-      if (reasoningDelta) {
-        yield { type: "reasoning_delta", text: reasoningDelta };
-      }
-
-      // Text content
-      if (delta.content && typeof delta.content === "string") {
-        yield { type: "text_delta", text: delta.content };
-      }
-
-      // Tool calls
-      const toolCalls = delta.tool_calls as Record<string, unknown>[] | undefined;
-      if (toolCalls) {
-        for (const tc of toolCalls) {
-          const idx = tc.index as number;
-          const fn = tc.function as Record<string, unknown> | undefined;
-
-          // New tool call starts when id is present
-          if (tc.id && typeof tc.id === "string") {
-            activeTools.set(idx, tc.id);
-            yield { type: "tool_use_start", id: tc.id, name: fn?.name as string ?? "" };
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const raw = line.slice(6).trim();
+        if (raw === "[DONE]") {
+          // Close out any active tool calls before signaling done
+          for (const [, toolId] of activeTools) {
+            yield { type: "tool_use_end", id: toolId };
           }
+          activeTools.clear();
+          yield { type: "done", stop_reason: stopReason, usage };
+          return;
+        }
 
-          // Argument deltas
-          if (fn?.arguments && typeof fn.arguments === "string") {
-            const toolId = activeTools.get(idx) ?? String(idx);
-            yield { type: "tool_use_delta", id: toolId, json: fn.arguments };
+        let chunk: Record<string, unknown>;
+        try { chunk = JSON.parse(raw); } catch { continue; }
+        throwProviderError(chunk);
+
+        // Usage from final chunk (OpenAI includes it when stream_options.include_usage is set)
+        const u = chunk.usage as Record<string, number> | undefined;
+        if (u) {
+          usage = { input_tokens: u.prompt_tokens ?? 0, output_tokens: u.completion_tokens ?? 0 };
+        }
+
+        const choice = (chunk.choices as Record<string, unknown>[])?.[0];
+        if (!choice) continue;
+
+        const finishReason = choice.finish_reason as string | null;
+        if (finishReason === "tool_calls") stopReason = "tool_use";
+        else if (finishReason === "length") stopReason = "max_tokens";
+
+        const delta = choice.delta as Record<string, unknown> | undefined;
+        if (!delta) continue;
+
+        // Reasoning content (DeepSeek/Qwen reasoning_content, OpenRouter reasoning)
+        const reasoningDelta = typeof delta.reasoning_content === "string"
+          ? delta.reasoning_content
+          : typeof delta.reasoning === "string" ? delta.reasoning : "";
+        if (reasoningDelta) {
+          yield { type: "reasoning_delta", text: reasoningDelta };
+        }
+
+        // Text content
+        if (delta.content && typeof delta.content === "string") {
+          yield { type: "text_delta", text: delta.content };
+        }
+
+        // Tool calls
+        const toolCalls = delta.tool_calls as Record<string, unknown>[] | undefined;
+        if (toolCalls) {
+          for (const tc of toolCalls) {
+            const idx = tc.index as number;
+            const fn = tc.function as Record<string, unknown> | undefined;
+
+            // New tool call starts when id is present
+            if (tc.id && typeof tc.id === "string") {
+              activeTools.set(idx, tc.id);
+              yield { type: "tool_use_start", id: tc.id, name: fn?.name as string ?? "" };
+            }
+
+            // Argument deltas
+            if (fn?.arguments && typeof fn.arguments === "string") {
+              const toolId = activeTools.get(idx) ?? String(idx);
+              yield { type: "tool_use_delta", id: toolId, json: fn.arguments };
+            }
           }
         }
       }
     }
-  }
 
-  // Emit tool_use_end for all active tools, then done
-  for (const [, toolId] of activeTools) {
-    yield { type: "tool_use_end", id: toolId };
+    // Emit tool_use_end for all active tools, then done
+    for (const [, toolId] of activeTools) {
+      yield { type: "tool_use_end", id: toolId };
+    }
+    yield { type: "done", stop_reason: stopReason, usage };
+  } finally {
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
   }
-  yield { type: "done", stop_reason: stopReason, usage };
 }

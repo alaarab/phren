@@ -471,3 +471,51 @@ describe("runTurn compaction", () => {
     session.log.assertReconstructs();
   });
 });
+
+describe("plan approval gates", () => {
+  it("keeps tools disabled and requests approval again after revision feedback", async () => {
+    const { runAgent } = await import("../agent-loop.js");
+    const execute = vi.fn().mockResolvedValue({ output: "done" });
+    const registry = new ToolRegistry();
+    registry.setPermissions({ mode: "full-auto", projectRoot: process.cwd(), allowedPaths: [] });
+    registry.register({ name: "marker", description: "marker", input_schema: {}, execute });
+    const provider = mockProvider([
+      textResponse("Initial plan"), textResponse("Revised plan"),
+      toolCallResponse("marker", {}), textResponse("Complete"),
+    ]);
+    const chat = vi.spyOn(provider, "chat");
+    const approval = vi.fn()
+      .mockResolvedValueOnce({ approved: false, feedback: "Use a safer approach" })
+      .mockResolvedValueOnce({ approved: true });
+    await runAgent("make a change", makeConfig({ provider, registry, plan: true, hooks: { onPlanApproval: approval } }));
+    expect(approval).toHaveBeenCalledTimes(2);
+    expect(chat.mock.calls.map((call) => call[2].map((tool) => tool.name))).toEqual([[], [], ["marker"], ["marker"]]);
+    expect(chat.mock.calls[0][0]).toContain("## Plan mode");
+    expect(chat.mock.calls[1][0]).toContain("## Plan mode");
+    expect(chat.mock.calls[2][0]).not.toContain("## Plan mode");
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+  it("stops when a revised plan is rejected without feedback", async () => {
+    const { runAgent } = await import("../agent-loop.js");
+    const provider = mockProvider([textResponse("Initial plan"), textResponse("Revised plan")]);
+    const chat = vi.spyOn(provider, "chat");
+    const approval = vi.fn()
+      .mockResolvedValueOnce({ approved: false, feedback: "Revise" })
+      .mockResolvedValueOnce({ approved: false });
+    const result = await runAgent("make a change", makeConfig({ provider, plan: true, hooks: { onPlanApproval: approval } }));
+    expect(chat).toHaveBeenCalledTimes(2);
+    expect(approval).toHaveBeenCalledTimes(2);
+    expect(result.toolCalls).toBe(0);
+    expect(result.messages.some((message) => message.content === "Plan approved. Proceed with execution.")).toBe(false);
+  });
+  it("does not record a plan approval that arrives after cancellation", async () => {
+    const { runAgent } = await import("../agent-loop.js");
+    const controller = new AbortController();
+    const result = await runAgent("make a change", makeConfig({ plan: true, hooks: {
+      signal: controller.signal,
+      onPlanApproval: async () => { controller.abort(); return { approved: true }; },
+    } }));
+    expect(result.turns).toBe(1);
+    expect(result.messages.some((message) => message.content === "Plan approved. Proceed with execution.")).toBe(false);
+  });
+});
