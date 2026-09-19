@@ -90,6 +90,20 @@ extension PhrenConnection {
         return try AgentChatTranscript.read(data, source: target.source)
     }
 
+    public static func childAgents(host: LiveHost, privateKey: Data, target: AgentChatTarget) async throws -> AgentChildTree {
+        guard !target.isStarting, target.hostID == host.id && target.muxID == host.muxID else { throw PhrenKitError.validation("The chat belongs to another computer.") }
+        let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: .childAgents(target))
+        return try AgentChildTree.read(data)
+    }
+
+    public static func childAgentTranscript(host: LiveHost, privateKey: Data, target: AgentChatTarget, child: String, provider: String) async throws -> AgentChatTranscript {
+        guard !target.isStarting, target.hostID == host.id && target.muxID == host.muxID,
+              child.range(of: "^[a-f0-9]{32}$", options: .regularExpression) != nil,
+              AgentChatTarget.sources.contains(provider) else { throw PhrenKitError.validation("This child conversation is invalid.") }
+        let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: .childTranscript(target, child: child))
+        return try AgentChatTranscript.read(data, source: provider)
+    }
+
     public static func sendChat(host: LiveHost, privateKey: Data, target: AgentChatTarget, text: String) async throws {
         guard target.hostID == host.id && target.muxID == host.muxID else { throw PhrenKitError.validation("The chat belongs to another computer.") }
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, text.utf8.count <= 32_768,
@@ -142,6 +156,13 @@ struct GatewayRequest: Sendable {
     static func history(_ target: AgentChatTarget, beforeLine: Int) -> Self {
         var query = targetQuery(target); query["beforeLine"] = String(beforeLine)
         return Self(path: path("/v1/transcripts/history", query), maximumResponseBytes: 8_388_608)
+    }
+    static func childAgents(_ target: AgentChatTarget) -> Self {
+        Self(path: path("/v1/subagents", targetQuery(target)))
+    }
+    static func childTranscript(_ target: AgentChatTarget, child: String) -> Self {
+        var query = targetQuery(target); query["child"] = child
+        return Self(path: path("/v1/subagents/transcript", query), maximumResponseBytes: 8_388_608)
     }
     static func targetBody(_ target: AgentChatTarget, fields: [String: Any] = [:]) throws -> Data {
         var body = fields; body["target"] = targetQuery(target)

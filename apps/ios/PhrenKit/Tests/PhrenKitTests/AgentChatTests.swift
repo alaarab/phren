@@ -3,6 +3,14 @@ import XCTest
 @testable import PhrenKit
 
 final class AgentChatTests: XCTestCase {
+    func testChildAgentTreeCountsNestedRunningAgents() throws {
+        let data = Data(#"{"agents":[{"id":"a","provider":"codex","path":"/root/first","callId":"c1","state":"completed","children":[{"id":"b","provider":"codex","path":"/root/first/worker","callId":"c2","state":"running","children":[]}]},{"id":"c","provider":"codex","path":"/root/second","callId":"c3","state":"running","children":[]}]}"#.utf8)
+        let tree = try AgentChildTree.read(data)
+        XCTAssertEqual(tree.runningCount, 2)
+        XCTAssertEqual(tree.agentCount, 3)
+        XCTAssertEqual(tree.agents[0].children[0].name, "worker")
+    }
+
     func testAttachmentsUseGeneratedNamesAndRejectUnsafeOrOversizedData() throws {
         let item = try AgentAttachment(name: "../../a screenshot.PNG", data: Data([1, 2, 3]), isImage: true)
         XCTAssertTrue(item.uploadName.hasSuffix(".png"))

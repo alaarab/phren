@@ -100,6 +100,8 @@ struct AgentChatView: View {
     @State private var dictating = false
     @State private var showingAgentSwitcher = false
     @State private var showingUsage = false
+    @State private var showingChildAgents = false
+    @State private var childAgents: [AgentChild] = []
     @State private var previewImage: ChatAttachmentDraft?
     @State private var assigningProject = false
     @State private var fullDiff: ChatFullDiff?
@@ -627,6 +629,9 @@ struct AgentChatView: View {
                 .presentationBackground(PhrenTheme.chatCanvas)
             }
         }
+        .sheet(isPresented: $showingChildAgents) {
+            if let target = model.target { ChatSubagentsView(session: session, target: target, agents: childAgents) }
+        }
         .sheet(item: $previewImage) { item in
             NavigationStack {
                 ChatAttachmentImage(attachment: item.attachment, maximumPixels: 2_048).padding()
@@ -650,6 +655,11 @@ struct AgentChatView: View {
         .task(id: RunIdentity(active: active, refresh: refresh)) {
             guard active else { return }
             await model.run(session)
+        }
+        .task(id: "\(model.target?.id ?? ""):\(model.timelineRevision)") {
+            guard let target = model.target, !target.isStarting else { childAgents = []; return }
+            childAgents = (try? await PhrenConnection.childAgents(host: session.host,
+                privateKey: DeviceSSHKey.load(session.host.id), target: target).agents) ?? childAgents
         }
     }
 
@@ -867,6 +877,15 @@ struct AgentChatView: View {
                             .font(.caption).foregroundStyle(PhrenTheme.warning)
                     }.accessibilityIdentifier("chat-answer-terminal")
                 }
+            }
+            let runningAgents = childAgents.reduce(0) { $0 + $1.runningCount }
+            if !childAgents.isEmpty {
+                Button { showingChildAgents = true } label: {
+                    Label(runningAgents > 0 ? "\(runningAgents) agent\(runningAgents == 1 ? "" : "s") running" : "Agent work",
+                          systemImage: "person.2.wave.2")
+                        .font(.caption.weight(.semibold)).frame(maxWidth: .infinity, alignment: .leading)
+                }.buttonStyle(.plain).foregroundStyle(PhrenTheme.phrenCardAccent)
+                    .accessibilityIdentifier("chat-child-agents")
             }
             if let error = model.deliveryError { Text(error).font(.caption).foregroundStyle(PhrenTheme.warning).accessibilityIdentifier("chat-delivery-error") }
             if let error = model.draftStorageError { Text(error).font(.caption).foregroundStyle(PhrenTheme.warning).accessibilityIdentifier("chat-draft-storage-error") }

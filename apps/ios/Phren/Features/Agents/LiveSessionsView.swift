@@ -753,6 +753,9 @@ private struct LiveSessionCard: View, Equatable {
     /// tripped UIKit's batch-update check.
     let onClose: (SessionCloseRequest, _ confirm: Bool) -> Void
     @State private var assigningProject = false
+    @State private var childTarget: AgentChatTarget?
+    @State private var childAgents: [AgentChild] = []
+    @State private var showingChildAgents = false
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.session == rhs.session && lhs.fresh == rhs.fresh && lhs.showHost == rhs.showHost
@@ -774,6 +777,18 @@ private struct LiveSessionCard: View, Equatable {
             .accessibilityIdentifier(showHost ? "overview-chat:\(session.accessibilityKey)"
                                      : "live-chat:\(session.workspaceID):\(session.tab.id)")
             .disabled(!fresh)
+            if !childAgents.isEmpty {
+                Button { showingChildAgents = true } label: {
+                    VStack(spacing: 2) {
+                        Image(systemName: "person.2.wave.2")
+                        Text("\(childAgents.reduce(0) { $0 + $1.agentCount })").font(.caption2.weight(.bold))
+                    }
+                    .foregroundStyle(childAgents.contains(where: { $0.runningCount > 0 }) ? PhrenTheme.phrenCardAccent : PhrenTheme.textMuted)
+                    .frame(minWidth: 38, minHeight: 44)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(childAgents.reduce(0) { $0 + $1.agentCount }) spawned agents")
+            }
             SessionPinButton(session: session, pinned: resolvedPin ?? (preferences?.isPinned(session.id) == true),
                              identifierPrefix: prefix, data: $data)
         }
@@ -792,6 +807,20 @@ private struct LiveSessionCard: View, Equatable {
         .sheet(isPresented: $assigningProject) {
             NavigationStack { LiveProjectPicker(hostID: session.host.id, cwd: session.tab.cwd ?? "",
                                                 existing: preferences?.mapping(hostID: session.host.id, cwd: session.tab.cwd)) }
+        }
+        .sheet(isPresented: $showingChildAgents) {
+            if let childTarget { ChatSubagentsView(session: session, target: childTarget, agents: childAgents) }
+        }
+        .task(id: "\(session.id):\(session.tab.status):\(session.tab.lastChangedAt?.timeIntervalSince1970 ?? 0)") {
+            do {
+                if let snapshot = try await SessionSubagentSnapshot.load(session) {
+                    childTarget = snapshot.target; childAgents = snapshot.agents
+                } else {
+                    childTarget = nil; childAgents = []
+                }
+            } catch {
+                if !Task.isCancelled { childTarget = nil; childAgents = [] }
+            }
         }
     }
 }
@@ -872,6 +901,8 @@ private struct LiveSessionDetailView: View {
                                 project: session.projectDisplayName(project?.name),
                                 state: session.tab.activity.rawValue
                             )
+
+                            SessionSubagentsCard(session: session)
 
                             SessionUsageCard(host: session.host, source: session.tab.agent)
 

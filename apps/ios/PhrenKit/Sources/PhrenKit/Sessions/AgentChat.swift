@@ -61,6 +61,29 @@ public struct AgentChatTarget: Codable, Equatable, Hashable, Sendable, Identifia
     }
 }
 
+public struct AgentChild: Codable, Equatable, Sendable, Identifiable {
+    public enum State: String, Codable, Sendable { case running, completed }
+    public let id: String
+    public let provider: String
+    public let path: String
+    public let callId: String
+    public let state: State
+    public let children: [AgentChild]
+    public var name: String {
+        let leaf = path.split(separator: "/").last.map(String.init) ?? "Agent"
+        return leaf.replacingOccurrences(of: "_", with: " ")
+    }
+    public var agentCount: Int { 1 + children.reduce(0) { $0 + $1.agentCount } }
+    public var runningCount: Int { (state == .running ? 1 : 0) + children.reduce(0) { $0 + $1.runningCount } }
+}
+
+public struct AgentChildTree: Codable, Equatable, Sendable {
+    public let agents: [AgentChild]
+    public var agentCount: Int { agents.reduce(0) { $0 + $1.agentCount } }
+    public var runningCount: Int { agents.reduce(0) { $0 + $1.runningCount } }
+    public static func read(_ data: Data) throws -> Self { try JSONDecoder().decode(Self.self, from: data) }
+}
+
 public struct AgentChatPanes: Decodable, Equatable, Sendable {
     public struct Pane: Decodable, Equatable, Sendable, Identifiable {
         public let id: String
