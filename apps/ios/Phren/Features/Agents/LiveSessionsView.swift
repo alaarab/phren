@@ -324,7 +324,11 @@ final class LiveHostMonitor {
                 guard generation == run else { return }
                 snapshot = value
                 approvalRefresh?.cancel()
-                approvalRefresh = Task { await approvals.refresh(value.sessions(on: host)) }
+                approvalRefresh = Task {
+                    let sessions = value.sessions(on: host)
+                    await ApprovalActivityController.shared.reconcile(host: host, sessions: sessions)
+                    await approvals.refresh(sessions)
+                }
                 lastUpdated = Date()
                 message = nil
                 fingerprint = nil

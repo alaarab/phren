@@ -27,6 +27,18 @@ actor ApprovalRequestStore {
         return record
     }
 
+    /// Read-only reconciliation also includes expired records, whose Live
+    /// Activities may outlive the file's next pruning pass.
+    func records() throws -> [Record] { try read() }
+
+    static func obsolete(_ record: Record, host: LiveHost, sessions: [LiveAgentSession], now: Date = .now) -> Bool {
+        guard record.host.id == host.id else { return false }
+        return record.expiresAt <= now || record.host != host || !sessions.contains {
+            $0.host == host && $0.workspaceID == record.target.workspaceID && $0.tab.id == record.target.tabID
+                && $0.tab.approvalPending == true
+        }
+    }
+
     func claim(_ id: String, preferences: LiveSessionPreferences, now: Date = .now) throws -> Record {
         var records = try read()
         guard let index = records.firstIndex(where: { $0.id == id }) else {

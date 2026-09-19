@@ -66,6 +66,27 @@ final class ApprovalActivityController {
         }
     }
 
+    /// A staleDate changes presentation; it does not dismiss the activity.
+    /// Sweep ActivityKit itself because a prior store save can prune expired
+    /// records, and a cold launch has no in-memory observed targets.
+    func retireExpired(now: Date = .now) async {
+        let expired = Activity<ApprovalActivityAttributes>.activities.filter { $0.content.state.expiresAt <= now }
+        await end(expired.map { $0.attributes.requestID })
+        observed = observed.filter { $0.value.expiresAt > now }
+    }
+
+    func reconcile(host: LiveHost, sessions: [LiveAgentSession]) async {
+        guard !Task.isCancelled, UIApplication.shared.applicationState == .active else { return }
+        await retireExpired()
+        for record in (try? await store.records()) ?? [] {
+            guard !Task.isCancelled else { return }
+            if ApprovalRequestStore.obsolete(record, host: host, sessions: sessions) {
+                observed.removeValue(forKey: record.target)
+                await remove(target: record.target, actionID: record.actionID)
+            }
+        }
+    }
+
     func answered(target: AgentChatTarget, actionID: String) async {
         handled[key(target, actionID)] = Date().addingTimeInterval(60)
         observed.removeValue(forKey: target)

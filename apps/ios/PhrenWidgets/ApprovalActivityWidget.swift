@@ -47,8 +47,8 @@ struct ApprovalActivityWidget: Widget {
         context.state.question ? "\(context.state.provider) has a question" : "\(context.state.provider) needs approval"
     }
     private func mark(_ context: ActivityViewContext<ApprovalActivityAttributes>) -> some View {
-        Image(systemName: context.state.question ? "questionmark.bubble.fill" : "hand.raised.fill")
-            .foregroundStyle(context.state.question ? WidgetTheme.accent : .orange)
+        Image(systemName: context.state.symbol(isStale: context.isStale))
+            .foregroundStyle(context.isStale ? Color.secondary : context.state.question ? WidgetTheme.accent : .orange)
     }
     @ViewBuilder private func actions(_ context: ActivityViewContext<ApprovalActivityAttributes>) -> some View {
         if context.state.question {

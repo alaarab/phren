@@ -14,6 +14,13 @@ struct ApprovalActivityAttributes: ActivityAttributes {
         /// Claude Code's AskUserQuestion: the activity offers Open, never a
         /// blind Approve — the answer is chosen in the app.
         var question = false
+
+        /// ActivityKit may retain a stale activity after its request expires.
+        /// It must no longer advertise a permission that needs an answer.
+        func symbol(isStale: Bool, now: Date = .now) -> String {
+            guard !isStale, expiresAt > now else { return "clock" }
+            return question ? "questionmark.bubble.fill" : "hand.raised.fill"
+        }
     }
     let requestID: String
 

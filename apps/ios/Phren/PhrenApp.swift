@@ -31,6 +31,7 @@ struct PhrenApp: App {
                         print("[PhrenPerformance] first scene task: \(String(format: "%.3f", (CFAbsoluteTimeGetCurrent() - launchedAt) * 1_000)) ms")
                     }
                     #endif
+                    await approvals.retireExpired()
                     await model.bootstrap()
                     AgentLaunch.restorePendingNavigation()
                 }
@@ -41,7 +42,7 @@ struct PhrenApp: App {
                     // Live sync runs only while the app is visible; returning
                     // to the foreground triggers an immediate catch-up pull.
                     switch phase {
-                    case .active: Task { await model.enterForeground() }
+                    case .active: Task { await approvals.retireExpired(); await model.enterForeground() }
                     case .background, .inactive: Task { await model.enterBackground() }
                     @unknown default: break
                     }

@@ -28,6 +28,34 @@ final class ApprovalRequestTests: XCTestCase {
         do { _ = try await store.claim(record.id, preferences: preferences); XCTFail("Retried invalidated answer") } catch {}
     }
 
+    func testExpiredActivityCannotAdvertiseAnApproval() {
+        let now = Date()
+        let live = ApprovalActivityAttributes.ContentState(provider: "Codex", project: "phren", host: "Mac",
+            explanation: "Run tests", expiresAt: now.addingTimeInterval(55))
+        XCTAssertEqual(live.symbol(isStale: false, now: now), "hand.raised.fill")
+        XCTAssertEqual(live.symbol(isStale: true, now: now), "clock")
+        XCTAssertEqual(live.symbol(isStale: false, now: now.addingTimeInterval(56)), "clock")
+        var question = live; question.question = true
+        XCTAssertEqual(question.symbol(isStale: false, now: now), "questionmark.bubble.fill")
+        XCTAssertEqual(question.symbol(isStale: true, now: now), "clock")
+    }
+
+    func testOverviewRetiresSavedRequestsAfterColdLaunchOnlyOnTheirOwnHost() async throws {
+        let host = try LiveHost(name: "Mac", address: "mac.local", username: "user")
+        let otherHost = try LiveHost(name: "Other Mac", address: "other.local", username: "user")
+        let target = try AgentChatTarget(hostID: host.id, workspaceID: "w1", tabID: "t1", paneID: "p1", source: "codex", sessionID: "session")
+        let now = Date()
+        let record = ApprovalRequestStore.Record(id: UUID().uuidString, actionID: "action", host: host, target: target, expiresAt: now.addingTimeInterval(55))
+        func sessions(_ pending: Bool) throws -> [LiveAgentSession] {
+            try LiveWorkspaces.read(Data("{\"kind\":\"herdr\",\"groups\":[{\"id\":\"w1\",\"label\":\"Work\",\"children\":[{\"id\":\"t1\",\"label\":\"Agent\",\"approvalPending\":\(pending)}]}]}".utf8)).sessions(on: host)
+        }
+        XCTAssertFalse(ApprovalRequestStore.obsolete(record, host: host, sessions: try sessions(true), now: now))
+        XCTAssertTrue(ApprovalRequestStore.obsolete(record, host: host, sessions: try sessions(false), now: now))
+        XCTAssertTrue(ApprovalRequestStore.obsolete(record, host: host, sessions: [], now: now))
+        XCTAssertFalse(ApprovalRequestStore.obsolete(record, host: otherHost, sessions: [], now: now))
+        XCTAssertTrue(ApprovalRequestStore.obsolete(record, host: host, sessions: try sessions(true), now: now.addingTimeInterval(56)))
+    }
+
     func testApprovalDetailsAndSavedTargetValidation() throws {
         let host = UUID()
         let target = try AgentChatTarget(hostID: host, workspaceID: "w1", tabID: "w1:t1", paneID: "w1:p1", source: "codex", sessionID: "session")
