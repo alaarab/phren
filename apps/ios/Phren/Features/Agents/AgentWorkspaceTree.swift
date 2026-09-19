@@ -49,10 +49,18 @@ struct WorkspaceTreeAgentLabel: View {
 /// The same computer → workspace → agent hierarchy used by Herdr, adapted
 /// for choosing a live conversation from compact drawers.
 struct AgentWorkspaceTree: View {
+    /// One tab and the real Herdr workspace it belongs to. Merged groups keep
+    /// each tab's own workspace id, so choosing a row still opens the right one.
+    private struct Child: Identifiable {
+        let workspaceID: String
+        let workspaceLabel: String
+        let tab: LiveWorkspaces.Tab
+        var id: String { workspaceID + ":" + tab.id }
+    }
     private struct MatchingGroup: Identifiable {
         let id: String
         let label: String
-        let children: [LiveWorkspaces.Tab]
+        let children: [Child]
     }
     let computers: [SessionOverviewMonitor.Computer]
     let query: String
@@ -65,8 +73,8 @@ struct AgentWorkspaceTree: View {
         if recent {
             ForEach(SessionRecency.ordered(computers.flatMap { computer in
                 matching(computer).flatMap { group in group.children.map {
-                    LiveAgentSession(host: computer.host, workspaceID: group.id, workspaceName: group.label,
-                                     tab: $0, workspaceTabCount: group.children.count)
+                    LiveAgentSession(host: computer.host, workspaceID: $0.workspaceID, workspaceName: $0.workspaceLabel,
+                                     tab: $0.tab, workspaceTabCount: group.children.count)
                 } }
             })) { item in
                 sessionButton(item, subtitle: "\(item.projectDisplayName(nil)) · \(item.host.name)")
@@ -76,8 +84,8 @@ struct AgentWorkspaceTree: View {
             let groups = matching(computer)
             if !groups.isEmpty {
                 Section {
-                    // Keyed by computer + workspace: two computers can share
-                    // a workspace id, and a bare id would drop the second.
+                    // Keyed by computer + project: two computers can share
+                    // a project name, and a bare name would drop the second.
                     ForEach(groups.map { (key: computer.host.id.uuidString + ":" + $0.id, group: $0) }, id: \.key) { entry in
                         let group = entry.group, key = entry.key
                         let open = !collapsed.contains(key)
@@ -88,9 +96,10 @@ struct AgentWorkspaceTree: View {
                         } label: { WorkspaceTreeDisclosure(label: group.label, count: group.children.count, open: open).padding(.horizontal, 12) }
                             .buttonStyle(.plain).accessibilityIdentifier("agent-workspace:\(computer.host.id):\(group.id)")
                         if open {
-                            ForEach(group.children.filter { $0.agent != nil || ($0.agentPaneCount ?? 0) > 0 }.map { (key: key + ":" + $0.id, tab: $0) }, id: \.key) { entry in
-                                let item = LiveAgentSession(host: computer.host, workspaceID: group.id, workspaceName: group.label,
-                                                            tab: entry.tab, workspaceTabCount: group.children.count)
+                            ForEach(group.children.filter { $0.tab.agent != nil || ($0.tab.agentPaneCount ?? 0) > 0 }.map { (key: key + ":" + $0.id, child: $0) }, id: \.key) { entry in
+                                let item = LiveAgentSession(host: computer.host, workspaceID: entry.child.workspaceID,
+                                                            workspaceName: entry.child.workspaceLabel, tab: entry.child.tab,
+                                                            workspaceTabCount: group.children.count)
                                 sessionButton(item, subtitle: nil)
                             }
                         }
@@ -116,14 +125,38 @@ struct AgentWorkspaceTree: View {
     private func matching(_ computer: SessionOverviewMonitor.Computer) -> [MatchingGroup] {
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let groups = computer.monitor.snapshot?.groups else { return [] }
-        return groups.compactMap { group in
+        // Herdr opens a fresh workspace each time the same project is started,
+        // so "Phren", "phren" and the next one would each get their own row.
+        // Fold workspaces that name the same project into one entry; every tab
+        // keeps its own workspace id for opening.
+        var merged: [String: (label: String, children: [Child])] = [:]
+        var order: [String] = []
+        for group in groups {
             let children = group.children.filter { tab in
                 (tab.agent != nil || (tab.agentPaneCount ?? 0) > 0) &&
                 (needle.isEmpty || "\(computer.host.name) \(group.label) \(tab.displayTitle) \(tab.agent ?? "")".localizedCaseInsensitiveContains(needle))
             }
-            guard !children.isEmpty else { return nil }
-            return MatchingGroup(id: group.id, label: group.label, children: children)
+            guard !children.isEmpty else { continue }
+            let key = Self.projectKey(group.label)
+            let mapped = children.map { Child(workspaceID: group.id, workspaceLabel: group.label, tab: $0) }
+            if var existing = merged[key] {
+                existing.children.append(contentsOf: mapped)
+                merged[key] = existing
+            } else {
+                merged[key] = (label: group.label, children: mapped)
+                order.append(key)
+            }
         }
+        return order.compactMap { key in
+            guard let entry = merged[key] else { return nil }
+            return MatchingGroup(id: key, label: entry.label, children: entry.children)
+        }
+    }
+
+    /// Workspaces that name the same project, ignoring case and surrounding
+    /// space, read as one.
+    private static func projectKey(_ label: String) -> String {
+        label.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 }
 
@@ -134,6 +167,9 @@ struct AgentDrawer: View {
     var choosePane: ((AgentChatPanes.Pane) -> Void)? = nil
     let chooseSession: (LiveAgentSession) -> Void
     let close: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// How far the panel has been dragged left; 0 while it rests open.
+    @State private var dragOffset: CGFloat = 0
 
     var body: some View {
         // Only the panel's background runs to the screen edges; its
@@ -143,7 +179,25 @@ struct AgentDrawer: View {
                           chooseSession: { chooseSession($0); close() }, close: close)
             .frame(width: min(UIScreen.main.bounds.width * 0.86, 380))
             .background(PhrenTheme.chatCanvas.ignoresSafeArea(edges: .vertical)).phrenElevation()
+            .offset(x: dragOffset)
             .transition(.move(edge: .leading))
+            // A leftward drag slides the panel away, like a standard side
+            // drawer; vertical drags stay with the list inside it.
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 12)
+                    .onChanged { value in
+                        guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                        dragOffset = min(0, value.translation.width)
+                    }
+                    .onEnded { value in
+                        let horizontal = abs(value.translation.width) > abs(value.translation.height)
+                        if horizontal, value.translation.width < -80 || value.predictedEndTranslation.width < -160 {
+                            close()
+                        } else if dragOffset != 0 {
+                            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) { dragOffset = 0 }
+                        }
+                    }
+            )
             // A marker names the drawer; an identifier on the container would
             // be stamped onto every child and hide the search field's own.
             .overlay(alignment: .topLeading) {

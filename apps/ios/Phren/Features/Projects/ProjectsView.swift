@@ -8,6 +8,10 @@ struct ProjectsView: View {
     @State private var filter = ""
     @State private var navigationPath = NavigationPath()
     @State private var showVoiceCapture = false
+    @State private var showAddProject = false
+    @State private var connectingComputer = false
+    @AppStorage("sessions.live.preferences.v1") private var livePreferences = Data()
+    private var hasComputer: Bool { !((try? LiveSessionPreferences.read(livePreferences))?.hosts.isEmpty ?? true) }
 
     private var projects: [StoreProject] {
         guard !filter.isEmpty else { return model.mergedProjects }
@@ -92,8 +96,23 @@ struct ProjectsView: View {
                     }
                 }
                 .overlay {
-                    if model.mergedProjects.isEmpty && model.storeDescriptors.isEmpty {
-                        PhrenEmptyState(title: "No projects yet", message: "Projects appear here once your phren store has content.")
+                    // First run: the store is connected but empty, or not
+                    // connected at all. Either way the next step is a computer
+                    // with a repository on it, so say so and offer it.
+                    if model.mergedProjects.isEmpty {
+                        PhrenEmptyState(title: "Add your first project",
+                                        message: hasComputer
+                                            ? "Pick a repository on your computer, or clone one from GitHub. Phren adds it and your agents start remembering."
+                                            : "Connect a computer running Phren Hook, then add a repository from it. Your agents start remembering from there.") {
+                            if !hasComputer {
+                                Button { connectingComputer = true } label: { Label("Connect a computer", systemImage: "desktopcomputer.and.arrow.down") }
+                                    .buttonStyle(.bordered).tint(PhrenTheme.cyan)
+                                    .accessibilityIdentifier("projects-connect-computer")
+                            }
+                            Button { showAddProject = true } label: { Label("Add a project", systemImage: "plus") }
+                                .buttonStyle(.borderedProminent).tint(PhrenTheme.cyan).foregroundStyle(PhrenTheme.chatPanel)
+                                .accessibilityIdentifier("projects-add-first")
+                        }
                     }
                 }
                 .searchable(text: $filter, prompt: "Filter projects")
@@ -102,6 +121,11 @@ struct ProjectsView: View {
             }
             .navigationTitle("Projects")
             .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button { showAddProject = true } label: { Image(systemName: "plus") }
+                        .accessibilityLabel("Add project")
+                        .accessibilityIdentifier("projects-add")
+                }
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
                         NavigationLink { GraphView() } label: {
@@ -184,6 +208,16 @@ struct ProjectsView: View {
             .sheet(isPresented: $showVoiceCapture) {
                 VoiceCaptureView(targets: voiceCaptureTargets)
             }
+            .sheet(isPresented: $showAddProject) {
+                AddProjectView { project in
+                    // Straight into the new project; "Open on a computer" is
+                    // one tap from there.
+                    guard let item = model.mergedProjects.first(where: { $0.project.name == project }) else { return }
+                    navigationPath = NavigationPath()
+                    navigationPath.append(item)
+                }
+            }
+            .sheet(isPresented: $connectingComputer) { NavigationStack { LiveHostEditor() } }
         }
     }
 }

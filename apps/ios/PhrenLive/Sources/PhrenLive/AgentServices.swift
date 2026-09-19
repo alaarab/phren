@@ -169,6 +169,91 @@ extension PhrenConnection {
         }
     }
 
+    /// A git checkout the computer offers for "Add project", and whether
+    /// phren there already tracks it.
+    public struct RepoCandidate: Sendable, Equatable, Identifiable {
+        public let directory: String
+        public let name: String
+        public let source: String
+        public let registered: Bool
+        public let lastSeen: String?
+        public init(directory: String, name: String, source: String, registered: Bool, lastSeen: String?) {
+            self.directory = directory; self.name = name; self.source = source; self.registered = registered; self.lastSeen = lastSeen
+        }
+        public var id: String { directory }
+        public var sourceLabel: String {
+            switch source {
+            case "activity": return "an agent worked here"
+            case "herdr": return "a Herdr workspace"
+            default: return "in your projects folder"
+            }
+        }
+    }
+
+    /// The repositories on the computer — where agents have worked, Herdr's
+    /// saved workspaces, then the usual project folders — newest first.
+    public static func candidateRepos(host: LiveHost, privateKey: Data) async throws -> [RepoCandidate] {
+        let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: .init(path: "/v1/projects/repos"))
+        guard data.count <= 262_144, let response = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let repos = response["repos"] as? [[String: Any]] else {
+            throw PhrenKitError.validation("The computer returned an unusable answer. Update Phren Hook.")
+        }
+        return repos.prefix(64).compactMap { entry in
+            guard let directory = entry["directory"] as? String, directory.hasPrefix("/"), directory.utf8.count <= 4_096,
+                  !directory.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
+                  let name = entry["name"] as? String, name.range(of: #"^[a-z0-9][a-z0-9-]{0,99}$"#, options: .regularExpression) != nil else { return nil }
+            return RepoCandidate(directory: directory, name: name, source: entry["source"] as? String ?? "search",
+                                 registered: entry["registered"] as? Bool ?? false, lastSeen: entry["lastSeen"] as? String)
+        }
+    }
+
+    /// What `POST /v1/projects/add` reports: the project phren named, its
+    /// folder, and whether the store reached GitHub (`pushed`) — if not, the
+    /// phone will not see the project until the computer next syncs.
+    public struct EnrolledProject: Sendable, Equatable {
+        public let project: String
+        public let directory: String
+        public let cloned: Bool
+        public let store: String
+        public let storeDetail: String?
+        public init(project: String, directory: String, cloned: Bool, store: String, storeDetail: String?) {
+            self.project = project; self.directory = directory; self.cloned = cloned; self.store = store; self.storeDetail = storeDetail
+        }
+        public var pushed: Bool { store == "pushed" }
+    }
+
+    /// "Add project": phren on the computer enrolls `directory`, or clones
+    /// `cloneURL` into its projects folder first. One of the two.
+    public static func enrollProject(host: LiveHost, privateKey: Data, directory: String? = nil, cloneURL: String? = nil) async throws -> EnrolledProject {
+        var body: [String: Any] = [:]
+        if let cloneURL {
+            let url = cloneURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard url.range(of: #"^(https://[a-z0-9.-]+/[\w.-]+/[\w.-]+?|git@[a-z0-9.-]+:[\w.-]+/[\w.-]+?)(\.git)?/?$"#, options: [.regularExpression, .caseInsensitive]) != nil else {
+                throw PhrenKitError.validation("Enter a GitHub repository URL (https://github.com/owner/repo).")
+            }
+            body["cloneUrl"] = url
+        } else if let directory {
+            guard directory.hasPrefix("/"), directory.utf8.count <= 4_096, !directory.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else {
+                throw PhrenKitError.validation("Enter the full folder path on this computer.")
+            }
+            body["directory"] = directory
+        } else { throw PhrenKitError.validation("Choose a folder or a repository URL.") }
+        var request = GatewayRequest(path: "/v1/projects/add", body: try JSONSerialization.data(withJSONObject: body))
+        request.timeoutSeconds = cloneURL == nil ? 60 : 240
+        let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: request)
+        return try enrolledProject(from: data)
+    }
+
+    static func enrolledProject(from data: Data) throws -> EnrolledProject {
+        guard let response = try JSONSerialization.jsonObject(with: data) as? [String: Any], response["ok"] as? Bool == true,
+              let project = response["project"] as? String, project.range(of: #"^[a-z0-9][a-z0-9-]{0,99}$"#, options: .regularExpression) != nil,
+              let directory = response["directory"] as? String, directory.hasPrefix("/"), directory.utf8.count <= 4_096 else {
+            throw PhrenKitError.validation("The computer didn't confirm the new project. Check phren status there before trying again.")
+        }
+        return EnrolledProject(project: project, directory: directory, cloned: response["cloned"] as? Bool ?? false,
+                               store: response["store"] as? String ?? "unknown", storeDetail: (response["storeDetail"] as? String).map { String($0.prefix(300)) })
+    }
+
     public enum LaunchKind: String, Sendable, CaseIterable, Identifiable {
         case codex, claude, copilot, opencode
         public var id: String { rawValue }

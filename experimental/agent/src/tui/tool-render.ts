@@ -30,7 +30,7 @@ export function formatToolInput(name: string, input: Record<string, unknown>): s
   switch (name) {
     case "read_file":
     case "write_file":
-    case "edit_file": return input.file_path as string ?? "";
+    case "edit_file": return (input.path as string) ?? (input.file_path as string) ?? "";
     case "shell": return (input.command as string ?? "").slice(0, 60);
     case "glob": return input.pattern as string ?? "";
     case "grep": return `/${input.pattern ?? ""}/ ${input.path ?? ""}`;

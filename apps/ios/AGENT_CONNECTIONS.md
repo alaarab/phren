@@ -89,6 +89,9 @@ Unbound or conflicting identities remain unavailable for chat and attachments.
 - `GET /v1/projects/locate?project=<name>`: where the project lives on that
   computer (activity journal, Herdr's saved workspaces, phren's registration,
   search roots), existing folders only.
+- `GET /v1/projects/repos` and `POST /v1/projects/add`: "Add project" — the
+  computer's untracked checkouts, and enrolling one (or cloning a GitHub URL)
+  with `phren add` there; the computer pushes its store so the phone can pull.
 - `WS /v1/transcripts`: backlog, append, and older frames with provider JSON rows
   and stable line numbers. History requests include `beforeLine`.
 - `GET /v1/transcripts/history`: the same exact target tuple plus a positive

@@ -29,7 +29,12 @@ export async function* prefetchFirst<T>(iterator: AsyncIterator<T>, first: Itera
 /** Default per-call budget when the tool declares none. */
 const DEFAULT_TOOL_TIMEOUT_MS = 120_000;
 
-type ToolExecResult = { block: ToolUseBlock; output: string; is_error: boolean; durationMs: number; images?: AgentToolImage[] };
+type ToolExecResult = { block: ToolUseBlock; output: string; is_error: boolean; durationMs: number; images?: AgentToolImage[]; cancelled?: boolean };
+
+/** Results that were synthesized by the loop rather than produced by a tool. */
+function isSyntheticResult(output: string): boolean {
+  return output.startsWith("Cancelled by user.") || output.startsWith("User denied permission.");
+}
 
 /**
  * Run tool blocks with concurrency limit. Tracks execution duration per tool.
@@ -64,7 +69,7 @@ export async function runToolsConcurrently(
     const batch = uniques.slice(i, i + MAX_TOOL_CONCURRENCY);
     const batchResults = await Promise.all(
       batch.map(async (block) => {
-        if (turnSignal?.aborted) return { block, output: "Cancelled by user.", is_error: true, durationMs: 0 };
+        if (turnSignal?.aborted) return { block, output: "Cancelled by user.", is_error: true, durationMs: 0, cancelled: true };
         const timeoutMs = registry.get(block.name)?.timeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS;
         const start = Date.now();
         const abort = new AbortController();
@@ -97,7 +102,7 @@ export async function runToolsConcurrently(
           };
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
-          return { block, output: msg, is_error: true, durationMs: Date.now() - start };
+          return { block, output: msg, is_error: true, durationMs: Date.now() - start, cancelled: msg === "Cancelled by user." };
         } finally {
           if (timer) clearTimeout(timer);
           if (onTurnAbort) turnSignal?.removeEventListener("abort", onTurnAbort);
@@ -150,6 +155,9 @@ export async function consumeStream(
 
   // Map block index -> tool state for Anthropic-style index-based IDs
   const toolsByIndex = new Map<string, { id: string; name: string; jsonParts: string[] }>();
+  // Tool calls whose accumulated JSON failed to parse, held until the turn's
+  // stop_reason is known (see tool_use_end).
+  const malformedTools: Array<{ id: string; name: string }> = [];
 
   // Reasoning must land BEFORE the text/tool blocks it preceded: Anthropic
   // requires thinking blocks first in the assistant content array.
@@ -201,14 +209,23 @@ export async function consumeStream(
       const tool = toolsByIndex.get(delta.id);
       if (tool) {
         const jsonStr = tool.jsonParts.join("");
-        let input: Record<string, unknown> = {};
+        let input: Record<string, unknown> | null = null;
         try {
-          input = JSON.parse(jsonStr);
-        } catch {
-          process.stderr.write(`\x1b[33m[warning] Malformed tool_use JSON for ${tool.name} (${tool.id}), skipping block\x1b[0m\n`);
-          continue;
+          const parsed: unknown = JSON.parse(jsonStr);
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            input = parsed as Record<string, unknown>;
+          }
+        } catch { /* fall through to malformed handling */ }
+        if (input) {
+          content.push({ type: "tool_use", id: tool.id, name: tool.name, input });
+        } else {
+          // Defer: a malformed call must not become an orphan tool_use on a
+          // truncated (max_tokens) or text turn, where runTurn never executes
+          // it. If the turn does end as tool_use, emit it with empty input so
+          // the tool runs and produces the matching tool_result.
+          malformedTools.push({ id: tool.id, name: tool.name });
+          process.stderr.write(`\x1b[33m[warning] Malformed tool_use JSON for ${tool.name} (${tool.id}); using empty input\x1b[0m\n`);
         }
-        content.push({ type: "tool_use", id: tool.id, name: tool.name, input });
       }
     } else if (delta.type === "done") {
       stop_reason = delta.stop_reason;
@@ -225,6 +242,15 @@ export async function consumeStream(
       (onTextDelta ?? process.stdout.write.bind(process.stdout))("\n");
     }
     content.push({ type: "text", text: currentText });
+  }
+
+  // Only a genuine tool_use turn can safely carry a synthesized tool block;
+  // runTurn executes it and pairs the result. On any other stop reason the
+  // block is dropped so the durable history never holds an orphan tool_use.
+  if (stop_reason === "tool_use") {
+    for (const tool of malformedTools) {
+      content.push({ type: "tool_use", id: tool.id, name: tool.name, input: {} });
+    }
   }
 
   return { content, stop_reason };
@@ -255,7 +281,7 @@ export async function executeToolBlocks(
   const results: ContentBlock[] = [];
   let toolCallCount = 0;
 
-  for (const { block, output, is_error, durationMs, images } of execResults) {
+  for (const { block, output, is_error, durationMs, images, cancelled } of execResults) {
     toolCallCount++;
     let finalOutput = output;
 
@@ -269,7 +295,11 @@ export async function executeToolBlocks(
       if (reminder) finalOutput += reminder;
     }
 
-    if (is_error && ctx.phrenCtx) {
+    // Synthetic cancellation/denial results are not tool failures: recovery
+    // search and auto-capture would record noise and, for a cancelled turn,
+    // run after the user has already asked to stop.
+    const synthetic = !!cancelled || isSyntheticResult(output);
+    if (is_error && ctx.phrenCtx && !synthetic) {
       try {
         const recovery = await searchErrorRecovery(ctx.phrenCtx, output);
         if (recovery) finalOutput += recovery;
@@ -280,7 +310,11 @@ export async function executeToolBlocks(
       } catch { /* best effort */ }
     }
 
-    if (ctx.hooks?.onToolEnd) {
+    if (cancelled) {
+      // The tool never produced a result, so a completed-call card would
+      // misrepresent it; report the cancellation as status instead.
+      if (ctx.verbose) ctx.status(`\x1b[2m  ← ${block.name} cancelled before execution\x1b[0m\n`);
+    } else if (ctx.hooks?.onToolEnd) {
       ctx.hooks.onToolEnd(block.name, block.input, finalOutput, is_error, durationMs);
     } else if (ctx.verbose) {
       const preview = finalOutput.slice(0, 200);

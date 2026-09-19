@@ -337,7 +337,7 @@ export async function runAgentCli(raw: string[]) {
     return undefined;
   };
 
-  const resumedLog = args.resume && !args.interactive && !args.multi && !args.team ? makeResumedLog() : undefined;
+  const resumedLog = args.resume ? makeResumedLog() : undefined;
 
   const agentConfig = {
     provider,

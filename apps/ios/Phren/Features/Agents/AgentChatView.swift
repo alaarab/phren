@@ -451,14 +451,19 @@ struct AgentChatView: View {
         .overlay(alignment: .topLeading) { if AgentChatFixture.enabled { ChatFixtureReport() } }
         #endif
         .overlay {
-            if showingAgentSwitcher {
-                ZStack(alignment: .leading) {
-                    Color.black.opacity(0.34).ignoresSafeArea().onTapGesture { closeAgentDrawer() }
+            // The ZStack stays put so the backdrop and the panel can animate
+            // in and out on their own: the scrim fades, the drawer slides.
+            ZStack(alignment: .leading) {
+                if showingAgentSwitcher {
+                    Color.black.opacity(0.34).ignoresSafeArea()
+                        .transition(.opacity)
+                        .onTapGesture { closeAgentDrawer() }
                     AgentDrawer(current: session, panes: model.panes, selectedPaneID: model.target?.paneID,
                                 choosePane: { pane in model.choose(pane, session: session); refresh = UUID() },
                                 chooseSession: switchSession, close: closeAgentDrawer)
-                }.zIndex(20)
-            }
+                        .transition(.move(edge: .leading))
+                }
+            }.zIndex(20)
         }
         .interactiveDismissDisabled(model.hasMore || model.loadingHistory)
         .navigationTitle("Agent chat")

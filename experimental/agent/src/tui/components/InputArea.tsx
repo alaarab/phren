@@ -109,7 +109,7 @@ export function PermissionsLine({ mode, theme, running, agents, selectedAgentId,
       {showPerm ? (
         <Text>{"  "}<Text color={color}>{icon} {label}</Text><Text dimColor> (shift+tab to cycle){running ? " \u00b7 esc to interrupt" : ""}</Text></Text>
       ) : (
-        <Text>{"  "}{running ? <Text dimColor>esc to interrupt</Text> : null}</Text>
+        <Text>{"  "}<Text dimColor>shift+tab permissions · ctrl+o tools · ctrl+f find · ctrl+t plan{running ? " · esc to interrupt" : ""}</Text></Text>
       )}
       {hasAgents ? (
         <Text>

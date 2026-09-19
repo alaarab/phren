@@ -10,6 +10,10 @@ number counts up on its own.
 
 ### New
 
+- **Add project** from the Projects tab: pick a computer, pick one of the
+  repositories it offers (or paste a GitHub URL for it to clone), and phren
+  there adds it and syncs the store — the project opens here, ready for
+  **Open on a computer**. An empty Projects tab now starts you there.
 - opencode sessions join the chat: pick it in **Open on a computer**, then read
   and send in the conversation like any other agent. A session that restarts in
   the same pane now attaches instead of staying on "Starting…".

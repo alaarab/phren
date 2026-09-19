@@ -548,6 +548,23 @@ import UIKit
         return [.init(directory: "/work/\(project)", source: "activity", lastSeen: "2026-09-12T01:00:00Z"),
                 .init(directory: "/Users/fixture/Projects/\(project)", source: "search", lastSeen: nil)]
     }
+    /// "Add project": the repositories a computer would offer, and what it
+    /// reports after enrolling one. Recorded so a UI test can check the ask.
+    static var enrollments: [(directory: String?, cloneURL: String?)] = []
+    static func repos() async throws -> [PhrenConnection.RepoCandidate] {
+        try await Task.sleep(for: .milliseconds(150))
+        return [.init(directory: "/work/nightjar", name: "nightjar", source: "activity", registered: false, lastSeen: "2026-09-12T01:00:00Z"),
+                .init(directory: "/Users/fixture/Projects/lantern", name: "lantern", source: "search", registered: false, lastSeen: nil),
+                .init(directory: "/Users/fixture/Projects/phren", name: "phren", source: "herdr", registered: true, lastSeen: nil)]
+    }
+    static func enroll(directory: String?, cloneURL: String?) async throws -> PhrenConnection.EnrolledProject {
+        try await Task.sleep(for: .milliseconds(400))
+        enrollments.append((directory, cloneURL))
+        if flag("--enroll-fails") { throw PhrenKitError.validation("git clone failed: the fixture said no.") }
+        let folder = directory ?? "/Users/fixture/Projects/" + (cloneURL?.split(separator: "/").last.map { $0.replacingOccurrences(of: ".git", with: "") } ?? "repo")
+        let name = String(folder.split(separator: "/").last ?? "repo")
+        return .init(project: name, directory: folder, cloned: cloneURL != nil, store: flag("--enroll-unpushed") ? "committed" : "pushed", storeDetail: flag("--enroll-unpushed") ? "no remote configured" : nil)
+    }
     /// Simulator actions the fixture screen sent, for tests.
     nonisolated(unsafe) static var simulatorActions: [String] = []
     static func launch(host: LiveHost, cwd: String, label: String, kind: String) async throws -> LiveAgentSession {
