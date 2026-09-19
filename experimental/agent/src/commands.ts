@@ -20,6 +20,7 @@ import { configCommand } from "./commands/config.js";
 import type { PermissionMode, PermissionConfig } from "./permissions/types.js";
 import { loadInputMode, saveInputMode, savePermissionMode } from "./settings.js";
 import { addAllow } from "./permissions/allowlist.js";
+import { loadCustomCommands, expandCustomCommand, customCommandInfos, type CustomCommand, type CustomCommandInfo } from "./custom-commands.js";
 
 const DIM = "\x1b[2m";
 const RESET = "\x1b[0m";
@@ -66,11 +67,7 @@ export function createCommandContext(session: AgentSession, contextLimit: number
   };
 }
 
-/**
- * All slash commands available in the agent, including TUI-only commands.
- * Used for tab completion in the TUI.
- */
-export const COMMAND_NAMES: readonly string[] = [
+const BUILTIN_COMMAND_NAMES: readonly string[] = [
   "/help", "/turns", "/clear", "/cwd", "/files", "/cost", "/plan", "/undo",
   "/context", "/model", "/provider", "/preset", "/session", "/history",
   "/compact", "/diff", "/git", "/mem", "/ask", "/resume", "/review", "/config", "/spawn", "/agents",
@@ -78,6 +75,51 @@ export const COMMAND_NAMES: readonly string[] = [
   "/mode", "/permissions", "/verbose", "/theme", "/agent", "/rewind", "/fork",
   "/exit", "/quit", "/q",
 ];
+
+/**
+ * All slash commands available in the agent, including TUI-only commands.
+ * Used for tab completion in the TUI.
+ */
+export const COMMAND_NAMES: string[] = [...BUILTIN_COMMAND_NAMES];
+
+const BUILTIN_BARE_NAMES = new Set(BUILTIN_COMMAND_NAMES.map((name) => name.slice(1)));
+
+let customCommands: CustomCommand[] = [];
+
+export function setCustomCommands(commands: CustomCommand[]): void {
+  customCommands = commands.filter((command) => !BUILTIN_BARE_NAMES.has(command.name));
+  COMMAND_NAMES.length = 0;
+  COMMAND_NAMES.push(...BUILTIN_COMMAND_NAMES, ...customCommands.map((command) => `/${command.name}`));
+}
+
+export function loadAndRegisterCustomCommands(cwd = process.cwd()): CustomCommand[] {
+  const commands = loadCustomCommands(cwd);
+  setCustomCommands(commands);
+  return commands;
+}
+
+export function getCustomCommands(): CustomCommand[] {
+  return customCommands;
+}
+
+export function getCustomCommandInfos(): CustomCommandInfo[] {
+  return customCommandInfos(customCommands);
+}
+
+export function resolveCustomCommand(input: string): string | null {
+  if (!input.startsWith("/")) return null;
+  const trimmed = input.trim();
+  const parts = trimmed.split(/\s+/);
+  const cmd = parts[0];
+  if (BUILTIN_BARE_NAMES.has(cmd.slice(1))) return null;
+  const bare = cmd.slice(1);
+  if (!bare) return null;
+  const match = customCommands.find((command) => command.name === bare);
+  if (!match) return null;
+  const args = trimmed.slice(cmd.length).trim();
+  const expanded = expandCustomCommand(match, args);
+  return expanded.length > 0 ? expanded : null;
+}
 
 /**
  * /skill-name gesture: an unknown slash input matching a phren skill (by name,

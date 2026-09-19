@@ -4,7 +4,17 @@ export interface PriorSummaryInfo {
   endedAt?: string;
 }
 
-export function buildSystemPrompt(phrenContext: string, priorSummary: PriorSummaryInfo | string | null, providerInfo?: { name: string; model?: string }): string {
+export interface CustomCommandHint {
+  name: string;
+  description?: string;
+}
+
+export function buildSystemPrompt(
+  phrenContext: string,
+  priorSummary: PriorSummaryInfo | string | null,
+  providerInfo?: { name: string; model?: string },
+  customCommands?: CustomCommandHint[],
+): string {
   const modelNote = providerInfo ? ` You are running on ${providerInfo.name}${providerInfo.model ? ` (model: ${providerInfo.model})` : ""}.` : "";
   const parts = [
     `You are phren-agent, an autonomous coding agent with persistent memory.${modelNote}`,
@@ -53,6 +63,13 @@ export function buildSystemPrompt(phrenContext: string, priorSummary: PriorSumma
 
   if (phrenContext) {
     parts.push("", phrenContext);
+  }
+
+  if (customCommands && customCommands.length > 0) {
+    const lines = customCommands.map((command) =>
+      command.description ? `- /${command.name} — ${command.description}` : `- /${command.name}`,
+    );
+    parts.push("", `## Custom commands\nThe user has defined these slash commands; they expand to instructions you should follow:\n${lines.join("\n")}`);
   }
 
   return parts.join("\n");

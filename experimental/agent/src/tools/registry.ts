@@ -3,6 +3,12 @@ import type { AgentToolDef } from "../providers/types.js";
 import type { PermissionConfig } from "../permissions/types.js";
 import { checkPermission } from "../permissions/checker.js";
 import { askUser as defaultAskUser } from "../permissions/prompt.js";
+import {
+  runPreToolUseHooks,
+  runPostToolUseHooks,
+  type HooksConfig,
+  type HookExecutor,
+} from "../user-hooks.js";
 
 /** Signature for the permission prompt function. */
 export type AskUserFn = (toolName: string, input: Record<string, unknown>, reason: string) => Promise<boolean>;
@@ -16,6 +22,8 @@ export class ToolRegistry {
     projectRoot: process.cwd(),
     allowedPaths: [],
   };
+  hookConfig: HooksConfig | null = null;
+  hookExecutor?: HookExecutor;
 
   register(tool: AgentTool): void {
     this.tools.set(tool.name, tool);
@@ -53,6 +61,12 @@ export class ToolRegistry {
     const tool = this.tools.get(name);
     if (!tool) return { output: `Unknown tool: ${name}`, is_error: true };
 
+    const hookOptions = { cwd: this.permissionConfig.projectRoot, executor: this.hookExecutor };
+    const pre = await runPreToolUseHooks(this.hookConfig, name, input, hookOptions);
+    if (pre.denied) {
+      return { output: pre.message, is_error: true };
+    }
+
     // Permission check — always enforced
     const rule = checkPermission(this.permissionConfig, name, input);
     if (rule.verdict === "deny") {
@@ -65,11 +79,15 @@ export class ToolRegistry {
       }
     }
 
+    let result: AgentToolResult;
     try {
-      return await tool.execute(input, signal);
+      result = await tool.execute(input, signal);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      return { output: `Tool error: ${msg}`, is_error: true };
+      result = { output: `Tool error: ${msg}`, is_error: true };
     }
+
+    await runPostToolUseHooks(this.hookConfig, name, input, result.output, !!result.is_error, hookOptions);
+    return result;
   }
 }
