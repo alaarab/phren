@@ -5,7 +5,8 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { once } from "node:events";
 import path from "node:path";
-import { dispatch } from "./transport.js";
+import { decodeShellDirectory, dispatch, shellEnvironment } from "./transport.js";
+import { homedir } from "node:os";
 import { forcedCommand, upgradeKeys } from "./install.js";
 
 const hookBundle = path.resolve(process.env.PHREN_TEST_HOOK_BUNDLE || "packages/cli/dist/bridge-hook.mjs");
@@ -49,8 +50,35 @@ describe("Phren preview dispatcher", () => {
     "phren-hook v1 web /tmp/agent.sock 80", "phren-hook v1 web 127.0.0.1 /tmp/agent.sock",
     "phren-hook v1 web 127.0.0.1 80; id", "phren-hook v1 web 127.0.0.1 80\n", "phren-hook v1 web 127.0.0.1 80 extra",
     "phren-hook v1 terminal default\n",
+    "phren-hook v1 shell", "phren-hook v1 shell L3RtcA== claude", "phren-hook v1 shell L3RtcA claude; id",
+    "phren-hook v1 shell L3RtcA sh", "phren-hook v1 shell L3RtcA claude extra", "phren-hook v1 shell L3RtcA\n",
+    "phren-hook v1 shell " + Buffer.from("relative/dir").toString("base64url"),
+    "phren-hook v1 shell " + Buffer.from("/tmp/x\u0000y").toString("base64url"),
+    "phren-hook v1 shell " + Buffer.from("/usr/bin").toString("base64url") + " claude",
   ])("rejects destination or command injection: %j", async command => {
     await expect(dispatch(command)).rejects.toMatchObject({ status: 403 });
+  });
+
+  it("decodes only canonical base64url absolute folders for project shells", () => {
+    expect(decodeShellDirectory(Buffer.from("/Users/me/Projects/app").toString("base64url"))).toBe("/Users/me/Projects/app");
+    expect(decodeShellDirectory(Buffer.from("/Users/me/Projects/app").toString("base64"))).toBeUndefined();
+    expect(decodeShellDirectory(Buffer.from("Projects/app").toString("base64url"))).toBeUndefined();
+    expect(decodeShellDirectory("")).toBeUndefined();
+  });
+
+  it("opens a project shell only inside home or a located project, and only on a PTY", async () => {
+    // Under home: passes folder validation and stops at the PTY check (this test has none).
+    const home = Buffer.from(homedir()).toString("base64url");
+    await expect(dispatch(`phren-hook v1 shell ${home}`)).rejects.toThrow("Request an SSH terminal first.");
+    await expect(dispatch(`phren-hook v1 shell ${home} codex`)).rejects.toThrow("Request an SSH terminal first.");
+    await expect(dispatch("phren-hook v1 shell " + Buffer.from("/nonexistent-phren-dir").toString("base64url"))).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("strips Herdr pane context from shells and pins a fixed PATH", () => {
+    const env = shellEnvironment({ HERDR_PANE_ID: "w1:p1", HERDR_ENV: "1", SHELL: "/bin/zsh", PATH: "/evil" });
+    expect(Object.keys(env).some(key => key.startsWith("HERDR_"))).toBe(false);
+    expect(env.SHELL).toBe("/bin/zsh");
+    expect(env.PATH).not.toContain("/evil");
   });
 
   it.each(["127.0.0.1", "::1"])("relays preview bytes only to the selected %s TCP port", async host => {

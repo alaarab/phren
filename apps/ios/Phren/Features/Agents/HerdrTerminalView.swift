@@ -70,7 +70,7 @@ private final class HerdrTerminalModel: NSObject, @preconcurrency TerminalViewDe
         terminal.selectedTextForegroundColor = UIColor(PhrenTheme.text)
         terminal.selectionHandleColor = UIColor(PhrenTheme.lavender)
     }
-    func run(host: LiveHost, session: LiveAgentSession?, target: AgentChatTarget?, paneID: String?, commandMenu: Bool = false) async {
+    func run(host: LiveHost, session: LiveAgentSession?, target: AgentChatTarget?, paneID: String?, route: TerminalRoute? = nil, commandMenu: Bool = false) async {
         let run = UUID(); generation = run
         connected = false; reconnecting = false; error = nil; pane = nil
         defer {
@@ -143,6 +143,9 @@ private final class HerdrTerminalModel: NSObject, @preconcurrency TerminalViewDe
             }
             var recovery = HerdrTerminalRecovery()
             var receivedBefore = false
+            // A shell route starts a fresh process on every connection, so a
+            // dropped link ends the session instead of silently restarting it.
+            let restarts = route?.needsHerdr ?? true
             while !Task.isCancelled {
                 let socket = HerdrTerminalSocket(); self.socket = socket
                 connectionID = UUID()
@@ -150,7 +153,7 @@ private final class HerdrTerminalModel: NSObject, @preconcurrency TerminalViewDe
                 var graphicsFilter = TerminalGraphicsFilter()
                 var first = true
                 do {
-                    for try await bytes in PhrenConnection.herdrTerminal(host: host, privateKey: key, socket: socket,
+                    for try await bytes in PhrenConnection.herdrTerminal(host: host, privateKey: key, socket: socket, route: route,
                                                                        columns: terminal.getTerminal().cols, rows: terminal.getTerminal().rows) {
                         try Task.checkCancellation()
                         guard generation == run else { return }
@@ -180,6 +183,7 @@ private final class HerdrTerminalModel: NSObject, @preconcurrency TerminalViewDe
                     guard !Task.isCancelled, generation == run else { return }
                     resize.detach()
                     connected = false; writes?.cancel(); writes = nil; self.socket = nil
+                    if !restarts { throw receivedBefore ? PhrenKitError.validation("The session ended. Reconnect to start a new one.") : error }
                     guard let delay = recovery.delay(after: error, now: HerdrTerminalRecovery.now()) else { throw error }
                     reconnecting = true
                     try await Task.sleep(for: .seconds(delay))
@@ -336,6 +340,9 @@ struct HerdrTerminalView: View {
     var session: LiveAgentSession? = nil
     var target: AgentChatTarget? = nil
     var paneID: String? = nil
+    /// Set for a terminal that does not go through Herdr (a project shell or
+    /// agent started straight over SSH); nil attaches the host's Herdr server.
+    var route: TerminalRoute? = nil
     var commandMenu = false
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dismiss) private var dismiss
@@ -453,7 +460,7 @@ struct HerdrTerminalView: View {
             model.terminal.onDictate = nil
         }
         .task(id: Run(active: active, reconnect: reconnect)) {
-            if active { await model.run(host: host, session: session, target: target, paneID: paneID, commandMenu: commandMenu) }
+            if active { await model.run(host: host, session: session, target: target, paneID: paneID, route: route, commandMenu: commandMenu) }
         }
     }
     private func closeAgents() { withAnimation(.easeInOut(duration: 0.18)) { showingAgents = false } }
@@ -478,7 +485,10 @@ struct HerdrTerminalView: View {
                 .accessibilityLabel(model.connected && active ? "Connected" : "Disconnected")
             VStack(alignment: .leading, spacing: 1) {
                 Text(host.name).font(.subheadline.weight(.medium)).lineLimit(1)
-                if let name = host.herdrSession, name != "default" {
+                if case .shell(let directory, let agent) = route {
+                    Text((agent?.title ?? "Shell") + " · " + (directory as NSString).lastPathComponent)
+                        .font(.caption2).foregroundStyle(PhrenTheme.textMuted).lineLimit(1)
+                } else if let name = host.herdrSession, name != "default" {
                     Text(name).font(.caption2).foregroundStyle(PhrenTheme.textMuted).lineLimit(1)
                 }
             }

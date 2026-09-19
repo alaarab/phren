@@ -82,7 +82,7 @@ describe("Phren Hook boundaries", () => {
     expect(upgradeKeys(result.text).changed).toBe(0);
   });
   it("rejects arbitrary commands, shells, and malformed terminal destinations", async () => {
-    for (const command of ["", "sh", "phren-hook v1 pipe; id", "phren-hook v1 terminal ../../work", "phren-hook v1 terminal work\necho secret", "phren-hook v2 pipe"]) {
+    for (const command of ["", "sh", "phren-hook v1 pipe; id", "phren-hook v1 shell /Users/me", "phren-hook v1 terminal ../../work", "phren-hook v1 terminal work\necho secret", "phren-hook v2 pipe"]) {
       await expect(dispatch(command)).rejects.toThrow("only permits");
     }
   });

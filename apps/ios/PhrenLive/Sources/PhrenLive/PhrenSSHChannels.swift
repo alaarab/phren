@@ -31,13 +31,13 @@ final class PhrenTerminalChannel: ChannelDuplexHandler {
     typealias OutboundIn = SSHChannelData
     let exchange: Exchange
     let socket: HerdrTerminalSocket
-    let server: String
+    let route: TerminalRoute
     let columns: Int
     let rows: Int
     private var stage = 0
     private var outstanding = 0
-    init(exchange: Exchange, socket: HerdrTerminalSocket, server: String, columns: Int, rows: Int) {
-        self.exchange = exchange; self.socket = socket; self.server = server; self.columns = columns; self.rows = rows
+    init(exchange: Exchange, socket: HerdrTerminalSocket, route: TerminalRoute, columns: Int, rows: Int) {
+        self.exchange = exchange; self.socket = socket; self.route = route; self.columns = columns; self.rows = rows
     }
     func handlerAdded(context: ChannelHandlerContext) { socket.attach(context.channel) }
     func channelActive(context: ChannelHandlerContext) {
@@ -50,7 +50,7 @@ final class PhrenTerminalChannel: ChannelDuplexHandler {
         if event is ChannelSuccessEvent {
             if stage == 0 {
                 stage = 1
-                context.triggerUserOutboundEvent(SSHChannelRequestEvent.ExecRequest(command: "phren-hook v1 terminal " + server, wantReply: true), promise: nil)
+                context.triggerUserOutboundEvent(SSHChannelRequestEvent.ExecRequest(command: route.command, wantReply: true), promise: nil)
             } else if stage == 1 {
                 stage = 2
                 context.channel.setOption(ChannelOptions.autoRead, value: false).whenFailure { [exchange] in exchange.finish(.failure($0)) }

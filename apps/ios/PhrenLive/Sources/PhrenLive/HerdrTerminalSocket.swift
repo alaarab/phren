@@ -30,15 +30,36 @@ public final class HerdrTerminalSocket: @unchecked Sendable {
     }
 }
 
+/// What the SSH PTY runs on the computer. The dispatcher there accepts exactly
+/// these commands; anything else the forced key refuses.
+public enum TerminalRoute: Sendable, Hashable {
+    /// Attach to a running Herdr server.
+    case herdr(server: String)
+    /// No Herdr: a login shell, or one agent, started in a project folder.
+    /// The folder travels base64url-encoded so paths never touch the command grammar.
+    case shell(directory: String, agent: PhrenConnection.LaunchKind?)
+
+    public var command: String {
+        switch self {
+        case .herdr(let server): return "phren-hook v1 terminal " + server
+        case .shell(let directory, let agent):
+            let folder = Data(directory.utf8).base64EncodedString()
+                .replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
+            return "phren-hook v1 shell " + folder + (agent.map { " " + $0.rawValue } ?? "")
+        }
+    }
+    public var needsHerdr: Bool { if case .herdr = self { return true } else { return false } }
+}
+
 extension PhrenConnection {
     public static func herdrTerminal(host: LiveHost, privateKey: Data, socket: HerdrTerminalSocket,
-                                     columns: Int = 80, rows: Int = 24) -> HerdrTerminalOutput {
+                                     route: TerminalRoute? = nil, columns: Int = 80, rows: Int = 24) -> HerdrTerminalOutput {
         let buffer = TerminalOutputBuffer()
         let signals = AsyncThrowingStream<Void, Error>(bufferingPolicy: .bufferingNewest(1)) { continuation in
             let task = Task {
                 do {
                     let request = GatewayRequest(path: "", streaming: true, terminalSocket: socket,
-                                                 terminalServer: host.herdrSession ?? "default",
+                                                 terminalRoute: route ?? .herdr(server: host.herdrSession ?? "default"),
                                                  terminalColumns: min(500, max(10, columns)), terminalRows: min(300, max(2, rows)))
                     _ = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: request) { data in
                         try buffer.append(data)

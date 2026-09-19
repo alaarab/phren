@@ -5,6 +5,21 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { BridgeError, object, PROTOCOL, serverName, socketPath, type Json } from "./protocol.js";
 import { rpc } from "./herdr.js";
+import { launchDirectory } from "./projects.js";
+
+/** Decode the base64url project folder from a `phren-hook v1 shell` command; undefined when it is not a path. */
+export function decodeShellDirectory(encoded: string): string | undefined {
+  if (!/^[A-Za-z0-9_-]{1,8192}$/.test(encoded)) return undefined;
+  const decoded = Buffer.from(encoded, "base64url");
+  if (decoded.toString("base64url") !== encoded) return undefined;
+  const dir = decoded.toString("utf8");
+  return path.isAbsolute(dir) && !/[\x00-\x1f\x7f]/.test(dir) && !dir.includes("\ufffd") ? dir : undefined;
+}
+export function shellEnvironment(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env = Object.fromEntries(Object.entries(base).filter(([key]) => !key.startsWith("HERDR_")));
+  env.PATH = [path.join(homedir(), ".local/bin"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"].join(":");
+  return env;
+}
 
 export async function health(): Promise<Json> {
   return new Promise((resolve, reject) => {
@@ -53,17 +68,33 @@ export async function dispatch(command: string): Promise<void> {
     await pipe({ host: preview[1], port: Number(preview[2]) });
     return;
   }
+  // Without Herdr: a login shell, or one agent, in a validated project folder
+  // on the SSH PTY itself. Nothing persists after the phone disconnects.
+  const shell = /^phren-hook v1 shell ([A-Za-z0-9_-]{1,8192})(?: (codex|claude|copilot|opencode))?$/.exec(command);
+  if (shell && shell[0] === command) {
+    const raw = decodeShellDirectory(shell[1]);
+    if (!raw) throw new BridgeError(403, "The shell folder is not a valid absolute path.");
+    const cwd = await launchDirectory(raw);
+    if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("Request an SSH terminal first.");
+    const login = process.env.SHELL && path.isAbsolute(process.env.SHELL) ? process.env.SHELL : "/bin/sh";
+    const [file, args] = shell[2] ? [shell[2], []] : [login, ["-l"]];
+    await attach(file, args, { cwd, env: shellEnvironment() }, shell[2] ? `${shell[2]} exited.` : "The shell exited.");
+    return;
+  }
   const terminal = /^phren-hook v1 terminal ([A-Za-z0-9_.-]{1,100})$/.exec(command);
-  if (!terminal || terminal[0] !== command) throw new BridgeError(403, "This SSH key only permits Phren Hook, loopback web previews, and existing Herdr terminals.");
+  if (!terminal || terminal[0] !== command) throw new BridgeError(403, "This SSH key only permits Phren Hook, loopback web previews, project shells, and existing Herdr terminals.");
   const server = serverName.parse(terminal[1]);
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("Request an SSH terminal first.");
   // Verify the named server exists; never create a workspace or an agent implicitly.
   await rpc(server, "ping");
-  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("HERDR_")));
-  env.PATH = [path.join(homedir(), ".local/bin"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"].join(":");
+  await attach("herdr", ["session", "attach", server], { env: shellEnvironment() }, "The Herdr terminal disconnected.");
+}
+
+/** Run one program on the inherited SSH PTY until it exits or the session hangs up. */
+async function attach(file: string, args: string[], options: { cwd?: string; env: NodeJS.ProcessEnv }, failure: string): Promise<void> {
   await new Promise<void>((resolve, reject) => {
-    const child = spawn("herdr", ["session", "attach", server], { env, stdio: "inherit" });
-    child.once("error", reject); child.once("exit", code => code === 0 ? resolve() : reject(new Error("The Herdr terminal disconnected.")));
+    const child = spawn(file, args, { ...options, stdio: "inherit" });
+    child.once("error", reject); child.once("exit", code => code === 0 ? resolve() : reject(new Error(failure)));
     const stop = () => child.kill("SIGHUP");
     process.once("SIGHUP", stop); process.once("SIGTERM", stop);
     child.once("exit", () => { process.removeListener("SIGHUP", stop); process.removeListener("SIGTERM", stop); });

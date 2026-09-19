@@ -138,7 +138,7 @@ struct GatewayRequest: Sendable {
     var beforeLine: Int?
     var initialMessages: [Data] = []
     var terminalSocket: HerdrTerminalSocket?
-    var terminalServer: String?
+    var terminalRoute: TerminalRoute?
     var terminalColumns = 80
     var terminalRows = 24
     var timeoutSeconds: Int?

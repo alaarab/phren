@@ -123,7 +123,7 @@ struct ProjectSessionsView: View {
                     }
                 }
                 if discovery.updated != nil && discovery.sessions.isEmpty && discovery.problems.isEmpty {
-                    Text("No Herdr sessions are running on the connected computers.").foregroundStyle(.secondary)
+                    Text("No Herdr sessions are running on the connected computers. \"Open on a computer…\" can still open a terminal over SSH.").foregroundStyle(.secondary)
                 }
             }
             .listSectionSpacing(12)

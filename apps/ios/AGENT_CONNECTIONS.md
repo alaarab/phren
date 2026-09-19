@@ -11,9 +11,14 @@ third-party gateway dependency or public listener.
 `current` link. A LaunchAgent or systemd user service owns its lifetime.
 
 The restricted SSH dispatcher accepts `phren-hook v1 pipe`,
-`phren-hook v1 terminal <server>`, and `phren-hook v1 web <host> <port>`.
+`phren-hook v1 terminal <server>`, `phren-hook v1 shell <base64url folder> [agent]`,
+and `phren-hook v1 web <host> <port>`.
 The pipe relays HTTP/WebSocket bytes to a mode-0600 Unix socket in a mode-0700
-directory. Terminal attaches an existing Herdr server through an SSH PTY.
+directory. Terminal attaches an existing Herdr server through an SSH PTY. Shell
+needs no Herdr: it starts a login shell, or one of codex/claude/copilot/opencode,
+directly on the SSH PTY in a folder that passes the workspace-creation rules
+(under home or a located project); the phone offers it when no Herdr server is
+running. It is terminal-only, ends with the connection, and has no chat identity.
 The web command relays bytes only to the literal loopback address `127.0.0.1`
 or `::1` and a decimal TCP port from 1 through 65535 — that is any loopback TCP
 listener on the computer, not only web previews, so the device key is worth as

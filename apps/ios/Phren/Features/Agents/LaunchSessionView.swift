@@ -26,6 +26,7 @@ struct LaunchSessionView: View {
     @State private var status: String?
     @State private var error: String?
     @State private var chatSession: LiveAgentSession?
+    @State private var terminalRoute: TerminalDestination?
     @State private var modelName = ""
 
     private typealias Harness = PhrenConnection.LaunchKind
@@ -207,6 +208,23 @@ struct LaunchSessionView: View {
                          ? "Creates a Herdr workspace on the computer, starts the agent in it, and opens the chat here. Starting can take up to a minute."
                          : "Creates a workspace, sends the task and its context, then opens the working agent. The task moves to Active only after delivery succeeds.")
                 }
+
+                if taskRequest == nil {
+                    Section {
+                        Button {
+                            guard let host = selectedHost else { return }
+                            terminalRoute = TerminalDestination(host: host, route: .shell(directory: folder.trimmingCharacters(in: .whitespacesAndNewlines), agent: harness))
+                        } label: {
+                            Label("Open a terminal instead", systemImage: "terminal")
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                        }
+                        .buttonStyle(.bordered).tint(PhrenTheme.cyan)
+                        .disabled(!canOpen)
+                        .accessibilityIdentifier("launch-terminal")
+                    } footer: {
+                        Text("Runs \(harness?.title ?? kind) straight over SSH in that folder — no Herdr needed. Terminal only: it ends when you leave, and it has no chat or approvals.")
+                    }
+                }
             }
             .listSectionSpacing(12)
             .navigationTitle("Open \(project)").navigationBarTitleDisplayMode(.inline)
@@ -214,6 +232,7 @@ struct LaunchSessionView: View {
             .phrenScreen()
             .modifier(SessionLaunchAlert(error: $error))
             .navigationDestination(item: $chatSession) { AgentChatSheet(session: $0) }
+            .navigationDestination(item: $terminalRoute) { HerdrTerminalView(host: $0.host, route: $0.route) }
             .interactiveDismissDisabled(launching)
             .task { modelName = storedModel(kind); await prepare() }
             .onChange(of: kind) { _, newKind in modelName = storedModel(newKind) }
@@ -245,6 +264,14 @@ struct LaunchSessionView: View {
         hostID = host.id
         if !folderEdited { folder = suggestedFolder(host); folderEdited = false }
         Task { await locate(host) }
+    }
+
+    private struct TerminalDestination: Identifiable, Hashable {
+        let host: LiveHost
+        let route: TerminalRoute
+        var id: String { "\(host.id):\(route.command)" }
+        static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
+        func hash(into hasher: inout Hasher) { hasher.combine(id) }
     }
 
     private func open() async {

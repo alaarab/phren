@@ -310,10 +310,12 @@ Projects are claimed by stores in the registry. Bare project names resolve unamb
 
 `packages/cli/src/bridge/` implements the independent local agent helper. The
 build produces a self-contained `bridge-hook.mjs`. The iPhone's `PhrenLive`
-package opens a pinned SSH session and executes only `phren-hook v1 pipe` or
-`phren-hook v1 terminal <Herdr server>`. HTTP/WebSocket requests travel over a
-private Unix socket; terminals use an SSH PTY attached to the existing Herdr
-server. Herdr's public JSON socket supplies workspace and pane control. Every
+package opens a pinned SSH session and executes only `phren-hook v1 pipe`,
+`phren-hook v1 terminal <Herdr server>`, or `phren-hook v1 shell <folder> [agent]`.
+HTTP/WebSocket requests travel over a private Unix socket; terminals use an SSH
+PTY attached to the existing Herdr server, or, when Herdr is not running, a
+shell or agent started directly on the PTY in a validated project folder (no
+chat, transcripts, or persistence for that one). Herdr's public JSON socket supplies workspace and pane control. Every
 chat mutation revalidates server, workspace, tab, pane, provider, and conversation.
 An agent-only socket registers lifecycle callbacks and explicit permission
 requests; it is inaccessible through the phone dispatcher. No Moshi installation

@@ -182,7 +182,7 @@ private final class GatewayChannel: ChannelInboundHandler {
                 }
                 if let socket = request.terminalSocket {
                     return channel.pipeline.addHandler(PhrenTerminalChannel(exchange: exchange, socket: socket,
-                        server: request.terminalServer ?? "default", columns: request.terminalColumns, rows: request.terminalRows))
+                        route: request.terminalRoute ?? .herdr(server: "default"), columns: request.terminalColumns, rows: request.terminalRows))
                 }
                 return channel.pipeline.addHandler(PhrenExecChannel(exchange: exchange)).flatMap {
                     if request.webSocket { return installTranscriptHandlers(channel: channel, exchange: exchange, request: request) }

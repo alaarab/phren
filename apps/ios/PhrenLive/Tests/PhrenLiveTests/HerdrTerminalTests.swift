@@ -4,6 +4,22 @@ import XCTest
 @testable import PhrenLive
 
 final class HerdrTerminalTests: XCTestCase {
+    func testTerminalRouteCommandsMatchTheDispatcherGrammar() {
+        XCTAssertEqual(TerminalRoute.herdr(server: "work").command, "phren-hook v1 terminal work")
+        // base64url without padding, so a path with `/` and `+`-producing bytes stays inside [A-Za-z0-9_-].
+        let folder = "/Users/me/Projects/app one?"
+        let command = TerminalRoute.shell(directory: folder, agent: .claude).command
+        XCTAssertTrue(command.hasPrefix("phren-hook v1 shell "))
+        XCTAssertTrue(command.hasSuffix(" claude"))
+        let encoded = command.dropFirst("phren-hook v1 shell ".count).dropLast(" claude".count)
+        XCTAssertTrue(encoded.allSatisfy { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" })
+        var padded = String(encoded).replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        padded += String(repeating: "=", count: (4 - padded.count % 4) % 4)
+        XCTAssertEqual(Data(base64Encoded: padded).flatMap { String(data: $0, encoding: .utf8) }, folder)
+        XCTAssertEqual(TerminalRoute.shell(directory: "/tmp", agent: nil).command, "phren-hook v1 shell L3RtcA")
+        XCTAssertFalse(TerminalRoute.shell(directory: "/tmp", agent: nil).needsHerdr)
+    }
+
     func testBurstPreservesEveryByteAcrossCoalescedWakeupsAndPartialDrains() async throws {
         let buffer = TerminalOutputBuffer()
         let (signals, continuation) = AsyncThrowingStream<Void, Error>.makeStream(bufferingPolicy: .bufferingNewest(1))
