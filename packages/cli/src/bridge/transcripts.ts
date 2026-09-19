@@ -1,4 +1,5 @@
-import { realpath } from "node:fs/promises";
+import { realpath, stat } from "node:fs/promises";
+import { createReadStream } from "node:fs";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -8,6 +9,100 @@ import { BridgeError, object, objects, sessionId, type Json, type Provider } fro
 import { namedPaths, SHELL_TOOLS, outputCallIds, type ChangeLookup } from "./changes.js";
 
 export interface Entry { line: number; raw: Json }
+export interface ChildAgentRelation {
+  /** `id` is a parent-scoped public reference; `session` never leaves Hook. */
+  id: string; session: string; provider: Provider; path: string; callId: string; state: "running" | "completed";
+  children: ChildAgentRelation[];
+}
+type DirectRelation = Omit<ChildAgentRelation, "id" | "provider" | "children">;
+type ChildRelationCache = {
+  dev: number; ino: number; fileSize: number; completeOffset: number; mtimeMs: number;
+  relations: Map<string, DirectRelation>;
+};
+const childRelationCache = new Map<string, ChildRelationCache>();
+
+function addChildRelation(line: string, found: Map<string, DirectRelation>): void {
+  if (!line.includes("SubAgentActivity")) return;
+  try {
+    const raw = object(JSON.parse(line)), payload = object(raw.payload), item = object(payload.item);
+    if (raw.type !== "event_msg" || payload.type !== "item_completed" || item.type !== "SubAgentActivity") return;
+    const kind = String(item.kind), child = String(item.agent_thread_id ?? ""), agentPath = String(item.agent_path ?? "");
+    const callId = String(item.id ?? "");
+    if (!["started", "completed"].includes(kind) || !sessionId.safeParse(child).success || !callId || agentPath.length > 512) return;
+    const previous = found.get(child);
+    found.set(child, { session: child, path: agentPath, callId: previous?.callId || callId,
+      state: kind === "completed" ? "completed" : previous?.state ?? "running" });
+  } catch { /* Ignore malformed/private rows. */ }
+}
+
+async function directChildAgents(file: string): Promise<DirectRelation[]> {
+  const metadata = await stat(file), cached = childRelationCache.get(file);
+  if (cached && cached.dev === metadata.dev && cached.ino === metadata.ino
+      && cached.fileSize === metadata.size && cached.mtimeMs === metadata.mtimeMs) return [...cached.relations.values()];
+  // Codex rollouts are append-only. Keep the byte position of the last full
+  // JSONL row so a live transcript only scans new rows as its chat advances.
+  // A truncate, replacement, or in-place rewrite starts from zero.
+  const append = cached && cached.dev === metadata.dev && cached.ino === metadata.ino && metadata.size > cached.fileSize;
+  const start = append ? cached.completeOffset : 0;
+  const found = append ? new Map(cached.relations) : new Map<string, DirectRelation>();
+  let pending = Buffer.alloc(0), completeOffset = start;
+  const input = metadata.size > start ? createReadStream(file, { start, end: metadata.size - 1 }) : undefined;
+  for await (const chunk of input ?? []) {
+    pending = Buffer.concat([pending, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)]);
+    let newline: number;
+    while ((newline = pending.indexOf(0x0a)) >= 0) {
+      addChildRelation(pending.subarray(0, newline).toString("utf8"), found);
+      completeOffset += newline + 1; pending = pending.subarray(newline + 1);
+    }
+  }
+  const entry = { dev: metadata.dev, ino: metadata.ino, fileSize: metadata.size, completeOffset,
+    mtimeMs: metadata.mtimeMs, relations: found };
+  childRelationCache.set(file, entry);
+  while (childRelationCache.size > 64) childRelationCache.delete(childRelationCache.keys().next().value!);
+  return [...found.values()];
+}
+
+/** Provider-neutral child-agent discovery. Codex currently supplies explicit
+ * SubAgentActivity links; other providers return no children until their
+ * public transcript format exposes an equivalent relationship. */
+export async function childAgentTree(source: Provider, session: string, depth = 0, seen = new Set<string>()): Promise<ChildAgentRelation[]> {
+  if (source !== "codex" || depth >= 4 || seen.size >= 128 || seen.has(session)) return [];
+  seen.add(session);
+  const file = await transcriptPath(source, session);
+  const relations = await directChildAgents(file), verified: ChildAgentRelation[] = [];
+  for (const relation of relations) {
+    const childFile = await transcriptPath(source, relation.session).catch(() => undefined);
+    if (!childFile || !await childTranscriptBelongsTo(childFile, session)) continue;
+    verified.push({ ...relation, provider: source,
+      id: createHash("sha256").update(`${source}\0${session}\0${relation.session}`).digest("hex").slice(0, 32),
+      children: await childAgentTree(source, relation.session, depth + 1, seen).catch(() => []) });
+  }
+  return verified;
+}
+
+async function childTranscriptBelongsTo(file: string, parent: string): Promise<boolean> {
+  let bytes = Buffer.alloc(0);
+  for await (const chunk of createReadStream(file, { start: 0, end: 1_048_575 })) {
+    bytes = Buffer.concat([bytes, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)]);
+    const newline = bytes.indexOf(0x0a); if (newline >= 0) { bytes = bytes.subarray(0, newline); break; }
+  }
+  try {
+    const raw = object(JSON.parse(bytes.toString("utf8"))), payload = object(raw.payload), source = object(payload.source);
+    const subagent = object(source.subagent), spawn = object(subagent.thread_spawn);
+    return raw.type === "session_meta" && String(spawn.parent_thread_id ?? payload.parent_thread_id ?? "") === parent;
+  } catch { return false; }
+}
+
+/** Explicit wire projection prevents a provider's private transcript identity
+ * from being returned if relation internals grow later. */
+export function publicChildAgents(tree: ChildAgentRelation[]): Json[] {
+  return tree.map(({ id, provider, path: agentPath, callId, state, children }) =>
+    ({ id, provider, path: agentPath, callId, state, children: publicChildAgents(children) }));
+}
+
+export function childAgent(tree: ChildAgentRelation[], id: string): ChildAgentRelation | undefined {
+  for (const node of tree) { if (node.id === id) return node; const nested = childAgent(node.children, id); if (nested) return nested; }
+}
 
 const CLAUDE_KEYS = new Set(["type", "uuid", "parentUuid", "timestamp", "message", "gitBranch", "cwd", "requestId", "isMeta", "isSidechain", "isCompactSummary", "phrenQueued", "phrenQueueKey", "phrenBackground"]);
 const harnessPreamble = (text: string) => /^<(?:environment_context>|user_instructions>|permission_profile|system-reminder>|turn_context>)/.test(text.trimStart());

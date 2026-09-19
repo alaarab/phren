@@ -19,14 +19,14 @@ import { BridgeError, bridgeRoot, id, type Json, MAX_FRAME, object, objects, PRO
 import { CodexQuestions } from "./questions.js";
 import { bootedSimulators, type SimulatorAction, simulatorAct, simulatorApps, simulatorScreenshot } from "./simulators.js";
 import { TabActivityStore } from "./tab-activity.js";
-import { conversationNamedPaths, historicalImage, TranscriptReader, transcriptPath } from "./transcripts.js";
+import { childAgent, childAgentTree, conversationNamedPaths, historicalImage, publicChildAgents, TranscriptReader, transcriptPath } from "./transcripts.js";
 import { listUploads, saveUpload, uploadImage } from "./uploads.js";
 import { AccountUsageReader } from "./usage.js";
 
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", herdr: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, repositoryFiles: true, approvalPush: "direct-apns", simulators: process.platform === "darwin" };
+  files: true, repositoryFiles: true, subagents: true, approvalPush: "direct-apns", simulators: process.platform === "darwin" };
 
 /** A file from the phone: a plain name and base64 bytes, bounded. */
 function uploadBody(data: Json): { name: string; bytes: Buffer } {
@@ -168,6 +168,20 @@ export async function serve(version: string): Promise<void> {
             const reader = new TranscriptReader(await transcriptPath(target.source, target.session), target.source, undefined, agentHooks.changes.view(`${target.source}:${target.session}`));
             const page = await reader.read(before, abort.signal);
             result = { ...page, type: "older", source: target.source, session: target.session }; break;
+          }
+          case "/v1/subagents": {
+            const target = targetFromURL(url); await validateTarget(target);
+            result = { agents: publicChildAgents(await childAgentTree(target.source, target.session)) }; break;
+          }
+          case "/v1/subagents/transcript": {
+            const target = targetFromURL(url); await validateTarget(target);
+            const child = z.string().parse(url.searchParams.get("child"));
+            const tree = await childAgentTree(target.source, target.session);
+            const relation = childAgent(tree, child);
+            if (!relation) throw new BridgeError(404, "This child agent does not belong to the selected conversation.");
+            const reader = new TranscriptReader(await transcriptPath(relation.provider, relation.session), relation.provider);
+            const page = await reader.read();
+            result = { ...page, type: "backlog", source: relation.provider, session: relation.id }; break;
           }
           default: throw new BridgeError(404, "Unknown Phren Hook route.");
         }
