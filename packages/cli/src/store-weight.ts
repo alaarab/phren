@@ -16,7 +16,7 @@ export interface StoreWeight {
   reference: number;
   tasks: number;
   skills: number;
-  /** Words in the global CLAUDE.md every session loads. */
+  /** Words in the global AGENTS.md every session loads. */
   globalClaude: number;
 }
 
@@ -43,7 +43,7 @@ function walkWords(dir: string, match: (name: string) => boolean): number {
 
 export function storeWeight(phrenPath: string, profile = ""): StoreWeight {
   const projectDirs = getProjectDirs(phrenPath, profile).filter((d) => path.basename(d) !== "global");
-  const w: StoreWeight = { projects: projectDirs.length, findings: 0, reference: 0, tasks: 0, skills: 0, globalClaude: words(path.join(phrenPath, "global", "CLAUDE.md")) };
+  const w: StoreWeight = { projects: projectDirs.length, findings: 0, reference: 0, tasks: 0, skills: 0, globalClaude: words(path.join(phrenPath, "global", "AGENTS.md")) };
   for (const dir of projectDirs) {
     w.findings += words(path.join(dir, "FINDINGS.md"));
     w.tasks += words(path.join(dir, "tasks.md"));

@@ -158,7 +158,7 @@ function seedProjectFixtures(phrenDir: string): void {
     ].join("\n"),
   );
   writeFile(
-    path.join(phrenDir, "repo-a", "CLAUDE.md"),
+    path.join(phrenDir, "repo-a", "AGENTS.md"),
     "# repo-a\n\nRepo A instructions for browser smoke coverage.\n",
   );
   writeFile(

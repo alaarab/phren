@@ -15,7 +15,7 @@ function fixture() {
   cleanups.push(tmp.cleanup);
   const store = path.join(tmp.path, "store");
   const repo = path.join(tmp.path, "repo");
-  writeFile(path.join(store, "demo", "CLAUDE.md"), "# Updated project instructions\n");
+  writeFile(path.join(store, "demo", "AGENTS.md"), "# Updated project instructions\n");
   writeFile(path.join(store, "profiles", "dev.yaml"), "projects:\n  - global\n  - demo\n");
   writeInstallPreferences(store, { installSkillLinks: false }); // No home integration in this fixture.
   writeProjectConfig(store, "demo", { ownership: "phren-managed", sourcePath: repo });

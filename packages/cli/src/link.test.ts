@@ -101,7 +101,7 @@ describe("link", () => {
         path.join(phrenProject, "summary.md"),
         "**What:** A test project"
       );
-      fs.writeFileSync(path.join(phrenProject, "CLAUDE.md"), "# Test");
+      fs.writeFileSync(path.join(phrenProject, "AGENTS.md"), "# Test");
 
       await runLink(phrenPath, { machine: "test-machine", profile: "test" });
 
@@ -127,7 +127,7 @@ describe("link", () => {
       const skillsSrc = path.join(phrenProject, "skills");
       fs.mkdirSync(skillsSrc, { recursive: true });
       fs.writeFileSync(path.join(skillsSrc, "deploy.md"), "# Deploy skill");
-      fs.writeFileSync(path.join(phrenProject, "CLAUDE.md"), "# Test");
+      fs.writeFileSync(path.join(phrenProject, "AGENTS.md"), "# Test");
 
       await runLink(phrenPath, { machine: "test-machine", profile: "test" });
 
@@ -147,7 +147,7 @@ describe("link", () => {
       const skillsSrc = path.join(phrenProject, "skills", "my-skill");
       fs.mkdirSync(skillsSrc, { recursive: true });
       fs.writeFileSync(path.join(skillsSrc, "SKILL.md"), "# My Skill");
-      fs.writeFileSync(path.join(phrenProject, "CLAUDE.md"), "# Test");
+      fs.writeFileSync(path.join(phrenProject, "AGENTS.md"), "# Test");
 
       await runLink(phrenPath, { machine: "test-machine", profile: "test" });
 
@@ -166,10 +166,10 @@ describe("link", () => {
 
       const phrenProject = path.join(phrenPath, "sym-project");
       fs.mkdirSync(phrenProject, { recursive: true });
-      fs.writeFileSync(path.join(phrenProject, "CLAUDE.md"), "# Real content");
+      fs.writeFileSync(path.join(phrenProject, "AGENTS.md"), "# Real content");
 
       // Create a user-owned file at destination
-      const destClaude = path.join(projectDir, "CLAUDE.md");
+      const destClaude = path.join(projectDir, "AGENTS.md");
       fs.writeFileSync(destClaude, "stale");
 
       await runLink(phrenPath, { machine: "test-machine", profile: "test" });
@@ -187,11 +187,11 @@ describe("link", () => {
 
       const phrenProject = path.join(phrenPath, "sym-project");
       fs.mkdirSync(phrenProject, { recursive: true });
-      fs.writeFileSync(path.join(phrenProject, "CLAUDE.md"), "# Real content");
+      fs.writeFileSync(path.join(phrenProject, "AGENTS.md"), "# Real content");
 
       const staleSource = path.join(tmpRoot, "stale.md");
       fs.writeFileSync(staleSource, "# Stale");
-      const destClaude = path.join(projectDir, "CLAUDE.md");
+      const destClaude = path.join(projectDir, "AGENTS.md");
       fs.symlinkSync(staleSource, destClaude);
 
       await runLink(phrenPath, { machine: "test-machine", profile: "test" });
@@ -209,11 +209,11 @@ describe("link", () => {
 
       const phrenProject = path.join(phrenPath, "managed-sym-project");
       fs.mkdirSync(phrenProject, { recursive: true });
-      fs.writeFileSync(path.join(phrenProject, "CLAUDE.md"), "# Real content");
+      fs.writeFileSync(path.join(phrenProject, "AGENTS.md"), "# Real content");
 
       const oldManagedSource = path.join(phrenPath, "old-managed.md");
       fs.writeFileSync(oldManagedSource, "# Old managed");
-      const destClaude = path.join(projectDir, "CLAUDE.md");
+      const destClaude = path.join(projectDir, "AGENTS.md");
       fs.symlinkSync(oldManagedSource, destClaude);
 
       await runLink(phrenPath, { machine: "test-machine", profile: "test" });
@@ -231,7 +231,7 @@ describe("link", () => {
 
       const phrenProject = path.join(phrenPath, "mcp-project");
       fs.mkdirSync(phrenProject, { recursive: true });
-      fs.writeFileSync(path.join(phrenProject, "CLAUDE.md"), "# Test");
+      fs.writeFileSync(path.join(phrenProject, "AGENTS.md"), "# Test");
       fs.writeFileSync(
         path.join(phrenProject, "phren.project.yaml"),
         yaml.dump({
@@ -264,9 +264,9 @@ describe("link", () => {
 
       const phrenProject = path.join(phrenPath, "identical-project");
       fs.mkdirSync(phrenProject, { recursive: true });
-      fs.writeFileSync(path.join(phrenProject, "CLAUDE.md"), "# Same content");
+      fs.writeFileSync(path.join(phrenProject, "AGENTS.md"), "# Same content");
 
-      const destClaude = path.join(projectDir, "CLAUDE.md");
+      const destClaude = path.join(projectDir, "AGENTS.md");
       fs.writeFileSync(destClaude, "# Same content");
 
       await runLink(phrenPath, { machine: "test-machine", profile: "test" });
@@ -284,14 +284,14 @@ describe("link", () => {
 
       const phrenProject = path.join(phrenPath, "detached-project");
       fs.mkdirSync(path.join(phrenProject, "skills"), { recursive: true });
-      fs.writeFileSync(path.join(phrenProject, "CLAUDE.md"), "# Phren CLAUDE");
+      fs.writeFileSync(path.join(phrenProject, "AGENTS.md"), "# Phren CLAUDE");
       fs.writeFileSync(path.join(phrenProject, "FINDINGS.md"), "# Findings");
       fs.writeFileSync(path.join(phrenProject, "phren.project.yaml"), "ownership: detached\n");
       fs.writeFileSync(path.join(phrenProject, "skills", "deploy.md"), "# Deploy");
 
       await runLink(phrenPath, { machine: "test-machine", profile: "test" });
 
-      expect(fs.existsSync(path.join(projectDir, "CLAUDE.md"))).toBe(false);
+      expect(fs.existsSync(path.join(projectDir, "AGENTS.md"))).toBe(false);
       expect(fs.existsSync(path.join(projectDir, "FINDINGS.md"))).toBe(false);
       expect(fs.existsSync(path.join(projectDir, ".claude", "skills", "deploy.md"))).toBe(false);
     });
@@ -305,7 +305,7 @@ describe("link", () => {
 
       const phrenProject = path.join(phrenPath, "kb-project");
       fs.mkdirSync(phrenProject, { recursive: true });
-      fs.writeFileSync(path.join(phrenProject, "CLAUDE.md"), "# Test");
+      fs.writeFileSync(path.join(phrenProject, "AGENTS.md"), "# Test");
       fs.writeFileSync(path.join(phrenProject, "REFERENCE.md"), "# Knowledge base");
       fs.writeFileSync(path.join(phrenProject, "FINDINGS.md"), "# Findings");
 
@@ -325,7 +325,7 @@ describe("link", () => {
 
       const phrenProject = path.join(phrenPath, "split-project");
       fs.mkdirSync(phrenProject, { recursive: true });
-      fs.writeFileSync(path.join(phrenProject, "CLAUDE.md"), "# Main");
+      fs.writeFileSync(path.join(phrenProject, "AGENTS.md"), "# Main");
       fs.writeFileSync(path.join(phrenProject, "CLAUDE-testing.md"), "# Testing instructions");
       fs.writeFileSync(path.join(phrenProject, "CLAUDE-deploy.md"), "# Deploy instructions");
 
@@ -344,7 +344,7 @@ describe("link", () => {
 
       const phrenProject = path.join(phrenPath, "ctx-project");
       fs.mkdirSync(phrenProject, { recursive: true });
-      fs.writeFileSync(path.join(phrenProject, "CLAUDE.md"), "# Test");
+      fs.writeFileSync(path.join(phrenProject, "AGENTS.md"), "# Test");
 
       const realContextFile = path.join(homeDir, ".phren-context.md");
       await runLink(phrenPath, { machine: "test-machine", profile: "test" });
@@ -363,7 +363,7 @@ describe("link", () => {
 
       const phrenProject = path.join(phrenPath, "dbg-project");
       fs.mkdirSync(phrenProject, { recursive: true });
-      fs.writeFileSync(path.join(phrenProject, "CLAUDE.md"), "# Test");
+      fs.writeFileSync(path.join(phrenProject, "AGENTS.md"), "# Test");
       fs.writeFileSync(path.join(phrenProject, "FINDINGS.md"), "# FINDINGS\n\n## 2025-01-01\n\n- debug insight\n");
 
       const realContextFile = path.join(homeDir, ".phren-context.md");
@@ -382,7 +382,7 @@ describe("link", () => {
 
       const phrenProject = path.join(phrenPath, "plan-project");
       fs.mkdirSync(phrenProject, { recursive: true });
-      fs.writeFileSync(path.join(phrenProject, "CLAUDE.md"), "# Test");
+      fs.writeFileSync(path.join(phrenProject, "AGENTS.md"), "# Test");
       fs.writeFileSync(path.join(phrenProject, "summary.md"), "**What:** A planning test project\n");
       fs.writeFileSync(path.join(phrenProject, "tasks.md"), "# Task\n\n## Active\n\n- Important task\n");
 
@@ -402,7 +402,7 @@ describe("link", () => {
 
       const phrenProject = path.join(phrenPath, "clean-project");
       fs.mkdirSync(phrenProject, { recursive: true });
-      fs.writeFileSync(path.join(phrenProject, "CLAUDE.md"), "# Test");
+      fs.writeFileSync(path.join(phrenProject, "AGENTS.md"), "# Test");
 
       const realContextFile = path.join(homeDir, ".phren-context.md");
       await runLink(phrenPath, { machine: "test-machine", profile: "test", task: "clean" });
@@ -420,7 +420,7 @@ describe("link", () => {
 
       const phrenProject = path.join(phrenPath, "mem-project");
       fs.mkdirSync(phrenProject, { recursive: true });
-      fs.writeFileSync(path.join(phrenProject, "CLAUDE.md"), "# Test");
+      fs.writeFileSync(path.join(phrenProject, "AGENTS.md"), "# Test");
       fs.writeFileSync(path.join(phrenProject, "summary.md"), "**What:** A memory test project\n");
 
       await runLink(phrenPath, { machine: "test-machine", profile: "test" });
@@ -443,7 +443,7 @@ describe("link", () => {
 
       const phrenProject = path.join(phrenPath, "preserve-project");
       fs.mkdirSync(phrenProject, { recursive: true });
-      fs.writeFileSync(path.join(phrenProject, "CLAUDE.md"), "# Test");
+      fs.writeFileSync(path.join(phrenProject, "AGENTS.md"), "# Test");
       fs.writeFileSync(path.join(phrenProject, "summary.md"), "**What:** Preserve project\n");
 
       // Pre-populate MEMORY.md with custom header
@@ -469,7 +469,7 @@ describe("link", () => {
       // Do NOT create the project directory on disk
       const phrenProject = path.join(phrenPath, "missing-project");
       fs.mkdirSync(phrenProject, { recursive: true });
-      fs.writeFileSync(path.join(phrenProject, "CLAUDE.md"), "# Test");
+      fs.writeFileSync(path.join(phrenProject, "AGENTS.md"), "# Test");
 
       // Should not throw, just skip
       await runLink(phrenPath, { machine: "test-machine", profile: "test" });
@@ -484,7 +484,7 @@ describe("link", () => {
 
         const phrenProject = path.join(phrenPath, name);
         fs.mkdirSync(phrenProject, { recursive: true });
-        fs.writeFileSync(path.join(phrenProject, "CLAUDE.md"), `# ${name}`);
+        fs.writeFileSync(path.join(phrenProject, "AGENTS.md"), `# ${name}`);
         fs.writeFileSync(path.join(phrenProject, "summary.md"), `**What:** ${name} project\n`);
       }
       process.env.PROJECTS_DIR = path.join(tmpRoot, "projects");
@@ -493,7 +493,7 @@ describe("link", () => {
 
       // Both projects should have symlinks
       for (const name of ["proj-a", "proj-b"]) {
-        const dest = path.join(tmpRoot, "projects", name, "CLAUDE.md");
+        const dest = path.join(tmpRoot, "projects", name, "AGENTS.md");
         expect(fs.lstatSync(dest).isSymbolicLink()).toBe(true);
       }
 
@@ -514,7 +514,7 @@ describe("link", () => {
 
       const phrenProject = path.join(phrenPath, "tool-project");
       fs.mkdirSync(phrenProject, { recursive: true });
-      fs.writeFileSync(path.join(phrenProject, "CLAUDE.md"), "# Tool project");
+      fs.writeFileSync(path.join(phrenProject, "AGENTS.md"), "# Tool project");
 
       await runLink(phrenPath, { machine: "test-machine", profile: "test", allTools: true });
 
@@ -533,7 +533,7 @@ describe("link", () => {
 
       const phrenProject = path.join(phrenPath, "tool-project");
       fs.mkdirSync(phrenProject, { recursive: true });
-      fs.writeFileSync(path.join(phrenProject, "CLAUDE.md"), "# Tool project");
+      fs.writeFileSync(path.join(phrenProject, "AGENTS.md"), "# Tool project");
 
       await runLink(phrenPath, { machine: "test-machine", profile: "test", allTools: true });
 
@@ -550,7 +550,7 @@ describe("link", () => {
 
       const phrenProject = path.join(phrenPath, "skill-test");
       fs.mkdirSync(phrenProject, { recursive: true });
-      fs.writeFileSync(path.join(phrenProject, "CLAUDE.md"), "# Test");
+      fs.writeFileSync(path.join(phrenProject, "AGENTS.md"), "# Test");
 
       await runLink(phrenPath, { machine: "test-machine", profile: "test" });
 
@@ -564,7 +564,7 @@ describe("link", () => {
       expect(content).not.toContain(".npm/_npx");
     });
 
-    it("mirrors resolved global plus project skills and generates AGENTS.md", async () => {
+    it("mirrors resolved global plus project skills and canonical AGENTS.md", async () => {
       setupProfile(["skill-test"]);
 
       const projectDir = path.join(tmpRoot, "projects", "skill-test");
@@ -576,7 +576,7 @@ describe("link", () => {
       fs.mkdirSync(path.join(phrenProject, "skills"), { recursive: true });
       fs.writeFileSync(path.join(phrenPath, "global", "skills", "humanize.md"), "---\nname: humanize\ndescription: global\n---\nbody\n");
       fs.writeFileSync(path.join(phrenProject, "skills", "verify.md"), "---\nname: verify\ndescription: local\n---\nbody\n");
-      fs.writeFileSync(path.join(phrenProject, "CLAUDE.md"), "# Test");
+      fs.writeFileSync(path.join(phrenProject, "AGENTS.md"), "# Test");
 
       await runLink(phrenPath, { machine: "test-machine", profile: "test", allTools: true });
 
@@ -586,8 +586,8 @@ describe("link", () => {
       expect(fs.lstatSync(path.join(projectMirror, "humanize.md")).isSymbolicLink()).toBe(true);
       expect(fs.lstatSync(path.join(projectMirror, "verify.md")).isSymbolicLink()).toBe(true);
       expect(JSON.parse(fs.readFileSync(manifestPath, "utf8")).skills.some((skill: { name: string; source: string }) => skill.name === "humanize" && skill.source === "global")).toBe(true);
-      expect(fs.readFileSync(agentsPath, "utf8")).toContain("<!-- phren:generated-agents -->");
-      expect(fs.readFileSync(agentsPath, "utf8")).toContain("/humanize");
+      expect(fs.lstatSync(agentsPath).isSymbolicLink()).toBe(true);
+      expect(fs.readFileSync(agentsPath, "utf8")).toBe("# Test");
     });
 
     it("throws when profile has no projects", async () => {
@@ -685,12 +685,12 @@ describe("link", () => {
 
       const projDir = path.join(phrenPath, "detached-proj");
       fs.mkdirSync(projDir, { recursive: true });
-      fs.writeFileSync(path.join(projDir, "CLAUDE.md"), "# Detached\n");
+      fs.writeFileSync(path.join(projDir, "AGENTS.md"), "# Detached\n");
       fs.writeFileSync(path.join(projDir, "phren.project.yaml"), "ownership: detached\n");
 
       const result = await runDoctor(phrenPath);
       const ownershipCheck = result.checks.find(c => c.name === "ownership:detached-proj");
-      const symlinkCheck = result.checks.find(c => c.name === "symlink:detached-proj/CLAUDE.md");
+      const symlinkCheck = result.checks.find(c => c.name === "symlink:detached-proj/AGENTS.md");
       expect(ownershipCheck?.ok).toBe(true);
       expect(ownershipCheck?.detail).toContain("detached");
       expect(symlinkCheck).toBeUndefined();

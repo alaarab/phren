@@ -739,7 +739,7 @@
             FAQ
           </a>
           <div class="sidebar-group-items" data-group="faq">
-            <a href="#vs-claude-md" class="sidebar-link sub">vs CLAUDE.md</a>
+            <a href="#vs-claude-md" class="sidebar-link sub">vs AGENTS.md</a>
             <a href="#performance" class="sidebar-link sub">Performance</a>
             <a href="#trust-decay" class="sidebar-link sub">Trust Decay</a>
             <a href="#multi-agent" class="sidebar-link sub">Multiple Agents</a>
@@ -877,7 +877,7 @@ phren add
 phren add ~/my-project</code></pre>
             <p>This creates <code>~/.phren/my-project/</code> with:</p>
             <ul>
-              <li><code>CLAUDE.md</code> &mdash; project-specific agent instructions</li>
+              <li><code>AGENTS.md</code> &mdash; project-specific agent instructions</li>
               <li><code>FINDINGS.md</code> &mdash; captured insights and patterns</li>
               <li><code>tasks.md</code> &mdash; task queue (active, queued, done)</li>
               <li><code>summary.md</code> &mdash; project summary for context injection</li>
@@ -2034,8 +2034,8 @@ sequenceDiagram
           <thead><tr><th>Path</th><th>Contents</th></tr></thead>
           <tbody>
             <tr><td><code>~/.phren/</code></td><td>Root store (git repo)</td></tr>
-            <tr><td><code>~/.phren/global/</code></td><td>Global skills, CLAUDE.md, FINDINGS.md</td></tr>
-            <tr><td><code>~/.phren/&lt;project&gt;/</code></td><td>Per-project CLAUDE.md, FINDINGS.md, tasks.md, summary.md, skills/</td></tr>
+            <tr><td><code>~/.phren/global/</code></td><td>Global skills, AGENTS.md, FINDINGS.md</td></tr>
+            <tr><td><code>~/.phren/&lt;project&gt;/</code></td><td>Per-project AGENTS.md, FINDINGS.md, tasks.md, summary.md, skills/</td></tr>
             <tr><td><code>~/.phren/profiles/</code></td><td>YAML files mapping project sets to profiles</td></tr>
             <tr><td><code>~/.phren/machines.yaml</code></td><td>Machine-to-profile mapping</td></tr>
             <tr><td><code>~/.phren/.config/</code></td><td>Retention/workflow/index policy JSON, access-control.json</td></tr>
@@ -2118,7 +2118,7 @@ npx vitest --watch                    # watch mode</code></pre>
         <p>Test files live as <code>*.test.ts</code> in <code>mcp/src/</code>. When adding a new feature, add tests in the same directory as the source file.</p>
 
         <h2 id="code-style">Code Style <a href="#code-style" class="anchor-link">#</a></h2>
-        <p>Read <code>CLAUDE.md</code> for the full set of conventions. The highlights:</p>
+        <p>Read <code>AGENTS.md</code> for the full set of conventions. The highlights:</p>
         <div class="style-grid">
           <div class="style-card style-card-dont">
             <div class="style-card-label">Don't</div>
@@ -2366,10 +2366,10 @@ refactor: extract keyword logic from hook-prompt</code></pre>
         <h1>Frequently Asked Questions</h1>
         <p class="docs-subtitle">Common questions about phren, answered.</p>
 
-        <h2 id="vs-claude-md">How is this different from just using CLAUDE.md? <a href="#vs-claude-md" class="anchor-link">#</a></h2>
-        <p><code>CLAUDE.md</code> loads the entire file on every prompt. If your file is 2,000 tokens, you pay 2,000 tokens every single time, whether the content is relevant or not. With five agents running in parallel, that is 10,000 tokens of context before anyone types a word.</p>
+        <h2 id="vs-claude-md">How is this different from just using AGENTS.md? <a href="#vs-claude-md" class="anchor-link">#</a></h2>
+        <p><code>AGENTS.md</code> loads the entire file on every prompt. If your file is 2,000 tokens, you pay 2,000 tokens every single time, whether the content is relevant or not. With five agents running in parallel, that is 10,000 tokens of context before anyone types a word.</p>
         <p>Phren searches what you wrote and injects only what matches the current prompt. By default it targets roughly 550 tokens with <code>PHREN_CONTEXT_TOKEN_BUDGET</code>, regardless of how large your knowledge base grows.</p>
-        <p><code>CLAUDE.md</code> is also static. Phren learns as you work. Every bug traced, every decision made, every pattern discovered gets saved automatically. The next session starts with that knowledge already in context.</p>
+        <p><code>AGENTS.md</code> is also static. Phren learns as you work. Every bug traced, every decision made, every pattern discovered gets saved automatically. The next session starts with that knowledge already in context.</p>
 
         <h2 id="performance">Does this slow down my prompts? <a href="#performance" class="anchor-link">#</a></h2>
         <p>Usually not on a warm local repo. The hook runs locally: keyword extraction, FTS5 search, and context injection all happen against a local SQLite index with no network calls in the default path.</p>
@@ -2611,8 +2611,8 @@ phren team join git@github.com:qualus/phren-arc.git
         <table class="docs-table">
           <thead><tr><th>Mode</th><th>Behavior</th></tr></thead>
           <tbody>
-            <tr><td><code>phren-managed</code></td><td>Default. phren symlinks <code>CLAUDE.md</code>, <code>FINDINGS.md</code>, skills into the project directory.</td></tr>
-            <tr><td><code>repo-owned</code></td><td>The project's repo owns its own <code>CLAUDE.md</code>. phren stores findings and tasks but does not symlink.</td></tr>
+            <tr><td><code>phren-managed</code></td><td>Default. phren symlinks <code>AGENTS.md</code>, <code>FINDINGS.md</code>, skills into the project directory.</td></tr>
+            <tr><td><code>repo-owned</code></td><td>The project's repo owns its own <code>AGENTS.md</code>. phren stores findings and tasks but does not symlink.</td></tr>
             <tr><td><code>read-only</code></td><td>phren indexes and searches the project but does not write to it.</td></tr>
           </tbody>
         </table>

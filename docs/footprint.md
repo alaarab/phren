@@ -26,7 +26,7 @@ Set the preset at install (`phren init --preset <name>`), switch it anytime
 - **assisted** — hooks and MCP stay on (you keep ambient context injection,
   auto-capture, and store git sync), but phren **never writes outside its own
   store and your agent's settings**. It prints a self-wiring snippet so you can
-  reference `global/CLAUDE.md` and skills from your own files. Re-print anytime
+  reference `global/AGENTS.md` and skills from your own files. Re-print anytime
   with `phren snippet`.
 - **manual** — phren runs as an MCP server only. No hooks, no automations, no
   auto-commit. A pull-based knowledge base your agent calls on demand.
@@ -45,7 +45,7 @@ Set the preset at install (`phren init --preset <name>`), switch it anytime
   that are detected on the machine.
 
 ### Home surfaces (managed only)
-- `~/.claude/CLAUDE.md` — symlink to `~/.phren/global/CLAUDE.md`.
+- `~/.claude/CLAUDE.md` — symlink to `~/.phren/global/AGENTS.md`.
 - `~/.claude/skills/*` — symlinks to phren slash-commands, plus
   `~/.claude/skill-manifest.json` and `~/.claude/skill-commands.json`.
 - `~/.github/copilot-instructions.md`, `~/.copilot/skills/` — when Copilot is detected.
@@ -57,8 +57,8 @@ These are re-created every SessionStart under `managed` (self-heal). Under
 `assisted`/`manual` phren does not create them and does not self-heal them.
 
 ### Project repos (managed only, and only for `phren-managed` ownership)
-- `<repo>/CLAUDE.md`, `<repo>/REFERENCE.md`, `<repo>/FINDINGS.md`,
-  `<repo>/CLAUDE-*.md`, `<repo>/AGENTS.md` (Codex) — symlinks/managed files.
+- `<repo>/AGENTS.md`, `<repo>/REFERENCE.md`, `<repo>/FINDINGS.md`,
+  `<repo>/CLAUDE.md` (Claude compatibility), and `<repo>/CLAUDE-*.md` — symlinks/managed files.
 - `<repo>/.claude/skills/*` — project skill symlinks.
 - `<repo>/.git/info/exclude` — phren-managed mirror filenames, under a
   `# phren-managed` marker.

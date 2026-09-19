@@ -903,7 +903,7 @@ describe("machines, profiles, and shell state", () => {
 
   it("listProjectCards includes summary/docs", () => {
     fs.writeFileSync(path.join(projectDir, "summary.md"), "# testproject\n\nQuick summary line\n");
-    fs.writeFileSync(path.join(projectDir, "CLAUDE.md"), "# testproject\n");
+    fs.writeFileSync(path.join(projectDir, "AGENTS.md"), "# testproject\n");
     fs.writeFileSync(path.join(projectDir, "tasks.md"), SAMPLE_TASK);
 
     const cards = listProjectCards(tmpDir);

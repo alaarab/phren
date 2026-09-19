@@ -128,7 +128,7 @@ final class SkillPathTests: XCTestCase {
 
     func testRejectsNonSkillPaths() {
         XCTAssertFalse(LocalStore.isSkillPath("myproj/FINDINGS.md"))
-        XCTAssertFalse(LocalStore.isSkillPath("global/CLAUDE.md"))
+        XCTAssertFalse(LocalStore.isSkillPath("global/AGENTS.md"))
         // Only SKILL.md inside a folder skill — supporting files aren't synced.
         XCTAssertFalse(LocalStore.isSkillPath("global/skills/audit/reference.md"))
         XCTAssertFalse(LocalStore.isSkillPath("global/skills/audit/nested/SKILL.md"))
@@ -148,7 +148,7 @@ final class SkillPathTests: XCTestCase {
     func testWritabilityBoundary() {
         XCTAssertTrue(LocalStore.isWritablePath("global/skills/audit/SKILL.md"))
         XCTAssertTrue(LocalStore.isWritablePath("myproj/skills/parity.md"))
-        XCTAssertTrue(LocalStore.isWritablePath("global/CLAUDE.md"))
+        XCTAssertTrue(LocalStore.isWritablePath("global/AGENTS.md"))
         XCTAssertFalse(LocalStore.isWritablePath("myproj/summary.md"))
         XCTAssertFalse(LocalStore.isWritablePath("myproj/reference/topics/auth.md"))
     }

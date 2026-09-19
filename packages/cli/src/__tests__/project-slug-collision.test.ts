@@ -3,7 +3,7 @@
  *
  * `/Users/u/Projects/Max4LivePlugins` was registered once as `max4liveplugins`
  * and later again as `max4live-plugins`, producing two project directories with
- * disjoint findings. The second had no phren.project.yaml, no CLAUDE.md and no
+ * disjoint findings. The second had no phren.project.yaml, no AGENTS.md and no
  * topic-config.json, so it looked half-created while holding real data.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";

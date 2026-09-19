@@ -14,6 +14,7 @@ const importPayloadSchema = z.object({
   project: z.string(),
   overwrite: z.boolean().optional(),
   summary: z.string().optional(),
+  agentsMd: z.string().optional(),
   claudeMd: z.string().optional(),
   taskRaw: z.string().optional(),
   findingsRaw: z.string().optional(),
@@ -80,8 +81,14 @@ export function register(server: McpServer, ctx: McpContext): void {
         if (taskRawPath && fs.existsSync(taskRawPath)) exported.taskRaw = fs.readFileSync(taskRawPath, "utf8");
       }
 
-      const claudePath = safeProjectPath(projectDir, "CLAUDE.md");
-      if (claudePath && fs.existsSync(claudePath)) exported.claudeMd = fs.readFileSync(claudePath, "utf8");
+      const agentsPath = safeProjectPath(projectDir, "AGENTS.md");
+      const legacyPath = safeProjectPath(projectDir, "CLAUDE.md");
+      const instructionsPath = agentsPath && fs.existsSync(agentsPath) ? agentsPath : legacyPath;
+      if (instructionsPath && fs.existsSync(instructionsPath)) {
+        const instructions = fs.readFileSync(instructionsPath, "utf8");
+        exported.agentsMd = instructions;
+        exported.claudeMd = instructions; // Deprecated export alias for older clients.
+      }
 
       return mcpResponse({ ok: true, message: `Exported project "${project}".`, data: exported });
     }
@@ -114,7 +121,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         const parsed = parsedResult.data;
 
         // Warn about unknown fields silently discarded by .passthrough()
-        const knownTopLevel = new Set(["project", "overwrite", "summary", "claudeMd", "learnings", "task", "taskRaw", "exportedAt", "version", "findingsRaw"]);
+        const knownTopLevel = new Set(["project", "overwrite", "summary", "agentsMd", "claudeMd", "learnings", "task", "taskRaw", "exportedAt", "version", "findingsRaw"]);
         const unknownFields = Object.keys(decoded as Record<string, unknown>).filter(k => !knownTopLevel.has(k));
         if (unknownFields.length > 0) {
           debugLog(`import_project: unknown fields will be ignored: ${unknownFields.join(", ")}`);
@@ -202,9 +209,10 @@ export function register(server: McpServer, ctx: McpContext): void {
             imported.push("summary.md");
           }
 
-          if (parsed.claudeMd) {
-            fs.writeFileSync(path.join(stagedProjectDir, "CLAUDE.md"), parsed.claudeMd);
-            imported.push("CLAUDE.md");
+          const instructions = parsed.agentsMd ?? parsed.claudeMd;
+          if (instructions) {
+            fs.writeFileSync(path.join(stagedProjectDir, "AGENTS.md"), instructions);
+            imported.push("AGENTS.md");
           }
 
           const findingsContent = typeof parsed.findingsRaw === "string" ? parsed.findingsRaw : buildFindingsContent();

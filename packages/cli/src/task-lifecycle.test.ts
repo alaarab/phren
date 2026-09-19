@@ -20,7 +20,7 @@ describe("task lifecycle", () => {
       taskMode: "manual",
     }, null, 2) + "\n");
     writeFile(path.join(tmp.path, project, "tasks.md"), `# ${project} tasks\n\n## Active\n\n## Queue\n\n## Done\n`);
-    writeFile(path.join(tmp.path, project, "CLAUDE.md"), "Repo: https://github.com/alaarab/phren\n");
+    writeFile(path.join(tmp.path, project, "AGENTS.md"), "Repo: https://github.com/alaarab/phren\n");
   });
 
   afterEach(() => {

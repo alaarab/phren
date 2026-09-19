@@ -132,7 +132,7 @@ Two keys, in both the Skills and Projects views:
 | `e` | Open the file in `$EDITOR` — your own vim, your config, your plugins |
 | `E` | Open it in phren's own modal editor, without leaving the dashboard |
 
-In the Skills view they edit the selected skill's markdown. In the Projects view they edit that project's `CLAUDE.md`, which the store owns and symlinks into the repo and into `.github/copilot-instructions.md` — so one edit reaches every linked checkout.
+In the Skills view they edit the selected skill's markdown. In the Projects view they edit that project's `AGENTS.md`, which the store owns and symlinks into the repo and into `.github/copilot-instructions.md` — so one edit reaches every linked checkout.
 
 `$EDITOR` is treated as a command line, not a binary, so values carrying arguments work (`code --wait`, `nvim -u NONE`). The shell releases the terminal while your editor runs and takes it back when you quit.
 

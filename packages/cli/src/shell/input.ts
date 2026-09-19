@@ -93,7 +93,7 @@ export interface NavigationHost extends PaletteHost {
 
 /**
  * The file `e` and `E` edit for the current view. Skills edit their own
- * markdown; a project edits the CLAUDE.md the store owns and symlinks into the
+ * markdown; a project edits the AGENTS.md the store owns and symlinks into the
  * repo, so editing here reaches every linked checkout.
  */
 export function editTargetFor(
@@ -108,7 +108,7 @@ export function editTargetFor(
     const project = item?.name ?? host.state.project;
     if (!project) return null;
     const store = resolveProjectStorePath(host.phrenPath, project);
-    return { path: path.join(store, project, "CLAUDE.md"), label: `${project}/CLAUDE.md`, kind: "claude" };
+    return { path: path.join(store, project, "AGENTS.md"), label: `${project}/AGENTS.md`, kind: "claude" };
   }
   return null;
 }

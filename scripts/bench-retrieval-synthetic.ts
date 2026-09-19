@@ -175,7 +175,7 @@ function buildMemoryContent(index: number): string {
 function createSyntheticPhren(rootDir: string, size: number): { phrenPath: string; queries: QuerySpec[] } {
   const phrenPath = path.join(rootDir, `phren-sim-${size}`);
   fs.mkdirSync(path.join(phrenPath, PROJECT_NAME, "reference"), { recursive: true });
-  fs.writeFileSync(path.join(phrenPath, PROJECT_NAME, "CLAUDE.md"), `# ${PROJECT_NAME}\n\nSynthetic benchmark project.\n`);
+  fs.writeFileSync(path.join(phrenPath, PROJECT_NAME, "AGENTS.md"), `# ${PROJECT_NAME}\n\nSynthetic benchmark project.\n`);
   fs.writeFileSync(path.join(phrenPath, PROJECT_NAME, "summary.md"), `Synthetic corpus with ${size} generated memory files.\n`);
   fs.writeFileSync(path.join(phrenPath, PROJECT_NAME, "FINDINGS.md"), "# Findings\n\n");
   fs.writeFileSync(path.join(phrenPath, PROJECT_NAME, "tasks.md"), "# Task\n\n## Active\n\n");

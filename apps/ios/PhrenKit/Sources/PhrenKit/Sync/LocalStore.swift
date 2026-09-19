@@ -55,7 +55,7 @@ public actor LocalStore {
     /// Only these paths are ever written back to GitHub. Everything else in
     /// the store — `.config/` (except skill preferences), `phren.root.yaml`, `stores.yaml`,
     /// `.phren-team.yaml`, `summary.md`, `truths.md`, and `reference/` — is
-    /// read-only. Authored skills and canonical CLAUDE.md instructions are
+    /// read-only. Authored skills and canonical AGENTS.md instructions are
     /// explicitly writable in project directories and global/.
     ///
     /// `journal/YYYY-MM-DD-<actor>.md` is writable *and* gated on exactly the
@@ -111,11 +111,11 @@ public actor LocalStore {
             // Findings plus the instructions that frame them. Nothing else
             // under `global/` is hot — its notes/tasks/review are CLI-side
             // machinery with no phone surface.
-            return parts.count == 2 && ["FINDINGS.md", "CLAUDE.md"].contains(parts[1])
+            return parts.count == 2 && ["FINDINGS.md", AgentInstructions.fileName, AgentInstructions.legacyFileName].contains(parts[1])
         }
         guard isProjectDirName(parts[0]) else { return false }
         if parts.count == 2 {
-            return ["FINDINGS.md", "tasks.md", "review.md", "summary.md", "CLAUDE.md", "truths.md", MachineRegistry.projectFile].contains(parts[1])
+            return ["FINDINGS.md", "tasks.md", "review.md", "summary.md", AgentInstructions.fileName, AgentInstructions.legacyFileName, "truths.md", MachineRegistry.projectFile].contains(parts[1])
         }
         if parts.count == 3, parts[1] == "notes" {
             return JSRegex(#"^\d{4}-\d{2}-\d{2}\.md$"#).test(parts[2])
@@ -377,6 +377,9 @@ public actor LocalStore {
         public var skills: [Skill] = []
         /// Canonical agent instructions, keyed by global/project scope.
         public var instructions: [String: String] = [:]
+        /// Backing path for each instruction value. Legacy stores may still
+        /// expose CLAUDE.md until a desktop migration copies it to AGENTS.md.
+        public var instructionPaths: [String: String] = [:]
         /// Raw so malformed or newer settings cannot be mistaken for defaults.
         public var skillPreferencesContent: String? = nil
         /// Which computers carry which projects, and where.
@@ -404,6 +407,7 @@ public actor LocalStore {
         var journals: [String: [JournalFile]] = [:]
         var skills: [Skill] = []
         var instructions: [String: String] = [:]
+        var instructionPaths: [String: String] = [:]
         var machines = MachineRegistry()
 
         for path in paths {
@@ -455,8 +459,16 @@ public actor LocalStore {
                     }
                 case "summary.md":
                     summaries[project] = content
-                case "CLAUDE.md":
+                case AgentInstructions.fileName:
                     instructions[project] = content
+                    instructionPaths[project] = path
+                case AgentInstructions.legacyFileName:
+                    // Older stores remain readable. AGENTS.md is canonical and
+                    // replaces this fallback regardless of listing order.
+                    if instructions[project] == nil {
+                        instructions[project] = content
+                        instructionPaths[project] = path
+                    }
                 case "truths.md":
                     truths[project] = TruthsFile(content: content).truths
                 case MachineRegistry.projectFile:
@@ -522,6 +534,7 @@ public actor LocalStore {
             projects: projects, findings: findings, tasks: tasks,
             notes: notes, reviewQueue: queue, summaries: summaries,
             truths: truths, consolidated: consolidated, skills: skills, instructions: instructions,
+            instructionPaths: instructionPaths,
             skillPreferencesContent: read(SkillPreferences.path), machines: machines
         )
         cachedSnapshot = files.map { ($0, result) }

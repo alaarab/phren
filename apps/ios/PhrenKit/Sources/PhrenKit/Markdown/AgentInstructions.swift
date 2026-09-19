@@ -3,10 +3,13 @@ import Foundation
 /// Canonical instructions consumed by phren's link step. The CLI derives
 /// managed AGENTS.md and Copilot mirrors from these files (link/link.ts).
 public enum AgentInstructions {
+    public static let fileName = "AGENTS.md"
+    public static let legacyFileName = "CLAUDE.md"
+
     public static func isPath(_ path: String) -> Bool {
         let parts = path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
         return parts.count == 2 && LocalStore.isReadableProjectDirName(parts[0])
-            && parts[1] == "CLAUDE.md"
+            && [fileName, legacyFileName].contains(parts[1])
     }
 
     public static func template(scope: String) -> String {

@@ -247,7 +247,7 @@ one document at a time, only when you open it.
 #### Hot tier — mirrored
 
 `phren.root.yaml`, `stores.yaml`, `.phren-team.yaml`, and per project directory
-`FINDINGS.md`, `tasks.md`, `review.md`, `summary.md`, `CLAUDE.md`, `truths.md`,
+`FINDINGS.md`, `tasks.md`, `review.md`, `summary.md`, `AGENTS.md`, `truths.md`,
 `notes/YYYY-MM-DD.md`, and `journal/YYYY-MM-DD-<actor>.md`.
 
 Global and project skills are also mirrored, in both `<scope>/skills/<name>.md`
@@ -267,7 +267,7 @@ the app never writes it.
 `global/FINDINGS.md` is in the hot tier too and remains **read-only**: it is
 the consolidate skill's cross-project output —
 often the largest findings file in a store — and the phone has no business
-rewriting it. Global skills and `global/CLAUDE.md` are authored content and
+rewriting it. Global skills and `global/AGENTS.md` are authored content and
 can be edited from the app. `LocalStore.isSyncedPath` admits global findings on its own branch rather
 than by relaxing `isProjectDirName`, because `isWritablePath` delegates to
 that predicate; the split is pinned by negative tests. Every write surface
@@ -347,7 +347,7 @@ the rest of `.config/` and `reference/` are not synced.
 - **Write whitelist**: only `<project>/FINDINGS.md`, `tasks.md`, `review.md`,
   `notes/YYYY-MM-DD.md` and `journal/YYYY-MM-DD-<actor>.md` are writable knowledge
   files, and only for a `<project>` that is a real project directory. Authored
-  skills and canonical `CLAUDE.md` are also writable, under a project or
+  skills and canonical `AGENTS.md` are also writable, under a project or
   `global/`. Skill switches write individual keys in `.config/skill-preferences.json`.
   The rest of `.config/`, `phren.root.yaml`, `stores.yaml`, `.phren-team.yaml`,
   `summary.md`, `truths.md`, `reference/`, global findings and every reserved
@@ -389,7 +389,7 @@ applies them. Agent tools may need a new session to reload their skill list.
 
 Projects → **Agent instructions** groups global and project instructions,
 with links to each scope's skills. The app edits the canonical store
-`CLAUDE.md`; phren's link step derives managed `AGENTS.md` and Copilot mirrors
+`AGENTS.md`; phren's link step mirrors it to managed repos and derives Claude Code and Copilot compatibility files
 on the computer. Changes reach linked agents after the computer syncs, and
 generated mirrors refresh when phren links the project or its MCP poller pulls. This screen manages
 agent setup. **Live sessions** separately reads running Herdr tabs through the

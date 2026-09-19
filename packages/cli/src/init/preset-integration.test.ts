@@ -35,7 +35,7 @@ describe.sequential("management preset init integration", () => {
     cleanup();
   });
 
-  it("managed init symlinks global CLAUDE.md into ~/.claude", async () => {
+  it("managed init symlinks global AGENTS.md into ~/.claude", async () => {
     const phrenPath = path.join(tmpRoot, "managed");
     process.env.PHREN_PATH = phrenPath;
     await suppressOutput(() => runInit({ yes: true, managementPreset: "managed" }));
@@ -54,7 +54,7 @@ describe.sequential("management preset init integration", () => {
     const prefs = readInstallPreferences(phrenPath);
     expect(prefs.managementPreset).toBe("assisted");
     // Store-internal file exists...
-    expect(fs.existsSync(path.join(phrenPath, "global", "CLAUDE.md"))).toBe(true);
+    expect(fs.existsSync(path.join(phrenPath, "global", "AGENTS.md"))).toBe(true);
     // ...but nothing is written into ~/.claude.
     expect(fs.existsSync(path.join(homeDir, ".claude", "CLAUDE.md"))).toBe(false);
     expect(fs.existsSync(path.join(homeDir, ".claude", "skill-manifest.json"))).toBe(false);
@@ -89,7 +89,7 @@ describe.sequential("management preset init integration", () => {
     expect(getProjectOwnershipDefault(expressPhrenPath)).toBe("detached");
   });
 
-  it("self-heal recreates the CLAUDE.md symlink under managed but not assisted", async () => {
+  it("self-heal recreates the AGENTS.md symlink under managed but not assisted", async () => {
     const phrenPath = path.join(tmpRoot, "selfheal");
     process.env.PHREN_PATH = phrenPath;
     await suppressOutput(() => runInit({ yes: true, managementPreset: "managed" }));
@@ -138,7 +138,7 @@ describe.sequential("management preset init integration", () => {
   // PHREN_PATH used to silently steal the user's real ~/.claude/CLAUDE.md and
   // repoint it into a temp directory that later disappears, leaving every
   // Claude session with no global context. The old ownership test —
-  // `target.endsWith("global/CLAUDE.md")` — treated any live root's global
+  // `target.endsWith("global/AGENTS.md")` — treated any live root's global
   // file as fair game.
 
   it("a throwaway store does not steal a CLAUDE.md symlink owned by a live store", async () => {
@@ -148,7 +148,7 @@ describe.sequential("management preset init integration", () => {
 
     const homeClaude = path.join(homeDir, ".claude", "CLAUDE.md");
     const realTarget = fs.realpathSync(homeClaude);
-    expect(realTarget).toBe(fs.realpathSync(path.join(realStore, "global", "CLAUDE.md")));
+    expect(realTarget).toBe(fs.realpathSync(path.join(realStore, "global", "AGENTS.md")));
 
     // A second, still-live store — a smoke test run, or phren's own web UI
     // pointed at a temp path — self-heals against the same $HOME.
@@ -179,7 +179,7 @@ describe.sequential("management preset init integration", () => {
     await suppressOutput(() => runInit({ yes: true, force: true, managementPreset: "managed" }));
     suppressOutput(() => repairPreexistingInstall(live));
 
-    expect(fs.realpathSync(homeClaude)).toBe(fs.realpathSync(path.join(live, "global", "CLAUDE.md")));
+    expect(fs.realpathSync(homeClaude)).toBe(fs.realpathSync(path.join(live, "global", "AGENTS.md")));
   });
 
   it("never replaces a hand-written ~/.claude/CLAUDE.md", async () => {

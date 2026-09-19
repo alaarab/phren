@@ -72,7 +72,7 @@ final class GraphExplorerTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let store = try LocalStore(rootDirectory: root, owner: "o", repo: "r", branch: "main")
-        try await store.write("demo/CLAUDE.md", content: "# Instructions", blobSha: nil)
+        try await store.write("demo/AGENTS.md", content: "# Instructions", blobSha: nil)
         try await store.write("team/journal/2026-07-28-tester.md",
                               content: try Fixtures.text("journal-2026-07-28-tester.md"), blobSha: nil)
         let input = await store.graphInput(storeName: "o/r")

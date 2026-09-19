@@ -328,7 +328,7 @@ export async function handleTaskNamespace(args: string[]) {
     }
     const targetRepo = repoArg || resolveProjectGithubRepo(phrenPath, project);
     if (!targetRepo) {
-      console.error("Could not infer a GitHub repo. Provide --repo <owner/name> or add a GitHub URL to CLAUDE.md/summary.md.");
+      console.error("Could not infer a GitHub repo. Provide --repo <owner/name> or add a GitHub URL to AGENTS.md/summary.md.");
       process.exit(1);
     }
     const created = createGithubIssueForTask({

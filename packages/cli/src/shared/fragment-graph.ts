@@ -164,7 +164,7 @@ export function ensureGlobalEntitiesTable(db: SqlJsDatabase): void {
 }
 
 /**
- * Parse user-defined fragment names from CLAUDE.md frontmatter.
+ * Parse user-defined fragment names from AGENTS.md frontmatter.
  * Looks for: <!-- phren:fragments: Redis,MyService,InternalAPI -->
  * Also supports legacy: <!-- phren:entities: ... -->
  *
@@ -188,7 +188,7 @@ function readUserDefinedFragmentsFromDisk(claudeMdPath: string): { mtime: number
 }
 
 /**
- * Prime CLAUDE.md fragments per project for a single build pass.
+ * Prime AGENTS.md fragments per project for a single build pass.
  * During an active build, extractAndLinkFragments resolves user fragments from this
  * in-memory map and avoids per-file sync stat/read calls.
  */
@@ -200,7 +200,7 @@ export function beginUserFragmentBuildCache(phrenPath: string, projects: Iterabl
     // it goes through path.join: concatenating with "/" reads fine on Windows
     // but produces a mixed-separator string that no other code path matches.
     const cacheKey = `${phrenPath}/${project}`;
-    const claudeMdPath = path.join(phrenPath, project, "CLAUDE.md");
+    const claudeMdPath = path.join(phrenPath, project, "AGENTS.md");
     try {
       const loaded = readUserDefinedFragmentsFromDisk(claudeMdPath);
       if (!loaded) {
@@ -226,7 +226,7 @@ export function endUserFragmentBuildCache(phrenPath: string): void {
 }
 
 function parseUserDefinedFragments(phrenPath: string, project: string): string[] {
-  const claudeMdPath = path.join(phrenPath, project, "CLAUDE.md");
+  const claudeMdPath = path.join(phrenPath, project, "AGENTS.md");
   const cacheKey = `${phrenPath}/${project}`;
   try {
     // Active build path: no sync I/O in per-file extraction.
@@ -337,7 +337,7 @@ export function extractAndLinkFragments(db: SqlJsDatabase, content: string, sour
     fragmentNames.push(phrase);
   }
 
-  // Add user-defined fragments from CLAUDE.md frontmatter
+  // Add user-defined fragments from AGENTS.md frontmatter
   if (phrenPath) {
     const projectMatch = sourceDoc.match(/^([^/]+)\//);
     if (projectMatch) {

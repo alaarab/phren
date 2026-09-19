@@ -21,7 +21,7 @@ If `machines.yaml` has no entry for this machine, ask which profile to use (`ls 
 
 ## Push ("save this to my phren", "sync back")
 
-Store files are the linked originals, so edits made through `~/.claude/skills/*` or a project's `CLAUDE.md` are already in the store. Commit and push from there:
+Store files are the linked originals, so edits made through `~/.claude/skills/*` or a project's `AGENTS.md` are already in the store. Commit and push from there:
 
 ```bash
 git -C ~/.phren add -A && git -C ~/.phren commit -m "<what changed> from $(hostname)" && git -C ~/.phren push
@@ -31,7 +31,7 @@ The stop hook auto-saves too; a manual push is only for "I want it on the other 
 
 ## Conflicts
 
-`git pull --rebase` may conflict when two machines edited the same file. `tasks.md` and `FINDINGS.md`: keep both sides. `CLAUDE.md` and skills: show the user both and let them choose. Never drop a side silently.
+`git pull --rebase` may conflict when two machines edited the same file. `tasks.md` and `FINDINGS.md`: keep both sides. `AGENTS.md` and skills: show the user both and let them choose. Never drop a side silently.
 
 ## Related
 

@@ -286,8 +286,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   `<topic>.older.md`, still indexed. Background maintenance refreshes the
   structural summaries for files that changed.
 - **`phren status` shows the store's weight** — words in findings, the archive,
-  tasks and skills, and the global CLAUDE.md — and **`phren doctor` has a
-  `context-cost` check** that warns when the global CLAUDE.md passes 600 words,
+  tasks and skills, and the global AGENTS.md — and **`phren doctor` has a
+  `context-cost` check** that warns when the global AGENTS.md passes 600 words,
   the MCP profile is `full`, or the median hook injection passes 1,500 tokens.
   None of the tidying stays done unless it is visible.
 
@@ -333,12 +333,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   `**/skills/**` and `.claude/skills/**`. Skills are instructions you invoke by
   name; indexed, they were crowding findings out of the prompt's context budget
   (nine of twelve injections in one session were skill files). They stay
-  reachable through `list_skills` and the global CLAUDE.md. Existing stores
+  reachable through `list_skills` and the global AGENTS.md. Existing stores
   keep their own `index-policy.json`; `phren config index` shows it.
 - **Claude's own memory directory is indexed only when asked.**
   `PHREN_FEATURE_NATIVE_MEMORY=1` turns it back on; by default phren indexes
   phren.
-- **The shipped `global/CLAUDE.md` is written to the agent, not to a new
+- **The shipped `global/AGENTS.md` is written to the agent, not to a new
   user.** Under 400 words: how to recall, what to save and what not to, tasks,
   sessions, where things are. The template comments that every session was
   reading are gone.
@@ -487,7 +487,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   opens phren's own modal editor instead, with a deliberate subset of vim:
   `hjkl`, `w b`, `0 $`, `gg G`, `i a I A`, `o O`, `x`, `dd`, `yy`, `p P`, `u`,
   `/` with `n`/`N`, and `:w :q :wq :q!`. In Skills it edits the skill's
-  markdown; in Projects it edits that project's `CLAUDE.md`, which the store
+  markdown; in Projects it edits that project's `AGENTS.md`, which the store
   owns and symlinks into the repo, so one edit reaches every linked checkout.
   Saving refuses a skill whose frontmatter no longer parses, refuses to write
   through a symlink, lands atomically, and rebuilds the skill manifests when the
@@ -684,7 +684,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   the store format; with no `.gitattributes`, git's autocrlf rewrote those bytes
   on a Windows checkout, so findings dates parsed as `unknown` and a rendered
   `tasks.md` was compared LF against a CRLF fixture. `fragment-graph` built the
-  `CLAUDE.md` path by concatenating with `/`, which Node accepts on Windows but
+  `AGENTS.md` path by concatenating with `/`, which Node accepts on Windows but
   which yields a mixed-separator string no other path in the process matches. A
   read-counting test mock derived a basename with `lastIndexOf("/")`, which
   returns -1 on Windows. And the extract-proactivity tests pointed the store at
@@ -708,7 +708,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 - **`phren init` promised slash-commands in a directory it created empty.** `setup.ts`
   provisions skills from `starter/global/skills/`, which shipped containing only
-  `CLAUDE.md` — so every install created `~/.phren/global/skills`, left it empty, and then
+  `AGENTS.md` — so every install created `~/.phren/global/skills`, left it empty, and then
   printed `ln -s ~/.phren/global/skills/phren-sync ~/.claude/skills/phren-sync`, a symlink
   to nothing. The five `phren-*` skills (sync, init, discover, consolidate, profiles) now
   ship there. Verified end to end from a packed tarball installed to a clean prefix:
@@ -1265,7 +1265,7 @@ Auto-extract noise sweep — seven targeted bugs that filled review queues and t
 - Stop-hook `git add -A` failed in sparse-checkout stores when untracked paths fell outside the sparse patterns, which silently stalled commit+push across all managed stores. All three call sites now pass `--sparse` so git skips non-sparse paths instead of erroring: `cli-hooks-stop.ts`, `cli/session-stop.ts`, `tools/finding.ts`.
 
 ### Changed
-- Team-store sync pathspec now also stages `*/reference/**`, `*/skills/**`, `*/CLAUDE.md`, `*/review.md`, `*/summary.md`, `*/topic-config.json`, `*/phren.project.yaml`, `*/FINDINGS.md.bak` in both `cli-hooks-stop.ts` team-store loop and `tools/finding.ts` `push_changes` tool. Previously topic-reference edits and skill files silently never committed.
+- Team-store sync pathspec now also stages `*/reference/**`, `*/skills/**`, `*/AGENTS.md`, `*/review.md`, `*/summary.md`, `*/topic-config.json`, `*/phren.project.yaml`, `*/FINDINGS.md.bak` in both `cli-hooks-stop.ts` team-store loop and `tools/finding.ts` `push_changes` tool. Previously topic-reference edits and skill files silently never committed.
 
 ## [0.1.19] - 2026-04-19
 
@@ -1382,7 +1382,7 @@ Bug fix release: federated search, team store, upstream tracking, CI stabilizati
 Feature release: memory override, pin_task tool, plan mode, graph UX, and path fixes.
 
 ### Added
-- **Memory override in CLAUDE.md** — memory instructions can be overridden per-project via CLAUDE.md
+- **Memory override in AGENTS.md** — memory instructions can be overridden per-project vian AGENTS.md
 - **`pin_task` MCP tool** — new tool to pin important tasks for persistent visibility
 - **Plan mode + graph UX** — plan mode for task planning and improved graph visualization
 
@@ -1442,7 +1442,7 @@ Major TUI overhaul based on Claude Code architecture study. 43 files changed, +1
 ### Removed
 - 6 dead components (AgentMessage, UserMessage, ChatMessage, StreamingText, Separator, CodeBlock)
 - 2 unused npm dependencies (ink-spinner, ink-text-input)
-- Fake `/kill` and `/broadcast` slash commands from CLAUDE.md (were never implemented)
+- Fake `/kill` and `/broadcast` slash commands from AGENTS.md (were never implemented)
 
 ### Closed
 - 20+ stale tasks verified and completed (TUI features, agent bugs, CLI items that were already done)
@@ -1583,7 +1583,7 @@ Major TUI overhaul based on Claude Code architecture study. 43 files changed, +1
 ## [0.0.43] - 2026-03-25
 
 ### Fixed
-- **Temp-root project detection**: init/onboarding no longer treats the shared OS temp root as a tracked project just because a stray `CLAUDE.md` exists under `os.tmpdir()`. Temp repos and first-run onboarding now behave correctly.
+- **Temp-root project detection**: init/onboarding no longer treats the shared OS temp root as a tracked project just because a stray `AGENTS.md` exists under `os.tmpdir()`. Temp repos and first-run onboarding now behave correctly.
 - **Session expiry correctness**: stale session cleanup now expires ended sessions from `endedAt` instead of `startedAt`, so long-running sessions do not disappear immediately after they finish.
 - **Session provenance isolation**: finding/session attribution no longer falls back to an unrelated active session from another project.
 - **VS Code GitHub issue creation**: the extension's "Create GitHub Issue" flow now maps to a supported `update_task({ create_issue: true })` path and links the created issue back onto the task.
@@ -1669,7 +1669,7 @@ Major TUI overhaul based on Claude Code architecture study. 43 files changed, +1
 - Removed unwired RBAC checkPermission scaffolding
 
 ### Docs
-- Fix 4 stale file paths in CLAUDE.md
+- Fix 4 stale file paths in AGENTS.md
 - Add re-init reminder to `phren update` command
 
 ### TODO (review before release)
@@ -2160,7 +2160,7 @@ Major TUI overhaul based on Claude Code architecture study. 43 files changed, +1
 ### Docs
 - README: documented all 46 MCP tools across 10 categories (was missing skills, hooks, and operations sections)
 - README: `get_tasks` entry updated with summary, pagination, and ID lookup features
-- global/CLAUDE.md: added task triage guidance (work_next, pin, tidy)
+- global/AGENTS.md: added task triage guidance (work_next, pin, tidy)
 - Architecture diagram updated with skills, hooks, and operations tool categories
 
 ## [1.15.5] - 2026-03-08
@@ -2228,7 +2228,7 @@ Major TUI overhaul based on Claude Code architecture study. 43 files changed, +1
 - Whitepaper: tool count updated from 19 to 29 in all three references
 - `docs/architecture.md`: MCP diagram updated to show all 7 tool categories including fragment graph and session management
 - `docs/llms-full.txt`: tool count 28 -> 29, added `cross_project_entities`, fixed tag parameter reference
-- `CLAUDE.md`: updated tool count in Key Files table
+- `AGENTS.md`: updated tool count in Key Files table
 
 ## [1.13.6] - 2026-03-07
 
@@ -2300,8 +2300,8 @@ Major TUI overhaul based on Claude Code architecture study. 43 files changed, +1
 ## [1.11.0] - 2026-03-06
 
 ### Added
-- Project templates for `init`: four built-in templates (python-project, monorepo, library, frontend), each with CLAUDE.md, LEARNINGS.md, summary.md, and tasks.md. Use `--template <name>` during init.
-- `--from-existing <path>` flag on init: bootstrap a phren project from an existing directory that already has a CLAUDE.md.
+- Project templates for `init`: four built-in templates (python-project, monorepo, library, frontend), each with AGENTS.md, LEARNINGS.md, summary.md, and tasks.md. Use `--template <name>` during init.
+- `--from-existing <path>` flag on init: bootstrap a phren project from an existing directory that already has an AGENTS.md.
 - `@import` syntax in indexed documents: `@import shared/file.md` resolves relative to the phren global directory, with cycle detection and depth cap.
 - `knowledge/` directory support: files in a project's `knowledge/` subdirectory are classified as `knowledge` type in the FTS index.
 - Task done-section stripping: completed task items (under `## Done`) are excluded from the FTS index to reduce noise.
@@ -2518,7 +2518,7 @@ Major TUI overhaul based on Claude Code architecture study. 43 files changed, +1
 ## [1.7.1] - 2026-03-04
 
 ### Removed
-- `/phren-update` and `/phren-learn` skills: redundant now that hooks auto-commit and CLAUDE.md instructions tell Claude to call `add_learning()` during sessions
+- `/phren-update` and `/phren-learn` skills: redundant now that hooks auto-commit and AGENTS.md instructions tell Claude to call `add_learning()` during sessions
 
 ### Changed
 - Skills count: 5 to 4 (sync, init, discover, consolidate)
@@ -2546,11 +2546,11 @@ Major TUI overhaul based on Claude Code architecture study. 43 files changed, +1
 - `add_learning(project, insight)` MCP tool: record a learning to LEARNINGS.md the moment you discover it, grouped by date
 - `remove_learning(project, text)` MCP tool: remove a learning that turned out to be wrong or outdated
 - `save_learnings(message?)` MCP tool: commit and push all phren changes (git add, commit, push)
-- Global CLAUDE.md now instructs Claude to use learning tools proactively during the session, not just at the end
+- Global AGENTS.md now instructs Claude to use learning tools proactively during the session, not just at the end
 
 ### Changed
 - MCP tool count: 7 -> 10 (added add_learning, remove_learning, save_learnings)
-- Global CLAUDE.md: split MCP instructions into Reading and Writing sections with clear triggers for each
+- Global AGENTS.md: split MCP instructions into Reading and Writing sections with clear triggers for each
 
 ## [1.6.3] - 2026-03-04
 
@@ -2558,7 +2558,7 @@ Major TUI overhaul based on Claude Code architecture study. 43 files changed, +1
 - README: removed duplicate JSON config blocks, fixed skill count (5 not 6), updated `/phren:learn` references to `/phren-update`
 - README: added `update_task` tool and `search_phren` type filter to MCP docs
 - README: replaced outdated `cd mcp && npm run build` instructions with `npx phren init`
-- Site: fixed `MEMORY.md` reference to `CLAUDE.md` in bento card, `/phren-learn` to `/phren-update`
+- Site: fixed `MEMORY.md` reference to `AGENTS.md` in bento card, `/phren-learn` to `/phren-update`
 - Site: updated "Clones the starter" to "Creates" (bundled since v1.6.0)
 - llms-install.md: fixed tool parameter signatures to match actual MCP server, added `-y` to npx commands
 
@@ -2582,7 +2582,7 @@ Major TUI overhaul based on Claude Code architecture study. 43 files changed, +1
 ### Changed
 - Starter is now bundled in the npm package (no more git clone from phren-starter repo)
 - Init copies from bundled starter directory, works offline and without git
-- Synced all starter templates to match 1.5.0 conventions (bold labels, project skills, key patterns, full global CLAUDE.md)
+- Synced all starter templates to match 1.5.0 conventions (bold labels, project skills, key patterns, full global AGENTS.md)
 - Init output says "Created phren v1.6.0" instead of "Cloned phren-starter"
 
 ### Removed
@@ -2592,7 +2592,7 @@ Major TUI overhaul based on Claude Code architecture study. 43 files changed, +1
 
 ### Fixed
 - FTS5 query sanitizer no longer strips URLs (only targets actual column prefixes)
-- Broken CLAUDE.md and LEARNINGS.md symlinks replaced with real files
+- Broken AGENTS.md and LEARNINGS.md symlinks replaced with real files
 - Init fallback no longer overwrites existing user files
 - Atomic writes for machines.yaml registration (no more race conditions)
 - Context file overwrites now preserve user content outside managed markers
@@ -2615,7 +2615,7 @@ Major TUI overhaul based on Claude Code architecture study. 43 files changed, +1
 - Merged `/phren-learn` into `/phren-update`: one skill for saving session learnings, works standalone or with full phren setup
 - Simplified from 6 skills to 5: update, sync, init, discover, consolidate
 - MCP tool descriptions now tell Claude when to call them proactively
-- global CLAUDE.md instructs Claude to use MCP tools and task without being asked
+- global AGENTS.md instructs Claude to use MCP tools and task without being asked
 - Landing page: replaced misleading token savings card with honest "search not load" framing
 - Skill names consistent everywhere with dashes (not colons)
 - Framework boilerplate no longer lists personal workflow skills
@@ -2628,7 +2628,7 @@ Major TUI overhaul based on Claude Code architecture study. 43 files changed, +1
 
 ### Added
 - `npx phren init`: one-command setup that clones phren-starter to `~/.phren`, sets hostname in `machines.yaml`, and configures Claude Code + VS Code MCP automatically
-- link.sh symlinks `CLAUDE-*.md` split files alongside `CLAUDE.md` for `@import` support
+- link.sh symlinks `CLAUDE-*.md` split files alongside `AGENTS.md` for `@import` support
 
 ## [1.1.4] - 2026-03-04
 

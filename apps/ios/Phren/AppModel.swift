@@ -979,6 +979,11 @@ final class AppModel {
         storeContexts.first { $0.id == storeId }?.snapshot.instructions[scope]
     }
 
+    func instructionsPath(scope: String, in storeId: String) -> String {
+        storeContexts.first { $0.id == storeId }?.snapshot.instructionPaths[scope]
+            ?? "\(scope)/\(AgentInstructions.fileName)"
+    }
+
     func skills(in storeId: String) -> [Skill] {
         storeContexts.first { $0.id == storeId }?.snapshot.skills ?? []
     }

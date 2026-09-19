@@ -4,7 +4,7 @@ import XCTest
 final class AuthoredFileTests: XCTestCase {
     private var directory: URL!
     private let skillPath = "demo/skills/audit.md"
-    private let instructionsPath = "demo/CLAUDE.md"
+    private let instructionsPath = "demo/AGENTS.md"
 
     override func setUpWithError() throws {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("phren-authored-\(UUID().uuidString)")
@@ -28,12 +28,12 @@ final class AuthoredFileTests: XCTestCase {
     }
 
     func testOnlyCanonicalInstructionsAndSkillPathsAreEditable() {
-        for path in ["global/CLAUDE.md", instructionsPath, skillPath, "global/skills/audit/SKILL.md"] {
+        for path in ["global/AGENTS.md", "global/CLAUDE.md", instructionsPath, "demo/CLAUDE.md", skillPath, "global/skills/audit/SKILL.md"] {
             XCTAssertTrue(LocalStore.isWritablePath(path), path)
             XCTAssertTrue(LocalStore.isSyncedPath(path), path)
         }
-        for path in ["CLAUDE.md", "/demo/CLAUDE.md", "demo//CLAUDE.md", "demo/../CLAUDE.md",
-                     "demo/AGENTS.md", "demo/GEMINI.md", "profiles/CLAUDE.md", "demo.archived/CLAUDE.md",
+        for path in ["AGENTS.md", "/demo/AGENTS.md", "demo//AGENTS.md", "demo/../AGENTS.md",
+                     "demo/GEMINI.md", "profiles/AGENTS.md", "demo.archived/AGENTS.md",
                      "global/FINDINGS.md", "global/skills//audit.md", "/global/skills/audit.md",
                      "global/skills/audit.md/", "demo/skills/audit/script.sh"] {
             XCTAssertFalse(LocalStore.isWritablePath(path), path)

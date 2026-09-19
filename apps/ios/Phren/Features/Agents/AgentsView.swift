@@ -73,6 +73,7 @@ struct AgentContextView: View {
     @State private var draft: DocumentDraft?
 
     private var content: String? { model.instructions(scope: scope, in: storeId) }
+    private var instructionsPath: String { model.instructionsPath(scope: scope, in: storeId) }
 
     var body: some View {
         PhrenList {
@@ -89,12 +90,12 @@ struct AgentContextView: View {
                 }
             }
             Section("Instructions") {
-                if let content { DocumentContentView(path: "\(scope)/CLAUDE.md", content: content, embedded: true) }
+                if let content { DocumentContentView(path: instructionsPath, content: content, embedded: true) }
                 else {
                     Text("Add the conventions, tools, and working rules your agents should follow.")
                         .foregroundStyle(.secondary)
                     if model.canPush(storeId: storeId) {
-                        Button("Add instructions") { draft = DocumentDraft(path: "\(scope)/CLAUDE.md", content: nil) }
+                        Button("Add instructions") { draft = DocumentDraft(path: "\(scope)/\(AgentInstructions.fileName)", content: nil) }
                     }
                 }
             }
@@ -110,7 +111,7 @@ struct AgentContextView: View {
         .toolbar {
             if let content, model.canPush(storeId: storeId) {
                 ToolbarItem(placement: .primaryAction) {
-                    Button("Edit") { draft = DocumentDraft(path: "\(scope)/CLAUDE.md", content: content) }
+                    Button("Edit") { draft = DocumentDraft(path: instructionsPath, content: content) }
                 }
             }
         }

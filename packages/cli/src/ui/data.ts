@@ -808,7 +808,7 @@ function buildProjectInfo(basePath: string, project: string, store?: string): Pr
   const dir = path.join(basePath, project);
   const findingsPath = path.join(dir, FINDINGS_FILENAME);
   const taskPath = resolveTaskFilePath(basePath, project);
-  const claudeMdPath = path.join(dir, "CLAUDE.md");
+  const claudeMdPath = path.join(dir, "AGENTS.md");
   const summaryPath = path.join(dir, "summary.md");
   const refPath = path.join(dir, "reference");
 

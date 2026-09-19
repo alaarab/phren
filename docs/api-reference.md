@@ -360,7 +360,7 @@ Record feedback on whether an injected memory was helpful or noisy.
 ### `add_project`
 
 Bootstraps a repo or working directory into phren and adds it to the active profile. Pass the path explicitly; when no `profile` is provided, phren uses `PHREN_PROFILE` or the current machine mapping from `machines.yaml`.
-Creates or copies `CLAUDE.md`, `summary.md`, `FINDINGS.md`, and `tasks.md` under `~/.phren/<project>`.
+Creates or copies `AGENTS.md`, `summary.md`, `FINDINGS.md`, and `tasks.md` under `~/.phren/<project>`.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -370,7 +370,7 @@ Creates or copies `CLAUDE.md`, `summary.md`, `FINDINGS.md`, and `tasks.md` under
 
 ### `export_project`
 
-Export a project's data (findings, task, summary, CLAUDE.md) as portable JSON.
+Export a project's data (findings, task, summary, AGENTS.md) as portable JSON.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|

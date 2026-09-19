@@ -550,7 +550,7 @@ async function handleGetProjectSummary(ctx: McpContext, { name }: { name: string
     if (store && fs.existsSync(path.join(store.path, lookupName))) {
       const projDir = path.join(store.path, lookupName);
       const fsDocs: Array<{ project: string; filename: string; type: string; content: string; path: string }> = [];
-      for (const [file, type] of [["summary.md", "summary"], ["CLAUDE.md", "claude"], [FINDINGS_FILENAME, "findings"], ["tasks.md", "task"], ["truths.md", "canonical"]] as const) {
+      for (const [file, type] of [["summary.md", "summary"], ["AGENTS.md", "claude"], [FINDINGS_FILENAME, "findings"], ["tasks.md", "task"], ["truths.md", "canonical"]] as const) {
         const filePath = path.join(projDir, file);
         if (fs.existsSync(filePath)) {
           fsDocs.push({ project: lookupName, filename: file, type, content: fs.readFileSync(filePath, "utf8").slice(0, 8000), path: filePath });
@@ -578,7 +578,7 @@ async function handleGetProjectSummary(ctx: McpContext, { name }: { name: string
     parts.push("\n*No summary.md found for this project.*");
   }
   if (claudeDoc) {
-    parts.push(`\n## CLAUDE.md path\n\`${claudeDoc.path}\``);
+    parts.push(`\n## AGENTS.md path\n\`${claudeDoc.path}\``);
   }
   // Show truths if they exist
   if (canonicalDoc) {
@@ -596,6 +596,7 @@ async function handleGetProjectSummary(ctx: McpContext, { name }: { name: string
     data: {
       name,
       summary: summaryDoc?.content ?? null,
+      agentsMdPath: claudeDoc?.path ?? null,
       claudeMdPath: claudeDoc?.path ?? null,
       truthsPath: canonicalDoc?.path ?? null,
       files: indexedFiles,
@@ -650,7 +651,7 @@ async function handleListProjects(ctx: McpContext, { page, page_size }: { page?:
   }
 
   const badgeTypes = ["claude", "findings", "summary", "task"] as const;
-  const badgeLabels: Record<string, string> = { claude: "CLAUDE.md", findings: "FINDINGS", summary: "summary", task: "task" };
+  const badgeLabels: Record<string, string> = { claude: "AGENTS.md", findings: "FINDINGS", summary: "summary", task: "task" };
 
   const projectList = pageProjects.map((entry) => {
     // Primary store projects: query the DB for badge info
@@ -674,7 +675,7 @@ async function handleListProjects(ctx: McpContext, { page, page_size }: { page?:
     const projDir = store ? path.join(store.path, entry.name) : "";
     const badges: string[] = [];
     if (projDir) {
-      if (fs.existsSync(path.join(projDir, "CLAUDE.md"))) badges.push("CLAUDE.md");
+      if (fs.existsSync(path.join(projDir, "AGENTS.md"))) badges.push("AGENTS.md");
       if (fs.existsSync(path.join(projDir, FINDINGS_FILENAME))) badges.push("FINDINGS");
       if (fs.existsSync(path.join(projDir, "summary.md"))) badges.push("summary");
       if (fs.existsSync(path.join(projDir, "tasks.md"))) badges.push("task");

@@ -1328,7 +1328,7 @@ export function renderTasksAndSettingsScript(authToken: string): string {
             if (pi.hasFindings) files.push('FINDINGS.md');
             if (pi.hasTasks) files.push('tasks.md');
             if (pi.hasSummary) files.push('summary.md');
-            if (pi.hasClaudeMd) files.push('CLAUDE.md');
+            if (pi.hasClaudeMd) files.push('AGENTS.md');
             if (files.length) {
               infoHtml += '<div style="margin-top:10px;font-size:var(--text-xs);color:var(--muted)">Files: ' + files.map(function(f) { return '<span class="badge" style="margin-right:4px">' + esc(f) + '</span>'; }).join('') + '</div>';
             }

@@ -30,8 +30,8 @@ export function refreshLinkedContext(phrenPath: string, profile: string): void {
       ? syncScopeSkillsToDir(phrenPath, project, skillsDir)
       : buildSkillManifest(phrenPath, profile, project);
     const agentsPath = path.join(target, "AGENTS.md");
-    const claudePath = path.join(source, "CLAUDE.md");
-    // The generated file is a snapshot, unlike the live CLAUDE.md symlink.
+    const claudePath = path.join(source, "AGENTS.md");
+    // The generated file is a snapshot, unlike the live AGENTS.md symlink.
     // Preserve native/user-owned instructions and installations without a Codex mirror.
     if (!fs.existsSync(agentsPath) || !fs.existsSync(claudePath) || fs.lstatSync(agentsPath).isSymbolicLink()) continue;
     const marker = "<!-- phren:generated-agents -->";
