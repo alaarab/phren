@@ -300,11 +300,6 @@ struct AgentChatView: View {
                                                revealed: model.reveal.visible, revealRevision: model.reveal.revision,
                                                images: model.imagesByMessage, session: session, target: model.target,
                                                active: active, preview: { previewImage = $0 }).equatable()
-                            if let prompt = model.question, model.needsAnswer, model.questionsSupported {
-                                ChatQuestionCard(prompt: prompt, busy: model.answering || !active || !model.connected) { answers in
-                                    sendTask = Task { await model.answer(session, question: prompt, selections: answers.map { $0.selections.sorted() }) }
-                                }.id(prompt.id)
-                            }
                             if model.target?.isStarting == true {
                                 Text("Starting \(model.target?.providerName ?? "agent") in \(session.projectDisplayName(project?.name))…")
                                     .foregroundStyle(PhrenTheme.textMuted).padding(.top, 40)
@@ -444,6 +439,20 @@ struct AgentChatView: View {
                 }
                 .id(approval.id)
                 .padding(.horizontal, 12).padding(.vertical, 6)
+            }
+            if model.approval == nil, let prompt = model.question {
+                if model.canAnswerQuestion {
+                    ChatQuestionCard(prompt: prompt, busy: model.answering || !active || !model.connected,
+                                     title: "\(model.target?.providerName ?? "Agent") has a question", allowsTyping: prompt.isAsync == true) { answers in
+                        sendTask = Task { await model.answer(session, question: prompt, answers: answers) }
+                    }.id(prompt.id).padding(.horizontal, 12).padding(.vertical, 6)
+                } else {
+                    ChatPendingQuestionCard(prompt: prompt, count: model.pendingQuestionCount) {
+                        NavigationLink { HerdrTerminalView(host: session.host, session: session, target: model.target) } label: {
+                            Label("Answer in terminal", systemImage: "terminal").frame(maxWidth: .infinity, minHeight: 32)
+                        }.accessibilityIdentifier("chat-question-terminal")
+                    }.padding(.horizontal, 12).padding(.vertical, 6)
+                }
             }
             if !model.backgroundJobs.isEmpty {
                 ChatBackgroundJobsView(jobs: model.backgroundJobs)
@@ -847,14 +856,14 @@ struct AgentChatView: View {
                 SlashCommandMenu(source: model.target?.source ?? "", draft: model.draft,
                                  choose: { model.draft = $0 + " " }, openAll: openCommandMenu)
             }
-            if model.needsAnswer && model.approval == nil {
+            if model.needsAnswer && model.approval == nil && model.question == nil {
                 HStack(spacing: 8) {
                     if answersInComposer {
-                        Text(model.question != nil ? "Waiting for your answer — type below" : "Waiting for your reply — type below")
+                        Text("Agent needs input — check the terminal prompt")
                             .font(.caption).foregroundStyle(PhrenTheme.warning)
                     }
                     NavigationLink { HerdrTerminalView(host: session.host, session: session, target: model.target) } label: {
-                        Label(model.question != nil ? "Or answer in the terminal" : "Open terminal", systemImage: "terminal")
+                        Label("Open terminal", systemImage: "terminal")
                             .font(.caption).foregroundStyle(PhrenTheme.warning)
                     }.accessibilityIdentifier("chat-answer-terminal")
                 }
@@ -1023,10 +1032,10 @@ struct AgentChatView: View {
     /// prompt, or a question type the Hook cannot structure. Then the
     /// composer is the answer, not just a link out to the terminal.
     private var answersInComposer: Bool {
-        model.needsAnswer && model.approval == nil && !(model.question != nil && model.questionsSupported)
+        model.needsAnswer && model.approval == nil && model.question == nil
     }
     private var canSend: Bool {
-        active && model.connected && !model.sending && !model.stopping && !model.answering && model.approval == nil
+        active && model.connected && !model.sending && !model.stopping && !model.answering && model.approval == nil && model.question == nil
             && (!model.needsAnswer || answersInComposer)
             && (!model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !model.attachments.isEmpty)
     }

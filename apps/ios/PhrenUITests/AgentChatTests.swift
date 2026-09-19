@@ -690,6 +690,30 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Answer received in this conversation."].waitForExistence(timeout: 8))
     }
 
+    @MainActor
+    func testAsyncCodexQuestionIsUpfrontAfterAcknowledgementAndAnswersInChat() {
+        let app = launch(extra: ["--chat-async-question"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        XCTAssertTrue(app.buttons["Send answer"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["Which Codex screens are missing approvals?"].exists)
+        XCTAssertFalse(app.staticTexts["Waiting for your reply — type below"].exists)
+        app.buttons["Phren and lock screen"].tap()
+        app.buttons["Send answer"].tap()
+        XCTAssertTrue(app.staticTexts["Answer received in this conversation."].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.buttons["Send answer"].exists)
+    }
+
+    @MainActor
+    func testUnsupportedQuestionStillShowsActualQuestionAboveComposer() {
+        let app = launch(extra: ["--chat-question-unsupported"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        XCTAssertTrue(app.staticTexts["Question needs your answer"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["Which Codex screens are missing approvals?"].exists)
+        XCTAssertTrue(app.buttons["chat-question-terminal"].exists)
+        XCTAssertFalse(app.staticTexts["Waiting for your reply — type below"].exists)
+        XCTAssertFalse(app.buttons["Send answer"].exists)
+    }
+
     /// Claude Code's AskUserQuestion arrives as a permission request. The phone
     /// shows the questions as phren's own choices — no raw tool JSON, no blind
     /// Approve — and sends the answers back inside the approval.

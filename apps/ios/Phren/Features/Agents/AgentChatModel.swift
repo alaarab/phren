@@ -143,6 +143,8 @@ final class AgentChatModel {
     private var statusBranch: String?
     var branch: String? { statusBranch ?? transcriptContext.branch }
     var questionsSupported = true
+    var asyncQuestionsSupported = false
+    var canAnswerQuestion: Bool { question?.isAsync == true ? asyncQuestionsSupported : questionsSupported }
     var progressUnavailable = false
     var messages: [AgentChatMessage] { history.messages }
     var hasMore: Bool { history.hasMore }
@@ -155,10 +157,11 @@ final class AgentChatModel {
     var stopping = false
     var needsAnswer = false
     var approval: AgentApproval?
-    var question: AgentQuestionPrompt?
+    private var questionState = AgentQuestionState()
+    var question: AgentQuestionPrompt? { questionState.pending.first }
+    var pendingQuestionCount: Int { questionState.pending.count }
     var interactionConnected = false
     var answering = false
-    private var answeredQuestions: Set<String> = []
     private var statusTask: Task<Void, Never>?
     private var progressTask: Task<Void, Never>?
     private var progressConnected = false
@@ -218,7 +221,7 @@ final class AgentChatModel {
             awaitingReply = false; sentAt = nil; liveActivity = nil; modelName = nil; preferProgressActivity = false
             transcriptContext = .init(); statusBranch = nil
             connected = false; error = nil; deliveryError = nil
-            sentImages = []; needsAnswer = false; approval = nil; question = nil; answeredQuestions = []
+            sentImages = []; needsAnswer = false; approval = nil; questionState = AgentQuestionState()
             reconciledQueueRows = AgentChatQueues.reconciledRows[chosen.id] ?? []
             queue = AgentChatQueues.items[chosen.id] ?? []
         } catch { self.error = error.localizedDescription }
@@ -392,13 +395,9 @@ final class AgentChatModel {
         }
     }
     func accept(_ frame: AgentChatTranscript) {
-        if frame.kind == .backlog { question = nil }
-        for event in frame.questionEvents {
-            switch event {
-            case .question(let prompt): if !answeredQuestions.contains(prompt.id) { question = prompt }
-            case .resolved(let id): if question?.id == id { question = nil }
-            }
-        }
+        // Older history must not resurrect a prompt whose answer fell outside
+        // that page. Live/backlog events carry the current question lifecycle.
+        if frame.kind != .older { questionState.receive(frame.questionEvents, reset: frame.kind == .backlog) }
         reveal.receive(frame, previous: messages, animated: animateReplies && hasTranscript)
         if frame.messages.contains(where: { $0.line > submittedAfterLine && $0.role != .user }) { awaitingReply = false }
         if !progressConnected, !frame.progressEvents.isEmpty { acceptProgress(frame) }
@@ -472,6 +471,8 @@ final class AgentChatModel {
                     #if DEBUG && targetEnvironment(simulator)
                     if AgentChatFixture.enabled {
                         guard self.target == target, generation == run, statusGeneration == statusRun else { return }
+                        asyncQuestionsSupported = !ProcessInfo.processInfo.arguments.contains("--chat-question-unsupported")
+                        if ProcessInfo.processInfo.arguments.contains("--chat-question-unsupported") { questionsSupported = false }
                         approval = try AgentChatFixture.approval(target)
                         if !ProcessInfo.processInfo.arguments.contains("--chat-streaming") {
                             acceptActivity(try AgentChatFixture.panes(session).validate(target).agentStatus)
@@ -487,7 +488,9 @@ final class AgentChatModel {
                         guard self.target == target, generation == run, statusGeneration == statusRun else { return }
                         if awaitingReply, liveActivity != "working", status.activity == "working" { awaitingReply = false }
                         approval = status.approval.flatMap { ApprovalActivityController.shared.wasHandled($0, target: target) ? nil : $0 }
-                        questionsSupported = status.questionsSupported; acceptActivity(status.activity); interactionConnected = true
+                        if let prompts = status.pendingQuestions { questionState.replaceAsync(prompts) }
+                        questionsSupported = status.questionsSupported; asyncQuestionsSupported = status.asyncQuestionsSupported
+                        acceptActivity(status.activity); interactionConnected = true
                         if let name = status.modelName, modelName != name { modelName = name }
                         if statusBranch != status.branch { statusBranch = status.branch }
                         if approval != nil || ["waiting", "blocked"].contains(status.activity ?? "") { awaitingReply = false }
@@ -504,10 +507,10 @@ final class AgentChatModel {
     /// `updatedInput` answers a Claude AskUserQuestion approval: its own input
     /// plus the chosen answers, sent with the approval.
     func answer(_ session: LiveAgentSession, approval expected: AgentApproval? = nil, approve: Bool = false, updatedInput: [String: Any]? = nil,
-                question prompt: AgentQuestionPrompt? = nil, selections: [[Int]] = []) async {
+                question prompt: AgentQuestionPrompt? = nil, selections: [[Int]] = [], answers: [AgentQuestionAnswer]? = nil) async {
         guard !answering, !sending, let target else { return }
         guard (expected != nil && expected == approval && interactionConnected)
-            || (prompt != nil && prompt == question && needsAnswer && connected) else { return }
+            || (prompt != nil && prompt == question && canAnswerQuestion && connected) else { return }
         answering = true; deliveryError = nil
         defer { answering = false }
         if let expected { await ApprovalActivityController.shared.answered(target: target, actionID: expected.id) }
@@ -516,26 +519,25 @@ final class AgentChatModel {
             if AgentChatFixture.enabled {
                 AgentChatFixture.answered = true; AgentChatFixture.denied = expected != nil && !approve
                 AgentChatFixture.answeredInput = updatedInput
-            } else { try await submitAnswer(session, target: target, approval: expected, approve: approve, updatedInput: updatedInput, question: prompt, selections: selections) }
+            } else { try await submitAnswer(session, target: target, approval: expected, approve: approve, updatedInput: updatedInput, question: prompt, selections: selections, answers: answers) }
             #else
-            try await submitAnswer(session, target: target, approval: expected, approve: approve, updatedInput: updatedInput, question: prompt, selections: selections)
+            try await submitAnswer(session, target: target, approval: expected, approve: approve, updatedInput: updatedInput, question: prompt, selections: selections, answers: answers)
             #endif
             guard self.target == target else { return }
             if approval?.id == expected?.id { approval = nil }
-            if let prompt { answeredQuestions.insert(prompt.id); if question?.id == prompt.id { question = nil } }
-            deliveryStatus = "Answer sent"
+            if let prompt { questionState.resolve(prompt.id) }
+            deliveryStatus = prompt?.isAsync == true ? "Answer queued for Codex" : "Answer sent"
         } catch {
             guard self.target == target else { return }
             if approval?.id == expected?.id { approval = nil }
-            if question?.id == prompt?.id { question = nil }
-            deliveryError = "Answer wasn't confirmed. Check the current prompt, then try again. Your answer hasn't been retried."
+            deliveryError = "Answer wasn't confirmed. Check the conversation or terminal before answering again. Phren hasn't retried it."
         }
     }
     private func submitAnswer(_ session: LiveAgentSession, target: AgentChatTarget, approval: AgentApproval?, approve: Bool, updatedInput: [String: Any]?,
-                              question: AgentQuestionPrompt?, selections: [[Int]]) async throws {
+                              question: AgentQuestionPrompt?, selections: [[Int]], answers: [AgentQuestionAnswer]?) async throws {
         let key = try DeviceSSHKey.load(session.host.id)
         if let approval { try await PhrenConnection.answerApproval(host: session.host, privateKey: key, target: target, actionID: approval.actionId, approve: approve, updatedInput: updatedInput) }
-        else if let question { try await PhrenConnection.answerQuestions(host: session.host, privateKey: key, target: target, prompt: question, selections: selections) }
+        else if let question { try await PhrenConnection.answerQuestions(host: session.host, privateKey: key, target: target, prompt: question, answers: answers ?? selections.map { AgentQuestionAnswer(selections: $0) }) }
     }
 
     var historyError: String?
@@ -631,8 +633,7 @@ final class AgentChatModel {
 
     /// Uploads can be reused after failure; prompt delivery is never replayed.
     func send(_ session: LiveAgentSession) async {
-        guard !sending, connected, approval == nil, target != nil,
-              !(needsAnswer && question != nil && questionsSupported),
+        guard !sending, connected, approval == nil, question == nil, target != nil,
               !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty else { return }
         guard !AgentSlashCommand.isCommand(draft) || attachments.isEmpty else {
             deliveryError = "Remove attachments before running a slash command."; return

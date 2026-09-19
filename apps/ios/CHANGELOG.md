@@ -10,6 +10,12 @@ number counts up on its own.
 
 ### New
 
+- Codex async questions stay visible above chat input after acknowledgement,
+  including older pending questions, and can be answered with choices or typed
+  text through Codex's exact-conversation inbox. Pending prompts no longer say
+  “Waiting for your reply — type below”; unsupported connections explain the
+  terminal fallback. Duplicate and uncertain answer submissions are not retried.
+
 - **Add project** from the Projects tab: pick a computer, pick one of the
   repositories it offers (or paste a GitHub URL for it to clone), and phren
   there adds it and syncs the store — the project opens here, ready for

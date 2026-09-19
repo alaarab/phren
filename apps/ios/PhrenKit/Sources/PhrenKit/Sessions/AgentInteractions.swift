@@ -45,6 +45,8 @@ public struct AgentInteractionStatus: Equatable, Sendable {
     public var activity: String? = nil
     public var modelName: String? = nil
     public var questionsSupported = true
+    public var asyncQuestionsSupported = false
+    public var pendingQuestions: [AgentQuestionPrompt]? = nil
     /// The pane's current git branch, read by Phren Hook on the computer.
     public var branch: String? = nil
     public static func read(_ data: Data, target: AgentChatTarget) throws -> Self? {
@@ -66,6 +68,13 @@ public struct AgentInteractionStatus: Equatable, Sendable {
         return .init(approval: approval, activity: ["working", "idle", "done", "waiting", "blocked", "error"].contains(activity ?? "") ? activity : nil,
                      modelName: (status["modelName"] as? String).map { String($0.prefix(100)) },
                      questionsSupported: (status["capabilities"] as? [String: Any])?["questions"] as? Bool ?? true,
+                     asyncQuestionsSupported: (status["capabilities"] as? [String: Any])?["asyncQuestions"] as? Bool ?? false,
+                     pendingQuestions: (status["pendingQuestions"] as? [[String: Any]]).map { values in values.prefix(64).compactMap { raw in
+                         guard let id = raw["toolUseId"] as? String else { return nil }
+                         // Status already uses the normalized question shape.
+                         guard var prompt = AgentQuestionPrompt.read(id: id, questions: raw["questions"]) else { return nil }
+                         prompt.isAsync = true; return prompt
+                     } },
                      branch: (status["branch"] as? String).flatMap { $0.isEmpty ? nil : String($0.prefix(200)) })
     }
 }
@@ -87,14 +96,27 @@ public struct AgentQuestionPrompt: Decodable, Equatable, Sendable, Identifiable 
         public var isFreeText: Bool { kind == "text" || kind == "number" }
     }
     public let toolUseId: String
+    /// Async Codex questions remain pending after the tool acknowledges receipt.
+    public var isAsync: Bool? = nil
     public let questions: [Question]
     public var id: String { toolUseId }
 
     /// A bounded, well-formed question set from a transcript block or a
     /// permission request, or nothing.
-    static func read(id: String, questions: Any?) -> Self? {
-        guard !id.isEmpty, id.utf8.count <= 512, let questions,
-              let data = try? JSONSerialization.data(withJSONObject: ["toolUseId": id, "questions": questions]),
+    static func read(id: String, questions: Any?, isAsync: Bool = false) -> Self? {
+        // Codex's async prompt uses `title` and string options; older prompts
+        // and Claude use `question` and option objects.
+        let normalized = (questions as? [[String: Any]])?.map { raw in
+            var question = raw
+            if isAsync {
+                question["question"] = raw["title"]
+                question["options"] = (raw["options"] as? [String])?.map { ["label": $0] } ?? []
+                if (question["options"] as? [[String: Any]])?.isEmpty == true { question["kind"] = "text" }
+            }
+            return question
+        }
+        guard !id.isEmpty, id.utf8.count <= 512, let normalized,
+              let data = try? JSONSerialization.data(withJSONObject: ["toolUseId": id, "questions": normalized, "isAsync": isAsync]),
               let prompt = try? JSONDecoder().decode(Self.self, from: data),
               (1...8).contains(prompt.questions.count),
               prompt.questions.allSatisfy({ !$0.question.isEmpty && $0.question.utf8.count <= 4_000
@@ -116,6 +138,18 @@ public struct AgentQuestionPrompt: Decodable, Equatable, Sendable, Identifiable 
             "questions": questions.map { q in ["id": q.id ?? "", "header": q.header ?? "", "question": q.question,
                                                "multiSelect": q.multiSelect ?? false, "options": q.options.map(\.label)] as [String: Any] },
             "answers": zip(questions, selections).map { ["questionId": $0.0.id ?? "", "optionIndexes": $0.1] as [String: Any] }
+        ])
+    }
+
+    /// Async Codex questions accept the same choice or typed response its
+    /// terminal sends. The helper reconstructs the quoted message from the
+    /// original transcript, then queues it to this exact conversation.
+    public func answerBody(target: AgentChatTarget, answers: [AgentQuestionAnswer]) throws -> Data {
+        guard isAsync == true else { return try answerBody(target: target, selections: answers.map(\.selections)) }
+        guard isAnswered(answers) else { throw PhrenKitError.validation("Answer every question.") }
+        return try JSONSerialization.data(withJSONObject: [
+            "source": target.source, "sessionId": target.sessionID, "toolUseId": toolUseId,
+            "answers": answers.map { ["optionIndexes": $0.selections, "text": $0.typed] as [String: Any] }
         ])
     }
 
@@ -170,6 +204,7 @@ public struct AgentQuestionAnswer: Equatable, Sendable {
 public enum AgentQuestionEvent: Equatable, Sendable {
     case question(AgentQuestionPrompt)
     case resolved(String)
+    case reply(String)
 
     static func read(_ raw: [String: Any], source: String) -> [Self] {
         var blocks: [[String: Any]] = []
@@ -178,14 +213,60 @@ public enum AgentQuestionEvent: Equatable, Sendable {
            let message = raw["message"] as? [String: Any] { blocks = message["content"] as? [[String: Any]] ?? [] }
         return blocks.compactMap { block in
             let kind = block["type"] as? String ?? ""
-            if ["function_call_output", "tool_result"].contains(kind), let id = (block["call_id"] ?? block["tool_use_id"]) as? String { return .resolved(id) }
+            if source == "codex", kind == "message", block["role"] as? String == "user" {
+                let text = (block["content"] as? [[String: Any]])?.compactMap { $0["text"] as? String }.joined(separator: "\n") ?? ""
+                return text.isEmpty ? nil : .reply(text)
+            }
+            if ["function_call_output", "custom_tool_call_output", "tool_result"].contains(kind), let id = (block["call_id"] ?? block["tool_use_id"]) as? String {
+                if let output = block["output"] as? String,
+                   let object = try? JSONSerialization.jsonObject(with: Data(output.utf8)) as? [String: Any],
+                   object["accepted"] as? Bool == true { return nil }
+                return .resolved(id)
+            }
+            let name = (block["name"] as? String ?? "").replacingOccurrences(of: "functions.", with: "", options: .anchored)
             guard ["function_call", "tool_use"].contains(kind),
-                  ["request_user_input", "AskUserQuestion"].contains(block["name"] as? String ?? ""),
+                  ["request_user_input", "request_user_input_async", "AskUserQuestion"].contains(name),
                   let id = (block["call_id"] ?? block["id"]) as? String, !id.isEmpty, id.utf8.count <= 512 else { return nil }
             var input = block["input"] as? [String: Any]
             if let arguments = block["arguments"] as? String { input = (try? JSONSerialization.jsonObject(with: Data(arguments.utf8))) as? [String: Any] }
-            guard let prompt = AgentQuestionPrompt.read(id: id, questions: input?["questions"]) else { return nil }
+            guard let prompt = AgentQuestionPrompt.read(id: id, questions: input?["questions"], isAsync: name == "request_user_input_async") else { return nil }
             return .question(prompt)
+        }
+    }
+}
+
+
+/// Keeps asynchronous questions visible across tool acknowledgements and final
+/// replies. A terminal answer quotes the exact question in a later user turn.
+public struct AgentQuestionState: Equatable, Sendable {
+    public private(set) var pending: [AgentQuestionPrompt] = []
+    private var answered: Set<String> = []
+    public init() {}
+    public mutating func resolve(_ id: String) {
+        guard pending.contains(where: { $0.id == id }) else { return }
+        pending.removeAll { $0.id == id }
+        answered.insert(id)
+    }
+    public mutating func replaceAsync(_ prompts: [AgentQuestionPrompt]) {
+        pending.removeAll { $0.isAsync == true }
+        pending += prompts.filter { !answered.contains($0.id) }
+    }
+    public mutating func receive(_ events: [AgentQuestionEvent], reset: Bool = false) {
+        if reset { pending.removeAll { $0.isAsync != true } }
+        for event in events {
+            switch event {
+            case .question(let prompt):
+                if !answered.contains(prompt.id), !pending.contains(where: { $0.id == prompt.id }) { pending.append(prompt) }
+            case .resolved(let id): resolve(id)
+            case .reply(let text):
+                for prompt in pending where prompt.isAsync == true && prompt.questions.allSatisfy({ question in
+                    let quote = question.question.components(separatedBy: "\n").map { "> " + $0 }.joined(separator: "\n") + "\n\n"
+                    guard let range = text.range(of: quote) else { return false }
+                    return !text[range.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                }) {
+                    resolve(prompt.id)
+                }
+            }
         }
     }
 }

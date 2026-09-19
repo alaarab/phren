@@ -42,7 +42,7 @@ struct ChatApprovalCard<Terminal: View>: View {
 }
 
 /// One card for the agent's questions: Codex's `request_user_input` (options
-/// only) and Claude Code's `AskUserQuestion` (options, a typed "Other…", or a
+/// for the synchronous tool; typed answers for async prompts) and Claude Code's `AskUserQuestion` (options, a typed "Other…", or a
 /// free-text answer, sent as the approval's `updatedInput`). Each question is
 /// its own section; one Send answers them all, since the agent takes them in
 /// a single reply.
@@ -50,7 +50,7 @@ struct ChatQuestionCard: View {
     let prompt: AgentQuestionPrompt
     let busy: Bool
     var title = "Your input"
-    /// Claude takes a typed answer beside the options; Codex does not.
+    /// Claude and asynchronous Codex prompts accept a typed answer beside options.
     var allowsTyping = false
     /// Decline to answer (Claude: the permission is denied and the agent
     /// carries on without an answer).
@@ -163,4 +163,32 @@ struct ChatQuestionCard: View {
 private struct ChatQuestionsHeight: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
+/// An older Hook can identify a question without having a response channel.
+/// Keep its actual text visible instead of suggesting a normal chat reply.
+struct ChatPendingQuestionCard<Terminal: View>: View {
+    let prompt: AgentQuestionPrompt
+    let count: Int
+    @ViewBuilder let terminal: () -> Terminal
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(count > 1 ? "\(count) pending questions" : "Question needs your answer", systemImage: "questionmark.bubble")
+                .font(.caption.weight(.semibold)).foregroundStyle(PhrenTheme.warning)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(prompt.questions.indices, id: \.self) { index in
+                        Text(prompt.questions[index].question).font(.headline).textSelection(.enabled)
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading)
+            }.frame(maxHeight: 140)
+            Text("This connection needs its question answered in the terminal.")
+                .font(.caption).foregroundStyle(PhrenTheme.textMuted)
+            terminal().buttonStyle(.bordered)
+        }.padding(16).phrenCard()
+            .overlay(alignment: .topLeading) {
+                Color.clear.frame(width: 1, height: 1).accessibilityElement()
+                    .accessibilityLabel("Pending question").accessibilityIdentifier("chat-pending-question")
+            }
+    }
 }

@@ -440,6 +440,12 @@ import UIKit
         if flag("--chat-link") { append("assistant", "[Open linked page](https://example.org/phren-fixture)") }
         // Real transcripts retain the tool call after it is answered. Keep its
         // line stable so the reply appends instead of reusing a tool message ID.
+        if flag("--chat-async-question") || flag("--chat-question-unsupported") {
+            let args: [String: Any] = ["questions": [["title": "Which Codex screens are missing approvals?", "options": ["Phren and lock screen", "Lock screen only"]]]]
+            entries.append(["line": entries.count, "raw": ["type": "response_item", "payload": ["type": "function_call", "name": "request_user_input_async", "call_id": "fixture-async-question", "arguments": String(decoding: try JSONSerialization.data(withJSONObject: args), as: UTF8.self)]]])
+            entries.append(["line": entries.count, "raw": ["type": "response_item", "payload": ["type": "function_call_output", "call_id": "fixture-async-question", "output": "{\"accepted\":true}"]]])
+            append("assistant", "I am investigating both paths.")
+        }
         if flag("--chat-question") {
             let args: [String: Any] = ["questions": [["id": "palette", "header": "Design", "question": "Which accent should the project use?", "options": [["label": "Cyan", "description": "Keep the Phren accent"], ["label": "Lavender", "description": "A softer accent"]]]]]
             let raw: [String: Any] = ["type": "response_item", "payload": ["type": "function_call", "name": "request_user_input", "call_id": "fixture-question", "arguments": String(decoding: try JSONSerialization.data(withJSONObject: args), as: UTF8.self)]]

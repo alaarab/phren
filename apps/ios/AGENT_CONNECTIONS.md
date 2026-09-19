@@ -304,3 +304,15 @@ is restricted to a workspace the test creates and closes.
 
 Run `phren bridge doctor` on each deployment computer. A passing Mac check does
 not establish that a second computer has installed the service.
+
+Codex asynchronous questions (`request_user_input_async`) use the title/string-
+option shape and return `{accepted:true}` before the person answers. The app
+keeps them pending across that acknowledgement and assistant replies, displays
+them above the composer even when the agent is working or idle, and supports
+choices or a typed Other answer when status advertises `asyncQuestions`. The
+Hook validates the original question and uses Codex's exact-thread inbox; the
+app reports “Answer queued for Codex.” Status also supplies older pending prompts.
+Answers made in Herdr resolve the matching quoted question in the transcript.
+Terminal-only connections without the inbox capability, and synchronous Codex
+questions without a response channel, show the actual question and a terminal
+link instead of suggesting that an ordinary composer message will answer it.

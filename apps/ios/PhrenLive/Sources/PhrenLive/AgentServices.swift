@@ -51,12 +51,16 @@ extension PhrenConnection {
         try await answer(host: host, privateKey: privateKey, target: target, path: "/v1/questions/answer",
                          body: prompt.answerBody(target: target, selections: selections))
     }
+    public static func answerQuestions(host: LiveHost, privateKey: Data, target: AgentChatTarget, prompt: AgentQuestionPrompt, answers: [AgentQuestionAnswer]) async throws {
+        try await answer(host: host, privateKey: privateKey, target: target, path: "/v1/questions/answer",
+                         body: prompt.answerBody(target: target, answers: answers))
+    }
     private static func answer(host: LiveHost, privateKey: Data, target: AgentChatTarget, path: String, body: Data) async throws {
         try checkHost(host, target)
         _ = try await chatPanes(host: host, privateKey: privateKey, workspaceID: target.workspaceID, tabID: target.tabID).validate(target)
         try Task.checkCancellation()
-        // The helper compares the exact action/prompt against the live terminal.
-        // Never retry an ambiguous response: these requests enter terminal input.
+        // The helper validates the exact pending request and conversation.
+        // Never retry an ambiguous response: the agent may have accepted it.
         try requireOK(await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: .init(path: path, body: GatewayRequest.targetBody(target, fields: (try JSONSerialization.jsonObject(with: body) as? [String: Any]) ?? [:]))))
     }
 
