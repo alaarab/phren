@@ -1,5 +1,6 @@
 import { realpath, stat } from "node:fs/promises";
 import { createReadStream } from "node:fs";
+import { createInterface } from "node:readline";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -11,10 +12,10 @@ import { namedPaths, SHELL_TOOLS, outputCallIds, type ChangeLookup } from "./cha
 export interface Entry { line: number; raw: Json }
 export interface ChildAgentRelation {
   /** `id` is a parent-scoped public reference; `session` never leaves Hook. */
-  id: string; session: string; provider: Provider; path: string; callId: string; state: "running" | "completed";
+  id: string; session: string; transcript: string; provider: Provider; path: string; callId: string; state: "running" | "completed";
   children: ChildAgentRelation[];
 }
-type DirectRelation = Omit<ChildAgentRelation, "id" | "provider" | "children">;
+type DirectRelation = Omit<ChildAgentRelation, "id" | "transcript" | "provider" | "children">;
 type ChildRelationCache = {
   dev: number; ino: number; fileSize: number; completeOffset: number; mtimeMs: number;
   relations: Map<string, DirectRelation>;
@@ -66,18 +67,67 @@ async function directChildAgents(file: string): Promise<DirectRelation[]> {
  * SubAgentActivity links; other providers return no children until their
  * public transcript format exposes an equivalent relationship. */
 export async function childAgentTree(source: Provider, session: string, depth = 0, seen = new Set<string>()): Promise<ChildAgentRelation[]> {
-  if (source !== "codex" || depth >= 4 || seen.size >= 128 || seen.has(session)) return [];
+  if (depth >= 4 || seen.size >= 128 || seen.has(session)) return [];
   seen.add(session);
+  if (!["codex", "claude"].includes(source)) return [];
   const file = await transcriptPath(source, session);
+  if (source === "claude") return claudeChildAgents(file, session);
   const relations = await directChildAgents(file), verified: ChildAgentRelation[] = [];
   for (const relation of relations) {
     const childFile = await transcriptPath(source, relation.session).catch(() => undefined);
     if (!childFile || !await childTranscriptBelongsTo(childFile, session)) continue;
-    verified.push({ ...relation, provider: source,
+    verified.push({ ...relation, transcript: childFile, provider: source,
       id: createHash("sha256").update(`${source}\0${session}\0${relation.session}`).digest("hex").slice(0, 32),
       children: await childAgentTree(source, relation.session, depth + 1, seen).catch(() => []) });
   }
   return verified;
+}
+
+const claudeRelationCache = new Map<string, { signature: string; relations: ChildAgentRelation[] }>();
+async function claudeChildAgents(file: string, session: string): Promise<ChildAgentRelation[]> {
+  const metadata = await stat(file), signature = `${metadata.dev}:${metadata.ino}:${metadata.size}:${metadata.mtimeMs}`;
+  const cached = claudeRelationCache.get(file); if (cached?.signature === signature) return cached.relations;
+  const launches = new Map<string, { path: string; callId: string; state: "running" | "completed" }>();
+  const lines = createInterface({ input: createReadStream(file, { encoding: "utf8" }), crlfDelay: Infinity });
+  for await (const line of lines) {
+    try {
+      const raw = object(JSON.parse(line)), result = object(raw.toolUseResult);
+      const agentId = String(result.agentId ?? ""), status = String(result.status ?? "");
+      if (/^[A-Za-z0-9._-]{1,128}$/.test(agentId) && ["async_launched", "running"].includes(status)) {
+        const blocks = objects(object(raw.message).content), callId = String(blocks.find(b => b.type === "tool_result")?.tool_use_id ?? "");
+        if (callId) launches.set(agentId, { path: String(result.description || result.name || "Agent").slice(0, 200), callId, state: "running" });
+      }
+      const content = typeof raw.content === "string" ? raw.content : typeof object(raw.message).content === "string" ? String(object(raw.message).content) : "";
+      if (content.includes("<task-notification>")) {
+        const child = /<task-id>([^<>]{1,128})<\/task-id>/.exec(content)?.[1], taskStatus = /<status>([^<>]+)<\/status>/.exec(content)?.[1];
+        const previous = child && launches.get(child); if (previous && ["completed", "failed", "cancelled"].includes(taskStatus ?? "")) previous.state = "completed";
+      }
+    } catch { /* Ignore unrelated/malformed rows. */ }
+  }
+  const relations: ChildAgentRelation[] = [];
+  const root = await realpath(path.join(path.dirname(file), session, "subagents")).catch(() => undefined);
+  if (root) for (const [agentId, launch] of launches) {
+    const childFile = await realpath(path.join(root, `agent-${agentId}.jsonl`)).catch(() => undefined);
+    if (!childFile || !childFile.startsWith(root + path.sep) || !await claudeChildBelongsTo(childFile, session, agentId)) continue;
+    relations.push({ id: createHash("sha256").update(`claude\0${session}\0${agentId}`).digest("hex").slice(0, 32),
+      session: agentId, transcript: childFile, provider: "claude", ...launch, children: [] });
+  }
+  claudeRelationCache.set(file, { signature, relations });
+  while (claudeRelationCache.size > 64) claudeRelationCache.delete(claudeRelationCache.keys().next().value!);
+  return relations;
+}
+
+async function claudeChildBelongsTo(file: string, parent: string, agentId: string): Promise<boolean> {
+  let bytes = Buffer.alloc(0);
+  for await (const chunk of createReadStream(file, { start: 0, end: 1_048_575 })) {
+    bytes = Buffer.concat([bytes, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)]);
+    const newline = bytes.indexOf(0x0a); if (newline >= 0) { bytes = bytes.subarray(0, newline); break; }
+  }
+  try {
+    const raw = object(JSON.parse(bytes.toString("utf8")));
+    return (raw.isSidechain === true && raw.sessionId === parent && raw.agentId === agentId)
+      || (raw.type === "fork-context-ref" && raw.parentSessionId === parent && raw.agentId === agentId);
+  } catch { return false; }
 }
 
 async function childTranscriptBelongsTo(file: string, parent: string): Promise<boolean> {
@@ -193,7 +243,7 @@ export async function transcriptPath(source: Provider, session: string): Promise
 }
 
 /** Public conversation/tool events and real usage only. Never export private reasoning. */
-export function visibleEvent(raw: Json, source: Provider): Json | undefined {
+export function visibleEvent(raw: Json, source: Provider, includeSidechain = false): Json | undefined {
   if (source === "phren" || source === "opencode") {
     // phren-agent's event log (experimental/agent/src/session/log.ts): the
     // header and log/replace splices are bookkeeping; the three message
@@ -250,7 +300,7 @@ export function visibleEvent(raw: Json, source: Provider): Json | undefined {
       return { type: "user", phrenQueued: true, phrenQueueKey: key, timestamp: raw.timestamp,
         message: { role: "user", content: raw.content } };
     }
-    if (raw.isMeta || raw.isSidechain || !["user", "assistant", "system"].includes(String(raw.type))) return undefined;
+    if (raw.isMeta || (raw.isSidechain && !includeSidechain) || !["user", "assistant", "system"].includes(String(raw.type))) return undefined;
     raw = Object.fromEntries(Object.entries(raw).filter(([key]) => CLAUDE_KEYS.has(key)));
     const message = object(raw.message);
     // Keep indexes for historical images while removing thinking contents.
@@ -273,7 +323,8 @@ export function visibleEvent(raw: Json, source: Provider): Json | undefined {
 export class TranscriptReader {
   private revision?: string;
   private nextLine = 0;
-  constructor(readonly file: string, readonly source: Provider, private readonly imageLine?: number, private readonly changes?: ChangeLookup) {}
+  constructor(readonly file: string, readonly source: Provider, private readonly imageLine?: number, private readonly changes?: ChangeLookup,
+              private readonly includeSidechain = false) {}
   async read(before?: number, signal?: AbortSignal): Promise<{ entries: Entry[]; totalLines: number; startLine: number; hasMore: boolean; reset: boolean }> {
     return withTranscriptIndex(this.file, async (handle, index) => {
       const reset = this.revision !== index.revision;
@@ -291,7 +342,7 @@ export class TranscriptReader {
         signal?.throwIfAborted();
         let entry: Entry | undefined;
         try {
-          const raw = row.bytes && visibleEvent(object(JSON.parse(row.bytes.toString())), this.source);
+          const raw = row.bytes && visibleEvent(object(JSON.parse(row.bytes.toString())), this.source, this.includeSidechain);
           if (raw) entry = { line: row.line, raw: this.imageLine === row.line ? raw : chatFrame(raw, this.source) };
         } catch { /* A malformed old row cannot block the next readable page. */ }
         if (entry && this.changes && this.imageLine === undefined) {
