@@ -26,6 +26,8 @@ import { startSession, endSession, getPriorSummary, saveSessionMessages, loadLas
 import { emitHerdrHook, setHerdrHookSession } from "./herdr-hooks.js";
 import { loadProjectContext, evolveProjectContext } from "./memory/project-context.js";
 import { buildSystemPrompt } from "./system-prompt.js";
+import { loadHooksConfig } from "./user-hooks.js";
+import { loadAndRegisterCustomCommands, getCustomCommandInfos } from "./commands.js";
 import { createSession, runTurn } from "./agent-loop.js";
 import { SessionLog, seedFromMessages } from "./session/log.js";
 import { fileSink, findLatestEventLog, persistFork, restoreSessionLog } from "./session/persist.js";
@@ -198,10 +200,12 @@ export async function runAgentCli(raw: string[]) {
     }
   }
 
+  loadAndRegisterCustomCommands(process.cwd());
+
   const systemPrompt = buildSystemPrompt(contextSnippet, priorSummary, {
     name: provider.name,
     model: (provider as { model?: string }).model,
-  });
+  }, getCustomCommandInfos());
 
   // Dry run: print system prompt and exit
   if (args.dryRun) {
@@ -214,6 +218,7 @@ export async function runAgentCli(raw: string[]) {
 
   // Register tools
   const registry = new ToolRegistry();
+  registry.hookConfig = loadHooksConfig(process.cwd());
   registry.setPermissions({
     mode: args.permissions,
     allowedPaths: [],
@@ -353,6 +358,7 @@ export async function runAgentCli(raw: string[]) {
     plan: args.plan,
     lintTestConfig,
     sessionId,
+    hookConfig: registry.hookConfig,
     sessionLog: resumedLog ?? makePersistedLog(),
     ...(args.noLlmCompact ? { compaction: { enabled: false } } : {}),
   };

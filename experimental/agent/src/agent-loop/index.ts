@@ -9,6 +9,7 @@ import { injectPlanPrompt, requestPlanApproval } from "../plan.js";
 import { detectLintCommand, detectTestCommand, runPostEditCheck } from "../tools/lint-test.js";
 import { createCheckpoint } from "../checkpoint.js";
 import { resetRepeatChain } from "../guards/repeat-tool-reminder.js";
+import { runLifecycleHooks } from "../user-hooks.js";
 
 import type { AgentConfig, AgentSession, AgentResult, TurnResult, TurnHooks } from "./types.js";
 import { createSession } from "./types.js";
@@ -51,6 +52,10 @@ export async function runTurn(
   const turnStart = session.turns;
 
   const signal = hooks?.signal;
+  const hookConfig = config.hookConfig ?? null;
+  if (hookConfig) {
+    await runLifecycleHooks(hookConfig, "UserPromptSubmit", { prompt: userInput });
+  }
 
   while (session.turns - turnStart < maxTurns) {
     // Abort check
@@ -334,6 +339,10 @@ export async function runTurn(
       .join("\n");
   } else if (lastAssistant && typeof lastAssistant.content === "string") {
     text = lastAssistant.content;
+  }
+
+  if (hookConfig) {
+    await runLifecycleHooks(hookConfig, "Stop", {});
   }
 
   return { text, turns: session.turns - turnStart, toolCalls: turnToolCalls };
