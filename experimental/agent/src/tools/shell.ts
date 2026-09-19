@@ -69,7 +69,7 @@ export function createShellTool(getPermissions?: () => PermissionConfig): AgentT
 
       const safety = checkShellSafety(command);
       if (!safety.safe && safety.severity === "block") {
-        return { output: `Blocked: ${safety.reason}`, is_error: true };
+        return { output: `Blocked: ${safety.reason}`, is_error: true, permissionDenied: true };
       }
 
       const isWindows = process.platform === "win32";
@@ -87,7 +87,7 @@ export function createShellTool(getPermissions?: () => PermissionConfig): AgentT
         });
       } catch (err: unknown) {
         if (err instanceof SandboxRequiredError) {
-          return { output: err.message, is_error: true };
+          return { output: err.message, is_error: true, permissionDenied: true };
         }
         throw err;
       }
