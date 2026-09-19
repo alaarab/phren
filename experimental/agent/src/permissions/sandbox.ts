@@ -30,6 +30,34 @@ export type PathValidation =
   | { ok: true; resolved: string }
   | { ok: false; error: string };
 
+/** Canonicalize even a not-yet-created file through its nearest existing
+ * ancestor. Broken/looping links and access errors cannot grant a boundary. */
+function canonicalPath(filePath: string): string {
+  let current = filePath;
+  const missing: string[] = [];
+  for (let depth = 0; depth < 256; depth++) {
+    try {
+      // The native implementation preserves kernel symlink/.. semantics.
+      return path.join(fs.realpathSync.native(current), ...missing.reverse());
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      // realpath also reports ENOENT for dangling symlinks. Unlike an absent
+      // filename, those must not fall back to a lexical path inside the root.
+      if (fs.lstatSync(current, { throwIfNoEntry: false })) throw error;
+      const parent = path.dirname(current);
+      if (parent === current) throw error;
+      missing.push(path.basename(current));
+      current = parent;
+    }
+  }
+  throw new Error("Path exceeds the ancestor resolution limit.");
+}
+
+function expandHome(filePath: string): string {
+  return filePath === "~" || filePath.startsWith("~/")
+    ? path.join(os.homedir(), filePath.slice(1)) : filePath;
+}
+
 /**
  * Resolve and validate a file path against the sandbox boundary.
  */
@@ -38,31 +66,21 @@ export function validatePath(
   projectRoot: string,
   allowedPaths: string[],
 ): PathValidation {
-  // Resolve ~ to home directory
-  let resolved = filePath;
-  if (resolved.startsWith("~/") || resolved === "~") {
-    resolved = path.join(os.homedir(), resolved.slice(1));
-  }
-
-  // Resolve to absolute
-  if (!path.isAbsolute(resolved)) {
-    resolved = path.resolve(projectRoot, resolved);
-  }
-
-  // Normalize (remove .., trailing slashes, etc.)
-  resolved = path.normalize(resolved);
-
-  // Resolve symlinks if the path exists
+  let resolved: string, root: string, allowed: string[];
   try {
-    if (fs.existsSync(resolved)) {
-      resolved = fs.realpathSync(resolved);
-    }
+    const absoluteRoot = path.resolve(expandHome(projectRoot));
+    // Preserve .. until filesystem resolution: link/../file follows the
+    // link before traversing its parent, unlike path.resolve's lexical fold.
+    const requested = expandHome(filePath);
+    resolved = canonicalPath(path.isAbsolute(requested) ? requested : absoluteRoot + path.sep + requested);
+    root = canonicalPath(absoluteRoot);
+    allowed = allowedPaths.map(value => canonicalPath(path.resolve(absoluteRoot, expandHome(value))));
   } catch {
-    // If we can't resolve, proceed with the normalized path
+    return { ok: false, error: `Path "${filePath}" could not be safely resolved.` };
   }
 
   // Check sandbox boundaries
-  if (!isPathInSandbox(resolved, projectRoot, allowedPaths)) {
+  if (!isPathInSandbox(resolved, root, allowed)) {
     return {
       ok: false,
       error: `Path "${resolved}" is outside project root "${projectRoot}" and not in allowed paths.`,
