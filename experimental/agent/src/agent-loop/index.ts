@@ -212,17 +212,15 @@ export async function runTurn(
 
     // Plan mode gate: after first response, ask for approval
     if (planPending) {
-      planPending = false;
       const approve = hooks?.onPlanApproval ?? requestPlanApproval;
       const { approved, feedback } = await approve();
+      if (signal?.aborted) break;
       if (!approved) {
-        // Always restore original system prompt on rejection to prevent plan prompt leaking
-        systemPrompt = config.systemPrompt;
         const msg = feedback
           ? `The user rejected the plan with feedback: ${feedback}\nPlease revise your plan.`
           : "The user rejected the plan. Task aborted.";
         if (feedback) {
-          // Let the LLM revise — add feedback as user message and continue
+          // Revisions remain in plan mode, with tools disabled, until approved.
           session.log.append("user/message", {
             message: { role: "user", content: msg },
             source: "user",
@@ -233,6 +231,7 @@ export async function runTurn(
         break;
       }
       // Approved — restore original system prompt and continue with tools enabled
+      planPending = false;
       systemPrompt = config.systemPrompt;
       session.log.append("user/message", {
         message: { role: "user", content: "Plan approved. Proceed with execution." },

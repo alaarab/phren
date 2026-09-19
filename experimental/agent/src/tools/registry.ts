@@ -58,6 +58,7 @@ export class ToolRegistry {
   }
 
   async execute(name: string, input: Record<string, unknown>, signal?: AbortSignal): Promise<AgentToolResult> {
+    if (signal?.aborted) return { output: "Cancelled by user.", is_error: true };
     const tool = this.tools.get(name);
     if (!tool) return { output: `Unknown tool: ${name}`, is_error: true };
 
@@ -66,6 +67,8 @@ export class ToolRegistry {
     if (pre.denied) {
       return { output: pre.message, is_error: true };
     }
+
+    if (signal?.aborted) return { output: "Cancelled by user.", is_error: true };
 
     // Permission check — always enforced
     const rule = checkPermission(this.permissionConfig, name, input);
@@ -78,6 +81,10 @@ export class ToolRegistry {
         return { output: "User denied permission.", is_error: true };
       }
     }
+
+    // An approval may arrive after the turn was cancelled or this call timed out.
+    // Recheck here: tools such as synchronous file writes cannot observe abort later.
+    if (signal?.aborted) return { output: "Cancelled by user.", is_error: true };
 
     let result: AgentToolResult;
     try {
