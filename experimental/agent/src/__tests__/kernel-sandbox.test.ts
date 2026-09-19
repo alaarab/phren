@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -14,6 +14,10 @@ import {
 import { createShellTool } from "../tools/shell.js";
 import { isPrivateAddress, checkUrlSafety } from "../tools/web-fetch.js";
 import type { PermissionConfig } from "../permissions/types.js";
+
+// Keep the real filesystem by default, with a configurable realpath export
+// for the Linux-only mount test below. Native ESM namespaces cannot be spied on.
+vi.mock("fs", async importOriginal => ({ ...await importOriginal<typeof import("fs")>() }));
 
 describe("kernel-sandbox", () => {
   beforeEach(() => _resetSandboxProbe());
@@ -48,12 +52,24 @@ describe("kernel-sandbox", () => {
       expect(argv).toContain(workDir);
     });
 
-    it("dedupes identical roots, skips nonexistent paths and the exact /tmp", () => {
-      const argv = buildBwrapArgv(["true"], [workDir, workDir, "/nonexistent-xyz", "/tmp"]);
+    it("dedupes identical roots and skips nonexistent paths", () => {
+      const argv = buildBwrapArgv(["true"], [workDir, workDir, "/nonexistent-xyz"]);
       const binds = argv.filter((a) => a === "--bind");
-      // workDir once (deduped); /tmp is already the writable tmpfs; nonexistent skipped
       expect(binds).toHaveLength(1);
       expect(argv).not.toContain("/nonexistent-xyz");
+    });
+
+    it("skips the exact /tmp already covered by the Linux tmpfs", () => {
+      // bwrap only runs on Linux. On macOS the host's /tmp resolves to
+      // /private/tmp, which is a different writable root, not this mount.
+      const realpath = vi.spyOn(fs, "realpathSync").mockReturnValue("/tmp");
+      try {
+        const argv = buildBwrapArgv(["true"], ["/tmp"]);
+        expect(argv).not.toContain("--bind");
+        expect(argv.slice(argv.indexOf("--tmpfs"), argv.indexOf("--tmpfs") + 2)).toEqual(["--tmpfs", "/tmp"]);
+      } finally {
+        realpath.mockRestore();
+      }
     });
 
     it("binds workspaces under /tmp so the tmpfs does not shadow them", () => {
