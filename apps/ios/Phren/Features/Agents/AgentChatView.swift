@@ -1124,15 +1124,16 @@ struct AgentChatView: View {
                         Image(systemName: "plus").font(.system(size: 21, weight: .light)).frame(width: 36, height: 44).contentShape(Rectangle())
                     }.accessibilityLabel("Add attachment").disabled(model.target == nil || model.sending)
                     if pasteAvailable {
+                        // The clipboard holds a picture: one tap attaches it.
                         Button { pasteClipboardImage() } label: {
-                            Image(systemName: "photo.on.clipboard").font(.system(size: 18)).frame(width: 40, height: 44).contentShape(Rectangle())
+                            Image(systemName: "doc.on.clipboard").font(.system(size: 17)).frame(width: 36, height: 44).contentShape(Rectangle())
                         }.accessibilityLabel("Paste image").accessibilityIdentifier("chat-paste-image")
                             .disabled(model.target == nil || model.sending)
                     }
                     NavigationLink {
                         HerdrTerminalView(host: session.host, session: session, target: model.target)
                     } label: {
-                        Image(systemName: "terminal").font(.system(size: 18)).frame(width: 44, height: 44).contentShape(Rectangle())
+                        Image(systemName: "terminal").font(.system(size: 18)).frame(width: 40, height: 44).contentShape(Rectangle())
                     }.accessibilityLabel("Open Herdr terminal").accessibilityIdentifier("chat-composer-terminal")
                     Button { composing = false; showingAgentSwitcher = true } label: {
                         Image(systemName: "person.2")

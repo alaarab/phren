@@ -15,6 +15,9 @@ number counts up on its own.
 
 ### New
 
+- The composer's Paste image button (shown when the clipboard holds a
+  picture) has its icon back; it used to leave an empty gap before the
+  terminal and agents buttons.
 - A waiting agent with a plain question in its terminal takes a typed reply
   from the composer again; the answer keys stay for real prompts, and Y and N
   appear only when they mean something there.
