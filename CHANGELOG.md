@@ -16,8 +16,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   mirrors sessions into the store's `.runtime/sessions` so the iOS app can read
   them. Identity needs `herdr integration install opencode` on the computer.
 
+### Fixed
+
+- The prompt hook no longer files conversation as tasks: replies ("Yep
+  /herdr the phren agent is there"), questions, and frames from another
+  agent or the harness (`<cross-session-message>`, delivery notices,
+  `<task-notification>`, `<system-reminder>`) are skipped, and the
+  `<pasted_content>` wrapper Claude Code puts around pasted or phone input is
+  read through instead of landing verbatim in the task.
+
 ### Changed
 
+- Tasks the prompt hook picks up on its own go to Queue, not Active, with a
+  `Queued task` notice. A prompt that asks to be tracked ("add this to
+  task"), or one matching a task already in Active, still goes to Active.
 - Swipe down on the chat message box, its icon row, or the Herdr shortcut row
   to dismiss the keyboard while keeping the draft.
 - iOS CI runs only by manual dispatch; the full native UI suite requires an

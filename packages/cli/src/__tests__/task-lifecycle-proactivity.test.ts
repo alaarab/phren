@@ -151,13 +151,15 @@ describe("task lifecycle task proactivity gating", () => {
     });
 
     expect(result.mode).toBe("auto");
-    expect(result.noticeLines.join("\n")).toContain("Active task");
+    // Picked up on its own: it waits in Queue, not Active.
+    expect(result.noticeLines.join("\n")).toContain("Queued task");
 
     const task = readTasks(tmp.path, project);
     expect(task.ok).toBe(true);
     if (!task.ok) return;
-    expect(task.data.items.Active).toHaveLength(1);
-    expect(task.data.items.Active[0].line).toBe("Implement automatic task management for hooks");
+    expect(task.data.items.Active).toHaveLength(0);
+    expect(task.data.items.Queue).toHaveLength(1);
+    expect(task.data.items.Queue[0].line).toBe("Implement automatic task management for hooks");
   });
 
   it('requires an explicit "add to task" signal at medium', () => {
@@ -272,8 +274,8 @@ describe("task lifecycle task proactivity gating", () => {
     const tasks = readTasks(tmp.path, project);
     expect(tasks.ok).toBe(true);
     if (!tasks.ok) return;
-    expect(tasks.data.items.Active).toHaveLength(1);
-    expect(result.noticeLines.join("\n")).toContain("Active task");
+    expect(tasks.data.items.Queue).toHaveLength(1);
+    expect(result.noticeLines.join("\n")).toContain("Queued task");
   });
 
   it("substance gate accepts a file-path-referenced prompt", () => {
@@ -289,7 +291,7 @@ describe("task lifecycle task proactivity gating", () => {
     const tasks = readTasks(tmp.path, project);
     expect(tasks.ok).toBe(true);
     if (!tasks.ok) return;
-    expect(tasks.data.items.Active).toHaveLength(1);
-    expect(result.noticeLines.join("\n")).toContain("Active task");
+    expect(tasks.data.items.Queue).toHaveLength(1);
+    expect(result.noticeLines.join("\n")).toContain("Queued task");
   });
 });

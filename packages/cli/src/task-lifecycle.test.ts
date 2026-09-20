@@ -53,7 +53,7 @@ describe("task lifecycle", () => {
     expect(after).toBe(before);
   });
 
-  it("auto mode creates an active task and links an explicit GitHub issue URL", () => {
+  it("auto mode queues a task and links an explicit GitHub issue URL", () => {
     writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({
       schemaVersion: 1,
 
@@ -71,15 +71,16 @@ describe("task lifecycle", () => {
     });
 
     expect(result.mode).toBe("auto");
-    expect(result.noticeLines.join("\n")).toContain("Active task");
+    expect(result.noticeLines.join("\n")).toContain("Queued task");
 
     const task = readTasks(tmp.path, project);
     expect(task.ok).toBe(true);
     if (!task.ok) return;
-    expect(task.data.items.Active).toHaveLength(1);
-    expect(task.data.items.Active[0].context).toContain("Implement automatic task management for hooks");
-    expect(task.data.items.Active[0].githubIssue).toBe(14);
-    expect(task.data.items.Active[0].githubUrl).toBe("https://github.com/alaarab/phren/issues/14");
+    expect(task.data.items.Active).toHaveLength(0);
+    expect(task.data.items.Queue).toHaveLength(1);
+    expect(task.data.items.Queue[0].context).toContain("Implement automatic task management for hooks");
+    expect(task.data.items.Queue[0].githubIssue).toBe(14);
+    expect(task.data.items.Queue[0].githubUrl).toBe("https://github.com/alaarab/phren/issues/14");
   });
 
   it("auto mode suggests instead of writing when discovery intent detected", () => {
@@ -125,12 +126,12 @@ describe("task lifecycle", () => {
     });
 
     expect(result.mode).toBe("auto");
-    expect(result.noticeLines.join("\n")).toContain("Active task");
+    expect(result.noticeLines.join("\n")).toContain("Queued task");
 
     const task = readTasks(tmp.path, project);
     expect(task.ok).toBe(true);
     if (!task.ok) return;
-    expect(task.data.items.Active).toHaveLength(1);
+    expect(task.data.items.Queue).toHaveLength(1);
   });
 
   it("auto mode writes task when both execution and discovery signals present", () => {
@@ -151,7 +152,7 @@ describe("task lifecycle", () => {
     });
 
     expect(result.mode).toBe("auto");
-    expect(result.noticeLines.join("\n")).toContain("Active task");
+    expect(result.noticeLines.join("\n")).toContain("Queued task");
   });
 
   it("auto mode writes task when no discovery signal present (default behavior)", () => {
@@ -172,7 +173,7 @@ describe("task lifecycle", () => {
     });
 
     expect(result.mode).toBe("auto");
-    expect(result.noticeLines.join("\n")).toContain("Active task");
+    expect(result.noticeLines.join("\n")).toContain("Queued task");
   });
 
   it("auto mode does not poison the tracked task on transient git failure", () => {
@@ -334,9 +335,47 @@ describe("task auto-capture prompt gate", () => {
     });
   }
 
-  it("still captures a real request", () => {
+  it("still captures a real request, into Queue", () => {
     const result = capture("Fix the retry backoff in the sync worker", "session-real");
-    expect(result.noticeLines.join("\n")).toContain("Active task");
+    expect(result.noticeLines.join("\n")).toContain("Queued task");
+    expect(taskCount()).toBe(1);
+    const tasks = readTasks(tmp.path, project);
+    expect(tasks.ok && tasks.data.items.Queue).toHaveLength(1);
+  });
+
+  // What the dispatcher session filed on 2026-09-19: replies from the phone
+  // (wrapped by the terminal), a message from another agent, questions.
+  const conversational: Array<[string, string]> = [
+    ["a wrapped reply", '<pasted_content id="92a5">\nYep /herdr the phren agent is there\n</pasted_content id="92a5">'],
+    ["a wrapped musing", '<pasted_content id="1b2c">\ncurious, I want you to look at /home/me/Projects/phren and tell me what changed\n</pasted_content id="1b2c">'],
+    ["a cross-session message", '<cross-session-message from="uds:/run/user/1000/cc-socks/1.sock" from-name="c2">\nFix the sync worker retry and update the docs\n</cross-session-message>'],
+    ["a delivery notice", "[Cross-session delivery notice] fix the sync worker: held for approval"],
+    ["a question", "Should I fix the retry backoff in the sync worker or update the docs first?"],
+    ["a bare acknowledgement of a path", "ok /home/me/Projects/phren is the one"],
+  ];
+  for (const [label, prompt] of conversational) {
+    it(`does not create a task from ${label}`, () => {
+      const result = capture(prompt, `session-${label.replace(/\s+/g, "-")}`);
+      expect(result.noticeLines).toEqual([]);
+      expect(taskCount()).toBe(0);
+    });
+  }
+
+  it("reads the request inside a paste wrapper and records it without the wrapper", () => {
+    const result = capture('<pasted_content id="7f01">\nFix the retry backoff in the sync worker\n</pasted_content id="7f01">', "session-wrapped-request");
+    expect(result.noticeLines.join("\n")).toContain("Queued task (demo): Fix the retry backoff in the sync worker");
+    const tasks = readTasks(tmp.path, project);
+    expect(tasks.ok && tasks.data.items.Queue[0].line).toBe("Fix the retry backoff in the sync worker");
+    expect((tasks.ok && tasks.data.items.Queue[0].context) || "").not.toContain("pasted_content");
+  });
+
+  it("puts a request the person asked to track in Active, and a matched Active task stays there", () => {
+    const explicit = capture("Add this to task: fix the retry backoff in the sync worker", "session-explicit");
+    expect(explicit.noticeLines.join("\n")).toContain("Active task");
+    const tasks = readTasks(tmp.path, project);
+    expect(tasks.ok && tasks.data.items.Active.map((t) => t.line)).toEqual(["Fix the retry backoff in the sync worker"]);
+    const again = capture("Fix the retry backoff in the sync worker properly", "session-again");
+    expect(again.noticeLines.join("\n")).toContain("Active task");
     expect(taskCount()).toBe(1);
   });
 });
