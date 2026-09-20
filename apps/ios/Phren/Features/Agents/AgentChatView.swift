@@ -1313,6 +1313,10 @@ private struct ModernChatFollowScroll<Content: View>: View {
     @State private var position = ScrollPosition()
     @State private var metrics = ChatScrollMetrics(contentHeight: 0, viewportHeight: 0, offsetY: 0)
     @State private var handledPinID: UUID?
+    /// A pin keeps following the viewport for a moment after it is applied:
+    /// the keyboard changes the container over several frames, and a pin
+    /// resolved against the first of them lands short of, or past, the end.
+    @State private var settlingUntil: Date?
 
     var body: some View {
         content
@@ -1324,6 +1328,14 @@ private struct ModernChatFollowScroll<Content: View>: View {
             .onScrollGeometryChange(for: ChatScrollMetrics.self) { ChatScrollMetrics($0) } action: { old, new in
                 metrics = new
                 changed(old, new, userDriven)
+                if !userDriven, let corrected = ChatScrollMetrics.correctiveOffset(new) {
+                    position.scrollTo(y: corrected)
+                    return
+                }
+                if let settlingUntil, settlingUntil > .now, !userDriven {
+                    if new.bottomOffset > 0.5, abs(new.offsetY - new.bottomOffset) > 0.5 { position.scrollTo(y: new.bottomOffset) }
+                    return
+                }
                 guard following,
                       let target = ChatScrollMetrics.shouldRepin(old: old, new: new, userDriven: userDriven) else { return }
                 // A numeric target avoids ScrollViewReader resolving an
@@ -1345,6 +1357,7 @@ private struct ModernChatFollowScroll<Content: View>: View {
         handledPinID = request.id
         let target = metrics.bottomOffset
         guard target > 0.5 else { return }
+        settlingUntil = .now + (request.animated ? 0.6 : 0.3)
         if request.animated {
             withAnimation { position.scrollTo(y: target) }
         } else {

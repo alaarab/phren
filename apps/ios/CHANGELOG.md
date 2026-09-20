@@ -15,6 +15,9 @@ number counts up on its own.
 
 ### New
 
+- The chat transcript no longer lands past its end when the keyboard
+  appears or goes away, or when a long conversation opens: any offset past
+  the last message is pulled back on the next layout.
 - Connection settings now offers the full color picker and custom hex colors
   for computers, alongside the quick swatches.
 - Agent work, the agent drawer and the composer badge show running agents

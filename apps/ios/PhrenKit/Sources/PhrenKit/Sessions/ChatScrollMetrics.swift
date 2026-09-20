@@ -24,6 +24,15 @@ public struct ChatScrollMetrics: Equatable, Sendable {
         bottomOffset - offsetY
     }
 
+    /// An offset past the transcript's end is never right, whoever set it:
+    /// a pin resolved against a viewport the keyboard was still shrinking, or
+    /// a lazy stack whose estimate was taller than its rows. `scrollTo(y:)`
+    /// does not clamp, so the correction has to be ours.
+    public static func correctiveOffset(_ metrics: ChatScrollMetrics) -> CGFloat? {
+        guard metrics.viewportHeight > 0.5, metrics.offsetY > metrics.bottomOffset + 0.5 else { return nil }
+        return metrics.bottomOffset
+    }
+
     /// Returns the clamped bottom offset for transcript growth or an already
     /// invalid offset. A keyboard or surrounding control changing the viewport
     /// alone must not enqueue another follow scroll against intermediate
