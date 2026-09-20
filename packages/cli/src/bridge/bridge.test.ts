@@ -695,6 +695,21 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     agentStatus = "idle";
     expect((await api("/v1/workspaces")).data.groups[0].children[0]).not.toHaveProperty("currentStep");
   });
+  it("takes typed text for a waiting agent only when no structured prompt is pending", async () => {
+    agentStatus = "blocked";
+    expect((await api("/v1/prompt", { target, text: "deploy as-is" })).status).toBe(200);
+    const callback = JSON.stringify({ target, event: "PermissionRequest", tool: "Shell", input: { command: "rm -rf build" } });
+    await new Promise<void>((resolve, reject) => {
+      const req = request({ socketPath: path.join(root, "bridge/agent.sock"), path: "/hook", method: "POST", headers: { "Content-Length": Buffer.byteLength(callback) } },
+        res => { res.resume(); res.on("end", resolve); });
+      req.on("error", reject); req.end(callback);
+    });
+    expect((await api("/v1/prompt", { target, text: "must not be typed into the prompt" })).status).toBe(409);
+    expect((await api("/v1/keys", { target, keys: ["y"] })).status).toBe(200);
+    expect((await api("/v1/prompt", { target, text: "next question" })).status).toBe(200);
+    agentStatus = "unknown";
+    expect((await api("/v1/prompt", { target, text: "nobody knows" })).status).toBe(409);
+  });
   it("lets the phone walk a menu it just opened with a slash command, briefly", async () => {
     agentStatus = "idle";
     expect((await api("/v1/keys", { target, keys: ["Down"] })).status).toBe(409);
@@ -995,8 +1010,11 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
       const upload = await api("/v1/upload", { target, name: `${status}.txt`, data: bytes.toString("base64") });
       expect(upload.status).toBe(200);
       expect(await readFile(upload.data.path)).toEqual(bytes);
-      expect((await api("/v1/prompt", { target, text: "Do not answer the pending question" })).status).toBe(409);
     }
+    // An unreadable status keeps text out; a plain waiting agent takes it
+    // (the structured cases are covered where prompts are pending).
+    agentStatus = "unknown";
+    expect((await api("/v1/prompt", { target, text: "Do not answer the pending question" })).status).toBe(409);
     expect(commands.some(c => c.method === "agent.prompt")).toBe(false);
     current = "bbbbbbbb-1111-4111-8111-111111111111";
     expect((await api("/v1/upload", { target, name: "changed.txt", data: Buffer.from("Draft").toString("base64") })).status).toBe(409);

@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
-import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
+import { appendFile, mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { CodexQuestions, pendingAsyncQuestion, pendingAsyncQuestions, questionReply } from "./questions.js";
@@ -84,5 +84,23 @@ describe("Codex async question replies", () => {
     await expect(new CodexQuestions(executable).answer(target, { toolUseId: "call-1", answers: [{ optionIndexes: [0] }] })).rejects.toThrow("conversation changed");
     await expect(readFile(path.join(directory, "sent.jsonl"))).rejects.toThrow();
     expect(await new CodexQuestions(path.join(directory, "missing-codex")).supported()).toBe(false);
+  });
+
+  it("finds a question Codex 0.155 delivers on an async agent message, until a quoting reply answers it", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "phren-questions-"));
+    const file = path.join(dir, "rollout.jsonl");
+    const asked = { type: "event_msg", payload: { type: "item_completed", item: { type: "AgentMessage", id: "call_q1", content: [{ type: "Text", text: "Deploy as-is?" }],
+      phase: "final_answer", delivery: "async", questions: [{ title: "Deploy as-is?", options: null }] } } };
+    const shown = { type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "Deploy as-is?" }] } };
+    await writeFile(file, [shown, asked].map(JSON.stringify).join("\n") + "\n");
+    try {
+      const pending = await pendingAsyncQuestions(file);
+      expect(pending).toEqual([{ id: "call_q1", questions: [{ title: "Deploy as-is?" }] }]);
+      expect(await pendingAsyncQuestion(file, "call_q1")).toEqual([{ title: "Deploy as-is?" }]);
+      const reply = questionReply(pending[0].questions, [{ optionIndexes: [], text: "Yes, deploy" }]);
+      expect(reply).toBe("> Deploy as-is?\n\nYes, deploy");
+      await appendFile(file, JSON.stringify({ type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: reply }] } }) + "\n");
+      expect(await pendingAsyncQuestions(file)).toEqual([]);
+    } finally { await rm(dir, { recursive: true, force: true }); }
   });
 });
