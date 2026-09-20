@@ -2,15 +2,15 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { fanoutChildren, visibleOpenCodeRunEvent } from "./fanouts.js";
+import { fanoutChildren, visibleCodexExecEvent, visibleOpenCodeRunEvent } from "./fanouts.js";
 
 const parent = "aaaaaaaa-1111-4111-8111-111111111111";
 let roots: string[] = [];
 
-async function fixture(id: string, overrides: Record<string, unknown> = {}) {
+async function fixture(id: string, overrides: Record<string, unknown> = {}, events = '{"type":"text"}\n') {
   const root = await mkdtemp(path.join(tmpdir(), "phren-fanouts-")); roots.push(root);
   const directory = path.join(root, ".runtime/agent-fanouts", id); await mkdir(directory, { recursive: true });
-  await writeFile(path.join(directory, "events.jsonl"), '{"type":"text"}\n');
+  await writeFile(path.join(directory, "events.jsonl"), events);
   await writeFile(path.join(directory, "manifest.json"), JSON.stringify({
     schemaVersion: 1, id, parent: { provider: "codex", session: parent }, provider: "opencode",
     taskLabel: "Review bridge", cwd: "/repo", worktree: "/repo-wt", model: "openrouter/deepseek/deepseek-v4.1-flash",
@@ -18,6 +18,12 @@ async function fixture(id: string, overrides: Record<string, unknown> = {}) {
     updatedAt: "2026-09-19T19:00:02.000Z", status: "running", ...overrides,
   }));
   return { root, directory, env: { PHREN_PATH: root } };
+}
+
+/** A Codex CLI fan-out manifest; `session` is the optional Codex thread UUID. */
+function codexFixture(id: string, session?: string, overrides: Record<string, unknown> = {}) {
+  return fixture(id, { provider: "codex", model: "gpt-5-codex", ...(session ? { session } : {}), ...overrides },
+    '{"type":"thread.started","thread_id":"cccccccc-3333-4333-8333-333333333333"}\n');
 }
 
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
@@ -42,6 +48,20 @@ describe("fan-out manifests", () => {
     expect(await fanoutChildren("codex", parent, second.env)).toEqual([]);
   });
 
+  it("returns Codex fan-outs and enforces provider-matching sessions", async () => {
+    const thread = "cccccccc-3333-4333-8333-333333333333";
+    const bound = await codexFixture("job-codex", thread);
+    const found = await fanoutChildren("codex", parent, bound.env);
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatchObject({ provider: "codex", session: thread, path: "Review bridge", state: "running" });
+
+    const mismatched = await codexFixture("job-codex-bad", "ses_abc");
+    expect(await fanoutChildren("codex", parent, mismatched.env)).toEqual([]);
+
+    const crossProvider = await fixture("job-open-bad", { session: thread });
+    expect(await fanoutChildren("codex", parent, crossProvider.env)).toEqual([]);
+  });
+
   it("redacts OpenCode reasoning, arguments, outputs, costs, and snapshots", () => {
     const secret = "sk-secret";
     expect(visibleOpenCodeRunEvent({ type: "text", timestamp: 1_789_845_268_396, part: { type: "text", text: "Visible", reasoning: secret } }))
@@ -51,5 +71,41 @@ describe("fan-out manifests", () => {
     expect(tool).toMatchObject({ data: { message: { content: [{ name: "bash", input: {}, phrenStatus: "completed" }] } } });
     expect(JSON.stringify(tool)).not.toContain(secret);
     expect(visibleOpenCodeRunEvent({ type: "step_start", part: { reasoning: secret } })).toBeUndefined();
+  });
+
+  it("translates Codex exec rows without leaking commands, output, or paths", () => {
+    const secret = "sk-secret";
+    const command = "cat ~/.ssh/id_rsa";
+    const path = "/home/user/.ssh/id_rsa";
+    const translated = [
+      { type: "item.completed", item: { id: "item_0", type: "agent_message", text: "Visible" } },
+      { type: "item.started", item: { id: "item_1", type: "command_execution", command, status: "in_progress" } },
+      { type: "item.completed", item: { id: "item_1", type: "command_execution", command, aggregated_output: secret, exit_code: 0, status: "completed" } },
+      { type: "item.started", item: { id: "item_9", type: "file_change", changes: [{ path, kind: "update" }], status: "in_progress" } },
+      { type: "item.completed", item: { id: "item_9", type: "file_change", changes: [{ path, kind: "update" }], status: "completed" } },
+      { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 2 } },
+      { type: "error", message: "boom" },
+    ].map(visibleCodexExecEvent);
+    const json = JSON.stringify(translated);
+    expect(json).not.toContain(command);
+    expect(json).not.toContain(secret);
+    expect(json).not.toContain(path);
+    expect(translated[0]).toMatchObject({ type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "Visible" }] } });
+    expect(translated[1]).toMatchObject({ type: "response_item", payload: { type: "function_call", name: "shell", call_id: "item_1", arguments: "{}" } });
+    expect(translated[2]).toMatchObject({ type: "response_item", payload: { type: "function_call_output", call_id: "item_1", output: "exit 0" } });
+    expect(translated[3]).toMatchObject({ type: "response_item", payload: { type: "function_call", name: "apply_patch", call_id: "item_9", arguments: "{}" } });
+    expect(translated[4]).toMatchObject({ type: "response_item", payload: { type: "function_call_output", call_id: "item_9", output: "1 file(s) changed" } });
+    expect(translated[5]).toMatchObject({ type: "event_msg", payload: { type: "task_complete" } });
+    expect(translated[6]).toMatchObject({ type: "event_msg", payload: { type: "error", message: "boom" } });
+  });
+
+  it("ignores private or unknown Codex exec rows", () => {
+    expect(visibleCodexExecEvent({ type: "thread.started", thread_id: "cccccccc-3333-4333-8333-333333333333" })).toBeUndefined();
+    expect(visibleCodexExecEvent({ type: "turn.started" })).toBeUndefined();
+    expect(visibleCodexExecEvent({ type: "item.started", item: { id: "item_0", type: "agent_message", text: "partial" } })).toBeUndefined();
+    expect(visibleCodexExecEvent({ type: "item.started", item: { id: "item_5", type: "reasoning" } })).toBeUndefined();
+    expect(visibleCodexExecEvent({ type: "made.up" })).toBeUndefined();
+    expect(visibleCodexExecEvent({ type: "item.completed", item: { id: "item_2", type: "command_execution", exit_code: null } }))
+      .toMatchObject({ type: "response_item", payload: { type: "function_call_output", call_id: "item_2", output: "finished" } });
   });
 });
