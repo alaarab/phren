@@ -77,6 +77,7 @@ final class AgentChatModel {
     private(set) var timelineRevision = 0
     private(set) var backgroundJobs: [ChatBackgroundJob] = []
     private(set) var currentToolName: String?
+    private(set) var currentToolDetail: String?
     private(set) var imagesByMessage: [String: [ChatAttachmentDraft]] = [:]
     @ObservationIgnored private var preparation = ChatTranscriptPreparation()
     @ObservationIgnored private var preparationTask: Task<Void, Never>?
@@ -87,7 +88,7 @@ final class AgentChatModel {
         let id = UUID(); preparationID = id
         let messages = history.messages
         if messages.isEmpty {
-            preparation = .init(); timeline = []; backgroundJobs = []; currentToolName = nil
+            preparation = .init(); timeline = []; backgroundJobs = []; currentToolName = nil; currentToolDetail = nil
             timelineRevision += 1; imagesByMessage = [:]; return
         }
         let previous = preparation
@@ -97,7 +98,7 @@ final class AgentChatModel {
             }.value
             guard !Task.isCancelled, preparationID == id else { return }
             preparation = value; timeline = value.entries; backgroundJobs = value.jobs
-            currentToolName = value.currentToolName; timelineRevision += 1
+            currentToolName = value.currentToolName; currentToolDetail = value.currentToolDetail; timelineRevision += 1
             matchSentImages()
         }
     }

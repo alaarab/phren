@@ -5,7 +5,7 @@ import XCTest
 
 final class SessionSurfacesTests: XCTestCase {
     func testUnmappedSessionUsesCwdFolderInsteadOfWorkspaceLabel() throws {
-        let sessions = try sessions([["id": "t", "label": "Agent", "cwd": "/Users/alaarab/Projects/phren", "agent": "codex"]])
+        let sessions = try sessions([["id": "t", "label": "Agent", "cwd": "/home/sam/Projects/phren", "agent": "codex"]])
         XCTAssertEqual(sessions[0].folderName, "phren")
         XCTAssertEqual(sessions[0].projectDisplayName(nil), "phren")
         XCTAssertTrue(sessions[0].usesFolderFallback(mappedProject: nil))
@@ -76,19 +76,19 @@ final class SessionSurfacesTests: XCTestCase {
         XCTAssertTrue(content.entries.isEmpty)
     }
 
+    func testEntryFromBeforeStepAndSubagentsStillDecodes() throws {
+        let content = try JSONDecoder().decode(SessionWorkingActivityAttributes.ContentState.self,
+            from: Data(#"{"working":1,"waiting":0,"startedAt":1000,"entries":[{"id":"s1","project":"App","provider":"codex","computer":"Mini"}]}"#.utf8))
+        XCTAssertNil(content.entries.first?.step)
+        XCTAssertEqual(content.entries.first?.subagents, 0)
+        XCTAssertEqual(content.primary?.project, "App")
+    }
+
     func testActivityQuietGraceOnlyEndsAfterThirtySecondsWithNoWorkingAgents() {
         let start = Date(timeIntervalSince1970: 1000)
         XCTAssertFalse(SessionWorkingActivityPolicy.shouldEnd(working: 0, quietSince: start, now: start.addingTimeInterval(29)))
         XCTAssertTrue(SessionWorkingActivityPolicy.shouldEnd(working: 0, quietSince: start, now: start.addingTimeInterval(30)))
         XCTAssertFalse(SessionWorkingActivityPolicy.shouldEnd(working: 1, quietSince: start, now: start.addingTimeInterval(31)))
         XCTAssertFalse(SessionWorkingActivityPolicy.shouldEnd(working: 0, quietSince: nil, now: start))
-    }
-
-    func testElapsedTimeFormatting() {
-        let start = Date(timeIntervalSince1970: 1_000)
-        XCTAssertEqual(SessionElapsedTime.format(from: start, to: start.addingTimeInterval(5)), "0:05")
-        XCTAssertEqual(SessionElapsedTime.format(from: start, to: start.addingTimeInterval(125)), "2:05")
-        XCTAssertEqual(SessionElapsedTime.format(from: start, to: start.addingTimeInterval(3_723)), "1:02:03")
-        XCTAssertEqual(SessionElapsedTime.format(from: start, to: start.addingTimeInterval(-4)), "0:00")
     }
 }

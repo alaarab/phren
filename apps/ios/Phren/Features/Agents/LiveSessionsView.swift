@@ -842,11 +842,17 @@ private struct LiveSessionCard: View, Equatable {
                 do {
                     if let snapshot = try await SessionSubagentSnapshot.load(session) {
                         childTarget = snapshot.target; childAgents = snapshot.agents
+                        await SessionWorkingActivityController.shared.observeSubagents(
+                            session: session, count: snapshot.agents.reduce(0) { $0 + $1.runningCount })
                     } else {
                         childTarget = nil; childAgents = []
+                        await SessionWorkingActivityController.shared.observeSubagents(session: session, count: 0)
                     }
                 } catch {
-                    if !Task.isCancelled { childTarget = nil; childAgents = [] }
+                    if !Task.isCancelled {
+                        childTarget = nil; childAgents = []
+                        await SessionWorkingActivityController.shared.observeSubagents(session: session, count: 0)
+                    }
                 }
                 try? await Task.sleep(for: .seconds(10))
             }

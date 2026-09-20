@@ -265,12 +265,13 @@ struct AgentChatView: View {
         let branch: String?
         let activity: String?
         let toolName: String?
+        let toolDetail: String?
     }
     private var workingActivityObservation: WorkingActivityObservation {
         WorkingActivityObservation(project: project?.name, provider: model.target?.source ?? session.tab.agent,
                                    branch: model.branch ?? session.tab.branch,
                                    activity: model.activityPhase == .working ? "working" : model.liveActivity ?? session.tab.agentStatus,
-                                   toolName: model.currentToolName)
+                                   toolName: model.currentToolName, toolDetail: model.currentToolDetail)
     }
     private func isAgent(_ pane: AgentChatPanes.Pane) -> Bool {
         (try? pane.target(hostID: session.host.id, workspaceID: session.workspaceID, tabID: session.tab.id, muxID: session.host.muxID)) != nil
@@ -555,7 +556,8 @@ struct AgentChatView: View {
             Task {
                 await SessionWorkingActivityController.shared.observe(
                     session: session, project: value.project, provider: value.provider,
-                    branch: value.branch, activity: value.activity, toolName: value.toolName
+                    branch: value.branch, activity: value.activity, toolName: value.toolName,
+                    toolDetail: value.toolDetail
                 )
             }
         }
@@ -655,7 +657,11 @@ struct AgentChatView: View {
     }
 
     private func refreshChildAgents() async {
-        guard let target = model.target, !target.isStarting else { childAgents = []; return }
+        guard let target = model.target, !target.isStarting else {
+            childAgents = []
+            await SessionWorkingActivityController.shared.observeSubagents(session: session, count: 0)
+            return
+        }
         #if DEBUG && targetEnvironment(simulator)
         if AgentChatFixture.enabled { childAgents = (try? AgentChatFixture.childAgents(target).agents) ?? []; return }
         #endif
@@ -663,6 +669,7 @@ struct AgentChatView: View {
             let key = try DeviceSSHKey.load(session.host.id)
             let tree = try await PhrenConnection.childAgents(host: session.host, privateKey: key, target: target)
             childAgents = tree.agents
+            await SessionWorkingActivityController.shared.observeSubagents(session: session, count: runningChildAgentCount)
         } catch {}
     }
 

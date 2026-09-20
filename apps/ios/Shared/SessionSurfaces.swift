@@ -88,13 +88,43 @@ struct SessionWorkingActivityAttributes: ActivityAttributes {
         let provider: String
         let tool: String?
         let computer: String
+        /// The current step, already trimmed for the lock screen (`nil` when
+        /// only the status shows). Kept as text so the widget never formats.
+        let step: String?
+        /// Running subagents in this session; 0 when none.
+        let subagents: Int
+
+        init(id: String, project: String, provider: String, tool: String? = nil, computer: String,
+             step: String? = nil, subagents: Int = 0) {
+            self.id = id; self.project = project; self.provider = provider; self.tool = tool
+            self.computer = computer; self.step = step; self.subagents = subagents
+        }
+        private enum CodingKeys: String, CodingKey { case id, project, provider, tool, computer, step, subagents }
+        /// Decode activities created before the step/subagent fields too, so
+        /// an upgrade does not make an already-live activity undecodable.
+        init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            id = try values.decode(String.self, forKey: .id)
+            project = try values.decode(String.self, forKey: .project)
+            provider = try values.decode(String.self, forKey: .provider)
+            tool = try values.decodeIfPresent(String.self, forKey: .tool)
+            computer = try values.decode(String.self, forKey: .computer)
+            step = try values.decodeIfPresent(String.self, forKey: .step)
+            subagents = try values.decodeIfPresent(Int.self, forKey: .subagents) ?? 0
+        }
     }
     struct ContentState: Codable, Hashable {
         let working: Int
         let waiting: Int
         let entries: [Entry]
         let startedAt: Date
-        var headline: String { waiting > 0 ? "\(working) working · \(waiting) waiting" : "\(working) agents working" }
+        var headline: String {
+            if waiting > 0 { return "\(working) working · \(waiting) waiting" }
+            return working == 1 ? "1 agent working" : "\(working) agents working"
+        }
+        /// The row the lock screen leads with: the pinned session when there
+        /// is one, otherwise the first working session.
+        var primary: Entry? { entries.first }
 
         init(working: Int, waiting: Int, entries: [Entry], startedAt: Date) {
             self.working = working; self.waiting = waiting; self.entries = entries; self.startedAt = startedAt
@@ -141,17 +171,5 @@ enum SessionWorkingActivityPolicy {
     static let quietInterval: TimeInterval = 30
     static func shouldEnd(working: Int, quietSince: Date?, now: Date) -> Bool {
         working == 0 && quietSince.map { now.timeIntervalSince($0) >= quietInterval } == true
-    }
-}
-
-enum SessionElapsedTime {
-    static func format(from startedAt: Date, to now: Date) -> String {
-        let seconds = max(0, Int(now.timeIntervalSince(startedAt)))
-        let hours = seconds / 3_600
-        let minutes = seconds % 3_600 / 60
-        let remainder = seconds % 60
-        return hours > 0
-            ? String(format: "%d:%02d:%02d", hours, minutes, remainder)
-            : String(format: "%d:%02d", minutes, remainder)
     }
 }

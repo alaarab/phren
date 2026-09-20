@@ -7,6 +7,7 @@ struct ChatTranscriptPreparation {
     private(set) var entries: [ChatTimelineEntry] = []
     private(set) var jobs: [ChatBackgroundJob] = []
     private(set) var currentToolName: String?
+    private(set) var currentToolDetail: String?
     private(set) var revision = 0
     private var keys: [Key] = []
     private var firstSeen: [String: Date] = [:]
@@ -43,12 +44,16 @@ struct ChatTranscriptPreparation {
         firstSeen = firstSeen.filter { retained.contains($0.key) }
         finishedSeen = finishedSeen.filter { retained.contains($0.key) }
         var completed: Set<String> = []
-        currentToolName = nil
+        currentToolName = nil; currentToolDetail = nil
         for message in messages.reversed() where message.role == .tool {
             if message.isToolResult { if let id = message.toolCallID { completed.insert(id) } }
             else if !message.isChange, message.title != "Background notification",
                     message.toolCallID.map({ !completed.contains($0) }) ?? true {
-                currentToolName = message.title; break
+                currentToolName = message.title
+                // The card's own short read of the input: a command's first
+                // line, or a file path. Cheap and off-main, same as the card.
+                currentToolDetail = message.title.map { ToolPresentation(title: $0, text: message.text).preview }
+                break
             }
         }
     }

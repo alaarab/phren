@@ -13,6 +13,8 @@ final class SessionWorkingActivityController {
     private var entities: [String: AgentSessionEntity] = [:]
     private var starts: [String: Date] = [:]
     private var tools: [String: String] = [:]
+    private var details: [String: String] = [:]
+    private var subagents: [String: Int] = [:]
     private var chat: (session: SessionWorkingActivityBuilder.Session, at: Date)?
     private var pinnedID: String?
     private var updateTask: Task<Void, Never>?
@@ -35,12 +37,24 @@ final class SessionWorkingActivityController {
     }
 
     func observe(session: LiveAgentSession, project: String?, provider: String?, branch: String?,
-                 activity state: String?, toolName: String?, now: Date = .now) async {
+                 activity state: String?, toolName: String?, toolDetail: String? = nil, now: Date = .now) async {
         SessionOverviewMonitor.shared.ensureRunning(hosts: AgentSessions.hosts)
         var entity = AgentSessionEntity(session); entity.project = project
         let state = normalized(state)
         tools[entity.id] = state == "working" ? toolName : nil
+        details[entity.id] = state == "working" ? toolDetail : nil
         chat = (input(entity, state: state, provider: provider, now: now), now)
+        scheduleUpdate()
+    }
+
+    /// Running subagents for a session. The Agents overview already polls this
+    /// per card (and the open chat per transcript revision); the controller
+    /// only stores the number and lets the existing throttle publish it.
+    func observeSubagents(session: LiveAgentSession, count: Int) async {
+        let id = AgentSessionEntity(session).id
+        let value = max(0, count)
+        guard subagents[id] != value else { return }
+        subagents[id] = value
         scheduleUpdate()
     }
 
@@ -60,6 +74,8 @@ final class SessionWorkingActivityController {
         starts = starts.filter { retained.contains($0.key) || chat?.session.entry.id == $0.key }
         entities = entities.filter { retained.contains($0.key) || chat?.session.entry.id == $0.key }
         tools = tools.filter { retained.contains($0.key) }
+        details = details.filter { retained.contains($0.key) || chat?.session.entry.id == $0.key }
+        subagents = subagents.filter { retained.contains($0.key) || chat?.session.entry.id == $0.key }
         scheduleUpdate()
     }
 
@@ -68,6 +84,8 @@ final class SessionWorkingActivityController {
         sessionsByHost = sessionsByHost.filter { saved.contains($0.key) }
         entities = entities.filter { entity in hosts.contains { $0.id == entity.value.hostID && $0.muxID == entity.value.muxID } }
         if let chat, entities[chat.session.entry.id] == nil { self.chat = nil }
+        details = details.filter { entities[$0.key] != nil || chat?.session.entry.id == $0.key }
+        subagents = subagents.filter { entities[$0.key] != nil || chat?.session.entry.id == $0.key }
         scheduleUpdate()
     }
 
@@ -89,11 +107,26 @@ final class SessionWorkingActivityController {
     private func input(_ entity: AgentSessionEntity, state: String, provider: String? = nil, now: Date) -> SessionWorkingActivityBuilder.Session {
         entities[entity.id] = entity
         if state == "working" { starts[entity.id] = starts[entity.id] ?? min(entity.lastChangedAt ?? now, now) }
-        else { starts[entity.id] = nil; tools[entity.id] = nil }
+        else { starts[entity.id] = nil; tools[entity.id] = nil; details[entity.id] = nil }
+        let tool = tools[entity.id]
         return .init(entry: .init(id: entity.id, project: String((entity.project ?? entity.workspace).prefix(80)),
-                                 provider: provider ?? entity.agent ?? "agent", tool: tools[entity.id].map { String($0.prefix(60)) },
-                                 computer: String(entity.computer.prefix(60))),
+                                 provider: provider ?? entity.agent ?? "agent", tool: tool.map { String($0.prefix(60)) },
+                                 computer: String(entity.computer.prefix(60)),
+                                 step: SessionActivityStep.format(tool: tool, detail: details[entity.id], status: statusText(state)),
+                                 subagents: subagents[entity.id] ?? 0),
                      state: state, startedAt: starts[entity.id] ?? now)
+    }
+
+    /// The step's fallback when no tool is known: the session's own status.
+    private func statusText(_ state: String) -> String? {
+        switch state.lowercased() {
+        case "working": "Working"
+        case "waiting": "Waiting for input"
+        case "idle": "Idle"
+        case "done": "Done"
+        case "error": "Needs attention"
+        default: nil
+        }
     }
 
     /// Coalesces fast hosts and chat ticks without postponing publication forever.
@@ -148,7 +181,10 @@ final class SessionWorkingActivityController {
                   let created = try? Activity.request(attributes: SessionWorkingActivityAttributes(routeID: UUID().uuidString), content: content, pushType: nil) else { return }
             activity = created
         }
-        if state.working + state.waiting == 1, let id = state.entries.first?.id, let entity = entities[id] {
+        // The activity opens its leading session: the pinned one when there is
+        // one, otherwise the oldest working session. An unknown route falls
+        // back to the Agents tab in `open(routeID:)`.
+        if let id = state.entries.first?.id, let entity = entities[id] {
             AppRuntime.defaults.set(try? JSONEncoder().encode(Route(id: activity.attributes.routeID, entity: entity)), forKey: Self.routeKey)
         } else { AppRuntime.defaults.removeObject(forKey: Self.routeKey) }
     }
