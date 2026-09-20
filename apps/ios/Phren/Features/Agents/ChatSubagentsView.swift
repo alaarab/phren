@@ -62,9 +62,9 @@ private extension AgentChild {
         default: return "Codex"
         }
     }
-    var providerAndModel: String {
-        [providerName, model].compactMap { $0 }.joined(separator: " · ")
-    }
+    /// The model is what the owner wants to know; the provider is already
+    /// the glyph, so it only stands in when no model was recorded.
+    var providerAndModel: String { model ?? providerName }
     var descendantLabel: String? {
         let count = children.reduce(0) { $0 + $1.agentCount }
         guard count > 0 else { return nil }
@@ -129,14 +129,19 @@ private struct AgentTreeRowView: View {
                 treeGuide.frame(width: CGFloat(row.depth) * 22 + 8)
             }
             HStack(spacing: 12) {
-                ZStack(alignment: .bottomTrailing) {
+                // The glyph sits in the middle of the tile; only the state dot
+                // hangs off the corner.
+                ZStack {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .fill(PhrenTheme.surfaceRaised)
-                    AgentProviderGlyph(source: row.agent.provider.lowercased(), size: 23)
+                    AgentProviderGlyph(source: row.agent.provider.lowercased(), size: 24)
+                }
+                .frame(width: 42, height: 42)
+                .overlay(alignment: .bottomTrailing) {
                     Circle().fill(stateColor).frame(width: 9, height: 9)
                         .overlay(Circle().stroke(PhrenTheme.toolPanel, lineWidth: 2))
                         .offset(x: 2, y: 2)
-                }.frame(width: 42, height: 42)
+                }
                 VStack(alignment: .leading, spacing: 5) {
                     Text(row.agent.name).font(.body.weight(.semibold)).foregroundStyle(PhrenTheme.text).lineLimit(2)
                     HStack(spacing: 6) {

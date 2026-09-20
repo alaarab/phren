@@ -13,6 +13,8 @@ number counts up on its own.
 - Graph nodes open in the graph's own docked dossier card, the same dark-glass
   dossier the web and VS Code viewers draw, with Focus, Open project and Share;
   the graph stays visible and the zoom controls step aside.
+- Agent work rows centre the provider glyph in its tile and show the model
+  the worker ran instead of repeating the provider name.
 - Session cards count only the subagents still running; the badge goes away
   when they finish.
 - Computer names use a device color you can choose in Connection settings,
