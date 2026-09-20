@@ -21,6 +21,7 @@ import { bootedSimulators, type SimulatorAction, simulatorAct, simulatorApps, si
 import { TabActivityStore } from "./tab-activity.js";
 import { childAgent, childAgentTree, conversationNamedPaths, historicalImage, publicChildAgents, TranscriptReader, transcriptPath } from "./transcripts.js";
 import { listUploads, saveUpload, uploadImage } from "./uploads.js";
+import { ModelCatalog } from "./models.js";
 import { AccountUsageReader } from "./usage.js";
 
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
@@ -72,6 +73,7 @@ export async function serve(version: string): Promise<void> {
   const locatedDirectories = new Set<string>();
   const journal = new ActivityJournal();
   const agentHooks = new AgentHooks();
+  const modelCatalog = new ModelCatalog();
   const contextUsage = new WorkspaceContextUsage();
   const accountUsage = new AccountUsageReader();
   const tabActivity = new TabActivityStore();
@@ -108,6 +110,7 @@ export async function serve(version: string): Promise<void> {
             response.setHeader("Content-Type", "image/png"); response.end(bytes); return;
           }
           case "/v1/files": result = { files: await listUploads("files") }; break;
+          case "/v1/models": result = { models: await modelCatalog.list(String(url.searchParams.get("source") ?? "")) }; break;
           case "/v1/projects/files": {
             const candidates = await locateProject(String(url.searchParams.get("project") ?? ""), await journal.recent());
             const directory = url.searchParams.get("directory");
@@ -266,7 +269,9 @@ export async function serve(version: string): Promise<void> {
             // prompt the agent is holding: a menu, a y/n, a trust question.
             if (keys.every(key => key === "Escape") ? !["working", "blocked", "waiting", "unknown"].includes(status)
               : !["blocked", "waiting", "unknown"].includes(status)) throw new BridgeError(409, keys.every(key => key === "Escape") ? "This agent is no longer working." : "This agent is not waiting for an answer.");
-            await rpc(target.server, "agent.send_keys", { target: target.pane, keys: keys.map(key => HERDR_KEYS[key] ?? key) }); result = { ok: true };
+            await rpc(target.server, "agent.send_keys", { target: target.pane, keys: keys.map(key => HERDR_KEYS[key] ?? key) });
+            if (keys.some(key => key !== "Up" && key !== "Down" && key !== "Tab")) agentHooks.clearTerminalPrompt(target);
+            result = { ok: true };
           } else if (url.pathname === "/v1/upload") {
             const { name, bytes } = uploadBody(data);
             result = { ok: true, path: await saveUpload(target.session, name, bytes) };
@@ -392,8 +397,9 @@ export async function serve(version: string): Promise<void> {
             const pendingQuestions = target.source === "codex" ? await codexQuestions.pending(target).catch(() => undefined) : undefined;
             const cwd = await trustedDirectory(pane).catch(() => undefined);
             const branch = cwd ? await repositoryBranch(cwd) : undefined;
+            const terminalPrompt = !pendingApproval && ["blocked", "waiting"].includes(String(pane.agent_status)) ? agentHooks.terminalPrompt(target) : undefined;
             send(client, { agentStatus: { source: target.source, session: target.session,
-              status: pendingApproval ? "waiting" : pane.agent_status, pendingApproval, pendingQuestions,
+              status: pendingApproval ? "waiting" : pane.agent_status, pendingApproval, pendingQuestions, terminalPrompt,
               capabilities: { ...capabilities, asyncQuestions: target.source === "codex" && codexQuestions.available }, branch } });
           }
           first = false;
