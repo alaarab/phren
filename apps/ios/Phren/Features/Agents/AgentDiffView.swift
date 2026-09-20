@@ -14,6 +14,7 @@ struct AgentDiffView: View {
     let target: AgentChatTarget
     var paths: [String] = []
     var child: String? = nil
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("sessions.live.preferences.v1") private var hostData = Data()
     @State private var diff: AgentRepositoryDiff?
@@ -67,35 +68,39 @@ struct AgentDiffView: View {
     }
 
     var body: some View {
-        PhrenList {
-            if let diff {
-                let staged = entries(diff.files, kind: "staged"), unstaged = entries(diff.files, kind: "unstaged"), committed = entries(diff.files, kind: "committed")
-                summary(root: diff.root, branch: diff.branch, files: diff.files, changed: staged.count + unstaged.count + committed.count)
-                if staged.isEmpty && unstaged.isEmpty && committed.isEmpty {
-                    Section { Label("Working tree is clean", systemImage: "checkmark.circle").foregroundStyle(PhrenTheme.success) }
-                }
-                if !staged.isEmpty { group("Staged Changes", staged) }
-                if !unstaged.isEmpty { group("Changes", unstaged) }
-                if !committed.isEmpty { group("Committed", committed) }
-                // What the command wrote elsewhere, one block per repository.
-                ForEach(diff.related ?? []) { other in
-                    let staged = entries(other.files, kind: "staged"), unstaged = entries(other.files, kind: "unstaged"), committed = entries(other.files, kind: "committed")
-                    summary(root: other.root, branch: other.branch, files: other.files, changed: staged.count + unstaged.count + committed.count)
+        VStack(spacing: 0) {
+            header
+            PhrenList {
+                if let diff {
+                    let staged = entries(diff.files, kind: "staged"), unstaged = entries(diff.files, kind: "unstaged"), committed = entries(diff.files, kind: "committed")
+                    summary(root: diff.root, branch: diff.branch, files: diff.files, changed: staged.count + unstaged.count + committed.count)
+                    if staged.isEmpty && unstaged.isEmpty && committed.isEmpty {
+                        Section { Label("Working tree is clean", systemImage: "checkmark.circle").foregroundStyle(PhrenTheme.success) }
+                    }
                     if !staged.isEmpty { group("Staged Changes", staged) }
                     if !unstaged.isEmpty { group("Changes", unstaged) }
                     if !committed.isEmpty { group("Committed", committed) }
+                    // What the command wrote elsewhere, one block per repository.
+                    ForEach(diff.related ?? []) { other in
+                        let staged = entries(other.files, kind: "staged"), unstaged = entries(other.files, kind: "unstaged"), committed = entries(other.files, kind: "committed")
+                        summary(root: other.root, branch: other.branch, files: other.files, changed: staged.count + unstaged.count + committed.count)
+                        if !staged.isEmpty { group("Staged Changes", staged) }
+                        if !unstaged.isEmpty { group("Changes", unstaged) }
+                        if !committed.isEmpty { group("Committed", committed) }
+                    }
+                } else if error == nil {
+                    Section { ProgressView("Loading repository changes…") }
                 }
-            } else if error == nil {
-                Section { ProgressView("Loading repository changes…") }
-            }
-            if let error { Section { Text(error).font(.footnote).foregroundStyle(PhrenTheme.warning) } }
-            if child == nil {
-                Section { NavigationLink { HerdrTerminalView(host: session.host, session: session, target: target) } label: { Label("Open Herdr terminal", systemImage: "terminal") } }
+                if let error { Section { Text(error).font(.footnote).foregroundStyle(PhrenTheme.warning) } }
+                if child == nil {
+                    Section { NavigationLink { HerdrTerminalView(host: session.host, session: session, target: target) } label: { Label("Open Herdr terminal", systemImage: "terminal") } }
+                }
             }
         }
-        .navigationTitle(child == nil ? "Repository changes" : "Agent changes").navigationBarTitleDisplayMode(.inline)
-        .navigationDestination(item: $opened) { FileDiffView(file: $0.file, section: $0.section) }
-        .toolbar { Button("Refresh diff", systemImage: "arrow.clockwise") { refresh = UUID() } }
+        .navigationDestination(item: $opened) {
+            FileDiffView(file: $0.file, section: $0.section).toolbar(.visible, for: .navigationBar)
+        }
+        .toolbar(.hidden, for: .navigationBar)
         .onAppear { visible = true }.onDisappear { visible = false }
         .task(id: Run(active: active, refresh: refresh)) {
             guard active else { return }
@@ -124,6 +129,34 @@ struct AgentDiffView: View {
                 counts = totals
                 diff = result
             } catch { if !Task.isCancelled { self.error = error.localizedDescription } }
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            Button { dismiss() } label: {
+                Image(systemName: "chevron.left").font(.system(size: 18, weight: .medium))
+                    .frame(width: 44, height: 44)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Back")
+            .accessibilityIdentifier("agent-diff-back")
+            Text(child == nil ? "Repository changes" : "Agent changes")
+                .font(.subheadline.weight(.medium)).foregroundStyle(PhrenTheme.text).lineLimit(1)
+            Spacer(minLength: 0)
+            Button { refresh = UUID() } label: {
+                Image(systemName: "arrow.clockwise").font(.system(size: 17))
+                    .frame(width: 44, height: 44)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Refresh diff")
+            .accessibilityIdentifier("agent-diff-refresh")
+        }
+        .foregroundStyle(PhrenTheme.text)
+        .padding(.horizontal, 4).padding(.vertical, 2)
+        .overlay(alignment: .topLeading) {
+            // A marker, not an identifier on the row: the row's id would hide the buttons' ids.
+            Color.clear.frame(width: 1, height: 1).accessibilityElement().accessibilityIdentifier("agent-diff-header")
         }
     }
 

@@ -10,6 +10,8 @@ number counts up on its own.
 
 ### New
 
+- Agent work uses compact headers and flat session-style cards for spawned
+  agents, with provider, model, checkout, and running state visible at a glance.
 - Agent work shows each fan-out worker's branch and worktree in its row and
   transcript header.
 - Subagent transcripts open that agent's repository changes directly, with the
