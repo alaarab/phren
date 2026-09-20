@@ -962,7 +962,8 @@ final class AgentChatTests: XCTestCase {
         app.buttons["Inline"].tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "+let accent = purple")).firstMatch.waitForExistence(timeout: 5))
         app.navigationBars.buttons.element(boundBy: 0).tap()
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        // The diff screen draws its own compact header, not a navigation bar.
+        app.buttons["agent-diff-back"].tap()
         app.buttons["chat-composer-terminal"].tap()
         XCTAssertTrue(app.otherElements["herdr-terminal-header"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.buttons["Toggle terminal keyboard"].waitForExistence(timeout: 8))
@@ -1188,7 +1189,8 @@ final class AgentChatTests: XCTestCase {
         // The header's diff screen covers the whole tree, plus every place the
         // session's commands wrote to.
         app.buttons["chat-diff"].tap()
-        XCTAssertTrue(app.navigationBars["Repository changes"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "agent-diff-header").firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Repository changes"].exists)
         let row = app.buttons["diff-file:unstaged:Theme.swift"]
         XCTAssertTrue(row.waitForExistence(timeout: 5)); row.tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "+let accent = purple")).firstMatch.waitForExistence(timeout: 5))
