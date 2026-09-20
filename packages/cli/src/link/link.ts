@@ -424,9 +424,7 @@ function linkProject(phrenPath: string, project: string, tools: Set<string>, cap
 
   // Project-level skills
   const targetSkills = path.join(target, ".claude", "skills");
-  const skillManifest = config.skills !== false
-    ? syncScopeSkillsToDir(phrenPath, project, targetSkills)
-    : undefined;
+  if (config.skills !== false) syncScopeSkillsToDir(phrenPath, project, targetSkills);
 
   // Auto-exclude phren-managed files from git status
   if (excludeEntries.length > 0) addGitExcludes(target, excludeEntries);
