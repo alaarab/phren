@@ -34,6 +34,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Codex fan-out child transcripts export the shell command, a bounded output
   tail, and the changed paths, and `/v1/subagents` reports a fan-out's model
   when its manifest names one.
+- Fan-out children returned by `/v1/subagents` report their worktree folder
+  name and attached branch without exposing the filesystem path.
 
 ### Fixed
 
