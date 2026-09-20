@@ -1391,6 +1391,21 @@ final class AgentChatTests: XCTestCase {
     }
 
     @MainActor
+    func testPasswordPromptIsAnsweredFromTheChat() {
+        let app = launch(extra: ["--chat-blocked"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let keys = app.otherElements["chat-answer-keys"]
+        XCTAssertTrue(keys.waitForExistence(timeout: 10))
+        app.buttons["chat-answer-secret"].tap()
+        let field = app.secureTextFields["chat-secret-field"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5), "The lock opens a password field")
+        field.tap(); field.typeText("hunter2")
+        app.buttons["chat-secret-send"].tap()
+        XCTAssertTrue(keys.waitForNonExistence(timeout: 10), "Once the agent stops waiting the row goes")
+        XCTAssertFalse(app.staticTexts["chat-delivery-error"].exists)
+    }
+
+    @MainActor
     func testSlashPermissionsDrawsTheMenuNativelyAndWalksItWithKeys() {
         let app = launch()
         app.buttons["live-chat:w7:w7:t9"].tap()

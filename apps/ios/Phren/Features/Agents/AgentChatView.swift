@@ -115,6 +115,7 @@ struct AgentChatView: View {
     @State private var showingUsage = false
     @State private var showingOptions = false
     @State private var showingModelPicker = false
+    @State private var showingSecret = false
     @State private var menuCommand: ChatMenuCommand?
     @State private var showingChildAgents = false
     @State private var childAgents: [AgentChild] = []
@@ -658,6 +659,7 @@ struct AgentChatView: View {
             }
         }
         .sheet(isPresented: $showingUsage) { usageSheet }
+        .sheet(isPresented: $showingSecret) { ChatSecretSheet(model: model, session: session) }
         .sheet(isPresented: $showingChildAgents) {
             if let target = model.target { ChatSubagentsView(session: session, target: target, agents: childAgents) }
         }
@@ -1086,6 +1088,17 @@ struct AgentChatView: View {
                             .accessibilityLabel(key.spoken)
                             .accessibilityIdentifier("chat-answer-key:\(key.rawValue)")
                         }
+                        Button { showingSecret = true } label: {
+                            Image(systemName: "key.fill")
+                                .font(.system(size: 15, weight: .semibold))
+                                .frame(minWidth: 40, minHeight: 36)
+                                .padding(.horizontal, 6)
+                                .background(PhrenTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 9))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(model.answering || !active || !model.connected)
+                        .accessibilityLabel("Type a password")
+                        .accessibilityIdentifier("chat-answer-secret")
                     }
                 }
                 .accessibilityElement(children: .contain)

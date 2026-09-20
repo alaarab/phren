@@ -75,6 +75,23 @@ extension PhrenConnection {
         }
     }
 
+    /// Types a secret the agent asked for at a prompt the terminal holds (a
+    /// sudo password, a login). The Hook sends it one key at a time and never
+    /// stores or echoes it; the phone does not keep it either.
+    public static func answerWithSecret(host: LiveHost, privateKey: Data, target: AgentChatTarget, text: String) async throws {
+        guard target.hostID == host.id && target.muxID == host.muxID else { throw PhrenKitError.validation("The chat belongs to another computer.") }
+        guard (1...256).contains(text.count),
+              !text.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
+            throw PhrenKitError.validation("Enter 1 to 256 characters without control characters or newlines.")
+        }
+        let pane = try await chatPanes(host: host, privateKey: privateKey, workspaceID: target.workspaceID, tabID: target.tabID).validate(target)
+        guard pane.needsAnswer || pane.agentStatus == "unknown" else { throw PhrenKitError.validation("This agent is not waiting for an answer.") }
+        let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: .secret(target, text: text))
+        guard (try JSONSerialization.jsonObject(with: data) as? [String: Any])?["ok"] as? Bool == true else {
+            throw PhrenKitError.validation("The secret was not confirmed. Check the terminal.")
+        }
+    }
+
     /// Only Escape is exposed. The caller cannot supply terminal key sequences.
     public static func stopChatTurn(host: LiveHost, privateKey: Data, target: AgentChatTarget) async throws {
         guard !target.isStarting, target.hostID == host.id && target.muxID == host.muxID else { throw PhrenKitError.validation("The chat belongs to another computer.") }
@@ -247,6 +264,15 @@ struct GatewayRequest: Sendable {
             return Self(path: "/v1/keys", body: try JSONSerialization.data(withJSONObject: ["target": route, "keys": keys.map(\.rawValue)], options: [.sortedKeys]))
         }
         return Self(path: "/v1/keys", body: try targetBody(target, fields: ["keys": keys.map(\.rawValue)]))
+    }
+    static func secret(_ target: AgentChatTarget, text: String) throws -> Self {
+        if target.isStarting {
+            var route: [String: Any] = targetQuery(target)
+            route.removeValue(forKey: "session")
+            route["starting"] = true; route["startingToken"] = target.startingToken
+            return Self(path: "/v1/secret", body: try JSONSerialization.data(withJSONObject: ["target": route, "text": text], options: [.sortedKeys]))
+        }
+        return Self(path: "/v1/secret", body: try targetBody(target, fields: ["text": text]))
     }
     static func prompt(_ target: AgentChatTarget, text: String) throws -> Self {
         if target.isStarting {

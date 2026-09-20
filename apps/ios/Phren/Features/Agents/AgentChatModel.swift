@@ -585,6 +585,20 @@ final class AgentChatModel {
         } catch { deliveryError = error.localizedDescription }
     }
 
+    /// Types a secret the agent asked for (a sudo password, a login) into
+    /// its terminal and presses Enter. The text is never kept on the phone.
+    func answer(_ session: LiveAgentSession, secret: String) async {
+        guard let target, !answering, !secret.isEmpty else { return }
+        answering = true; deliveryError = nil
+        defer { answering = false }
+        do {
+            #if DEBUG && targetEnvironment(simulator)
+            if AgentChatFixture.enabled { try await AgentChatFixture.answer(target, secret: secret); return }
+            #endif
+            try await PhrenConnection.answerWithSecret(host: session.host, privateKey: try DeviceSSHKey.load(session.host.id), target: target, text: secret)
+        } catch { deliveryError = error.localizedDescription }
+    }
+
     /// Types a slash command whose agent answers with a menu, then walks
     /// that menu to `index`. The command goes through the ordinary send so
     /// the transcript shows it; the keys follow once the menu has drawn.

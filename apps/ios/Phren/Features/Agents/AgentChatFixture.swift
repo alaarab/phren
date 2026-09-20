@@ -575,6 +575,13 @@ import UIKit
         answeredKeys.append(key.rawValue)
         if key == .enter || key == .yes || key == .no { answered = true }
     }
+    static var answeredSecretCharacters: [Int] = []
+    /// Records only how long the secret was — never the text itself.
+    static func answer(_ target: AgentChatTarget, secret: String) async throws {
+        try await Task.sleep(for: .milliseconds(150))
+        answeredSecretCharacters.append(secret.count)
+        answered = true
+    }
     static func send(_ target: AgentChatTarget, text: String) async throws {
         try await Task.sleep(for: .milliseconds(250))
         sendAttempts += 1

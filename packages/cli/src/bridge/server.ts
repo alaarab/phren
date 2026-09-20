@@ -228,6 +228,15 @@ export async function serve(version: string): Promise<void> {
             if (!["blocked", "waiting", "unknown"].includes(String(pane.agent_status))) throw new BridgeError(409, "This agent is not waiting for an answer.");
             await rpc(target.server, "agent.send_keys", { target: target.pane, keys: keys.map(key => HERDR_KEYS[key] ?? key) });
             result = { ok: true };
+          } else if (url.pathname === "/v1/secret" && object(data.target).starting === true) {
+            // A password the terminal is reading before the agent has a
+            // conversation is typed the same way as one after it.
+            const target = startingTargetSchema.parse(data.target);
+            const pane = await startingPane(target);
+            const text = secretText.parse(data.text);
+            if (!["blocked", "waiting", "unknown"].includes(String(pane.agent_status))) throw new BridgeError(409, "This agent is not waiting for an answer.");
+            await typeSecret(target.server, target.pane, text);
+            result = { ok: true };
           } else if (url.pathname === "/v1/prompt" && object(data.target).starting === true) {
             const target = startingTargetSchema.parse(data.target);
             const pane = await validateStartingTarget(target);
@@ -245,7 +254,7 @@ export async function serve(version: string): Promise<void> {
           const target = targetSchema.parse(data.target);
           // Uploads store bytes without answering or interrupting the agent.
           // They still require fresh identity, just like prompt mutations.
-          const sendsInput = ["/v1/prompt", "/v1/keys"].includes(url.pathname);
+          const sendsInput = ["/v1/prompt", "/v1/keys", "/v1/secret"].includes(url.pathname);
           // A key press is how a prompt the agent draws in its terminal gets
           // answered, so keys are the one input allowed while the agent is
           // blocked or waiting; the status check below is theirs alone.
@@ -283,6 +292,15 @@ export async function serve(version: string): Promise<void> {
               : !["blocked", "waiting", "unknown"].includes(status))) throw new BridgeError(409, keys.every(key => key === "Escape") ? "This agent is no longer working." : "This agent is not waiting for an answer.");
             await rpc(target.server, "agent.send_keys", { target: target.pane, keys: keys.map(key => HERDR_KEYS[key] ?? key) });
             if (keys.some(key => key !== "Up" && key !== "Down" && key !== "Tab")) { agentHooks.clearTerminalPrompt(target); agentHooks.menuClosed(target); }
+            result = { ok: true };
+          } else if (url.pathname === "/v1/secret") {
+            // A password the terminal is reading (sudo, a login) cannot be
+            // pasted: bracketed paste corrupts a tty read, so it is typed a
+            // character at a time. The Hook never logs, echoes or stores it.
+            const text = secretText.parse(data.text);
+            if (!["blocked", "waiting", "unknown"].includes(String(pane.agent_status))) throw new BridgeError(409, "This agent is not waiting for an answer.");
+            await typeSecret(target.server, target.pane, text);
+            agentHooks.clearTerminalPrompt(target);
             result = { ok: true };
           } else if (url.pathname === "/v1/upload") {
             const { name, bytes } = uploadBody(data);
@@ -480,6 +498,37 @@ export async function serve(version: string): Promise<void> {
 /** The phone can press these and nothing else; never a typed string. */
 const ANSWER_KEYS = ["Escape", "Enter", "Up", "Down", "Tab", "y", "n", "1", "2", "3", "4", "5", "6", "7", "8", "9"] as const;
 const HERDR_KEYS: Partial<Record<(typeof ANSWER_KEYS)[number], string>> = { Escape: "esc", Enter: "enter", Up: "up", Down: "down", Tab: "tab" };
+
+/** A secret typed into a terminal prompt: printable, bounded, never logged. */
+const secretText = z.string().min(1).max(256).refine(t => !/[\x00-\x1f\x7f]/.test(t));
+
+/** One key per character; Herdr's send_keys takes single characters and named
+ * keys only, and a tty password read is corrupted by a bracketed paste. */
+function secretKeys(text: string): string[] {
+  return [...text].map(character => character === " " ? "space" : character);
+}
+
+/** Type a secret, then submit it. A chunk that may already have reached the
+ * terminal is never resent; the phone is told to check it by hand. */
+async function typeSecret(server: string, pane: string, text: string): Promise<void> {
+  const keys = secretKeys(text);
+  let sent = false;
+  for (let index = 0; index < keys.length; index += 32) {
+    try {
+      await rpc(server, "agent.send_keys", { target: pane, keys: keys.slice(index, index + 32) });
+      sent = true;
+    } catch (error) {
+      if (sent) throw new BridgeError(502, "The password may have been typed only partly; check the terminal.");
+      throw error;
+    }
+  }
+  try {
+    await rpc(server, "agent.send_keys", { target: pane, keys: ["enter"] });
+  } catch (error) {
+    if (sent) throw new BridgeError(502, "The password may have been typed only partly; check the terminal.");
+    throw error;
+  }
+}
 
 const launchKinds = ["codex", "claude", "copilot", "opencode"] as const;
 const plainText = (max: number) => z.string().min(1).max(max).refine(t => !/[\x00-\x1f\x7f]/.test(t));

@@ -23,6 +23,9 @@ number counts up on its own.
   arrows and Esc. The Hook accepts exactly those keys and nothing typed.
   When the prompt is a permission request the Hook saw go by, the question
   itself (reason and command) appears above the keys.
+- A prompt that wants a password (sudo, a login) can be answered from the
+  same row: a lock opens a field, the secret is typed into the agent's
+  terminal and sent with Enter, and the phone keeps nothing.
 - Typing /model, or Model in the chat options, opens a picker listing the
   models the computer's agent actually offers, with descriptions and the
   default marked, plus a field for any id; the choice is applied in the

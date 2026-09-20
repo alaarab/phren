@@ -738,6 +738,31 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     expect((await api("/v1/keys", { target, keys: ["Escape"] })).status).toBe(409);
     expect(commands.filter(c => c.method === "agent.send_keys")).toHaveLength(5);
   });
+  it("types a terminal secret one key at a time and never echoes it", async () => {
+    const secret = "hunter 2!";
+    agentStatus = "blocked";
+    const sent = await api("/v1/secret", { target, text: secret });
+    expect(sent.status, JSON.stringify(sent.data)).toBe(200);
+    expect(sent.data).toEqual({ ok: true });
+    // Every character is its own key, a space is the named key, and the
+    // submission is a separate call: a bracketed paste would corrupt the read.
+    expect(commands.filter(c => c.method === "agent.send_keys").map(c => c.params.keys))
+      .toEqual([["h", "u", "n", "t", "e", "r", "space", "2", "!"], ["enter"]]);
+    expect(JSON.stringify(sent.data)).not.toContain(secret);
+    // The text is bounded and printable, and an error never carries it back.
+    expect((await api("/v1/secret", { target, text: "x".repeat(300) })).status).toBe(400);
+    const newline = await api("/v1/secret", { target, text: "pass\nword" });
+    expect(newline.status).toBe(400);
+    expect(JSON.stringify(newline.data)).not.toContain("pass");
+    // Only a terminal the agent is holding a prompt in takes a secret.
+    agentStatus = "idle";
+    const before = commands.filter(c => c.method === "agent.send_keys").length;
+    const refused = await api("/v1/secret", { target, text: secret });
+    expect(refused.status).toBe(409);
+    expect(refused.data.error).toBe("This agent is not waiting for an answer.");
+    expect(JSON.stringify(refused.data)).not.toContain(secret);
+    expect(commands.filter(c => c.method === "agent.send_keys").length).toBe(before);
+  });
   it("reports uncertain prompt delivery after replacement and sends only once", async () => {
     replaceBeforeMutation = true;
     const response = await api("/v1/prompt", { target, text: "sent once" });
