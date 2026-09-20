@@ -29,6 +29,15 @@ final class LiveSessionsTests: XCTestCase {
         }
         computer.tap()
         XCTAssertTrue(app.staticTexts["Build graph"].waitForExistence(timeout: 10))
+        app.buttons["Connection settings"].tap()
+        let orange = app.buttons["host-color:#FF8A5B"]
+        XCTAssertTrue(orange.waitForExistence(timeout: 5))
+        orange.tap()
+        app.buttons["Cancel"].tap()
+        app.navigationBars["Test Mac"].buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.staticTexts["session-computer-name"].waitForExistence(timeout: 10))
+        computer.tap()
+        XCTAssertTrue(app.staticTexts["Build graph"].waitForExistence(timeout: 10))
         app.buttons["live-detail:w1:w1:t1"].tap()
         if app.buttons["Change project link"].exists { app.buttons["Change project link"].tap() }
         else { app.buttons["Link to project"].tap() }

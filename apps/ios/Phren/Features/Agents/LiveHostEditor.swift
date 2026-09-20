@@ -12,14 +12,44 @@ struct LiveHostEditor: View {
     @State private var port = "22"
     @State private var username = ""
     @State private var herdrSession = ""
+    @State private var selectedColor: String?
     @State private var key = ""
     @State private var error: String?
     @State private var saved = false
     @State private var removing = false
     @State private var copied = false
 
+    private let colorNames = ["Blue", "Teal", "Green", "Amber", "Orange", "Pink", "Lavender", "Slate"]
+    private var displayedColor: String { selectedColor ?? existing?.color ?? LiveHost.defaultColor(for: id) }
+
     var body: some View {
         PhrenForm {
+            Section {
+                Text(name.isEmpty ? (existing?.name ?? "Computer") : name)
+                    .font(.title3).fontWeight(.medium)
+                    .foregroundStyle(PhrenTheme.hostColor(displayedColor))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            Section("Color") {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(Array(LiveHost.colorPalette.enumerated()), id: \.element) { index, hex in
+                            Button { chooseColor(hex) } label: {
+                                ZStack {
+                                    Circle().fill(PhrenTheme.hostColor(hex)).frame(width: 28, height: 28)
+                                    if displayedColor == hex {
+                                        Circle().stroke(PhrenTheme.text, lineWidth: 2).frame(width: 34, height: 34)
+                                    }
+                                }
+                                .frame(width: 36, height: 36)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(colorNames[index])
+                            .accessibilityIdentifier("host-color:\(hex)")
+                        }
+                    }
+                }
+            }
             Section("SSH computer") {
                 TextField("Name", text: $name).accessibilityIdentifier("live-host-name")
                 TextField("Tailscale hostname or IP", text: $address).accessibilityIdentifier("live-host-address")
@@ -104,11 +134,20 @@ struct LiveHostEditor: View {
         do { key = try DeviceSSHKey.publicKey(id) }
         catch { self.error = error.localizedDescription }
     }
+    private func chooseColor(_ color: String) {
+        guard existing != nil else { selectedColor = color; return }
+        do {
+            data = try LiveSessionPreferences.settingColor(hostID: id, color: color, in: data)
+            selectedColor = color
+        }
+        catch { self.error = error.localizedDescription }
+    }
     private func save() {
         do {
             let host = try LiveHost(id: id, name: name, address: address, port: Int(port) ?? 0,
                                    username: username, fingerprint: existing?.fingerprint,
-                                   herdrSession: herdrSession.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : herdrSession.trimmingCharacters(in: .whitespacesAndNewlines))
+                                   herdrSession: herdrSession.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : herdrSession.trimmingCharacters(in: .whitespacesAndNewlines),
+                                   color: selectedColor ?? existing?.color)
             data = try LiveSessionPreferences.saving(host, in: data)
             saved = true
             dismiss()

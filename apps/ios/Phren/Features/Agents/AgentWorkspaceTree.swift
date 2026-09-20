@@ -106,7 +106,8 @@ struct AgentWorkspaceTree: View {
                     }
                 } header: {
                     if computers.count > 1 {
-                        Text(computer.host.name).font(.caption.weight(.semibold)).foregroundStyle(PhrenTheme.textMuted)
+                        Text(computer.host.name).font(.caption.weight(.medium))
+                            .foregroundStyle(PhrenTheme.hostColor(computer.host.color ?? LiveHost.defaultColor(for: computer.host.id)))
                             .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.top, 12)
                     }
                 }

@@ -44,6 +44,11 @@ enum PhrenTheme {
     static var sessionProject: Color { Color(hex: palette.sessionProject ?? palette.link ?? palette.action) }
     static var sessionTitle: Color { Color(hex: palette.sessionTitle ?? palette.secondary) }
     static var sessionMeta: Color { Color(hex: palette.sessionMeta ?? palette.muted) }
+    static func hostColor(_ hex: String?) -> Color {
+        guard let hex, hex.range(of: #"^#[0-9A-Fa-f]{6}$"#, options: .regularExpression) != nil,
+              let value = UInt32(hex.dropFirst(), radix: 16) else { return textMuted }
+        return Color(hex: value)
+    }
     static var stateWorking: Color { Color(hex: palette.stateWorking ?? palette.action) }
     static var stateWaiting: Color { Color(hex: palette.stateWaiting ?? 0xE0BC7F) }
     static var stateDone: Color { Color(hex: palette.stateDone ?? 0x8AC8AC) }
@@ -184,6 +189,7 @@ struct PhrenMenuRow: View {
     var subtitle: String? = nil
     let icon: String
     var color: Color = PhrenTheme.textSecondary
+    var titleColor: Color = PhrenTheme.text
     var compact = false
 
     var body: some View {
@@ -195,7 +201,7 @@ struct PhrenMenuRow: View {
                 .background(color.opacity(0.08), in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.small, style: .continuous))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 4) {
-                Text(title).font(.body.weight(.medium)).foregroundStyle(PhrenTheme.text)
+                Text(title).font(.body.weight(.medium)).foregroundStyle(titleColor)
                 if let subtitle {
                     Text(subtitle).font(.caption).foregroundStyle(PhrenTheme.textMuted)
                 }

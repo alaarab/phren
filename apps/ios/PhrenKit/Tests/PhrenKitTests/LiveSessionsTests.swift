@@ -81,4 +81,20 @@ final class LiveSessionsTests: XCTestCase {
         XCTAssertThrowsError(try LiveHost(name: "Mac", address: "example", port: 65536, username: "user"))
         XCTAssertThrowsError(try LiveHost(name: "Mac", address: "example", username: "user", fingerprint: "not-a-pin"))
     }
+
+    func testHostColorCompatibilityPersistenceAndDefault() throws {
+        let id = try XCTUnwrap(UUID(uuidString: "A1000000-0000-0000-0000-000000000001"))
+        let oldHost = Data(#"{"id":"A1000000-0000-0000-0000-000000000001","name":"Test Mac","address":"fixture.invalid","port":22,"username":"fixture"}"#.utf8)
+        XCTAssertNil(try JSONDecoder().decode(LiveHost.self, from: oldHost).color)
+
+        let host = try LiveHost(id: id, name: "Test Mac", address: "fixture.invalid", username: "fixture")
+        var data = try LiveSessionPreferences.saving(host, in: Data())
+        data = try LiveSessionPreferences.settingColor(hostID: id, color: "#FF8A5B", in: data)
+        XCTAssertEqual(try LiveSessionPreferences.read(data).hosts.first?.color, "#FF8A5B")
+        XCTAssertEqual(try JSONDecoder().decode(LiveSessionPreferences.self, from: data).hosts.first?.color, "#FF8A5B")
+
+        let first = LiveHost.defaultColor(for: id)
+        XCTAssertEqual(first, LiveHost.defaultColor(for: id))
+        XCTAssertTrue(LiveHost.colorPalette.contains(first))
+    }
 }
