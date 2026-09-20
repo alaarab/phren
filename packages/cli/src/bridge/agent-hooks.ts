@@ -113,6 +113,10 @@ export class AgentHooks {
    * party that knows which conversation consumed the text, so it is the one
    * that can refuse it when that is not the conversation the phone meant. */
   private deliveries = new Map<string, Delivery[]>();
+  /** The permission request a conversation is drawing in its own terminal
+   * because nobody was there to hold it: what the phone shows above its
+   * answer keys until the pane stops waiting. */
+  private terminalPrompts = new Map<string, { tool: string; message: string; at: number }>();
   private watching = new Map<string, number>();
   readonly overview = new ApprovalWatchLeases();
   private server?: Server;
@@ -157,6 +161,20 @@ export class AgentHooks {
     delivery.settle("blocked");
     return { decision: "block", reason: "Phren sent this message to a different conversation in this pane; it was not delivered here. Send it again from the phone." };
   }
+  private rememberTerminalPrompt(target: Target, body: Json) {
+    this.terminalPrompts.set(JSON.stringify(target), { tool: String(body.tool || "action").slice(0, 200),
+      message: JSON.stringify(body.input || {}, null, 2).slice(0, 32_768), at: Date.now() });
+    while (this.terminalPrompts.size > 64) this.terminalPrompts.delete(this.terminalPrompts.keys().next().value!);
+  }
+  /** The request the agent is showing in its terminal, if one fell through
+   * in the last fifteen minutes; the caller only asks while the pane waits. */
+  terminalPrompt(target: Target): Json | undefined {
+    const key = JSON.stringify(target), entry = this.terminalPrompts.get(key);
+    if (!entry) return undefined;
+    if (Date.now() - entry.at > 900_000) { this.terminalPrompts.delete(key); return undefined; }
+    return { toolName: entry.tool, message: entry.message, at: new Date(entry.at).toISOString() };
+  }
+  clearTerminalPrompt(target: Target) { this.terminalPrompts.delete(JSON.stringify(target)); }
   approval(target: Target): Json | undefined {
     const pending = [...this.pending.entries()].find(([, p]) => JSON.stringify(p.target) === JSON.stringify(target));
     if (pending) return { actionId: pending[0], toolName: pending[1].tool, title: `Allow ${pending[1].tool}?`, message: pending[1].message, expiresAt: pending[1].expiresAt };
@@ -253,14 +271,18 @@ export class AgentHooks {
           else await this.changes.after(conversation, id);
           res.end("{}"); return;
         }
+        if (body.event === "PermissionRequest") this.terminalPrompts.delete(JSON.stringify(target));
         if (body.event !== "PermissionRequest" || target.source === "copilot"
-          || (!this.watching.has(JSON.stringify(target)) && !this.overview.has(target.server) && !this.push.available)) { res.end("{}"); return; }
+          || (!this.watching.has(JSON.stringify(target)) && !this.overview.has(target.server) && !this.push.available)) {
+          if (body.event === "PermissionRequest") this.rememberTerminalPrompt(target, body);
+          res.end("{}"); return;
+        }
         // A foreground watcher or configured push device can hold the callback.
         // Timeouts always return control to the ordinary terminal prompt.
         if (this.pending.size >= 64) { res.end("{}"); return; }
         const action = randomUUID();
         const locallyWatched = this.watching.has(JSON.stringify(target)) || this.overview.has(target.server);
-        const timer = setTimeout(() => { this.pending.delete(action); this.dropPushBindings(action); res.end("{}"); }, 55_000);
+        const timer = setTimeout(() => { this.pending.delete(action); this.dropPushBindings(action); this.rememberTerminalPrompt(target, body); res.end("{}"); }, 55_000);
         const expiresAt = new Date(Date.now() + 55_000).toISOString();
         this.pending.set(action, { target, response: res, tool: String(body.tool || "action").slice(0, 200), input: body.input,
           message: JSON.stringify(body.input || {}, null, 2).slice(0, 32_768), expiresAt, timer });
