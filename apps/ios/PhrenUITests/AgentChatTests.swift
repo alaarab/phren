@@ -221,6 +221,24 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(modeledAgent.waitForExistence(timeout: 5))
         XCTAssertTrue(modeledAgent.label.contains("Claude"), "The model appears beside its provider")
         capture(app, "Agent work cards")
+        let completedID = "a" + String(repeating: "1", count: 31)
+        modeledAgent.swipeLeft()
+        let clear = app.buttons["chat-subagent-clear:\(completedID)"]
+        XCTAssertTrue(clear.waitForExistence(timeout: 3))
+        clear.tap()
+        XCTAssertTrue(modeledAgent.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["1 agent · 1 running"].waitForExistence(timeout: 3))
+        let showCleared = app.buttons["chat-subagents-show-cleared"]
+        XCTAssertTrue(showCleared.waitForExistence(timeout: 3))
+        showCleared.tap()
+        XCTAssertTrue(modeledAgent.waitForExistence(timeout: 5))
+        capture(app, "Cleared subagents")
+        // Leave the persistent fixture clean so the test can be rerun on the
+        // same installed app without inheriting its earlier dismissal.
+        modeledAgent.swipeLeft()
+        let restore = app.buttons["chat-subagent-restore:\(completedID)"]
+        XCTAssertTrue(restore.waitForExistence(timeout: 3))
+        restore.tap()
         app.buttons["chat-subagents-done"].tap()
         let open = app.buttons["chat-agent-transcript:agent-audit"]
         XCTAssertTrue(open.waitForExistence(timeout: 8))
