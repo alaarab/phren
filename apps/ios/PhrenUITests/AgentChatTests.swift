@@ -1377,6 +1377,11 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(app.buttons["chat-answer-key:y"].exists)
         XCTAssertTrue(app.buttons["chat-answer-key:Escape"].exists)
         XCTAssertTrue(app.buttons["chat-answer-terminal"].exists, "The terminal stays one tap away")
+        // Combined into one element, which XCUITest reports as static text.
+        let prompt = app.descendants(matching: .any).matching(identifier: "chat-terminal-prompt").firstMatch
+        XCTAssertTrue(prompt.waitForExistence(timeout: 8), "The question the keys answer is shown, not just the keys")
+        XCTAssertTrue(prompt.label.contains("May I inspect the installed simulator runtimes"), "The reason comes first: \(prompt.label)")
+        XCTAssertTrue(prompt.label.contains("xcrun simctl list runtimes"))
         capture(app, "Answer keys for a terminal prompt")
         app.buttons["chat-answer-key:Down"].tap()
         XCTAssertTrue(keys.waitForExistence(timeout: 3), "Moving through a menu keeps the row")
@@ -1395,6 +1400,9 @@ final class AgentChatTests: XCTestCase {
         app.buttons["chat-send"].tap()
         let terra = app.buttons["chat-model:gpt-5.6-terra"]
         XCTAssertTrue(terra.waitForExistence(timeout: 5), "The /model command opens the phone's own picker")
+        XCTAssertTrue(app.buttons["chat-model:gpt-6-astra"].exists, "The list is what the computer reports, not a built-in one")
+        XCTAssertTrue(app.buttons["chat-model:gpt-6-astra"].label.contains("default"))
+        XCTAssertTrue(app.buttons["chat-model:gpt-6-astra"].label.contains("Our most capable"))
         capture(app, "Model picker")
         terra.tap()
         let echoed = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "/model gpt-5.6-terra")).firstMatch

@@ -67,6 +67,13 @@ import UIKit
     /// The plan Claude wrote in plan mode: more than a screenful, so the card
     /// cuts it and offers the rest.
     static let planMarkdown = "# Plan: subagent and todo cards\n\n## Steps\n\n1. Parse the Task tool in PhrenKit\n2. Draw the agent card\n3. Fold superseded todo lists\n4. Add fixture flags\n5. Write the UI tests\n6. Run the suite on the simulator\n7. Check the cards at accessibility sizes\n8. Verify the plan approval path\n9. Update the changelog\n10. Ask for review\n\n## Notes\n\n- Keep every card in the phren card family\n- No raw JSON on any card\n- Final step marker: run the full suite once more"
+    /// A Codex approval that fell through to the terminal: the Hook saw it
+    /// but nobody was watching, so the chat shows the question above its keys.
+    static func terminalPrompt(_ target: AgentChatTarget) -> AgentTerminalPrompt? {
+        guard flag("--chat-blocked"), !answered else { return nil }
+        let input: [String: Any] = ["command": "xcrun simctl list runtimes", "justification": "May I inspect the installed simulator runtimes to resolve the Watch target test failure?"]
+        return AgentTerminalPrompt(toolName: "Shell", message: String(decoding: (try? JSONSerialization.data(withJSONObject: input, options: [.prettyPrinted, .sortedKeys])) ?? Data(), as: UTF8.self))
+    }
     static func approval(_ target: AgentChatTarget) throws -> AgentApproval? {
         guard !answered else { return nil }
         if flag("--chat-approval-question") {
@@ -554,6 +561,13 @@ import UIKit
         }
         return try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: ["type": "backlog", "source": target.source,
                                                                                     "entries": entries, "startLine": flag("--chat-history") ? 20 : 0, "totalLines": (flag("--chat-history") ? 20 : 0) + entries.count, "hasMore": flag("--chat-history")]), source: target.source)
+    }
+    static func models(source: String) -> [AgentModelChoice] {
+        source == "codex" ? [
+            AgentModelChoice(name: "GPT-6-Astra", argument: "gpt-6-astra", description: "Our most capable model for complex, demanding work.", isDefault: true),
+            AgentModelChoice(name: "GPT-5.6-Sol", argument: "gpt-5.6-sol", description: "Reliable agentic workhorse for everyday tasks."),
+            AgentModelChoice(name: "GPT-5.6-Terra", argument: "gpt-5.6-terra", description: "Balanced agentic coding model for everyday work."),
+        ] : [AgentModelChoice(name: "Fable", argument: "fable", description: "The latest Fable model.")]
     }
     static var answeredKeys: [String] = []
     static func answer(_ target: AgentChatTarget, key: AgentAnswerKey) async throws {

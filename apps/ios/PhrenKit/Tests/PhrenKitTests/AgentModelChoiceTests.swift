@@ -15,4 +15,14 @@ final class AgentModelChoiceTests: XCTestCase {
         XCTAssertNil(AgentModelChoice.command(for: "two words"))
         XCTAssertNil(AgentModelChoice.command(for: "bad;id"))
     }
+
+    func testCatalogueFromTheComputer() throws {
+        let data = Data(#"{"models":[{"id":"gpt-6-astra","name":"GPT-6-Astra","description":"Most capable.","isDefault":true},{"id":"gpt-5.6-sol","name":"GPT-5.6-Sol"},{"id":"bad id","name":"x"},{"id":"claude-fable-5-1[1m]","name":"Fable 5.1 (1M context)"}]}"#.utf8)
+        let models = try AgentModelChoice.read(data)
+        XCTAssertEqual(models.map(\.argument), ["gpt-6-astra", "gpt-5.6-sol", "claude-fable-5-1[1m]"])
+        XCTAssertEqual(models[0].description, "Most capable.")
+        XCTAssertTrue(models[0].isDefault)
+        XCTAssertFalse(models[1].isDefault)
+        XCTAssertThrowsError(try AgentModelChoice.read(Data("{}".utf8)))
+    }
 }

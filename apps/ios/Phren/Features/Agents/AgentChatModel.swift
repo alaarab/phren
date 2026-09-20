@@ -171,6 +171,8 @@ final class AgentChatModel {
     var pendingQuestionCount: Int { questionState.pending.count }
     var interactionConnected = false
     var answering = false
+    /// What the agent is asking in its terminal, when the Hook saw the request go by.
+    var terminalPrompt: AgentTerminalPrompt?
     private var statusTask: Task<Void, Never>?
     private var progressTask: Task<Void, Never>?
     private var progressConnected = false
@@ -493,6 +495,7 @@ final class AgentChatModel {
                         asyncQuestionsSupported = !ProcessInfo.processInfo.arguments.contains("--chat-question-unsupported")
                         if ProcessInfo.processInfo.arguments.contains("--chat-question-unsupported") { questionsSupported = false }
                         approval = try AgentChatFixture.approval(target)
+                        terminalPrompt = AgentChatFixture.terminalPrompt(target)
                         if !ProcessInfo.processInfo.arguments.contains("--chat-streaming") {
                             acceptActivity(try AgentChatFixture.panes(session).validate(target).agentStatus)
                         }
@@ -507,6 +510,7 @@ final class AgentChatModel {
                         guard self.target == target, generation == run, statusGeneration == statusRun else { return }
                         if awaitingReply, liveActivity != "working", status.activity == "working" { awaitingReply = false }
                         approval = status.approval.flatMap { ApprovalActivityController.shared.wasHandled($0, target: target) ? nil : $0 }
+                        if terminalPrompt != status.terminalPrompt { terminalPrompt = status.terminalPrompt }
                         if let prompts = status.pendingQuestions { questionState.replaceAsync(prompts) }
                         questionsSupported = status.questionsSupported; asyncQuestionsSupported = status.asyncQuestionsSupported
                         acceptActivity(status.activity); interactionConnected = true
@@ -517,7 +521,7 @@ final class AgentChatModel {
                     }
                 } catch {}
                 guard !Task.isCancelled, self.target == target, generation == run, statusGeneration == statusRun else { return }
-                approval = nil; interactionConnected = false
+                approval = nil; terminalPrompt = nil; interactionConnected = false
                 do { try await Task.sleep(for: .seconds(3)) } catch { return }
             }
         }

@@ -655,6 +655,45 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     expect(await submit(other, "queued while busy")).toMatchObject({ decision: "block" });
     expect(await submit(session, "queued while busy")).toEqual({ status: 200 });
   }, 15_000);
+  it("remembers a permission request it could not hold and shows it while the pane waits", async () => {
+    agentStatus = "blocked";
+    const callback = JSON.stringify({ target, event: "PermissionRequest", tool: "Shell", input: { command: "xcrun simctl list runtimes", justification: "Inspect the runtimes" } });
+    const reply = await new Promise<string>((resolve, reject) => {
+      const req = request({ socketPath: path.join(root, "bridge/agent.sock"), path: "/hook", method: "POST", headers: { "Content-Length": Buffer.byteLength(callback) } },
+        res => { let data = ""; res.on("data", bytes => data += bytes); res.on("end", () => resolve(data)); });
+      req.on("error", reject); req.end(callback);
+    });
+    expect(reply).toBe("{}");
+    const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
+    const frames: any[] = []; socket.on("message", data => frames.push(JSON.parse(data.toString())));
+    await once(socket, "open");
+    for (let i = 0; i < 80 && !frames.length; i++) await sleep(25);
+    expect(frames[0].agentStatus).toMatchObject({ status: "blocked", terminalPrompt: { toolName: "Shell" } });
+    expect(frames[0].agentStatus.terminalPrompt.message).toContain("xcrun simctl list runtimes");
+    socket.terminate();
+    // Answering with a key clears it; moving through the menu does not.
+    expect((await api("/v1/keys", { target, keys: ["Down"] })).status).toBe(200);
+    const again = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
+    const later: any[] = []; again.on("message", data => later.push(JSON.parse(data.toString())));
+    await once(again, "open");
+    for (let i = 0; i < 80 && !later.length; i++) await sleep(25);
+    expect(later[0].agentStatus.terminalPrompt).toMatchObject({ toolName: "Shell" });
+    again.terminate();
+    expect((await api("/v1/keys", { target, keys: ["y"] })).status).toBe(200);
+    const cleared = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
+    const last: any[] = []; cleared.on("message", data => last.push(JSON.parse(data.toString())));
+    await once(cleared, "open");
+    for (let i = 0; i < 80 && !last.length; i++) await sleep(25);
+    expect(last[0].agentStatus.terminalPrompt).toBeUndefined();
+    cleared.terminate();
+  });
+  it("lists the models a computer's agents offer", async () => {
+    const claude = await api("/v1/models?source=claude");
+    expect(claude.status).toBe(200);
+    expect(claude.data.models.map((m: any) => m.id)).toEqual(expect.arrayContaining(["fable", "opus", "sonnet", "haiku"]));
+    expect((await api("/v1/models?source=opencode")).data).toEqual({ models: [] });
+    expect((await api("/v1/models?source=../etc")).data).toEqual({ models: [] });
+  });
   it("presses answer keys only while the agent waits, and never anything typed", async () => {
     agentStatus = "blocked";
     expect((await api("/v1/keys", { target, keys: ["y"] })).status).toBe(200);

@@ -18,8 +18,11 @@ number counts up on its own.
 - Prompts an agent draws only in its terminal (folder trust, a yes/no, a
   menu) can be answered from the chat with a row of keys: Y, N, Enter, the
   arrows and Esc. The Hook accepts exactly those keys and nothing typed.
-- Typing /model, or Model in the chat options, opens a picker with the
-  agent's usual models and a field for any id; the choice is applied in the
+  When the prompt is a permission request the Hook saw go by, the question
+  itself (reason and command) appears above the keys.
+- Typing /model, or Model in the chat options, opens a picker listing the
+  models the computer's agent actually offers, with descriptions and the
+  default marked, plus a field for any id; the choice is applied in the
   transcript without switching to the terminal.
 - Inserting an image from the terminal now uploads it to the computer and
   types its path at the cursor; the terminal stays open.

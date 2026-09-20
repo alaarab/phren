@@ -40,8 +40,38 @@ public struct AgentApproval: Decodable, Equatable, Sendable, Identifiable {
     }
 }
 
+/// A permission request the agent is drawing in its own terminal because the
+/// Hook had no one to hold it for. Read-only on the phone: the answer goes
+/// in as keys, not as an approval.
+public struct AgentTerminalPrompt: Decodable, Equatable, Sendable {
+    public let toolName: String?
+    public let message: String?
+
+    public init(toolName: String?, message: String?) {
+        self.toolName = toolName
+        self.message = message
+    }
+
+    /// The same first-line rule as an approval card: the human reason or
+    /// command when the input carries one, otherwise the input itself.
+    public var explanation: String? {
+        guard let message, !message.isEmpty else { return nil }
+        if let input = try? JSONSerialization.jsonObject(with: Data(message.utf8)) as? [String: Any] {
+            for key in ["justification", "description", "command", "cmd", "plan"] {
+                if let text = input[key] as? String, !text.isEmpty { return text }
+            }
+        }
+        return message
+    }
+    public var command: String? {
+        guard let message, let input = try? JSONSerialization.jsonObject(with: Data(message.utf8)) as? [String: Any] else { return nil }
+        return ["command", "cmd"].lazy.compactMap { input[$0] as? String }.first { !$0.isEmpty }
+    }
+}
+
 public struct AgentInteractionStatus: Equatable, Sendable {
     public let approval: AgentApproval?
+    public var terminalPrompt: AgentTerminalPrompt? = nil
     public var activity: String? = nil
     public var modelName: String? = nil
     public var questionsSupported = true
@@ -64,8 +94,13 @@ public struct AgentInteractionStatus: Equatable, Sendable {
             }
             approval = candidate
         }
+        var terminalPrompt: AgentTerminalPrompt?
+        if approval == nil, let raw = status["terminalPrompt"] as? [String: Any], JSONSerialization.isValidJSONObject(raw) {
+            terminalPrompt = try? JSONDecoder().decode(AgentTerminalPrompt.self, from: JSONSerialization.data(withJSONObject: raw))
+            if let message = terminalPrompt?.message, message.utf8.count > 32_768 { terminalPrompt = AgentTerminalPrompt(toolName: terminalPrompt?.toolName, message: String(message.prefix(32_768))) }
+        }
         let activity = status["status"] as? String
-        return .init(approval: approval, activity: ["working", "idle", "done", "waiting", "blocked", "error"].contains(activity ?? "") ? activity : nil,
+        return .init(approval: approval, terminalPrompt: terminalPrompt, activity: ["working", "idle", "done", "waiting", "blocked", "error"].contains(activity ?? "") ? activity : nil,
                      modelName: (status["modelName"] as? String).map { String($0.prefix(100)) },
                      questionsSupported: (status["capabilities"] as? [String: Any])?["questions"] as? Bool ?? true,
                      asyncQuestionsSupported: (status["capabilities"] as? [String: Any])?["asyncQuestions"] as? Bool ?? false,

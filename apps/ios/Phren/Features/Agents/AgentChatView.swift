@@ -642,7 +642,7 @@ struct AgentChatView: View {
         .onDisappear { dictationTask?.cancel(); cleanupTask?.cancel(); dictating = false; if dictation.isRecording { dictation.stop() } }
         .sheet(isPresented: $showingOptions) { chatOptionsSheet }
         .sheet(isPresented: $showingModelPicker) {
-            ChatModelPickerSheet(source: model.target?.source ?? "", current: model.modelName) { command in
+            ChatModelPickerSheet(source: model.target?.source ?? "", current: model.modelName, host: session.host) { command in
                 showingModelPicker = false
                 model.draft = command
                 sendDraft(handoffCommands: false)
@@ -1035,8 +1035,27 @@ struct AgentChatView: View {
                 // A prompt only the terminal shows: answer it with the keys
                 // such prompts take, without leaving the chat.
                 VStack(alignment: .leading, spacing: 6) {
+                    if let prompt = model.terminalPrompt {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Label("\(model.target?.providerName ?? "Agent") asks: \(prompt.toolName ?? "permission")", systemImage: "hand.raised")
+                                .font(.caption.weight(.semibold)).foregroundStyle(PhrenTheme.warning)
+                            if let explanation = prompt.explanation {
+                                Text(explanation).font(.subheadline).lineLimit(5).textSelection(.enabled)
+                            }
+                            if let command = prompt.command, command != prompt.explanation {
+                                Text(command).font(.system(.caption, design: .monospaced)).lineLimit(3).textSelection(.enabled)
+                                    .foregroundStyle(PhrenTheme.textMuted)
+                            }
+                            Text("Y is yes, Esc is no; arrows and Enter walk the menu.")
+                                .font(.caption2).foregroundStyle(PhrenTheme.textMuted)
+                        }
+                        .padding(10)
+                        .background(PhrenTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("chat-terminal-prompt")
+                    }
                     HStack(spacing: 8) {
-                        Text("Agent is waiting for an answer in its terminal")
+                        Text(model.terminalPrompt == nil ? "Agent is waiting for an answer in its terminal" : "Answer here or in the terminal")
                             .font(.caption).foregroundStyle(PhrenTheme.warning)
                         Spacer(minLength: 4)
                         NavigationLink { HerdrTerminalView(host: session.host, session: session, target: model.target) } label: {

@@ -7,11 +7,28 @@ import Foundation
 public struct AgentModelChoice: Identifiable, Equatable, Sendable {
     public let name: String
     public let argument: String
+    public var description: String? = nil
+    public var isDefault = false
     public var id: String { argument }
 
-    public init(name: String, argument: String) {
+    public init(name: String, argument: String, description: String? = nil, isDefault: Bool = false) {
         self.name = name
         self.argument = argument
+        self.description = description
+        self.isDefault = isDefault
+    }
+
+    /// The catalogue the computer reports (`/v1/models`): what the agent's
+    /// own menu would list, so the phone needs no update when models change.
+    public static func read(_ data: Data) throws -> [AgentModelChoice] {
+        guard data.count <= 262_144, let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let models = object["models"] as? [[String: Any]] else { throw PhrenKitError.validation("The computer returned no model list.") }
+        return models.prefix(64).compactMap { raw in
+            guard let id = raw["id"] as? String, command(for: id) != nil else { return nil }
+            let name = (raw["name"] as? String).flatMap { $0.isEmpty ? nil : String($0.prefix(100)) } ?? id
+            let description = (raw["description"] as? String).flatMap { $0.isEmpty ? nil : String($0.prefix(300)) }
+            return AgentModelChoice(name: name, argument: id, description: description, isDefault: raw["isDefault"] as? Bool == true)
+        }
     }
 
     /// Providers whose `/model <id>` applies without an interactive menu.

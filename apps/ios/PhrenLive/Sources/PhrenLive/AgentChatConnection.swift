@@ -104,6 +104,14 @@ extension PhrenConnection {
         return try AgentChatTranscript.read(data, source: target.source)
     }
 
+    /// The models the agent on that computer can switch to, as its own menu
+    /// would list them. Read-only; sources the Hook does not know yield [].
+    public static func models(host: LiveHost, privateKey: Data, source: String) async throws -> [AgentModelChoice] {
+        guard AgentChatTarget.sources.contains(source) else { throw PhrenKitError.validation("Unknown agent.") }
+        let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: GatewayRequest(path: "/v1/models?source=\(source)", maximumResponseBytes: 262_144))
+        return try AgentModelChoice.read(data)
+    }
+
     public static func childAgents(host: LiveHost, privateKey: Data, target: AgentChatTarget) async throws -> AgentChildTree {
         guard !target.isStarting, target.hostID == host.id && target.muxID == host.muxID else { throw PhrenKitError.validation("The chat belongs to another computer.") }
         let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: .childAgents(target))
