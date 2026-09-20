@@ -101,7 +101,42 @@ extension PhrenConnection {
               child.range(of: "^[a-f0-9]{32}$", options: .regularExpression) != nil,
               AgentChatTarget.sources.contains(provider) else { throw PhrenKitError.validation("This child conversation is invalid.") }
         let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: .childTranscript(target, child: child))
-        return try AgentChatTranscript.read(data, source: provider)
+        return try AgentChatTranscript.read(data, source: provider, sidechain: true, session: child)
+    }
+
+    /// Follow a child agent's transcript as it grows, through the parent
+    /// conversation's socket. The frames name the child by its public id.
+    public static func childAgentUpdates(host: LiveHost, privateKey: Data, target: AgentChatTarget, child: String, provider: String) -> AsyncThrowingStream<AgentChatTranscript, Error> {
+        AsyncThrowingStream(bufferingPolicy: .bufferingOldest(8)) { continuation in
+            let worker = Task {
+                do {
+                    guard !target.isStarting, target.hostID == host.id && target.muxID == host.muxID,
+                          child.range(of: "^[a-f0-9]{32}$", options: .regularExpression) != nil,
+                          AgentChatTarget.sources.contains(provider) else { throw PhrenKitError.validation("This child conversation is invalid.") }
+                    let request = GatewayRequest.childTranscriptStream(target, child: child)
+                    _ = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: request) { data in
+                        // An older Hook ignores `child` and would stream the parent; its
+                        // frames name the parent session and are refused here.
+                        let frame = try AgentChatTranscript.read(data, source: provider, sidechain: true, session: child)
+                        if case .dropped = continuation.yield(frame) { throw LiveConnectionError.oversized }
+                    }
+                    continuation.finish()
+                } catch { continuation.finish(throwing: error) }
+            }
+            continuation.onTermination = { _ in worker.cancel() }
+        }
+    }
+
+    public static func childAgentHistory(host: LiveHost, privateKey: Data, target: AgentChatTarget, child: String, provider: String, beforeLine: Int) async throws -> AgentChatTranscript {
+        guard !target.isStarting, target.hostID == host.id && target.muxID == host.muxID, beforeLine > 0,
+              child.range(of: "^[a-f0-9]{32}$", options: .regularExpression) != nil,
+              AgentChatTarget.sources.contains(provider) else { throw PhrenKitError.validation("This history has no earlier destination.") }
+        let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: .childHistory(target, child: child, beforeLine: beforeLine))
+        let result = try AgentChatTranscript.read(data, source: provider, sidechain: true, session: child)
+        guard result.kind == .older, result.messages.allSatisfy({ $0.line < beforeLine }) else {
+            throw PhrenKitError.validation("The computer returned a different history range.")
+        }
+        return result
     }
 
     public static func sendChat(host: LiveHost, privateKey: Data, target: AgentChatTarget, text: String) async throws {
@@ -163,6 +198,14 @@ struct GatewayRequest: Sendable {
     static func childTranscript(_ target: AgentChatTarget, child: String) -> Self {
         var query = targetQuery(target); query["child"] = child
         return Self(path: path("/v1/subagents/transcript", query), maximumResponseBytes: 8_388_608)
+    }
+    static func childTranscriptStream(_ target: AgentChatTarget, child: String) -> Self {
+        var query = targetQuery(target); query["child"] = child
+        return Self(path: path("/v1/transcripts", query), webSocket: true, streaming: true)
+    }
+    static func childHistory(_ target: AgentChatTarget, child: String, beforeLine: Int) -> Self {
+        var query = targetQuery(target); query["child"] = child; query["beforeLine"] = String(beforeLine)
+        return Self(path: path("/v1/transcripts/history", query), maximumResponseBytes: 8_388_608)
     }
     static func targetBody(_ target: AgentChatTarget, fields: [String: Any] = [:]) throws -> Data {
         var body = fields; body["target"] = targetQuery(target)

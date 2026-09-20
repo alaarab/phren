@@ -100,6 +100,7 @@ struct AgentChatView: View {
     @State private var dictating = false
     @State private var showingAgentSwitcher = false
     @State private var showingUsage = false
+    @State private var showingOptions = false
     @State private var showingChildAgents = false
     @State private var childAgents: [AgentChild] = []
     @State private var previewImage: ChatAttachmentDraft?
@@ -492,6 +493,7 @@ struct AgentChatView: View {
         .confirmsWebLinks()
         .environment(\.openChatDiff) { fullDiff = $0 }
         .environment(\.openToolOutput) { fullToolOutput = $0 }
+        .environment(\.chatChildAgents, model.target.flatMap { target in childAgents.isEmpty ? nil : ChatChildAgents(session: session, target: target, agents: childAgents) })
         .environment(textSelection)
         #if DEBUG && targetEnvironment(simulator)
         .overlay(alignment: .topLeading) { if AgentChatFixture.enabled { ChatFixtureReport() } }
@@ -599,6 +601,7 @@ struct AgentChatView: View {
         }
         .onChange(of: scenePhase) { _, phase in if phase != .active { stopDictation() } }
         .onDisappear { dictationTask?.cancel(); cleanupTask?.cancel(); dictating = false; if dictation.isRecording { dictation.stop() } }
+        .sheet(isPresented: $showingOptions) { chatOptionsSheet }
         .sheet(isPresented: $showingUsage) {
             if let usage = model.progress.usage {
                 VStack(alignment: .leading, spacing: 16) {
@@ -658,6 +661,9 @@ struct AgentChatView: View {
         }
         .task(id: "\(model.target?.id ?? ""):\(model.timelineRevision)") {
             guard let target = model.target, !target.isStarting else { childAgents = []; return }
+            #if DEBUG && targetEnvironment(simulator)
+            if AgentChatFixture.enabled { childAgents = (try? AgentChatFixture.childAgents(target).agents) ?? []; return }
+            #endif
             childAgents = (try? await PhrenConnection.childAgents(host: session.host,
                 privateKey: DeviceSSHKey.load(session.host.id), target: target).agents) ?? childAgents
         }
@@ -787,28 +793,47 @@ struct AgentChatView: View {
     }
 
     private var chatOptions: some View {
-        // Only what has no home elsewhere on this screen: the terminal,
-        // repository changes, slash commands, dictation and reconnecting all
-        // live in the header, the composer, or the connection notice.
-        Menu {
-            NavigationLink { HerdrWorkspacesView(hostID: session.host.id) } label: { Label("Herdr workspaces", systemImage: "rectangle.split.3x1") }
-            if let project {
-                NavigationLink("Project memory") { ProjectDetailView(storeId: project.storeID, project: project.name) }
-                NavigationLink("Project skills") { SkillsView(project: project.name, storeId: project.storeID) }
-                NavigationLink("Explore graph") { GraphView(focusProject: project.name, initialStoreId: project.storeID) }
+        Button { showingOptions = true } label: { Image(systemName: "ellipsis").frame(width: 36, height: 44).contentShape(Rectangle()) }
+            .accessibilityLabel("Chat options")
+    }
+
+    /// Only what has no home elsewhere on this screen: the terminal,
+    /// repository changes, slash commands, dictation and reconnecting all
+    /// live in the header, the composer, or the connection notice. A sheet,
+    /// not a menu: the header's menu never opened on the phone.
+    private var chatOptionsSheet: some View {
+        NavigationStack {
+            PhrenList {
+                Section {
+                    NavigationLink { HerdrWorkspacesView(hostID: session.host.id) } label: { Label("Herdr workspaces", systemImage: "rectangle.split.3x1") }
+                    if model.panes.filter({ (try? $0.target(hostID: session.host.id, workspaceID: session.workspaceID, tabID: session.tab.id, muxID: session.host.muxID)) != nil }).count > 1 {
+                        Button { afterOptions { model.chooseAnother(); refresh = UUID() } } label: { Label("Choose another agent", systemImage: "person.2") }
+                            .disabled(model.sending)
+                    }
+                }
+                if let project {
+                    Section("Project") {
+                        NavigationLink { ProjectDetailView(storeId: project.storeID, project: project.name) } label: { Label("Project memory", systemImage: "brain.head.profile") }
+                        NavigationLink { SkillsView(project: project.name, storeId: project.storeID) } label: { Label("Project skills", systemImage: "sparkles") }
+                        NavigationLink { GraphView(focusProject: project.name, initialStoreId: project.storeID) } label: { Label("Explore graph", systemImage: "point.3.connected.trianglepath.dotted") }
+                        Button { afterOptions { showingContext = true } } label: { Label("Add project context", systemImage: "brain") }
+                    }
+                }
+                if model.progress.usage != nil || model.progressUnavailable {
+                    Section("This conversation") { tokenUsage }
+                }
             }
-            tokenUsage
-            if project != nil {
-                Button("Add project context", systemImage: "brain") { showingContext = true }
-            }
-            if model.panes.filter({ (try? $0.target(hostID: session.host.id, workspaceID: session.workspaceID, tabID: session.tab.id, muxID: session.host.muxID)) != nil }).count > 1 {
-                Button("Choose another agent") {
-                    model.chooseAnother()
-                    refresh = UUID()
-                }.disabled(model.sending)
-            }
-        } label: { Image(systemName: "ellipsis").frame(width: 36, height: 44).contentShape(Rectangle()) }
-        .accessibilityLabel("Chat options")
+            .navigationTitle("Chat options").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showingOptions = false }.accessibilityIdentifier("chat-options-done") } }
+        }
+        .presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
+    }
+
+    /// Close the options sheet, then present or act; two sheets cannot
+    /// change places in the same beat.
+    private func afterOptions(_ action: @escaping () -> Void) {
+        showingOptions = false
+        Task { try? await Task.sleep(for: .milliseconds(350)); action() }
     }
 
     private func connectionIssue(_ message: String, retry: Bool = false) -> some View {
@@ -825,14 +850,17 @@ struct AgentChatView: View {
 
     @ViewBuilder private var tokenUsage: some View {
         if let usage = model.progress.usage {
-            Button { showingUsage = true } label: {
+            Button { afterOptions { showingUsage = true } } label: {
                 Label("Token usage", systemImage: "chart.bar")
             }.accessibilityIdentifier("chat-token-usage").accessibilityLabel("Latest reported usage: \(usage.output) output tokens, \(usage.input) input tokens")
         } else if model.progressUnavailable {
-            Menu {
-                Link("Set up token counts on this computer", destination: URL(string: "https://github.com/alaarab/phren/blob/main/apps/ios/README.md#live-token-counts")!)
-            } label: {
-                Text("Tokens unavailable").font(.caption2).foregroundStyle(PhrenTheme.textMuted)
+            Link(destination: URL(string: "https://github.com/alaarab/phren/blob/main/apps/ios/README.md#live-token-counts")!) {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Tokens unavailable")
+                        Text("Set up token counts on this computer").font(.caption).foregroundStyle(PhrenTheme.textMuted)
+                    }
+                } icon: { Image(systemName: "chart.bar") }
             }
         }
     }
@@ -878,11 +906,12 @@ struct AgentChatView: View {
                     }.accessibilityIdentifier("chat-answer-terminal")
                 }
             }
+            // Only while something is still out there. Finished agents stay
+            // reachable from their cards in the timeline, not from the composer.
             let runningAgents = childAgents.reduce(0) { $0 + $1.runningCount }
-            if !childAgents.isEmpty {
+            if runningAgents > 0 {
                 Button { showingChildAgents = true } label: {
-                    Label(runningAgents > 0 ? "\(runningAgents) agent\(runningAgents == 1 ? "" : "s") running" : "Agent work",
-                          systemImage: "person.2.wave.2")
+                    Label("\(runningAgents) agent\(runningAgents == 1 ? "" : "s") running", systemImage: "person.2.wave.2")
                         .font(.caption.weight(.semibold)).frame(maxWidth: .infinity, alignment: .leading)
                 }.buttonStyle(.plain).foregroundStyle(PhrenTheme.phrenCardAccent)
                     .accessibilityIdentifier("chat-child-agents")

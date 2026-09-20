@@ -214,18 +214,21 @@ struct SessionSubagentsCard: View {
     }
 }
 
-private struct ChildAgentTranscriptView: View {
+/// A child agent's own conversation, read-only. Follows the transcript live
+/// while the agent works, and pages back through what it did earlier.
+struct ChildAgentTranscriptView: View {
     let session: LiveAgentSession
     let target: AgentChatTarget
     let agent: AgentChild
-    @State private var transcript: AgentChatTranscript?
+    @State private var history = AgentChatHistory()
+    @State private var loaded = false
+    @State private var live = false
+    @State private var loadingOlder = false
     @State private var error: String?
     @State private var fullToolOutput: FullToolOutput?
     @State private var textSelection = ChatTextSelection()
 
-    private var entries: [ChatTimelineEntry] {
-        ChatTimelineEntry.group(transcript?.messages ?? [])
-    }
+    private var entries: [ChatTimelineEntry] { ChatTimelineEntry.group(history.messages) }
 
     var body: some View {
         ScrollView {
@@ -235,15 +238,26 @@ private struct ChildAgentTranscriptView: View {
                     ContentUnavailableView("Transcript unavailable", systemImage: "bubble.left.and.exclamationmark.bubble.right",
                                            description: Text(error))
                         .frame(maxWidth: .infinity).padding(.vertical, 40)
-                } else if let transcript {
-                    ChatTranscriptRows(revision: transcript.messages.count, entries: entries, revealed: [:], revealRevision: 0,
-                                       images: [:], session: session, target: nil, active: false, preview: { _ in })
-                        .accessibilityIdentifier("child-agent-transcript")
-                    if transcript.hasMore {
-                        Label("Showing recent activity", systemImage: "clock.arrow.circlepath")
+                } else if loaded {
+                    if history.hasMore {
+                        Button {
+                            Task { await loadOlder() }
+                        } label: {
+                            Label(loadingOlder ? "Loading earlier activity…" : "Show earlier activity", systemImage: "clock.arrow.circlepath")
+                                .font(.caption).foregroundStyle(PhrenTheme.accent)
+                                .padding(12).frame(maxWidth: .infinity, alignment: .leading).phrenPanel(tool: true)
+                        }
+                        .buttonStyle(.plain).disabled(loadingOlder)
+                        .accessibilityIdentifier("child-agent-older")
+                    }
+                    if history.messages.isEmpty {
+                        Text(agent.state == .running ? "Nothing recorded yet." : "This agent recorded no conversation.")
                             .font(.caption).foregroundStyle(PhrenTheme.textMuted)
                             .padding(12).frame(maxWidth: .infinity, alignment: .leading).phrenPanel(tool: true)
                     }
+                    ChatTranscriptRows(revision: history.messages.count, entries: entries, revealed: [:], revealRevision: 0,
+                                       images: [:], session: session, target: nil, active: false, preview: { _ in })
+                        .accessibilityIdentifier("child-agent-transcript")
                 } else {
                     ProgressView("Loading agent transcript…").frame(maxWidth: .infinity).padding(.vertical, 48)
                 }
@@ -254,7 +268,12 @@ private struct ChildAgentTranscriptView: View {
         .environment(textSelection)
         .navigationDestination(item: $fullToolOutput) { FullToolOutputView(output: $0) }
         .navigationTitle(agent.name).navigationBarTitleDisplayMode(.inline)
-        .task { await loadTranscript() }
+        .task(id: agent.id) { await follow() }
+    }
+
+    private var stateLine: String {
+        if agent.state != .running { return "Completed · read-only view" }
+        return live ? "Working now · following live" : "Working now · read-only view"
     }
 
     private var transcriptHeader: some View {
@@ -263,21 +282,60 @@ private struct ChildAgentTranscriptView: View {
                 .frame(width: 42, height: 42).background(PhrenTheme.phrenCardAccent.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
             VStack(alignment: .leading, spacing: 3) {
                 Text(agent.providerName + " subagent").font(.headline).foregroundStyle(PhrenTheme.text)
-                Text(agent.state == .running ? "Working now · read-only view" : "Completed · read-only view")
-                    .font(.caption).foregroundStyle(PhrenTheme.textMuted)
+                Text(stateLine).font(.caption).foregroundStyle(PhrenTheme.textMuted)
             }
             Spacer()
             Circle().fill(agent.state == .running ? PhrenTheme.cyan : PhrenTheme.success).frame(width: 9, height: 9)
         }.padding(14).phrenPanel()
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("child-agent-header")
     }
 
-    private func loadTranscript() async {
+    /// Stream through the parent's socket; a computer whose Hook predates
+    /// child streaming still answers the one-shot snapshot.
+    @MainActor private func follow() async {
+        #if DEBUG && targetEnvironment(simulator)
+        if AgentChatFixture.enabled {
+            if let frame = try? AgentChatFixture.childTranscript(child: agent.id) { history.receive(frame); loaded = true }
+            else { error = "This agent's activity is not available yet." }
+            return
+        }
+        #endif
         do {
-            transcript = try await PhrenConnection.childAgentTranscript(host: session.host,
+            let key = try DeviceSSHKey.load(session.host.id)
+            let updates = PhrenConnection.childAgentUpdates(host: session.host, privateKey: key, target: target, child: agent.id, provider: agent.provider)
+            for try await frame in updates {
+                if frame.kind != .append || !frame.messages.isEmpty { history.receive(frame) }
+                loaded = true; live = true; error = nil
+            }
+            live = false
+        } catch is CancellationError {
+            live = false
+        } catch {
+            live = false
+            guard !loaded else { return }
+            await loadSnapshot()
+        }
+    }
+
+    @MainActor private func loadSnapshot() async {
+        do {
+            let frame = try await PhrenConnection.childAgentTranscript(host: session.host,
                 privateKey: DeviceSSHKey.load(session.host.id), target: target, child: agent.id, provider: agent.provider)
-            error = nil
+            history.receive(frame); loaded = true; error = nil
+        } catch is CancellationError {
         } catch {
             self.error = "This agent's activity is not available yet."
         }
+    }
+
+    @MainActor private func loadOlder() async {
+        guard let before = history.startLine, before > 0, !loadingOlder else { return }
+        loadingOlder = true; defer { loadingOlder = false }
+        do {
+            let page = try await PhrenConnection.childAgentHistory(host: session.host, privateKey: DeviceSSHKey.load(session.host.id),
+                target: target, child: agent.id, provider: agent.provider, beforeLine: before)
+            history.receive(page)
+        } catch { /* The earlier rows stay one tap away; the live tail keeps flowing. */ }
     }
 }

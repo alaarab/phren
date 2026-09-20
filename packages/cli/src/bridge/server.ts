@@ -15,7 +15,7 @@ import { paneChatState, paneIdentity, panes, rpc, servers, snapshot, trustedDire
 import { LaunchLimiter } from "./limits.js";
 import { locateProject } from "./locate.js";
 import { launchDirectory, repositoryBranch, repositoryDiff, webServers } from "./projects.js";
-import { BridgeError, bridgeRoot, id, type Json, MAX_FRAME, object, objects, PROTOCOL, serverName, socketPath, startingTargetSchema, targetFromURL, targetSchema } from "./protocol.js";
+import { BridgeError, bridgeRoot, id, type Json, MAX_FRAME, object, objects, PROTOCOL, serverName, socketPath, startingTargetSchema, type Target, targetFromURL, targetSchema } from "./protocol.js";
 import { CodexQuestions } from "./questions.js";
 import { bootedSimulators, type SimulatorAction, simulatorAct, simulatorApps, simulatorScreenshot } from "./simulators.js";
 import { TabActivityStore } from "./tab-activity.js";
@@ -165,9 +165,10 @@ export async function serve(version: string): Promise<void> {
             const abort = new AbortController();
             response.once("close", () => { if (!response.writableEnded) abort.abort(); });
             await validateTarget(target);
-            const reader = new TranscriptReader(await transcriptPath(target.source, target.session), target.source, undefined, agentHooks.changes.view(`${target.source}:${target.session}`));
+            const child = url.searchParams.get("child");
+            const { reader, source, session } = child === null ? await conversationReader(target) : await childConversationReader(target, child);
             const page = await reader.read(before, abort.signal);
-            result = { ...page, type: "older", source: target.source, session: target.session }; break;
+            result = { ...page, type: "older", source, session }; break;
           }
           case "/v1/subagents": {
             const target = targetFromURL(url); await validateTarget(target);
@@ -175,13 +176,9 @@ export async function serve(version: string): Promise<void> {
           }
           case "/v1/subagents/transcript": {
             const target = targetFromURL(url); await validateTarget(target);
-            const child = z.string().parse(url.searchParams.get("child"));
-            const tree = await childAgentTree(target.source, target.session);
-            const relation = childAgent(tree, child);
-            if (!relation) throw new BridgeError(404, "This child agent does not belong to the selected conversation.");
-            const reader = new TranscriptReader(relation.transcript, relation.provider, undefined, undefined, relation.provider === "claude");
+            const { reader, source, session } = await childConversationReader(target, z.string().parse(url.searchParams.get("child")));
             const page = await reader.read();
-            result = { ...page, type: "backlog", source: relation.provider, session: relation.id }; break;
+            result = { ...page, type: "backlog", source, session }; break;
           }
           default: throw new BridgeError(404, "Unknown Phren Hook route.");
         }
@@ -280,6 +277,19 @@ export async function serve(version: string): Promise<void> {
   });
   http.requestTimeout = 20_000; http.headersTimeout = 10_000; http.maxHeadersCount = 32;
   const ws = new WebSocketServer({ noServer: true, maxPayload: 65_536, perMessageDeflate: false });
+  async function conversationReader(target: Target) {
+    const reader = new TranscriptReader(await transcriptPath(target.source, target.session), target.source, undefined, agentHooks.changes.view(`${target.source}:${target.session}`));
+    return { reader, source: target.source, session: target.session };
+  }
+  /** The transcript of an agent the conversation spawned. The child is a
+   * parent-scoped id from `/v1/subagents`; the file is only ever reached
+   * through the relation, never by a path or session the phone names. */
+  async function childConversationReader(target: Target, child: string) {
+    const relation = childAgent(await childAgentTree(target.source, target.session), child);
+    if (!relation) throw new BridgeError(404, "This child agent does not belong to the selected conversation.");
+    const reader = new TranscriptReader(relation.transcript, relation.provider, undefined, undefined, relation.provider === "claude");
+    return { reader, source: relation.provider, session: relation.id };
+  }
   http.on("upgrade", (request, socket, head) => {
     try {
       const url = new URL(request.url || "/", "http://phren.local");
@@ -306,6 +316,11 @@ export async function serve(version: string): Promise<void> {
     // Even rejected upgrades may already contain invalid WebSocket frames.
     // Handle their errors before parsing any untrusted destination fields.
     const target = targetFromURL(url);
+    // A child agent's transcript streams through the same socket, bound to
+    // the parent conversation: the parent target is what gets revalidated
+    // each tick, and the frames name the child by its parent-scoped id.
+    const child = url.pathname === "/v1/transcripts" ? url.searchParams.get("child") : null;
+    let conversation = { source: target.source, session: target.session };
     const tick = async () => {
       if (busy || !ready || abort.signal.aborted) return; busy = true;
       try {
@@ -313,8 +328,7 @@ export async function serve(version: string): Promise<void> {
           const pane = first ? initialPane : await validateTarget(target);
           if (reader) {
             const page = await reader.read(undefined, abort.signal);
-            if (first || page.entries.length || page.reset) send(client, { ...page, type: first || page.reset ? "backlog" : "append", source: target.source,
-              session: target.session });
+            if (first || page.entries.length || page.reset) send(client, { ...page, type: first || page.reset ? "backlog" : "append", ...conversation });
           } else {
             const pendingApproval = agentHooks.approval(target);
             const pendingQuestions = target.source === "codex" ? await codexQuestions.pending(target).catch(() => undefined) : undefined;
@@ -330,7 +344,7 @@ export async function serve(version: string): Promise<void> {
           const before = pending.shift()!;
           await validateTarget(target);
           const page = await reader.read(before, abort.signal);
-          send(client, { ...page, type: "older", source: target.source, session: target.session });
+          send(client, { ...page, type: "older", ...conversation });
         }
       } catch { stop(); client.close(1011, "The conversation changed; refresh"); }
       finally { busy = false; if (pending.length) void tick(); }
@@ -349,7 +363,10 @@ export async function serve(version: string): Promise<void> {
       initialPane = await validateTarget(target);
       if (abort.signal.aborted) return;
       unwatch = agentHooks.watch(target);
-      reader = url.pathname === "/v1/transcripts" ? new TranscriptReader(await transcriptPath(target.source, target.session), target.source, undefined, agentHooks.changes.view(`${target.source}:${target.session}`)) : undefined;
+      if (url.pathname === "/v1/transcripts") {
+        const opened = child === null ? await conversationReader(target) : await childConversationReader(target, child);
+        reader = opened.reader; conversation = { source: opened.source, session: opened.session };
+      }
       if (abort.signal.aborted) { stop(); return; }
       ready = true;
       timer = setInterval(() => { void tick(); }, reader ? 500 : 1500);
