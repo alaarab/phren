@@ -17,11 +17,11 @@ final class MachineRegistryTests: XCTestCase {
     func testHostLookupIgnoresTheLocalSuffixAndCase() {
         let registry = MachineRegistry(machines: ["Desk.local": "mac-mini", "linuxbox": "personal"],
                                        profiles: ["mac-mini": ["phren", "alphalens"], "personal": ["phren"]])
-        XCTAssertEqual(registry.hosts(for: "phren"), ["Desk.local", "omarchy"])
+        XCTAssertEqual(registry.hosts(for: "phren"), ["Desk.local", "linuxbox"])
         XCTAssertEqual(registry.hosts(for: "alphalens"), ["Desk.local"])
-        XCTAssertTrue(registry.hosts("squids-mac-mini", project: "phren"))
+        XCTAssertTrue(registry.hosts("desk", project: "phren"))
         XCTAssertTrue(registry.hosts("Desk.local", project: "alphalens"))
-        XCTAssertFalse(registry.hosts("omarchy", project: "alphalens"))
+        XCTAssertFalse(registry.hosts("linuxbox", project: "alphalens"))
         XCTAssertFalse(registry.hosts("laptop", project: "phren"))
     }
 
