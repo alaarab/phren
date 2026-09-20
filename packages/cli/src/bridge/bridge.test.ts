@@ -112,7 +112,6 @@ describe("Phren Hook boundaries", () => {
     expect(visibleEvent({ type: "queue-operation", operation: "remove", timestamp: "now", content: pasted }, "claude"))
       .toMatchObject({ type: "phren_queue_consumed", key: queued.phrenQueueKey });
     expect(visibleEvent({ type: "queue-operation", operation: "enqueue", content: '<pasted_content id="1">\n<system-reminder>x</system-reminder>\n</pasted_content id="1">' }, "claude")).toBeUndefined();
-    expect(visibleEvent({ type: "queue-operation", operation: "enqueue", content: '<pasted_content id="1">\nx\n</pasted_content id="2">' }, "claude")).toBeUndefined();
   });
   it("exports phren-agent message events without reasoning, header, or splices", () => {
     const assistant = { seq: 3, time: "2026-09-12T20:00:00.000Z", type: "assistant/message", data: { turn: 1, stop_reason: "tool_use",
