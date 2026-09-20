@@ -958,3 +958,11 @@ and description on each row. The list scrolls within a compact panel. Selecting
 a suggestion fills the draft, including a space for arguments, without sending it.
 All commands still opens the exact agent's live terminal menu for installed skills
 and extension commands.
+
+## Worker builds
+
+`scripts/worker-build.sh <family> build|test <simulator-udid> [-- xcodebuild args]`
+gives every worker on one branch family a shared derived-data folder under
+`/tmp/phren-ios-derived/<family>`, exports a test run's attachments and drops
+the result bundle, keeps the newest five attachment folders, refuses to run
+with under 8 GB free, and offers `clean` and `status` subcommands.
