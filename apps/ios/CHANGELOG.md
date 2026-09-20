@@ -306,6 +306,12 @@ number counts up on its own.
   "Open mina in Phren" opens that chat, starting the session when needed.
   Both in Shortcuts as "Message Agent" and "Open Session".
 
+### Fixed
+
+- Agent chats stay at the last message when the keyboard or nearby activity
+  changes height, without scrolling into empty space below the transcript.
+
+
 ## 0.0.7
 
 ### New
