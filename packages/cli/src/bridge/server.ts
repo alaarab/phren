@@ -19,7 +19,7 @@ import { BridgeError, bridgeRoot, id, type Json, MAX_FRAME, object, objects, PRO
 import { CodexQuestions } from "./questions.js";
 import { bootedSimulators, type SimulatorAction, simulatorAct, simulatorApps, simulatorScreenshot } from "./simulators.js";
 import { TabActivityStore } from "./tab-activity.js";
-import { childAgent, childAgentTree, conversationNamedPaths, historicalImage, publicChildAgents, TranscriptReader, transcriptPath } from "./transcripts.js";
+import { childAgent, childAgentTree, conversationNamedPaths, historicalImage, publicChildAgents, refreshTranscript, TranscriptReader, transcriptPath } from "./transcripts.js";
 import { listUploads, saveUpload, uploadImage } from "./uploads.js";
 import { ModelCatalog } from "./models.js";
 import { currentStep } from "./steps.js";
@@ -179,6 +179,7 @@ export async function serve(version: string): Promise<void> {
             await validateTarget(target);
             const child = url.searchParams.get("child");
             const { reader, source, session } = child === null ? await conversationReader(target) : await childConversationReader(target, child);
+            if (reader) await refreshTranscript(reader.file, source, session);
             const page = reader ? await reader.read(before, abort.signal) : emptyPage;
             result = { ...page, type: "older", source, session }; break;
           }
@@ -420,6 +421,7 @@ export async function serve(version: string): Promise<void> {
           if (awaitingTranscript) {
             if (first) send(client, { ...emptyPage, type: "backlog", ...conversation });
           } else if (reader) {
+            await refreshTranscript(reader.file, conversation.source, conversation.session);
             const page = await reader.read(undefined, abort.signal);
             if (first || page.entries.length || page.reset) send(client, { ...page, type: first || page.reset ? "backlog" : "append", ...conversation });
           } else {

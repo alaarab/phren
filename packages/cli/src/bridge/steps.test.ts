@@ -11,6 +11,7 @@ describe("current step", () => {
   it("describes tool calls the way the lock screen reads them", () => {
     expect(describeStep("Bash", { command: "swift test --filter ChatTimelineTests\necho done" })).toBe("Bash: swift test --filter ChatTimelineT…");
     expect(describeStep("shell", '{"command":["bash","-lc","ls -la"]}')).toBe("shell: ls -la");
+    expect(describeStep("shell", { command: "/bin/zsh -lc 'swift build'" })).toBe("shell: swift build");
     expect(describeStep("Bash", { command: `cd ${homedir()}/app && git status` })).toBe("Bash: git status");
     expect(describeStep("Bash", { command: `ls ${homedir()}/app` })).toBe("Bash: ls ~/app");
     expect(describeStep("Edit", { file_path: "/home/sam/app/Sources/View.swift" })).toBe("Editing View.swift");

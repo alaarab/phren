@@ -105,7 +105,7 @@ async function processLogs(pids: number[]): Promise<string[]> {
     const result = await exec("/usr/sbin/lsof", ["-a", "-p", String(pid), "-Fn"], { timeout: 3000, maxBuffer: 1_048_576 }).catch(() => ({ stdout: "" }));
     return result.stdout.split("\n").filter(n => n.startsWith("n/")).map(n => n.slice(1));
   }));
-  return [...new Set(paths.flat())].filter(p => p.endsWith(".jsonl"));
+  return [...new Set(paths.flat())].filter(p => p.endsWith(".jsonl") || p.endsWith(".lock"));
 }
 
 interface PaneIdentity { sessionId?: string; noTranscriptLogs: boolean }
@@ -126,7 +126,7 @@ export async function paneIdentity(server: string, pane: Json, fresh = false): P
 async function identityFromProcesses(server: string, pane: Json, pids: number[]): Promise<PaneIdentity> {
   const files = await processLogs(pids);
   const candidates = files.flatMap(file => {
-    const match = pane.agent === "codex" ? /rollout-.*-([a-f0-9-]{36})\.jsonl$/i.exec(file)
+    const match = pane.agent === "codex" ? (/rollout-.*-([a-f0-9-]{36})\.jsonl$/i.exec(file) ?? /thread-writer-locks\/([a-f0-9-]{36})\.lock$/i.exec(file))
       : pane.agent === "claude" ? /\/([a-f0-9-]{36})\.jsonl$/i.exec(file)
       // phren-agent appends and closes per event, so its log is rarely open;
       // the lifecycle binding below is the usual path for it.

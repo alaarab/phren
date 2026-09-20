@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import path from "node:path";
 import { withTranscriptIndex } from "./transcript-index.js";
-import { transcriptPath, visibleEvent } from "./transcripts.js";
+import { refreshTranscript, transcriptPath, visibleEvent } from "./transcripts.js";
 import { BridgeError, object, objects, type Json, type Provider } from "./protocol.js";
 
 /** What a working agent is doing right now, in the words the lock screen
@@ -12,7 +12,7 @@ const TAIL_ROWS = 24, LIMIT = 40;
 
 export async function currentStep(source: Provider, session: string): Promise<string | undefined> {
   let file: string;
-  try { file = await transcriptPath(source, session); } catch (error) { if (error instanceof BridgeError) return undefined; throw error; }
+  try { file = await transcriptPath(source, session); await refreshTranscript(file, source, session); } catch (error) { if (error instanceof BridgeError) return undefined; throw error; }
   return withTranscriptIndex(file, async (handle, index) => {
     const key = `${index.revision}:${index.lines}`;
     const cached = cache.get(file);
@@ -76,8 +76,8 @@ export function describe(tool: string, args: unknown): string {
   if (["bash", "shell", "exec_command", "exec", "parallel", "tools", "write_stdin", "container.exec"].includes(name)) {
     // Drop the shell wrapper and a leading `cd <dir> &&`, and keep the home
     // directory (and the account name in it) off the lock screen.
-    const command = firstLine(text("command", "cmd")).replace(/^(bash|sh|zsh)\s+-l?c\s+/, "")
-      .replace(/^cd\s+\S+\s*(?:&&|;)\s*/, "").split(homedir()).join("~");
+    const command = firstLine(text("command", "cmd")).replace(/^(?:\/\S*\/)?(?:bash|sh|zsh)\s+-l?c\s+/, "")
+      .replace(/^(['"])(.*)\1$/, "$2").replace(/^cd\s+\S+\s*(?:&&|;)\s*/, "").split(homedir()).join("~");
     value = command ? `${tool}: ${command}` : tool;
   } else if (["edit", "multiedit", "write", "notebookedit", "patch", "apply_patch", "str_replace_editor", "str_replace"].includes(name)) {
     const patchTarget = /\*\*\* (?:Update|Add|Delete) File: (.+)/.exec(text("input", "patch"))?.[1];
