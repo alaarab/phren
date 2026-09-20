@@ -8,6 +8,11 @@ number counts up on its own.
 
 ## 1.0.0
 
+### Changed
+
+- Spawned agents now sit under their parent agent in the sidebar, and the
+  agent-tree control lives beside the agent switcher in chat input.
+
 ### New
 
 - Agent work uses compact headers and flat session-style cards for spawned
@@ -32,8 +37,8 @@ number counts up on its own.
   the chat) and **Open transcript** once it is back — with earlier activity
   one tap away. The transcript of a finished Claude Code subagent was
   showing empty.
-- A compact agent-tree badge in the chat header shows how many spawned agents
-  are still running, and agent lists and transcripts now include model names.
+- A compact agent-tree badge in the chat composer shows how many spawned
+  agents are still running, and agent lists and transcripts include model names.
 - The ⋯ button in the chat header opens a Chat options sheet (Herdr
   workspaces, project memory, skills, graph, project context, token usage,
   another agent). The menu behind it never opened on the phone.

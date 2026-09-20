@@ -66,7 +66,10 @@ struct AgentWorkspaceTree: View {
     let query: String
     let current: LiveAgentSession.ID?
     var recent = false
+    var children: [AgentChild] = []
     let choose: (LiveAgentSession) -> Void
+    var openChild: (AgentChild) -> Void = { _ in }
+    var openSessionChild: (LiveAgentSession, AgentChatTarget, AgentChild) -> Void = { _, _, _ in }
     @State private var collapsed: Set<String> = []
 
     var body: some View {
@@ -77,7 +80,7 @@ struct AgentWorkspaceTree: View {
                                      tab: $0.tab, workspaceTabCount: group.children.count)
                 } }
             })) { item in
-                sessionButton(item, subtitle: "\(item.projectDisplayName(nil)) · \(item.host.name)")
+                sessionRow(item, subtitle: "\(item.projectDisplayName(nil)) · \(item.host.name)")
             }
         } else {
         ForEach(computers) { computer in
@@ -100,7 +103,7 @@ struct AgentWorkspaceTree: View {
                                 let item = LiveAgentSession(host: computer.host, workspaceID: entry.child.workspaceID,
                                                             workspaceName: entry.child.workspaceLabel, tab: entry.child.tab,
                                                             workspaceTabCount: group.children.count)
-                                sessionButton(item, subtitle: nil)
+                                sessionRow(item, subtitle: nil)
                             }
                         }
                     }
@@ -116,11 +119,10 @@ struct AgentWorkspaceTree: View {
         }
     }
 
-    private func sessionButton(_ item: LiveAgentSession, subtitle: String?) -> some View {
-        Button { choose(item) } label: {
-            WorkspaceTreeAgentLabel(tab: item.tab, subtitle: subtitle, selected: item.id == current, tinted: true)
-        }.buttonStyle(.plain)
-            .accessibilityIdentifier("switch-session:\(item.host.id):\(item.host.muxID):\(item.workspaceID):\(item.tab.id)")
+    private func sessionRow(_ item: LiveAgentSession, subtitle: String?) -> some View {
+        AgentWorkspaceSessionRow(item: item, subtitle: subtitle, selected: item.id == current,
+                                 currentChildren: item.id == current ? children : nil,
+                                 choose: choose, openChild: openChild, openSessionChild: openSessionChild)
     }
 
     private func matching(_ computer: SessionOverviewMonitor.Computer) -> [MatchingGroup] {
@@ -161,11 +163,142 @@ struct AgentWorkspaceTree: View {
     }
 }
 
+private struct DrawerAgentTreeRow: Identifiable {
+    let agent: AgentChild
+    let depth: Int
+    let isLastSibling: Bool
+    var id: String { agent.id }
+
+    static func flatten(_ agents: [AgentChild], depth: Int = 0) -> [Self] {
+        agents.enumerated().flatMap { index, agent in
+            [Self(agent: agent, depth: depth, isLastSibling: index == agents.count - 1)]
+                + flatten(agent.children, depth: depth + 1)
+        }
+    }
+}
+
+private struct AgentWorkspaceSessionRow: View {
+    private struct RefreshID: Hashable {
+        let session: LiveAgentSession.ID
+        let isCurrent: Bool
+    }
+
+    let item: LiveAgentSession
+    let subtitle: String?
+    let selected: Bool
+    /// Non-nil, including while empty, means the chat already owns the live
+    /// child list for this row. Other visible rows refresh their own snapshot.
+    let currentChildren: [AgentChild]?
+    let choose: (LiveAgentSession) -> Void
+    let openChild: (AgentChild) -> Void
+    let openSessionChild: (LiveAgentSession, AgentChatTarget, AgentChild) -> Void
+    @State private var snapshotChildren: [AgentChild] = []
+    @State private var snapshotTarget: AgentChatTarget?
+
+    private var children: [AgentChild] { currentChildren ?? snapshotChildren }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Button { choose(item) } label: {
+                WorkspaceTreeAgentLabel(tab: item.tab, subtitle: subtitle, selected: selected, tinted: true)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("switch-session:\(item.host.id):\(item.host.muxID):\(item.workspaceID):\(item.tab.id)")
+
+            ForEach(DrawerAgentTreeRow.flatten(children)) { row in
+                Button {
+                    if selected {
+                        openChild(row.agent)
+                    } else if let snapshotTarget {
+                        choose(item)
+                        openSessionChild(item, snapshotTarget, row.agent)
+                    }
+                } label: {
+                    DrawerChildAgentLabel(row: row)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("drawer-child-agent:\(row.agent.id)")
+            }
+        }
+        .task(id: RefreshID(session: item.id, isCurrent: currentChildren != nil)) {
+            guard currentChildren == nil else { return }
+            while !Task.isCancelled {
+                if let snapshot = try? await SessionSubagentSnapshot.load(item), !Task.isCancelled {
+                    snapshotTarget = snapshot.target
+                    snapshotChildren = snapshot.agents
+                }
+                do { try await Task.sleep(for: .seconds(10)) }
+                catch { return }
+            }
+        }
+    }
+}
+
+private struct DrawerChildAgentLabel: View {
+    let row: DrawerAgentTreeRow
+
+    private var providerName: String {
+        switch row.agent.provider.lowercased() {
+        case "claude": return "Claude"
+        case "copilot": return "Copilot"
+        case "phren": return "Phren"
+        case "opencode": return "OpenCode"
+        default: return "Codex"
+        }
+    }
+    private var metadata: String {
+        var parts = [row.agent.model.flatMap { $0.isEmpty ? nil : $0 } ?? providerName]
+        if let branch = row.agent.branch, !branch.isEmpty { parts.append("⑂ \(branch)") }
+        return parts.joined(separator: " · ")
+    }
+    private var stateName: String { row.agent.state == .running ? "Running" : "Completed" }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            treeGuide.frame(width: CGFloat(row.depth + 1) * 16 + 4)
+            HStack(spacing: 9) {
+                AgentProviderGlyph(source: row.agent.provider.lowercased(), size: 16)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(row.agent.name).font(.subheadline).lineLimit(1)
+                    Text(metadata).font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(PhrenTheme.sessionMeta).lineLimit(1).truncationMode(.middle)
+                }
+                Spacer(minLength: 8)
+                Circle().fill(row.agent.state == .running ? PhrenTheme.cyan : PhrenTheme.success)
+                    .frame(width: 7, height: 7).accessibilityHidden(true)
+            }
+        }
+        .foregroundStyle(PhrenTheme.text)
+        .frame(maxWidth: .infinity, minHeight: 44)
+        .padding(.horizontal, 12)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(row.agent.name), \(metadata), \(stateName)")
+    }
+
+    private var treeGuide: some View {
+        GeometryReader { proxy in
+            let x = proxy.size.width - 10
+            Path { path in
+                path.move(to: CGPoint(x: x, y: 0))
+                path.addLine(to: CGPoint(x: x, y: row.isLastSibling ? proxy.size.height / 2 : proxy.size.height))
+                path.move(to: CGPoint(x: x, y: proxy.size.height / 2))
+                path.addLine(to: CGPoint(x: proxy.size.width - 2, y: proxy.size.height / 2))
+            }
+            .stroke(PhrenTheme.border, style: StrokeStyle(lineWidth: 1, lineCap: .round, lineJoin: .round))
+        }
+        .accessibilityHidden(true)
+    }
+}
+
 struct AgentDrawer: View {
     let current: LiveAgentSession?
     var panes: [AgentChatPanes.Pane] = []
     var selectedPaneID: String? = nil
     var choosePane: ((AgentChatPanes.Pane) -> Void)? = nil
+    var children: [AgentChild] = []
+    var openChild: (AgentChild) -> Void = { _ in }
+    var openSessionChild: (LiveAgentSession, AgentChatTarget, AgentChild) -> Void = { _, _, _ in }
     let chooseSession: (LiveAgentSession) -> Void
     let close: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -176,6 +309,7 @@ struct AgentDrawer: View {
         // Only the panel's background runs to the screen edges; its
         // content keeps clear of the status bar and home indicator.
         ChatAgentSwitcher(session: current, panes: panes, selectedPaneID: selectedPaneID,
+                          children: children, openChild: openChild, openSessionChild: openSessionChild,
                           choosePane: { choosePane?($0); close() },
                           chooseSession: { chooseSession($0); close() }, close: close)
             .frame(width: min(UIScreen.main.bounds.width * 0.86, 380))

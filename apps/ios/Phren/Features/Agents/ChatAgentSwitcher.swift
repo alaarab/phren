@@ -7,6 +7,9 @@ struct ChatAgentSwitcher: View {
     let session: LiveAgentSession?
     let panes: [AgentChatPanes.Pane]
     let selectedPaneID: String?
+    let children: [AgentChild]
+    let openChild: (AgentChild) -> Void
+    let openSessionChild: (LiveAgentSession, AgentChatTarget, AgentChild) -> Void
     let choosePane: (AgentChatPanes.Pane) -> Void
     let chooseSession: (LiveAgentSession) -> Void
     let close: () -> Void
@@ -47,7 +50,9 @@ struct ChatAgentSwitcher: View {
                     .foregroundStyle(PhrenTheme.textMuted).padding(.horizontal, 12).padding(.top, 12)
                 if !overview.ready { HStack { ProgressView(); Text("Finding your agents…").font(.subheadline) }.padding(12) }
                 if overview.ready {
-                    AgentWorkspaceTree(computers: overview.computers, query: query, current: session?.id, recent: recent, choose: chooseSession)
+                    AgentWorkspaceTree(computers: overview.computers, query: query, current: session?.id,
+                                       recent: recent, children: children, choose: chooseSession,
+                                       openChild: openChild, openSessionChild: openSessionChild)
                 }
                 let hasSessions = overview.computers.contains { computer in
                     computer.monitor.snapshot?.sessions(on: computer.host).contains {
