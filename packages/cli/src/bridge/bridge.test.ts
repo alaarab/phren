@@ -683,6 +683,35 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
       expect((await api("/v1/diff", { target, paths: [outside] })).status).toBe(403);
     } finally { await rm(sibling, { recursive: true, force: true }); }
   });
+  it("diffs a spawned agent's own worktree through its parent-scoped child id", async () => {
+    const worktree = await mkdtemp(path.join(tmpdir(), "phren-child-repo-"));
+    try {
+      await execFileAsync("git", ["init", "-q", worktree]);
+      await writeFile(path.join(worktree, "tracked.txt"), "first line\n");
+      await execFileAsync("git", ["-C", worktree, "add", "tracked.txt"]);
+      await execFileAsync("git", ["-C", worktree, "-c", "user.email=a@b.c", "-c", "user.name=t", "commit", "-qm", "start"]);
+      await writeFile(path.join(worktree, "tracked.txt"), "first line\nsecond line\n");
+      const job = "child-diff-job", directory = path.join(root, ".phren/.runtime/agent-fanouts", job);
+      await mkdir(directory, { recursive: true });
+      await writeFile(path.join(directory, "events.jsonl"), JSON.stringify({ type: "thread.started", thread_id: "cccccccc-3333-4333-8333-333333333333" }) + "\n");
+      await writeFile(path.join(directory, "manifest.json"), JSON.stringify({ schemaVersion: 1, id: job,
+        parent: { provider: "codex", session }, provider: "codex", taskLabel: "Child worktree",
+        cwd: worktree, worktree, model: "gpt-5-codex", eventLog: "events.jsonl",
+        createdAt: "2026-09-19T19:00:00.000Z", startedAt: "2026-09-19T19:00:00.000Z",
+        updatedAt: "2026-09-19T19:00:00.000Z", status: "running" }));
+      const tree = await api("/v1/subagents?" + new URLSearchParams(target));
+      expect(tree.status).toBe(200);
+      const child = tree.data.agents.find((agent: any) => agent.path === "Child worktree");
+      expect(child?.id).toMatch(/^[a-f0-9]{32}$/);
+      expect(child).not.toHaveProperty("cwd");
+      const diff = await api("/v1/diff", { target, child: child.id });
+      expect(diff.status, JSON.stringify(diff.data)).toBe(200);
+      expect(diff.data.root).toBe(await realpathAsync(worktree));
+      expect(JSON.stringify(diff.data.files)).toContain("+second line");
+      expect(JSON.stringify(diff.data.files)).not.toContain(worktree);
+      expect((await api("/v1/diff", { target, child: "0".repeat(32) })).status).toBe(404);
+    } finally { await rm(worktree, { recursive: true, force: true }); }
+  });
   it("streams incremental transcript and real usage frames, then closes after a conversation replacement", async () => {
     const query = new URLSearchParams(target).toString();
     const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/transcripts?${query}`);

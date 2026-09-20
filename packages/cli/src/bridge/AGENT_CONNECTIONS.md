@@ -89,7 +89,7 @@ WebSockets on the same socket.
 | `POST /v1/upload` | Bounded file/image upload under the selected conversation. |
 | `GET, POST /v1/files` | List/store files sent by the phone outside any conversation. |
 | `GET /v1/uploads/image` | Bytes of one image the phone uploaded, by absolute `path`; only a real file inside the Hook's own uploads folder whose bytes are an image, at most 8 MiB. |
-| `POST /v1/diff` | Pane repository diff and authorized optional `paths`, grouped by repository. |
+| `POST /v1/diff` | Pane repository diff and authorized optional `paths`, grouped by repository. With `child=<id>` from `/v1/subagents` it returns that spawned agent's whole repository diff instead: its own worktree for a fan-out, the parent's checkout otherwise. |
 | `GET /v1/web-servers` | Discover local web servers; discovery does not constrain the SSH web relay. |
 | `GET /v1/simulators`, `/v1/simulators/apps`, `/v1/simulators/screenshot` | Booted simulators, installed apps and a selected device screenshot on macOS. |
 | `POST /v1/simulators/action` | Validated simulator lifecycle, launch, URL, tap, home/lock and text actions. |

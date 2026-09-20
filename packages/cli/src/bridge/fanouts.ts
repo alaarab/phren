@@ -48,6 +48,8 @@ export interface FanoutChild {
   session?: string;
   /** The model that manifest named, so the phone can label the worker. */
   model?: string;
+  /** The worker's own checkout, kept off the wire. */
+  cwd: string;
   path: string;
   callId: string;
   state: "running" | "completed";
@@ -93,8 +95,8 @@ export async function fanoutChildren(parentProvider: Provider, parentSession: st
       const transcript = await regularContainedFile(jobRoot, path.join(jobRoot, manifest.eventLog), MAX_EVENT_LOG_BYTES);
       if (!transcript) continue;
       const id = createHash("sha256").update(`${parentProvider}\0${parentSession}\0${manifest.id}`).digest("hex").slice(0, 32);
-      children.push({ id, provider: manifest.provider, session: manifest.session, model: manifest.model, path: manifest.taskLabel,
-        callId: `fanout:${id}`, state: ["queued", "running"].includes(manifest.status) ? "running" : "completed",
+      children.push({ id, provider: manifest.provider, session: manifest.session, model: manifest.model, cwd: manifest.worktree,
+        path: manifest.taskLabel, callId: `fanout:${id}`, state: ["queued", "running"].includes(manifest.status) ? "running" : "completed",
         transcript, children: [] });
     } catch { /* Torn, old, or untrusted manifests do not become child agents. */ }
   }

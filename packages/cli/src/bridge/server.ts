@@ -243,15 +243,24 @@ export async function serve(version: string): Promise<void> {
             const { name, bytes } = uploadBody(data);
             result = { ok: true, path: await saveUpload(target.session, name, bytes) };
           } else if (url.pathname === "/v1/diff") {
-            const cwd = await trustedDirectory(pane), paths = z.array(z.string().max(4096)).max(24).optional().parse(data.paths) ?? [];
-            const abort = new AbortController();
-            response.once("close", () => { if (!response.writableEnded) abort.abort(); });
-            const allowed = paths.length ? await agentHooks.changes.recordedPaths(`${target.source}:${target.session}`) : [];
-            if (paths.length) {
-              try { allowed.push(...await conversationNamedPaths(await transcriptPath(target.source, target.session), target.source, cwd, abort.signal)); }
-              catch { abort.signal.throwIfAborted(); /* Missing transcripts grant no extra paths; recorded scope still works. */ }
+            const child = z.string().regex(/^[a-f0-9]{32}$/).optional().parse(data.child);
+            if (child !== undefined) {
+              // A spawned agent: its own worktree for a fan-out, otherwise the
+              // parent's checkout. The whole repository, no phone-named paths.
+              const relation = childAgent(await childAgentTree(target.source, target.session), child);
+              if (!relation) throw new BridgeError(404, "That agent is not part of this conversation.");
+              result = await repositoryDiff(relation.cwd ?? await trustedDirectory(pane), [], []);
+            } else {
+              const cwd = await trustedDirectory(pane), paths = z.array(z.string().max(4096)).max(24).optional().parse(data.paths) ?? [];
+              const abort = new AbortController();
+              response.once("close", () => { if (!response.writableEnded) abort.abort(); });
+              const allowed = paths.length ? await agentHooks.changes.recordedPaths(`${target.source}:${target.session}`) : [];
+              if (paths.length) {
+                try { allowed.push(...await conversationNamedPaths(await transcriptPath(target.source, target.session), target.source, cwd, abort.signal)); }
+                catch { abort.signal.throwIfAborted(); /* Missing transcripts grant no extra paths; recorded scope still works. */ }
+              }
+              result = await repositoryDiff(cwd, paths, allowed);
             }
-            result = await repositoryDiff(cwd, paths, allowed);
           }
           else if (url.pathname === "/v1/approvals/answer") {
             const actionId = target.source === "opencode"

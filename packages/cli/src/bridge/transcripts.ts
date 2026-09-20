@@ -16,6 +16,8 @@ export interface ChildAgentRelation {
   id: string; session: string; transcript: string; provider: Provider; path: string; callId: string; state: "running" | "completed";
   /** Only fan-out manifests name a model; other providers leave it absent. */
   model?: string;
+  /** The checkout a fan-out worker owns; parent-checkout children omit it. */
+  cwd?: string;
   children: ChildAgentRelation[];
 }
 type DirectRelation = Omit<ChildAgentRelation, "id" | "transcript" | "provider" | "children">;
@@ -73,7 +75,7 @@ export async function childAgentTree(source: Provider, session: string, depth = 
   if (depth >= 4 || seen.size >= 128 || seen.has(session)) return [];
   seen.add(session);
   const fanouts: ChildAgentRelation[] = (await fanoutChildren(source, session)).map(child => ({
-    ...child, session: child.session ?? child.id, children: [],
+    ...child, session: child.session ?? child.id, cwd: child.cwd, children: [],
   }));
   if (!["codex", "claude"].includes(source)) return fanouts;
   const file = await transcriptPath(source, session);

@@ -25,6 +25,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Codex CLI fan-outs now appear as child agents beside OpenCode ones: a
   `provider: "codex"` manifest with a `codex exec --json` event log is read as
   a child transcript.
+- `/v1/diff` takes `child=<id>` from `/v1/subagents` to return that spawned
+  agent's whole repository diff: its own worktree for a fan-out, the parent's
+  checkout otherwise.
 
 ### Changed
 
