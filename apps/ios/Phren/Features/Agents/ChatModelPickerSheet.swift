@@ -11,17 +11,31 @@ struct ChatModelPickerSheet: View {
     let choose: (String) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var custom = ""
-    /// What the computer reports; the built-in names stand in until it answers.
+    /// What the computer reports. Until it answers the list is empty with a
+    /// loading row; the built-in names only stand in when there is no computer
+    /// to ask or the request fails, so a wrong list never flashes first.
     @State private var reported: [AgentModelChoice]?
     @State private var loading = false
+    @State private var failed = false
 
-    private var choices: [AgentModelChoice] { reported ?? AgentModelChoice.choices(source: source) }
+    private var choices: [AgentModelChoice] {
+        if let reported { return reported }
+        return host == nil || failed ? AgentModelChoice.choices(source: source) : []
+    }
     private var customCommand: String? { AgentModelChoice.command(for: custom) }
 
     var body: some View {
         NavigationStack {
             PhrenList {
                 Section {
+                    if loading && reported == nil {
+                        HStack(spacing: 10) {
+                            ProgressView().tint(PhrenTheme.textMuted)
+                            Text("Asking the computer…").foregroundStyle(PhrenTheme.textMuted)
+                        }
+                        .frame(minHeight: 44)
+                        .accessibilityIdentifier("chat-model-loading")
+                    }
                     ForEach(choices) { choice in
                         Button { choose("/model " + choice.argument) } label: {
                             HStack(spacing: 10) {
@@ -65,7 +79,6 @@ struct ChatModelPickerSheet: View {
             }
             .navigationTitle("Model").navigationBarTitleDisplayMode(.inline)
             .task { await loadFromComputer() }
-            .overlay(alignment: .top) { if loading { ProgressView().padding(.top, 8).accessibilityLabel("Loading models") } }
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.accessibilityIdentifier("chat-model-cancel") } }
             .phrenScreen()
         }
@@ -81,6 +94,8 @@ struct ChatModelPickerSheet: View {
         defer { loading = false }
         if let models = try? await PhrenConnection.models(host: host, privateKey: try DeviceSSHKey.load(host.id), source: source), !models.isEmpty {
             reported = models
+        } else {
+            failed = true
         }
     }
 
