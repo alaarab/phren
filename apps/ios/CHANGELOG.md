@@ -10,6 +10,8 @@ number counts up on its own.
 
 ### New
 
+- Subagent transcripts open that agent's repository changes directly, with the
+  same native file and diff views as the parent chat.
 - Graph nodes open in the graph's own docked dossier card, the same dark-glass
   dossier the web and VS Code viewers draw, with Focus, Open project and Share;
   the graph stays visible and the zoom controls step aside.
