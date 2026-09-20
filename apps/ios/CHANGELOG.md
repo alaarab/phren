@@ -40,6 +40,8 @@ lock screen and Changes screen done properly.
   dims for Always-On; the timer, which cannot tick there, steps aside.
 - A background worker launched from a shell loop no longer shows the
   unexpanded label variable as its name.
+- Background workers launched through the fanout skill (Codex or OpenCode,
+  by provider) are named and grouped like the old per-provider launchers.
 - Projects: a Knobs screen sets finding sensitivity, proactivity and task
   mode per project, written to phren.project.yaml; empty means the global
   setting.

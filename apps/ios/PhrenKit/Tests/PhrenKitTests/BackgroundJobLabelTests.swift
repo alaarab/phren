@@ -24,6 +24,24 @@ final class BackgroundJobLabelTests: XCTestCase {
         ))
     }
 
+    func testParsesTheFanoutLauncherByProvider() throws {
+        let codex = try XCTUnwrap(BackgroundJobLabel.parse(
+            command: #"cat p.txt | ~/.phren/global/skills/fanout/scripts/run.sh --provider codex --model gpt-6-astra --label "Astra cleanup" --worktree /tmp/wt"#
+        ))
+        XCTAssertEqual(codex.provider, "codex")
+        XCTAssertEqual(codex.label, "Astra cleanup")
+        let go = try XCTUnwrap(BackgroundJobLabel.parse(
+            command: "~/.phren/global/skills/fanout/scripts/run.sh --label 'Go worker' --provider opencode --model opencode-go/kimi-k3 --worktree /tmp/wt"
+        ))
+        XCTAssertEqual(go.provider, "opencode")
+        XCTAssertEqual(go.label, "Go worker")
+        let direct = try XCTUnwrap(BackgroundJobLabel.parse(
+            command: #"~/.phren/global/skills/fanout/scripts/opencode.sh --label "Direct" --worktree /tmp/wt --model openrouter/x/y"#
+        ))
+        XCTAssertEqual(direct.provider, "opencode")
+        XCTAssertNil(BackgroundJobLabel.parse(command: #"~/.phren/global/skills/fanout/scripts/run.sh --label "No provider" --worktree /tmp/wt"#))
+    }
+
     func testRejectsALabelTheShellHadNotExpanded() {
         // A loop launching several workers passes the label as a variable;
         // the raw text is not a name the person should see.
