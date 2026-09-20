@@ -1383,6 +1383,25 @@ final class AgentChatTests: XCTestCase {
     }
 
     @MainActor
+    func testFocusingTheComposerKeepsTheLastMessageOnScreen() {
+        let app = launch(extra: ["--chat-heavy"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let tail = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Heavy fixture reply 19.")).firstMatch
+        XCTAssertTrue(tail.waitForExistence(timeout: 15))
+        let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
+        XCTAssertTrue(composer.waitForExistence(timeout: 8))
+        composer.tap()
+        Thread.sleep(forTimeInterval: 1.5)
+        capture(app, "Composer focused on a long transcript")
+        XCTAssertTrue(tail.isHittable, "Focusing the composer must keep the transcript's end above the keyboard, not scroll past it")
+        XCTAssertFalse(app.buttons["Latest messages"].exists, "Follow should stay engaged when the keyboard appears")
+        app.buttons["Return"].exists ? app.buttons["Return"].tap() : app.swipeDown()
+        Thread.sleep(forTimeInterval: 1.0)
+        capture(app, "Composer released on a long transcript")
+        XCTAssertTrue(tail.isHittable, "Dismissing the keyboard must leave the transcript's end on screen")
+    }
+
+    @MainActor
     func testStreamingReplyStaysPinnedToTheBottom() {
         let app = launch(extra: ["--chat-streaming", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
         app.buttons["live-chat:w7:w7:t9"].tap()

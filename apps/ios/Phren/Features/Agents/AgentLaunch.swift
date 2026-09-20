@@ -70,25 +70,50 @@ enum AgentLaunch {
     /// Delivers the first instruction to the one supported agent pane in a
     /// newly launched session. Pane identity is resolved and revalidated by
     /// the normal chat transport before the prompt reaches the terminal.
-    static func sendInitialPrompt(_ prompt: String, to session: LiveAgentSession) async throws {
-        let panes: AgentChatPanes
-        #if DEBUG && targetEnvironment(simulator)
-        if AgentChatFixture.enabled { panes = try AgentChatFixture.panes(session) }
-        else { panes = try await PhrenConnection.chatPanes(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), workspaceID: session.workspaceID, tabID: session.tab.id) }
-        #else
-        panes = try await PhrenConnection.chatPanes(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), workspaceID: session.workspaceID, tabID: session.tab.id)
-        #endif
-        let targets = panes.panes.compactMap {
-            try? $0.target(hostID: session.host.id, workspaceID: session.workspaceID,
-                           tabID: session.tab.id, muxID: session.host.muxID)
+    ///
+    /// An agent is still settling for a few seconds after Herdr reports it:
+    /// its status reads "unknown", it has neither a conversation nor a
+    /// starting token, or the token moves while it forks helpers. Every
+    /// rejection here happens before the prompt is dispatched, so waiting and
+    /// trying again cannot deliver it twice.
+    static func sendInitialPrompt(_ prompt: String, to session: LiveAgentSession, attempts: Int = 20) async throws {
+        for attempt in 1... {
+            let panes = try await fetchPanes(session)
+            let targets = panes.panes.compactMap { pane -> (AgentChatPanes.Pane, AgentChatTarget)? in
+                guard let target = try? pane.target(hostID: session.host.id, workspaceID: session.workspaceID,
+                                                    tabID: session.tab.id, muxID: session.host.muxID) else { return nil }
+                return (pane, target)
+            }
+            guard targets.count == 1, let (pane, target) = targets.first else {
+                throw PhrenKitError.validation("The new workspace did not expose exactly one agent conversation.")
+            }
+            let settled = (pane.starting == true || pane.sessionId != nil) && ["idle", "working"].contains(pane.agentStatus ?? "")
+            if settled {
+                do {
+                    #if DEBUG && targetEnvironment(simulator)
+                    if AgentChatFixture.enabled { try await AgentChatFixture.send(target, text: prompt); return }
+                    #endif
+                    try await PhrenConnection.sendChat(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, text: prompt)
+                    return
+                } catch let error as PhrenKitError where attempt < attempts {
+                    // Preflight only: the pane list moved under us. Re-read and retry.
+                    _ = error
+                } catch LiveConnectionError.gatewayRejection(status: 409, reason: _) where attempt < attempts {
+                }
+            } else if attempt >= attempts {
+                throw PhrenKitError.validation(pane.agentStatus == "blocked" || pane.agentStatus == "waiting"
+                    ? "The agent is waiting for input in its terminal before it can take a task."
+                    : "The agent did not become ready in time.")
+            }
+            try await Task.sleep(for: .seconds(1))
         }
-        guard targets.count == 1, let target = targets.first else {
-            throw PhrenKitError.validation("The new workspace did not expose exactly one agent conversation.")
-        }
+    }
+
+    private static func fetchPanes(_ session: LiveAgentSession) async throws -> AgentChatPanes {
         #if DEBUG && targetEnvironment(simulator)
-        if AgentChatFixture.enabled { try await AgentChatFixture.send(target, text: prompt); return }
+        if AgentChatFixture.enabled { return try AgentChatFixture.panes(session) }
         #endif
-        try await PhrenConnection.sendChat(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, text: prompt)
+        return try await PhrenConnection.chatPanes(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), workspaceID: session.workspaceID, tabID: session.tab.id)
     }
 
     /// A session object from its identifiers alone.
