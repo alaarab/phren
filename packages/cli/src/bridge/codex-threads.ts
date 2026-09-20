@@ -8,6 +8,7 @@ import { bridgeRoot, object, objects, sessionId, type Json } from "./protocol.js
  * materializes such a thread into a rollout-shaped JSONL of its own, append
  * only, so every reader of Codex transcripts keeps working unchanged. */
 const MAX_ITEMS = 20_000, OUTPUT_TAIL = 4_000;
+const STALLED_AFTER_MS = 10 * 60 * 1_000;
 
 interface Emitted { lastOrdinal: number; maxUpdated: number; count: number; done: Record<string, "call" | "done"> }
 
@@ -33,6 +34,29 @@ export async function codexThreadExists(session: string): Promise<boolean> {
     const row = object(db.prepare("select count(*) as n from thread_items where thread_id = ?").get(session));
     return Number(row.n) > 0;
   } catch { return false; } finally { db.close(); }
+}
+
+/** A working pane whose projection cursor stopped at an unfinished turn can
+ * keep accepting input even though none of it will be readable again. */
+export async function threadHealth(session: string, agentStatus: unknown): Promise<{ stalled: boolean; since?: string }> {
+  if (!sessionId.safeParse(session).success || !["working", "blocked", "waiting"].includes(String(agentStatus))) return { stalled: false };
+  const stateFile = materializedPath(session) + ".state.json";
+  let cursor: Emitted, cursorMtime: number;
+  try {
+    cursor = { lastOrdinal: -1, maxUpdated: -1, count: 0, done: {}, ...object(JSON.parse(await readFile(stateFile, "utf8"))) } as Emitted;
+    cursorMtime = (await stat(stateFile)).mtimeMs;
+  } catch { return { stalled: false }; }
+  if (Date.now() - cursorMtime < STALLED_AFTER_MS) return { stalled: false };
+  const history = await openReadOnly(path.join(codexHome(), "thread_history_1.sqlite"));
+  if (!history) return { stalled: false };
+  try {
+    const summary = object(history.prepare("select count(*) as n, max(rollout_ordinal) as last, max(updated_at_ordinal) as updated from thread_items where thread_id = ?").get(session));
+    // The store may have advanced just before the materializer catches up.
+    if (cursor.count !== Number(summary.n) || cursor.lastOrdinal !== Number(summary.last) || cursor.maxUpdated !== Number(summary.updated)) return { stalled: false };
+    const turn = object(history.prepare("select status, rollout_end_ordinal from thread_turns where thread_id = ? order by rollout_ordinal desc limit 1").get(session));
+    if (turn.status !== "inProgress" || turn.rollout_end_ordinal !== null) return { stalled: false };
+    return { stalled: true, since: new Date(cursorMtime).toISOString() };
+  } catch { return { stalled: false }; } finally { history.close(); }
 }
 
 /** Bring the materialized file up to date with the store. Returns the file

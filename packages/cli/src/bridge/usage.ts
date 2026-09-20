@@ -126,15 +126,15 @@ async function liveOpenRouterUsage(now: Date): Promise<AccountUsage | undefined>
   }
 }
 
-/** "seven_day_fable" → "7-day · Fable"; the two plain windows keep their names. */
+/** "seven_day_fable" → "7-day, Fable"; weekly-all stays explicit. */
 function claudeWindowName(key: string): string {
   const spans: [string, string][] = [["five_hour", "5-hour"], ["seven_day", "7-day"], ["one_hour", "1-hour"], ["one_day", "1-day"]];
   for (const [prefix, label] of spans) {
-    if (key === prefix) return `${label} limit`;
+    if (key === prefix) return key === "seven_day" ? "7-day, all models" : `${label} limit`;
     if (key.startsWith(prefix + "_")) {
       const model = key.slice(prefix.length + 1).split("_").filter(Boolean)
         .map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
-      return `${label} · ${model}`;
+      return `${label}, ${model}`;
     }
   }
   return key.split("_").filter(Boolean).map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
@@ -175,7 +175,7 @@ export function claudeScopedWindows(config: unknown, now = new Date()): UsageWin
     const model = safeText(object(object(object(limit.scope).model)).display_name);
     if (!model) continue;
     const reset = Date.parse(String(limit.resets_at ?? ""));
-    const entry = window(`seven_day_${model.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`, `7-day · ${model}`, limit.percent,
+    const entry = window(`seven_day_${model.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`, `7-day, ${model}`, limit.percent,
       Number.isFinite(reset) ? Math.round(reset / 1000) : undefined);
     if (entry) windows.push({ ...entry, asOf: fetched });
   }
@@ -203,12 +203,12 @@ export function claudeOAuthUsage(value: unknown, now = new Date()): AccountUsage
         const entry = window("five_hour", "5-hour limit", percent, reset);
         if (entry) windows.push(entry);
       } else if (limit.kind === "weekly_all") {
-        const entry = window("seven_day", "7-day limit", percent, reset);
+        const entry = window("seven_day", "7-day, all models", percent, reset);
         if (entry) windows.push(entry);
       } else if (limit.kind === "weekly_scoped") {
         const model = safeText(object(object(object(limit.scope).model)).display_name);
         if (!model) continue;
-        const entry = window(`seven_day_${model.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`, `7-day · ${model}`, percent, reset);
+        const entry = window(`seven_day_${model.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`, `7-day, ${model}`, percent, reset);
         if (entry) windows.push(entry);
       }
     }

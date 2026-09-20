@@ -5,8 +5,32 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- The periodic store pull commits uncommitted writes (a task from `add_task`,
+  a new finding) before it fetches or merges, so a managed sync can no longer
+  discard or block on a write that arrived moments earlier; a divergent remote
+  is merged instead of deferred, and conflicting `tasks.md` and `FINDINGS.md`
+  keep both sides' bullets. Each pull records what it did in
+  `background-sync.log`.
+
 ### Added
 
+- Conductor design and independent worker briefs for remote reports, agent
+  ancestry, phone navigation, headless workers and question relay, plus a
+  shipped `conductor` skill with a concise dispatcher voice.
+- Computer enrollment for Phren Hook with reusable private ed25519 keys and
+  restricted public-key acceptance, pinned peers in `hooks.yaml`, and remote
+  placement through `/v1/dispatch`, `phren dispatch` and the `dispatch` MCP
+  tool. Placement resolves projects on the receiving computer and keeps
+  uncertain deliveries in `phren dispatch status` without retrying.
+- Scheduled prompts: project `schedules.yaml` files, local-time interval,
+  daily, weekly, once and cron evaluation, Herdr or headless execution, Hook
+  list/run/history routes, and `phren schedule` management commands.
+- Phren Hook reports a Codex thread whose history stopped persisting.
+- Phren Hook transcript streams resume after the iPhone's last received line,
+  and reconnect backlogs no longer roll a longer local chat back to an older
+  bounded page after the app has been idle.
 - Phren Hook accepts answer keys for a prompt it remembered (a permission
   request it could not hold) even while Herdr still reads the pane as working;
   the phone no longer gets 'This agent is not waiting for an answer'.

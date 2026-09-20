@@ -2,13 +2,13 @@ import { execFileSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { initTestPhrenRoot, makeTempDir, writeFile } from "../test-helpers.js";
-import { writeInstallPreferences } from "../init/preferences.js";
-import { runtimeFile } from "../phren-paths.js";
+import { pullAtSessionStart } from "../cli/session-git.js";
 import { tryFileLock } from "../governance/locks.js";
 import { getRuntimeHealth } from "../governance/policy.js";
-import { pullAtSessionStart } from "../cli/session-git.js";
-import { parsePullInterval, periodicPullEnabled, pollStore, resolvePullInterval, runPollGit, startPullPolling, type RunGit } from "./pull.js";
+import { writeInstallPreferences } from "../init/preferences.js";
+import { runtimeFile } from "../phren-paths.js";
+import { initTestPhrenRoot, makeTempDir, writeFile } from "../test-helpers.js";
+import { parsePullInterval, periodicPullEnabled, pollStore, type RunGit, resolvePullInterval, runPollGit, startPullPolling } from "./pull.js";
 
 const cleanups: (() => void)[] = [];
 afterEach(() => {
@@ -114,19 +114,45 @@ describe("store polling with real Git repositories", () => {
     expect(git(reader, "status", "--porcelain")).toBe("");
   });
 
-  it("preserves uncommitted edits and retries on the next interval after they are saved", async () => {
+  it("commits uncommitted store writes before pulling instead of deferring them", async () => {
     const { reader, publish, commit } = fixture();
     publish();
     writeFile(path.join(reader, "notes.md"), "local draft\n");
-    expect((await pollStore(reader, 60, runPollGit, 100_000)).status).toBe("deferred");
+    expect((await pollStore(reader, 60, runPollGit, 100_000)).status).toBe("updated");
     expect(fs.readFileSync(path.join(reader, "notes.md"), "utf8")).toBe("local draft\n");
-    fs.unlinkSync(path.join(reader, "notes.md"));
-    expect((await pollStore(reader, 60, runPollGit, 160_000)).status).toBe("updated");
+    expect(git(reader, "show", "HEAD:notes.md")).toBe("local draft");
+    expect(git(reader, "status", "--porcelain")).toBe("");
     const localHead = commit(reader, "local ahead\n");
     const run = vi.fn(runPollGit);
     expect((await pollStore(reader, 60, run, 220_000)).status).toBe("unchanged");
     expect(git(reader, "rev-parse", "HEAD")).toBe(localHead);
     expect(run.mock.calls.some(([, args]) => args[0] === "fetch")).toBe(false);
+  });
+
+  it("commits a task written through add_task before pulling and keeps both sides of tasks.md", async () => {
+    const { reader, writer } = fixture();
+    const tasksPath = (repo: string) => path.join(repo, "project", "tasks.md");
+    const localTasks = "# task\n\n## Active\n\n## Queue\n\n- [ ] Local task written by add_task\n\n## Done\n";
+    writeFile(tasksPath(reader), localTasks);
+
+    // The task is still uncommitted when the sync routine runs; the remote has not moved.
+    expect((await pollStore(reader, 60, runPollGit, 100_000)).status).toBe("unchanged");
+    expect(git(reader, "show", "HEAD:project/tasks.md")).toContain("Local task written by add_task");
+    expect(git(reader, "status", "--porcelain")).toBe("");
+
+    // A second computer adds a task to the same file and pushes.
+    const remoteTasks = "# task\n\n## Active\n\n## Queue\n\n- [ ] Remote task from another computer\n\n## Done\n";
+    writeFile(tasksPath(writer), remoteTasks);
+    git(writer, "add", ".");
+    git(writer, "commit", "-m", "remote task");
+    git(writer, "push");
+
+    expect((await pollStore(reader, 60, runPollGit, 160_000)).status).toBe("updated");
+    const merged = fs.readFileSync(tasksPath(reader), "utf8");
+    expect(merged).toContain("Local task written by add_task");
+    expect(merged).toContain("Remote task from another computer");
+    expect(merged).not.toContain("<<<<<<<");
+    expect(git(reader, "status", "--porcelain")).toBe("");
   });
 
   it("defers diverged history without starting a rebase or changing local commits", async () => {
@@ -215,6 +241,7 @@ describe("running MCP polling", () => {
     let head = "a".repeat(40);
     const run = vi.fn<RunGit>(async (_cwd, args) => {
       if (args[0] === "rev-parse") return { ok: true, output: args[1] === "HEAD" ? head : path.join(root, ".git") };
+      if (args[0] === "status") return { ok: true, output: "" };
       if (args[0] === "symbolic-ref") return { ok: true, output: "refs/heads/main" };
       if (args[0] === "for-each-ref") return { ok: true, output: "origin\trefs/heads/main\trefs/remotes/origin/main" };
       if (args[0] === "ls-remote") return { ok: true, output: `${head}\trefs/heads/main` };

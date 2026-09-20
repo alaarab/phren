@@ -22,12 +22,12 @@ const manifestSchema = z.object({
   schemaVersion: z.literal(1),
   id: jobID,
   parent: z.object({ provider: z.enum(["codex", "claude", "copilot", "phren", "opencode"]), session: sessionId }).optional(),
-  provider: z.enum(["opencode", "codex"]),
+  provider: z.enum(["opencode", "codex", "claude"]),
   session: sessionId.optional(),
   taskLabel: z.string().min(1).max(200),
   cwd: z.string().min(1).max(4096).refine(path.isAbsolute),
   worktree: z.string().min(1).max(4096).refine(path.isAbsolute),
-  model: z.string().min(1).max(200),
+  model: z.string().min(1).max(200).optional(),
   eventLog: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.jsonl$/),
   createdAt: timestamp,
   startedAt: timestamp,
@@ -35,12 +35,13 @@ const manifestSchema = z.object({
   finishedAt: timestamp.optional(),
   status: z.enum(["queued", "running", "completed", "failed", "cancelled"]),
   exitCode: z.number().int().min(0).max(255).optional(),
+  schedule: z.object({ id: z.string().regex(/^[a-f0-9]{8}$/), project: z.string().min(1).max(200) }).optional(),
 }).strict().superRefine((manifest, ctx) => {
-  // OpenCode sessions are `ses_…`, Codex sessions are thread UUIDs. Neither
-  // provider may claim the other's identity.
+  // OpenCode sessions are `ses_…`; Codex and Claude sessions are UUIDs.
+  // A provider cannot claim another provider's identity shape.
   if (manifest.session === undefined) return;
-  const valid = manifest.provider === "codex" ? z.string().uuid().safeParse(manifest.session).success
-    : opencodeSession.safeParse(manifest.session).success;
+  const valid = manifest.provider === "opencode" ? opencodeSession.safeParse(manifest.session).success
+    : z.string().uuid().safeParse(manifest.session).success;
   if (!valid) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["session"],
     message: `A ${manifest.provider} manifest needs a matching session identity.` });
 });
@@ -49,7 +50,7 @@ export type FanoutManifest = z.infer<typeof manifestSchema>;
 export interface FanoutChild {
   /** Parent-scoped opaque ID. Filesystem paths never cross the bridge. */
   id: string;
-  provider: "opencode" | "codex";
+  provider: "opencode" | "codex" | "claude";
   session?: string;
   /** The model that manifest named, so the phone can label the worker. */
   model?: string;

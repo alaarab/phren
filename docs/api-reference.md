@@ -1,6 +1,6 @@
 # MCP API Reference
 
-Phren exposes 61 MCP tools across 14 modules, through two profiles. **`core`**, the default, gives a client ten tools: the handful an agent reaches for during normal work, plus `phren_admin`, which reaches everything else by name. **`full`** exposes every tool under its own name (all 61, plus the three composites below), for clients that scripted against the old surface. Switch with `phren config mcp-profile core|full` or the `PHREN_MCP_PROFILE` environment variable; restart the client afterwards.
+Phren exposes 62 MCP tools across 15 modules, through two profiles. **`core`**, the default, gives a client ten tools: the handful an agent reaches for during normal work, plus `phren_admin`, which reaches everything else by name. **`full`** exposes every tool under its own name (all 62, plus the three composites below), for clients that scripted against the old surface. Switch with `phren config mcp-profile core|full` or the `PHREN_MCP_PROFILE` environment variable; restart the client afterwards.
 
 Why: the full surface is about 53k characters of schema, roughly 13k tokens, downloaded before a session says a word, and 59 similar verbs to pick the wrong one from. Core is about 17k characters.
 
@@ -23,7 +23,39 @@ A composite takes `action` plus the target tool's own parameters, validated agai
 
 All tools return structured JSON: `{ ok, message, data?, error? }`.
 
-Module layout: search, tasks, findings, daily notes, memory quality, data management, fragment graph, sessions, operations/review, skills, hooks, extraction, configuration.
+Module layout: search, tasks, findings, daily notes, memory quality, data management, fragment graph, sessions, operations/review, skills, hooks, extraction, configuration, topic summaries, dispatch.
+
+## Cross-computer dispatch
+
+### `dispatch`
+
+Send a worker brief through the local Phren Hook to an enrolled computer. In the
+core profile use `phren_admin(action: "dispatch", ...)`; full exposes `dispatch`
+directly. The local Hook must be running. Enroll the sender's computer key on the
+receiver with `phren bridge enroll-computer <name>` and its `--accept` command,
+then configure verified SSH peers in the local Hook's private `hooks.yaml`.
+See [Conductor](conductor.md) for setup, trust boundaries and worker contracts.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `computer` | string | yes | Enrolled name, or `anywhere` for the connected peer with the fewest working agents. |
+| `project` | string | yes | Project slug whose `phren.project.yaml` sourcePath exists on the receiver. No local checkout paths. |
+| `harness` | enum | yes | `codex`, `claude`, or `opencode`. |
+| `model` | string | no | Explicit remote model, up to 200 characters; otherwise its configured default. |
+| `prompt` | string | yes | Worker brief, up to 32768 characters. |
+| `label` | string | yes | Task label, up to 200 characters. |
+
+Returns the receipt in `data`: dispatch ID, computer, project, harness/model,
+label, timestamps, state, remote target when known, and an optional error.
+`accepted` means first-prompt acceptance, not task completion. `uncertain` means
+delivery might have occurred; never retry it automatically. The first slice
+provides placement only, with receipts through `phren dispatch status`; live
+reports, remote tree rows and headless fallback are later work packages.
+
+CLI equivalent:
+`phren dispatch Desk phren --harness codex --label 'Checks' --prompt 'Run the assigned checks'`.
+
+---
 
 ---
 

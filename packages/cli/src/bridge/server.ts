@@ -8,7 +8,9 @@ import { z } from "zod";
 import { ActivityJournal } from "./activity.js";
 import { AgentHooks } from "./agent-hooks.js";
 import { homeDirectory, startChangeRetention } from "./changes.js";
+import { threadHealth } from "./codex-threads.js";
 import { WorkspaceContextUsage } from "./context.js";
+import { DispatchService, dispatchProjectDirectory, dispatchStatus } from "./dispatch.js";
 import { candidateRepos, enrollProject } from "./enroll.js";
 import { browseFiles } from "./files.js";
 import { gitBranches, gitDiscard, gitLog, gitPulls, gitStage, gitStatus, gitTree, gitUnstage } from "./git.js";
@@ -25,11 +27,13 @@ import { listUploads, saveUpload, uploadImage } from "./uploads.js";
 import { ModelCatalog } from "./models.js";
 import { currentModel, currentStep } from "./steps.js";
 import { AccountUsageReader } from "./usage.js";
+import { createScheduleLauncher, Scheduler, scheduleRunsFile } from "./schedules.js";
+import { defaultPhrenPath } from "../shared.js";
 
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", shell: "ssh-pty", herdr: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, repositoryFiles: true, subagents: true, approvalPush: "direct-apns", simulators: process.platform === "darwin" };
+  files: true, repositoryFiles: true, subagents: true, dispatch: true, approvalPush: "direct-apns", simulators: process.platform === "darwin" };
 
 /** A file from the phone: a plain name and base64 bytes, bounded. */
 function uploadBody(data: Json): { name: string; bytes: Buffer } {
@@ -84,6 +88,7 @@ export async function serve(version: string): Promise<void> {
   try { computerID = (await readFile(identityFile, "utf8")).trim(); }
   catch { computerID = randomUUID(); await writeFile(identityFile, computerID, { flag: "wx", mode: 0o600 }); }
   const launches = new LaunchLimiter();
+  const dispatches = new DispatchService();
   const locatedDirectories = new Set<string>();
   const journal = new ActivityJournal();
   const agentHooks = new AgentHooks();
@@ -92,6 +97,10 @@ export async function serve(version: string): Promise<void> {
   const accountUsage = new AccountUsageReader();
   const tabActivity = new TabActivityStore();
   const codexQuestions = new CodexQuestions();
+  const scheduleStore = defaultPhrenPath();
+  const scheduler = new Scheduler({ now: () => new Date(), store: scheduleStore, runsFile: scheduleRunsFile(),
+    launch: createScheduleLauncher((server, data) => launchSession(server, data), scheduleStore),
+    locateProject: async project => (await locateProject(project, await journal.recent()))[0]?.directory });
   const info = { product: "phren-hook", protocol: PROTOCOL, version, computer: { id: computerID, name: hostname() }, capabilities };
   const old = await lstat(socketPath()).catch(() => null);
   if (old) {
@@ -115,6 +124,14 @@ export async function serve(version: string): Promise<void> {
       if (request.method === "GET") {
         switch (url.pathname) {
           case "/v1/health": result = info; break;
+          case "/v1/dispatch": result = { dispatches: await dispatchStatus() }; break;
+          case "/v1/dispatch/capacity": {
+            const live = await servers();
+            const snapshots = await Promise.all(live.map(server => snapshot(String(server.session))));
+            result = { product: "phren-hook", protocol: PROTOCOL, servers: live.map(server => server.session),
+              working: snapshots.reduce((sum, value) => sum + objects(value.panes).filter(pane => pane.agent && pane.agent_status === "working").length, 0) };
+            break;
+          }
           case "/v1/muxes": result = { muxes: await servers() }; break;
           case "/v1/activity": result = { events: await journal.recent() }; break;
           case "/v1/web-servers": result = { servers: await webServers() }; break;
@@ -215,7 +232,18 @@ export async function serve(version: string): Promise<void> {
         }
       } else if (request.method === "POST") {
         const data = await body(request);
-        if (url.pathname === "/v1/push/register") {
+        if (url.pathname === "/v1/schedules") {
+          result = await scheduler.statuses();
+        } else if (url.pathname === "/v1/schedules/run") {
+          const input = z.object({ project: z.string().min(1).max(200), id: z.string().regex(/^[a-f0-9]{8}$/) }).parse(data);
+          result = { ok: true, run: await scheduler.launchNow(input.project, input.id) };
+        } else if (url.pathname === "/v1/schedules/history") {
+          const input = z.object({ project: z.string().min(1).max(200).optional(), id: z.string().regex(/^[a-f0-9]{8}$/).optional(),
+            limit: z.number().int().min(1).max(500).optional() }).parse(data);
+          result = { runs: await scheduler.history(input) };
+        } else if (url.pathname === "/v1/dispatch") {
+          result = await dispatches.dispatch(data);
+        } else if (url.pathname === "/v1/push/register") {
           await agentHooks.push.register(data); result = { ok: true };
         } else if (url.pathname === "/v1/push/answer") {
           await agentHooks.answerPush(z.string().uuid().parse(data.binding), data.decision); result = { ok: true };
@@ -231,7 +259,12 @@ export async function serve(version: string): Promise<void> {
           result = await simulatorAct(z.string().parse(data.udid), z.object({ action: z.string(), bundleId: z.string().optional(), url: z.string().optional(), x: z.number().optional(), y: z.number().optional(), text: z.string().optional(), submit: z.boolean().optional() }).parse(data) as unknown as SimulatorAction);
         } else {
         if (url.pathname === "/v1/workspaces/launch") {
-          result = await launches.run(async () => launchSession(selectedServer(url), { ...data, cwd: await launchDirectory(data.cwd, await journal.recent(), locatedDirectories) }));
+          result = await launches.run(async () => {
+            if (data.project !== undefined && data.cwd !== undefined) throw new BridgeError(400, "Choose project or cwd, not both.");
+            const cwd = data.project !== undefined ? await dispatchProjectDirectory(data.project)
+              : await launchDirectory(data.cwd, await journal.recent(), locatedDirectories);
+            return launchSession(selectedServer(url), { ...data, cwd });
+          });
         } else if (url.pathname.startsWith("/v1/workspaces/")) {
           const operation = url.pathname.split("/").at(-1)!;
           result = operation === "create" ? await launches.run(async () => workspaceAction(selectedServer(url), operation,
@@ -451,6 +484,10 @@ export async function serve(version: string): Promise<void> {
     // the parent conversation: the parent target is what gets revalidated
     // each tick, and the frames name the child by its parent-scoped id.
     const child = url.pathname === "/v1/transcripts" ? url.searchParams.get("child") : null;
+    const cursor = url.pathname === "/v1/transcripts" ? url.searchParams.get("afterLine") : null;
+    // The first frame stays a backlog for protocol compatibility, but a
+    // reconnect only reads rows beyond the phone's retained raw-line cursor.
+    let resumeAfterLine = cursor === null ? undefined : z.coerce.number().int().nonnegative().max(4_294_967_295).parse(cursor);
     let conversation = { source: target.source, session: target.session };
     // The transcript file of a fresh conversation appears with its first
     // turn; until then the socket carries an empty backlog and keeps looking.
@@ -470,7 +507,10 @@ export async function serve(version: string): Promise<void> {
             if (first) send(client, { ...emptyPage, type: "backlog", ...conversation });
           } else if (reader) {
             await refreshTranscript(reader.file, conversation.source, conversation.session);
-            const page = await reader.read(undefined, abort.signal);
+            const page = resumeAfterLine === undefined
+              ? await reader.read(undefined, abort.signal)
+              : await reader.readAfter(resumeAfterLine, abort.signal);
+            resumeAfterLine = undefined;
             if (first || page.entries.length || page.reset) send(client, { ...page, type: first || page.reset ? "backlog" : "append", ...conversation });
           } else {
             const pendingApproval = agentHooks.approval(target);
@@ -478,9 +518,11 @@ export async function serve(version: string): Promise<void> {
             const cwd = await trustedDirectory(pane).catch(() => undefined);
             const branch = cwd ? await repositoryBranch(cwd) : undefined;
             const terminalPrompt = !pendingApproval && ["blocked", "waiting"].includes(String(pane.agent_status)) ? agentHooks.terminalPrompt(target) : undefined;
+            const historyHealth = target.source === "codex" ? await threadHealth(target.session, pane.agent_status) : { stalled: false };
             send(client, { agentStatus: { source: target.source, session: target.session,
               status: pendingApproval ? "waiting" : pane.agent_status, pendingApproval, pendingQuestions, terminalPrompt,
               compacting: agentHooks.compacting(target),
+              ...(historyHealth.stalled ? { historyStalled: true, historyStalledSince: historyHealth.since } : {}),
               capabilities: { ...capabilities, asyncQuestions: target.source === "codex" && codexQuestions.available }, branch } });
           }
           first = false;
@@ -522,6 +564,8 @@ export async function serve(version: string): Promise<void> {
   await new Promise<void>((resolve, reject) => { http.once("error", reject); http.listen(socketPath(), () => resolve()); });
   await chmod(socketPath(), 0o600);
   await agentHooks.start();
+  void scheduler.tick().catch(() => {});
+  const scheduleTimer = setInterval(() => { void scheduler.tick().catch(() => {}); }, 30_000);
   let recording = false;
   const activityTimer = setInterval(() => {
     if (recording) return;
@@ -540,7 +584,7 @@ export async function serve(version: string): Promise<void> {
     })().finally(() => { recording = false; }).catch(() => {});
   }, 5000);
   await new Promise<void>(resolve => {
-    const stop = () => { stopRetention(); clearInterval(activityTimer); agentHooks.close(); ws.clients.forEach(c => c.terminate()); ws.close(); http.close(() => resolve()); http.closeAllConnections(); };
+    const stop = () => { stopRetention(); clearInterval(scheduleTimer); clearInterval(activityTimer); scheduler.close(); agentHooks.close(); ws.clients.forEach(c => c.terminate()); ws.close(); http.close(() => resolve()); http.closeAllConnections(); };
     process.once("SIGTERM", stop); process.once("SIGINT", stop);
   });
   await unlink(socketPath()).catch(() => {});
@@ -591,7 +635,7 @@ const plainText = (max: number) => z.string().min(1).max(max).refine(t => !/[\x0
  * by diffing snapshots; `agent.start` returns once Herdr has detected the
  * agent and it is ready for input, which can take most of `timeoutMs`.
  */
-async function launchSession(server: string, data: Json): Promise<Json> {
+export async function launchSession(server: string, data: Json): Promise<Json> {
   const cwd = z.string().min(1).max(4096).refine(t => path.isAbsolute(t) && !/[\x00-\x1f\x7f]/.test(t)).parse(data.cwd);
   const label = plainText(200).parse(data.label);
   const kind = z.enum(launchKinds).parse(data.kind);
@@ -630,7 +674,11 @@ async function launchSession(server: string, data: Json): Promise<Json> {
   const pane = objects(after.panes).find(p => p.pane_id === created!.paneId && p.tab_id === created!.tabId && p.workspace_id === created!.workspaceId);
   const agentStatus = typeof pane?.agent_status === "string" ? pane.agent_status : undefined;
   const sessionId = pane && pane.agent === kind ? await paneIdentity(server, pane) : undefined;
-  return { ok: true, ...created, agent: kind, agentStatus, sessionId };
+  const chat = !sessionId && pane && pane.agent === kind ? await paneChatState(server, pane).catch((): Json => ({})) : {};
+  const binding = { server, workspace: created.workspaceId, tab: created.tabId, pane: created.paneId, source: kind };
+  const target = sessionId ? { ...binding, session: sessionId }
+    : chat.starting === true ? { ...binding, starting: true, startingToken: chat.startingToken } : undefined;
+  return { ok: true, ...created, agent: kind, agentStatus, sessionId, target };
 }
 
 async function workspaceAction(server: string, operation: string, data: Json): Promise<Json> {

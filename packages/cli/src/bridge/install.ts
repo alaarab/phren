@@ -166,7 +166,7 @@ export async function uninstall() {
   await applyAgentHooks(await planAgentHooks(path.join(bridgeRoot(), "current/bridge-hook.mjs"), true));
   await applyOpencodePlugin(true);
   // Preserve journal, settings, uploaded images, rollback version and SSH backups.
-  console.log("Phren Hook stopped and its background service removed. Remove phren-iphone keys from authorized_keys to revoke iPhone access. Local data remains in " + bridgeRoot());
+  console.log("Phren Hook stopped and its background service removed. Remove phren-iphone and phren-computer keys from authorized_keys to revoke device access. Local data remains in " + bridgeRoot());
 }
 
 interface SettingsEdit { file: string; before?: string; after: string }
