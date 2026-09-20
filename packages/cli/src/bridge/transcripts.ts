@@ -16,6 +16,9 @@ export interface ChildAgentRelation {
   id: string; session: string; transcript: string; provider: Provider; path: string; callId: string; state: "running" | "completed";
   /** Only fan-out manifests name a model; other providers leave it absent. */
   model?: string;
+  /** Public checkout labels for fan-outs; full paths remain private. */
+  worktreeName?: string;
+  branch?: string;
   /** The checkout a fan-out worker owns; parent-checkout children omit it. */
   cwd?: string;
   children: ChildAgentRelation[];
@@ -162,8 +165,10 @@ async function childTranscriptBelongsTo(file: string, parent: string): Promise<b
 /** Explicit wire projection prevents a provider's private transcript identity
  * from being returned if relation internals grow later. */
 export function publicChildAgents(tree: ChildAgentRelation[]): Json[] {
-  return tree.map(({ id, provider, path: agentPath, callId, state, model, children }) =>
-    ({ id, provider, path: agentPath, callId, state, ...(model !== undefined ? { model } : {}), children: publicChildAgents(children) }));
+  return tree.map(({ id, provider, path: agentPath, callId, state, model, worktreeName, branch, children }) =>
+    ({ id, provider, path: agentPath, callId, state, ...(model !== undefined ? { model } : {}),
+      ...(worktreeName !== undefined ? { worktreeName } : {}), ...(branch !== undefined ? { branch } : {}),
+      children: publicChildAgents(children) }));
 }
 
 export function childAgent(tree: ChildAgentRelation[], id: string): ChildAgentRelation | undefined {

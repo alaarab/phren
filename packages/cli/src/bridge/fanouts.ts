@@ -1,13 +1,17 @@
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { lstat, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { z } from "zod";
 import { type Json, object, type Provider, sessionId } from "./protocol.js";
 
 const MAX_MANIFEST_BYTES = 64 * 1024;
 const MAX_EVENT_LOG_BYTES = 64 * 1024 * 1024;
 const MAX_JOBS = 128;
+const WORKTREE_CACHE_MS = 15_000;
+const exec = promisify(execFile);
 const jobID = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/);
 const timestamp = z.string().datetime({ offset: true });
 
@@ -48,6 +52,8 @@ export interface FanoutChild {
   session?: string;
   /** The model that manifest named, so the phone can label the worker. */
   model?: string;
+  worktreeName?: string;
+  branch?: string;
   /** The worker's own checkout, kept off the wire. */
   cwd: string;
   path: string;
@@ -55,6 +61,29 @@ export interface FanoutChild {
   state: "running" | "completed";
   transcript: string;
   children: FanoutChild[];
+}
+
+type WorktreeDetails = Pick<FanoutChild, "worktreeName" | "branch">;
+const worktreeCache = new Map<string, { expiresAt: number; details: WorktreeDetails }>();
+
+async function worktreeDetails(worktree: string): Promise<WorktreeDetails> {
+  const now = Date.now(), cached = worktreeCache.get(worktree);
+  if (cached && cached.expiresAt > now) return cached.details;
+  let details: WorktreeDetails = {};
+  const metadata = await stat(worktree).catch(() => undefined);
+  if (metadata?.isDirectory()) {
+    const worktreeName = path.basename(worktree).slice(0, 200);
+    details = worktreeName ? { worktreeName } : {};
+    try {
+      const { stdout } = await exec("git", ["-C", worktree, "rev-parse", "--abbrev-ref", "HEAD"],
+        { timeout: 2_000, maxBuffer: 4_096 });
+      const branch = stdout.trim();
+      if (branch && branch !== "HEAD") details.branch = branch.slice(0, 200);
+    } catch { /* Missing repositories, detached heads, and git errors have no public branch. */ }
+  }
+  worktreeCache.set(worktree, { expiresAt: Date.now() + WORKTREE_CACHE_MS, details });
+  while (worktreeCache.size > MAX_JOBS) worktreeCache.delete(worktreeCache.keys().next().value!);
+  return details;
 }
 
 export function fanoutRoot(env: NodeJS.ProcessEnv = process.env): string {
@@ -94,8 +123,9 @@ export async function fanoutChildren(parentProvider: Provider, parentSession: st
       if (!jobRoot.startsWith(root + path.sep)) continue;
       const transcript = await regularContainedFile(jobRoot, path.join(jobRoot, manifest.eventLog), MAX_EVENT_LOG_BYTES);
       if (!transcript) continue;
+      const worktree = await worktreeDetails(manifest.worktree);
       const id = createHash("sha256").update(`${parentProvider}\0${parentSession}\0${manifest.id}`).digest("hex").slice(0, 32);
-      children.push({ id, provider: manifest.provider, session: manifest.session, model: manifest.model, cwd: manifest.worktree,
+      children.push({ id, provider: manifest.provider, session: manifest.session, model: manifest.model, ...worktree, cwd: manifest.worktree,
         path: manifest.taskLabel, callId: `fanout:${id}`, state: ["queued", "running"].includes(manifest.status) ? "running" : "completed",
         transcript, children: [] });
     } catch { /* Torn, old, or untrusted manifests do not become child agents. */ }
