@@ -1106,9 +1106,11 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(app.buttons["Copy patch"].exists)
         capture(app, "Phren purple actions and native tool diff")
         // A Read of an image shows the image itself in the card.
+        let transcript = app.scrollViews["chat-transcript"]
         let read = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "chat-tool-group:", "Read")).firstMatch
         XCTAssertTrue(read.waitForExistence(timeout: 3)); read.tap()
         XCTAssertTrue(app.descendants(matching: .any)["chat-historical-image"].firstMatch.waitForExistence(timeout: 8))
+        for _ in 0..<8 where !read.isHittable { transcript.swipeDown() }
         read.tap()
         // A collapsed tool stays one fixed-height row. Opening it reveals
         // the changed-file cards; each file can then expand or push its reader.
@@ -1157,6 +1159,8 @@ final class AgentChatTests: XCTestCase {
         // The same command appended to the phren store, which a hook committed
         // straight away: it appears as its own repository, with the commit.
         app.navigationBars.buttons.firstMatch.tap()
+        // The store's commit sits under its own folder path; expand it first.
+        app.buttons["phone"].tap()
         let store = app.buttons["diff-file:committed:phone/FINDINGS.md"]
         XCTAssertTrue(store.waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "phren: capture finding")).firstMatch.exists)
