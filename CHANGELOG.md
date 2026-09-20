@@ -16,6 +16,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   mirrors sessions into the store's `.runtime/sessions` so the iOS app can read
   them. Identity needs `herdr integration install opencode` on the computer.
 
+### Fixed
+
+- Composite MCP tools (`manage_task`, `revise_finding`, `session`,
+  `phren_admin`) accept a nested object argument that the host passed through
+  as a JSON string — Claude Code did this for `manage_task action=update`
+  (`updates`) and `phren_admin action=set_config` (`settings`), which then
+  failed with "expected object, received string".
+
 ### Changed
 
 - Swipe down on the chat message box, its icon row, or the Herdr shortcut row
