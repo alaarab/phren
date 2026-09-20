@@ -24,7 +24,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   them. Identity needs `herdr integration install opencode` on the computer.
 - Codex CLI fan-outs now appear as child agents beside OpenCode ones: a
   `provider: "codex"` manifest with a `codex exec --json` event log is read as
-  a redacted child transcript.
+  a child transcript.
+
+### Changed
+
+- Codex fan-out child transcripts export the shell command, a bounded output
+  tail, and the changed paths, and `/v1/subagents` reports a fan-out's model
+  when its manifest names one.
 
 ### Fixed
 

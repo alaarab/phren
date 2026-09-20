@@ -14,6 +14,8 @@ export interface Entry { line: number; raw: Json }
 export interface ChildAgentRelation {
   /** `id` is a parent-scoped public reference; `session` never leaves Hook. */
   id: string; session: string; transcript: string; provider: Provider; path: string; callId: string; state: "running" | "completed";
+  /** Only fan-out manifests name a model; other providers leave it absent. */
+  model?: string;
   children: ChildAgentRelation[];
 }
 type DirectRelation = Omit<ChildAgentRelation, "id" | "transcript" | "provider" | "children">;
@@ -158,8 +160,8 @@ async function childTranscriptBelongsTo(file: string, parent: string): Promise<b
 /** Explicit wire projection prevents a provider's private transcript identity
  * from being returned if relation internals grow later. */
 export function publicChildAgents(tree: ChildAgentRelation[]): Json[] {
-  return tree.map(({ id, provider, path: agentPath, callId, state, children }) =>
-    ({ id, provider, path: agentPath, callId, state, children: publicChildAgents(children) }));
+  return tree.map(({ id, provider, path: agentPath, callId, state, model, children }) =>
+    ({ id, provider, path: agentPath, callId, state, ...(model !== undefined ? { model } : {}), children: publicChildAgents(children) }));
 }
 
 export function childAgent(tree: ChildAgentRelation[], id: string): ChildAgentRelation | undefined {
