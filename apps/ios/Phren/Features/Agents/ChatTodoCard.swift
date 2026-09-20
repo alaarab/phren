@@ -23,10 +23,11 @@ struct ChatTodoCard: View {
             Button {
                 withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { expanded.toggle() }
             } label: {
-                ToolCardHeader(icon: "checklist", title: list.title) {
-                    Text(list.summary).font(.caption.monospacedDigit()).foregroundStyle(PhrenTheme.textMuted).lineLimit(1)
+                ToolCardHeader(icon: "checklist", title: list.title, compact: folded) {
+                    Text(list.summary).font(folded ? PhrenTypography.footnote.monospacedDigit() : .caption.monospacedDigit())
+                        .foregroundStyle(PhrenTheme.textMuted).lineLimit(1)
                     if entry.cardSuperseded {
-                        Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
+                        Image(systemName: "chevron.down").font(.system(size: folded ? 12 : 10, weight: .semibold))
                             .rotationEffect(.degrees(expanded ? 180 : 0)).foregroundStyle(PhrenTheme.phrenCardAccent)
                     }
                 }
@@ -52,7 +53,7 @@ struct ChatTodoCard: View {
                 }
             }
         }
-        .toolCard()
+        .toolCard(collapsed: folded)
         .toolCardMarker("chat-todo-card:\(entry.callID)",
                         label: "\(list.title), \(list.summary)" + (entry.cardSuperseded ? ", replaced by a later list" : ""))
     }

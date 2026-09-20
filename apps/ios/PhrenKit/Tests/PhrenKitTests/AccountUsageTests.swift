@@ -11,22 +11,24 @@ final class AccountUsageTests: XCTestCase {
         XCTAssertTrue(account.isStale(at: account.updatedDate!.addingTimeInterval(121)))
         XCTAssertTrue(account.isStale(at: account.windows[0].resetDate!))
     }
-    func testSameAccountOnTwoComputersMergesToOneCardWithTheFreshestWindows() throws {
+    func testSameAccountOnTwoComputersKeepsTheNewestReportIntact() throws {
         let now = try XCTUnwrap(ISO8601Dates.parse("2026-09-15T20:30:00Z"))
-        let mac = try AccountUsageSnapshot.read(Data(#"{"accounts":[{"source":"codex","windows":[],"message":"Sign in"},{"source":"claude","updatedAt":"2026-09-15T20:29:30Z","windows":[{"id":"five_hour","name":"5-hour limit","usedPercent":14},{"id":"seven_day_fable","name":"7-day · Fable","usedPercent":48,"asOf":"2026-09-14T08:06:00Z"}]}]}"#.utf8))
-        let remote = try AccountUsageSnapshot.read(Data(#"{"accounts":[{"source":"codex","updatedAt":"2026-09-15T20:29:40Z","windows":[{"id":"codex:primary","name":"7-day limit","usedPercent":90}]},{"source":"claude","updatedAt":"2026-09-15T20:29:00Z","windows":[{"id":"five_hour","name":"5-hour limit","usedPercent":13},{"id":"seven_day_fable","name":"7-day · Fable","usedPercent":89,"asOf":"2026-09-15T18:00:00Z"}]}]}"#.utf8))
-        let merged = MergedAccountUsage.merge([("Mac", mac), ("Linuxbox", remote)], at: now)
+        let mac = try AccountUsageSnapshot.read(Data(#"{"accounts":[{"source":"codex","windows":[],"message":"Sign in"},{"source":"claude","updatedAt":"2026-09-15T20:29:30Z","windows":[{"id":"five_hour","name":"5-hour limit","usedPercent":40},{"id":"seven_day","name":"7-day, all models","usedPercent":16},{"id":"seven_day_fable","name":"7-day, Fable","usedPercent":18,"asOf":"2026-09-14T08:06:00Z"}]}]}"#.utf8))
+        let remote = try AccountUsageSnapshot.read(Data(#"{"accounts":[{"source":"codex","updatedAt":"2026-09-15T20:29:40Z","windows":[{"id":"codex:primary","name":"7-day limit","usedPercent":90}]},{"source":"claude","updatedAt":"2026-09-15T20:29:00Z","windows":[{"id":"five_hour","name":"5-hour limit","usedPercent":13},{"id":"seven_day","name":"7-day, all models","usedPercent":70},{"id":"seven_day_fable","name":"7-day, Fable","usedPercent":89,"asOf":"2026-09-15T18:00:00Z"}]}]}"#.utf8))
+        let merged = MergedAccountUsage.merge([("Desk", mac), ("Desk 2", remote)], at: now)
         XCTAssertEqual(merged.map(\.source), ["codex", "claude"])
-        XCTAssertEqual(merged[0].computers, ["Mac", "Linuxbox"])
+        XCTAssertEqual(merged[0].computers, ["Desk", "Desk 2"])
         XCTAssertEqual(merged[0].windows.map(\.usedPercent), [90])
         XCTAssertNil(merged[0].message, "A computer that has the account reporting outranks one that asks to sign in")
         let claude = merged[1]
-        XCTAssertEqual(claude.windows.map(\.id), ["five_hour", "seven_day_fable"])
-        XCTAssertEqual(claude.windows[0].usedPercent, 14, "The computer that reported most recently wins the shared window")
-        XCTAssertEqual(claude.windows[1].usedPercent, 89, "A per-model window is dated by its own snapshot, not the report")
+        XCTAssertEqual(claude.windows.map(\.id), ["five_hour", "seven_day", "seven_day_fable"])
+        XCTAssertEqual(claude.windows.map(\.usedPercent), [40, 16, 18], "The newest whole report wins, not the maximum for each window")
+        XCTAssertEqual(claude.windows.map(\.name), ["5-hour limit", "7-day, all models", "7-day, Fable"])
+        XCTAssertEqual(claude.primaryWindow?.id, "five_hour")
+        XCTAssertEqual(claude.primaryWindow?.usedPercent, 40)
         XCTAssertEqual(claude.updatedAt, ISO8601Dates.parse("2026-09-15T20:29:30Z"))
         XCTAssertFalse(claude.stale)
-        XCTAssertEqual(MergedAccountUsage.merge([("Mac", nil)], at: now), [])
+        XCTAssertEqual(MergedAccountUsage.merge([("Desk", nil)], at: now), [])
     }
     func testUnavailableDoesNotInventZeroUsage() throws {
         let value = try AccountUsageSnapshot.read(Data(#"{"accounts":[{"source":"codex","windows":[],"message":"Sign in"}]}"#.utf8))
@@ -39,7 +41,7 @@ final class AccountUsageTests: XCTestCase {
         let mac = try AccountUsageSnapshot.read(Data(#"{"accounts":[{"source":"opencode","updatedAt":"2026-09-19T18:29:00Z","windows":[],"spend":{"amountUSD":4.39,"period":"rolling_7_days"}},{"source":"openrouter","accountId":"\#(keyA)","updatedAt":"2026-09-19T18:29:00Z","windows":[],"spend":{"amountUSD":5.0,"period":"calendar_week"}}]}"#.utf8))
         let remote = try AccountUsageSnapshot.read(Data(#"{"accounts":[{"source":"opencode","updatedAt":"2026-09-19T18:29:30Z","windows":[],"spend":{"amountUSD":0.61,"period":"rolling_7_days"}},{"source":"openrouter","accountId":"\#(keyA)","updatedAt":"2026-09-19T18:29:30Z","windows":[],"spend":{"amountUSD":5.08,"period":"calendar_week"}}]}"#.utf8))
         let server = try AccountUsageSnapshot.read(Data(#"{"accounts":[{"source":"openrouter","accountId":"\#(keyB)","updatedAt":"2026-09-19T18:29:20Z","windows":[],"spend":{"amountUSD":1.12,"period":"calendar_week"}}]}"#.utf8))
-        let merged = MergedAccountUsage.merge([("Mac", mac), ("Linuxbox", remote), ("Server", server)], at: now)
+        let merged = MergedAccountUsage.merge([("Desk", mac), ("Desk 2", remote), ("Desk 3", server)], at: now)
         let openCode = try XCTUnwrap(merged.first { $0.source == "opencode" })
         XCTAssertEqual(try XCTUnwrap(openCode.spend).amountUSD, 5.0, accuracy: 0.000_001)
         XCTAssertEqual(openCode.spend?.periodLabel, "Past 7 days")
@@ -50,7 +52,7 @@ final class AccountUsageTests: XCTestCase {
     func testHookPayloadWithAllFourProvidersParses() throws {
         let now = try XCTUnwrap(ISO8601Dates.parse("2026-09-20T07:41:48.502Z"))
         let key = String(repeating: "a", count: 64)
-        let data = Data(#"{"accounts":[{"source":"codex","windows":[{"id":"codex:primary","name":"7-day limit","usedPercent":12,"resetsAt":"2026-09-26T13:12:01.000Z"}],"updatedAt":"2026-09-20T07:41:48.502Z"},{"source":"claude","windows":[{"id":"five_hour","name":"5-hour limit","usedPercent":35,"resetsAt":"2026-09-20T09:30:00.000Z"},{"id":"seven_day","name":"7-day limit","usedPercent":15,"resetsAt":"2026-09-26T20:00:00.000Z"},{"id":"seven_day_fable","name":"7-day · Fable","usedPercent":16,"resetsAt":"2026-09-26T20:00:00.000Z"}],"updatedAt":"2026-09-20T07:41:45.218Z"},{"source":"opencode","windows":[],"spend":{"amountUSD":4.5,"period":"rolling_7_days"},"updatedAt":"2026-09-20T07:41:45.218Z"},{"source":"openrouter","accountId":"\#(key)","windows":[],"spend":{"amountUSD":5.177927645,"period":"calendar_week"},"updatedAt":"2026-09-20T07:41:45.218Z"}]}"#.utf8)
+        let data = Data(#"{"accounts":[{"source":"codex","windows":[{"id":"codex:primary","name":"7-day limit","usedPercent":12,"resetsAt":"2026-09-26T13:12:01.000Z"}],"updatedAt":"2026-09-20T07:41:48.502Z"},{"source":"claude","windows":[{"id":"five_hour","name":"5-hour limit","usedPercent":35,"resetsAt":"2026-09-20T09:30:00.000Z"},{"id":"seven_day","name":"7-day, all models","usedPercent":15,"resetsAt":"2026-09-26T20:00:00.000Z"},{"id":"seven_day_fable","name":"7-day, Fable","usedPercent":16,"resetsAt":"2026-09-26T20:00:00.000Z"}],"updatedAt":"2026-09-20T07:41:45.218Z"},{"source":"opencode","windows":[],"spend":{"amountUSD":4.5,"period":"rolling_7_days"},"updatedAt":"2026-09-20T07:41:45.218Z"},{"source":"openrouter","accountId":"\#(key)","windows":[],"spend":{"amountUSD":5.177927645,"period":"calendar_week"},"updatedAt":"2026-09-20T07:41:45.218Z"}]}"#.utf8)
         let value = try AccountUsageSnapshot.read(data)
         XCTAssertEqual(value.accounts.map(\.source), ["codex", "claude", "opencode", "openrouter"])
 
@@ -63,7 +65,7 @@ final class AccountUsageTests: XCTestCase {
         let claude = value.accounts[1]
         XCTAssertEqual(claude.windows.map(\.id), ["five_hour", "seven_day", "seven_day_fable"])
         XCTAssertEqual(claude.windows.map(\.usedPercent), [35, 15, 16])
-        XCTAssertEqual(claude.windows[2].name, "7-day · Fable")
+        XCTAssertEqual(claude.windows.map(\.name), ["5-hour limit", "7-day, all models", "7-day, Fable"])
 
         let openCode = value.accounts[2]
         XCTAssertTrue(openCode.windows.isEmpty)

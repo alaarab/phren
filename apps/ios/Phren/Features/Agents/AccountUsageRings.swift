@@ -2,28 +2,15 @@ import PhrenKit
 import SwiftUI
 
 /// The plan usage rings on the Sessions tab, the way Moshi's home shows
-/// them: one ring per provider in use — Claude and Codex both when both
-/// are — each the most consumed window that provider reports across your
-/// computers. Tapping opens Account usage. Read from the shared usage cache,
-/// which each computer refreshes about once a minute.
+/// them: one ring per provider in use, each showing the primary window from
+/// the same merged report as Account usage. Tapping opens Account usage.
 struct AccountUsageRings: View {
     let hosts: [LiveHost]
     private let cache = AccountUsageCache.shared
     @Environment(\.scenePhase) private var phase
 
-    /// Provider → most consumed window across every computer that reports it.
-    private var quotas: [(source: String, percent: Double)] {
-        var best: [String: Double] = [:]
-        for host in hosts {
-            for account in cache.snapshot(for: host)?.accounts ?? [] {
-                guard let used = account.windows.map(\.usedPercent).max() else { continue }
-                best[account.source] = max(best[account.source] ?? 0, used)
-            }
-        }
-        // A stable order: Claude outermost, then Codex, then anything else.
-        let order = ["claude", "codex", "copilot"]
-        return best.sorted { (order.firstIndex(of: $0.key) ?? 9, $0.key) < (order.firstIndex(of: $1.key) ?? 9, $1.key) }
-            .map { (source: $0.key, percent: $0.value) }
+    private var quotas: [AccountUsageRingQuota] {
+        AccountUsageRingSelection.primaryWindows(in: cache.mergedAccounts(for: hosts, at: Date()))
     }
 
     var body: some View {
@@ -36,14 +23,13 @@ struct AccountUsageRings: View {
                     ring(nil, color: PhrenTheme.textMuted, size: 20)
                 } else {
                     ForEach(Array(quotas.enumerated()), id: \.element.source) { index, quota in
-                        ring(quota.percent, color: Self.color(for: quota.source), size: 20 - CGFloat(index) * 7)
+                        ring(quota.window.usedPercent, color: Self.color(for: quota.source), size: 20 - CGFloat(index) * 7)
                     }
                 }
             }.frame(width: 22, height: 22).contentShape(Rectangle())
         }
         .accessibilityLabel("Account usage")
-        .accessibilityValue(quotas.isEmpty ? "unavailable"
-                            : quotas.map { "\($0.source.capitalized) \(Int($0.percent))%" }.joined(separator: ", "))
+        .accessibilityValue(AccountUsageRingSelection.accessibilityValue(quotas))
         .accessibilityIdentifier("all-account-usage")
         .task(id: RefreshID(hosts: hosts, active: phase == .active)) {
             guard phase == .active else { return }
@@ -70,5 +56,46 @@ struct AccountUsageRings: View {
                         .stroke(color, style: StrokeStyle(lineWidth: 2, lineCap: .round)).rotationEffect(.degrees(-90))
                 }
             }.frame(width: size, height: size)
+    }
+}
+
+struct AccountUsageRingQuota: Equatable {
+    let source: String
+    let accountName: String
+    let window: AccountUsageSnapshot.Window
+}
+
+enum AccountUsageRingSelection {
+    static func primaryWindows(in accounts: [MergedAccountUsage]) -> [AccountUsageRingQuota] {
+        let order = ["claude", "codex", "copilot"]
+        return accounts.compactMap { account in
+            account.primaryWindow.map { AccountUsageRingQuota(source: account.source, accountName: account.name, window: $0) }
+        }.sorted {
+            (order.firstIndex(of: $0.source) ?? 9, $0.source) < (order.firstIndex(of: $1.source) ?? 9, $1.source)
+        }
+    }
+
+    static func accessibilityValue(_ quotas: [AccountUsageRingQuota]) -> String {
+        guard let primary = quotas.first else { return "unavailable" }
+        return "\(primary.accountName) \(AccountUsagePresentation.percent(primary.window.usedPercent))"
+    }
+}
+
+enum AccountUsagePresentation {
+    static func percent(_ value: Double) -> String {
+        "\(value.formatted(.number.precision(.fractionLength(0...1))))%"
+    }
+
+    static func windowName(_ window: AccountUsageSnapshot.Window, source: String) -> String {
+        guard source == "claude" else { return shortName(window.name) }
+        if window.id == "seven_day" { return "7-day, all models" }
+        if window.id.hasPrefix("seven_day_") {
+            return shortName(window.name).replacingOccurrences(of: "7-day · ", with: "7-day, ")
+        }
+        return shortName(window.name)
+    }
+
+    private static func shortName(_ name: String) -> String {
+        name.hasSuffix(" limit") ? String(name.dropLast(6)) : name
     }
 }

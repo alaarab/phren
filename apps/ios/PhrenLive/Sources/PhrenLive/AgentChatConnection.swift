@@ -6,12 +6,13 @@ import NIOWebSocket
 import PhrenKit
 
 extension PhrenConnection {
-    public static func chatUpdates(host: LiveHost, privateKey: Data, target: AgentChatTarget) -> AsyncThrowingStream<AgentChatTranscript, Error> {
+    public static func chatUpdates(host: LiveHost, privateKey: Data, target: AgentChatTarget, afterLine: Int? = nil) -> AsyncThrowingStream<AgentChatTranscript, Error> {
         AsyncThrowingStream(bufferingPolicy: .bufferingOldest(8)) { continuation in
             let worker = Task {
                 do {
                     guard !target.isStarting, target.hostID == host.id && target.muxID == host.muxID else { throw PhrenKitError.validation("The chat belongs to another computer.") }
-                    let request = GatewayRequest.transcript(target, streaming: true)
+                    guard afterLine.map({ $0 >= 0 }) ?? true else { throw PhrenKitError.validation("The chat transcript cursor is invalid.") }
+                    let request = GatewayRequest.transcript(target, streaming: true, afterLine: afterLine)
                     _ = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: request) { data in
                         let frame = try AgentChatTranscript.read(data, source: target.source)
                         if case .dropped = continuation.yield(frame) { throw LiveConnectionError.oversized }
@@ -222,8 +223,10 @@ struct GatewayRequest: Sendable {
         ["server": String(target.muxID.dropFirst("herdr:".count)), "workspace": target.workspaceID,
          "tab": target.tabID, "pane": target.paneID, "source": target.source, "session": target.sessionID]
     }
-    static func transcript(_ target: AgentChatTarget, streaming: Bool = false, beforeLine: Int? = nil) -> Self {
-        Self(path: path("/v1/transcripts", targetQuery(target)), webSocket: true, streaming: streaming, beforeLine: beforeLine)
+    static func transcript(_ target: AgentChatTarget, streaming: Bool = false, beforeLine: Int? = nil, afterLine: Int? = nil) -> Self {
+        var query = targetQuery(target)
+        if let afterLine { query["afterLine"] = String(afterLine) }
+        return Self(path: path("/v1/transcripts", query), webSocket: true, streaming: streaming, beforeLine: beforeLine)
     }
     static func history(_ target: AgentChatTarget, beforeLine: Int) -> Self {
         var query = targetQuery(target); query["beforeLine"] = String(beforeLine)

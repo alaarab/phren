@@ -38,11 +38,16 @@ public enum PendingOp: Codable, Equatable, Sendable {
     /// The op carries the full desired knob state rather than a diff so it can
     /// be re-applied onto fresh content after a remote change.
     case setProjectKnobs(project: String, knobs: ProjectKnobs, expectedContent: String?)
+    /// Replaces `<project>/schedules.yaml` with bytes rendered from the
+    /// editor's complete list. The expected bytes protect top-level keys a
+    /// newer CLI may have added since the editor opened the file.
+    case saveSchedules(project: String, content: String, expectedContent: String?)
 
     public var project: String {
         switch self {
         case .setSkillEnabled(let scope, _, _, _): return scope
         case .setProjectKnobs(let p, _, _): return p
+        case .saveSchedules(let p, _, _): return p
         case .addFinding(let p, _, _), .editFinding(let p, _, _), .removeFinding(let p, _),
              .approveQueue(let p, _), .rejectQueue(let p, _), .editQueue(let p, _, _),
              .addNote(let p, _, _, _), .editNote(let p, _, _, _), .removeNote(let p, _, _),
@@ -68,7 +73,7 @@ public enum PendingOp: Codable, Equatable, Sendable {
         case .addNote, .editNote, .removeNote, .promoteNote: return "update"
         case .addTask, .completeTask, .removeTask, .updateTask: return "task"
         case .updateSkill, .deleteSkill, .setSkillEnabled: return "skills"
-        case .setProjectKnobs: return "update"
+        case .setProjectKnobs, .saveSchedules: return "update"
         case .saveAuthoredFile(let path, _, _), .deleteAuthoredFile(let path, _):
             return LocalStore.isSkillPath(path) ? "skills" : "update"
         }
@@ -126,6 +131,8 @@ public enum PendingOp: Codable, Equatable, Sendable {
         case .setSkillEnabled: return SkillPreferences.path
         case .setProjectKnobs(let project, _, _):
             return "\(project)/\(MachineRegistry.projectFile)"
+        case .saveSchedules(let project, _, _):
+            return "\(project)/\(SchedulesFile.fileName)"
         case .addFinding, .editFinding, .removeFinding:
             return "\(project)/FINDINGS.md"
         case .approveQueue, .rejectQueue, .editQueue:
@@ -180,6 +187,7 @@ public enum PendingOp: Codable, Equatable, Sendable {
         case .setSkillEnabled(let scope, let name, let enabled, _):
             return "\(enabled ? "Enable" : "Disable") skill: \(scope)/\(name)"
         case .setProjectKnobs: return "Update project knobs"
+        case .saveSchedules: return "Save schedules"
         }
     }
 
@@ -232,9 +240,9 @@ public struct QueuedOp: Codable, Equatable, Identifiable, Sendable {
 /// bad read — see the contract on ``VersionedDocument`` before changing this
 /// type or ``PendingOp``.
 public struct PendingOpsQueue: Codable, Sendable, VersionedDocument {
-    /// Version 3 adds per-skill settings. Version 4 adds per-project knobs. All
-    /// legacy operations remain decodable.
-    public static let currentSchemaVersion = 4
+    /// Version 3 adds per-skill settings, version 4 adds per-project knobs, and
+    /// version 5 adds scheduled prompts. All legacy operations remain decodable.
+    public static let currentSchemaVersion = 5
 
     public var schemaVersion: Int = PendingOpsQueue.currentSchemaVersion
     public var pending: [QueuedOp] = []

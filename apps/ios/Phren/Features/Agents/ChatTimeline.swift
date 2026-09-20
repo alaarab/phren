@@ -82,18 +82,18 @@ struct ChatReadRun: View, Equatable {
     }
     var body: some View { ChatPerformance.measure("read-run row") { content } }
     @ViewBuilder private var content: some View {
-        VStack(alignment: .leading, spacing: expanded ? 8 : 0) {
+        VStack(alignment: .leading, spacing: expanded ? 6 : 0) {
             Button {
                 withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { expanded.toggle() }
             } label: {
                 HStack(spacing: 7) {
-                    Image(systemName: "doc.text.magnifyingglass").foregroundStyle(PhrenTheme.chatNeutralDim).frame(width: 14)
+                    Image(systemName: "doc.text.magnifyingglass").font(.system(size: 14)).foregroundStyle(PhrenTheme.chatNeutralDim).frame(width: 14)
                     Text(title).fontWeight(.semibold).foregroundStyle(PhrenTheme.chatText).lineLimit(1)
                     Text(preview).foregroundStyle(PhrenTheme.chatNeutral).lineLimit(1).truncationMode(.middle)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
+                    Image(systemName: "chevron.down").font(.system(size: 12, weight: .semibold))
                         .rotationEffect(.degrees(expanded ? 180 : 0)).foregroundStyle(PhrenTheme.chatNeutralDim)
-                }.font(.system(.caption, design: .monospaced)).padding(.horizontal, 12).frame(height: 44)
+                }.font(PhrenTypography.footnote).padding(.horizontal, 12).padding(.vertical, 4).frame(minHeight: 44)
             }.buttonStyle(.plain)
                 .accessibilityLabel("\(title), \(groups.count) read operations")
                 .accessibilityValue(expanded ? "Expanded" : "Collapsed")
@@ -143,20 +143,20 @@ struct ChatToolActivity: View, Equatable {
                 withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { expanded.toggle() }
             } label: {
                 HStack(spacing: 7) {
-                    Image(systemName: summary.icon).foregroundStyle(PhrenTheme.chatNeutralDim).frame(width: 14)
+                    Image(systemName: summary.icon).font(.system(size: 14)).foregroundStyle(PhrenTheme.chatNeutralDim).frame(width: 14)
                     Text(summary.title).fontWeight(.semibold).foregroundStyle(PhrenTheme.chatText).lineLimit(1)
                     if summary.count > 1 { Text("×\(summary.count)").foregroundStyle(PhrenTheme.chatNeutralDim) }
                     Text(summary.preview).foregroundStyle(PhrenTheme.chatNeutral).lineLimit(1).truncationMode(.middle)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     if messages.contains(where: \.isToolResult) {
-                        Image(systemName: "checkmark").font(.system(size: 10, weight: .medium)).foregroundStyle(PhrenTheme.chatNeutralDim)
+                        Image(systemName: "checkmark").font(.system(size: 12, weight: .medium)).foregroundStyle(PhrenTheme.chatNeutralDim)
                     }
-                    Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
+                    Image(systemName: "chevron.down").font(.system(size: 12, weight: .semibold))
                         .rotationEffect(.degrees(expanded ? 180 : 0)).foregroundStyle(PhrenTheme.chatNeutralDim)
                 }
-                .font(.system(.caption, design: .monospaced))
-                .padding(.horizontal, 12).frame(height: 44)
-                .contentShape(Rectangle().inset(by: -5))
+                .font(PhrenTypography.footnote)
+                .padding(.horizontal, 12).padding(.vertical, 4).frame(minHeight: 44)
+                .contentShape(Rectangle())
             }.buttonStyle(.plain)
                 .accessibilityLabel("\(summary.title), \(summary.count) \(summary.count == 1 ? "operation" : "operations")")
                 .accessibilityValue(expanded ? "Expanded" : "Collapsed")

@@ -29,13 +29,13 @@ struct MCPToolCard: View, Equatable {
         } label: {
             VStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
                 HStack(spacing: PhrenTheme.Space.small) {
-                    Image(systemName: "server.rack").font(.system(size: 15, weight: .medium)).foregroundStyle(PhrenTheme.phrenCardAccent)
-                        .frame(width: 22, height: 22).accessibilityHidden(true)
-                    Text(presentation.verb).font(.subheadline.weight(.semibold))
+                    Image(systemName: "server.rack").font(.system(size: 14, weight: .medium)).foregroundStyle(PhrenTheme.phrenCardAccent)
+                        .frame(width: 18, height: 18).accessibilityHidden(true)
+                    Text(presentation.verb).font(PhrenTypography.footnote.weight(.semibold))
                         .foregroundStyle(PhrenTheme.text).lineLimit(2)
                     Spacer(minLength: 0)
                     status
-                    Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold))
+                    Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(PhrenTheme.phrenCardAccent).accessibilityHidden(true)
                 }
                 ToolCardChip(text: presentation.server)
@@ -73,11 +73,14 @@ struct MCPToolCard: View, Equatable {
     @ViewBuilder private var status: some View {
         switch presentation.status {
         case .running:
-            Image(systemName: "ellipsis").foregroundStyle(PhrenTheme.phrenCardAccent).accessibilityLabel("Running")
+            Image(systemName: "ellipsis").font(.system(size: 12, weight: .medium))
+                .foregroundStyle(PhrenTheme.phrenCardAccent).accessibilityLabel("Running")
         case .succeeded:
-            Image(systemName: "checkmark").foregroundStyle(PhrenTheme.phrenCardAccent).accessibilityLabel("Completed")
+            Image(systemName: "checkmark").font(.system(size: 12, weight: .medium))
+                .foregroundStyle(PhrenTheme.phrenCardAccent).accessibilityLabel("Completed")
         case .failed:
-            Image(systemName: "exclamationmark.circle").foregroundStyle(PhrenTheme.danger).accessibilityLabel("Failed")
+            Image(systemName: "exclamationmark.circle").font(.system(size: 12, weight: .medium))
+                .foregroundStyle(PhrenTheme.danger).accessibilityLabel("Failed")
         }
     }
 }

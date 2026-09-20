@@ -123,6 +123,8 @@ final class AgentChatModel {
     /// The agent is summarizing the conversation to reclaim context; the
     /// header says so and the turn stays busy until it finishes.
     var isCompacting = false
+    var historyStalled = false
+    var historyStalledSince: Date?
     private var preferProgressActivity = false
     var activityPhase: AgentChatProgress.Phase? {
         if preferProgressActivity { return progress.phase }
@@ -233,7 +235,8 @@ final class AgentChatModel {
                 restoringDraft = false
             }
             history = .init(); progress = .init(); reveal.finish(); hasTranscript = false
-            awaitingReply = false; sentAt = nil; liveActivity = nil; isCompacting = false; modelName = nil; preferProgressActivity = false
+            awaitingReply = false; sentAt = nil; liveActivity = nil; isCompacting = false; historyStalled = false; historyStalledSince = nil
+            modelName = nil; preferProgressActivity = false
             transcriptContext = .init(); statusBranch = nil
             connected = false; error = nil; deliveryError = nil
             sentImages = []; needsAnswer = false; approval = nil; questionState = AgentQuestionState()
@@ -281,7 +284,8 @@ final class AgentChatModel {
         statusTask?.cancel(); statusTask = nil; interactionConnected = false; approval = nil
         target = nil; history = .init(); connected = false; queue = []; drainTask?.cancel(); drainTask = nil
         rejectedStreamTarget = nil
-        progress = .init(); reveal.finish(); hasTranscript = false; awaitingReply = false; sentAt = nil; liveActivity = nil; isCompacting = false; modelName = nil
+        progress = .init(); reveal.finish(); hasTranscript = false; awaitingReply = false; sentAt = nil; liveActivity = nil; isCompacting = false
+        historyStalled = false; historyStalledSince = nil; modelName = nil
         transcriptContext = .init(); statusBranch = nil
         draft = ""; attachments = []; sentImages = []; deliveryError = nil; needsAnswer = false
     }
@@ -363,6 +367,7 @@ final class AgentChatModel {
         progressTask?.cancel(); progressTask = nil
         streamTask?.cancel(); streamTask = nil; streamTarget = nil
         statusTask?.cancel(); statusTask = nil; interactionConnected = false; approval = nil; isCompacting = false
+        historyStalled = false; historyStalledSince = nil
         connected = false; loading = false
         // Polling failures cannot remove a rejected-transcript latch and cause
         // the same oversized backlog to be decoded again after the host recovers.
@@ -396,7 +401,10 @@ final class AgentChatModel {
                     return
                 }
                 #endif
-                let updates = PhrenConnection.chatUpdates(host: session.host, privateKey: try DeviceSSHKey.load(session.host.id), target: target)
+                // Raw line totals include private rows with no chat bubble,
+                // so they are the only lossless cursor for the Hook's index.
+                let afterLine = hasTranscript && history.totalLines > 0 ? history.totalLines - 1 : nil
+                let updates = PhrenConnection.chatUpdates(host: session.host, privateKey: try DeviceSSHKey.load(session.host.id), target: target, afterLine: afterLine)
                 for try await frame in updates {
                     try Task.checkCancellation()
                     guard self.target == target, generation == run else { return }
@@ -488,6 +496,7 @@ final class AgentChatModel {
 
     private func beginStatus(_ session: LiveAgentSession, target: AgentChatTarget, run: UUID) {
         statusTask?.cancel(); interactionConnected = false; approval = nil; isCompacting = false
+        historyStalled = false; historyStalledSince = nil
         let statusRun = UUID(); statusGeneration = statusRun
         statusTask = Task {
             while !Task.isCancelled {
@@ -499,6 +508,8 @@ final class AgentChatModel {
                         if ProcessInfo.processInfo.arguments.contains("--chat-question-unsupported") { questionsSupported = false }
                         approval = try AgentChatFixture.approval(target)
                         terminalPrompt = AgentChatFixture.terminalPrompt(target)
+                        let status = try AgentChatFixture.status(target)
+                        historyStalled = status.historyStalled; historyStalledSince = status.historyStalledSince
                         if !ProcessInfo.processInfo.arguments.contains("--chat-streaming") {
                             acceptActivity(try AgentChatFixture.panes(session).validate(target).agentStatus)
                         }
@@ -518,6 +529,7 @@ final class AgentChatModel {
                         questionsSupported = status.questionsSupported; asyncQuestionsSupported = status.asyncQuestionsSupported
                         acceptActivity(status.activity); interactionConnected = true
                         isCompacting = status.compacting
+                        historyStalled = status.historyStalled; historyStalledSince = status.historyStalledSince
                         if let name = status.modelName, modelName != name { modelName = name }
                         if statusBranch != status.branch { statusBranch = status.branch }
                         if approval != nil || ["waiting", "blocked"].contains(status.activity ?? "") { awaitingReply = false }
@@ -526,6 +538,7 @@ final class AgentChatModel {
                 } catch {}
                 guard !Task.isCancelled, self.target == target, generation == run, statusGeneration == statusRun else { return }
                 approval = nil; terminalPrompt = nil; interactionConnected = false; isCompacting = false
+                historyStalled = false; historyStalledSince = nil
                 do { try await Task.sleep(for: .seconds(3)) } catch { return }
             }
         }

@@ -35,15 +35,23 @@ extension ChatTimelineEntry {
 /// PhrenToolCard's look for the agent's own cards: the same surface, border
 /// and radius, so the phren, agent, todo and plan cards read as one family.
 struct ToolCardChrome: ViewModifier {
+    var collapsed = false
     func body(content: Content) -> some View {
-        content
-            .padding(PhrenTheme.Space.medium).frame(maxWidth: .infinity, alignment: .leading)
-            .background(PhrenTheme.phrenCardSurface, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium))
-            .overlay(RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium).strokeBorder(PhrenTheme.phrenCardBorder, lineWidth: 0.5))
+        if collapsed {
+            content
+                .padding(.horizontal, 12).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .background(PhrenTheme.phrenCardSurface, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium))
+                .overlay(RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium).strokeBorder(PhrenTheme.phrenCardBorder, lineWidth: 0.5))
+        } else {
+            content
+                .padding(PhrenTheme.Space.medium).frame(maxWidth: .infinity, alignment: .leading)
+                .background(PhrenTheme.phrenCardSurface, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium))
+                .overlay(RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium).strokeBorder(PhrenTheme.phrenCardBorder, lineWidth: 0.5))
+        }
     }
 }
 extension View {
-    func toolCard() -> some View { modifier(ToolCardChrome()) }
+    func toolCard(collapsed: Bool = false) -> some View { modifier(ToolCardChrome(collapsed: collapsed)) }
     /// The card's identifier on a 1×1 element over its corner: stamped on
     /// the container it would hide the children from tests and VoiceOver.
     func toolCardMarker(_ id: String, label: String) -> some View {
@@ -61,27 +69,35 @@ struct ToolCardHeader<Trailing: View>: View {
     let icon: String
     let title: String
     var status: ToolCardStatus? = nil
+    var compact = false
     @ViewBuilder var trailing: () -> Trailing
-    init(icon: String, title: String, status: ToolCardStatus? = nil, @ViewBuilder trailing: @escaping () -> Trailing = { EmptyView() }) {
-        self.icon = icon; self.title = title; self.status = status; self.trailing = trailing
+    init(icon: String, title: String, status: ToolCardStatus? = nil, compact: Bool = false,
+         @ViewBuilder trailing: @escaping () -> Trailing = { EmptyView() }) {
+        self.icon = icon; self.title = title; self.status = status; self.compact = compact; self.trailing = trailing
     }
     var body: some View {
         HStack(spacing: PhrenTheme.Space.small) {
-            Image(systemName: icon).font(.system(size: 15, weight: .medium)).foregroundStyle(PhrenTheme.phrenCardAccent)
-                .frame(width: 22, height: 22).accessibilityHidden(true)
-            Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(PhrenTheme.text).lineLimit(2)
+            Image(systemName: icon).font(.system(size: compact ? 14 : 15, weight: .medium)).foregroundStyle(PhrenTheme.phrenCardAccent)
+                .frame(width: compact ? 18 : 22, height: compact ? 18 : 22).accessibilityHidden(true)
+            Text(title).font(compact ? PhrenTypography.footnote.weight(.semibold) : .subheadline.weight(.semibold))
+                .foregroundStyle(PhrenTheme.text).lineLimit(compact ? 1 : 2)
             Spacer(minLength: 0)
             trailing()
-            switch status {
-            case .running:
-                Image(systemName: "ellipsis").foregroundStyle(PhrenTheme.phrenCardAccent).accessibilityLabel("Running")
-            case .done:
-                Image(systemName: "checkmark").foregroundStyle(PhrenTheme.phrenCardAccent).accessibilityLabel("Completed")
-            case .failed:
-                Image(systemName: "exclamationmark.circle").foregroundStyle(PhrenTheme.danger).accessibilityLabel("Failed")
-            case nil: EmptyView()
+            Group {
+                switch status {
+                case .running:
+                    Image(systemName: "ellipsis").foregroundStyle(PhrenTheme.phrenCardAccent).accessibilityLabel("Running")
+                case .done:
+                    Image(systemName: "checkmark").foregroundStyle(PhrenTheme.phrenCardAccent).accessibilityLabel("Completed")
+                case .failed:
+                    Image(systemName: "exclamationmark.circle").foregroundStyle(PhrenTheme.danger).accessibilityLabel("Failed")
+                case nil: EmptyView()
+                }
             }
+            .font(.system(size: compact ? 12 : 15, weight: .medium))
         }
+        .padding(.vertical, compact ? 4 : 0)
+        .frame(minHeight: compact ? 44 : nil)
     }
 }
 

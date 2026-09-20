@@ -86,6 +86,14 @@ enum UITestFixtures {
                 try await store.write("global/skills/review-style.md", content: SkillFile.template(name: "review-style", description: "Review shared style", instructions: "Use clear names."), blobSha: nil)
                 try await store.write("other/skills/other-check.md", content: SkillFile.template(name: "other-check", description: "Review another project", instructions: "Check the other project."), blobSha: nil)
             }
+            if owner == primary, arguments.contains("--schedules-fixture") {
+                try await store.write("machines.yaml", content: "Desk: desk\n", blobSha: nil)
+                try await store.write("profiles/desk.yaml", content: "name: desk\nprojects:\n  - demo\n  - other\n", blobSha: nil)
+                try await store.write("other/FINDINGS.md", content: "# Findings\n", blobSha: nil)
+                try await store.write("demo/schedules.yaml", content: Self.demoSchedules, blobSha: nil)
+                try await store.write("other/schedules.yaml", content: Self.otherSchedules, blobSha: nil)
+                defaults.set(try LiveSessionPreferences.saving(mac(), in: Data()), forKey: preferencesKey)
+            }
             if owner == primary, arguments.contains("--automatic-sessions-fixture") {
                 let savedPins = (try? LiveSessionPreferences.read(defaults.data(forKey: preferencesKey) ?? Data()))?.pinnedSessions ?? []
                 if trailer {
@@ -152,9 +160,58 @@ enum UITestFixtures {
         let arguments = ProcessInfo.processInfo.arguments
         let trailer = arguments.contains("--trailer-fixture")
         let tour = arguments.contains("--store-tour-fixture") || trailer
+        if arguments.contains("--schedules-fixture") {
+            return try LiveHost(id: hostIDs[0], name: "Desk", address: "desk.example", username: "sam",
+                                fingerprint: "SHA256:" + String(repeating: "A", count: 43))
+        }
         return try LiveHost(id: hostIDs[0], name: trailer ? "studio" : tour ? "Mac mini" : "Test Mac", address: trailer ? "studio" : tour ? "mini" : "fixture.invalid",
                             username: tour ? "ala" : "fixture", fingerprint: "SHA256:" + String(repeating: "A", count: 43))
     }
+
+    private static let demoSchedules = """
+    version: 1
+    schedules:
+      - id: 7f3a2c1d
+        name: Nightly test sweep
+        enabled: true
+        computer: Desk
+        harness: codex
+        model: gpt-5.6-sol
+        every: daily
+        at: "07:30"
+        prompt: |
+          Run the full test suite, fix what is red, and leave a summary in tasks.
+        createdAt: 2026-09-20T21:00:00Z
+        updatedAt: 2026-09-20T21:00:00Z
+      - id: 8a4b3c2d
+        name: Weekday review
+        enabled: true
+        computer: Desk
+        harness: claude
+        every: weekly
+        at: "07:30"
+        days: [mon, tue, wed, thu, fri]
+        prompt: |
+          Review the active work and summarize anything that needs attention.
+        createdAt: 2026-09-20T21:05:00Z
+        updatedAt: 2026-09-20T21:05:00Z
+    """
+
+    private static let otherSchedules = """
+    version: 1
+    schedules:
+      - id: 9b5c4d3e
+        name: One-time launch check
+        enabled: true
+        computer: Desk
+        harness: opencode
+        every: once
+        once: 2026-09-21T09:00:00
+        prompt: |
+          Check the launch once and record the result.
+        createdAt: 2026-09-20T21:10:00Z
+        updatedAt: 2026-09-20T21:10:00Z
+    """
 
     /// The finding Claude saves in the video's conversation, and the node the
     /// memory graph opens: one text, so the viewer sees the same card twice.

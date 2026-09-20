@@ -17,6 +17,9 @@ final class AccountUsageCache {
         self.now = now; self.fetch = fetch ?? { try await Self.fetch($0) }
     }
     func snapshot(for host: LiveHost) -> AccountUsageSnapshot? { cache.snapshot(for: host) }
+    func mergedAccounts(for hosts: [LiveHost], at date: Date) -> [MergedAccountUsage] {
+        MergedAccountUsage.merge(hosts.map { ($0.name, cache.snapshot(for: $0)) }, at: date)
+    }
 
     @discardableResult
     func refresh(_ host: LiveHost, force: Bool = false) async throws -> AccountUsageSnapshot {
@@ -44,12 +47,17 @@ final class AccountUsageCache {
             }
             if ProcessInfo.processInfo.arguments.contains("--usage-delayed") { try await Task.sleep(for: .milliseconds(800)) }
             let now = Date()
-            var accounts = ["codex", "claude"].map { source in
-                ["source": source, "updatedAt": now.ISO8601Format(), "windows": [
-                    ["id": "five_hour", "name": "5-hour limit", "usedPercent": 23.5, "resetsAt": now.addingTimeInterval(7200).ISO8601Format()],
-                    ["id": "seven_day", "name": "7-day limit", "usedPercent": 41.2, "resetsAt": now.addingTimeInterval(172800).ISO8601Format()]
-                ]] as [String: Any]
-            }
+            var accounts: [[String: Any]] = [
+                ["source": "codex", "updatedAt": now.ISO8601Format(), "windows": [
+                    ["id": "codex:primary", "name": "5-hour limit", "usedPercent": 23.5, "resetsAt": now.addingTimeInterval(7200).ISO8601Format()],
+                    ["id": "codex:secondary", "name": "7-day limit", "usedPercent": 41.2, "resetsAt": now.addingTimeInterval(172800).ISO8601Format()]
+                ]],
+                ["source": "claude", "updatedAt": now.ISO8601Format(), "windows": [
+                    ["id": "five_hour", "name": "5-hour limit", "usedPercent": 40.0, "resetsAt": now.addingTimeInterval(7200).ISO8601Format()],
+                    ["id": "seven_day", "name": "7-day, all models", "usedPercent": 16.0, "resetsAt": now.addingTimeInterval(172800).ISO8601Format()],
+                    ["id": "seven_day_fable", "name": "7-day, Fable", "usedPercent": 18.0, "resetsAt": now.addingTimeInterval(172800).ISO8601Format()]
+                ]]
+            ]
             accounts.append(["source": "opencode", "updatedAt": now.ISO8601Format(), "windows": [],
                              "spend": ["amountUSD": 4.39, "period": "rolling_7_days"]])
             accounts.append(["source": "openrouter", "accountId": String(repeating: "a", count: 64),

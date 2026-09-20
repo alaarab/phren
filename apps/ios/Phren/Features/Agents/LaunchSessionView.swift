@@ -11,6 +11,7 @@ struct LaunchSessionView: View {
     let storeID: String
     let project: String
     var taskRequest: TaskAgentRequest? = nil
+    var preferredHostID: UUID? = nil
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @AppStorage("sessions.live.preferences.v1") private var data = Data()
@@ -243,7 +244,7 @@ struct LaunchSessionView: View {
     /// Pre-select the first computer the store says has the project, and
     /// learn each computer's own name so `machines.yaml` can be matched.
     private func prepare() async {
-        if hostID == nil, let known = hosts.first(where: knowsProject) ?? hosts.first { select(known) }
+        if hostID == nil, let known = hosts.first(where: { $0.id == preferredHostID }) ?? hosts.first(where: knowsProject) ?? hosts.first { select(known) }
         await withTaskGroup(of: (UUID, String?).self) { group in
             for host in hosts where host.fingerprint != nil {
                 group.addTask {

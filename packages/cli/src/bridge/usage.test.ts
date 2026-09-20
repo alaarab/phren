@@ -49,12 +49,14 @@ describe("account usage", () => {
     }
     expect(claudeUsage({}).message).toContain("after Claude Code replies");
     expect(claudeUsage({ rate_limits: { five_hour: { used_percentage: 100, resets_at: "tomorrow" } } }).windows[0].resetsAt).toBeUndefined();
-    // Per-model windows each get their own line, after the two overall ones.
+    // Weekly-all and per-model windows are separate allotments. A scoped
+    // window can be higher without contradicting the all-models window.
     const perModel = claudeUsage({ rate_limits: {
-      seven_day_fable: { used_percentage: 12, resets_at: 1789848000 }, five_hour: { used_percentage: 10, resets_at: 1789514400 },
-      seven_day: { used_percentage: 70, resets_at: 1789848000 }, seven_day_opus: { used_percentage: 3, resets_at: 1789848000 } } });
-    expect(perModel.windows.map(w => [w.id, w.name])).toEqual([
-      ["five_hour", "5-hour limit"], ["seven_day", "7-day limit"], ["seven_day_fable", "7-day · Fable"], ["seven_day_opus", "7-day · Opus"]]);
+      seven_day_fable: { used_percentage: 18, resets_at: 1789848000 }, five_hour: { used_percentage: 40, resets_at: 1789514400 },
+      seven_day: { used_percentage: 16, resets_at: 1789848000 }, seven_day_opus: { used_percentage: 3, resets_at: 1789848000 } } });
+    expect(perModel.windows.map(w => [w.id, w.name, w.usedPercent])).toEqual([
+      ["five_hour", "5-hour limit", 40], ["seven_day", "7-day, all models", 16],
+      ["seven_day_fable", "7-day, Fable", 18], ["seven_day_opus", "7-day, Opus", 3]]);
   });
   it("normalizes Claude's documented subscription status-line data", () => {
     const value = claudeUsage({ rate_limits: { five_hour: { used_percentage: 41.2, resets_at: reset },
@@ -83,8 +85,8 @@ describe("account usage", () => {
         { kind: "weekly_scoped", percent: 200, scope: { model: { display_name: "Broken" } } },
       ] } } };
     expect(claudeScopedWindows(config, now)).toEqual([
-      { id: "seven_day_fable", name: "7-day · Fable", usedPercent: 48, resetsAt: "2026-09-19T20:00:00.000Z", asOf: "2026-09-12T07:00:00.000Z" },
-      { id: "seven_day_opus_5", name: "7-day · Opus 5", usedPercent: 7, resetsAt: undefined, asOf: "2026-09-12T07:00:00.000Z" },
+      { id: "seven_day_fable", name: "7-day, Fable", usedPercent: 48, resetsAt: "2026-09-19T20:00:00.000Z", asOf: "2026-09-12T07:00:00.000Z" },
+      { id: "seven_day_opus_5", name: "7-day, Opus 5", usedPercent: 7, resetsAt: undefined, asOf: "2026-09-12T07:00:00.000Z" },
     ]);
     expect(JSON.stringify(claudeScopedWindows(config, now))).not.toContain("private");
     expect(claudeScopedWindows({ cachedUsageUtilization: { utilization: { limits: [] } } }, now)).toEqual([]);
@@ -129,9 +131,9 @@ describe("account usage", () => {
     ], access_token: "private" }, now);
     expect(value.windows.map(w => [w.id, w.name, w.usedPercent])).toEqual([
       ["five_hour", "5-hour limit", 2],
-      ["seven_day", "7-day limit", 99],
-      ["seven_day_fable", "7-day · Fable", 100],
-      ["seven_day_opus_5", "7-day · Opus 5", 7],
+      ["seven_day", "7-day, all models", 99],
+      ["seven_day_fable", "7-day, Fable", 100],
+      ["seven_day_opus_5", "7-day, Opus 5", 7],
     ]);
     expect(JSON.stringify(value)).not.toContain("private");
     expect(value.updatedAt).toBe(now.toISOString());

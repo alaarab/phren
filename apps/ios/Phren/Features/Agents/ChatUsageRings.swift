@@ -9,17 +9,15 @@ struct ChatUsageRings: View {
 
     var body: some View {
         let context = session.tab.contextUsedPercent
-        // Show the most consumed reported window; do not invent a quota for
-        // a provider that does not publish one or borrow another provider's.
-        let account = cache.snapshot(for: session.host)?.accounts.first { $0.source == source }
-        let quota = account?.windows.map(\.usedPercent).max()
+        let account = cache.mergedAccounts(for: [session.host], at: Date()).first { $0.source == source }
+        let quota = account?.primaryWindow?.usedPercent
         NavigationLink { AccountUsageView(hostID: session.host.id) } label: {
             ZStack {
                 ring(context, color: PhrenTheme.accent, size: 28)
                 ring(quota, color: PhrenTheme.success, size: 18)
             }.frame(width: 44, height: 44).contentShape(Rectangle())
         }.accessibilityLabel("Context and account usage")
-            .accessibilityValue("Context \(context.map { "\(Int($0))%" } ?? "unavailable"), account \(quota.map { "\(Int($0))%" } ?? "unavailable")")
+            .accessibilityValue("Context \(context.map { AccountUsagePresentation.percent($0) } ?? "unavailable"), account \(quota.map { AccountUsagePresentation.percent($0) } ?? "unavailable")")
             .accessibilityIdentifier("chat-usage-rings")
             .task(id: phase) {
                 guard phase == .active else { return }

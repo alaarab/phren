@@ -1025,6 +1025,19 @@ public actor SyncEngine {
             // Every knob back to "inherit" with no file to edit is a no-op.
             if current == nil && next.isEmpty { return [] }
             return [FileEdit(path: path, content: next)]
+
+        case .saveSchedules(let project, let content, let expected):
+            let path = "\(project)/\(SchedulesFile.fileName)"
+            guard LocalStore.isSchedulesPath(path) else {
+                throw PhrenKitError.validation("\(path) cannot hold schedules.")
+            }
+            let current = await read(path, overlay: overlay)
+            guard current == expected || current == content else {
+                throw PhrenKitError.validation(
+                    "\(path) changed since you opened it. Review the latest version before saving again."
+                )
+            }
+            return [FileEdit(path: path, content: content)]
         }
     }
 }

@@ -124,7 +124,7 @@ private struct BranchRow: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text(name).font(PhrenTheme.Font.monoSubheadline.weight(.medium))
+                    Text(name).font(PhrenTypography.monoFootnote.weight(.medium))
                         .foregroundStyle(current ? PhrenTheme.success : PhrenTheme.chatText)
                         .lineLimit(1).truncationMode(.middle)
                     if let upstream {
@@ -141,14 +141,14 @@ private struct BranchRow: View {
                 Image(systemName: "arrow.up.right")
                     .font(PhrenTheme.Font.subheadline.weight(.semibold))
                     .foregroundStyle(PhrenTheme.textMuted)
-                    .frame(width: 32, height: 44)
+                    .frame(width: 32, height: 40)
                     .accessibilityHidden(true)
             }
         }
-        .padding(.horizontal, PhrenTheme.Space.medium).padding(.vertical, 6)
-        .frame(minHeight: 44)
+        .padding(.horizontal, PhrenTheme.Space.medium).padding(.vertical, 2)
+        .frame(minHeight: 40)
         .background(current ? PhrenTheme.success.opacity(0.12) : PhrenTheme.surface,
                     in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.small, style: .continuous))
-        .contentShape(Rectangle())
+        .contentShape(Rectangle().inset(by: -2))
     }
 }

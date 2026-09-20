@@ -79,7 +79,7 @@ struct ChangesHistoryTab: View {
         switch row {
         case .uncommitted(let uncommitted):
             HStack(spacing: 8) {
-                Text("Uncommitted changes").font(PhrenTheme.Font.subheadline.weight(.medium)).foregroundStyle(PhrenTheme.text).lineLimit(1)
+                Text("Uncommitted changes").font(PhrenTypography.footnote.weight(.medium)).foregroundStyle(PhrenTheme.text).lineLimit(1)
                 Spacer(minLength: 8)
                 if uncommitted.files > 0 {
                     Text("\(uncommitted.files) file\(uncommitted.files == 1 ? "" : "s")")
@@ -87,26 +87,26 @@ struct ChangesHistoryTab: View {
                     PhrenStatLabel(added: uncommitted.additions, removed: uncommitted.deletions)
                 }
             }
-            .padding(.vertical, 6)
+            .padding(.vertical, 2)
             .padding(.leading, 34)
-            .frame(minHeight: 44)
+            .frame(minHeight: 40)
             .background(uncommitted.files > 0 ? PhrenTheme.success.opacity(0.08) : Color.clear)
             .overlay(alignment: .leading) { HistoryRail(connectTop: false, connectBottom: bottom, ring: true) }
             .accessibilityIdentifier("changes-history-uncommitted")
         case .commit(let commit):
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 1) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(commit.subject).font(PhrenTheme.Font.subheadline).foregroundStyle(PhrenTheme.chatText)
+                    Text(commit.subject).font(PhrenTypography.footnote).foregroundStyle(PhrenTheme.chatText)
                         .lineLimit(1).truncationMode(.tail)
                     Spacer(minLength: 8)
                     Text(commit.relativeTime).font(PhrenTheme.Font.caption).foregroundStyle(PhrenTheme.textMuted).monospacedDigit()
                 }
                 if !commit.refs.isEmpty { GitRefChips(refs: commit.refs) }
             }
-            .padding(.vertical, 6)
+            .padding(.vertical, 2)
             .padding(.leading, 34)
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
+            .frame(minHeight: 40)
+            .contentShape(Rectangle().inset(by: -2))
             .overlay(alignment: .leading) { HistoryRail(connectTop: top, connectBottom: bottom, ring: false) }
             .onTapGesture { copy(commit) }
             .onLongPressGesture { showingFull = commit }

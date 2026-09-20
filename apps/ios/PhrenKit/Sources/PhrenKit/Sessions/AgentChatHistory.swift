@@ -23,7 +23,8 @@ public struct AgentChatHistory: Equatable, Sendable {
     public func acknowledgementID(for messageID: String) -> String { acknowledgementIDs[messageID] ?? messageID }
 
     public mutating func receive(_ frame: AgentChatTranscript) {
-        if frame.kind == .backlog && frame.totalLines < totalLines { self = Self() }
+        // A reconnect page can lag behind rows the phone already retained.
+        // Conversation selection owns resets; a lower count cannot prove one.
         var merged = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, $0) })
         for message in frame.messages where replacedQueueMessages[message.id] == nil {
             // Once browsing beyond the retained live window, incoming output

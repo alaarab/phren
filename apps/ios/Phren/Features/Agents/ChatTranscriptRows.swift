@@ -20,7 +20,7 @@ struct ChatTranscriptRows: View, Equatable {
     }
     var body: some View {
         ChatPerformance.measure("transcript rows") {
-            LazyVStack(alignment: .leading, spacing: 12) {
+            LazyVStack(alignment: .leading, spacing: 6) {
                 ForEach(entries) { entry in
                     ChatTranscriptRow(entry: entry, revealedText: revealed[entry.id], images: images[entry.id] ?? [],
                                       session: session, target: target, active: active, preview: preview)

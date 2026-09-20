@@ -81,6 +81,9 @@ public struct AgentInteractionStatus: Equatable, Sendable {
     public var branch: String? = nil
     /// True while the agent is summarizing the conversation to reclaim context.
     public var compacting = false
+    /// The Codex pane is still active, but its persisted history stopped advancing.
+    public var historyStalled = false
+    public var historyStalledSince: Date? = nil
     public static func read(_ data: Data, target: AgentChatTarget) throws -> Self? {
         guard data.count <= 1_048_576 else { throw PhrenKitError.validation("Agent status is too large.") }
         guard let frame = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -113,7 +116,9 @@ public struct AgentInteractionStatus: Equatable, Sendable {
                          prompt.isAsync = true; return prompt
                      } },
                      branch: (status["branch"] as? String).flatMap { $0.isEmpty ? nil : String($0.prefix(200)) },
-                     compacting: status["compacting"] as? Bool ?? false)
+                     compacting: status["compacting"] as? Bool ?? false,
+                     historyStalled: status["historyStalled"] as? Bool ?? false,
+                     historyStalledSince: ISO8601Dates.parse(status["historyStalledSince"] as? String))
     }
 }
 

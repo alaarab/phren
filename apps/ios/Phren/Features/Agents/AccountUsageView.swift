@@ -20,7 +20,7 @@ struct AccountUsageView: View {
                 Text("Connect a computer in Agents to see Claude, Codex, OpenCode, and OpenRouter usage.")
             } else {
                 TimelineView(.periodic(from: .now, by: 30)) { context in
-                    let accounts = MergedAccountUsage.merge(hosts.map { ($0.name, cache.snapshot(for: $0)) }, at: context.date)
+                    let accounts = cache.mergedAccounts(for: hosts, at: context.date)
                     if accounts.isEmpty, !loading.isEmpty { ProgressView("Reading account limits…") }
                     ForEach(accounts) { account in
                         Section { AccountUsageCard(account: account, now: context.date) }
@@ -79,19 +79,25 @@ private struct AccountUsageCard: View {
                 .accessibilityIdentifier("usage-spend:\(account.source)")
             }
             ForEach(account.windows) { window in
+                let name = AccountUsagePresentation.windowName(window, source: account.source)
+                let percent = AccountUsagePresentation.percent(window.usedPercent)
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(alignment: .firstTextBaseline) {
-                        Text(Self.shortName(window.name)).font(.subheadline)
+                        Text(name).font(.subheadline)
                         Spacer()
-                        Text("\(window.usedPercent.formatted(.number.precision(.fractionLength(0...1))))%")
-                            .font(.subheadline.monospacedDigit().weight(.semibold))
+                        Text(percent).font(.subheadline.monospacedDigit().weight(.semibold))
                     }
                     ProgressView(value: window.usedPercent, total: 100)
                         .tint(account.stale ? PhrenTheme.textMuted : window.usedPercent >= 90 ? PhrenTheme.warning : PhrenTheme.accent)
-                        .accessibilityLabel("\(window.name): \(window.usedPercent.formatted()) percent used")
+                        .accessibilityLabel("\(name): \(window.usedPercent.formatted()) percent used")
                     caption(window)
                 }
-                .accessibilityIdentifier("usage-window:\(account.source):\(window.id)")
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel(name)
+                .accessibilityValue("\(account.name) \(percent)")
+                .accessibilityIdentifier(window.id == account.primaryWindow?.id
+                                         ? "usage-primary-window:\(account.source)"
+                                         : "usage-window:\(account.source):\(window.id)")
             }
             if let message = account.message {
                 Text(message).font(.footnote).foregroundStyle(PhrenTheme.textMuted)
@@ -102,11 +108,6 @@ private struct AccountUsageCard: View {
         }
         .padding(.vertical, 4)
         .accessibilityIdentifier("account-usage:\(account.source)")
-    }
-
-    /// "5-hour limit" → "5-hour"; "7-day · Fable" stays.
-    static func shortName(_ name: String) -> String {
-        name.hasSuffix(" limit") ? String(name.dropLast(6)) : name
     }
 
     @ViewBuilder private func caption(_ window: AccountUsageSnapshot.Window) -> some View {

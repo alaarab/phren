@@ -73,9 +73,15 @@ WebSockets on the same socket.
 | Route | Purpose and boundary |
 | --- | --- |
 | `GET /v1/health` | Protocol, capabilities, computer identity. |
+| `POST /v1/dispatch` | Place a worker brief on an enrolled computer over pinned SSH. Returns a durable receipt and remote target; never automatically retries a mutation. |
+| `GET /v1/dispatch`, `/v1/dispatch/capacity` | Local placement receipts; running Herdr servers and working-agent count for scheduling. These are not worker completion reports. |
 | `GET /v1/muxes` | Running Herdr servers. |
 | `GET /v1/workspaces`, `/v1/workspaces/panes` | Workspace overview, pane identity, context, branch, activity and watched approvals. |
 | `POST /v1/workspaces/launch` | Create a workspace/tab and start the selected agent. |
+| `POST /v1/schedules` | List every store schedule with its project, this computer's next run, latest local run, and running state. A schedule assigned to another computer has `nextRun: null`. |
+| `POST /v1/schedules/run` | Launch `{ project, id }` immediately through the same Herdr or headless scheduler path. Unknown schedules are 404; an active run or another computer assignment is 409. |
+| `POST /v1/schedules/history` | Newest-first computer-local schedule runs, filtered by optional `project` and `id`; `limit` defaults to 50 and is capped at 500. |
+| `POST /v1/workspaces/launch` | Create a workspace/tab and start the selected agent. Accepts the phone's `cwd` or a mutually exclusive `project` slug resolved from this computer's registered sourcePath. Returns a session or starting `target` when identity is available. |
 | `POST /v1/workspaces/create`, `/focus`, `/rename`, `/close` | Existing workspace actions. Creation uses the same launch admission limits. |
 | `GET /v1/projects/locate` | Existing project candidates from activity, Herdr, store registration and local search roots. |
 | `GET /v1/projects/repos` | Git checkouts on this computer for "Add project" — activity, Herdr, then one level under the project roots — each marked whether phren already tracks it. |
@@ -104,6 +110,22 @@ Creation resolves `cwd` with `realpath`, requires an existing directory under th
 user's real home or within a `locateProject` candidate, and sends the resolved
 path to Herdr. At most one creation/launch is in flight, and at most six attempts
 are admitted per minute; excess requests return HTTP 429.
+
+The scheduler reads `<project>/schedules.yaml` every 30 seconds. Computer names
+match case-insensitively with a trailing `.local` ignored. Run state stays in
+`schedule-runs.jsonl` under the private Hook runtime and retains the newest 2000
+runs. A run is recorded before launch and a `launched` or `running` record blocks
+another launch for that schedule. Headless jobs write their manifest and event
+log under the store's private `agent-fanouts` runtime folder so Agent work can
+discover them.
+Computer dispatch keys reuse the phone's `restrict,pty` forced-command line;
+`phren bridge enroll-computer <name>` prints it and `--accept <public-key-file>`
+enrolls it on a receiver. This grants the full phone boundary above, including
+project shells and loopback services, not only dispatch. Private keys and
+verified peers in `hooks.yaml` stay under the Hook runtime directory. A dispatch
+project's registered absolute `sourcePath` is resolved on the receiver and must
+exist; the sender cannot supply a directory. See [Conductor](../../../../docs/conductor.md)
+for setup, receipt states, scheduling and follow-on report/tree contracts.
 
 `/v1/diff` accepts extra `paths` only within the pane repository, the phren store,
 the conversation's locally recorded `phren_changes` roots/paths, or paths found

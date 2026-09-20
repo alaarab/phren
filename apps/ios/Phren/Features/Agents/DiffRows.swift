@@ -69,7 +69,7 @@ struct DiffRowView: View {
     /// numbers drew without reaching into the collapsed row's children.
     var markGutter = false
     /// The width of each number column. The Changes screen's two numbers share
-    /// a fixed 44pt gutter; the chat diff keeps the editor's wider columns.
+    /// a fixed 40pt gutter; the chat diff keeps the editor's wider columns.
     var numberWidth: CGFloat = DiffPalette.numberWidth
 
     var body: some View {
@@ -101,6 +101,7 @@ struct DiffRowView: View {
                             Text(row.old.map(String.init) ?? "").frame(width: numberWidth, alignment: .trailing)
                             Text(row.new.map(String.init) ?? "").frame(width: numberWidth, alignment: .trailing)
                         }
+                        .font(PhrenTypography.monoCaption2)
                         .foregroundStyle(PhrenTheme.textDim).padding(.trailing, 6).padding(.vertical, 1.5)
                         .background(DiffPalette.gutterShape(row.kind, runStart: runStart, runEnd: runEnd))
                     }
@@ -248,13 +249,15 @@ struct DiffFoldBar: View {
             HStack(spacing: 2) {
                 Button(action: onUp) {
                     Image(systemName: "chevron.up").font(PhrenTheme.Font.caption.weight(.semibold))
-                        .frame(width: 44, height: 44)
+                        .frame(width: 44, height: 28)
+                        .overlay { Color.clear.frame(width: 44, height: 44).contentShape(Rectangle()) }
                 }
                 .disabled(!canJumpUp)
                 .accessibilityLabel("Previous hunk")
                 Button(action: onDown) {
                     Image(systemName: "chevron.down").font(PhrenTheme.Font.caption.weight(.semibold))
-                        .frame(width: 44, height: 44)
+                        .frame(width: 44, height: 28)
+                        .overlay { Color.clear.frame(width: 44, height: 44).contentShape(Rectangle()) }
                 }
                 .disabled(!canJumpDown)
                 .accessibilityLabel("Next hunk")
@@ -267,7 +270,7 @@ struct DiffFoldBar: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 10)
-        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
         .background(PhrenTheme.surfaceRaised.opacity(0.6))
         .overlay(alignment: .bottom) { Rectangle().fill(PhrenTheme.border).frame(height: 0.5) }
         .contentShape(Rectangle())

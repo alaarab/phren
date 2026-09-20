@@ -57,9 +57,9 @@ public actor LocalStore {
     /// `.phren-team.yaml`, `summary.md`, `truths.md`, and `reference/` — is
     /// read-only. Authored skills and canonical AGENTS.md instructions are
     /// explicitly writable in project directories and global/. A project's
-    /// `phren.project.yaml` is writable through ``PendingOp/setProjectKnobs``
-    /// alone, so the knobs screen can set per-project overrides without letting
-    /// the generic editor rewrite `sourcePath` or a retention block.
+    /// `phren.project.yaml` and `schedules.yaml` are writable through their
+    /// dedicated operations alone, so generic authored-file edits cannot
+    /// rewrite store metadata.
     ///
     /// `journal/YYYY-MM-DD-<actor>.md` is writable *and* gated on exactly the
     /// same ``isProjectDirName`` predicate as `FINDINGS.md`, which is what
@@ -68,10 +68,10 @@ public actor LocalStore {
     /// `global/FINDINGS.md` is.
     public static func isWritablePath(_ path: String) -> Bool {
         if path == SkillPreferences.path { return true }
-        // The one registry file the phone may write, and only through
-        // ``PendingOp/setProjectKnobs`` — the raw file editor still refuses it,
-        // because a raw edit could drop the sibling keys the CLI reads.
+        // These store files are admitted for their dedicated ops; the raw file
+        // editor still refuses them because it could drop sibling metadata.
         if isProjectConfigPath(path) { return true }
+        if isSchedulesPath(path) { return true }
         // Authored content is separate from global's read-only findings tier.
         if isSkillPath(path) || AgentInstructions.isPath(path) { return true }
         let parts = path.split(separator: "/").map(String.init)
@@ -122,7 +122,7 @@ public actor LocalStore {
         }
         guard isProjectDirName(parts[0]) else { return false }
         if parts.count == 2 {
-            return ["FINDINGS.md", "tasks.md", "review.md", "summary.md", AgentInstructions.fileName, AgentInstructions.legacyFileName, "truths.md", MachineRegistry.projectFile].contains(parts[1])
+            return ["FINDINGS.md", "tasks.md", "review.md", "summary.md", AgentInstructions.fileName, AgentInstructions.legacyFileName, "truths.md", MachineRegistry.projectFile, SchedulesFile.fileName].contains(parts[1])
         }
         if parts.count == 3, parts[1] == "notes" {
             return JSRegex(#"^\d{4}-\d{2}-\d{2}\.md$"#).test(parts[2])
@@ -173,6 +173,13 @@ public actor LocalStore {
         let parts = path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
         return parts.count == 2 && isProjectDirName(parts[0])
             && parts[1] == MachineRegistry.projectFile
+    }
+
+    /// `<project>/schedules.yaml`, admitted only for ``PendingOp/saveSchedules``.
+    public static func isSchedulesPath(_ path: String) -> Bool {
+        let parts = path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        return parts.count == 2 && isProjectDirName(parts[0])
+            && parts[1] == SchedulesFile.fileName
     }
 
     /// The cross-project tier: consolidated findings that apply everywhere,
@@ -407,6 +414,11 @@ public actor LocalStore {
         /// project → the raw `phren.project.yaml` bytes, so a knob write can
         /// carry the exact content it read as its conflict check.
         public var projectConfigs: [String: String] = [:]
+        /// project → scheduled prompts parsed from `schedules.yaml`.
+        public var schedules: [String: [Schedule]] = [:]
+        /// Raw bytes used to preserve unknown top-level keys and detect edits
+        /// made elsewhere while the schedule editor was open.
+        public var scheduleContents: [String: String] = [:]
 
         public static let empty = Snapshot(projects: [], findings: [:], tasks: [:], notes: [:], reviewQueue: [], summaries: [:])
     }
@@ -434,6 +446,8 @@ public actor LocalStore {
         var machines = MachineRegistry()
         var projectKnobs: [String: ProjectKnobs] = [:]
         var projectConfigs: [String: String] = [:]
+        var schedules: [String: [Schedule]] = [:]
+        var scheduleContents: [String: String] = [:]
 
         for path in paths {
             let parts = path.split(separator: "/").map(String.init)
@@ -500,6 +514,9 @@ public actor LocalStore {
                     projectConfigs[project] = content
                     projectKnobs[project] = ProjectKnobs.parse(content)
                     if let sourcePath = MachineRegistry.parseSourcePath(content) { machines.sourcePaths[project] = sourcePath }
+                case SchedulesFile.fileName:
+                    scheduleContents[project] = content
+                    schedules[project] = SchedulesFile.parse(content)
                 default:
                     break
                 }
@@ -563,7 +580,8 @@ public actor LocalStore {
             truths: truths, consolidated: consolidated, skills: skills, instructions: instructions,
             instructionPaths: instructionPaths,
             skillPreferencesContent: read(SkillPreferences.path), machines: machines,
-            projectKnobs: projectKnobs, projectConfigs: projectConfigs
+            projectKnobs: projectKnobs, projectConfigs: projectConfigs,
+            schedules: schedules, scheduleContents: scheduleContents
         )
         cachedSnapshot = files.map { ($0, result) }
         return result

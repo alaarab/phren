@@ -8,6 +8,14 @@ final class ChangesTabTests: XCTestCase {
         let app = launchChanges()
         let diffMode = app.buttons["changes-mode-diff"]
         XCTAssertTrue(diffMode.waitForExistence(timeout: 10), "The Changes tab must offer a Diff mode")
+        let tabBar = app.descendants(matching: .any).matching(identifier: "changes-tab-bar").firstMatch
+        XCTAssertTrue(tabBar.exists)
+        XCTAssertLessThan(tabBar.frame.height, 40, "The Changes tabs stay compact")
+        app.buttons["changes-tab-tree"].tap()
+        let treeRow = app.descendants(matching: .any).matching(identifier: "changes-tree-row:Sources").firstMatch
+        XCTAssertTrue(treeRow.waitForExistence(timeout: 8))
+        XCTAssertLessThan(treeRow.frame.height, 36, "Working tree rows stay compact")
+        app.buttons["changes-tab-changes"].tap()
         app.buttons["changes-mode-list"].tap()
         let title = app.staticTexts["changes-title"]
         XCTAssertEqual(title.label, "Uncommitted changes")

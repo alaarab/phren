@@ -2,9 +2,9 @@ import SwiftUI
 import PhrenKit
 
 /// Per-project overrides for the knobs the CLI reads from
-/// `phren.project.yaml`. Every picker's first option is "Inherit global"
-/// (nil), which removes the key from the file; the CLI then falls back to the
-/// global setting. Saving is per change — there is no draft to lose.
+/// `phren.project.yaml`. Each group's first option is "Inherit global" (nil),
+/// which removes the key from the file; the CLI then falls back to the global
+/// setting. Saving is per change, so there is no draft to lose.
 struct ProjectKnobsView: View {
     let storeId: String
     let project: String
@@ -19,74 +19,142 @@ struct ProjectKnobsView: View {
     @State private var expectedContent: String?
 
     var body: some View {
-        NavigationStack {
-            PhrenForm {
-                Section {
-                    Picker("Finding sensitivity", selection: $knobs.findingSensitivity) {
-                        Text("Inherit global").tag(ProjectKnobs.FindingSensitivity?.none)
-                        ForEach(ProjectKnobs.FindingSensitivity.allCases, id: \.self) { value in
-                            Text(value.rawValue.capitalized).tag(ProjectKnobs.FindingSensitivity?.some(value))
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .accessibilityIdentifier("knob-findingSensitivity")
+        VStack(spacing: 0) {
+            header
+            ScrollView {
+                VStack(alignment: .leading, spacing: PhrenTheme.Space.section) {
+                    findingSensitivityOptions
+                    proactivityOptions(
+                        title: "Proactivity",
+                        key: "proactivity",
+                        selection: knobs.proactivity
+                    ) { knobs.proactivity = $0 }
+                    proactivityOptions(
+                        title: "Proactivity for findings",
+                        key: "proactivityFindings",
+                        selection: knobs.proactivityFindings
+                    ) { knobs.proactivityFindings = $0 }
+                    proactivityOptions(
+                        title: "Proactivity for tasks",
+                        key: "proactivityTask",
+                        selection: knobs.proactivityTask
+                    ) { knobs.proactivityTask = $0 }
+                    taskModeOptions
 
-                    Picker("Proactivity", selection: $knobs.proactivity) {
-                        Text("Inherit global").tag(ProjectKnobs.Proactivity?.none)
-                        ForEach(ProjectKnobs.Proactivity.allCases, id: \.self) { value in
-                            Text(value.rawValue.capitalized).tag(ProjectKnobs.Proactivity?.some(value))
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .accessibilityIdentifier("knob-proactivity")
-
-                    Picker("Proactivity for findings", selection: $knobs.proactivityFindings) {
-                        Text("Inherit global").tag(ProjectKnobs.Proactivity?.none)
-                        ForEach(ProjectKnobs.Proactivity.allCases, id: \.self) { value in
-                            Text(value.rawValue.capitalized).tag(ProjectKnobs.Proactivity?.some(value))
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .accessibilityIdentifier("knob-proactivityFindings")
-
-                    Picker("Proactivity for tasks", selection: $knobs.proactivityTask) {
-                        Text("Inherit global").tag(ProjectKnobs.Proactivity?.none)
-                        ForEach(ProjectKnobs.Proactivity.allCases, id: \.self) { value in
-                            Text(value.rawValue.capitalized).tag(ProjectKnobs.Proactivity?.some(value))
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .accessibilityIdentifier("knob-proactivityTask")
-
-                    Picker("Task mode", selection: $knobs.taskMode) {
-                        Text("Inherit global").tag(ProjectKnobs.TaskMode?.none)
-                        ForEach(ProjectKnobs.TaskMode.allCases, id: \.self) { value in
-                            Text(value.rawValue.capitalized).tag(ProjectKnobs.TaskMode?.some(value))
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .accessibilityIdentifier("knob-taskMode")
-                } footer: {
                     Text("Saved to this project's phren.project.yaml; empty means the global setting.")
-                        .font(.caption)
+                        .font(PhrenTheme.Font.caption)
                         .foregroundStyle(PhrenTheme.textMuted)
                 }
+                .padding(PhrenTheme.Space.large)
             }
-            .overlay(alignment: .topLeading) {
-                Color.clear.frame(width: 1, height: 1)
-                    .accessibilityElement().accessibilityLabel("Project knobs")
-                    .accessibilityIdentifier("project-knobs")
-            }
-            .navigationTitle("Knobs")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                }
-            }
-            .task { load() }
-            .onChange(of: knobs) { _, new in save(new) }
         }
+        .background(PhrenTheme.bg.ignoresSafeArea())
+        .overlay(alignment: .topLeading) {
+            Color.clear.frame(width: 1, height: 1)
+                .accessibilityElement().accessibilityLabel("Project knobs")
+                .accessibilityIdentifier("project-knobs")
+        }
+        .task { load() }
+        .onChange(of: knobs) { _, new in save(new) }
+    }
+
+    private var header: some View {
+        ZStack {
+            Text("Knobs")
+                .font(PhrenTheme.Font.subheadline.weight(.semibold))
+                .foregroundStyle(PhrenTheme.text)
+            HStack {
+                Button("Cancel") { dismiss() }
+                    .frame(minWidth: 44, minHeight: 44, alignment: .leading)
+                Spacer()
+                Button("Done") { dismiss() }
+                    .frame(minWidth: 44, minHeight: 44, alignment: .trailing)
+            }
+            .foregroundStyle(PhrenTheme.accentSolid)
+        }
+        .padding(.horizontal, PhrenTheme.Space.large)
+        .frame(height: 56)
+    }
+
+    private var findingSensitivityOptions: some View {
+        VStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
+            Text("Finding sensitivity")
+                .plainListSectionLabel()
+                .accessibilityIdentifier("knob-findingSensitivity")
+            optionRow(
+                label: "Inherit global",
+                selected: knobs.findingSensitivity == nil,
+                identifier: "knob-findingSensitivity:inherit"
+            ) { knobs.findingSensitivity = nil }
+            ForEach(ProjectKnobs.FindingSensitivity.allCases, id: \.self) { value in
+                optionRow(
+                    label: value.rawValue.capitalized,
+                    selected: knobs.findingSensitivity == value,
+                    identifier: "knob-findingSensitivity:\(value.rawValue)"
+                ) { knobs.findingSensitivity = value }
+            }
+        }
+    }
+
+    private func proactivityOptions(
+        title: String,
+        key: String,
+        selection: ProjectKnobs.Proactivity?,
+        select: @escaping (ProjectKnobs.Proactivity?) -> Void
+    ) -> some View {
+        VStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
+            Text(title)
+                .plainListSectionLabel()
+                .accessibilityIdentifier("knob-\(key)")
+            optionRow(
+                label: "Inherit global",
+                selected: selection == nil,
+                identifier: "knob-\(key):inherit"
+            ) { select(nil) }
+            ForEach(ProjectKnobs.Proactivity.allCases, id: \.self) { value in
+                optionRow(
+                    label: value.rawValue.capitalized,
+                    selected: selection == value,
+                    identifier: "knob-\(key):\(value.rawValue)"
+                ) { select(value) }
+            }
+        }
+    }
+
+    private var taskModeOptions: some View {
+        VStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
+            Text("Task mode")
+                .plainListSectionLabel()
+                .accessibilityIdentifier("knob-taskMode")
+            optionRow(
+                label: "Inherit global",
+                selected: knobs.taskMode == nil,
+                identifier: "knob-taskMode:inherit"
+            ) { knobs.taskMode = nil }
+            ForEach(ProjectKnobs.TaskMode.allCases, id: \.self) { value in
+                optionRow(
+                    label: value.rawValue.capitalized,
+                    selected: knobs.taskMode == value,
+                    identifier: "knob-taskMode:\(value.rawValue)"
+                ) { knobs.taskMode = value }
+            }
+        }
+    }
+
+    private func optionRow(
+        label: String,
+        selected: Bool,
+        identifier: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        ChatQuestionOptionRow(
+            label: label,
+            selected: selected,
+            radius: PhrenTheme.Radius.questionOption,
+            minimumHeight: 44,
+            action: action
+        )
+        .accessibilityIdentifier(identifier)
     }
 
     private func load() {

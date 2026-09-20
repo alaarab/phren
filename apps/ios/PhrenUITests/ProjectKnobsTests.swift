@@ -2,7 +2,7 @@ import XCTest
 
 final class ProjectKnobsTests: XCTestCase {
     @MainActor
-    func testProjectKnobsRowOpensTheFivePickers() {
+    func testProjectKnobsRowsSaveAndRoundTrip() {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--project-skills-fixture", "-phren-tab", "projects"]
         app.launch()
@@ -14,9 +14,40 @@ final class ProjectKnobsTests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 5))
         row.tap()
 
-        XCTAssertTrue(app.descendants(matching: .any)["project-knobs"].waitForExistence(timeout: 5))
-        for key in ["findingSensitivity", "proactivity", "proactivityFindings", "proactivityTask", "taskMode"] {
-            XCTAssertTrue(app.descendants(matching: .any)["knob-\(key)"].waitForExistence(timeout: 5), key)
+        let screen = app.descendants(matching: .any)["project-knobs"]
+        XCTAssertTrue(screen.waitForExistence(timeout: 5))
+        let selections = [
+            ("findingSensitivity", "aggressive"),
+            ("proactivity", "high"),
+            ("proactivityFindings", "medium"),
+            ("proactivityTask", "low"),
+            ("taskMode", "suggest")
+        ]
+
+        func reveal(_ element: XCUIElement, key: String) {
+            for _ in 0..<12 where !element.isHittable { app.swipeUp() }
+            XCTAssertTrue(element.waitForExistence(timeout: 5), key)
+            XCTAssertTrue(element.isHittable, key)
+        }
+
+        for (key, value) in selections {
+            let option = app.buttons["knob-\(key):\(value)"]
+            reveal(option, key: key)
+            XCTAssertTrue(app.descendants(matching: .any)["knob-\(key)"].exists, key)
+            option.tap()
+            XCTAssertTrue(option.isSelected, key)
+        }
+
+        app.buttons["Done"].tap()
+        XCTAssertTrue(screen.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.tap()
+        XCTAssertTrue(screen.waitForExistence(timeout: 5))
+
+        for (key, value) in selections {
+            let option = app.buttons["knob-\(key):\(value)"]
+            reveal(option, key: key)
+            XCTAssertTrue(option.isSelected, "\(key) did not round-trip")
         }
 
         let attachment = XCTAttachment(screenshot: app.screenshot())

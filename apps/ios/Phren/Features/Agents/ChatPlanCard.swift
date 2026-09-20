@@ -17,11 +17,11 @@ struct ChatPlanCard: View {
             Button {
                 withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { opened.toggle() }
             } label: {
-                ToolCardHeader(icon: "map", title: "Plan ready for review", status: status) {
-                    Text(stateLabel).font(.caption.weight(.medium)).lineLimit(1)
+                ToolCardHeader(icon: "map", title: "Plan ready for review", status: status, compact: folded) {
+                    Text(stateLabel).font(folded ? PhrenTypography.footnote.weight(.medium) : .caption.weight(.medium)).lineLimit(1)
                         .foregroundStyle(plan.state == .pending ? PhrenTheme.warning : PhrenTheme.textMuted)
                     if plan.state == .pending {
-                        Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
+                        Image(systemName: "chevron.down").font(.system(size: folded ? 12 : 10, weight: .semibold))
                             .rotationEffect(.degrees(opened ? 180 : 0)).foregroundStyle(PhrenTheme.phrenCardAccent)
                     }
                 }
@@ -34,7 +34,7 @@ struct ChatPlanCard: View {
                 ChatPlanBody(plan: plan.plan, preview: preview, cacheKey: entry.cardMarkdownKey, id: entry.callID)
             }
         }
-        .toolCard()
+        .toolCard(collapsed: folded)
         .toolCardMarker("chat-plan-card:\(entry.callID)", label: "Plan ready for review, \(stateLabel)")
     }
     private var status: ToolCardStatus? {

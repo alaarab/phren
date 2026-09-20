@@ -309,6 +309,21 @@ struct ProjectDetailView: View {
             .accessibilityLabel("Project knobs")
             .accessibilityIdentifier("project-knobs-row")
             .padding(.horizontal, 16).padding(.bottom, 8)
+            NavigationLink { SchedulesView(storeId: storeId, project: project) } label: {
+                HStack(spacing: 10) {
+                    Label("Schedules", systemImage: "clock.badge.checkmark")
+                    Spacer()
+                    Text(schedulesSummary).foregroundStyle(PhrenTheme.textMuted)
+                    Image(systemName: "chevron.right").font(.caption.weight(.semibold))
+                }
+                .font(.subheadline)
+                .padding(.horizontal, 14).frame(minHeight: 44)
+                .background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Project schedules")
+            .accessibilityIdentifier("project-schedules-row")
+            .padding(.horizontal, 16).padding(.bottom, 8)
             Picker("Section", selection: $tab) {
                 ForEach(Tab.allCases, id: \.self) { Text($0.rawValue) }
             }
@@ -358,6 +373,18 @@ struct ProjectDetailView: View {
     private var knobsSummary: String {
         let count = model.snapshot(for: storeId).projectKnobs[project]?.setCount ?? 0
         return count == 0 ? "Global" : "\(count) set"
+    }
+
+    private var schedulesSummary: String {
+        let schedules = model.snapshot(for: storeId).schedules[project] ?? []
+        guard !schedules.isEmpty else { return "None" }
+        let next = schedules
+            .filter(\.enabled)
+            .compactMap { ScheduleWords.nextRun($0, after: .now, calendar: .current) }
+            .min()
+        let state = next.map { ScheduleWords.relative($0, now: .now) }
+            ?? (schedules.contains(where: \.enabled) ? "done" : "paused")
+        return "\(schedules.count) · \(state)"
     }
 }
 

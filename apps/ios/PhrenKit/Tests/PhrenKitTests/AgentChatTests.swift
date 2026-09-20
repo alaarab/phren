@@ -109,8 +109,24 @@ final class AgentChatTests: XCTestCase {
         history.receive(try page("backlog", [8, 9, 10, 11]))
         XCTAssertEqual(history, unchanged, "Repeated snapshots must not invalidate the chat view")
         history.receive(try page("backlog", [0, 1], total: 2))
-        XCTAssertNotEqual(history, unchanged)
-        XCTAssertEqual(history.messages.map(\.line), [0, 1])
+        XCTAssertEqual(history, unchanged, "A delayed backlog must not roll the transcript back")
+    }
+
+    func testReconnectBacklogsCannotRollHistoryBackAndMergeNewLines() throws {
+        func page(_ lines: [Int], total: Int) throws -> AgentChatTranscript {
+            let rows = lines.map { line in ["line": line, "raw": ["type": "response_item", "payload": ["type": "message", "role": "assistant", "content": "Message \(line)"]]] as [String: Any] }
+            return try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: ["type": "backlog", "source": "codex", "entries": rows, "startLine": lines.min() ?? 0, "totalLines": total, "hasMore": true]), source: "codex")
+        }
+        var history = AgentChatHistory()
+        history.receive(try page([8, 9, 10, 11], total: 12))
+
+        history.receive(try page([8, 9], total: 10))
+        XCTAssertEqual(history.messages.map(\.line), [8, 9, 10, 11], "A stale reconnect page must not remove newer local rows")
+        XCTAssertEqual(history.totalLines, 12)
+
+        history.receive(try page([12, 13], total: 14))
+        XCTAssertEqual(history.messages.map(\.line), [8, 9, 10, 11, 12, 13], "A reconnect page beyond the local cursor must extend history")
+        XCTAssertEqual(history.totalLines, 14)
     }
 
     func testEmptyFinalHistoryPageClosesPaginationWithoutLosingMessages() throws {
@@ -162,8 +178,8 @@ final class AgentChatTests: XCTestCase {
         XCTAssertFalse(history.hasMore)
         XCTAssertTrue(history.hasNewer)
         history.receive(try page(0..<2, total: 2))
-        XCTAssertFalse(history.hasNewer, "A replaced/truncated transcript resets the window")
-        XCTAssertEqual(history.messages.count, 2)
+        XCTAssertTrue(history.hasNewer, "A stale reconnect cannot reset the retained window")
+        XCTAssertEqual(history.messages.count, 4_000)
     }
 
     func testPaneListsRejectMismatchedLocationsAndDuplicateIDs() throws {

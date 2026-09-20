@@ -82,6 +82,14 @@ final class AgentChatConnectionTests: XCTestCase {
         XCTAssertEqual(body["text"] as? String, "First prompt")
     }
 
+    func testTranscriptReconnectCarriesTheLastReceivedLine() throws {
+        let target = try AgentChatTarget(hostID: UUID(), workspaceID: "w", tabID: "w:t", paneID: "w:p", source: "codex", sessionID: "fixture")
+        let request = GatewayRequest.transcript(target, streaming: true, afterLine: 41)
+        let components = try XCTUnwrap(URLComponents(string: request.path))
+        XCTAssertEqual(components.path, "/v1/transcripts")
+        XCTAssertEqual(components.queryItems?.first { $0.name == "afterLine" }?.value, "41")
+    }
+
     func testPromptEncodingKeepsTextOutOfTerminalCommands() throws {
         let target = try AgentChatTarget(hostID: UUID(), workspaceID: "w7", tabID: "w7:t1", paneID: "w7:p2", source: "claude", sessionID: "fixture")
         let text = "Review `file.swift`\n$(not-a-command) \"quoted\""

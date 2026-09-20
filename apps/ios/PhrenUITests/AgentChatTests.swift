@@ -79,6 +79,7 @@ final class AgentChatTests: XCTestCase {
             for _ in 0..<8 where !card.isHittable { transcript.swipeDown() }
             XCTAssertTrue(card.waitForExistence(timeout: 5))
         }
+        XCTAssertLessThanOrEqual(fetch.frame.height, 44, "A collapsed web card stays one row tall")
         XCTAssertTrue(fetch.label.contains("developer.apple.com/documentation/swiftui/scrollview"), fetch.label)
         XCTAssertFalse(fetch.label.contains("?language="), "Host and path only while folded")
         XCTAssertTrue(search.label.contains("“SwiftUI nested ScrollView gesture”"), search.label)
@@ -430,7 +431,7 @@ final class AgentChatTests: XCTestCase {
         let row = app.descendants(matching: .any).matching(identifier: "chat-compaction").firstMatch
         for _ in 0..<6 where !row.isHittable { transcript.swipeUp() }
         XCTAssertTrue(row.waitForExistence(timeout: 5))
-        XCTAssertLessThan(row.frame.height, 60, "A compaction is one small row, not a bubble")
+        XCTAssertLessThanOrEqual(row.frame.height, 44, "A compaction is one small row, not a bubble")
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "compaction filler")).firstMatch.exists,
                        "The summary stays behind the row, never inline in the transcript")
         capture(app, "Compaction as one small row")
@@ -449,7 +450,7 @@ final class AgentChatTests: XCTestCase {
         XCTAssertEqual(runs.count, 2, "The command that changed a file splits the looking around")
         XCTAssertTrue(runs.element(boundBy: 0).label.contains("Shell ×3"), runs.element(boundBy: 0).label)
         XCTAssertTrue(runs.element(boundBy: 1).label.contains("Shell ×4"), runs.element(boundBy: 1).label)
-        XCTAssertLessThanOrEqual(runs.firstMatch.frame.height, 54, "A folded run is one pill tall")
+        XCTAssertLessThanOrEqual(runs.firstMatch.frame.height, 44, "A folded run is one pill tall")
         // The change card sits between them with its file row already showing.
         XCTAssertEqual(cards.count, 1)
         XCTAssertEqual(cards.firstMatch.label, "Shell, 1 operation")
@@ -553,10 +554,10 @@ final class AgentChatTests: XCTestCase {
         app.buttons["live-chat:w7:w7:t9"].tap()
         let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
         XCTAssertTrue(composer.waitForExistence(timeout: 8))
-        XCTAssertLessThan(composer.frame.height, 60)
+        XCTAssertLessThanOrEqual(composer.frame.height, 40)
         let box = app.descendants(matching: .any).matching(identifier: "chat-message-box").firstMatch
-        XCTAssertGreaterThan(box.frame.maxY, app.frame.maxY - 50)
-        XCTAssertLessThan(box.frame.height, 100)
+        XCTAssertGreaterThan(box.frame.maxY, app.frame.maxY - 40)
+        XCTAssertLessThanOrEqual(box.frame.height, 84)
         XCTAssertGreaterThan(composer.frame.width, app.frame.width - 55)
         let lastLine = app.staticTexts["Ready to test."]
         XCTAssertTrue(lastLine.waitForExistence(timeout: 5))
@@ -659,8 +660,13 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(group.waitForExistence(timeout: 8))
         XCTAssertEqual(group.label, "Shell, 1 operation")
         XCTAssertEqual(group.value as? String, "Collapsed")
-        // A 44pt pill whose tap shape reaches 5pt past its edges (the reported frame is the tap shape).
-        XCTAssertLessThanOrEqual(group.frame.height, 54, "The compact tool pill stays one row tall")
+        XCTAssertLessThanOrEqual(group.frame.height, 44, "The compact tool pill stays one row tall")
+        let header = app.descendants(matching: .any).matching(identifier: "chat-header").firstMatch
+        let messageBox = app.descendants(matching: .any).matching(identifier: "chat-message-box").firstMatch
+        XCTAssertTrue(header.exists)
+        XCTAssertTrue(messageBox.exists)
+        XCTAssertLessThan(header.frame.minY, 70, "The header sits directly under the status bar")
+        XCTAssertGreaterThan(messageBox.frame.maxY, app.frame.maxY - 40, "The composer sits on the home indicator")
         XCTAssertFalse(app.keyboards.firstMatch.exists)
         XCTAssertFalse(app.staticTexts["All 4 timeline tests passed."].exists)
         XCTAssertFalse(app.buttons["Latest messages"].exists, "A settled conversation already at the bottom does not need a jump button")
@@ -1444,6 +1450,17 @@ final class AgentChatTests: XCTestCase {
         yes.tap()
         XCTAssertTrue(keys.waitForNonExistence(timeout: 10), "Once the agent stops waiting the row goes")
         XCTAssertFalse(app.staticTexts["chat-delivery-error"].exists)
+    }
+
+    @MainActor
+    func testStalledCodexHistoryOffersANewThreadWithoutWaitingState() {
+        let app = launch(extra: ["--chat-history-stalled"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let notice = app.descendants(matching: .any).matching(identifier: "chat-history-stalled").firstMatch
+        XCTAssertTrue(notice.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["Codex stopped recording this thread 2h ago. Start a new one to keep following it."].exists)
+        XCTAssertTrue(app.buttons["New thread"].exists)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Agent is waiting")).firstMatch.exists)
     }
 
     @MainActor

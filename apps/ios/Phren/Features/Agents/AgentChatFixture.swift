@@ -7,6 +7,7 @@ import UIKit
 /// Isolated, in-memory conversations for UI tests; never active on an iPhone.
 @MainActor enum AgentChatFixture {
     static var enabled: Bool { AppModel.isUITesting && ProcessInfo.processInfo.arguments.contains("--native-chat-fixture") }
+    static var schedulesEnabled: Bool { AppModel.isUITesting && ProcessInfo.processInfo.arguments.contains("--schedules-fixture") }
     static var sent: [(String, String)] = []
     static var startingAttachedAt: Date?
     static let startingToken = String(repeating: "a", count: 64)
@@ -73,6 +74,18 @@ import UIKit
         guard flag("--chat-blocked"), !answered else { return nil }
         let input: [String: Any] = ["command": "xcrun simctl list runtimes", "justification": "May I inspect the installed simulator runtimes to resolve the Watch target test failure?"]
         return AgentTerminalPrompt(toolName: "Shell", message: String(decoding: (try? JSONSerialization.data(withJSONObject: input, options: [.prettyPrinted, .sortedKeys])) ?? Data(), as: UTF8.self))
+    }
+    static func status(_ target: AgentChatTarget) throws -> AgentInteractionStatus {
+        var value: [String: Any] = ["source": target.source, "session": target.sessionID]
+        if flag("--chat-history-stalled") {
+            value["historyStalled"] = true
+            value["historyStalledSince"] = Date.now.addingTimeInterval(-2 * 3_600)
+                .formatted(Date.ISO8601FormatStyle(includingFractionalSeconds: true))
+        }
+        guard let status = try AgentInteractionStatus.read(JSONSerialization.data(withJSONObject: ["agentStatus": value]), target: target) else {
+            throw PhrenKitError.validation("The fixture status is missing.")
+        }
+        return status
     }
     static func approval(_ target: AgentChatTarget) throws -> AgentApproval? {
         guard !answered else { return nil }
@@ -179,7 +192,7 @@ import UIKit
         let launchedKind = launches.last.map(\.kind).flatMap { session.workspaceID == "w9" ? $0 : nil }
         let agent = launchedKind ?? (flag("--chat-copilot") ? "copilot" : (trailer || flag("--chat-claude-queue") || flag("--chat-claude-image") || flag("--chat-read-images") || flag("--chat-approval-question") || flag("--chat-agent-card") || flag("--chat-todos") || flag("--chat-plan-mode") || flag("--chat-web-tools") || flag("--chat-skill-chip") || flag("--chat-mcp-card") || flag("--chat-compaction") || (tour && flag("--chat-phren-tools"))) ? "claude" : "codex")
         var panes: [[String: Any]] = [["id": "\(session.workspaceID):p1", "label": "1", "title": tour ? "Ship the onboarding flow" : "Polish the phone app", "agent": agent,
-                                     "agentStatus": ((flag("--chat-blocked") || flag("--chat-approval") || flag("--chat-approval-question") || flag("--chat-plan-mode") || flag("--chat-question")) && !answered) ? "blocked" : (flag("--chat-queue-completion") || (flag("--chat-working") && !stopped) ? "working" : "idle"), "sessionId": agent == "copilot" ? "00000000-0000-0000-0000-000000000023" : "fixture-\(agent)-session", "cwd": root]]
+                                     "agentStatus": ((flag("--chat-blocked") || flag("--chat-approval") || flag("--chat-approval-question") || flag("--chat-plan-mode") || flag("--chat-question")) && !answered) ? "blocked" : (flag("--chat-queue-completion") || flag("--chat-history-stalled") || (flag("--chat-working") && !stopped) ? "working" : "idle"), "sessionId": agent == "copilot" ? "00000000-0000-0000-0000-000000000023" : "fixture-\(agent)-session", "cwd": root]]
         if flag("--starting-session-fixture") {
             panes[0]["startingToken"] = startingToken
             if startingAttachedAt == nil || Date.now < startingAttachedAt! {
@@ -664,6 +677,110 @@ import UIKit
             "entries": delta, "startLine": 0, "totalLines": totalLines, "hasMore": false]), source: target.source)
     }
     private static func flag(_ flag: String) -> Bool { ProcessInfo.processInfo.arguments.contains(flag) }
+
+    private struct ScheduleStatusesResponse: Decodable { let schedules: [ScheduleStatus] }
+    private struct ScheduleRunResponse: Decodable { let run: ScheduleRun }
+    private struct ScheduleHistoryResponse: Decodable { let runs: [ScheduleRun] }
+    private static var scheduleStarts: [String: Date] = [:]
+
+    static func schedules(host: LiveHost) async throws -> [ScheduleStatus] {
+        guard schedulesEnabled, SchedulesView.canonicalHost(host.name) == "desk" else {
+            throw LiveConnectionError.disconnected
+        }
+        let now = Date.now
+        let values: [[String: Any]] = [
+            scheduleStatus(project: "demo", id: "7f3a2c1d", next: now.addingTimeInterval(3 * 3_600),
+                           last: run(project: "demo", schedule: "7f3a2c1d", id: "run-daily", started: now.addingTimeInterval(-7_500),
+                                     finished: now.addingTimeInterval(-7_200), status: "finished")),
+            scheduleStatus(project: "demo", id: "8a4b3c2d", next: now.addingTimeInterval(27 * 3_600),
+                           last: run(project: "demo", schedule: "8a4b3c2d", id: "run-weekly", started: now.addingTimeInterval(-94_000),
+                                     finished: now.addingTimeInterval(-93_600), status: "failed", reason: "Tests failed")),
+            scheduleStatus(project: "other", id: "9b5c4d3e", next: nil,
+                           last: run(project: "other", schedule: "9b5c4d3e", id: "run-once", started: now.addingTimeInterval(-86_700),
+                                     finished: now.addingTimeInterval(-86_400), status: "finished")),
+        ]
+        let data = try JSONSerialization.data(withJSONObject: ["computer": "Desk", "schedules": values])
+        return try scheduleDecoder.decode(ScheduleStatusesResponse.self, from: data).schedules
+    }
+
+    static func runSchedule(host: LiveHost, project: String, id: String) async throws -> ScheduleRun {
+        guard schedulesEnabled, SchedulesView.canonicalHost(host.name) == "desk",
+              ["7f3a2c1d", "8a4b3c2d", "9b5c4d3e"].contains(id) else {
+            throw LiveConnectionError.response(404)
+        }
+        let started = Date.now
+        scheduleStarts[SchedulesView.key(project: project, id: id)] = started
+        let value = run(project: project, schedule: id, id: "run-now-\(id)", started: started,
+                        finished: nil, status: "running")
+        let data = try JSONSerialization.data(withJSONObject: ["ok": true, "run": value])
+        return try scheduleDecoder.decode(ScheduleRunResponse.self, from: data).run
+    }
+
+    static func scheduleHistory(host: LiveHost, project: String?, id: String?, limit: Int) async throws -> [ScheduleRun] {
+        guard schedulesEnabled, SchedulesView.canonicalHost(host.name) == "desk" else {
+            throw LiveConnectionError.disconnected
+        }
+        let now = Date.now
+        let targetProject = project ?? "demo"
+        let targetID = id ?? "7f3a2c1d"
+        var values = [
+            run(project: targetProject, schedule: targetID, id: "history-new", started: now.addingTimeInterval(-7_500),
+                finished: now.addingTimeInterval(-7_200), status: "finished"),
+            run(project: targetProject, schedule: targetID, id: "history-failed", started: now.addingTimeInterval(-93_900),
+                finished: now.addingTimeInterval(-93_600), status: "failed", reason: "Tests failed"),
+            run(project: targetProject, schedule: targetID, id: "history-old", started: now.addingTimeInterval(-180_600),
+                finished: now.addingTimeInterval(-180_000), status: "finished"),
+        ]
+        if let started = scheduleStarts[SchedulesView.key(project: targetProject, id: targetID)] {
+            let running = Date.now.timeIntervalSince(started) < 2
+            values[0] = run(project: targetProject, schedule: targetID, id: "run-now-\(targetID)", started: started,
+                            finished: running ? nil : started.addingTimeInterval(2), status: running ? "running" : "finished")
+        }
+        let data = try JSONSerialization.data(withJSONObject: ["runs": Array(values.prefix(max(0, min(500, limit))))])
+        return try scheduleDecoder.decode(ScheduleHistoryResponse.self, from: data).runs
+    }
+
+    private static func scheduleStatus(project: String, id: String, next: Date?, last: [String: Any]) -> [String: Any] {
+        var value: [String: Any] = [
+            "project": project,
+            "id": id,
+            "lastRun": last,
+            "running": scheduleStarts[SchedulesView.key(project: project, id: id)]
+                .map { Date.now.timeIntervalSince($0) < 2 } ?? false,
+        ]
+        if let next { value["nextRun"] = scheduleDate(next) }
+        if let started = scheduleStarts[SchedulesView.key(project: project, id: id)] {
+            let running = Date.now.timeIntervalSince(started) < 2
+            value["lastRun"] = run(project: project, schedule: id, id: "run-now-\(id)", started: started,
+                                   finished: running ? nil : started.addingTimeInterval(2), status: running ? "running" : "finished")
+        }
+        return value
+    }
+
+    private static func run(project: String, schedule: String, id: String, started: Date, finished: Date?,
+                            status: String, reason: String? = nil) -> [String: Any] {
+        var value: [String: Any] = [
+            "id": id,
+            "scheduleId": schedule,
+            "project": project,
+            "startedAt": scheduleDate(started),
+            "status": status,
+            "launch": ["mode": "herdr", "workspaceId": "w1", "tabId": "w1:t1", "paneId": "w1:p1", "sessionId": "fixture-schedule"],
+        ]
+        if let finished { value["finishedAt"] = scheduleDate(finished) }
+        if let reason { value["reason"] = reason }
+        return value
+    }
+
+    private static var scheduleDecoder: JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
+    }
+
+    private static func scheduleDate(_ date: Date) -> String {
+        date.formatted(Date.ISO8601FormatStyle())
+    }
 
     /// "Open on a computer": what the Hook would return after creating a
     /// workspace and starting the agent, plus the snapshot the session comes

@@ -54,10 +54,10 @@ struct ChangesTab: View {
             modePill("List", icon: "list.bullet", value: "list", identifier: "changes-mode-list")
             modePill("Diff", icon: "rectangle.split.2x1", value: "diff", identifier: "changes-mode-diff")
         }
-        .padding(3)
+        .padding(2)
         .background(PhrenTheme.surface, in: Capsule())
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, PhrenTheme.Space.medium).padding(.vertical, PhrenTheme.Space.small)
+        .padding(.horizontal, PhrenTheme.Space.medium).padding(.vertical, 2)
     }
 
     private func modePill(_ title: String, icon: String, value: String, identifier: String) -> some View {
@@ -72,9 +72,9 @@ struct ChangesTab: View {
                 Text(title).font(PhrenTheme.Font.subheadline.weight(.medium))
             }
             .foregroundStyle(selected ? PhrenTheme.accent : PhrenTheme.textMuted)
-            .padding(.horizontal, 14).frame(minHeight: 44)
+            .padding(.horizontal, 14).frame(minHeight: 32)
             .background(selected ? PhrenTheme.accent.opacity(0.16) : .clear, in: Capsule())
-            .contentShape(Rectangle())
+            .contentShape(Rectangle().inset(by: -6))
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(selected ? .isSelected : [])
@@ -260,7 +260,7 @@ struct ChangesFileRow: View {
             ChangesStatusDot(status: file.status)
             VStack(alignment: .leading, spacing: 4) {
                 Text(file.path)
-                    .font(PhrenTheme.Font.monoSubheadline)
+                    .font(PhrenTypography.monoFootnote)
                     .foregroundStyle(PhrenTheme.text)
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1).truncationMode(.middle)
                 if dynamicTypeSize > .large { counts }
@@ -270,7 +270,7 @@ struct ChangesFileRow: View {
             Button(action: onRevert) {
                 Image(systemName: "arrow.uturn.backward")
                     .font(PhrenTheme.Font.subheadline.weight(.semibold)).foregroundStyle(PhrenTheme.textMuted)
-                    .frame(width: 44, height: 44)
+                    .frame(width: 40, height: 40).contentShape(Rectangle().inset(by: -2))
             }
             .buttonStyle(.plain).disabled(busy || file.staged)
             .accessibilityLabel("Revert \(file.name)")
@@ -278,14 +278,14 @@ struct ChangesFileRow: View {
             Button(action: onStage) {
                 Image(systemName: file.staged ? "minus" : "plus")
                     .font(PhrenTheme.Font.subheadline.weight(.semibold)).foregroundStyle(PhrenTheme.accent)
-                    .frame(width: 44, height: 44)
+                    .frame(width: 40, height: 40).contentShape(Rectangle().inset(by: -2))
             }
             .buttonStyle(.plain).disabled(busy)
             .accessibilityLabel(file.staged ? "Unstage \(file.name)" : "Stage \(file.name)")
             .accessibilityIdentifier("changes-stage:\(file.path)")
         }
         .padding(.horizontal, PhrenTheme.Space.medium)
-        .frame(minHeight: 44)
+        .frame(minHeight: 40)
         .background(PhrenTheme.bg)
         // An identifier on the row itself would replace the two buttons'
         // own, so the row is marked by a zero-size overlay instead.
@@ -328,7 +328,7 @@ struct ChangesDiffList: View {
                                                     runStart: DiffPalette.run(section.document.rows, at: index).start,
                                                     runEnd: DiffPalette.run(section.document.rows, at: index).end,
                                                     wrap: wrap, scrollCode: !wrap, markGutter: index == firstNumberedRow(section.document),
-                                                    numberWidth: 22)
+                                                    numberWidth: 17)
                                             .id(rowID(section, row))
                                     }
                                 }
@@ -362,7 +362,7 @@ struct ChangesDiffList: View {
                 Button { onStage(file.path, file.staged) } label: {
                     Image(systemName: file.staged ? "minus" : "plus")
                         .font(PhrenTheme.Font.subheadline.weight(.semibold)).foregroundStyle(PhrenTheme.accent)
-                        .frame(width: 44, height: 44)
+                        .frame(width: 40, height: 40).contentShape(Rectangle().inset(by: -2))
                 }
                 .buttonStyle(.plain).disabled(busy)
                 .accessibilityLabel(file.staged ? "Unstage \(file.name)" : "Stage \(file.name)")
@@ -370,7 +370,7 @@ struct ChangesDiffList: View {
             }
         }
         .padding(.horizontal, PhrenTheme.Space.medium)
-        .frame(minHeight: 44)
+        .frame(minHeight: 40)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(PhrenTheme.surface)
         .accessibilityElement(children: .contain)

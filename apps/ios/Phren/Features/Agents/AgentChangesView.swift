@@ -71,7 +71,7 @@ struct AgentChangesView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 2) {
             Text(title)
                 .font(PhrenTheme.Font.title2.weight(.bold))
                 .foregroundStyle(PhrenTheme.text)
@@ -82,6 +82,7 @@ struct AgentChangesView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
+        .padding(.top, 4)
         .padding(.bottom, 8)
         .overlay(alignment: .topLeading) {
             Color.clear.frame(width: 1, height: 1).accessibilityElement().accessibilityIdentifier("changes-header")
@@ -127,7 +128,7 @@ struct AgentChangesView: View {
                 .accessibilityIdentifier("changes-status-error")
         } else {
             Text("Loading…")
-                .font(PhrenTheme.Font.monoSubheadline)
+                .font(PhrenTypography.monoFootnote)
                 .foregroundStyle(PhrenTheme.textMuted)
                 .accessibilityIdentifier("changes-status-line")
         }
@@ -148,16 +149,16 @@ struct AgentChangesView: View {
             ForEach(ChangesSection.allCases) { section in
                 Button { selection = section } label: {
                     Image(systemName: section.symbol)
-                        .font(PhrenTheme.Font.body.weight(.medium))
+                        .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(selection == section ? PhrenTheme.accent : PhrenTheme.textMuted)
-                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .frame(maxWidth: .infinity, minHeight: 32)
                         .background {
                             if selection == section {
                                 RoundedRectangle(cornerRadius: PhrenTheme.Radius.small, style: .continuous)
                                     .fill(PhrenTheme.surface)
                             }
                         }
-                        .contentShape(Rectangle())
+                        .contentShape(Rectangle().inset(by: -6))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(section.title)
@@ -165,8 +166,13 @@ struct AgentChangesView: View {
                 .accessibilityAddTraits(selection == section ? [.isSelected] : [])
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.bottom, 4)
+        .padding(2)
+        .padding(.horizontal, 10)
+        .overlay {
+            Color.clear.frame(maxWidth: .infinity, minHeight: 36).accessibilityElement()
+                .accessibilityIdentifier("changes-tab-bar")
+                .allowsHitTesting(false)
+        }
     }
 
     @ViewBuilder private var selectedSection: some View {

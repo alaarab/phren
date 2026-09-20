@@ -32,15 +32,18 @@ struct WebToolCard: View, Equatable {
                 withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { expanded.toggle() }
             } label: {
                 HStack(spacing: PhrenTheme.Space.small) {
-                    Image(systemName: "globe").font(.system(size: 15, weight: .medium)).foregroundStyle(PhrenTheme.phrenCardAccent)
-                        .frame(width: 22, height: 22).accessibilityHidden(true)
-                    Text(presentation.location).font(.subheadline.weight(.semibold)).foregroundStyle(PhrenTheme.text)
-                        .lineLimit(2).truncationMode(.middle)
+                    Image(systemName: "globe").font(.system(size: expanded ? 15 : 14, weight: .medium)).foregroundStyle(PhrenTheme.phrenCardAccent)
+                        .frame(width: expanded ? 22 : 18, height: expanded ? 22 : 18).accessibilityHidden(true)
+                    Text(presentation.location)
+                        .font(expanded ? .subheadline.weight(.semibold) : PhrenTypography.footnote.weight(.semibold))
+                        .foregroundStyle(PhrenTheme.text).lineLimit(expanded ? 2 : 1).truncationMode(.middle)
                     Spacer(minLength: 0)
                     status
-                    Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
+                    Image(systemName: "chevron.down").font(.system(size: expanded ? 10 : 12, weight: .semibold))
                         .rotationEffect(.degrees(expanded ? 180 : 0)).foregroundStyle(PhrenTheme.phrenCardAccent).accessibilityHidden(true)
                 }
+                .padding(.vertical, expanded ? 0 : 4)
+                .frame(minHeight: expanded ? nil : 44)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -50,7 +53,7 @@ struct WebToolCard: View, Equatable {
             .accessibilityIdentifier("chat-web-card:\(callID)")
             if expanded { details }
         }
-        .toolCard()
+        .toolCard(collapsed: !expanded)
     }
 
     @ViewBuilder private var details: some View {
@@ -93,11 +96,14 @@ struct WebToolCard: View, Equatable {
     @ViewBuilder private var status: some View {
         switch presentation.status {
         case .running:
-            Image(systemName: "ellipsis").foregroundStyle(PhrenTheme.phrenCardAccent).accessibilityLabel("Running")
+            Image(systemName: "ellipsis").font(.system(size: expanded ? 15 : 12, weight: .medium))
+                .foregroundStyle(PhrenTheme.phrenCardAccent).accessibilityLabel("Running")
         case .succeeded:
-            Image(systemName: "checkmark").foregroundStyle(PhrenTheme.phrenCardAccent).accessibilityLabel("Completed")
+            Image(systemName: "checkmark").font(.system(size: expanded ? 15 : 12, weight: .medium))
+                .foregroundStyle(PhrenTheme.phrenCardAccent).accessibilityLabel("Completed")
         case .failed:
-            Image(systemName: "exclamationmark.circle").foregroundStyle(PhrenTheme.danger).accessibilityLabel("Failed")
+            Image(systemName: "exclamationmark.circle").font(.system(size: expanded ? 15 : 12, weight: .medium))
+                .foregroundStyle(PhrenTheme.danger).accessibilityLabel("Failed")
         }
     }
 }

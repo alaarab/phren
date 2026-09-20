@@ -90,6 +90,35 @@ struct PhrenChip: View {
     }
 }
 
+struct PhrenSwitch: View {
+    @Binding var isOn: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Button {
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
+                isOn.toggle()
+            }
+        } label: {
+            ZStack {
+                Capsule()
+                    .fill(isOn ? PhrenTheme.accentSolid : PhrenTheme.surfaceRaised)
+                    .frame(width: 44, height: 26)
+                Circle()
+                    .fill(.white)
+                    .frame(width: 22, height: 22)
+                    .offset(x: isOn ? 9 : -9)
+            }
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Enabled")
+        .accessibilityValue(isOn ? "On" : "Off")
+        .accessibilityAddTraits(.isToggle)
+    }
+}
+
 struct PhrenStatLabel: View {
     var added: Int? = nil
     var removed: Int? = nil

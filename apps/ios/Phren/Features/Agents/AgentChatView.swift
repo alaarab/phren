@@ -67,6 +67,29 @@ struct AgentChatSheet: View {
     }
 }
 
+private struct ChatHistoryStalledNotice: View {
+    let since: Date?
+    let newThread: () -> Void
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 60)) { context in
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                Text("Codex stopped recording this thread \(since.map { SessionRelativeTime.text(since: $0, at: context.date) } ?? "recently"). Start a new one to keep following it.")
+                    .font(.footnote)
+                Spacer(minLength: 4)
+                Button("New thread", action: newThread).font(.footnote.weight(.semibold)).fixedSize()
+            }
+            .foregroundStyle(PhrenTheme.warning)
+            .padding(10)
+            .background(PhrenTheme.warning.opacity(0.14), in: RoundedRectangle(cornerRadius: 10))
+            .padding(.horizontal, 12).padding(.top, 6)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("chat-history-stalled")
+        }
+    }
+}
+
 struct AgentChatView: View {
     /// The terminal's Chat control pops back to the nearest chat beneath it.
     static let screenTag = "agent-chat"
@@ -112,6 +135,7 @@ struct AgentChatView: View {
     /// segment is folded into the message and a new one starts.
     @State private var dictating = false
     @State private var showingAgentSwitcher = false
+    @State private var launchingNewThread = false
     @State private var showingUsage = false
     @State private var showingOptions = false
     @State private var showingModelPicker = false
@@ -327,10 +351,10 @@ struct AgentChatView: View {
                                                active: active, preview: { previewImage = $0 }).equatable()
                             if model.target?.isStarting == true {
                                 Text("Starting \(model.target?.providerName ?? "agent") in \(session.projectDisplayName(project?.name))…")
-                                    .foregroundStyle(PhrenTheme.textMuted).padding(.top, 40)
+                                    .foregroundStyle(PhrenTheme.textMuted).padding(.top, 24)
                                     .accessibilityIdentifier("chat-starting")
                             } else if model.connected && model.messages.isEmpty {
-                                Text("Ready for your message.").foregroundStyle(PhrenTheme.textMuted).padding(.top, 40)
+                                Text("Ready for your message.").foregroundStyle(PhrenTheme.textMuted).padding(.top, 24)
                             }
                         }
                         // The scroll marker is not a message: it must not add
@@ -339,7 +363,7 @@ struct AgentChatView: View {
                             Color.clear.preference(key: ChatBottomPosition.self, value: geometry.frame(in: .named("chat-scroll")).maxY)
                         }.frame(height: 1).id("chat-bottom")
                     }
-                    .padding(.horizontal, 18).padding(.top, 18).padding(.bottom, 6)
+                    .padding(.horizontal, 18).padding(.top, 6).padding(.bottom, 6)
                     .frame(minHeight: scrollHeight, alignment: .bottom)
                     .background(GeometryReader { geometry in
                         Color.clear.preference(key: ChatContentHeight.self, value: geometry.size.height)
@@ -518,6 +542,10 @@ struct AgentChatView: View {
                 )
                 .padding(.horizontal, 12).padding(.top, 6)
             }
+            if model.historyStalled {
+                ChatHistoryStalledNotice(since: model.historyStalledSince) { launchingNewThread = true }
+                    .disabled(project == nil)
+            }
             composer
                 .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         }
@@ -550,6 +578,7 @@ struct AgentChatView: View {
         .interactiveDismissDisabled(model.hasMore || model.loadingHistory)
         .navigationTitle("Agent chat")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .navigationBar)
         // Pushed inside a tab, the chat is a full-height screen: the tab bar
         // would otherwise sit under the composer.
         .toolbar(.hidden, for: .tabBar)
@@ -648,6 +677,9 @@ struct AgentChatView: View {
         .onChange(of: scenePhase) { _, phase in if phase != .active { stopDictation() } }
         .onDisappear { dictationTask?.cancel(); cleanupTask?.cancel(); dictating = false; if dictation.isRecording { dictation.stop() } }
         .sheet(isPresented: $showingOptions) { chatOptionsSheet }
+        .sheet(isPresented: $launchingNewThread) {
+            if let project { LaunchSessionView(storeID: project.storeID, project: project.name, preferredHostID: session.host.id) }
+        }
         .sheet(item: $menuCommand) { item in
             if let menu = AgentMenuChoice.menu(command: item.command, source: model.target?.source ?? "") {
                 ChatMenuPickerSheet(title: menu.title, command: item.command, rows: menu.rows) { index in
@@ -887,7 +919,7 @@ struct AgentChatView: View {
     private var chatHeader: some View {
         HStack(spacing: 10) {
             ChatDismissButton()
-            AgentProviderGlyph(source: model.target?.source)
+            AgentProviderGlyph(source: model.target?.source, size: 22)
                 .overlay(alignment: .bottomTrailing) {
                     ChatActivityIndicator(connected: model.connected && active,
                                           reconnecting: active && model.target != nil && !model.connected && !model.loading && !model.automaticReconnectSuspended,
@@ -899,9 +931,9 @@ struct AgentChatView: View {
                         .offset(x: 4, y: 4)
                 }
                 .accessibilityElement(children: .contain)
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(selectedPane?.displayTitle ?? session.projectDisplayName(project?.name))
-                    .font(.system(.subheadline, design: .monospaced).weight(.semibold)).lineLimit(1)
+                    .font(PhrenTypography.subheadline.weight(.semibold)).lineLimit(1)
                 HStack(spacing: 4) {
                     if session.usesFolderFallback(mappedProject: project?.name) { Image(systemName: "folder").font(.caption2) }
                     Text(chatLocation).lineLimit(1)
@@ -911,7 +943,7 @@ struct AgentChatView: View {
                             .accessibilityIdentifier("chat-link-project")
                     }
                 }
-                    .font(.system(.caption2, design: .monospaced)).foregroundStyle(PhrenTheme.chatNeutral)
+                    .font(PhrenTypography.caption2).foregroundStyle(PhrenTheme.chatNeutral)
                     .accessibilityLabel(chatLocationSpoken).accessibilityIdentifier("chat-location")
             }.frame(maxWidth: .infinity, alignment: .leading)
             if let target = model.target {
@@ -927,9 +959,9 @@ struct AgentChatView: View {
             chatOptions
         }
         .buttonStyle(.plain).foregroundStyle(PhrenTheme.chatText)
-        .padding(.horizontal, 8).padding(.vertical, 8)
+        .padding(.horizontal, 10).frame(minHeight: 48)
         .phrenPanel(radius: PhrenTheme.Radius.large)
-        .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 4)
+        .padding(.horizontal, 10).padding(.top, 2).padding(.bottom, 4)
         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         .accessibilityElement(children: .contain)
         .overlay(alignment: .topLeading) {
@@ -1099,35 +1131,40 @@ struct AgentChatView: View {
                     .autocorrectionDisabled(!ChatSettings.autocorrects)
                     .lineLimit(1...4).focused($composing).font(.system(size: composerTextSize, design: .monospaced))
                     .tint(PhrenTheme.cyan).padding(.vertical, 8).padding(.horizontal, 12)
-                    .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+                    .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
                     .contentShape(Rectangle())
                     .dismissKeyboardOnDownwardDrag { composing = false }
                     .accessibilityIdentifier("chat-composer").disabled(model.target == nil)
                 HStack(alignment: .bottom, spacing: 4) {
                     Button { showingAttachments = true } label: {
-                        Image(systemName: "plus").font(.system(size: 21, weight: .light)).frame(width: 36, height: 44).contentShape(Rectangle())
+                        Image(systemName: "plus").font(.system(size: 17, weight: .light)).frame(width: 40, height: 40)
+                            .contentShape(Rectangle().inset(by: -2))
                     }.accessibilityLabel("Add attachment").disabled(model.target == nil || model.sending)
                     if pasteAvailable {
                         // The clipboard holds a picture: one tap attaches it.
                         Button { pasteClipboardImage() } label: {
-                            Image(systemName: "doc.on.clipboard").font(.system(size: 17)).frame(width: 36, height: 44).contentShape(Rectangle())
+                            Image(systemName: "doc.on.clipboard").font(.system(size: 17)).frame(width: 40, height: 40)
+                                .contentShape(Rectangle().inset(by: -2))
                         }.accessibilityLabel("Paste image").accessibilityIdentifier("chat-paste-image")
                             .disabled(model.target == nil || model.sending)
                     }
                     NavigationLink {
                         HerdrTerminalView(host: session.host, session: session, target: model.target)
                     } label: {
-                        Image(systemName: "terminal").font(.system(size: 18)).frame(width: 40, height: 44).contentShape(Rectangle())
+                        Image(systemName: "terminal").font(.system(size: 17)).frame(width: 40, height: 40)
+                            .contentShape(Rectangle().inset(by: -2))
                     }.accessibilityLabel("Open Herdr terminal").accessibilityIdentifier("chat-composer-terminal")
                     Button { composing = false; showingAgentSwitcher = true } label: {
                         Image(systemName: "person.2")
-                            .font(.system(size: 18)).frame(width: 40, height: 44).contentShape(Rectangle())
+                            .font(.system(size: 17)).frame(width: 40, height: 40)
+                            .contentShape(Rectangle().inset(by: -2))
                     }.accessibilityLabel("Switch agent").accessibilityIdentifier("chat-switch-agent")
                         .disabled(model.sending || model.answering || model.stopping)
                     if runningChildAgentCount > 0 {
                         Button { showingChildAgents = true } label: {
                             Image(systemName: "point.3.filled.connected.trianglepath.dotted")
-                                .font(.system(size: 17)).frame(width: 40, height: 44).contentShape(Rectangle())
+                                .font(.system(size: 17)).frame(width: 40, height: 40)
+                                .contentShape(Rectangle().inset(by: -2))
                                 .foregroundStyle(PhrenTheme.chatText)
                                 .overlay(alignment: .topTrailing) {
                                     Text("\(runningChildAgentCount)")
@@ -1144,11 +1181,11 @@ struct AgentChatView: View {
                     Button {
                         if dictating { stopDictation() } else { startDictation() }
                     } label: {
-                        Image(systemName: dictating ? "mic.fill" : "mic").font(.system(size: 20))
+                        Image(systemName: dictating ? "mic.fill" : "mic").font(.system(size: 17))
                             .foregroundStyle(dictating ? PhrenTheme.accent : PhrenTheme.chatText)
                             .scaleEffect(dictating ? 1 + CGFloat(dictation.audioLevel) * 0.25 : 1)
                             .animation(.easeOut(duration: 0.12), value: dictation.audioLevel)
-                            .frame(width: 40, height: 44).contentShape(Rectangle())
+                            .frame(width: 40, height: 40).contentShape(Rectangle().inset(by: -2))
                     }.accessibilityLabel(dictating ? "Stop dictation" : "Dictate message")
                         .accessibilityIdentifier("chat-dictate")
                         .disabled(model.target == nil || model.sending)
@@ -1179,7 +1216,7 @@ struct AgentChatView: View {
                         .frame(width: 36, height: 36)
                         .foregroundStyle(primaryActionEnabled ? PhrenTheme.chatPanel : PhrenTheme.textDim)
                         .background(primaryActionEnabled ? PhrenTheme.cyan : PhrenTheme.borderStrong, in: Circle())
-                        .frame(width: 44, height: 44).contentShape(Rectangle())
+                        .frame(width: 40, height: 40).contentShape(Rectangle().inset(by: -2))
                     }
                     .disabled(!primaryActionEnabled)
                     .accessibilityLabel(showsStop ? "Stop" : showsQueue ? "Queue message" : "Send message")
@@ -1199,7 +1236,7 @@ struct AgentChatView: View {
             .disabled(model.restoringDraft)
         }
         .buttonStyle(.plain).foregroundStyle(PhrenTheme.chatText)
-        .padding(.horizontal, 10).padding(.top, 6).padding(.bottom, 8)
+        .padding(.horizontal, 10).padding(.top, 6).padding(.bottom, 2)
         .background(PhrenTheme.chatCanvas.ignoresSafeArea(.container, edges: .bottom))
     }
 

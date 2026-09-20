@@ -29,6 +29,7 @@ struct ChangesPullRequestsTab: View {
                     ForEach(model.pulls) { pull in
                         Button { open(pull) } label: { row(pull) }
                             .buttonStyle(.plain)
+                            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                             .accessibilityIdentifier("changes-pull:\(pull.number)")
                     }
                 }
@@ -44,6 +45,7 @@ struct ChangesPullRequestsTab: View {
                 .listRowBackground(Color.clear)
             }
         }
+        .environment(\.defaultMinListRowHeight, 40)
         .accessibilityIdentifier("changes-pulls")
         .refreshable { await load() }
         .onAppear { if model == nil { reload() } }
@@ -84,10 +86,10 @@ struct ChangesPullRequestsTab: View {
     private func row(_ pull: GitPulls.Pull) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Circle().fill(stateColor(pull)).frame(width: 8, height: 8).padding(.top, 5)
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 6) {
-                    Text("#\(pull.number)").font(PhrenTheme.Font.monoSubheadline).foregroundStyle(PhrenTheme.textMuted)
-                    Text(pull.title).font(PhrenTheme.Font.subheadline).foregroundStyle(PhrenTheme.text).lineLimit(1).truncationMode(.tail)
+                    Text("#\(pull.number)").font(PhrenTypography.monoFootnote).foregroundStyle(PhrenTheme.textMuted)
+                    Text(pull.title).font(PhrenTypography.footnote).foregroundStyle(PhrenTheme.text).lineLimit(1).truncationMode(.tail)
                 }
                 HStack(spacing: 4) {
                     chip(pull.head)
@@ -99,8 +101,8 @@ struct ChangesPullRequestsTab: View {
             }
             Spacer(minLength: 0)
         }
-        .frame(minHeight: 44)
-        .contentShape(Rectangle())
+        .frame(minHeight: 40)
+        .contentShape(Rectangle().inset(by: -2))
     }
 
     private func chip(_ text: String) -> some View {

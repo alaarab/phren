@@ -63,6 +63,17 @@ struct AgentsView: View {
         .refreshable { await model.pullToRefresh() }
         .safeAreaInset(edge: .top, spacing: 0) { LiveStatusBar() }
         .phrenScreen()
+        .toolbar {
+            if let storeId = stores.first?.id {
+                ToolbarItem(placement: .primaryAction) {
+                    NavigationLink { SchedulesView(storeId: storeId, project: nil) } label: {
+                        Image(systemName: "clock.badge.checkmark")
+                    }
+                    .accessibilityLabel("Schedules")
+                    .accessibilityIdentifier("schedules-all")
+                }
+            }
+        }
     }
 }
 

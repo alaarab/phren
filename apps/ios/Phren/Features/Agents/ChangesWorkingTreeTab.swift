@@ -56,6 +56,7 @@ struct ChangesWorkingTreeTab: View {
                     .listRowBackground(Color.clear)
                 }
             }
+            .environment(\.defaultMinListRowHeight, 32)
             .refreshable { await loadRoot() }
         }
         .accessibilityIdentifier("changes-tree")
@@ -206,9 +207,14 @@ private struct WorkingTreeRow: View {
             if entry.isDirectory { onToggle(entry) } else { onOpen(entry) }
         } label: { row }
             .buttonStyle(.plain)
-            .frame(minHeight: 44)
-            .listRowInsets(EdgeInsets(top: 0, leading: 16 + CGFloat(level) * 16, bottom: 0, trailing: 16))
+            .frame(minHeight: 32)
+            .listRowInsets(EdgeInsets(top: 0, leading: 12 + CGFloat(level) * 12, bottom: 0, trailing: 12))
             .accessibilityIdentifier("changes-tree-entry:\(entry.path)")
+            .overlay {
+                Color.clear.frame(maxWidth: .infinity, minHeight: 32).accessibilityElement()
+                    .accessibilityIdentifier("changes-tree-row:\(entry.path)")
+                    .allowsHitTesting(false)
+            }
         if entry.isDirectory, isExpanded, let child = children[entry.path] {
             ForEach(child.entries) { sub in
                 WorkingTreeRow(entry: sub, level: level + 1, expanded: expanded, children: children,
@@ -221,15 +227,15 @@ private struct WorkingTreeRow: View {
         HStack(spacing: 8) {
             if entry.isDirectory {
                 Image(systemName: "chevron.right")
-                    .font(PhrenTheme.Font.caption2.weight(.semibold))
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(PhrenTheme.textMuted)
                     .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                    .frame(width: 12)
+                    .frame(width: 14)
             } else {
-                Color.clear.frame(width: 12)
+                Color.clear.frame(width: 14)
             }
             icon
-            Text(entry.name).font(PhrenTheme.Font.monoSubheadline).foregroundStyle(PhrenTheme.text)
+            Text(entry.name).font(PhrenTypography.monoFootnote).foregroundStyle(PhrenTheme.text)
                 .lineLimit(1).truncationMode(.middle)
             if entry.isDirectory, loading.contains(entry.path) {
                 ProgressView().controlSize(.mini)
@@ -239,12 +245,13 @@ private struct WorkingTreeRow: View {
             }
             Spacer(minLength: 0)
         }
-        .contentShape(Rectangle())
+        .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+        .contentShape(Rectangle().inset(by: -6))
     }
 
     private var icon: some View {
         ZStack(alignment: .bottomTrailing) {
-            PhrenFileTypeIcon(path: entry.name, folder: entry.isDirectory)
+            PhrenFileTypeIcon(path: entry.name, folder: entry.isDirectory, size: 14)
             if entry.isDirectory, entry.status == .changed {
                 Circle().fill(PhrenTheme.danger).frame(width: 7, height: 7)
                     .overlay(Circle().strokeBorder(PhrenTheme.surface, lineWidth: 1))

@@ -122,6 +122,16 @@ const PROJECTS_SUBCOMMANDS: Subcommand[] = [
   { name: "remove", usage: "phren projects remove <name>", summary: "Remove a project" },
 ];
 
+const SCHEDULE_SUBCOMMANDS: Subcommand[] = [
+  { name: "list", usage: "phren schedule list [project]", summary: "List scheduled prompts" },
+  { name: "add", usage: "phren schedule add <project> --name <name> --harness <name> --computer <name> [--model <model>] --every <kind> [timing] (--prompt <text>|--prompt-file <path>)", summary: "Add a scheduled prompt" },
+  { name: "remove", usage: "phren schedule remove <project> <id>", summary: "Remove a scheduled prompt" },
+  { name: "enable", usage: "phren schedule enable <project> <id>", summary: "Resume a scheduled prompt" },
+  { name: "disable", usage: "phren schedule disable <project> <id>", summary: "Pause a scheduled prompt" },
+  { name: "run", usage: "phren schedule run <project> <id>", summary: "Run a schedule through the local Hook" },
+  { name: "history", usage: "phren schedule history [project] [--id <id>] [--limit <n>]", summary: "Show local schedule runs" },
+];
+
 const SKILLS_SUBCOMMANDS: Subcommand[] = [
   { name: "list", usage: "phren skills list", summary: "List installed skills" },
   { name: "add", usage: "phren skills add <project> <path>", summary: "Link a skill into a project" },
@@ -188,13 +198,20 @@ const TEAM_SUBCOMMANDS: Subcommand[] = [
 
 export const REGISTRY: Command[] = [
   {
-    name: "bridge", topic: "setup", usage: "phren bridge <install|status|doctor|update|rollback|uninstall>",
-    summary: "Install and manage Phren Hook for iPhone agent connections",
+    name: "bridge", topic: "setup", usage: "phren bridge <install|status|doctor|update|rollback|uninstall|enroll-computer>",
+    summary: "Install Phren Hook and enroll phone or computer connections",
+    subcommands: [{ name: "enroll-computer", usage: "phren bridge enroll-computer <name> [--accept <public-key-file>]", summary: "Print or accept a restricted computer dispatch key" }],
     run: async args => {
       const { runBridge } = await import("./bridge/command.js");
       const { VERSION } = await import("./package-metadata.js");
       return runBridge(args, VERSION);
     },
+  },
+  {
+    name: "dispatch", topic: "core", usage: "phren dispatch <computer|anywhere> <project> --label <label> --prompt <brief> [--harness codex|claude|opencode] [--model <model>]",
+    summary: "Dispatch a worker brief through Phren Hook",
+    subcommands: [{ name: "status", usage: "phren dispatch status", summary: "List local dispatch receipts" }],
+    run: async args => (await import("./bridge/dispatch-command.js")).runDispatch(args),
   },
   // Setup (featured: init, quickstart)
   {
@@ -236,6 +253,17 @@ export const REGISTRY: Command[] = [
     run: async (args, ctx) => {
       const { handleProjectsNamespace } = await import("./cli/namespaces.js");
       await handleProjectsNamespace(args, ctx.profile());
+    },
+  },
+  {
+    name: "schedule",
+    topic: "projects",
+    usage: "phren schedule <subcommand>",
+    summary: "Manage scheduled prompts",
+    subcommands: SCHEDULE_SUBCOMMANDS,
+    run: async (args, ctx) => {
+      const { handleScheduleCommand } = await import("./cli/schedules.js");
+      return handleScheduleCommand(args, ctx.phrenPath());
     },
   },
 
