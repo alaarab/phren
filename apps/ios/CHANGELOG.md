@@ -6,7 +6,22 @@ Settings → About. `scripts/changelog.py` refuses to build a version that has n
 section here; the version is `MARKETING_VERSION` in `project.yml`, the build
 number counts up on its own.
 
-## 1.0.0
+## 1.0.1
+
+A patch on the day-one build: faster sends, a chat that stays put, and the
+lock screen and Changes screen done properly.
+
+### New
+
+- Changes is a new screen laid out like a source-control sheet: the branch
+  and counts up top, then Changes (List or Diff, with stage, unstage and
+  revert, a line-number gutter, word-level highlights and folded unchanged
+  runs), History with a commit graph and branch chips, Branches with local
+  and remote lists, PRs from GitHub, and a Working tree browser with file
+  icons and change badges.
+- Lock screen: one line per running agent with its model, project, computer
+  and elapsed time, waiting agents first, "+N more" past five, and no
+  private paths in the step.
 
 ### Changed
 
@@ -30,6 +45,13 @@ number counts up on its own.
   setting.
 - A tool's output screen no longer shows a Done button beside the back
   chevron; back is the way out.
+- What's new appears once after every update again; it used to count the
+  marketing version alone, which every TestFlight build shares.
+
+## 1.0.0
+
+### Changed
+
 - Spawned agents now sit under their parent agent in the sidebar, and the
   agent-tree control lives beside the agent switcher in chat input.
 

@@ -2,6 +2,7 @@ import SwiftUI
 
 /// Semantic colors follow the saved appearance without resetting view state.
 enum PhrenTheme {
+    typealias Font = PhrenTypography
     enum Radius {
         static let small: CGFloat = 10
         static let medium: CGFloat = 14

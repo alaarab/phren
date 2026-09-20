@@ -11,6 +11,7 @@ import { homeDirectory, startChangeRetention } from "./changes.js";
 import { WorkspaceContextUsage } from "./context.js";
 import { candidateRepos, enrollProject } from "./enroll.js";
 import { browseFiles } from "./files.js";
+import { gitBranches, gitDiscard, gitLog, gitPulls, gitStage, gitStatus, gitTree, gitUnstage } from "./git.js";
 import { paneChatState, paneIdentity, panes, rpc, servers, snapshot, trustedDirectory, validateStartingTarget, validateTarget, workspaceSnapshot, startingPane } from "./herdr.js";
 import { LaunchLimiter } from "./limits.js";
 import { locateProject } from "./locate.js";
@@ -22,7 +23,7 @@ import { TabActivityStore } from "./tab-activity.js";
 import { childAgent, childAgentTree, conversationNamedPaths, historicalImage, publicChildAgents, refreshTranscript, TranscriptReader, transcriptPath } from "./transcripts.js";
 import { listUploads, saveUpload, uploadImage } from "./uploads.js";
 import { ModelCatalog } from "./models.js";
-import { currentStep } from "./steps.js";
+import { currentModel, currentStep } from "./steps.js";
 import { AccountUsageReader } from "./usage.js";
 
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
@@ -60,6 +61,18 @@ function send(socket: WebSocket, frame: unknown) {
   const data = JSON.stringify(frame);
   if (Buffer.byteLength(data) > MAX_FRAME || socket.bufferedAmount > MAX_FRAME) { socket.close(1009, "Reconnect to resume the conversation"); return; }
   socket.send(data);
+}
+
+/** The repository a git route acts on: the pane's trusted directory, or a
+ * spawned child's own worktree exactly as /v1/diff resolves it. */
+async function gitRepository(pane: Json, target: Target, child: unknown): Promise<string> {
+  const id = z.string().regex(/^[a-f0-9]{32}$/).optional().parse(child);
+  if (id !== undefined) {
+    const relation = childAgent(await childAgentTree(target.source, target.session), id);
+    if (!relation) throw new BridgeError(404, "That agent is not part of this conversation.");
+    return relation.cwd ?? await trustedDirectory(pane);
+  }
+  return trustedDirectory(pane);
 }
 
 export async function serve(version: string): Promise<void> {
@@ -153,12 +166,17 @@ export async function serve(version: string): Promise<void> {
                 if (chat?.starting === true) tab.starting = true;
               }
               if (typeof tab.cwd === "string" && tab.agent) tab.branch = await repositoryBranch(tab.cwd);
-              // What a working agent is doing, for cards and the lock screen.
-              if (agents.length === 1 && agents[0].agent_status === "working") {
+              // The model the pane's agent is running, and what it is doing
+              // right now, for cards and the lock screen.
+              if (agents.length === 1 && provider.safeParse(agents[0].agent).success) {
                 const session = chatStates.get(agents[0])?.sessionId;
-                if (typeof session === "string" && provider.safeParse(agents[0].agent).success) {
-                  const step = await currentStep(agents[0].agent as Provider, session).catch(() => undefined);
-                  if (step) tab.currentStep = step;
+                if (typeof session === "string") {
+                  const model = await currentModel(agents[0].agent as Provider, session).catch(() => undefined);
+                  if (model) tab.model = model;
+                  if (agents[0].agent_status === "working") {
+                    const step = await currentStep(agents[0].agent as Provider, session).catch(() => undefined);
+                    if (step) tab.currentStep = step;
+                  }
                 }
               }
             }
@@ -338,6 +356,20 @@ export async function serve(version: string): Promise<void> {
               result = await repositoryDiff(cwd, paths, allowed);
             }
           }
+          else if (url.pathname.startsWith("/v1/git/")) {
+            // Git routes read the pane's repository, or a spawned child's own
+            // worktree, exactly as /v1/diff resolves it.
+            const cwd = await gitRepository(pane, target, data.child);
+            if (url.pathname === "/v1/git/status") result = await gitStatus(cwd);
+            else if (url.pathname === "/v1/git/log") result = await gitLog(cwd, z.coerce.number().int().min(1).max(200).optional().parse(data.limit) ?? 60, z.string().min(1).max(512).optional().parse(data.ref));
+            else if (url.pathname === "/v1/git/branches") result = await gitBranches(cwd);
+            else if (url.pathname === "/v1/git/pulls") result = await gitPulls(cwd);
+            else if (url.pathname === "/v1/git/tree") result = await gitTree(cwd, z.string().max(4096).optional().parse(data.path) ?? "");
+            else if (url.pathname === "/v1/git/stage") result = await gitStage(cwd, data.paths);
+            else if (url.pathname === "/v1/git/unstage") result = await gitUnstage(cwd, data.paths);
+            else if (url.pathname === "/v1/git/discard") result = await gitDiscard(cwd, data.paths);
+            else throw new BridgeError(404, "Unknown Phren Hook route.");
+          }
           else if (url.pathname === "/v1/approvals/answer") {
             const actionId = target.source === "opencode"
               ? z.string().regex(/^[A-Za-z0-9_]{1,200}$/).parse(data.actionId)
@@ -381,7 +413,7 @@ export async function serve(version: string): Promise<void> {
   async function childConversationReader(target: Target, child: string) {
     const relation = childAgent(await childAgentTree(target.source, target.session), child);
     if (!relation) throw new BridgeError(404, "This child agent does not belong to the selected conversation.");
-    const reader = new TranscriptReader(relation.transcript, relation.provider, undefined, undefined, relation.provider === "claude");
+    const reader = new TranscriptReader(relation.transcript, relation.provider, undefined, undefined, relation.provider === "claude", relation.cwd);
     return { reader, source: relation.provider, session: relation.id };
   }
   http.on("upgrade", (request, socket, head) => {

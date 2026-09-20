@@ -10,6 +10,11 @@ import SwiftUI
 /// them through its own vibrant/monochrome material — so those widgets stick
 /// to default text styles plus `.widgetAccentable()`.
 enum WidgetTheme {
+    typealias Font = PhrenTypography
+    static let activityBackground = Color.black
+    static let activityText = Color.white
+    static let activitySecondary = Color.secondary
+    static let warning = Color(widgetHex: 0xE0BC7F)
     static let bg = Color(widgetHex: 0x0A0A1A)          // --bg
     static let text = Color(widgetHex: 0xECE9F5)        // --ink
     static let textMuted = Color(widgetHex: 0xECE9F5).opacity(0.55) // --muted

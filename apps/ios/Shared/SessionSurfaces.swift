@@ -88,6 +88,9 @@ struct SessionWorkingActivityAttributes: ActivityAttributes {
         let provider: String
         let tool: String?
         let computer: String
+        /// The model the agent runs, as the Hook's overview named it; nil when
+        /// the transcript had not named one yet.
+        let model: String?
         /// The current step, already trimmed for the lock screen (`nil` when
         /// only the status shows). Kept as text so the widget never formats.
         let step: String?
@@ -95,15 +98,20 @@ struct SessionWorkingActivityAttributes: ActivityAttributes {
         let subagents: Int
         /// "working", "waiting" or "idle"; the lock screen colours the step by it.
         let state: String?
+        /// When the agent's current turn or session began, so each row has its
+        /// own timer; nil when the Hook never reported one.
+        let startedAt: Date?
 
         init(id: String, project: String, provider: String, tool: String? = nil, computer: String,
-             step: String? = nil, subagents: Int = 0, state: String? = nil) {
+             model: String? = nil, step: String? = nil, subagents: Int = 0, state: String? = nil,
+             startedAt: Date? = nil) {
             self.id = id; self.project = project; self.provider = provider; self.tool = tool
-            self.computer = computer; self.step = step; self.subagents = subagents; self.state = state
+            self.computer = computer; self.model = model; self.step = step; self.subagents = subagents
+            self.state = state; self.startedAt = startedAt
         }
-        private enum CodingKeys: String, CodingKey { case id, project, provider, tool, computer, step, subagents, state }
-        /// Decode activities created before the step/subagent fields too, so
-        /// an upgrade does not make an already-live activity undecodable.
+        private enum CodingKeys: String, CodingKey { case id, project, provider, tool, computer, model, step, subagents, state, startedAt }
+        /// Decode activities created before the step/subagent/model fields too,
+        /// so an upgrade does not make an already-live activity undecodable.
         init(from decoder: Decoder) throws {
             let values = try decoder.container(keyedBy: CodingKeys.self)
             id = try values.decode(String.self, forKey: .id)
@@ -111,9 +119,11 @@ struct SessionWorkingActivityAttributes: ActivityAttributes {
             provider = try values.decode(String.self, forKey: .provider)
             tool = try values.decodeIfPresent(String.self, forKey: .tool)
             computer = try values.decode(String.self, forKey: .computer)
+            model = try values.decodeIfPresent(String.self, forKey: .model)
             step = try values.decodeIfPresent(String.self, forKey: .step)
             subagents = try values.decodeIfPresent(Int.self, forKey: .subagents) ?? 0
             state = try values.decodeIfPresent(String.self, forKey: .state)
+            startedAt = try values.decodeIfPresent(Date.self, forKey: .startedAt)
         }
     }
     struct ContentState: Codable, Hashable {
@@ -121,18 +131,26 @@ struct SessionWorkingActivityAttributes: ActivityAttributes {
         let waiting: Int
         let entries: [Entry]
         let startedAt: Date
+        /// Agents beyond the rows the lock screen shows, for its "+N more" line.
+        let more: Int
+        /// Distinct computers the listed agents run on.
+        let computers: Int
         var headline: String {
             if waiting > 0 { return "\(working) working · \(waiting) waiting" }
             return working == 1 ? "1 agent working" : "\(working) agents working"
         }
-        /// The row the lock screen leads with: the pinned session when there
-        /// is one, otherwise the first working session.
+        /// "N agents · M computers", the one line above the per-agent rows.
+        /// N counts the listed rows plus those past the cap; M their computers.
+        var summary: String { "\(entries.count + more) agents · \(computers) computers" }
+        /// The row the lock screen leads with: the pinned session when there is
+        /// one, otherwise the first row in waiting-first order.
         var primary: Entry? { entries.first }
 
-        init(working: Int, waiting: Int, entries: [Entry], startedAt: Date) {
+        init(working: Int, waiting: Int, entries: [Entry], startedAt: Date, more: Int = 0, computers: Int = 0) {
             self.working = working; self.waiting = waiting; self.entries = entries; self.startedAt = startedAt
+            self.more = more; self.computers = computers
         }
-        private enum CodingKeys: String, CodingKey { case working, waiting, entries, startedAt }
+        private enum CodingKeys: String, CodingKey { case working, waiting, entries, startedAt, more, computers }
         /// Decode activities created before the aggregate upgrade too, so the
         /// app can find and replace/end them instead of leaving an orphan.
         init(from decoder: Decoder) throws {
@@ -141,6 +159,8 @@ struct SessionWorkingActivityAttributes: ActivityAttributes {
             waiting = try values.decodeIfPresent(Int.self, forKey: .waiting) ?? 0
             entries = try values.decodeIfPresent([Entry].self, forKey: .entries) ?? []
             startedAt = try values.decode(Date.self, forKey: .startedAt)
+            more = try values.decodeIfPresent(Int.self, forKey: .more) ?? 0
+            computers = try values.decodeIfPresent(Int.self, forKey: .computers) ?? Set(entries.map(\.computer)).count
         }
     }
     let routeID: String
@@ -149,6 +169,11 @@ struct SessionWorkingActivityAttributes: ActivityAttributes {
 /// Stable input independent of ActivityKit or a real computer. The controller
 /// retains each start across title/tool changes and merges the open chat by ID.
 enum SessionWorkingActivityBuilder {
+    /// The rows the lock screen draws; the rest are counted, not listed.
+    static let maxEntries = 5
+    /// How long a just-finished agent keeps its green row before it drops off.
+    static let finishingGrace: TimeInterval = 60
+
     struct Session: Equatable {
         let entry: SessionWorkingActivityAttributes.Entry
         let state: String
@@ -156,16 +181,23 @@ enum SessionWorkingActivityBuilder {
     }
     static func build(_ sessions: [Session], pinnedID: String? = nil, now: Date) -> SessionWorkingActivityAttributes.ContentState {
         let unique = Dictionary(sessions.map { ($0.entry.id, $0) }, uniquingKeysWith: { _, latest in latest }).values
-        let working = unique.filter { $0.state == "working" }
         let waiting = unique.filter { $0.state == "waiting" }
-        let visible = (Array(working) + Array(waiting)).sorted {
+        let working = unique.filter { $0.state == "working" }
+        // A finish stays a moment so its green row is not yanked as it lands.
+        let finishing = unique.filter { $0.state == "idle" && now.timeIntervalSince($0.startedAt) < finishingGrace }
+        func rank(_ session: Session) -> Int { session.state == "waiting" ? 0 : session.state == "working" ? 1 : 2 }
+        let ordered = (Array(waiting) + Array(working) + Array(finishing)).sorted {
             if ($0.entry.id == pinnedID) != ($1.entry.id == pinnedID) { return $0.entry.id == pinnedID }
-            if $0.state != $1.state { return $0.state == "working" }
+            if rank($0) != rank($1) { return rank($0) < rank($1) }
             if $0.state == "working", $0.startedAt != $1.startedAt { return $0.startedAt < $1.startedAt }
             return $0.entry.id < $1.entry.id
         }
-        return .init(working: working.count, waiting: waiting.count, entries: Array(visible.prefix(4).map(\.entry)),
-                     startedAt: working.map(\.startedAt).min() ?? now)
+        let entries = Array(ordered.prefix(maxEntries).map(\.entry))
+        let total = waiting.count + working.count + finishing.count
+        return .init(working: working.count, waiting: waiting.count, entries: entries,
+                     startedAt: working.map(\.startedAt).min() ?? now,
+                     more: max(0, total - entries.count),
+                     computers: Set(ordered.map(\.entry.computer)).count)
     }
 }
 

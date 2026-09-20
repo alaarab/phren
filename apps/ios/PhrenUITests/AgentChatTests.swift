@@ -972,6 +972,22 @@ final class AgentChatTests: XCTestCase {
         capture(app, "Native Herdr terminal")
     }
 
+    /// The source-control sheet: the branch stat line from /v1/git/status and
+    /// the five segment bar the tabs hang from.
+    @MainActor
+    func testChangesScreenShowsGitStatusAndTabs() {
+        let app = launch(extra: ["--chat-diffs"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        app.buttons["chat-diff"].tap()
+        let status = app.descendants(matching: .any).matching(identifier: "changes-status-line").firstMatch
+        XCTAssertTrue(status.waitForExistence(timeout: 8))
+        XCTAssertEqual(status.label, "main · 2 unstaged · 1 untracked · 3 +12 -3")
+        for identifier in ["changes-tab-changes", "changes-tab-history", "changes-tab-branches", "changes-tab-pulls", "changes-tab-tree"] {
+            XCTAssertTrue(app.buttons[identifier].waitForExistence(timeout: 5), "Missing \(identifier)")
+        }
+        capture(app, "Changes screen")
+    }
+
     @MainActor
     func testDraftAndAttachmentSurviveProcessRelaunch() {
         var app = launch(extra: ["--chat-persistent-draft", "--chat-clear-drafts"])
@@ -1209,6 +1225,29 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "+- Accent is purple now")).firstMatch.waitForExistence(timeout: 5))
         capture(app, "A hook's commit in another repository, from the same command")
     }
+
+    /// The Changes screen's pull requests and working tree tabs: the fixture's
+    /// GitHub CLI list draws a row, and a folder expands to its changed file.
+    @MainActor
+    func testChangesPullsAndWorkingTreeTabs() {
+        let app = launch(extra: ["--chat-diffs"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        XCTAssertTrue(app.scrollViews["chat-transcript"].waitForExistence(timeout: 8))
+        app.buttons["chat-diff"].tap()
+        XCTAssertTrue(app.buttons["changes-tab-pulls"].waitForExistence(timeout: 8))
+        app.buttons["changes-tab-pulls"].tap()
+        let pull = app.buttons["changes-pull:42"]
+        XCTAssertTrue(pull.waitForExistence(timeout: 8))
+        XCTAssertTrue(pull.label.contains("Changes: pull requests and a working tree"))
+        capture(app, "Pull requests in the changes screen")
+        app.buttons["changes-tab-tree"].tap()
+        let folder = app.buttons["changes-tree-entry:Sources"]
+        XCTAssertTrue(folder.waitForExistence(timeout: 8))
+        folder.tap()
+        XCTAssertTrue(app.buttons["changes-tree-entry:Sources/App.swift"].waitForExistence(timeout: 8))
+        capture(app, "Working tree with change badges")
+    }
+
     /// Seed this simulator with `xcrun simctl addmedia <device> <test-image>`.
     @MainActor
     func testSystemPhotoPickerPreparesAnAttachment() throws {

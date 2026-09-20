@@ -26,7 +26,7 @@ enum DiffPalette {
     static func sign(_ kind: DiffDocument.Kind) -> String {
         kind == .added ? "+" : kind == .removed ? "−" : " "
     }
-    static let font = Font.system(.caption, design: .monospaced)
+    static let font = PhrenTheme.Font.monoCaption
     static let numberWidth: CGFloat = 34
     static let compactNumberWidth: CGFloat = 26
 
@@ -60,13 +60,21 @@ struct DiffRowView: View {
     var runEnd = true
     /// Long lines wrap under their own first character instead of scrolling.
     var wrap = false
+    /// Keep the gutter fixed when only code should scroll horizontally.
+    var scrollCode = false
     /// One narrow number column with the sign inside it — for chat cards,
     /// where the editor's two-column gutter would eat a third of the width.
     var compact = false
+    /// Exposes an element id for the gutter, so a UI test can prove the line
+    /// numbers drew without reaching into the collapsed row's children.
+    var markGutter = false
+    /// The width of each number column. The Changes screen's two numbers share
+    /// a fixed 44pt gutter; the chat diff keeps the editor's wider columns.
+    var numberWidth: CGFloat = DiffPalette.numberWidth
 
     var body: some View {
         if row.kind == .hunk {
-            DiffHunkRow(text: row.text, compact: compact)
+            DiffHunkRow(text: row.text, compact: compact, numberWidth: numberWidth)
         } else if row.kind == .header {
             Text(row.text.isEmpty ? " " : row.text)
                 .font(DiffPalette.font.weight(.semibold)).foregroundStyle(PhrenTheme.textSecondary)
@@ -90,8 +98,8 @@ struct DiffRowView: View {
                         // The tint spans the row's full height, so a run of lines
                         // shares one unbroken block.
                         HStack(spacing: 0) {
-                            Text(row.old.map(String.init) ?? "").frame(width: DiffPalette.numberWidth, alignment: .trailing)
-                            Text(row.new.map(String.init) ?? "").frame(width: DiffPalette.numberWidth, alignment: .trailing)
+                            Text(row.old.map(String.init) ?? "").frame(width: numberWidth, alignment: .trailing)
+                            Text(row.new.map(String.init) ?? "").frame(width: numberWidth, alignment: .trailing)
                         }
                         .foregroundStyle(PhrenTheme.textDim).padding(.trailing, 6).padding(.vertical, 1.5)
                         .background(DiffPalette.gutterShape(row.kind, runStart: runStart, runEnd: runEnd))
@@ -100,10 +108,12 @@ struct DiffRowView: View {
                         .foregroundStyle(row.kind == .added ? PhrenTheme.success : row.kind == .removed ? PhrenTheme.danger : PhrenTheme.textDim)
                         .frame(width: 14, alignment: .center).padding(.vertical, 1.5)
                 }
-                Text(Self.attributed(row, language: language))
-                    .foregroundStyle(PhrenTheme.text)
-                    .fixedSize(horizontal: !wrap, vertical: false)
-                    .padding(.leading, compact ? 4 : 0).padding(.trailing, 12).padding(.vertical, 1.5)
+                if scrollCode {
+                    ScrollView(.horizontal) { code }
+                        .scrollIndicators(.hidden)
+                } else {
+                    code
+                }
                 Spacer(minLength: 0)
             }
             .font(DiffPalette.font)
@@ -112,21 +122,38 @@ struct DiffRowView: View {
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(Self.spoken(row))
             .accessibilityAddTraits(.isStaticText)
+            .overlay(alignment: .topLeading) {
+                if markGutter {
+                    Color.clear.frame(width: 1, height: 1).accessibilityElement().accessibilityIdentifier("diff-gutter-number")
+                }
+            }
         }
     }
 
+    private var code: some View {
+        Text(Self.attributed(row, language: language))
+            .foregroundStyle(PhrenTheme.text)
+            .fixedSize(horizontal: !wrap, vertical: true)
+            .padding(.leading, compact ? 4 : 0).padding(.trailing, 12).padding(.vertical, 1.5)
+    }
+
     /// The line without its leading sign, syntax-coloured, with the changed
-    /// characters tinted on top — GitHub's two layers.
+    /// words tinted on top — GitHub's two layers.
     static func attributed(_ row: DiffDocument.Row, language: SyntaxTokenizer.Language = .plain) -> AttributedString {
         let body = row.kind == .context || row.kind == .added || row.kind == .removed ? String(row.text.dropFirst()) : row.text
         var text = body.isEmpty ? AttributedString(" ") : CodeHighlighting.highlighted(body, language: language)
-        guard let inner = row.inner, !inner.isEmpty else { return text }
-        // `inner` indexes the original line; shift by the dropped sign.
-        let start = row.text.distance(from: row.text.index(after: row.text.startIndex), to: inner.lowerBound)
-        let length = row.text.distance(from: inner.lowerBound, to: inner.upperBound)
-        let from = text.index(text.startIndex, offsetByCharacters: max(0, start))
-        let to = text.index(from, offsetByCharacters: min(length, text.characters.count - max(0, start)))
-        text[from..<to].backgroundColor = DiffPalette.inner(row.kind)
+        guard !row.inner.isEmpty else { return text }
+        // `inner` addresses the row text; the attributed string drops the sign.
+        let sign = row.text.isEmpty ? 0 : 1
+        for range in row.inner {
+            let start = row.text.distance(from: row.text.startIndex, to: range.lowerBound) - sign
+            let length = row.text.distance(from: range.lowerBound, to: range.upperBound)
+            let remaining = text.characters.count - start
+            guard start >= 0, length > 0, remaining > 0 else { continue }
+            let from = text.index(text.startIndex, offsetByCharacters: start)
+            let to = text.index(from, offsetByCharacters: min(length, remaining))
+            text[from..<to].backgroundColor = DiffPalette.inner(row.kind)
+        }
         return text
     }
 
@@ -145,11 +172,12 @@ struct DiffRowView: View {
 struct DiffHunkRow: View {
     let text: String
     var compact = false
+    var numberWidth: CGFloat = DiffPalette.numberWidth
     var body: some View {
         HStack(spacing: 8) {
-            Rectangle().fill(PhrenTheme.borderStrong).frame(width: compact ? DiffPalette.compactNumberWidth + 16 : 2 * DiffPalette.numberWidth + 6, height: 1)
+            Rectangle().fill(PhrenTheme.borderStrong).frame(width: compact ? DiffPalette.compactNumberWidth + 16 : 2 * numberWidth + 6, height: 1)
             Text(text).font(DiffPalette.font).foregroundStyle(PhrenTheme.accent.opacity(0.9)).lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
+                .truncationMode(.tail)
             Rectangle().fill(PhrenTheme.borderStrong).frame(height: 1)
         }
         .padding(.vertical, 5)
@@ -203,5 +231,47 @@ struct DiffSplitRowView: View {
         .font(DiffPalette.font)
         .frame(width: columnWidth, alignment: .leading)
         .background(Rectangle().fill(line.map { DiffPalette.line($0.kind) } ?? PhrenTheme.surface.opacity(0.4)))
+    }
+}
+
+/// Git omits these lines from the patch, so the controls navigate to the
+/// neighboring hunks without pretending to reveal unavailable source.
+struct DiffFoldBar: View {
+    let count: Int
+    var canJumpUp = true
+    var canJumpDown = true
+    let onUp: () -> Void
+    let onDown: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            HStack(spacing: 2) {
+                Button(action: onUp) {
+                    Image(systemName: "chevron.up").font(PhrenTheme.Font.caption.weight(.semibold))
+                        .frame(width: 44, height: 44)
+                }
+                .disabled(!canJumpUp)
+                .accessibilityLabel("Previous hunk")
+                Button(action: onDown) {
+                    Image(systemName: "chevron.down").font(PhrenTheme.Font.caption.weight(.semibold))
+                        .frame(width: 44, height: 44)
+                }
+                .disabled(!canJumpDown)
+                .accessibilityLabel("Next hunk")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(PhrenTheme.textMuted)
+            Text("\(count) unmodified line\(count == 1 ? "" : "s")")
+                .font(PhrenTheme.Font.monoCaption2)
+                .foregroundStyle(PhrenTheme.textMuted)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .background(PhrenTheme.surfaceRaised.opacity(0.6))
+        .overlay(alignment: .bottom) { Rectangle().fill(PhrenTheme.border).frame(height: 0.5) }
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("changes-fold")
     }
 }

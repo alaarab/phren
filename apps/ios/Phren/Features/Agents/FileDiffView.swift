@@ -63,13 +63,13 @@ struct FileDiffView: View {
     private var summaryBar: some View {
         HStack(spacing: 10) {
             DiffStatusBadge(status: file.status)
-            Text(file.path).font(.system(.caption, design: .monospaced)).foregroundStyle(PhrenTheme.textSecondary)
+            Text(file.path).font(PhrenTheme.Font.monoCaption).foregroundStyle(PhrenTheme.textSecondary)
                 .lineLimit(1).truncationMode(.head)
             Spacer(minLength: 8)
             if let document {
                 DiffCounts(added: document.added, removed: document.removed)
             }
-            Text(section.kind == "staged" ? "Staged" : "Unstaged").font(.caption2).foregroundStyle(PhrenTheme.textMuted)
+            Text(section.kind == "staged" ? "Staged" : "Unstaged").font(PhrenTheme.Font.caption2).foregroundStyle(PhrenTheme.textMuted)
         }
         .padding(.horizontal, 14).padding(.vertical, 8)
         .background(PhrenTheme.surface)
@@ -107,7 +107,7 @@ struct FileDiffView: View {
                         }
                         if document.truncated {
                             Text("Preview truncated. Copy the patch for all supplied lines.")
-                                .font(.caption).foregroundStyle(PhrenTheme.textMuted).padding(12)
+                                .font(PhrenTheme.Font.caption).foregroundStyle(PhrenTheme.textMuted).padding(12)
                         }
                     }
                     .frame(minWidth: geometry.size.width, alignment: .leading)
@@ -140,8 +140,8 @@ struct FileDiffView: View {
 
     private func notice(_ title: String, detail: String) -> some View {
         VStack(spacing: 6) {
-            Text(title).font(.subheadline.weight(.medium))
-            Text(detail).font(.footnote).foregroundStyle(PhrenTheme.textMuted).multilineTextAlignment(.center)
+            Text(title).font(PhrenTheme.Font.subheadline.weight(.medium))
+            Text(detail).font(PhrenTheme.Font.footnote).foregroundStyle(PhrenTheme.textMuted).multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity).padding(24)
     }
@@ -168,7 +168,7 @@ struct DiffStatusBadge: View {
 
     var body: some View {
         let (letter, color, name) = Self.letter(status)
-        Text(letter).font(.system(.caption, design: .monospaced).weight(.bold)).foregroundStyle(color)
+        Text(letter).font(PhrenTheme.Font.monoCaption.weight(.bold)).foregroundStyle(color)
             .frame(width: 18).accessibilityLabel(name)
     }
 }
@@ -181,7 +181,7 @@ struct DiffCounts: View {
             Text("+\(added)").foregroundStyle(PhrenTheme.success)
             Text("−\(removed)").foregroundStyle(PhrenTheme.danger)
         }
-        .font(.system(.caption2, design: .monospaced).weight(.medium)).monospacedDigit()
+        .font(PhrenTheme.Font.monoCaption2.weight(.medium)).monospacedDigit()
         .accessibilityElement(children: .ignore).accessibilityLabel("\(added) added, \(removed) removed")
     }
 }

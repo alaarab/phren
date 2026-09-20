@@ -13,7 +13,7 @@ final class SessionSurfacesTests: XCTestCase {
         XCTAssertFalse(sessions[0].usesFolderFallback(mappedProject: "iOS App"))
     }
     private func sessions(_ children: [[String: Any]]) throws -> [LiveAgentSession] {
-        let host = try LiveHost(name: "Mini", address: "mini.fixture.invalid", username: "fixture")
+        let host = try LiveHost(name: "Desk", address: "mini.fixture.invalid", username: "fixture")
         let data = try JSONSerialization.data(withJSONObject: [
             "kind": "herdr", "groups": [["id": "w1", "label": "phren", "children": children]],
         ])
@@ -48,22 +48,51 @@ final class SessionSurfacesTests: XCTestCase {
         let now = Date(timeIntervalSince1970: 1000)
         let sessions = (0..<7).map { index in
             SessionWorkingActivityBuilder.Session(
-                entry: .init(id: "s\(index)", project: "p\(index)", provider: "codex", tool: "Read", computer: "Mini"),
+                entry: .init(id: "s\(index)", project: "p\(index)", provider: "codex", tool: "Read", computer: "Desk"),
                 state: index < 5 ? "working" : "waiting", startedAt: now.addingTimeInterval(Double(index * -10)))
         }
         let state = SessionWorkingActivityBuilder.build(sessions + [sessions[0]], pinnedID: "s6", now: now)
         XCTAssertEqual(state.working, 5)
         XCTAssertEqual(state.waiting, 2)
-        XCTAssertEqual(state.entries.count, 4)
+        XCTAssertEqual(state.entries.count, 5)
+        XCTAssertEqual(state.more, 2)
         XCTAssertEqual(state.entries.first?.id, "s6")
         XCTAssertEqual(state.startedAt, now.addingTimeInterval(-40))
         XCTAssertEqual(SessionWorkingActivityBuilder.build([], now: now).working, 0)
     }
 
+    func testRunningAgentsAcrossComputersListWaitingFirst() {
+        let now = Date(timeIntervalSince1970: 1000)
+        func session(_ id: String, state: String, computer: String, started: TimeInterval) -> SessionWorkingActivityBuilder.Session {
+            .init(entry: .init(id: id, project: id, provider: "codex", tool: nil, computer: computer),
+                  state: state, startedAt: now.addingTimeInterval(started))
+        }
+        let state = SessionWorkingActivityBuilder.build([
+            session("working-old", state: "working", computer: "Desk", started: -30),
+            session("waiting", state: "waiting", computer: "Linuxbox", started: -10),
+            session("working-new", state: "working", computer: "Desk", started: -20),
+        ], now: now)
+        XCTAssertEqual(state.entries.map(\.id), ["waiting", "working-old", "working-new"])
+        XCTAssertEqual(state.computers, 2)
+        XCTAssertEqual(state.more, 0)
+    }
+
+    func testSevenAgentsProduceFiveRowsAndCountTheRest() {
+        let now = Date(timeIntervalSince1970: 1000)
+        let sessions = (0..<7).map { index in
+            SessionWorkingActivityBuilder.Session(
+                entry: .init(id: "s\(index)", project: "p\(index)", provider: "claude", tool: nil, computer: "Desk"),
+                state: "working", startedAt: now.addingTimeInterval(Double(-index)))
+        }
+        let state = SessionWorkingActivityBuilder.build(sessions, now: now)
+        XCTAssertEqual(state.entries.count, 5)
+        XCTAssertEqual(state.more, 2)
+    }
+
     func testUnchangedSnapshotsDoNotProduceNewActivityContent() {
         let start = Date(timeIntervalSince1970: 1000)
-        let working = SessionWorkingActivityBuilder.Session(entry: .init(id: "one", project: "App", provider: "claude", tool: nil, computer: "Mini"), state: "working", startedAt: start)
-        let waiting = SessionWorkingActivityBuilder.Session(entry: .init(id: "two", project: "CLI", provider: "codex", tool: nil, computer: "Studio"), state: "waiting", startedAt: start)
+        let working = SessionWorkingActivityBuilder.Session(entry: .init(id: "one", project: "App", provider: "claude", tool: nil, computer: "Desk"), state: "working", startedAt: start)
+        let waiting = SessionWorkingActivityBuilder.Session(entry: .init(id: "two", project: "CLI", provider: "codex", tool: nil, computer: "Linuxbox"), state: "waiting", startedAt: start)
         XCTAssertEqual(SessionWorkingActivityBuilder.build([working, waiting], now: start),
                        SessionWorkingActivityBuilder.build([waiting, working], now: start.addingTimeInterval(2)))
         XCTAssertEqual(SessionWorkingActivityPolicy.updateInterval, 2)
@@ -78,7 +107,7 @@ final class SessionSurfacesTests: XCTestCase {
 
     func testEntryFromBeforeStepAndSubagentsStillDecodes() throws {
         let content = try JSONDecoder().decode(SessionWorkingActivityAttributes.ContentState.self,
-            from: Data(#"{"working":1,"waiting":0,"startedAt":1000,"entries":[{"id":"s1","project":"App","provider":"codex","computer":"Mini"}]}"#.utf8))
+            from: Data(#"{"working":1,"waiting":0,"startedAt":1000,"entries":[{"id":"s1","project":"App","provider":"codex","computer":"Desk"}]}"#.utf8))
         XCTAssertNil(content.entries.first?.step)
         XCTAssertEqual(content.entries.first?.subagents, 0)
         XCTAssertNil(content.entries.first?.state)

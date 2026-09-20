@@ -12,11 +12,14 @@ final class SessionWorkingActivityController {
     private var sessionsByHost: [UUID: [SessionWorkingActivityBuilder.Session]] = [:]
     private var entities: [String: AgentSessionEntity] = [:]
     private var starts: [String: Date] = [:]
+    private var states: [String: String] = [:]
     private var tools: [String: String] = [:]
     private var details: [String: String] = [:]
     /// What the Hook says each working agent is doing, from the overview,
     /// so the lock screen has a step even when no chat is open.
     private var overviewSteps: [String: String] = [:]
+    /// The model the Hook names for each agent pane, from the same overview.
+    private var overviewModels: [String: String] = [:]
     private var subagents: [String: Int] = [:]
     private var chat: (session: SessionWorkingActivityBuilder.Session, at: Date)?
     private var pinnedID: String?
@@ -75,14 +78,17 @@ final class SessionWorkingActivityController {
         for session in sessions {
             let id = AgentSessionEntity(session).id
             if let step = session.tab.currentStep, !step.isEmpty { overviewSteps[id] = step } else { overviewSteps[id] = nil }
+            if let model = session.tab.model, !model.isEmpty { overviewModels[id] = model } else { overviewModels[id] = nil }
         }
-        sessionsByHost[host.id] = reports.map { input($0.entity, state: $0.state.rawValue, now: now) }
+        sessionsByHost[host.id] = reports.map { input($0.entity, state: lockState($0.state), now: now) }
         let retained = Set(sessionsByHost.values.flatMap { $0.map(\.entry.id) })
         starts = starts.filter { retained.contains($0.key) || chat?.session.entry.id == $0.key }
+        states = states.filter { retained.contains($0.key) || chat?.session.entry.id == $0.key }
         entities = entities.filter { retained.contains($0.key) || chat?.session.entry.id == $0.key }
         tools = tools.filter { retained.contains($0.key) }
         details = details.filter { retained.contains($0.key) || chat?.session.entry.id == $0.key }
         overviewSteps = overviewSteps.filter { retained.contains($0.key) }
+        overviewModels = overviewModels.filter { retained.contains($0.key) }
         subagents = subagents.filter { retained.contains($0.key) || chat?.session.entry.id == $0.key }
         scheduleUpdate()
     }
@@ -93,7 +99,11 @@ final class SessionWorkingActivityController {
         entities = entities.filter { entity in hosts.contains { $0.id == entity.value.hostID && $0.muxID == entity.value.muxID } }
         if let chat, entities[chat.session.entry.id] == nil { self.chat = nil }
         details = details.filter { entities[$0.key] != nil || chat?.session.entry.id == $0.key }
+        overviewSteps = overviewSteps.filter { entities[$0.key] != nil || chat?.session.entry.id == $0.key }
+        overviewModels = overviewModels.filter { entities[$0.key] != nil || chat?.session.entry.id == $0.key }
         subagents = subagents.filter { entities[$0.key] != nil || chat?.session.entry.id == $0.key }
+        starts = starts.filter { entities[$0.key] != nil }
+        states = states.filter { entities[$0.key] != nil }
         scheduleUpdate()
     }
 
@@ -112,17 +122,36 @@ final class SessionWorkingActivityController {
         default: "idle"
         }
     }
+    /// The overview's states as the lock screen reads them: a finish is an
+    /// idle row it keeps for a minute, while an error or unknown pane is not
+    /// a running agent and gets no row.
+    private func lockState(_ state: SessionStatusReport.State) -> String {
+        switch state {
+        case .working: "working"
+        case .waiting: "waiting"
+        case .idle, .done: "idle"
+        default: state.rawValue
+        }
+    }
     private func input(_ entity: AgentSessionEntity, state: String, provider: String? = nil, now: Date) -> SessionWorkingActivityBuilder.Session {
         entities[entity.id] = entity
-        if state == "working" { starts[entity.id] = starts[entity.id] ?? min(entity.lastChangedAt ?? now, now) }
-        else { starts[entity.id] = nil; tools[entity.id] = nil; details[entity.id] = nil }
+        if states[entity.id] != state {
+            // Title/tool updates must not restart a turn's timer. An idle pane
+            // with no history is not evidence that an agent just finished.
+            let fallback: Date = state == "idle" && states[entity.id] == nil ? .distantPast : now
+            starts[entity.id] = min(entity.lastChangedAt ?? fallback, now)
+            states[entity.id] = state
+        }
+        if state != "working" { tools[entity.id] = nil; details[entity.id] = nil }
+        let began = starts[entity.id] ?? now
         let tool = tools[entity.id]
         return .init(entry: .init(id: entity.id, project: String((entity.project ?? entity.workspace).prefix(80)),
                                  provider: provider ?? entity.agent ?? "agent", tool: tool.map { String($0.prefix(60)) },
                                  computer: String(entity.computer.prefix(60)),
+                                 model: overviewModels[entity.id].map { String($0.prefix(40)) },
                                  step: SessionActivityStep.format(tool: tool, detail: details[entity.id] ?? (tool == nil ? overviewSteps[entity.id] : nil), status: statusText(state)),
-                                 subagents: subagents[entity.id] ?? 0, state: state),
-                     state: state, startedAt: starts[entity.id] ?? now)
+                                 subagents: subagents[entity.id] ?? 0, state: state, startedAt: began),
+                     state: state, startedAt: began)
     }
 
     /// The step's fallback when no tool is known: the session's own status.
@@ -139,8 +168,8 @@ final class SessionWorkingActivityController {
 
     /// Coalesces fast hosts and chat ticks without postponing publication forever.
     private func scheduleUpdate() {
-        if sessionsByHost.values.joined().contains(where: { $0.state == "working" })
-            || (chat?.session.state == "working" && Date.now.timeIntervalSince(chat?.at ?? .distantPast) < 6) {
+        if sessionsByHost.values.joined().contains(where: { $0.state == "working" || $0.state == "waiting" })
+            || (["working", "waiting"].contains(chat?.session.state ?? "") && Date.now.timeIntervalSince(chat?.at ?? .distantPast) < 6) {
             quietSince = nil; endTask?.cancel(); endTask = nil
         }
         guard updateTask == nil else { return }
@@ -160,11 +189,12 @@ final class SessionWorkingActivityController {
         let activities = Activity<SessionWorkingActivityAttributes>.activities
         let current = activities.first
         for extra in activities.dropFirst() { await extra.end(nil, dismissalPolicy: .immediate) }
-        if state.working == 0 {
+        if state.working == 0 && state.waiting == 0 && state.entries.isEmpty {
             guard let current else { return }
             // Preserve the last timer during the quiet period, so idle polls
             // don't keep changing content or restart the 30-second deadline.
-            state = .init(working: 0, waiting: state.waiting, entries: state.entries, startedAt: current.content.state.startedAt)
+            state = .init(working: 0, waiting: state.waiting, entries: state.entries, startedAt: current.content.state.startedAt,
+                          more: state.more, computers: state.computers)
             if quietSince == nil {
                 quietSince = now
                 endTask = Task { [weak self] in
@@ -185,7 +215,7 @@ final class SessionWorkingActivityController {
             activity = current
             if current.content.state != state { await current.update(content) }
         } else {
-            guard state.working > 0, ActivityAuthorizationInfo().areActivitiesEnabled,
+            guard state.working + state.waiting > 0, ActivityAuthorizationInfo().areActivitiesEnabled,
                   let created = try? Activity.request(attributes: SessionWorkingActivityAttributes(routeID: UUID().uuidString), content: content, pushType: nil) else { return }
             activity = created
         }

@@ -7,65 +7,35 @@ struct SessionWorkingActivityWidget: Widget {
         ActivityConfiguration(for: SessionWorkingActivityAttributes.self) { context in
             SessionWorkingSummary(state: context.state)
                 .padding(10)
-                // The lock screen re-renders the activity for Always-On with
-                // its own type settings; capping Dynamic Type keeps every
-                // row on the one line the design gives it.
-                .dynamicTypeSize(...DynamicTypeSize.large)
-                .activityBackgroundTint(.black)
-                .activitySystemActionForegroundColor(.white)
+                .activityBackgroundTint(WidgetTheme.activityBackground)
+                .activitySystemActionForegroundColor(WidgetTheme.activityText)
                 .widgetURL(routeURL(context))
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) { PhrenActivityMark(size: 18) }
-                DynamicIslandExpandedRegion(.trailing) { ElapsedTimer(start: context.state.startedAt) }
                 DynamicIslandExpandedRegion(.center) {
-                    Text(context.state.headline)
-                        .font(.caption.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.7)
+                    Text(context.state.summary)
+                        .font(WidgetTheme.Font.caption).foregroundStyle(WidgetTheme.activitySecondary).lineLimit(1).truncationMode(.tail)
+
                 }
-                DynamicIslandExpandedRegion(.bottom) { bottom(context.state) }
+                DynamicIslandExpandedRegion(.bottom) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(context.state.entries.prefix(3)) { entry in
+                            AgentRow(entry: entry)
+                        }
+                    }
+
+                }
             } compactLeading: {
                 PhrenActivityMark(size: 16)
             } compactTrailing: {
-                Text("\(context.state.working)").font(.caption2.weight(.semibold)).monospacedDigit()
-                    .foregroundStyle(context.state.waiting > 0 ? .orange : WidgetTheme.cyan)
+                Text("\(context.state.working)").font(WidgetTheme.Font.caption2.weight(.semibold)).monospacedDigit()
+                    .foregroundStyle(context.state.waiting > 0 ? WidgetTheme.warning : WidgetTheme.cyan)
                     .padding(.horizontal, 5).padding(.vertical, 2)
-                    .background((context.state.waiting > 0 ? Color.orange : WidgetTheme.cyan).opacity(0.15), in: Capsule())
+                    .background((context.state.waiting > 0 ? WidgetTheme.warning : WidgetTheme.cyan).opacity(0.15), in: Capsule())
                     .accessibilityLabel("\(context.state.working) working, \(context.state.waiting) waiting")
             } minimal: { PhrenActivityMark(size: 16) }
             .widgetURL(routeURL(context))
-        }
-    }
-
-    /// The primary session's project · computer and current step, then the
-    /// remaining rows. Steps carry `privacySensitive` so a locked screen hides
-    /// what the agent is doing until the person authenticates.
-    @ViewBuilder private func bottom(_ state: SessionWorkingActivityAttributes.ContentState) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if let entry = state.primary {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text(entry.project).privacySensitive().font(.caption.weight(.semibold)).lineLimit(1)
-                        Text("· \(entry.computer)").privacySensitive().font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                        if entry.subagents > 0 { SubagentPill(count: entry.subagents) }
-                        Spacer(minLength: 0)
-                    }
-                    if let step = entry.step ?? entry.tool {
-                        Text(step).privacySensitive().font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                }
-            }
-            ForEach(state.entries.dropFirst().prefix(3)) { entry in
-                HStack(spacing: 6) {
-                    ProviderActivityGlyph(provider: entry.provider, size: 16)
-                    Text(entry.project).privacySensitive().lineLimit(1)
-                    if let step = entry.step ?? entry.tool {
-                        Text("· \(step)").privacySensitive().foregroundStyle(.secondary).lineLimit(1)
-                    }
-                    Spacer(minLength: 0)
-                    Text(entry.computer).privacySensitive().font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                }
-                .font(.caption).frame(maxWidth: .infinity, alignment: .leading)
-            }
         }
     }
 
@@ -79,102 +49,83 @@ struct SessionWorkingActivityWidget: Widget {
     }
 }
 
-/// The lock-screen / banner presentation, three short rows: which session
-/// (project, computer, elapsed), what it is doing (or that it needs you),
-/// and what else is running when there is more than one.
+/// The lock-screen / banner presentation: the phren mark and a count, then one
+/// short row per running agent, then how many more were too many to list.
 private struct SessionWorkingSummary: View {
     let state: SessionWorkingActivityAttributes.ContentState
-    /// Always-On draws the activity dimmed and with its own text metrics;
-    /// the rows keep their fixed heights and the timer, which does not tick
-    /// there, gives way to the step alone.
-    @Environment(\.isLuminanceReduced) private var dimmed
-
-    private var total: Int { state.working + state.waiting }
-    private var others: [SessionWorkingActivityAttributes.Entry] { Array(state.entries.dropFirst().prefix(3)) }
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    private var visibleCount: Int { dynamicTypeSize.isAccessibilitySize ? min(1, state.entries.count) : state.entries.count }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(alignment: .center, spacing: 8) {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
                 PhrenActivityMark(size: 18)
-                if let entry = state.primary {
-                    Text(entry.project).privacySensitive().font(.subheadline.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
-                        .layoutPriority(1)
-                    Text(entry.computer).privacySensitive().font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
-                } else {
-                    Text(state.headline).font(.subheadline.weight(.medium)).lineLimit(1).minimumScaleFactor(0.8)
-                }
-                Spacer(minLength: 4)
-                if !dimmed { ElapsedTimer(start: state.startedAt) }
+                Text(state.summary).font(WidgetTheme.Font.caption).foregroundStyle(WidgetTheme.activitySecondary)
+                    .lineLimit(1).truncationMode(.tail)
             }
-            .frame(height: 22)
-            if let entry = state.primary {
-                HStack(spacing: 6) {
-                    StepLine(entry: entry)
-                    Spacer(minLength: 4)
-                    if entry.subagents > 0 { SubagentPill(count: entry.subagents) }
-                }
-                .frame(height: 18)
+            ForEach(state.entries.prefix(visibleCount)) { entry in
+                AgentRow(entry: entry)
             }
-            if total > 1 {
-                HStack(spacing: 6) {
-                    HStack(spacing: -4) {
-                        ForEach(others) { entry in
-                            ProviderActivityGlyph(provider: entry.provider, size: 14)
-                                .background(Circle().fill(.black).padding(-2))
-                        }
-                    }
-                    Text(state.headline).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
-                }
-                .frame(height: 16)
-                .accessibilityElement(children: .combine)
+            let more = state.more + state.entries.count - visibleCount
+            if more > 0 {
+                Text("+\(more) more agents").font(WidgetTheme.Font.caption2).foregroundStyle(WidgetTheme.activitySecondary)
+                    .lineLimit(1).truncationMode(.tail)
             }
         }
-        .fixedSize(horizontal: false, vertical: true)
     }
 }
 
-/// The step, coloured by the session's state: what a working agent is
-/// doing in secondary, a wait for the person in orange, a finish in green.
-private struct StepLine: View {
+/// One fixed-height agent row: provider, project, model, computer, a state dot
+/// with the step (a wait replaces it with "Needs an answer"), and its own
+/// elapsed timer. Every text truncates at the tail so a long value can never
+/// wrap the row or stretch the activity.
+private struct AgentRow: View {
     let entry: SessionWorkingActivityAttributes.Entry
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.isLuminanceReduced) private var isLuminanceReduced
 
     private var isWaiting: Bool { entry.state == "waiting" }
-    private var text: String { isWaiting ? "Needs an answer" : (entry.step ?? entry.tool ?? "Working") }
-    private var color: Color { isWaiting ? .orange : entry.state == "idle" ? WidgetTheme.green : .secondary }
+    private var isIdle: Bool { entry.state == "idle" || entry.state == "done" }
+    private var step: String { isWaiting ? "Needs an answer" : (entry.step ?? entry.tool ?? "Working") }
+    private var color: Color { isWaiting ? WidgetTheme.warning : isIdle ? WidgetTheme.green : WidgetTheme.activitySecondary }
 
     var body: some View {
-        HStack(spacing: 5) {
-            Image(systemName: isWaiting ? "hand.raised.fill" : entry.state == "idle" ? "checkmark.circle.fill" : "circle.fill")
-                .font(.system(size: isWaiting ? 10 : 6)).foregroundStyle(color)
-            Text(text).privacySensitive().font(.caption).foregroundStyle(color).lineLimit(1).truncationMode(.tail)
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(entry.project).font(WidgetTheme.Font.caption.weight(.semibold))
+                Text([entry.model, entry.computer, step].compactMap { $0 }.joined(separator: " · "))
+                    .font(WidgetTheme.Font.caption2).foregroundStyle(color)
+            }
+        } else {
+            row
         }
     }
-}
 
-/// The timer is pinned to a fixed width so `Text(style: .timer)` can never
-/// stretch the island as it grows.
-private struct ElapsedTimer: View {
-    let start: Date
-
-    var body: some View {
-        Text(start, style: .timer).font(.caption.monospacedDigit()).foregroundStyle(WidgetTheme.cyan)
-            .multilineTextAlignment(.trailing).minimumScaleFactor(0.65)
-            .frame(width: 52, alignment: .trailing).clipped()
-    }
-}
-
-private struct SubagentPill: View {
-    let count: Int
-
-    var body: some View {
-        HStack(spacing: 3) {
-            Image(systemName: "person.2.fill").font(.system(size: 9))
-            Text("\(count) agent\(count == 1 ? "" : "s")").font(.caption2.weight(.semibold)).monospacedDigit()
+    private var row: some View {
+        HStack(spacing: 6) {
+            ProviderActivityGlyph(provider: entry.provider, size: 14)
+            Text(entry.project).privacySensitive().font(WidgetTheme.Font.caption.weight(.semibold))
+                .lineLimit(1).truncationMode(.tail).layoutPriority(1)
+            if let model = entry.model {
+                Text(model).font(WidgetTheme.Font.caption2.monospaced()).foregroundStyle(WidgetTheme.activitySecondary)
+                    .lineLimit(1).truncationMode(.tail)
+            }
+            Text(entry.computer).font(WidgetTheme.Font.caption2).foregroundStyle(WidgetTheme.activitySecondary)
+                .lineLimit(1).truncationMode(.tail)
+            Spacer(minLength: 4)
+            HStack(spacing: 4) {
+                Circle().fill(color).frame(width: 6, height: 6)
+                Text(step).privacySensitive().font(WidgetTheme.Font.caption2).foregroundStyle(color)
+                    .lineLimit(1).truncationMode(.tail)
+            }
+            if !isLuminanceReduced, !isIdle, let startedAt = entry.startedAt {
+                Text(startedAt, style: .timer).font(WidgetTheme.Font.caption2.monospacedDigit())
+                    .multilineTextAlignment(.trailing).minimumScaleFactor(0.7)
+                    .lineLimit(1).truncationMode(.tail)
+                    .frame(width: 44, alignment: .trailing).clipped()
+            }
         }
-        .foregroundStyle(WidgetTheme.cyan)
-        .padding(.horizontal, 6).padding(.vertical, 2)
-        .background(WidgetTheme.cyan.opacity(0.15), in: Capsule())
-        .accessibilityLabel("\(count) agent\(count == 1 ? "" : "s") running")
+        .frame(minHeight: 18)
     }
 }
 

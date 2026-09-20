@@ -10,12 +10,12 @@ import { locateProject } from "./locate.js";
 import { BridgeError, type Json } from "./protocol.js";
 
 const exec = promisify(execFile);
-async function git(cwd: string, ...args: string[]): Promise<string> {
+export async function git(cwd: string, ...args: string[]): Promise<string> {
   return (await exec("git", ["-C", cwd, "--no-pager", ...args], {
     timeout: 10_000, maxBuffer: 4_194_304, env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_CONFIG_NOSYSTEM: "1" },
   })).stdout;
 }
-async function gitRoot(dir: string): Promise<string | undefined> {
+export async function gitRoot(dir: string): Promise<string | undefined> {
   try { return await realpath((await git(dir, "rev-parse", "--show-toplevel")).trim()); } catch { return undefined; }
 }
 

@@ -918,8 +918,7 @@ struct AgentChatView: View {
                 NavigationLink {
                     // Besides the pane's tree: whatever the session's commands
                     // wrote elsewhere — the phren store, a sibling checkout.
-                    AgentDiffView(session: session, target: target, paths: Array(Set(model.messages.filter { $0.role == .tool && !$0.isToolResult && !$0.isChange }
-                        .flatMap { ToolPresentationCache.value($0).editedPaths }).sorted().prefix(24)))
+                    AgentChangesView(session: session, target: target)
                 } label: {
                     Image(systemName: "arrow.triangle.branch").font(.system(size: 17)).frame(width: 40, height: 44).contentShape(Rectangle())
                         .foregroundStyle(PhrenTheme.chatText)

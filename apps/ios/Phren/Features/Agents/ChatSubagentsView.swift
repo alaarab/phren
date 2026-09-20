@@ -66,7 +66,7 @@ struct ChatSubagentsView: View {
             }
             .background(PhrenTheme.chatCanvas)
             .navigationDestination(item: $diffChild) { child in
-                AgentDiffView(session: session, target: target, paths: [], child: child)
+                AgentChangesView(session: session, target: target, child: child)
             }
             .toolbar(.hidden, for: .navigationBar)
         }
@@ -381,7 +381,7 @@ struct ChildAgentTranscriptView: View {
             .accessibilityIdentifier("child-agent-header")
             Spacer(minLength: 0)
             NavigationLink {
-                AgentDiffView(session: session, target: target, paths: [], child: agent.id)
+                AgentChangesView(session: session, target: target, child: agent.id)
             } label: {
                 Image(systemName: "plus.forwardslash.minus").font(.system(size: 17))
                     .frame(width: 44, height: 44)

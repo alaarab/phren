@@ -1,10 +1,11 @@
 import Foundation
+import PhrenKit
 
 /// A unified patch prepared the way VS Code's diff editor presents one: full
 /// rows with old/new line numbers, changed blocks (a run of removed lines
 /// followed by the added lines that replaced them) for next/previous
-/// navigation, and the inner character range that actually differs when a
-/// removed line pairs with an added one, so a one-word edit reads as one word.
+/// navigation, the word runs that actually differ when a removed line pairs
+/// with an added one, and the unmodified lines the patch folded away.
 struct DiffDocument {
     enum Kind { case context, added, removed, hunk, header }
 
@@ -14,11 +15,20 @@ struct DiffDocument {
         let old: Int?
         let new: Int?
         let text: String
-        /// Character range (in `text`) that differs from the paired line —
+        /// Ranges (in `text`) that differ word-by-word from the paired line —
         /// VS Code's stronger "inserted/removed text" tint.
-        var inner: Range<String.Index>?
+        var inner: [Range<String.Index>] = []
         /// The change block this row belongs to; context rows have none.
         var change: Int?
+    }
+
+    /// A run of unmodified lines `git diff` left out, drawn as a fold bar
+    /// before `beforeRow`.
+    struct Fold: Identifiable {
+        let id: Int
+        let count: Int
+        let oldStart: Int
+        let beforeRow: Int
     }
 
     /// One side-by-side line: at most one row per column.
@@ -30,6 +40,8 @@ struct DiffDocument {
     }
 
     let rows: [Row]
+    /// Fold bars in document order.
+    let folds: [Fold]
     /// Row index where each change block starts, in order.
     let changeStarts: [Int]
     let added: Int
@@ -59,9 +71,13 @@ struct DiffDocument {
             let pairs = min(removedEnd - start, addedEnd - removedEnd)
             for offset in 0..<pairs {
                 let left = start + offset, right = removedEnd + offset
-                if let (a, b) = Self.innerDifference(rows[left].text, rows[right].text) {
-                    rows[left].inner = a; rows[right].inner = b
-                }
+                let oldBody = String(rows[left].text.dropFirst())
+                let newBody = String(rows[right].text.dropFirst())
+                let highlight = DiffWords.highlight(old: oldBody, new: newBody)
+                // Nothing shared: the whole-line tint already says so.
+                guard highlight.matched > 0 else { continue }
+                rows[left].inner = Self.shifted(highlight.old, body: oldBody, in: rows[left].text)
+                rows[right].inner = Self.shifted(highlight.new, body: newBody, in: rows[right].text)
             }
             index = addedEnd
         }
@@ -70,6 +86,7 @@ struct DiffDocument {
         self.added = preview.added
         self.removed = preview.removed
         self.truncated = preview.truncated
+        self.folds = Self.folds(rows: rows)
     }
 
     /// Rows paired into two columns: context on both sides, a change block's
@@ -106,27 +123,39 @@ struct DiffDocument {
         }
     }
 
-    /// The differing middle after trimming the common prefix and suffix. The
-    /// diff body starts after the `+`/`-` sign, which both lines share in
-    /// position, so it is skipped. Nil when the lines have nothing in common
-    /// worth pointing at (the whole line changed) — then the row tint alone
-    /// says so, as VS Code does.
-    static func innerDifference(_ a: String, _ b: String) -> (Range<String.Index>, Range<String.Index>)? {
-        let bodyA = a.dropFirst(), bodyB = b.dropFirst()
-        guard !bodyA.isEmpty, !bodyB.isEmpty else { return nil }
-        var prefix = 0
-        var ia = bodyA.startIndex, ib = bodyB.startIndex
-        while ia < bodyA.endIndex, ib < bodyB.endIndex, bodyA[ia] == bodyB[ib] {
-            prefix += 1; ia = bodyA.index(after: ia); ib = bodyB.index(after: ib)
+    /// The word runs are computed on the body (the line without its sign), so
+    /// carry them over to the stored row text by character offset — a `String.Index`
+    /// belongs to the string that made it, not to an equal copy.
+    private static func shifted(_ ranges: [Range<String.Index>], body: String, in text: String) -> [Range<String.Index>] {
+        ranges.compactMap { range in
+            let lower = body.distance(from: body.startIndex, to: range.lowerBound) + 1
+            let upper = body.distance(from: body.startIndex, to: range.upperBound) + 1
+            guard let start = text.index(text.startIndex, offsetBy: lower, limitedBy: text.endIndex),
+                  let end = text.index(text.startIndex, offsetBy: upper, limitedBy: text.endIndex) else { return nil }
+            return start..<end
         }
-        var ea = bodyA.endIndex, eb = bodyB.endIndex
-        while ea > ia, eb > ib, bodyA[bodyA.index(before: ea)] == bodyB[bodyB.index(before: eb)] {
-            ea = bodyA.index(before: ea); eb = bodyB.index(before: eb)
+    }
+
+    /// Where the fold bars sit: the gap before a hunk lives directly above it.
+    private static func folds(rows: [Row]) -> [Fold] {
+        var hunks: [(row: Int, hunk: DiffFolds.Hunk)] = []
+        for (index, row) in rows.enumerated() where row.kind == .hunk {
+            if let hunk = hunkHeader(row.text) { hunks.append((index, hunk)) }
         }
-        let shared = prefix + bodyA.distance(from: ea, to: bodyA.endIndex)
-        let longest = max(bodyA.count, bodyB.count)
-        // Under a third in common reads better as two whole lines.
-        guard shared * 3 >= longest else { return nil }
-        return (ia..<ea, ib..<eb)
+        guard !hunks.isEmpty else { return [] }
+        return DiffFolds.gaps(hunks.map { $0.hunk }).enumerated().map { order, gap in
+            let before = gap.afterHunk < 0 ? 0 : gap.afterHunk + 1
+            return Fold(id: order, count: gap.count, oldStart: gap.oldStart, beforeRow: hunks[min(before, hunks.count - 1)].row)
+        }
+    }
+
+    /// `@@ -12,3 +14,2 @@` — the old side is all a fold needs. A missing count
+    /// means one line; a missing old range (`@@ -0,0 +…`) means zero.
+    static func hunkHeader(_ text: String) -> DiffFolds.Hunk? {
+        guard let match = text.range(of: #"^@@ -([0-9]+)(?:,([0-9]+))? "#, options: .regularExpression) else { return nil }
+        let numbers = text[match].dropFirst(4).prefix { $0.isNumber || $0 == "," }.split(separator: ",")
+        guard let start = numbers.first.flatMap({ Int($0) }) else { return nil }
+        let count = numbers.count > 1 ? Int(numbers[1]) ?? 1 : 1
+        return DiffFolds.Hunk(oldStart: start, oldCount: count)
     }
 }

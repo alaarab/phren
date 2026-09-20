@@ -691,6 +691,61 @@ import UIKit
         let name = String(folder.split(separator: "/").last ?? "repo")
         return .init(project: name, directory: folder, cloned: cloneURL != nil, store: flag("--enroll-unpushed") ? "committed" : "pushed", storeDetail: flag("--enroll-unpushed") ? "no remote configured" : nil)
     }
+    /// The Hook's `/v1/git/log` answer for the Changes screen: three commits
+    /// with local, remote and head refs, and an uncommitted summary. Ages are
+    /// relative so the History rail shows a real "2h ago".
+    static func gitLog(target: AgentChatTarget, ref: String? = nil) throws -> GitLog {
+        let now = Date()
+        let format = Date.ISO8601FormatStyle()
+        func ago(_ hours: Double) -> String { format.format(now.addingTimeInterval(-hours * 3_600)) }
+        let payload: [String: Any] = [
+            "commits": [
+                ["sha": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2", "short": "a1b2c3d",
+                 "subject": "Wire the checkout flow to the new ledger", "author": "sam", "date": ago(2),
+                 "refs": [["name": "main", "kind": "head"], ["name": "origin/main", "kind": "remote"]],
+                 "parents": ["9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e"]],
+                ["sha": "9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e", "short": "9f8e7d6",
+                 "subject": "Scope idempotency keys per merchant", "author": "sam", "date": ago(26),
+                 "refs": [["name": "release/1.0", "kind": "local"]],
+                 "parents": ["0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d"]],
+                ["sha": "0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d", "short": "0c1d2e3",
+                 "subject": "Ledger: reversal references on corrections", "author": "sam", "date": ago(74),
+                 "refs": [], "parents": []],
+            ],
+            "uncommitted": ["files": 3, "additions": 590, "deletions": 231],
+        ]
+        var result = payload
+        var commits = payload["commits"] as? [[String: Any]] ?? []
+        if let ref, ref != "main", ref != "origin/main" {
+            commits = Array(commits.dropFirst(ref == "spike/graph" ? 2 : 1))
+        }
+        result["commits"] = commits
+        let status = try gitStatus(target)
+        result["uncommitted"] = ["files": Set(status.files.map(\.path)).count, "additions": status.additions, "deletions": status.deletions]
+        return try GitLog.read(JSONSerialization.data(withJSONObject: result))
+    }
+
+    /// The Hook's `/v1/git/branches` answer: `main` current with its upstream,
+    /// a branch ahead and behind, and one with no upstream.
+    static func gitBranches(target: AgentChatTarget) throws -> GitBranches {
+        let now = Date()
+        let format = Date.ISO8601FormatStyle()
+        func ago(_ hours: Double) -> String { format.format(now.addingTimeInterval(-hours * 3_600)) }
+        let payload: [String: Any] = [
+            "current": "main",
+            "local": [
+                ["name": "main", "upstream": "origin/main", "ahead": 0, "behind": 0, "date": ago(2)],
+                ["name": "release/1.0", "upstream": "origin/release/1.0", "ahead": 2, "behind": 1, "date": ago(26)],
+                ["name": "spike/graph", "ahead": 0, "behind": 0, "date": ago(74)],
+            ],
+            "remote": [
+                ["name": "origin/main", "date": ago(2)],
+                ["name": "origin/release/1.0", "date": ago(26)],
+            ],
+        ]
+        return try GitBranches.read(JSONSerialization.data(withJSONObject: payload))
+    }
+
     /// Simulator actions the fixture screen sent, for tests.
     nonisolated(unsafe) static var simulatorActions: [String] = []
     static func launch(host: LiveHost, cwd: String, label: String, kind: String) async throws -> LiveAgentSession {

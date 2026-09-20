@@ -5,6 +5,10 @@ import SwiftUI
 /// section once after an update, or every release from Settings → About.
 enum ReleaseNotesStore {
     static let seenVersionKey = "whatsNew.seenVersion.v1"
+    /// Every TestFlight build ships under the same marketing version, so the
+    /// build number is part of what counts as "seen"; otherwise the notes
+    /// showed once per version and never again for the next twenty builds.
+    static var seenStamp: String { "\(version) (\(build))" }
     static var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?" }
     static var build: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?" }
     static let notes: ReleaseNotes = ReleaseNotes(markdown: Bundle.main.url(forResource: "CHANGELOG", withExtension: "md")
@@ -16,9 +20,9 @@ enum ReleaseNotesStore {
     static func shouldPresent(defaults: UserDefaults = AppRuntime.defaults) -> Bool {
         if AppRuntime.isUITesting { return ProcessInfo.processInfo.arguments.contains("--whats-new") }
         guard let current, !current.isEmpty else { return false }
-        return defaults.string(forKey: seenVersionKey) != version
+        return defaults.string(forKey: seenVersionKey) != seenStamp
     }
-    static func markSeen(defaults: UserDefaults = AppRuntime.defaults) { defaults.set(version, forKey: seenVersionKey) }
+    static func markSeen(defaults: UserDefaults = AppRuntime.defaults) { defaults.set(seenStamp, forKey: seenVersionKey) }
 }
 
 struct WhatsNewSheet: View {

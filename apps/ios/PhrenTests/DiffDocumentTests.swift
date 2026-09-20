@@ -8,8 +8,8 @@ final class DiffDocumentTests: XCTestCase {
         XCTAssertEqual(document.added, 1); XCTAssertEqual(document.removed, 1)
         let removed = document.rows[2], added = document.rows[3]
         XCTAssertEqual(removed.change, 0); XCTAssertEqual(added.change, 0); XCTAssertNil(document.rows[1].change)
-        XCTAssertEqual(removed.inner.map { String(removed.text[$0]) }, "green")
-        XCTAssertEqual(added.inner.map { String(added.text[$0]) }, "purple")
+        XCTAssertEqual(removed.inner.map { String(removed.text[$0]) }, ["green"])
+        XCTAssertEqual(added.inner.map { String(added.text[$0]) }, ["purple"])
         XCTAssertEqual(DiffRowView.spoken(added), "+let accent = purple")
         XCTAssertEqual(String(DiffRowView.attributed(added).characters), "let accent = purple")
     }
@@ -17,7 +17,7 @@ final class DiffDocumentTests: XCTestCase {
     func testWhollyDifferentLinesGetNoInnerRangeAndLoneAdditionsAreABlock() {
         let document = DiffDocument(patch: "@@ -1,2 +1,3 @@\n-alpha\n+zzzzzzzzzzzz\n context\n+new line")
         XCTAssertEqual(document.changeStarts, [1, 4])
-        XCTAssertNil(document.rows[1].inner); XCTAssertNil(document.rows[2].inner)
+        XCTAssertTrue(document.rows[1].inner.isEmpty); XCTAssertTrue(document.rows[2].inner.isEmpty)
         XCTAssertEqual(document.rows[4].change, 1)
     }
 
@@ -28,6 +28,12 @@ final class DiffDocumentTests: XCTestCase {
         XCTAssertEqual(split[1].left?.text, "-one"); XCTAssertEqual(split[1].right?.text, "+uno")
         XCTAssertEqual(split[2].left?.text, "-two"); XCTAssertNil(split[2].right)
         XCTAssertEqual(split[3].left?.text, " keep"); XCTAssertEqual(split[3].right?.text, " keep")
+    }
+
+    func testFoldBarsSitAboveTheirHunk() {
+        let document = DiffDocument(patch: "@@ -2,3 +2,4 @@\n context\n+added\n context\n@@ -10,2 +11,2 @@\n-old\n+new")
+        XCTAssertEqual(document.folds.map(\.count), [1, 5])
+        XCTAssertEqual(document.folds.map(\.beforeRow), [0, 4])
     }
 
     func testStatusLettersFollowGitPorcelain() {
