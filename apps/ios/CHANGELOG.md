@@ -15,6 +15,9 @@ number counts up on its own.
 
 ### New
 
+- A waiting agent with a plain question in its terminal takes a typed reply
+  from the composer again; the answer keys stay for real prompts, and Y and N
+  appear only when they mean something there.
 - Typing /permissions on a Codex chat draws its menu natively (Ask for
   approval, Approve for me, Full Access); the choice types the command and
   walks the agent's own menu with keys, without the terminal.

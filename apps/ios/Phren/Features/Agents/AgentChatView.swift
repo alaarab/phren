@@ -1066,7 +1066,7 @@ struct AgentChatView: View {
                         .accessibilityIdentifier("chat-terminal-prompt")
                     }
                     HStack(spacing: 8) {
-                        Text(model.terminalPrompt == nil ? "Agent is waiting for an answer in its terminal" : "Answer here or in the terminal")
+                        Text(model.terminalPrompt == nil ? "Agent is waiting; reply here, press a key, or use the terminal" : "Answer here or in the terminal")
                             .font(.caption).foregroundStyle(PhrenTheme.warning)
                         Spacer(minLength: 4)
                         NavigationLink { HerdrTerminalView(host: session.host, session: session, target: model.target) } label: {
@@ -1075,7 +1075,11 @@ struct AgentChatView: View {
                         }.accessibilityIdentifier("chat-answer-terminal")
                     }
                     HStack(spacing: 6) {
-                        ForEach(AgentAnswerKey.row) { key in
+                        // Y and N are letters: without a known prompt they would
+                        // only land in a Codex composer. Claude's own dialogs take them.
+                        ForEach(AgentAnswerKey.row.filter { key in
+                            ![.yes, .no].contains(key) || model.terminalPrompt != nil || model.target?.source == "claude"
+                        }) { key in
                             Button { sendTask = Task { await model.answer(session, key: key) } } label: {
                                 Text(key.label)
                                     .font(.system(.footnote, design: .monospaced).weight(.semibold))

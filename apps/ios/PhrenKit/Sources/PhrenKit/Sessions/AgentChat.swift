@@ -181,9 +181,9 @@ public struct AgentChatPanes: Decodable, Equatable, Sendable {
               target.isStarting ? (pane.starting == true && pane.sessionId == nil && pane.startingToken == target.startingToken) : pane.sessionId == target.sessionID else {
             throw PhrenKitError.validation("The agent in this pane changed. Reopen chat to choose its current conversation.")
         }
-        if sending && pane.needsAnswer {
-            throw PhrenKitError.validation("This agent is waiting for an answer; use the answer keys or the card above before sending another message.")
-        }
+        // A waiting agent may still take typed text (a plain question in its
+        // terminal); the Hook refuses when something structured is pending.
+        _ = sending
         return pane
     }
 }

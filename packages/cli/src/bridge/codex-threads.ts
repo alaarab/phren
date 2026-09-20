@@ -64,7 +64,14 @@ export async function materializeCodexThread(session: string): Promise<string | 
       const call = callRow(item), output = outputRow(item);
       if (!emitted) {
         if (call) { lines.push(JSON.stringify(call)); state.done[id] = "call"; }
-        else if (messageRow(item)) { lines.push(JSON.stringify(messageRow(item))); state.done[id] = "done"; continue; }
+        else if (messageRow(item)) {
+          lines.push(JSON.stringify(messageRow(item)));
+          // A question the agent asked (delivered async) rides along as the
+          // same event the rollout would carry, so the pending scan sees it.
+          const asked = questionEvent(item);
+          if (asked) lines.push(JSON.stringify(asked));
+          state.done[id] = "done"; continue;
+        }
         else continue;
       }
       if (state.done[id] === "call" && output) { lines.push(JSON.stringify(output)); state.done[id] = "done"; }
@@ -101,6 +108,13 @@ function messageRow(item: Json): Json | undefined {
     return { type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: item.text }] } };
   }
   return undefined;
+}
+
+/** Codex 0.155 asks through an agent message with `questions` attached. */
+function questionEvent(item: Json): Json | undefined {
+  if (item.type !== "agentMessage" || item.delivery !== "async" || !Array.isArray(item.questions) || !item.questions.length) return undefined;
+  return { type: "event_msg", payload: { type: "item_completed", item: { type: "AgentMessage", id: String(item.id ?? ""),
+    content: [{ type: "Text", text: String(item.text ?? "") }], delivery: "async", questions: objects(item.questions).slice(0, 8) } } };
 }
 
 /** The call row an item starts with; tool inputs, not reasoning. */

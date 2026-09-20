@@ -259,7 +259,16 @@ export async function serve(version: string): Promise<void> {
           // A key press is how a prompt the agent draws in its terminal gets
           // answered, so keys are the one input allowed while the agent is
           // blocked or waiting; the status check below is theirs alone.
-          const pane = await validateTarget(target, url.pathname === "/v1/prompt", sendsInput || url.pathname === "/v1/upload");
+          const pane = await validateTarget(target, false, sendsInput || url.pathname === "/v1/upload");
+          if (url.pathname === "/v1/prompt") {
+            // A waiting agent takes typed text only when nothing structured
+            // is pending there: an approval the Hook holds or saw, or a
+            // status Herdr cannot read. Otherwise the answer keys are the way.
+            const status = String(pane.agent_status);
+            if (status === "unknown" || (["blocked", "waiting"].includes(status) && (agentHooks.approval(target) || agentHooks.terminalPrompt(target)))) {
+              throw new BridgeError(409, "This agent needs input in the terminal first.");
+            }
+          }
           if (url.pathname === "/v1/prompt") {
             const text = z.string().min(1).max(32768).refine(t => !/[\x00-\x08\x0b-\x1f\x7f]/.test(t)).parse(data.text);
             // Herdr types into the pane; the agent that receives the text

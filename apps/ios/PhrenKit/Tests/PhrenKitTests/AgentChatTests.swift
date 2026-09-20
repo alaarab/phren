@@ -131,7 +131,9 @@ final class AgentChatTests: XCTestCase {
         XCTAssertThrowsError(try list.validate(replaced))
         let otherPane = try AgentChatTarget(hostID: host, workspaceID: "w7", tabID: "w7:t1", paneID: "w7:p2", source: "codex", sessionID: "session-one")
         XCTAssertThrowsError(try list.validate(otherPane))
-        XCTAssertThrowsError(try panes(status: "blocked").validate(target, sending: true))
+        // A waiting agent may still take typed text; the Hook decides whether
+        // something structured is pending there.
+        XCTAssertEqual(try panes(status: "blocked").validate(target, sending: true).id, "w7:p1")
         XCTAssertThrowsError(try AgentChatTarget(hostID: host, workspaceID: "w7&tab=w8", tabID: "w7:t1", paneID: "w7:p1", source: "codex", sessionID: "session-one"))
     }
 
