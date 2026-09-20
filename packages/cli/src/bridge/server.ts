@@ -11,7 +11,7 @@ import { homeDirectory, startChangeRetention } from "./changes.js";
 import { WorkspaceContextUsage } from "./context.js";
 import { candidateRepos, enrollProject } from "./enroll.js";
 import { browseFiles } from "./files.js";
-import { paneChatState, paneIdentity, panes, rpc, servers, snapshot, trustedDirectory, validateStartingTarget, validateTarget, workspaceSnapshot } from "./herdr.js";
+import { paneChatState, paneIdentity, panes, rpc, servers, snapshot, trustedDirectory, validateStartingTarget, validateTarget, workspaceSnapshot, startingPane } from "./herdr.js";
 import { LaunchLimiter } from "./limits.js";
 import { locateProject } from "./locate.js";
 import { launchDirectory, repositoryBranch, repositoryDiff, webServers } from "./projects.js";
@@ -207,7 +207,16 @@ export async function serve(version: string): Promise<void> {
             { ...data, cwd: await launchDirectory(data.cwd ?? homeDirectory(), await journal.recent(), locatedDirectories) }))
             : await workspaceAction(selectedServer(url), operation, data);
         } else {
-          if (url.pathname === "/v1/prompt" && object(data.target).starting === true) {
+          if (url.pathname === "/v1/keys" && object(data.target).starting === true) {
+            // A folder-trust or login prompt comes before the agent has a
+            // conversation; the phone answers it on the starting binding.
+            const target = startingTargetSchema.parse(data.target);
+            const pane = await startingPane(target);
+            const keys = z.array(z.enum(ANSWER_KEYS)).min(1).max(4).parse(data.keys);
+            if (!["blocked", "waiting", "unknown"].includes(String(pane.agent_status))) throw new BridgeError(409, "This agent is not waiting for an answer.");
+            await rpc(target.server, "agent.send_keys", { target: target.pane, keys: keys.map(key => HERDR_KEYS[key] ?? key) });
+            result = { ok: true };
+          } else if (url.pathname === "/v1/prompt" && object(data.target).starting === true) {
             const target = startingTargetSchema.parse(data.target);
             const pane = await validateStartingTarget(target);
             const text = z.string().min(1).max(32768).refine(t => !/[\x00-\x08\x0b-\x1f\x7f]/.test(t)).parse(data.text);
@@ -225,7 +234,10 @@ export async function serve(version: string): Promise<void> {
           // Uploads store bytes without answering or interrupting the agent.
           // They still require fresh identity, just like prompt mutations.
           const sendsInput = ["/v1/prompt", "/v1/keys"].includes(url.pathname);
-          const pane = await validateTarget(target, sendsInput, sendsInput || url.pathname === "/v1/upload");
+          // A key press is how a prompt the agent draws in its terminal gets
+          // answered, so keys are the one input allowed while the agent is
+          // blocked or waiting; the status check below is theirs alone.
+          const pane = await validateTarget(target, url.pathname === "/v1/prompt", sendsInput || url.pathname === "/v1/upload");
           if (url.pathname === "/v1/prompt") {
             const text = z.string().min(1).max(32768).refine(t => !/[\x00-\x08\x0b-\x1f\x7f]/.test(t)).parse(data.text);
             // Herdr types into the pane; the agent that receives the text
@@ -248,8 +260,13 @@ export async function serve(version: string): Promise<void> {
               result = { ok: true, ...(!confirmed ? { deliveryUncertain: true } : {}) };
             }
           } else if (url.pathname === "/v1/keys") {
-            if (JSON.stringify(data.keys) !== '["Escape"]' || pane.agent_status !== "working") throw new BridgeError(409, "This agent is no longer working.");
-            await rpc(target.server, "agent.send_keys", { target: target.pane, keys: ["esc"] }); result = { ok: true };
+            const keys = z.array(z.enum(ANSWER_KEYS)).min(1).max(4).parse(data.keys);
+            const status = String(pane.agent_status);
+            // Escape interrupts a working agent. Everything else answers a
+            // prompt the agent is holding: a menu, a y/n, a trust question.
+            if (keys.every(key => key === "Escape") ? !["working", "blocked", "waiting", "unknown"].includes(status)
+              : !["blocked", "waiting", "unknown"].includes(status)) throw new BridgeError(409, keys.every(key => key === "Escape") ? "This agent is no longer working." : "This agent is not waiting for an answer.");
+            await rpc(target.server, "agent.send_keys", { target: target.pane, keys: keys.map(key => HERDR_KEYS[key] ?? key) }); result = { ok: true };
           } else if (url.pathname === "/v1/upload") {
             const { name, bytes } = uploadBody(data);
             result = { ok: true, path: await saveUpload(target.session, name, bytes) };
@@ -441,6 +458,10 @@ export async function serve(version: string): Promise<void> {
   });
   await unlink(socketPath()).catch(() => {});
 }
+
+/** The phone can press these and nothing else; never a typed string. */
+const ANSWER_KEYS = ["Escape", "Enter", "Up", "Down", "Tab", "y", "n", "1", "2", "3", "4", "5", "6", "7", "8", "9"] as const;
+const HERDR_KEYS: Partial<Record<(typeof ANSWER_KEYS)[number], string>> = { Escape: "esc", Enter: "enter", Up: "up", Down: "down", Tab: "tab" };
 
 const launchKinds = ["codex", "claude", "copilot", "opencode"] as const;
 const plainText = (max: number) => z.string().min(1).max(max).refine(t => !/[\x00-\x1f\x7f]/.test(t));

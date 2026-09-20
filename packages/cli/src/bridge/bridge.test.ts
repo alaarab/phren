@@ -655,6 +655,30 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     expect(await submit(other, "queued while busy")).toMatchObject({ decision: "block" });
     expect(await submit(session, "queued while busy")).toEqual({ status: 200 });
   }, 15_000);
+  it("presses answer keys only while the agent waits, and never anything typed", async () => {
+    agentStatus = "blocked";
+    expect((await api("/v1/keys", { target, keys: ["y"] })).status).toBe(200);
+    expect((await api("/v1/keys", { target, keys: ["Enter"] })).status).toBe(200);
+    expect((await api("/v1/keys", { target, keys: ["Down", "Enter"] })).status).toBe(200);
+    expect(commands.filter(c => c.method === "agent.send_keys").map(c => c.params.keys)).toEqual([["y"], ["enter"], ["down", "enter"]]);
+    expect((await api("/v1/keys", { target, keys: ["x"] })).status).toBe(400);
+    expect((await api("/v1/keys", { target, keys: ["rm -rf"] })).status).toBe(400);
+    expect((await api("/v1/keys", { target, keys: [] })).status).toBe(400);
+    // A starting agent's own first prompt (folder trust) has no session yet.
+    reportIdentity = false;
+    const starting = (await api("/v1/workspaces/panes?groupId=w1&childId=w1:t1")).data.panes[0];
+    expect(starting).toMatchObject({ starting: true });
+    const { session: _session, ...location } = target;
+    expect((await api("/v1/keys", { target: { ...location, starting: true, startingToken: starting.startingToken }, keys: ["Enter"] })).status).toBe(200);
+    expect((await api("/v1/keys", { target: { ...location, starting: true, startingToken: "0".repeat(64) }, keys: ["Enter"] })).status).toBe(409);
+    reportIdentity = true;
+    agentStatus = "working";
+    expect((await api("/v1/keys", { target, keys: ["Enter"] })).status).toBe(409);
+    expect((await api("/v1/keys", { target, keys: ["Escape"] })).status).toBe(200);
+    agentStatus = "idle";
+    expect((await api("/v1/keys", { target, keys: ["Escape"] })).status).toBe(409);
+    expect(commands.filter(c => c.method === "agent.send_keys")).toHaveLength(5);
+  });
   it("reports uncertain prompt delivery after replacement and sends only once", async () => {
     replaceBeforeMutation = true;
     const response = await api("/v1/prompt", { target, text: "sent once" });
