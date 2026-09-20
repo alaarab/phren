@@ -135,6 +135,9 @@ import UIKit
                 panes[0]["agentStatus"] = "idle"
             }
         }
+        if flag("--chat-shell-only") {
+            panes = [["id": "\(session.workspaceID):p1", "label": "1", "title": "alaarab@omarchy:~", "cwd": root]]
+        }
         if flag("--chat-multiple") {
             panes.append(["id": "\(session.workspaceID):p2", "label": "2", "title": "Review the changes", "agent": "claude", "agentStatus": "idle", "sessionId": "fixture-claude-session"])
         }

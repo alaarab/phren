@@ -1406,6 +1406,25 @@ final class AgentChatTests: XCTestCase {
     }
 
     @MainActor
+    func testTabWithoutAnAgentOpensTheTerminalAndKeepsItOneTapAway() {
+        let app = launch(extra: ["--chat-shell-only"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        XCTAssertTrue(app.otherElements["herdr-terminal-header"].waitForExistence(timeout: 8), "A shell-only tab goes straight to its terminal")
+        app.buttons["herdr-terminal-back"].tap()
+        XCTAssertTrue(app.staticTexts["No agent in this tab"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.otherElements["herdr-terminal-header"].waitForExistence(timeout: 2), "The fallback happens once, not on every return")
+        XCTAssertTrue(app.buttons["chat-composer-terminal"].isEnabled)
+        XCTAssertFalse(app.buttons["chat-send"].isEnabled)
+        capture(app, "Shell-only tab offers the terminal without an agent")
+        app.buttons["chat-terminal-pane:w7:p1"].tap()
+        XCTAssertTrue(app.otherElements["herdr-terminal-header"].waitForExistence(timeout: 8))
+        app.buttons["herdr-terminal-back"].tap()
+        XCTAssertTrue(app.staticTexts["No agent in this tab"].waitForExistence(timeout: 5))
+        app.buttons["chat-composer-terminal"].tap()
+        XCTAssertTrue(app.otherElements["herdr-terminal-header"].waitForExistence(timeout: 8))
+    }
+
+    @MainActor
     func testRejectedSendKeepsTheMessageQueuedAndAllowsExplicitRetry() {
         let app = launch(extra: ["--chat-send-rejected", "--chat-working"])
         app.buttons["live-chat:w7:w7:t9"].tap()

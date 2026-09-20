@@ -114,6 +114,7 @@ struct AgentChatView: View {
     @State private var paginationReady = false
     @State private var requestedHistoryLine: Int?
     @State private var scrollHeight: CGFloat = 0
+    @State private var fellBackToTerminal = false
     @ScaledMetric(relativeTo: .body) private var composerTextSize = 14.0
     @FocusState private var composing: Bool
     /// The one paragraph showing native text selection, if any.
@@ -245,6 +246,10 @@ struct AgentChatView: View {
                                    activity: model.activityPhase == .working ? "working" : model.liveActivity ?? session.tab.agentStatus,
                                    toolName: model.currentToolName)
     }
+    private func isAgent(_ pane: AgentChatPanes.Pane) -> Bool {
+        (try? pane.target(hostID: session.host.id, workspaceID: session.workspaceID, tabID: session.tab.id, muxID: session.host.muxID)) != nil
+    }
+    private var hasAgentPanes: Bool { model.panes.contains(where: isAgent) }
 
     var body: some View { ChatPerformance.measure("chat container") { content } }
     private var content: some View {
@@ -256,9 +261,9 @@ struct AgentChatView: View {
                     VStack(spacing: 0) {
                         VStack(alignment: .leading, spacing: 12) {
                             if model.target == nil && !model.loading {
-                                Text("Choose an agent").font(.title2.weight(.semibold))
+                                Text(hasAgentPanes ? "Choose an agent" : "No agent in this tab").font(.title2.weight(.semibold))
                                 ForEach(model.panes) { pane in
-                                    if (try? pane.target(hostID: session.host.id, workspaceID: session.workspaceID, tabID: session.tab.id, muxID: session.host.muxID)) != nil {
+                                    if isAgent(pane) {
                                         Button {
                                             model.choose(pane, session: session); refresh = UUID()
                                         } label: {
@@ -266,14 +271,14 @@ struct AgentChatView: View {
                                                 .padding(16).phrenCard()
                                         }.buttonStyle(.plain).accessibilityIdentifier("chat-pane:\(pane.id)")
                                     } else {
-                                        NavigationLink {
-                                            HerdrTerminalView(host: session.host, session: session, paneID: pane.id)
-                                        } label: {
-                                            Label("\(pane.displayTitle) · Open terminal", systemImage: "terminal").font(.subheadline)
-                                        }
+                                        Button { commandDestination = .init(paneID: pane.id, menu: false) } label: {
+                                            HStack { VStack(alignment: .leading) { Text(pane.displayTitle); Text("Open terminal").font(.caption) }; Spacer(); Image(systemName: "terminal") }
+                                                .padding(16).phrenCard()
+                                        }.buttonStyle(.plain).accessibilityIdentifier("chat-terminal-pane:\(pane.id)")
                                     }
                                 }
-                                Text("Native chat supports Codex, Claude Code, and GitHub Copilot sessions recognized on this computer.")
+                                Text(hasAgentPanes ? "Native chat supports Codex, Claude Code, and GitHub Copilot sessions recognized on this computer."
+                                     : "Start Codex, Claude Code, or GitHub Copilot in the terminal and chat picks it up here.")
                                     .font(.footnote).foregroundStyle(PhrenTheme.textMuted)
                                 if model.panes.contains(where: { $0.agent == "copilot" }) {
                                     Link("Set up Copilot chat", destination: URL(string: "https://alaarab.github.io/phren/phren-hook.html")!)
@@ -566,6 +571,14 @@ struct AgentChatView: View {
                 // Commands chosen in the live menu can replace the session too.
                 model.chooseAnother(); refresh = UUID()
             }
+        }
+        .onChange(of: model.loading) { _, loading in
+            // A tab with only shells is a terminal, not a chat: go straight
+            // there once, and come back to the picker when an agent starts.
+            guard !loading, !fellBackToTerminal, model.target == nil, model.error == nil,
+                  !model.panes.isEmpty, !hasAgentPanes, commandDestination == nil else { return }
+            fellBackToTerminal = true
+            commandDestination = .init(paneID: model.panes[0].id, menu: false)
         }
         .sheet(isPresented: $showingAttachments) {
             if let openingTarget = model.target {
@@ -913,7 +926,6 @@ struct AgentChatView: View {
                     } label: {
                         Image(systemName: "terminal").font(.system(size: 18)).frame(width: 44, height: 44).contentShape(Rectangle())
                     }.accessibilityLabel("Open Herdr terminal").accessibilityIdentifier("chat-composer-terminal")
-                        .disabled(model.target == nil)
                     Button { composing = false; showingAgentSwitcher = true } label: {
                         Image(systemName: "person.2")
                             .font(.system(size: 18)).frame(width: 40, height: 44).contentShape(Rectangle())
