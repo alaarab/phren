@@ -33,6 +33,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- `phren config proactivity <level> --scope findings|tasks` sets the
+  findings-only or task-only auto-capture level; `proactivity.findings` and
+  `proactivity.tasks` now appear in `phren config --help` and the command
+  registry. `set_config` domain `proactivity` already took `scope`.
 - Swipe down on the chat message box, its icon row, or the Herdr shortcut row
   to dismiss the keyboard while keeping the draft.
 - iOS CI runs only by manual dispatch; the full native UI suite requires an
