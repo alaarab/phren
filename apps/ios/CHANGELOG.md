@@ -10,6 +10,8 @@ number counts up on its own.
 
 ### New
 
+- Memory graph nodes open in a compact in-screen panel, keeping the graph
+  visible and interactive while details and project actions stay close by.
 - A subagent's card in the chat opens that agent's own transcript —
   **Follow transcript** while it works (live, through the same connection as
   the chat) and **Open transcript** once it is back — with earlier activity
