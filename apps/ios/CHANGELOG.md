@@ -13,6 +13,8 @@ number counts up on its own.
 - Graph nodes open in the graph's own docked dossier card, the same dark-glass
   dossier the web and VS Code viewers draw, with Focus, Open project and Share;
   the graph stays visible and the zoom controls step aside.
+- Session cards count only the subagents still running; the badge goes away
+  when they finish.
 - Computer names use a device color you can choose in Connection settings,
   making it easier to see which machine a session is running on.
 - A subagent's card in the chat opens that agent's own transcript —

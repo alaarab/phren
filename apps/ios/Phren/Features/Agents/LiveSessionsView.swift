@@ -780,17 +780,21 @@ private struct LiveSessionCard: View, Equatable {
             .accessibilityIdentifier(showHost ? "overview-chat:\(session.accessibilityKey)"
                                      : "live-chat:\(session.workspaceID):\(session.tab.id)")
             .disabled(!fresh)
-            if !childAgents.isEmpty {
+            // Only agents still working earn a place on the card; finished
+            // ones stay reachable from the chat's agent tree.
+            let runningAgents = childAgents.reduce(0) { $0 + $1.runningCount }
+            if runningAgents > 0 {
                 Button { showingChildAgents = true } label: {
                     VStack(spacing: 2) {
                         Image(systemName: "person.2.wave.2")
-                        Text("\(childAgents.reduce(0) { $0 + $1.agentCount })").font(.caption2.weight(.bold))
+                        Text("\(runningAgents)").font(.caption2.weight(.bold)).monospacedDigit()
                     }
-                    .foregroundStyle(childAgents.contains(where: { $0.runningCount > 0 }) ? PhrenTheme.phrenCardAccent : PhrenTheme.textMuted)
+                    .foregroundStyle(PhrenTheme.phrenCardAccent)
                     .frame(minWidth: 38, minHeight: 44)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("\(childAgents.reduce(0) { $0 + $1.agentCount }) spawned agents")
+                .accessibilityLabel("\(runningAgents) agents running")
+                .accessibilityIdentifier("\(prefix)-running-agents:\(session.accessibilityKey)")
             }
             SessionPinButton(session: session, pinned: resolvedPin ?? (preferences?.isPinned(session.id) == true),
                              identifierPrefix: prefix, data: $data)
