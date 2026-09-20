@@ -50,12 +50,44 @@ function normalizeProactivityLevel(raw: string | undefined): ProactivityLevel | 
 }
 
 function printProactivityUsage(subcommand: string): void {
-  console.error(`Usage: phren config ${subcommand} [high|medium|low]`);
+  console.error(subcommand === "proactivity"
+    ? "Usage: phren config proactivity [high|medium|low] [--scope base|findings|tasks] [--project <name>]"
+    : `Usage: phren config ${subcommand} [high|medium|low] [--project <name>]`);
 }
 
-export function handleConfigProactivity(subcommand: "proactivity" | "proactivity.findings" | "proactivity.tasks", args: string[]) {
+type ProactivitySubcommand = "proactivity" | "proactivity.findings" | "proactivity.tasks";
+const SCOPE_SUBCOMMANDS: Record<string, ProactivitySubcommand> = {
+  base: "proactivity", findings: "proactivity.findings", tasks: "proactivity.tasks", task: "proactivity.tasks",
+};
+
+/** `--scope tasks` on the base command is the same as `proactivity.tasks`. */
+function parseScopeArg(args: string[]): { scope?: ProactivitySubcommand; rest: string[]; invalid?: string } {
+  const rest: string[] = [];
+  let scope: ProactivitySubcommand | undefined, invalid: string | undefined;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    const inline = arg.startsWith("--scope=") ? arg.slice("--scope=".length) : undefined;
+    if (arg === "--scope" || inline !== undefined) {
+      const raw = inline ?? args[++i] ?? "";
+      const match = SCOPE_SUBCOMMANDS[raw.trim().toLowerCase()];
+      if (match) scope = match; else invalid = raw;
+      continue;
+    }
+    rest.push(arg);
+  }
+  return { scope, rest, invalid };
+}
+
+export function handleConfigProactivity(requested: ProactivitySubcommand, args: string[]) {
   const phrenPath = getPhrenPath();
-  const { project: projectArg, rest: filteredArgs } = parseProjectArg(args);
+  const scoped = parseScopeArg(args);
+  if (scoped.invalid !== undefined || (scoped.scope && requested !== "proactivity")) {
+    printProactivityUsage(requested);
+    process.exitCode = 1;
+    return;
+  }
+  const subcommand = scoped.scope ?? requested;
+  const { project: projectArg, rest: filteredArgs } = parseProjectArg(scoped.rest);
   const value = filteredArgs[0];
 
   if (value === undefined) {
