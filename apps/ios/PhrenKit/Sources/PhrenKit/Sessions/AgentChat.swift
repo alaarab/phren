@@ -82,6 +82,36 @@ public struct AgentChild: Codable, Equatable, Sendable, Identifiable {
     public var runningCount: Int { (state == .running ? 1 : 0) + children.reduce(0) { $0 + $1.runningCount } }
 }
 
+public struct AgentChildTreeRow: Equatable, Sendable {
+    public let agent: AgentChild
+    public let depth: Int
+
+    public init(agent: AgentChild, depth: Int) {
+        self.agent = agent
+        self.depth = depth
+    }
+}
+
+public extension AgentChild {
+    static func rows(_ agents: [AgentChild], includeCompleted: Bool) -> [AgentChildTreeRow] {
+        rows(agents, includeCompleted: includeCompleted, depth: 0)
+    }
+
+    static func runningRows(_ agents: [AgentChild]) -> [AgentChildTreeRow] {
+        rows(agents, includeCompleted: false)
+    }
+
+    private static func rows(_ agents: [AgentChild], includeCompleted: Bool,
+                             depth: Int) -> [AgentChildTreeRow] {
+        agents.flatMap { agent in
+            let visible = includeCompleted || agent.state == .running
+            let descendants = rows(agent.children, includeCompleted: includeCompleted,
+                                   depth: visible ? depth + 1 : depth)
+            return (visible ? [AgentChildTreeRow(agent: agent, depth: depth)] : []) + descendants
+        }
+    }
+}
+
 public struct AgentChildTree: Codable, Equatable, Sendable {
     public let agents: [AgentChild]
     public var agentCount: Int { agents.reduce(0) { $0 + $1.agentCount } }

@@ -8,29 +8,13 @@ struct ChatSubagentsView: View {
     let agents: [AgentChild]
     @Environment(\.dismiss) private var dismiss
     @State private var diffChild: String?
-    @State private var dismissedIDs: Set<String>
-    @State private var showingCleared = false
-    private let dismissalStore: DismissedAgents
+    @AppStorage("chat.subagents.showCompleted") private var showingCompleted = false
 
-    init(session: LiveAgentSession, target: AgentChatTarget, agents: [AgentChild]) {
-        self.session = session
-        self.target = target
-        self.agents = agents
-        let store = DismissedAgents()
-        dismissalStore = store
-        _dismissedIDs = State(initialValue: store.ids(for: target.conversationKey))
-    }
-
-    private var allRows: [AgentTreeRow] { AgentTreeRow.flatten(agents) }
-    private var clearedRows: [AgentTreeRow] {
-        allRows.filter { $0.agent.state == .completed && dismissedIDs.contains($0.agent.id) }
-    }
-    private var rows: [AgentTreeRow] {
-        showingCleared ? allRows : AgentTreeRow.visible(agents, dismissedIDs: dismissedIDs)
-    }
-    private var total: Int { rows.count }
-    private var running: Int { rows.filter { $0.agent.state == .running }.count }
-    private var hasVisibleCompleted: Bool { rows.contains { $0.agent.state == .completed } }
+    private var allRows: [AgentTreeRow] { AgentTreeRow.rows(agents, includeCompleted: true) }
+    private var rows: [AgentTreeRow] { AgentTreeRow.rows(agents, includeCompleted: showingCompleted) }
+    private var total: Int { allRows.count }
+    private var running: Int { allRows.filter { $0.agent.state == .running }.count }
+    private var hasCompleted: Bool { total > running }
     private var providers: [String] { Array(Set(rows.map { $0.agent.providerName })).sorted() }
 
     var body: some View {
@@ -47,50 +31,41 @@ struct ChatSubagentsView: View {
                     .padding(.bottom, 6)
                 }
                 List {
-                    ForEach(rows) { row in
-                        NavigationLink {
-                            ChildAgentTranscriptView(session: session, target: target, agent: row.agent)
-                        } label: {
-                            AgentTreeRowView(row: row)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("child-agent:\(row.agent.id)")
-                        .contextMenu {
-                            Button("Changes", systemImage: "plus.forwardslash.minus") { diffChild = row.agent.id }
-                        }
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            if row.agent.state == .completed && dismissedIDs.contains(row.agent.id) {
-                                Button("Restore", systemImage: "eye") { restore(row.agent.id) }
-                                    .tint(PhrenTheme.accent)
-                                    .accessibilityIdentifier("chat-subagent-restore:\(row.agent.id)")
-                            } else if row.agent.state == .completed {
-                                Button("Clear", systemImage: "eye.slash") { clear(row.agent.id) }
-                                    .tint(PhrenTheme.textMuted)
-                                    .accessibilityIdentifier("chat-subagent-clear:\(row.agent.id)")
+                    if rows.isEmpty && !showingCompleted {
+                        HStack(spacing: 8) {
+                            Text("No agents running")
+                                .font(.caption)
+                                .foregroundStyle(PhrenTheme.textMuted)
+                            if hasCompleted {
+                                Button("Show completed") {
+                                    withAnimation(.easeInOut(duration: 0.15)) { showingCompleted = true }
+                                }
+                                .font(.caption.weight(.medium))
+                                .buttonStyle(.bordered)
+                                .buttonBorderShape(.capsule)
+                                .controlSize(.small)
+                                .frame(minHeight: 44)
                             }
                         }
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
-                        .listRowInsets(EdgeInsets(top: 3, leading: 16, bottom: 3, trailing: 16))
-                    }
-                    if !clearedRows.isEmpty {
-                        Button {
-                            withAnimation(.easeInOut(duration: 0.15)) { showingCleared.toggle() }
-                        } label: {
-                            HStack {
-                                Spacer()
-                                Text("\(clearedRows.count) cleared · \(showingCleared ? "Hide" : "Show")")
-                                    .font(.caption)
-                                    .foregroundStyle(PhrenTheme.textMuted)
-                                Spacer()
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                    } else {
+                        ForEach(rows) { row in
+                            NavigationLink {
+                                ChildAgentTranscriptView(session: session, target: target, agent: row.agent)
+                            } label: {
+                                AgentTreeRowView(row: row)
                             }
-                            .frame(minHeight: 36)
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("child-agent:\(row.agent.id)")
+                            .contextMenu {
+                                Button("Changes", systemImage: "plus.forwardslash.minus") { diffChild = row.agent.id }
+                            }
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                            .listRowInsets(EdgeInsets(top: 3, leading: 16, bottom: 3, trailing: 16))
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("chat-subagents-show-cleared")
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
-                        .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 8, trailing: 16))
                     }
                 }
                 .listStyle(.plain)
@@ -108,18 +83,19 @@ struct ChatSubagentsView: View {
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 1) {
                 Text("Agent work").font(.subheadline.weight(.medium)).foregroundStyle(PhrenTheme.text)
-                Text("\(total) \(total == 1 ? "agent" : "agents") · \(running) running")
+                Text(showingCompleted ? "\(total) agents · \(running) running" : "\(running) running")
                     .font(.caption).foregroundStyle(PhrenTheme.textMuted)
             }
             Spacer(minLength: 8)
-            Button("Clear completed") { clearCompleted() }
+            Button(showingCompleted ? "Hide completed" : "Show completed") {
+                withAnimation(.easeInOut(duration: 0.15)) { showingCompleted.toggle() }
+            }
                 .font(.caption.weight(.medium))
                 .buttonStyle(.bordered)
                 .buttonBorderShape(.capsule)
                 .controlSize(.small)
                 .frame(minHeight: 44)
-                .disabled(!hasVisibleCompleted)
-                .accessibilityIdentifier("chat-subagents-clear-completed")
+                .accessibilityIdentifier("chat-subagents-show-completed")
             Button("Done") { dismiss() }
                 .font(.caption.weight(.medium))
                 .buttonStyle(.bordered)
@@ -135,24 +111,6 @@ struct ChatSubagentsView: View {
         }
     }
 
-    private func clear(_ id: String) {
-        dismissalStore.dismiss(id, in: target.conversationKey)
-        withAnimation(.easeInOut(duration: 0.15)) { _ = dismissedIDs.insert(id) }
-    }
-
-    private func restore(_ id: String) {
-        dismissalStore.restore(id, in: target.conversationKey)
-        withAnimation(.easeInOut(duration: 0.15)) { _ = dismissedIDs.remove(id) }
-    }
-
-    private func clearCompleted() {
-        let ids = Set(allRows.filter { $0.agent.state == .completed }.map(\.agent.id))
-        for id in ids { dismissalStore.dismiss(id, in: target.conversationKey) }
-        withAnimation(.easeInOut(duration: 0.15)) {
-            dismissedIDs.formUnion(ids)
-            showingCleared = false
-        }
-    }
 }
 
 struct AgentTreeRow: Identifiable, Equatable {
@@ -162,21 +120,20 @@ struct AgentTreeRow: Identifiable, Equatable {
     var id: String { agent.id }
 
     static func flatten(_ agents: [AgentChild], depth: Int = 0) -> [Self] {
-        agents.enumerated().flatMap { index, agent in
-            [Self(agent: agent, depth: depth, isLastSibling: index == agents.count - 1)]
-                + flatten(agent.children, depth: depth + 1)
+        rows(agents, includeCompleted: true).map { row in
+            Self(agent: row.agent, depth: row.depth + depth, isLastSibling: row.isLastSibling)
         }
     }
 
-    static func visible(_ agents: [AgentChild], dismissedIDs: Set<String>) -> [Self] {
-        flatten(agents).filter { $0.agent.state == .running || !dismissedIDs.contains($0.agent.id) }
-    }
-
-    /// Shared with the chat header so its total can use the sheet's exact
-    /// visibility rule after the one-line badge follow-up lands.
-    static func visible(_ agents: [AgentChild], for target: AgentChatTarget,
-                        store: DismissedAgents = DismissedAgents()) -> [Self] {
-        visible(agents, dismissedIDs: store.ids(for: target.conversationKey))
+    static func rows(_ agents: [AgentChild], includeCompleted: Bool) -> [Self] {
+        let childRows = includeCompleted ? AgentChild.rows(agents, includeCompleted: true)
+                                         : AgentChild.runningRows(agents)
+        return childRows.indices.map { index in
+            let row = childRows[index]
+            let following = childRows.dropFirst(index + 1).first { $0.depth <= row.depth }
+            return Self(agent: row.agent, depth: row.depth,
+                        isLastSibling: following.map { $0.depth != row.depth } ?? true)
+        }
     }
 }
 

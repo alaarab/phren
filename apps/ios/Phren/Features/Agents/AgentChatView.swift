@@ -836,7 +836,6 @@ struct AgentChatView: View {
         return parts.joined(separator: " · ")
     }
 
-    private var childAgentCount: Int { childAgents.reduce(0) { $0 + $1.agentCount } }
     private var runningChildAgentCount: Int { childAgents.reduce(0) { $0 + $1.runningCount } }
 
     private var chatHeader: some View {
@@ -1038,20 +1037,20 @@ struct AgentChatView: View {
                             .font(.system(size: 18)).frame(width: 40, height: 44).contentShape(Rectangle())
                     }.accessibilityLabel("Switch agent").accessibilityIdentifier("chat-switch-agent")
                         .disabled(model.sending || model.answering || model.stopping)
-                    if !childAgents.isEmpty {
+                    if runningChildAgentCount > 0 {
                         Button { showingChildAgents = true } label: {
                             Image(systemName: "point.3.filled.connected.trianglepath.dotted")
                                 .font(.system(size: 17)).frame(width: 40, height: 44).contentShape(Rectangle())
                                 .foregroundStyle(PhrenTheme.chatText)
                                 .overlay(alignment: .topTrailing) {
-                                    Text("\(runningChildAgentCount > 0 ? runningChildAgentCount : childAgentCount)")
+                                    Text("\(runningChildAgentCount)")
                                         .font(.system(.caption2, design: .monospaced).weight(.bold)).monospacedDigit()
-                                        .foregroundStyle(runningChildAgentCount > 0 ? PhrenTheme.phrenCardAccent : PhrenTheme.textMuted)
+                                        .foregroundStyle(PhrenTheme.phrenCardAccent)
                                         .padding(.horizontal, 4).padding(.vertical, 1)
                                         .background(PhrenTheme.chatPanel, in: Capsule())
                                 }
                         }
-                        .accessibilityLabel("\(childAgentCount) spawned agents, \(runningChildAgentCount) running")
+                        .accessibilityLabel("\(runningChildAgentCount) running \(runningChildAgentCount == 1 ? "agent" : "agents")")
                         .accessibilityIdentifier("chat-agent-tree")
                     }
                     Spacer(minLength: 4)

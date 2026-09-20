@@ -169,10 +169,13 @@ private struct DrawerAgentTreeRow: Identifiable {
     let isLastSibling: Bool
     var id: String { agent.id }
 
-    static func flatten(_ agents: [AgentChild], depth: Int = 0) -> [Self] {
-        agents.enumerated().flatMap { index, agent in
-            [Self(agent: agent, depth: depth, isLastSibling: index == agents.count - 1)]
-                + flatten(agent.children, depth: depth + 1)
+    static func flatten(_ agents: [AgentChild]) -> [Self] {
+        let childRows = AgentChild.runningRows(agents)
+        return childRows.indices.map { index in
+            let row = childRows[index]
+            let following = childRows.dropFirst(index + 1).first { $0.depth <= row.depth }
+            return Self(agent: row.agent, depth: row.depth,
+                        isLastSibling: following.map { $0.depth != row.depth } ?? true)
         }
     }
 }
@@ -251,8 +254,6 @@ private struct DrawerChildAgentLabel: View {
         if let branch = row.agent.branch, !branch.isEmpty { parts.append("⑂ \(branch)") }
         return parts.joined(separator: " · ")
     }
-    private var stateName: String { row.agent.state == .running ? "Running" : "Completed" }
-
     var body: some View {
         HStack(spacing: 0) {
             treeGuide.frame(width: CGFloat(row.depth + 1) * 16 + 4)
@@ -264,8 +265,6 @@ private struct DrawerChildAgentLabel: View {
                         .foregroundStyle(PhrenTheme.sessionMeta).lineLimit(1).truncationMode(.middle)
                 }
                 Spacer(minLength: 8)
-                Circle().fill(row.agent.state == .running ? PhrenTheme.cyan : PhrenTheme.success)
-                    .frame(width: 7, height: 7).accessibilityHidden(true)
             }
         }
         .foregroundStyle(PhrenTheme.text)
@@ -273,7 +272,7 @@ private struct DrawerChildAgentLabel: View {
         .padding(.horizontal, 12)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(row.agent.name), \(metadata), \(stateName)")
+        .accessibilityLabel("\(row.agent.name), \(metadata)")
     }
 
     private var treeGuide: some View {

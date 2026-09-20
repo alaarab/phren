@@ -17,8 +17,8 @@ number counts up on its own.
 
 - Connection settings now offers the full color picker and custom hex colors
   for computers, alongside the quick swatches.
-- Completed agents can be cleared from Agent work and restored when needed,
-  keeping active agent trees focused on work still in progress.
+- Agent work and the agent drawer show only running agents by default; use
+  Show completed in Agent work to revisit a finished worker's transcript or diff.
 - Agent work uses compact headers and flat session-style cards for spawned
   agents, with provider, model, checkout, and running state visible at a glance.
 - Agent work shows each fan-out worker's branch and worktree in its row and

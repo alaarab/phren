@@ -214,37 +214,27 @@ final class AgentChatTests: XCTestCase {
         let tree = app.buttons["chat-agent-tree"]
         XCTAssertTrue(tree.waitForExistence(timeout: 8))
         XCTAssertFalse(app.buttons["1 agent running"].exists, "The old agent label no longer takes a composer row")
-        XCTAssertTrue(tree.label.contains("1 running"), "The composer badge counts only running agents")
+        XCTAssertEqual(tree.label, "1 running agent", "The composer badge counts only running agents")
         capture(app, "Agent tree in the composer")
         tree.tap()
         XCTAssertTrue(app.buttons["chat-subagents-done"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.navigationBars["Agent work"].exists)
+        let completedID = "a" + String(repeating: "1", count: 31)
+        let completedAgent = app.buttons["child-agent:\(completedID)"]
+        XCTAssertFalse(completedAgent.exists, "Completed agents stay out of Agent work by default")
+        let showCompleted = app.buttons["chat-subagents-show-completed"]
+        XCTAssertTrue(showCompleted.waitForExistence(timeout: 3))
+        showCompleted.tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "codex/device-color")).firstMatch.waitForExistence(timeout: 5))
         let modeledAgent = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "child-agent:", "gpt-5-codex")).firstMatch
         XCTAssertTrue(modeledAgent.waitForExistence(timeout: 5))
         XCTAssertTrue(modeledAgent.label.contains("Claude"), "The model appears beside its provider")
         capture(app, "Agent work cards")
-        let completedID = "a" + String(repeating: "1", count: 31)
-        modeledAgent.swipeLeft()
-        let clear = app.buttons["chat-subagent-clear:\(completedID)"]
-        XCTAssertTrue(clear.waitForExistence(timeout: 3))
-        clear.tap()
-        XCTAssertTrue(modeledAgent.waitForNonExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["1 agent · 1 running"].waitForExistence(timeout: 3))
-        let showCleared = app.buttons["chat-subagents-show-cleared"]
-        XCTAssertTrue(showCleared.waitForExistence(timeout: 3))
-        showCleared.tap()
-        XCTAssertTrue(modeledAgent.waitForExistence(timeout: 5))
-        capture(app, "Cleared subagents")
-        // Leave the persistent fixture clean so the test can be rerun on the
-        // same installed app without inheriting its earlier dismissal.
-        modeledAgent.swipeLeft()
-        let restore = app.buttons["chat-subagent-restore:\(completedID)"]
-        XCTAssertTrue(restore.waitForExistence(timeout: 3))
-        restore.tap()
+        showCompleted.tap()
+        XCTAssertTrue(completedAgent.waitForNonExistence(timeout: 5))
         app.buttons["chat-subagents-done"].tap()
         app.buttons["chat-switch-agent"].tap()
-        let fixtureChildID = "a1111111111111111111111111111111"
+        let fixtureChildID = "b2222222222222222222222222222222"
         let drawerChild = app.buttons["drawer-child-agent:\(fixtureChildID)"]
         XCTAssertTrue(drawerChild.waitForExistence(timeout: 5))
         drawerChild.tap()
