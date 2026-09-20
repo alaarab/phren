@@ -117,6 +117,10 @@ export class AgentHooks {
    * because nobody was there to hold it: what the phone shows above its
    * answer keys until the pane stops waiting. */
   private terminalPrompts = new Map<string, { tool: string; message: string; at: number }>();
+  /** Panes where Phren just typed a bare slash command: the agent is drawing
+   * that command's menu, which Herdr reports as an idle agent, so keys are
+   * allowed there for a short while to walk and confirm it. */
+  private menus = new Map<string, number>();
   private watching = new Map<string, number>();
   readonly overview = new ApprovalWatchLeases();
   private server?: Server;
@@ -175,6 +179,15 @@ export class AgentHooks {
     return { toolName: entry.tool, message: entry.message, at: new Date(entry.at).toISOString() };
   }
   clearTerminalPrompt(target: Target) { this.terminalPrompts.delete(JSON.stringify(target)); }
+  menuOpened(target: Target) {
+    this.menus.set(JSON.stringify(target), Date.now());
+    while (this.menus.size > 64) this.menus.delete(this.menus.keys().next().value!);
+  }
+  menuOpen(target: Target): boolean {
+    const at = this.menus.get(JSON.stringify(target));
+    return at !== undefined && Date.now() - at < 30_000;
+  }
+  menuClosed(target: Target) { this.menus.delete(JSON.stringify(target)); }
   approval(target: Target): Json | undefined {
     const pending = [...this.pending.entries()].find(([, p]) => JSON.stringify(p.target) === JSON.stringify(target));
     if (pending) return { actionId: pending[0], toolName: pending[1].tool, title: `Allow ${pending[1].tool}?`, message: pending[1].message, expiresAt: pending[1].expiresAt };

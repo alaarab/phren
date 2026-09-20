@@ -15,6 +15,9 @@ number counts up on its own.
 
 ### New
 
+- Typing /permissions on a Codex chat draws its menu natively (Ask for
+  approval, Approve for me, Full Access); the choice types the command and
+  walks the agent's own menu with keys, without the terminal.
 - Prompts an agent draws only in its terminal (folder trust, a yes/no, a
   menu) can be answered from the chat with a row of keys: Y, N, Enter, the
   arrows and Esc. The Hook accepts exactly those keys and nothing typed.

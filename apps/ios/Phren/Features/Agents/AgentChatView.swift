@@ -115,6 +115,7 @@ struct AgentChatView: View {
     @State private var showingUsage = false
     @State private var showingOptions = false
     @State private var showingModelPicker = false
+    @State private var menuCommand: ChatMenuCommand?
     @State private var showingChildAgents = false
     @State private var childAgents: [AgentChild] = []
     private struct OpenedChild: Identifiable, Hashable {
@@ -641,6 +642,14 @@ struct AgentChatView: View {
         .onChange(of: scenePhase) { _, phase in if phase != .active { stopDictation() } }
         .onDisappear { dictationTask?.cancel(); cleanupTask?.cancel(); dictating = false; if dictation.isRecording { dictation.stop() } }
         .sheet(isPresented: $showingOptions) { chatOptionsSheet }
+        .sheet(item: $menuCommand) { item in
+            if let menu = AgentMenuChoice.menu(command: item.command, source: model.target?.source ?? "") {
+                ChatMenuPickerSheet(title: menu.title, command: item.command, rows: menu.rows) { index in
+                    menuCommand = nil
+                    sendTask = Task { await model.drive(session, menuCommand: item.command, index: index) }
+                }
+            }
+        }
         .sheet(isPresented: $showingModelPicker) {
             ChatModelPickerSheet(source: model.target?.source ?? "", current: model.modelName, host: session.host) { command in
                 showingModelPicker = false
@@ -1148,6 +1157,10 @@ struct AgentChatView: View {
                             sendTask = Task { await model.stop(session) }
                         } else if trimmed == "/", model.attachments.isEmpty {
                             openCommandMenu()
+                        } else if model.attachments.isEmpty, AgentMenuChoice.menu(command: trimmed, source: model.target?.source ?? "") != nil {
+                            // The agent would draw a menu in its terminal; the
+                            // phone draws the same rows and walks it with keys.
+                            menuCommand = ChatMenuCommand(command: trimmed)
                         } else if trimmed == "/model", model.attachments.isEmpty, AgentModelChoice.supportsPicker(source: model.target?.source ?? "") {
                             // The agent's own /model is a terminal menu; the
                             // phone offers the same choice as a sheet and sends

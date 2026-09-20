@@ -695,6 +695,18 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     agentStatus = "idle";
     expect((await api("/v1/workspaces")).data.groups[0].children[0]).not.toHaveProperty("currentStep");
   });
+  it("lets the phone walk a menu it just opened with a slash command, briefly", async () => {
+    agentStatus = "idle";
+    expect((await api("/v1/keys", { target, keys: ["Down"] })).status).toBe(409);
+    expect((await api("/v1/prompt", { target, text: "/permissions" })).status).toBe(200);
+    expect((await api("/v1/keys", { target, keys: ["Down", "Down"] })).status).toBe(200);
+    expect((await api("/v1/keys", { target, keys: ["Enter"] })).status).toBe(200);
+    // Enter closed the menu; the pane is an idle agent again.
+    expect((await api("/v1/keys", { target, keys: ["Down"] })).status).toBe(409);
+    // A prompt with words is a message, not a menu.
+    expect((await api("/v1/prompt", { target, text: "/model gpt-5.6-terra" })).status).toBe(200);
+    expect((await api("/v1/keys", { target, keys: ["Enter"] })).status).toBe(409);
+  });
   it("lists the models a computer's agents offer", async () => {
     const claude = await api("/v1/models?source=claude");
     expect(claude.status).toBe(200);

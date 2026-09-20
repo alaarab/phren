@@ -567,16 +567,33 @@ final class AgentChatModel {
 
     /// One key into the agent's terminal for a prompt only it can see. The
     /// row stays until the pane's status leaves "needs answer".
-    func answer(_ session: LiveAgentSession, key: AgentAnswerKey) async {
-        guard let target, !answering else { return }
+    func answer(_ session: LiveAgentSession, key: AgentAnswerKey) async { await answer(session, keys: [key]) }
+    func answer(_ session: LiveAgentSession, keys: [AgentAnswerKey]) async {
+        guard let target, !answering, !keys.isEmpty else { return }
         answering = true; deliveryError = nil
         defer { answering = false }
         do {
             #if DEBUG && targetEnvironment(simulator)
-            if AgentChatFixture.enabled { try await AgentChatFixture.answer(target, key: key); return }
+            if AgentChatFixture.enabled { for key in keys { try await AgentChatFixture.answer(target, key: key) }; return }
             #endif
-            try await PhrenConnection.answerWithKeys(host: session.host, privateKey: try DeviceSSHKey.load(session.host.id), target: target, keys: [key])
+            // The Hook takes four keys a call; a long walk goes in pieces.
+            var remaining = keys[...]
+            while !remaining.isEmpty {
+                let chunk = Array(remaining.prefix(4)); remaining = remaining.dropFirst(4)
+                try await PhrenConnection.answerWithKeys(host: session.host, privateKey: try DeviceSSHKey.load(session.host.id), target: target, keys: chunk)
+            }
         } catch { deliveryError = error.localizedDescription }
+    }
+
+    /// Types a slash command whose agent answers with a menu, then walks
+    /// that menu to `index`. The command goes through the ordinary send so
+    /// the transcript shows it; the keys follow once the menu has drawn.
+    func drive(_ session: LiveAgentSession, menuCommand command: String, index: Int) async {
+        draft = command
+        await send(session)
+        guard deliveryError == nil else { return }
+        try? await Task.sleep(for: .milliseconds(700))
+        await answer(session, keys: AgentMenuChoice.keys(selecting: index))
     }
 
     func showLatest() {

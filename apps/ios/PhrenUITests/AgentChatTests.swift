@@ -1391,6 +1391,25 @@ final class AgentChatTests: XCTestCase {
     }
 
     @MainActor
+    func testSlashPermissionsDrawsTheMenuNativelyAndWalksItWithKeys() {
+        let app = launch()
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
+        XCTAssertTrue(composer.waitForExistence(timeout: 8))
+        composer.tap(); composer.typeText("/permissions")
+        app.buttons["chat-send"].tap()
+        let full = app.buttons["chat-menu:2"]
+        XCTAssertTrue(full.waitForExistence(timeout: 5), "The agent's menu is drawn as native rows")
+        XCTAssertTrue(full.label.contains("Full Access"))
+        capture(app, "Permissions menu")
+        full.tap()
+        let echoed = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "/permissions")).firstMatch
+        XCTAssertTrue(echoed.waitForExistence(timeout: 8), "The command is typed for the agent")
+        XCTAssertFalse(app.otherElements["herdr-terminal-header"].exists, "The menu is walked with keys, not in the terminal")
+        XCTAssertFalse(app.staticTexts["chat-delivery-error"].waitForExistence(timeout: 3))
+    }
+
+    @MainActor
     func testSlashModelOpensAPickerAndSendsTheArgumentFormWithoutTheTerminal() {
         let app = launch()
         app.buttons["live-chat:w7:w7:t9"].tap()
