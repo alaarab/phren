@@ -29,6 +29,7 @@ function fakeModules(register: (name: string, config: ToolConfig, handler: ToolH
   tool("add_task", "Add a task.", { project: z.string(), text: z.string() });
   tool("complete_task", "Complete a task.", { project: z.string(), task: z.string() });
   tool("update_task", "Update a task.", { project: z.string(), task: z.string(), text: z.string() });
+  tool("set_config", "Set config.", { domain: z.string(), settings: z.record(z.string(), z.unknown()), project: z.string().optional() });
   tool("session_start", "Start a session.", { project: z.string().optional() });
   tool("session_end", "End a session.", { summary: z.string().optional() });
   tool("list_skills", "List skills. Includes global ones.", { project: z.string().optional() });
@@ -103,7 +104,7 @@ describe("composites", () => {
   it("phren_admin runs any non-core tool and can list them all", async () => {
     const { registered, calls } = gateWith("core");
     const listing = parse(await registered.get("phren_admin")!.handler({ action: "list_actions" }));
-    expect(listing.actions.map((a: { name: string }) => a.name)).toEqual(["get_config", "list_skills", "toggle_hooks"]);
+    expect(listing.actions.map((a: { name: string }) => a.name)).toEqual(["get_config", "list_skills", "set_config", "toggle_hooks"]);
     await registered.get("phren_admin")!.handler({ action: "toggle_hooks", enabled: false });
     expect(calls).toEqual(["toggle_hooks"]);
   });
@@ -153,5 +154,22 @@ describe("dispatch", () => {
   it("reports an unknown target instead of throwing", async () => {
     const catalog: Catalog = new Map();
     expect(parse(await dispatch(catalog, "nope", {})).error).toMatch(/Unknown tool/);
+  });
+
+  it("takes a nested object as an object or as the JSON string a host passes through", async () => {
+    const { registered, calls } = gateWith("core");
+    const admin = registered.get("phren_admin")!.handler;
+    const asObject = parse(await admin({ action: "set_config", domain: "proactivity", settings: { level: "medium", scope: "tasks" } }));
+    expect(asObject.data.args.settings).toEqual({ level: "medium", scope: "tasks" });
+    const asString = parse(await admin({ action: "set_config", domain: "proactivity", settings: '{"level":"medium","scope":"tasks"}' }));
+    expect(asString.data.args.settings).toEqual({ level: "medium", scope: "tasks" });
+    expect(calls).toEqual(["set_config", "set_config"]);
+    // A string field stays a string even when it looks like JSON, and a
+    // string that is not JSON gets the schema's own explanation.
+    const text = parse(await registered.get("manage_task")!.handler({ action: "update", project: "p", task: "t", text: '{"not":"parsed"}' }));
+    expect(text.data.args.text).toBe('{"not":"parsed"}');
+    const broken = parse(await admin({ action: "set_config", domain: "proactivity", settings: "{level: medium" }));
+    expect(broken.ok).toBe(false);
+    expect(broken.issues[0].path).toBe("settings");
   });
 });

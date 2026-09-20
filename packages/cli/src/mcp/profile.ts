@@ -229,13 +229,33 @@ function errorResponse(error: string, extra: Record<string, unknown> = {}) {
   return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error, ...extra }, null, 2) }] };
 }
 
+/**
+ * A composite's schema is `passthrough`, so the host serializes whatever it
+ * does not recognize; Claude Code hands nested objects (`updates`, `settings`,
+ * `citation`) over as JSON strings. When the target wants an object and the
+ * string reads as one, use what it reads as.
+ */
+function decodeJsonArguments(schema: z.ZodObject<z.ZodRawShape>, args: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...args };
+  for (const [key, value] of Object.entries(args)) {
+    if (typeof value !== "string" || !/^\s*[[{]/.test(value)) continue;
+    const field = schema.shape[key] as z.ZodTypeAny | undefined;
+    if (!field || field.safeParse(value).success) continue;
+    try {
+      const decoded: unknown = JSON.parse(value);
+      if (decoded !== null && typeof decoded === "object" && field.safeParse(decoded).success) out[key] = decoded;
+    } catch { /* Not JSON: the schema's own error explains the miss. */ }
+  }
+  return out;
+}
+
 /** Run a catalog tool by name after validating the arguments against its own schema. */
 export async function dispatch(catalog: Catalog, target: string, args: Record<string, unknown>): Promise<unknown> {
   const entry = catalog.get(target);
   if (!entry) return errorResponse(`Unknown tool "${target}"`);
   const schema = schemaOf(entry);
   if (schema) {
-    const parsed = schema.safeParse(args);
+    const parsed = schema.safeParse(decodeJsonArguments(schema, args));
     if (!parsed.success) {
       return errorResponse(`Invalid arguments for ${target}`, {
         issues: parsed.error.issues.map((i) => ({ path: i.path.join("."), message: i.message })),
