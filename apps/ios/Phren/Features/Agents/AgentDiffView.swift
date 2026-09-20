@@ -13,6 +13,7 @@ struct AgentDiffView: View {
     let session: LiveAgentSession
     let target: AgentChatTarget
     var paths: [String] = []
+    var child: String? = nil
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("sessions.live.preferences.v1") private var hostData = Data()
     @State private var diff: AgentRepositoryDiff?
@@ -88,9 +89,11 @@ struct AgentDiffView: View {
                 Section { ProgressView("Loading repository changes…") }
             }
             if let error { Section { Text(error).font(.footnote).foregroundStyle(PhrenTheme.warning) } }
-            Section { NavigationLink { HerdrTerminalView(host: session.host, session: session, target: target) } label: { Label("Open Herdr terminal", systemImage: "terminal") } }
+            if child == nil {
+                Section { NavigationLink { HerdrTerminalView(host: session.host, session: session, target: target) } label: { Label("Open Herdr terminal", systemImage: "terminal") } }
+            }
         }
-        .navigationTitle("Repository changes").navigationBarTitleDisplayMode(.inline)
+        .navigationTitle(child == nil ? "Repository changes" : "Agent changes").navigationBarTitleDisplayMode(.inline)
         .navigationDestination(item: $opened) { FileDiffView(file: $0.file, section: $0.section) }
         .toolbar { Button("Refresh diff", systemImage: "arrow.clockwise") { refresh = UUID() } }
         .onAppear { visible = true }.onDisappear { visible = false }
@@ -102,11 +105,11 @@ struct AgentDiffView: View {
                 #if DEBUG && targetEnvironment(simulator)
                 if AgentChatFixture.enabled {
                     // Opened from the heredoc card, the store it wrote to comes back as a related repository.
-                    let related = paths.isEmpty ? "" : #","related":[{"root":"/Users/fixture/.phren","branch":"main","files":[{"path":"phone/FINDINGS.md","status":"  ","sections":[{"id":"committed:phone/FINDINGS.md","kind":"committed","binary":false,"loadState":"loaded","note":"a1b2c3d · phren: capture finding · 1 minute ago","patch":"diff --git a/phone/FINDINGS.md b/phone/FINDINGS.md\n--- a/phone/FINDINGS.md\n+++ b/phone/FINDINGS.md\n@@ -2,2 +2,3 @@\n - Tiles are one sprite\n+- Accent is purple now\n - Offline first\n"}]}]}]"#
+                    let related = child == nil && !paths.isEmpty ? #","related":[{"root":"/Users/fixture/.phren","branch":"main","files":[{"path":"phone/FINDINGS.md","status":"  ","sections":[{"id":"committed:phone/FINDINGS.md","kind":"committed","binary":false,"loadState":"loaded","note":"a1b2c3d · phren: capture finding · 1 minute ago","patch":"diff --git a/phone/FINDINGS.md b/phone/FINDINGS.md\n--- a/phone/FINDINGS.md\n+++ b/phone/FINDINGS.md\n@@ -2,2 +2,3 @@\n - Tiles are one sprite\n+- Accent is purple now\n - Offline first\n"}]}]}]"# : ""
                     result = try AgentRepositoryDiff.read(Data((#"{"root":"/work/phone","launchPath":"/work/phone","branch":"main","files":[{"path":"Theme.swift","status":" M","sections":[{"id":"unstaged:Theme.swift","kind":"unstaged","binary":false,"patch":"@@ -1,3 +1,3 @@\n import SwiftUI\n-let accent = green\n+let accent = purple\n let radius = 12"}]},{"path":"Sources/App/Settings.swift","status":"M ","sections":[{"id":"staged:Sources/App/Settings.swift","kind":"staged","binary":false,"patch":"@@ -10,4 +10,5 @@ struct Settings {\n     var theme = \"dark\"\n+    var compact = true\n     var sound = false\n"}]},{"path":"Notes.md","status":"??","sections":[]}]"# + related + "}").utf8))
-                } else { result = try await PhrenConnection.repositoryDiff(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, paths: paths) }
+                } else { result = try await PhrenConnection.repositoryDiff(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, paths: paths, child: child) }
                 #else
-                result = try await PhrenConnection.repositoryDiff(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, paths: paths)
+                result = try await PhrenConnection.repositoryDiff(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, paths: paths, child: child)
                 #endif
                 try Task.checkCancellation()
                 // Counted once here rather than per row: the bridge can hand

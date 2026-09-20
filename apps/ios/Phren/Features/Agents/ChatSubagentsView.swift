@@ -7,6 +7,7 @@ struct ChatSubagentsView: View {
     let target: AgentChatTarget
     let agents: [AgentChild]
     @Environment(\.dismiss) private var dismiss
+    @State private var diffChild: String?
 
     private var rows: [AgentTreeRow] { AgentTreeRow.flatten(agents) }
     private var total: Int { agents.reduce(0) { $0 + $1.agentCount } }
@@ -26,6 +27,9 @@ struct ChatSubagentsView: View {
                         }
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("child-agent:\(row.agent.id)")
+                        .contextMenu {
+                            Button("Changes", systemImage: "plus.forwardslash.minus") { diffChild = row.agent.id }
+                        }
                     }
                 }
                 .padding(.horizontal, 16).padding(.vertical, 12)
@@ -33,6 +37,9 @@ struct ChatSubagentsView: View {
             .background(PhrenTheme.chatCanvas)
             .navigationTitle("Agent work")
             .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(item: $diffChild) { child in
+                AgentDiffView(session: session, target: target, paths: [], child: child)
+            }
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         }
     }
@@ -276,6 +283,14 @@ struct ChildAgentTranscriptView: View {
         .environment(textSelection)
         .navigationDestination(item: $fullToolOutput) { FullToolOutputView(output: $0) }
         .navigationTitle(agent.name).navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            NavigationLink {
+                AgentDiffView(session: session, target: target, paths: [], child: agent.id)
+            } label: {
+                Label("Changes", systemImage: "plus.forwardslash.minus")
+            }
+            .accessibilityIdentifier("chat-subagent-diff")
+        }
         .task(id: agent.id) { await follow() }
     }
 

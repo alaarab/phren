@@ -222,6 +222,11 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Child audit marker")).firstMatch.waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["This agent recorded no conversation."].exists)
         XCTAssertEqual(rawJSONTexts(app).count, 0, "No raw JSON in a child transcript")
+        app.buttons["chat-subagent-diff"].tap()
+        XCTAssertTrue(app.navigationBars["Agent changes"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Theme.swift"].waitForExistence(timeout: 5))
+        capture(app, "Subagent changes")
+        app.navigationBars["Agent changes"].buttons.element(boundBy: 0).tap()
     }
 
     @MainActor
