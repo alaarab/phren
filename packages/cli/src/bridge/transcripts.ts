@@ -7,6 +7,7 @@ import path from "node:path";
 import { glob } from "glob";
 import { withTranscriptIndex } from "./transcript-index.js";
 import { BridgeError, object, objects, sessionId, type Json, type Provider } from "./protocol.js";
+import { materializeCodexThread, materializedRoot } from "./codex-threads.js";
 import { namedPaths, SHELL_TOOLS, outputCallIds, type ChangeLookup } from "./changes.js";
 import { fanoutChildren, visibleCodexExecEvent, visibleOpenCodeRunEvent } from "./fanouts.js";
 
@@ -339,14 +340,26 @@ export async function transcriptPath(source: Provider, session: string): Promise
     : source === "claude" ? path.join(process.env.CLAUDE_CONFIG_DIR || path.join(homedir(), ".claude"), "projects")
     : source === "phren" || source === "opencode" ? path.join(phrenStoreRoot(), ".runtime", "sessions")
     : path.join(process.env.COPILOT_HOME || path.join(homedir(), ".copilot"), "session-state");
-  const root = await realpath(base);
+  const root = await realpath(base).catch(() => base);
   const pattern = source === "codex" ? `*/*/*/rollout-*-${session}.jsonl` : source === "claude" ? `*/${session}.jsonl`
     : source === "phren" ? `session-${session}.events.jsonl` : source === "opencode" ? `opencode-${session}.events.jsonl` : `${session}/events.jsonl`;
-  const matches = await glob(pattern, { cwd: root, absolute: true, follow: false });
-  if (matches.length !== 1) throw new BridgeError(404, "The transcript is not available for this conversation.");
+  const matches = await glob(pattern, { cwd: root, absolute: true, follow: false }).catch(() => [] as string[]);
+  if (matches.length !== 1) {
+    // Codex 0.155 keeps new threads only in its sqlite store; the Hook
+    // materializes those into a rollout-shaped file of its own.
+    const materialized = source === "codex" ? await materializeCodexThread(session) : undefined;
+    if (materialized) return materialized;
+    throw new BridgeError(404, "The transcript is not available for this conversation.");
+  }
   const file = await realpath(matches[0]);
   if (!file.startsWith(root + path.sep)) throw new BridgeError(403, "The transcript points outside its agent folder.");
   return file;
+}
+
+/** Keeps a materialized Codex thread current before a read; a no-op for
+ * transcripts the agent writes itself. */
+export async function refreshTranscript(file: string, source: Provider, session: string): Promise<void> {
+  if (source === "codex" && file.startsWith(materializedRoot() + path.sep)) await materializeCodexThread(session);
 }
 
 /** Claude Code files bracketed-paste input — which is how Herdr's
