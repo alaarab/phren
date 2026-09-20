@@ -388,6 +388,7 @@ struct HerdrTerminalView: View {
         let session: LiveAgentSession
         var pane: AgentChatPanes.Pane? = nil
         var attachments: [AgentAttachment] = []
+        var child: AgentChildRequest? = nil
         static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
         func hash(into hasher: inout Hasher) { hasher.combine(id) }
     }
@@ -422,7 +423,10 @@ struct HerdrTerminalView: View {
             if showingAgents {
                 ZStack(alignment: .leading) {
                     Color.black.opacity(0.34).ignoresSafeArea().onTapGesture { closeAgents() }
-                    AgentDrawer(current: session, chooseSession: { selected in
+                    AgentDrawer(current: session, openSessionChild: { selected, target, child in
+                        chatOpen = .init(session: selected, child: AgentChildRequest(session: selected, target: target, agent: child))
+                        closeAgents()
+                    }, chooseSession: { selected in
                         chatOpen = .init(session: selected); closeAgents()
                     }, close: closeAgents)
                 }.zIndex(20)
@@ -439,7 +443,7 @@ struct HerdrTerminalView: View {
             }
         }
         .navigationDestination(item: $chatOpen) {
-            AgentChatSheet(session: $0.session, initialPane: $0.pane, attachments: $0.attachments)
+            AgentChatSheet(session: $0.session, initialPane: $0.pane, attachments: $0.attachments, initialChild: $0.child)
         }
         .sheet(isPresented: $showingDictation) { ChatDictationView { text in model.input(text) } }
         .onReceive(NotificationCenter.default.publisher(for: .GCKeyboardDidConnect)) { _ in hardwareKeyboard = true }

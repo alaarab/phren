@@ -33,18 +33,27 @@ struct AgentSessionDestination: View {
     }
 }
 
+struct AgentChildRequest: Equatable {
+    let session: LiveAgentSession
+    let target: AgentChatTarget
+    let agent: AgentChild
+}
+
 struct AgentChatSheet: View {
     @State private var session: LiveAgentSession
     @State private var incomingAttachments: [AgentAttachment]
     @State private var incomingDraft: String
+    @State private var requestedChild: AgentChildRequest?
     private let initialSessionID: LiveAgentSession.ID
     private let initialPane: AgentChatPanes.Pane?
     private let startsDictation: Bool
     init(session: LiveAgentSession, initialPane: AgentChatPanes.Pane? = nil,
-         attachments: [AgentAttachment] = [], draft: String = "", startsDictation: Bool = false) {
+         attachments: [AgentAttachment] = [], draft: String = "", startsDictation: Bool = false,
+         initialChild: AgentChildRequest? = nil) {
         _session = State(initialValue: session)
         _incomingAttachments = State(initialValue: attachments)
         _incomingDraft = State(initialValue: draft)
+        _requestedChild = State(initialValue: initialChild)
         initialSessionID = session.id
         self.initialPane = initialPane
         self.startsDictation = startsDictation
@@ -53,6 +62,7 @@ struct AgentChatSheet: View {
         AgentChatView(session: session, switchSession: { session = $0 },
                       initialPane: session.id == initialSessionID ? initialPane : nil,
                       incomingAttachments: $incomingAttachments, incomingDraft: $incomingDraft,
+                      requestedChild: $requestedChild,
                       startsDictation: startsDictation && session.id == initialSessionID).id(session.id)
     }
 }
@@ -65,6 +75,9 @@ struct AgentChatView: View {
     let initialPane: AgentChatPanes.Pane?
     @Binding var incomingAttachments: [AgentAttachment]
     @Binding var incomingDraft: String
+    /// Kept by the sheet so selecting a child under another tab survives the
+    /// parent chat being replaced with that tab's conversation.
+    @Binding fileprivate var requestedChild: AgentChildRequest?
     /// Opened by the Action button: start listening as soon as the chat is up.
     var startsDictation = false
     @State private var initialized = false
@@ -103,6 +116,15 @@ struct AgentChatView: View {
     @State private var showingOptions = false
     @State private var showingChildAgents = false
     @State private var childAgents: [AgentChild] = []
+    private struct OpenedChild: Identifiable, Hashable {
+        let session: LiveAgentSession
+        let target: AgentChatTarget
+        let agent: AgentChild
+        var id: String { target.id + "/" + agent.id }
+        static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
+        func hash(into hasher: inout Hasher) { hasher.combine(id) }
+    }
+    @State private var openedChild: OpenedChild?
     @State private var previewImage: ChatAttachmentDraft?
     @State private var assigningProject = false
     @State private var fullDiff: ChatFullDiff?
@@ -494,6 +516,8 @@ struct AgentChatView: View {
                         .onTapGesture { closeAgentDrawer() }
                     AgentDrawer(current: session, panes: model.panes, selectedPaneID: model.target?.paneID,
                                 choosePane: { pane in model.choose(pane, session: session); refresh = UUID() },
+                                children: childAgents, openChild: openChildFromDrawer,
+                                openSessionChild: openSessionChildFromDrawer,
                                 chooseSession: switchSession, close: closeAgentDrawer)
                         .transition(.move(edge: .leading))
                 }
@@ -506,6 +530,9 @@ struct AgentChatView: View {
         // would otherwise sit under the composer.
         .toolbar(.hidden, for: .tabBar)
         .keepsInteractivePop(hidesNavigationBar: true, screenTag: Self.screenTag)
+        .navigationDestination(item: $openedChild) { destination in
+            ChildAgentTranscriptView(session: destination.session, target: destination.target, agent: destination.agent)
+        }
         .navigationDestination(item: $fullDiff) { FileDiffView(file: $0.file, section: $0.section) }
         .navigationDestination(item: $fullToolOutput) { FullToolOutputView(output: $0) }
         .onAppear {
@@ -523,6 +550,7 @@ struct AgentChatView: View {
         .onChange(of: model.restoringDraft) { _, _ in acceptIncomingAttachments() }
         .onChange(of: model.approval?.id) { _, id in if id != nil { composing = false } }
         .onChange(of: model.attachments.count) { _, _ in acceptIncomingAttachments() }
+        .onChange(of: requestedChild, initial: true) { _, _ in openRequestedChildIfReady() }
         .onChange(of: workingActivityObservation, initial: true) { _, value in
             Task {
                 await SessionWorkingActivityController.shared.observe(
@@ -636,6 +664,23 @@ struct AgentChatView: View {
             let tree = try await PhrenConnection.childAgents(host: session.host, privateKey: key, target: target)
             childAgents = tree.agents
         } catch {}
+    }
+
+    private func openChildFromDrawer(_ child: AgentChild) {
+        closeAgentDrawer()
+        guard let target = model.target else { return }
+        openedChild = OpenedChild(session: session, target: target, agent: child)
+    }
+
+    private func openSessionChildFromDrawer(_ childSession: LiveAgentSession, target: AgentChatTarget, child: AgentChild) {
+        closeAgentDrawer()
+        requestedChild = AgentChildRequest(session: childSession, target: target, agent: child)
+    }
+
+    private func openRequestedChildIfReady() {
+        guard let request = requestedChild, request.session.id == session.id else { return }
+        requestedChild = nil
+        openedChild = OpenedChild(session: request.session, target: request.target, agent: request.agent)
     }
 
     /// The tab's panes when no conversation is open yet: agents to chat with,
@@ -823,22 +868,6 @@ struct AgentChatView: View {
                     .font(.system(.caption2, design: .monospaced)).foregroundStyle(PhrenTheme.chatNeutral)
                     .accessibilityLabel(chatLocationSpoken).accessibilityIdentifier("chat-location")
             }.frame(maxWidth: .infinity, alignment: .leading)
-            if !childAgents.isEmpty {
-                Button { showingChildAgents = true } label: {
-                    Image(systemName: "point.3.filled.connected.trianglepath.dotted")
-                        .font(.system(size: 17)).frame(width: 40, height: 44).contentShape(Rectangle())
-                        .foregroundStyle(PhrenTheme.chatText)
-                        .overlay(alignment: .topTrailing) {
-                            Text("\(runningChildAgentCount > 0 ? runningChildAgentCount : childAgentCount)")
-                                .font(.system(.caption2, design: .monospaced).weight(.bold)).monospacedDigit()
-                                .foregroundStyle(runningChildAgentCount > 0 ? PhrenTheme.phrenCardAccent : PhrenTheme.textMuted)
-                                .padding(.horizontal, 4).padding(.vertical, 1)
-                                .background(PhrenTheme.chatPanel, in: Capsule())
-                        }
-                }
-                .accessibilityLabel("\(childAgentCount) spawned agents, \(runningChildAgentCount) running")
-                .accessibilityIdentifier("chat-agent-tree")
-            }
             if let target = model.target {
                 NavigationLink {
                     // Besides the pane's tree: whatever the session's commands
@@ -857,7 +886,11 @@ struct AgentChatView: View {
         .phrenPanel(radius: PhrenTheme.Radius.large)
         .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 4)
         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
-        .accessibilityElement(children: .contain).accessibilityIdentifier("chat-header")
+        .accessibilityElement(children: .contain)
+        .overlay(alignment: .topLeading) {
+            Color.clear.frame(width: 1, height: 1).accessibilityElement()
+                .accessibilityIdentifier("chat-header")
+        }
     }
 
     private var chatOptions: some View {
@@ -1005,6 +1038,22 @@ struct AgentChatView: View {
                             .font(.system(size: 18)).frame(width: 40, height: 44).contentShape(Rectangle())
                     }.accessibilityLabel("Switch agent").accessibilityIdentifier("chat-switch-agent")
                         .disabled(model.sending || model.answering || model.stopping)
+                    if !childAgents.isEmpty {
+                        Button { showingChildAgents = true } label: {
+                            Image(systemName: "point.3.filled.connected.trianglepath.dotted")
+                                .font(.system(size: 17)).frame(width: 40, height: 44).contentShape(Rectangle())
+                                .foregroundStyle(PhrenTheme.chatText)
+                                .overlay(alignment: .topTrailing) {
+                                    Text("\(runningChildAgentCount > 0 ? runningChildAgentCount : childAgentCount)")
+                                        .font(.system(.caption2, design: .monospaced).weight(.bold)).monospacedDigit()
+                                        .foregroundStyle(runningChildAgentCount > 0 ? PhrenTheme.phrenCardAccent : PhrenTheme.textMuted)
+                                        .padding(.horizontal, 4).padding(.vertical, 1)
+                                        .background(PhrenTheme.chatPanel, in: Capsule())
+                                }
+                        }
+                        .accessibilityLabel("\(childAgentCount) spawned agents, \(runningChildAgentCount) running")
+                        .accessibilityIdentifier("chat-agent-tree")
+                    }
                     Spacer(minLength: 4)
                     Button {
                         if dictating { stopDictation() } else { startDictation() }

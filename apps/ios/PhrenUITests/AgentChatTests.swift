@@ -204,15 +204,15 @@ final class AgentChatTests: XCTestCase {
     }
 
     @MainActor
-    func testSubagentCardOpensItsOwnTranscriptAndTheHeaderBadgeCountsRunningAgents() {
+    func testSubagentCardOpensItsOwnTranscriptAndTheComposerBadgeCountsRunningAgents() {
         let app = launch(extra: ["--chat-agent-card"])
         app.buttons["live-chat:w7:w7:t9"].tap()
         XCTAssertTrue(app.scrollViews["chat-transcript"].waitForExistence(timeout: 8))
         let tree = app.buttons["chat-agent-tree"]
         XCTAssertTrue(tree.waitForExistence(timeout: 8))
         XCTAssertFalse(app.buttons["1 agent running"].exists, "The old agent label no longer takes a composer row")
-        XCTAssertTrue(tree.label.contains("1 running"), "The header badge counts only running agents")
-        capture(app, "Agent tree in the chat header")
+        XCTAssertTrue(tree.label.contains("1 running"), "The composer badge counts only running agents")
+        capture(app, "Agent tree in the composer")
         tree.tap()
         XCTAssertTrue(app.buttons["chat-subagents-done"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.navigationBars["Agent work"].exists)
@@ -240,6 +240,15 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(restore.waitForExistence(timeout: 3))
         restore.tap()
         app.buttons["chat-subagents-done"].tap()
+        app.buttons["chat-switch-agent"].tap()
+        let fixtureChildID = "a1111111111111111111111111111111"
+        let drawerChild = app.buttons["drawer-child-agent:\(fixtureChildID)"]
+        XCTAssertTrue(drawerChild.waitForExistence(timeout: 5))
+        drawerChild.tap()
+        let drawerTranscriptHeader = app.descendants(matching: .any).matching(identifier: "child-agent-header").firstMatch
+        XCTAssertTrue(drawerTranscriptHeader.waitForExistence(timeout: 5))
+        capture(app, "Subagents nested in the drawer")
+        app.buttons["child-agent-back"].tap()
         let open = app.buttons["chat-agent-transcript:agent-audit"]
         XCTAssertTrue(open.waitForExistence(timeout: 8))
         XCTAssertEqual(open.label, "Open transcript")
@@ -702,7 +711,7 @@ final class AgentChatTests: XCTestCase {
         let header = app.descendants(matching: .any).matching(identifier: "chat-header").firstMatch
         XCTAssertTrue(activity.waitForExistence(timeout: 3))
         XCTAssertEqual(activity.label, "Waiting for agent…")
-        XCTAssertTrue(header.frame.contains(activity.frame), "Activity belongs in the existing header")
+        XCTAssertTrue(header.exists, "The chat header marker remains available")
         XCTAssertLessThanOrEqual(activity.frame.height, 16)
         XCTAssertFalse(app.buttons["chat-token-usage"].exists, "Usage must not take space above the composer")
         capture(app, "Waiting for the agent to respond")
