@@ -11,12 +11,14 @@ const MAX_JOBS = 128;
 const jobID = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/);
 const timestamp = z.string().datetime({ offset: true });
 
+const opencodeSession = z.string().regex(/^ses_[0-9A-Za-z]{1,64}$/);
+
 const manifestSchema = z.object({
   schemaVersion: z.literal(1),
   id: jobID,
   parent: z.object({ provider: z.enum(["codex", "claude", "copilot", "phren", "opencode"]), session: sessionId }).optional(),
-  provider: z.literal("opencode"),
-  session: z.string().regex(/^ses_[0-9A-Za-z]{1,64}$/).optional(),
+  provider: z.enum(["opencode", "codex"]),
+  session: sessionId.optional(),
   taskLabel: z.string().min(1).max(200),
   cwd: z.string().min(1).max(4096).refine(path.isAbsolute),
   worktree: z.string().min(1).max(4096).refine(path.isAbsolute),
@@ -28,13 +30,21 @@ const manifestSchema = z.object({
   finishedAt: timestamp.optional(),
   status: z.enum(["queued", "running", "completed", "failed", "cancelled"]),
   exitCode: z.number().int().min(0).max(255).optional(),
-}).strict();
+}).strict().superRefine((manifest, ctx) => {
+  // OpenCode sessions are `ses_…`, Codex sessions are thread UUIDs. Neither
+  // provider may claim the other's identity.
+  if (manifest.session === undefined) return;
+  const valid = manifest.provider === "codex" ? z.string().uuid().safeParse(manifest.session).success
+    : opencodeSession.safeParse(manifest.session).success;
+  if (!valid) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["session"],
+    message: `A ${manifest.provider} manifest needs a matching session identity.` });
+});
 
 export type FanoutManifest = z.infer<typeof manifestSchema>;
 export interface FanoutChild {
   /** Parent-scoped opaque ID. Filesystem paths never cross the bridge. */
   id: string;
-  provider: "opencode";
+  provider: "opencode" | "codex";
   session?: string;
   path: string;
   callId: string;
@@ -81,7 +91,7 @@ export async function fanoutChildren(parentProvider: Provider, parentSession: st
       const transcript = await regularContainedFile(jobRoot, path.join(jobRoot, manifest.eventLog), MAX_EVENT_LOG_BYTES);
       if (!transcript) continue;
       const id = createHash("sha256").update(`${parentProvider}\0${parentSession}\0${manifest.id}`).digest("hex").slice(0, 32);
-      children.push({ id, provider: "opencode", session: manifest.session, path: manifest.taskLabel,
+      children.push({ id, provider: manifest.provider, session: manifest.session, path: manifest.taskLabel,
         callId: `fanout:${id}`, state: ["queued", "running"].includes(manifest.status) ? "running" : "completed",
         transcript, children: [] });
     } catch { /* Torn, old, or untrusted manifests do not become child agents. */ }
@@ -113,4 +123,39 @@ export function visibleOpenCodeRunEvent(raw: Json): Json | undefined {
       role: "assistant", content: [{ type: "text", text: `Step finished${typeof part.reason === "string" ? `: ${part.reason.slice(0, 200)}` : "."}` }],
     } } };
   }
+}
+
+/** Project raw `codex exec --json` rows into the shape Codex's own rollout
+ * files use, so the existing Codex transcript reader renders them unchanged.
+ * Command text, output, file paths, diffs, usage, and costs are intentionally
+ * omitted; only the exit code and change count of a tool call cross the wire. */
+export function visibleCodexExecEvent(raw: Json): Json | undefined {
+  const item = object(raw.item), callId = () => String(item.id ?? "").slice(0, 200);
+  if (raw.type === "item.completed" && item.type === "agent_message") {
+    if (typeof item.text !== "string") return undefined;
+    return { type: "response_item", payload: { type: "message", role: "assistant",
+      content: [{ type: "output_text", text: item.text.slice(0, 262_144) }] } };
+  }
+  if (raw.type === "item.started" && item.type === "command_execution") {
+    return { type: "response_item", payload: { type: "function_call", name: "shell",
+      call_id: callId(), arguments: "{}" } };
+  }
+  if (raw.type === "item.completed" && item.type === "command_execution") {
+    return { type: "response_item", payload: { type: "function_call_output", call_id: callId(),
+      output: typeof item.exit_code === "number" ? `exit ${item.exit_code}` : "finished" } };
+  }
+  if (raw.type === "item.started" && item.type === "file_change") {
+    return { type: "response_item", payload: { type: "function_call", name: "apply_patch",
+      call_id: callId(), arguments: "{}" } };
+  }
+  if (raw.type === "item.completed" && item.type === "file_change") {
+    const changes = Array.isArray(item.changes) ? item.changes : [];
+    return { type: "response_item", payload: { type: "function_call_output", call_id: callId(),
+      output: `${changes.length} file(s) changed` } };
+  }
+  if (raw.type === "turn.completed") return { type: "event_msg", payload: { type: "task_complete" } };
+  if (raw.type === "error" && typeof raw.message === "string") {
+    return { type: "event_msg", payload: { type: "error", message: raw.message.slice(0, 2000) } };
+  }
+  return undefined;
 }

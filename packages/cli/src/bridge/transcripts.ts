@@ -8,7 +8,7 @@ import { glob } from "glob";
 import { withTranscriptIndex } from "./transcript-index.js";
 import { BridgeError, object, objects, sessionId, type Json, type Provider } from "./protocol.js";
 import { namedPaths, SHELL_TOOLS, outputCallIds, type ChangeLookup } from "./changes.js";
-import { fanoutChildren, visibleOpenCodeRunEvent } from "./fanouts.js";
+import { fanoutChildren, visibleCodexExecEvent, visibleOpenCodeRunEvent } from "./fanouts.js";
 
 export interface Entry { line: number; raw: Json }
 export interface ChildAgentRelation {
@@ -291,6 +291,7 @@ export function visibleEvent(raw: Json, source: Provider, includeSidechain = fal
     return { seq: raw.seq, time: raw.time, type: raw.type, data: exported };
   }
   if (source === "codex") {
+    const execEvent = visibleCodexExecEvent(raw); if (execEvent) return execEvent;
     const p = object(raw.payload);
     // The model answering this turn is the only field of turn_context the
     // phone shows; its policies and instructions stay on the computer.
