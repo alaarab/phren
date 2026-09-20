@@ -1048,70 +1048,49 @@ struct AgentChatView: View {
                                  choose: { model.draft = $0 + " " }, openAll: openCommandMenu)
             }
             if model.needsAnswer && model.approval == nil && model.question == nil {
-                // A prompt only the terminal shows: answer it with the keys
-                // such prompts take, without leaving the chat.
-                VStack(alignment: .leading, spacing: 6) {
-                    if let prompt = model.terminalPrompt {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Label("\(model.target?.providerName ?? "Agent") asks: \(prompt.toolName ?? "permission")", systemImage: "hand.raised")
-                                .font(.caption.weight(.semibold)).foregroundStyle(PhrenTheme.warning)
-                            if let explanation = prompt.explanation {
-                                Text(explanation).font(.subheadline).lineLimit(5).textSelection(.enabled)
-                            }
-                            if let command = prompt.command, command != prompt.explanation {
-                                Text(command).font(.system(.caption, design: .monospaced)).lineLimit(3).textSelection(.enabled)
-                                    .foregroundStyle(PhrenTheme.textMuted)
-                            }
-                            Text("Y is yes, Esc is no; arrows and Enter walk the menu.")
-                                .font(.caption2).foregroundStyle(PhrenTheme.textMuted)
-                        }
-                        .padding(10)
-                        .background(PhrenTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
-                        .accessibilityElement(children: .combine)
-                        .accessibilityIdentifier("chat-terminal-prompt")
+                if let prompt = model.terminalPrompt {
+                    ChatTerminalQuestionCard(providerName: model.target?.providerName ?? "Agent", prompt: prompt,
+                                             answering: model.answering,
+                                             disabled: model.answering || !active || !model.connected,
+                                             terminal: { answerTerminalLink }, secret: { answerSecretButton }) { key in
+                        sendTask = Task { await model.answer(session, key: key) }
                     }
-                    HStack(spacing: 8) {
-                        Text(model.terminalPrompt == nil ? "Agent is waiting; reply here, press a key, or use the terminal" : "Answer here or in the terminal")
-                            .font(.caption).foregroundStyle(PhrenTheme.warning)
-                        Spacer(minLength: 4)
-                        NavigationLink { HerdrTerminalView(host: session.host, session: session, target: model.target) } label: {
-                            Label("Terminal", systemImage: "terminal")
-                                .font(.caption).foregroundStyle(PhrenTheme.warning)
-                        }.accessibilityIdentifier("chat-answer-terminal")
-                    }
-                    HStack(spacing: 6) {
-                        // Y and N are letters: without a known prompt they would
-                        // only land in a Codex composer. Claude's own dialogs take them.
-                        ForEach(AgentAnswerKey.row.filter { key in
-                            ![.yes, .no].contains(key) || model.terminalPrompt != nil || model.target?.source == "claude"
-                        }) { key in
-                            Button { sendTask = Task { await model.answer(session, key: key) } } label: {
-                                Text(key.label)
-                                    .font(.system(.footnote, design: .monospaced).weight(.semibold))
-                                    .frame(minWidth: 40, minHeight: 36)
-                                    .padding(.horizontal, 6)
-                                    .background(PhrenTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 9))
+                } else {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 8) {
+                            Text("Waiting for your answer")
+                                .font(PhrenTheme.Font.caption)
+                                .foregroundStyle(PhrenTheme.textMuted)
+                                .lineLimit(1)
+                            Spacer(minLength: 4)
+                            answerTerminalLink
+                        }
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                // Letters answer Claude's own dialogs; in a
+                                // Codex composer they would only type text.
+                                ForEach(quietAnswerKeys) { key in
+                                    Button { sendTask = Task { await model.answer(session, key: key) } } label: {
+                                        Text(key.label)
+                                            .font(PhrenTheme.Font.monoFootnote.weight(.semibold))
+                                            .foregroundStyle(PhrenTheme.textMuted)
+                                            .frame(minWidth: 48, minHeight: 36)
+                                            .contentShape(RoundedRectangle(cornerRadius: PhrenTheme.Radius.small, style: .continuous))
+                                            .overlay(RoundedRectangle(cornerRadius: PhrenTheme.Radius.small, style: .continuous)
+                                                .strokeBorder(PhrenTheme.border, lineWidth: 1))
+                                    }
+                                    .buttonStyle(.plain)
+                                    .disabled(model.answering || !active || !model.connected)
+                                    .accessibilityLabel(key.spoken)
+                                    .accessibilityIdentifier("chat-answer-key:\(key.rawValue)")
+                                }
+                                answerSecretButton
                             }
-                            .buttonStyle(.plain)
-                            .disabled(model.answering || !active || !model.connected)
-                            .accessibilityLabel(key.spoken)
-                            .accessibilityIdentifier("chat-answer-key:\(key.rawValue)")
                         }
-                        Button { showingSecret = true } label: {
-                            Image(systemName: "key.fill")
-                                .font(.system(size: 15, weight: .semibold))
-                                .frame(minWidth: 40, minHeight: 36)
-                                .padding(.horizontal, 6)
-                                .background(PhrenTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 9))
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(model.answering || !active || !model.connected)
-                        .accessibilityLabel("Type a password")
-                        .accessibilityIdentifier("chat-answer-secret")
                     }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("chat-answer-keys")
                 }
-                .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("chat-answer-keys")
             }
             if let error = model.deliveryError { Text(error).font(.caption).foregroundStyle(PhrenTheme.warning).accessibilityIdentifier("chat-delivery-error") }
             if let error = model.draftStorageError { Text(error).font(.caption).foregroundStyle(PhrenTheme.warning).accessibilityIdentifier("chat-draft-storage-error") }
@@ -1223,6 +1202,38 @@ struct AgentChatView: View {
         .padding(.horizontal, 10).padding(.top, 6).padding(.bottom, 8)
         .background(PhrenTheme.chatCanvas.ignoresSafeArea(.container, edges: .bottom))
     }
+
+    private var answerTerminalLink: some View {
+        NavigationLink { HerdrTerminalView(host: session.host, session: session, target: model.target) } label: {
+            Label("Terminal", systemImage: "terminal")
+                .font(PhrenTheme.Font.caption)
+                .foregroundStyle(PhrenTheme.textMuted)
+        }
+        .accessibilityIdentifier("chat-answer-terminal")
+    }
+
+    private var answerSecretButton: some View {
+        Button { showingSecret = true } label: {
+            Image(systemName: "key.fill")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(PhrenTheme.textMuted)
+                .frame(minWidth: 48, minHeight: 36)
+                .contentShape(RoundedRectangle(cornerRadius: PhrenTheme.Radius.small, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: PhrenTheme.Radius.small, style: .continuous)
+                    .strokeBorder(PhrenTheme.border, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .disabled(model.answering || !active || !model.connected)
+        .accessibilityLabel("Type a password")
+        .accessibilityIdentifier("chat-answer-secret")
+    }
+
+    private var quietAnswerKeys: [AgentAnswerKey] {
+        [.enter, .up, .down, .tab, .escape, .yes, .no].filter { key in
+            ![.yes, .no].contains(key) || model.terminalPrompt != nil || model.target?.source == "claude"
+        }
+    }
+
     /// Sends the draft. A slash command normally hands off to the terminal,
     /// where the agent draws its menu; a command with its answer already in
     /// it (`/model sonnet`) is answered in the transcript and stays here.

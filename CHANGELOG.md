@@ -7,6 +7,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- Phren Hook accepts answer keys for a prompt it remembered (a permission
+  request it could not hold) even while Herdr still reads the pane as working;
+  the phone no longer gets 'This agent is not waiting for an answer'.
 - Phren Hook serves git status, log, branches, pull requests, a working tree
   listing and stage, unstage and discard for the phone's Changes screen,
   bound to the pane's repository.

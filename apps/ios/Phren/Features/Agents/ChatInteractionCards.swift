@@ -1,3 +1,4 @@
+import Foundation
 import PhrenKit
 import SwiftUI
 
@@ -41,6 +42,89 @@ struct ChatApprovalCard<Terminal: View>: View {
     }
 }
 
+struct ChatQuestionHeaderLabel: View {
+    let title: String
+    let systemImage: String
+
+    var body: some View {
+        Label(title, systemImage: systemImage)
+            .font(PhrenTheme.Font.caption.weight(.semibold))
+            .foregroundStyle(PhrenTheme.cyan)
+            .lineLimit(1)
+    }
+}
+
+struct ChatQuestionExpandButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                .font(PhrenTheme.Font.caption.weight(.semibold))
+                .frame(width: 32, height: 32)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(PhrenTheme.textMuted)
+        .accessibilityLabel("Expand questions")
+        .accessibilityIdentifier("chat-question-expand")
+    }
+}
+
+struct ChatQuestionOptionRow: View {
+    let label: String
+    var detail: String? = nil
+    var preview: String? = nil
+    var selected = false
+    var multi = false
+    var inline = true
+    var busy = false
+    var radius = PhrenTheme.Radius.small
+    var minimumHeight: CGFloat? = nil
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: selected ? (multi ? "checkmark.square.fill" : "checkmark.circle.fill") : (multi ? "square" : "circle"))
+                    .foregroundStyle(selected ? PhrenTheme.cyan : PhrenTheme.textDim)
+                    .padding(.top, 1)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(label).foregroundStyle(PhrenTheme.text).fixedSize(horizontal: false, vertical: true)
+                    if let detail, !detail.isEmpty {
+                        Text(detail).font(PhrenTheme.Font.caption).foregroundStyle(PhrenTheme.textMuted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let preview {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            Text(preview).font(PhrenTheme.Font.monoCaption2).foregroundStyle(PhrenTheme.text)
+                                .lineLimit(inline ? 6 : nil).fixedSize(horizontal: true, vertical: true)
+                                .padding(8)
+                        }
+                        .background(PhrenTheme.bgSunken, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.small, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: PhrenTheme.Radius.small, style: .continuous)
+                            .stroke(PhrenTheme.border, lineWidth: 1))
+                        .padding(.top, 2)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, minHeight: minimumHeight, alignment: .leading)
+            .background(selected ? PhrenTheme.cyan.opacity(0.1) : PhrenTheme.surfaceRaised,
+                        in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous)
+                .stroke(selected ? PhrenTheme.cyan.opacity(0.5) : .clear, lineWidth: 1))
+            .contentShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(busy)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        // The preview sits in a scroller, which drops it from the button's label.
+        .accessibilityValue(preview ?? "")
+    }
+}
+
 /// One card for the agent's questions: Codex's `request_user_input` (options
 /// for the synchronous tool; typed answers for async prompts) and Claude Code's `AskUserQuestion` (options, a typed "Other…", or a
 /// free-text answer, sent as the approval's `updatedInput`). Each question is
@@ -73,18 +157,13 @@ struct ChatQuestionCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Label(title, systemImage: allowsTyping ? "questionmark.bubble" : "bubble.left.and.text.bubble.right")
-                    .font(.caption.weight(.semibold)).foregroundStyle(PhrenTheme.cyan).lineLimit(1)
+                ChatQuestionHeaderLabel(title: title, systemImage: allowsTyping ? "questionmark.bubble" : "bubble.left.and.text.bubble.right")
                 Spacer(minLength: 0)
                 if prompt.questions.count > 1 {
                     Text("\(answeredCount) of \(prompt.questions.count)").font(.caption2.monospacedDigit()).foregroundStyle(PhrenTheme.textMuted)
                         .accessibilityLabel("\(answeredCount) of \(prompt.questions.count) answered")
                 }
-                Button { expanded = true } label: {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right").font(.caption.weight(.semibold))
-                        .frame(width: 32, height: 32).contentShape(Rectangle())
-                }.buttonStyle(.plain).foregroundStyle(PhrenTheme.textMuted)
-                    .accessibilityLabel("Expand questions").accessibilityIdentifier("chat-question-expand")
+                ChatQuestionExpandButton { expanded = true }
             }
             let questions = questionList(inline: true).background(GeometryReader { geometry in
                 Color.clear.preference(key: ChatQuestionsHeight.self, value: geometry.size.height)
@@ -189,7 +268,8 @@ struct ChatQuestionCard: View {
         let multi = question.multiSelect == true
         let selected = answers[index, default: .init()].selections.contains(option)
         let choice = question.options[option]
-        return Button {
+        return ChatQuestionOptionRow(label: choice.label, detail: choice.description, preview: choice.preview,
+                                     selected: selected, multi: multi, inline: inline, busy: busy) {
             var answer = answers[index, default: .init()]
             if multi {
                 if selected { answer.selections.removeAll { $0 == option } } else { answer.selections.append(option) }
@@ -198,36 +278,7 @@ struct ChatQuestionCard: View {
                 answer.selections = [option]; answer.text = ""; typing = nil
             }
             answers[index] = answer
-        } label: {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: selected ? (multi ? "checkmark.square.fill" : "checkmark.circle.fill") : (multi ? "square" : "circle"))
-                    .foregroundStyle(selected ? PhrenTheme.cyan : PhrenTheme.textDim)
-                    .padding(.top, 1)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(choice.label).foregroundStyle(PhrenTheme.text).fixedSize(horizontal: false, vertical: true)
-                    if let detail = choice.description, !detail.isEmpty {
-                        Text(detail).font(.caption).foregroundStyle(PhrenTheme.textMuted).fixedSize(horizontal: false, vertical: true)
-                    }
-                    if let preview = choice.preview {
-                        // Inline: a glimpse; the sheet shows the whole preview and lets it scroll sideways.
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            Text(preview).font(.caption2.monospaced()).foregroundStyle(PhrenTheme.text)
-                                .lineLimit(inline ? 6 : nil).fixedSize(horizontal: true, vertical: true)
-                                .padding(8)
-                        }
-                        .background(PhrenTheme.bgSunken, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.small, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: PhrenTheme.Radius.small, style: .continuous).stroke(PhrenTheme.border, lineWidth: 1))
-                        .padding(.top, 2)
-                    }
-                }
-                Spacer(minLength: 0)
-            }.padding(12).background(selected ? PhrenTheme.cyan.opacity(0.1) : PhrenTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.small, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: PhrenTheme.Radius.small, style: .continuous).stroke(selected ? PhrenTheme.cyan.opacity(0.5) : .clear, lineWidth: 1))
-                .contentShape(RoundedRectangle(cornerRadius: PhrenTheme.Radius.small, style: .continuous))
-        }.buttonStyle(.plain).disabled(busy)
-            .accessibilityAddTraits(selected ? .isSelected : [])
-            // The preview sits in a scroller, which drops it from the button's label.
-            .accessibilityValue(choice.preview ?? "")
+        }
     }
     private func typedRow(_ index: Int, question: AgentQuestionPrompt.Question, placeholder: String) -> some View {
         let text = Binding<String>(
@@ -254,6 +305,108 @@ struct ChatQuestionCard: View {
 private struct ChatQuestionsHeight: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
+struct ChatTerminalQuestionCard<Terminal: View, Secret: View>: View {
+    let providerName: String
+    let prompt: AgentTerminalPrompt
+    let answering: Bool
+    let disabled: Bool
+    @ViewBuilder let terminal: () -> Terminal
+    @ViewBuilder let secret: () -> Secret
+    let answer: (AgentAnswerKey) -> Void
+    @State private var selectedKey: AgentAnswerKey?
+    @State private var expanded = false
+
+    private var title: String { "\(providerName) asks" }
+    private var yesKey: AgentAnswerKey { isMenu ? .enter : .yes }
+    private var message: String {
+        if let explanation = prompt.explanation, explanation != prompt.command { return explanation }
+        if prompt.command != nil { return "Run this command?" }
+        return prompt.toolName.map { "Allow \($0)?" } ?? "Allow this action?"
+    }
+    private var isMenu: Bool {
+        let tool = prompt.toolName?.lowercased() ?? ""
+        if tool.contains("question") || tool.contains("select") { return true }
+        guard let message = prompt.message,
+              let input = try? JSONSerialization.jsonObject(with: Data(message.utf8)) as? [String: Any] else { return false }
+        return input["questions"] != nil || input["options"] != nil || input["choices"] != nil
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                ChatQuestionHeaderLabel(title: title, systemImage: "questionmark.bubble")
+                Spacer(minLength: 0)
+                terminal()
+                secret()
+                ChatQuestionExpandButton { expanded = true }
+            }
+            promptContent(inline: true)
+            answerRow("Yes", key: yesKey)
+            answerRow("No", key: .escape)
+        }
+        .padding(16)
+        .phrenCard()
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("chat-answer-keys")
+        .sheet(isPresented: $expanded) { expandedSheet }
+        .onChange(of: answering) { _, now in if now { expanded = false } }
+    }
+
+    private func promptContent(inline: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(message)
+                .font(PhrenTheme.Font.body)
+                .foregroundStyle(PhrenTheme.text)
+                .lineLimit(inline ? 6 : nil)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+            if let command = prompt.command {
+                Text(command)
+                    .font(PhrenTheme.Font.monoFootnote)
+                    .foregroundStyle(PhrenTheme.textMuted)
+                    .lineLimit(inline ? 3 : nil)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier(inline ? "chat-terminal-prompt" : "chat-terminal-prompt-expanded")
+    }
+
+    private func answerRow(_ label: String, key: AgentAnswerKey) -> some View {
+        ChatQuestionOptionRow(label: label, selected: answering && selectedKey == key, busy: disabled,
+                              radius: PhrenTheme.Radius.questionOption, minimumHeight: 44) {
+            selectedKey = key
+            answer(key)
+        }
+        .accessibilityLabel(key.spoken)
+        .accessibilityIdentifier("chat-answer-key:\(key.rawValue)")
+    }
+
+    private var expandedSheet: some View {
+        PhrenNavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    promptContent(inline: false)
+                    answerRow("Yes", key: yesKey)
+                    answerRow("No", key: .escape)
+                }
+                .padding(16)
+            }
+            .background(PhrenTheme.bg)
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { expanded = false }.accessibilityIdentifier("chat-question-collapse")
+                }
+            }
+        }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+    }
 }
 
 /// An older Hook can identify a question without having a response channel.

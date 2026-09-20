@@ -5,6 +5,7 @@ enum PhrenTheme {
     typealias Font = PhrenTypography
     enum Radius {
         static let small: CGFloat = 10
+        static let questionOption: CGFloat = 12
         static let medium: CGFloat = 14
         static let large: CGFloat = 18
         static let pill: CGFloat = 1_000

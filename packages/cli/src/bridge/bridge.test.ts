@@ -676,6 +676,21 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     expect(await post("SessionStart")).toEqual({ status: 200 });
     expect((await status()).compacting).toBe(false);
   });
+  it("presses keys for a prompt the Hook remembered even when Herdr reads the pane as working", async () => {
+    agentStatus = "working";
+    const callback = JSON.stringify({ target, event: "PermissionRequest", tool: "Bash", input: { command: "python3 tools/fetch_sdk.py" } });
+    // Nobody holds the request, so the hook answers at once and remembers it.
+    await new Promise<void>((resolve, reject) => {
+      const req = request({ socketPath: path.join(root, "bridge/agent.sock"), path: "/hook", method: "POST",
+        headers: { "Content-Length": Buffer.byteLength(callback) } }, res => { res.resume(); res.on("end", resolve); });
+      req.on("error", reject); req.end(callback);
+    });
+    const before = commands.filter(c => c.method === "agent.send_keys").length;
+    expect((await api("/v1/keys", { target, keys: ["y"] })).status).toBe(200);
+    expect(commands.filter(c => c.method === "agent.send_keys").length).toBe(before + 1);
+    // Answered: the pane is working again and plain keys are refused as before.
+    expect((await api("/v1/keys", { target, keys: ["y"] })).status).toBe(409);
+  });
   it("remembers a permission request it could not hold and shows it while the pane waits", async () => {
     agentStatus = "blocked";
     const callback = JSON.stringify({ target, event: "PermissionRequest", tool: "Shell", input: { command: "xcrun simctl list runtimes", justification: "Inspect the runtimes" } });

@@ -25,6 +25,9 @@ lock screen and Changes screen done properly.
 
 ### Changed
 
+- A prompt from the agent's terminal is asked as a card with Yes and No rows;
+  the raw keys sit in a quiet strip beneath, and the orange waiting sentence
+  is gone.
 - Sending is faster: the phone keeps one SSH connection per computer and
   runs every request as a channel on it, and a send, a key or a password no
   longer asks the computer about the pane first (the Hook checks the

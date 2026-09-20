@@ -1429,18 +1429,19 @@ final class AgentChatTests: XCTestCase {
         app.buttons["live-chat:w7:w7:t9"].tap()
         let keys = app.otherElements["chat-answer-keys"]
         XCTAssertTrue(keys.waitForExistence(timeout: 10), "A prompt the Hook cannot structure still gets an answer row")
-        XCTAssertTrue(app.buttons["chat-answer-key:y"].exists)
+        let yes = app.buttons["chat-answer-key:y"]
+        XCTAssertTrue(yes.exists)
+        XCTAssertGreaterThanOrEqual(yes.frame.height, 44, "The prompt's answer rows stay comfortable to tap")
         XCTAssertTrue(app.buttons["chat-answer-key:Escape"].exists)
         XCTAssertTrue(app.buttons["chat-answer-terminal"].exists, "The terminal stays one tap away")
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Agent is waiting")).firstMatch.exists)
         // Combined into one element, which XCUITest reports as static text.
         let prompt = app.descendants(matching: .any).matching(identifier: "chat-terminal-prompt").firstMatch
         XCTAssertTrue(prompt.waitForExistence(timeout: 8), "The question the keys answer is shown, not just the keys")
         XCTAssertTrue(prompt.label.contains("May I inspect the installed simulator runtimes"), "The reason comes first: \(prompt.label)")
         XCTAssertTrue(prompt.label.contains("xcrun simctl list runtimes"))
-        capture(app, "Answer keys for a terminal prompt")
-        app.buttons["chat-answer-key:Down"].tap()
-        XCTAssertTrue(keys.waitForExistence(timeout: 3), "Moving through a menu keeps the row")
-        app.buttons["chat-answer-key:Enter"].tap()
+        capture(app, "Terminal question card")
+        yes.tap()
         XCTAssertTrue(keys.waitForNonExistence(timeout: 10), "Once the agent stops waiting the row goes")
         XCTAssertFalse(app.staticTexts["chat-delivery-error"].exists)
     }
