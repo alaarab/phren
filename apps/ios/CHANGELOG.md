@@ -19,7 +19,7 @@ number counts up on its own.
   for computers, alongside the quick swatches.
 - Agent work, the agent drawer and the composer badge show running agents
   only; finished workers leave the tree, and their cards read model and
-  branch on one line without a Running capsule.
+  branch on one line without a Running capsule or a chevron.
 - Agent work uses compact headers and flat session-style cards for spawned
   agents, with provider, model, checkout, and running state visible at a glance.
 - Agent work shows each fan-out worker's branch and worktree in its row and

@@ -39,12 +39,18 @@ struct ChatSubagentsView: View {
                         .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                     } else {
                         ForEach(rows) { row in
-                            NavigationLink {
-                                ChildAgentTranscriptView(session: session, target: target, agent: row.agent)
-                            } label: {
-                                AgentTreeRowView(row: row)
-                            }
-                            .buttonStyle(.plain)
+                            // The link sits behind the card so the list adds
+                            // no disclosure chevron; the whole card is the tap.
+                            AgentTreeRowView(row: row)
+                                .background {
+                                    NavigationLink {
+                                        ChildAgentTranscriptView(session: session, target: target, agent: row.agent)
+                                    } label: { EmptyView() }
+                                    .opacity(0)
+                                    .accessibilityHidden(true)
+                                }
+                            .accessibilityElement(children: .combine)
+                            .accessibilityAddTraits(.isButton)
                             .accessibilityIdentifier("child-agent:\(row.agent.id)")
                             .contextMenu {
                                 Button("Changes", systemImage: "plus.forwardslash.minus") { diffChild = row.agent.id }
