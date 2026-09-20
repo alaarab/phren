@@ -212,13 +212,16 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(tree.waitForExistence(timeout: 8))
         XCTAssertFalse(app.buttons["1 agent running"].exists, "The old agent label no longer takes a composer row")
         XCTAssertTrue(tree.label.contains("1 running"), "The header badge counts only running agents")
+        capture(app, "Agent tree in the chat header")
         tree.tap()
+        XCTAssertTrue(app.buttons["chat-subagents-done"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.navigationBars["Agent work"].exists)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "codex/device-color")).firstMatch.waitForExistence(timeout: 5))
         let modeledAgent = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "child-agent:", "gpt-5-codex")).firstMatch
         XCTAssertTrue(modeledAgent.waitForExistence(timeout: 5))
         XCTAssertTrue(modeledAgent.label.contains("Claude"), "The model appears beside its provider")
-        capture(app, "Agent tree in the chat header")
-        app.buttons["Done"].tap()
+        capture(app, "Agent work cards")
+        app.buttons["chat-subagents-done"].tap()
         let open = app.buttons["chat-agent-transcript:agent-audit"]
         XCTAssertTrue(open.waitForExistence(timeout: 8))
         XCTAssertEqual(open.label, "Open transcript")
@@ -232,10 +235,10 @@ final class AgentChatTests: XCTestCase {
         XCTAssertFalse(app.staticTexts["This agent recorded no conversation."].exists)
         XCTAssertEqual(rawJSONTexts(app).count, 0, "No raw JSON in a child transcript")
         app.buttons["chat-subagent-diff"].tap()
-        XCTAssertTrue(app.navigationBars["Agent changes"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "agent-diff-header").firstMatch.waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Theme.swift"].waitForExistence(timeout: 5))
         capture(app, "Subagent changes")
-        app.navigationBars["Agent changes"].buttons.element(boundBy: 0).tap()
+        app.buttons["agent-diff-back"].tap()
     }
 
     @MainActor

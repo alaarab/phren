@@ -16,31 +16,63 @@ struct ChatSubagentsView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
-                    AgentTreeSummary(total: total, running: running, providers: providers)
-                    ForEach(rows) { row in
-                        NavigationLink {
-                            ChildAgentTranscriptView(session: session, target: target, agent: row.agent)
-                        } label: {
-                            AgentTreeRowView(row: row)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("child-agent:\(row.agent.id)")
-                        .contextMenu {
-                            Button("Changes", systemImage: "plus.forwardslash.minus") { diffChild = row.agent.id }
+            VStack(spacing: 0) {
+                header
+                if providers.count > 1 {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(providers, id: \.self) { ToolCardChip(text: $0) }
                         }
                     }
+                    .contentMargins(.horizontal, 16, for: .scrollContent)
+                    .padding(.bottom, 6)
                 }
-                .padding(.horizontal, 16).padding(.vertical, 12)
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 6) {
+                        ForEach(rows) { row in
+                            NavigationLink {
+                                ChildAgentTranscriptView(session: session, target: target, agent: row.agent)
+                            } label: {
+                                AgentTreeRowView(row: row)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("child-agent:\(row.agent.id)")
+                            .contextMenu {
+                                Button("Changes", systemImage: "plus.forwardslash.minus") { diffChild = row.agent.id }
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 16).padding(.vertical, 8)
+                }
             }
             .background(PhrenTheme.chatCanvas)
-            .navigationTitle("Agent work")
-            .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(item: $diffChild) { child in
                 AgentDiffView(session: session, target: target, paths: [], child: child)
             }
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .toolbar(.hidden, for: .navigationBar)
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Agent work").font(.subheadline.weight(.medium)).foregroundStyle(PhrenTheme.text)
+                Text("\(total) \(total == 1 ? "agent" : "agents") · \(running) running")
+                    .font(.caption).foregroundStyle(PhrenTheme.textMuted)
+            }
+            Spacer(minLength: 8)
+            Button("Done") { dismiss() }
+                .font(.caption.weight(.medium))
+                .buttonStyle(.bordered)
+                .buttonBorderShape(.capsule)
+                .controlSize(.small)
+                .frame(minHeight: 44)
+                .accessibilityIdentifier("chat-subagents-done")
+        }
+        .padding(.horizontal, 4).padding(.vertical, 2)
+        // A marker rather than an identifier on the row, so Done keeps its own id.
+        .overlay(alignment: .topLeading) {
+            Color.clear.frame(width: 1, height: 1).accessibilityElement().accessibilityIdentifier("chat-subagents-header")
         }
     }
 }
@@ -84,94 +116,36 @@ private extension AgentChild {
     }
 }
 
-private struct AgentTreeSummary: View {
-    let total: Int
-    let running: Int
-    let providers: [String]
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 12) {
-                ZStack {
-                    Circle().fill(PhrenTheme.phrenCardAccent.opacity(0.16))
-                    Image(systemName: "point.3.connected.trianglepath.dotted")
-                        .font(.title3.weight(.semibold)).foregroundStyle(PhrenTheme.phrenCardAccent)
-                }.frame(width: 44, height: 44)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Agent tree").font(.headline).foregroundStyle(PhrenTheme.text)
-                    Text("\(total) \(total == 1 ? "agent" : "agents") · \(running) running")
-                        .font(.subheadline).foregroundStyle(PhrenTheme.textMuted)
-                }
-                Spacer()
-                if running > 0 {
-                    Label("Live", systemImage: "circle.fill").labelStyle(AgentLiveLabelStyle())
-                }
-            }
-            if !providers.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(providers, id: \.self) { ToolCardChip(text: $0) }
-                    }
-                }
-            }
-        }
-        .padding(16).phrenPanel()
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("agent-tree-summary")
-    }
-}
-
-private struct AgentLiveLabelStyle: LabelStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: 5) {
-            configuration.icon.font(.system(size: 7)).foregroundStyle(PhrenTheme.cyan)
-            configuration.title.font(.caption.weight(.semibold)).foregroundStyle(PhrenTheme.cyan)
-        }.padding(.horizontal, 9).padding(.vertical, 5)
-            .background(PhrenTheme.cyan.opacity(0.12), in: Capsule())
-    }
-}
-
 private struct AgentTreeRowView: View {
     let row: AgentTreeRow
-    private var stateColor: Color { row.agent.state == .running ? PhrenTheme.cyan : PhrenTheme.success }
     private var stateName: String { row.agent.state == .running ? "Running" : "Completed" }
 
     var body: some View {
         HStack(alignment: .center, spacing: 0) {
             if row.depth > 0 {
-                treeGuide.frame(width: CGFloat(row.depth) * 22 + 8)
+                treeGuide.frame(width: CGFloat(row.depth) * 16 + 4)
             }
             HStack(spacing: 12) {
-                // The glyph sits in the middle of the tile; only the state dot
-                // hangs off the corner.
-                ZStack {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(PhrenTheme.surfaceRaised)
-                    AgentProviderGlyph(source: row.agent.provider.lowercased(), size: 24)
-                }
-                .frame(width: 42, height: 42)
-                .overlay(alignment: .bottomTrailing) {
-                    Circle().fill(stateColor).frame(width: 9, height: 9)
-                        .overlay(Circle().stroke(PhrenTheme.toolPanel, lineWidth: 2))
-                        .offset(x: 2, y: 2)
-                }
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(row.agent.name).font(.body.weight(.semibold)).foregroundStyle(PhrenTheme.text).lineLimit(2)
-                    HStack(spacing: 6) {
-                        Text(row.agent.providerAndModel)
-                        Text("·")
-                        Text(stateName).foregroundStyle(stateColor)
-                        if let descendants = row.agent.descendantLabel {
-                            Text("·"); Text(descendants)
+                AgentProviderAvatar(provider: row.agent.provider, state: row.agent.state)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 5) {
+                        Text(row.agent.providerAndModel).foregroundStyle(PhrenTheme.sessionProject)
+                        if let branch = row.agent.branch, !branch.isEmpty {
+                            Text("⑂ \(branch)")
                         }
-                    }.font(.caption).foregroundStyle(PhrenTheme.textMuted).lineLimit(1)
-                    if let checkout = row.agent.checkoutDisplayLabel {
-                        AgentCheckoutLine(label: checkout)
+                        if let worktree = row.agent.worktreeName, !worktree.isEmpty {
+                            Text("· \(worktree)")
+                        }
                     }
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(PhrenTheme.sessionMeta)
+                    .lineLimit(1).truncationMode(.middle)
+                    Text(row.agent.name).font(.body.weight(.medium)).foregroundStyle(PhrenTheme.text).lineLimit(2)
                 }
                 Spacer(minLength: 8)
-                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(PhrenTheme.textDim)
+                if row.agent.state == .running { AgentRunningCapsule() }
             }
-            .padding(14).phrenPanel(tool: true)
+            .padding(12).sessionCard()
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(row.agent.name), \(row.agent.providerName)" + (row.agent.model.map { ", \($0)" } ?? "") + ", \(stateName)" + (row.agent.descendantLabel.map { ", \($0)" } ?? "") + (row.agent.branch.map { ", \($0)" } ?? ""))
@@ -179,27 +153,52 @@ private struct AgentTreeRowView: View {
 
     private var treeGuide: some View {
         GeometryReader { proxy in
-            let x = proxy.size.width - 16
+            let x = proxy.size.width - 10
             Path { path in
                 path.move(to: CGPoint(x: x, y: 0))
                 path.addLine(to: CGPoint(x: x, y: row.isLastSibling ? proxy.size.height / 2 : proxy.size.height))
                 path.move(to: CGPoint(x: x, y: proxy.size.height / 2))
-                path.addLine(to: CGPoint(x: proxy.size.width - 3, y: proxy.size.height / 2))
-            }.stroke(PhrenTheme.border, style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+                path.addLine(to: CGPoint(x: proxy.size.width - 2, y: proxy.size.height / 2))
+            }.stroke(PhrenTheme.border, style: StrokeStyle(lineWidth: 1, lineCap: .round, lineJoin: .round))
         }.accessibilityHidden(true)
     }
 }
 
-private struct AgentCheckoutLine: View {
-    let label: String
+private struct AgentProviderAvatar: View {
+    let provider: String
+    let state: AgentChild.State
+
+    private var stateColor: Color { state == .running ? PhrenTheme.cyan : PhrenTheme.success }
 
     var body: some View {
-        HStack(spacing: 5) {
-            Image(systemName: "arrow.triangle.branch").font(.caption2)
-            Text(label).font(.caption.monospaced()).lineLimit(1).truncationMode(.middle)
+        ZStack {
+            Circle().stroke(stateColor.opacity(0.22), lineWidth: 2).frame(width: 36, height: 36)
+            AgentProviderGlyph(source: provider.lowercased(), size: 20)
         }
-        .foregroundStyle(PhrenTheme.textMuted)
-        .lineLimit(1)
+        .frame(width: 44, height: 44)
+        .overlay(alignment: .bottomTrailing) {
+            if state == .running {
+                Circle().fill(PhrenTheme.cyan).frame(width: 10, height: 10)
+                    .overlay(Circle().strokeBorder(PhrenTheme.surface, lineWidth: 1.5))
+                    .offset(x: 1, y: 1)
+            } else {
+                Image(systemName: "checkmark").font(.system(size: 7.5, weight: .bold))
+                    .foregroundStyle(Color.black.opacity(0.85))
+                    .frame(width: 15, height: 15)
+                    .background(PhrenTheme.success, in: Circle())
+                    .overlay(Circle().strokeBorder(PhrenTheme.surface, lineWidth: 1.5))
+                    .offset(x: 1, y: 1)
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+private struct AgentRunningCapsule: View {
+    var body: some View {
+        Text("Running").font(.caption.weight(.semibold)).foregroundStyle(PhrenTheme.cyan)
+            .padding(.horizontal, 9).padding(.vertical, 5)
+            .background(PhrenTheme.cyan.opacity(0.12), in: Capsule())
     }
 }
 
@@ -225,17 +224,27 @@ struct SessionSubagentsCard: View {
     @State private var agents: [AgentChild] = []
     @State private var showing = false
 
+    private var total: Int { agents.reduce(0) { $0 + $1.agentCount } }
+    private var running: Int { agents.reduce(0) { $0 + $1.runningCount } }
+
     var body: some View {
         Group {
             if let target, !agents.isEmpty {
                 Button { showing = true } label: {
-                    HStack {
-                        Label("Spawned agents", systemImage: "person.2.wave.2")
-                        Spacer()
-                        Text("\(agents.reduce(0) { $0 + $1.runningCount }) running").foregroundStyle(PhrenTheme.textMuted)
-                        Image(systemName: "chevron.right").foregroundStyle(PhrenTheme.textDim)
-                    }.padding(16).phrenPanel(tool: true)
-                }.buttonStyle(.plain)
+                    HStack(spacing: 12) {
+                        AgentProviderAvatar(provider: agents[0].provider, state: running > 0 ? .running : .completed)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("\(total) \(total == 1 ? "agent" : "agents") · \(running) running")
+                                .font(.system(.caption, design: .monospaced)).foregroundStyle(PhrenTheme.sessionProject)
+                            Text("Spawned agents").font(.body.weight(.medium)).foregroundStyle(PhrenTheme.text)
+                        }
+                        Spacer(minLength: 8)
+                        if running > 0 { AgentRunningCapsule() }
+                    }.padding(12).sessionCard()
+                }
+                .buttonStyle(.plain)
+                    .accessibilityLabel("Spawned agents, \(total) \(total == 1 ? "agent" : "agents"), \(running) running")
+                    .accessibilityIdentifier("session-spawned-agents")
                     .sheet(isPresented: $showing) { ChatSubagentsView(session: session, target: target, agents: agents) }
             }
         }
@@ -256,6 +265,7 @@ struct ChildAgentTranscriptView: View {
     let session: LiveAgentSession
     let target: AgentChatTarget
     let agent: AgentChild
+    @Environment(\.dismiss) private var dismiss
     @State private var history = AgentChatHistory()
     @State private var loaded = false
     @State private var live = false
@@ -267,51 +277,47 @@ struct ChildAgentTranscriptView: View {
     private var entries: [ChatTimelineEntry] { ChatTimelineEntry.group(history.messages) }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 14) {
-                transcriptHeader
-                if let error {
-                    ContentUnavailableView("Transcript unavailable", systemImage: "bubble.left.and.exclamationmark.bubble.right",
-                                           description: Text(error))
-                        .frame(maxWidth: .infinity).padding(.vertical, 40)
-                } else if loaded {
-                    if history.hasMore {
-                        Button {
-                            Task { await loadOlder() }
-                        } label: {
-                            Label(loadingOlder ? "Loading earlier activity…" : "Show earlier activity", systemImage: "clock.arrow.circlepath")
-                                .font(.caption).foregroundStyle(PhrenTheme.accent)
+        VStack(spacing: 0) {
+            transcriptHeader
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 14) {
+                    if let error {
+                        ContentUnavailableView("Transcript unavailable", systemImage: "bubble.left.and.exclamationmark.bubble.right",
+                                               description: Text(error))
+                            .frame(maxWidth: .infinity).padding(.vertical, 40)
+                    } else if loaded {
+                        if history.hasMore {
+                            Button {
+                                Task { await loadOlder() }
+                            } label: {
+                                Label(loadingOlder ? "Loading earlier activity…" : "Show earlier activity", systemImage: "clock.arrow.circlepath")
+                                    .font(.caption).foregroundStyle(PhrenTheme.accent)
+                                    .padding(12).frame(maxWidth: .infinity, alignment: .leading).phrenPanel(tool: true)
+                            }
+                            .buttonStyle(.plain).disabled(loadingOlder)
+                            .accessibilityIdentifier("child-agent-older")
+                        }
+                        if history.messages.isEmpty {
+                            Text(agent.state == .running ? "Nothing recorded yet." : "This agent recorded no conversation.")
+                                .font(.caption).foregroundStyle(PhrenTheme.textMuted)
                                 .padding(12).frame(maxWidth: .infinity, alignment: .leading).phrenPanel(tool: true)
                         }
-                        .buttonStyle(.plain).disabled(loadingOlder)
-                        .accessibilityIdentifier("child-agent-older")
+                        ChatTranscriptRows(revision: history.messages.count, entries: entries, revealed: [:], revealRevision: 0,
+                                           images: [:], session: session, target: nil, active: false, preview: { _ in })
+                            .accessibilityIdentifier("child-agent-transcript")
+                    } else {
+                        ProgressView("Loading agent transcript…").frame(maxWidth: .infinity).padding(.vertical, 48)
                     }
-                    if history.messages.isEmpty {
-                        Text(agent.state == .running ? "Nothing recorded yet." : "This agent recorded no conversation.")
-                            .font(.caption).foregroundStyle(PhrenTheme.textMuted)
-                            .padding(12).frame(maxWidth: .infinity, alignment: .leading).phrenPanel(tool: true)
-                    }
-                    ChatTranscriptRows(revision: history.messages.count, entries: entries, revealed: [:], revealRevision: 0,
-                                       images: [:], session: session, target: nil, active: false, preview: { _ in })
-                        .accessibilityIdentifier("child-agent-transcript")
-                } else {
-                    ProgressView("Loading agent transcript…").frame(maxWidth: .infinity).padding(.vertical, 48)
-                }
-            }.padding(.horizontal, 16).padding(.vertical, 12)
+                }.padding(.horizontal, 16).padding(.vertical, 12)
+            }
         }
         .background(PhrenTheme.chatCanvas)
         .environment(\.openToolOutput) { fullToolOutput = $0 }
         .environment(textSelection)
-        .navigationDestination(item: $fullToolOutput) { FullToolOutputView(output: $0) }
-        .navigationTitle(agent.name).navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            NavigationLink {
-                AgentDiffView(session: session, target: target, paths: [], child: agent.id)
-            } label: {
-                Label("Changes", systemImage: "plus.forwardslash.minus")
-            }
-            .accessibilityIdentifier("chat-subagent-diff")
+        .navigationDestination(item: $fullToolOutput) {
+            FullToolOutputView(output: $0).toolbar(.visible, for: .navigationBar)
         }
+        .toolbar(.hidden, for: .navigationBar)
         .task(id: agent.id) { await follow() }
     }
 
@@ -320,23 +326,44 @@ struct ChildAgentTranscriptView: View {
         return live ? "Working now · following live" : "Working now · read-only view"
     }
 
+    private var transcriptMeta: String {
+        var parts = [agent.providerName]
+        if let model = agent.model { parts.append(model) }
+        if let checkout = agent.checkoutDisplayLabel { parts.append(checkout) }
+        return parts.joined(separator: " · ")
+    }
+
     private var transcriptHeader: some View {
-        HStack(spacing: 12) {
-            AgentProviderGlyph(source: agent.provider.lowercased(), size: 25)
-                .frame(width: 42, height: 42).background(PhrenTheme.phrenCardAccent.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
-            VStack(alignment: .leading, spacing: 3) {
-                Text(agent.providerName + " subagent" + (agent.model.map { " · \($0)" } ?? ""))
-                    .font(.headline).foregroundStyle(PhrenTheme.text)
-                if let checkout = agent.checkoutDisplayLabel {
-                    AgentCheckoutLine(label: checkout)
-                }
-                Text(stateLine).font(.caption).foregroundStyle(PhrenTheme.textMuted)
+        HStack(spacing: 8) {
+            Button { dismiss() } label: {
+                Image(systemName: "chevron.left").font(.system(size: 18, weight: .medium))
+                    .frame(width: 44, height: 44)
             }
-            Spacer()
-            Circle().fill(agent.state == .running ? PhrenTheme.cyan : PhrenTheme.success).frame(width: 9, height: 9)
-        }.padding(14).phrenPanel()
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("child-agent-header")
+            .buttonStyle(.plain)
+            .accessibilityLabel("Back")
+            .accessibilityIdentifier("child-agent-back")
+            AgentProviderAvatar(provider: agent.provider, state: agent.state)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(agent.name).font(.subheadline.weight(.medium)).foregroundStyle(PhrenTheme.text).lineLimit(1)
+                Text(transcriptMeta)
+                    .font(.caption2).foregroundStyle(PhrenTheme.textMuted).lineLimit(1)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(agent.name), \(agent.providerName)" + (agent.model.map { ", \($0)" } ?? "") + ", \(stateLine)")
+            .accessibilityIdentifier("child-agent-header")
+            Spacer(minLength: 0)
+            NavigationLink {
+                AgentDiffView(session: session, target: target, paths: [], child: agent.id)
+            } label: {
+                Image(systemName: "plus.forwardslash.minus").font(.system(size: 17))
+                    .frame(width: 44, height: 44)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Changes")
+            .accessibilityIdentifier("chat-subagent-diff")
+        }
+        .foregroundStyle(PhrenTheme.text)
+        .padding(.horizontal, 4).padding(.vertical, 2)
     }
 
     /// Stream through the parent's socket; a computer whose Hook predates
