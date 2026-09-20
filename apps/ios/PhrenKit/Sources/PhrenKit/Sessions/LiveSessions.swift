@@ -16,6 +16,9 @@ public struct LiveWorkspaces: Codable, Equatable, Sendable {
         public let branch: String?
         public let agentPaneCount: Int?
         public let paneCount: Int?
+        /// What a working agent is doing right now, as the Hook read it from
+        /// the transcript tail ("Bash: swift build", "Editing View.swift").
+        public let currentStep: String?
         /// Herdr's state-change counter for the tab's panes: higher means the
         /// agent's status moved more recently. Not a timestamp; only an order.
         public let changedSeq: Int?
@@ -33,7 +36,7 @@ public struct LiveWorkspaces: Codable, Equatable, Sendable {
         }
 
         private enum CodingKeys: String, CodingKey {
-            case id, label, title, agentStatus, approvalPending, agent, starting, cwd, branch, agentPaneCount, paneCount, changedSeq
+            case id, label, title, agentStatus, approvalPending, agent, starting, cwd, branch, agentPaneCount, paneCount, changedSeq, currentStep
             case reportedContextUsedPercent = "contextUsedPercent"
             case reportedLastChangedAt = "lastChangedAt"
         }

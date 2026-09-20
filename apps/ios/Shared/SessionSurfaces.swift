@@ -93,13 +93,15 @@ struct SessionWorkingActivityAttributes: ActivityAttributes {
         let step: String?
         /// Running subagents in this session; 0 when none.
         let subagents: Int
+        /// "working", "waiting" or "idle"; the lock screen colours the step by it.
+        let state: String?
 
         init(id: String, project: String, provider: String, tool: String? = nil, computer: String,
-             step: String? = nil, subagents: Int = 0) {
+             step: String? = nil, subagents: Int = 0, state: String? = nil) {
             self.id = id; self.project = project; self.provider = provider; self.tool = tool
-            self.computer = computer; self.step = step; self.subagents = subagents
+            self.computer = computer; self.step = step; self.subagents = subagents; self.state = state
         }
-        private enum CodingKeys: String, CodingKey { case id, project, provider, tool, computer, step, subagents }
+        private enum CodingKeys: String, CodingKey { case id, project, provider, tool, computer, step, subagents, state }
         /// Decode activities created before the step/subagent fields too, so
         /// an upgrade does not make an already-live activity undecodable.
         init(from decoder: Decoder) throws {
@@ -111,6 +113,7 @@ struct SessionWorkingActivityAttributes: ActivityAttributes {
             computer = try values.decode(String.self, forKey: .computer)
             step = try values.decodeIfPresent(String.self, forKey: .step)
             subagents = try values.decodeIfPresent(Int.self, forKey: .subagents) ?? 0
+            state = try values.decodeIfPresent(String.self, forKey: .state)
         }
     }
     struct ContentState: Codable, Hashable {

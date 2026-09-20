@@ -687,6 +687,14 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     expect(last[0].agentStatus.terminalPrompt).toBeUndefined();
     cleared.terminate();
   });
+  it("tells the overview what a working agent is doing", async () => {
+    const before = await api("/v1/workspaces");
+    expect(before.data.groups[0].children[0]).toMatchObject({ currentStep: "Writing a reply" });
+    await appendFile(record, JSON.stringify({ type: "response_item", payload: { type: "function_call", name: "shell", call_id: "s1", arguments: JSON.stringify({ command: ["bash", "-lc", "swift build"] }) } }) + "\n");
+    expect((await api("/v1/workspaces")).data.groups[0].children[0].currentStep).toBe("shell: swift build");
+    agentStatus = "idle";
+    expect((await api("/v1/workspaces")).data.groups[0].children[0]).not.toHaveProperty("currentStep");
+  });
   it("lists the models a computer's agents offer", async () => {
     const claude = await api("/v1/models?source=claude");
     expect(claude.status).toBe(200);

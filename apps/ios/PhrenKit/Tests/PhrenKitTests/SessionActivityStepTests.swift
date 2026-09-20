@@ -34,4 +34,10 @@ final class SessionActivityStepTests: XCTestCase {
         XCTAssertTrue(value.hasSuffix("…"))
         XCTAssertEqual(value, "Bash: swift test --filter ChatTranscrip…")
     }
+
+    func testAStepTheComputerAlreadyPhrasedIsKeptWithoutATool() {
+        XCTAssertEqual(SessionActivityStep.format(tool: nil, detail: "Editing View.swift", status: "Working"), "Editing View.swift")
+        XCTAssertEqual(SessionActivityStep.format(tool: nil, detail: "  ", status: "Working"), "Working")
+        XCTAssertEqual(SessionActivityStep.format(tool: "Bash", detail: "make", status: "Working"), "Bash: make")
+    }
 }

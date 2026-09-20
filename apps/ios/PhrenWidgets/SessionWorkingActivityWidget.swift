@@ -75,37 +75,65 @@ struct SessionWorkingActivityWidget: Widget {
     }
 }
 
-/// The lock-screen / banner presentation: the session leading the activity.
+/// The lock-screen / banner presentation, three short rows: which session
+/// (project, computer, elapsed), what it is doing (or that it needs you),
+/// and what else is running when there is more than one.
 private struct SessionWorkingSummary: View {
     let state: SessionWorkingActivityAttributes.ContentState
 
     private var total: Int { state.working + state.waiting }
+    private var others: [SessionWorkingActivityAttributes.Entry] { Array(state.entries.dropFirst().prefix(3)) }
 
     var body: some View {
-        HStack(alignment: .center, spacing: 10) {
-            PhrenActivityMark(size: 18)
-            if let entry = state.primary {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text(entry.project).privacySensitive().font(.subheadline.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
-                        Text("· \(entry.computer)").privacySensitive().font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                        if entry.subagents > 0 { SubagentPill(count: entry.subagents) }
-                    }
-                    Text(entry.step ?? entry.tool ?? state.headline).privacySensitive()
-                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .center, spacing: 8) {
+                PhrenActivityMark(size: 18)
+                if let entry = state.primary {
+                    Text(entry.project).privacySensitive().font(.subheadline.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
+                    Text(entry.computer).privacySensitive().font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                } else {
+                    Text(state.headline).font(.subheadline.weight(.medium)).lineLimit(1).minimumScaleFactor(0.8)
                 }
-            } else {
-                Text(state.headline).font(.subheadline.weight(.medium)).lineLimit(1).minimumScaleFactor(0.8)
+                Spacer(minLength: 4)
+                ElapsedTimer(start: state.startedAt)
             }
-            Spacer(minLength: 4)
+            if let entry = state.primary {
+                HStack(spacing: 6) {
+                    StepLine(entry: entry)
+                    Spacer(minLength: 4)
+                    if entry.subagents > 0 { SubagentPill(count: entry.subagents) }
+                }
+            }
             if total > 1 {
-                Text("\(total)").font(.caption2.weight(.bold)).monospacedDigit()
-                    .foregroundStyle(WidgetTheme.cyan)
-                    .padding(.horizontal, 5).padding(.vertical, 2)
-                    .background(WidgetTheme.cyan.opacity(0.15), in: Capsule())
-                    .accessibilityLabel("\(total) sessions")
+                HStack(spacing: 6) {
+                    HStack(spacing: -4) {
+                        ForEach(others) { entry in
+                            ProviderActivityGlyph(provider: entry.provider, size: 14)
+                                .background(Circle().fill(.black).padding(-2))
+                        }
+                    }
+                    Text(state.headline).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                }
+                .accessibilityElement(children: .combine)
             }
-            ElapsedTimer(start: state.startedAt)
+        }
+    }
+}
+
+/// The step, coloured by the session's state: what a working agent is
+/// doing in secondary, a wait for the person in orange, a finish in green.
+private struct StepLine: View {
+    let entry: SessionWorkingActivityAttributes.Entry
+
+    private var isWaiting: Bool { entry.state == "waiting" }
+    private var text: String { isWaiting ? "Needs an answer" : (entry.step ?? entry.tool ?? "Working") }
+    private var color: Color { isWaiting ? .orange : entry.state == "idle" ? WidgetTheme.green : .secondary }
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: isWaiting ? "hand.raised.fill" : entry.state == "idle" ? "checkmark.circle.fill" : "circle.fill")
+                .font(.system(size: isWaiting ? 10 : 6)).foregroundStyle(color)
+            Text(text).privacySensitive().font(.caption).foregroundStyle(color).lineLimit(1)
         }
     }
 }

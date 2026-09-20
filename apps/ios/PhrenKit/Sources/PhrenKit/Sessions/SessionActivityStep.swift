@@ -14,6 +14,9 @@ public enum SessionActivityStep {
         var value: String?
         if let name, !name.isEmpty {
             value = describe(tool: name, detail: firstLine(detail) ?? "")
+        } else if let step = firstLine(detail), !step.isEmpty {
+            // The Hook already phrased it ("Editing View.swift"); keep it.
+            value = step
         }
         if value == nil, let fallback, !fallback.isEmpty { value = fallback }
         guard let value, !value.isEmpty else { return nil }

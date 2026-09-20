@@ -81,6 +81,7 @@ final class SessionSurfacesTests: XCTestCase {
             from: Data(#"{"working":1,"waiting":0,"startedAt":1000,"entries":[{"id":"s1","project":"App","provider":"codex","computer":"Mini"}]}"#.utf8))
         XCTAssertNil(content.entries.first?.step)
         XCTAssertEqual(content.entries.first?.subagents, 0)
+        XCTAssertNil(content.entries.first?.state)
         XCTAssertEqual(content.primary?.project, "App")
     }
 

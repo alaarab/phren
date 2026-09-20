@@ -15,6 +15,7 @@ enum WidgetTheme {
     static let textMuted = Color(widgetHex: 0xECE9F5).opacity(0.55) // --muted
     static let accent = Color(widgetHex: 0x9058F0)      // --accent
     static let cyan = Color(widgetHex: 0x28D3F2)        // --cyan
+    static let green = Color(widgetHex: 0x8AC8AC)       // stateDone
     static let border = Color(widgetHex: 0x9C8FF8).opacity(0.18)    // --border
 }
 

@@ -14,6 +14,9 @@ final class SessionWorkingActivityController {
     private var starts: [String: Date] = [:]
     private var tools: [String: String] = [:]
     private var details: [String: String] = [:]
+    /// What the Hook says each working agent is doing, from the overview,
+    /// so the lock screen has a step even when no chat is open.
+    private var overviewSteps: [String: String] = [:]
     private var subagents: [String: Int] = [:]
     private var chat: (session: SessionWorkingActivityBuilder.Session, at: Date)?
     private var pinnedID: String?
@@ -69,12 +72,17 @@ final class SessionWorkingActivityController {
     func reconcile(_ sessions: [LiveAgentSession], on host: LiveHost, projects: [ProjectEntity],
                    preferences: LiveSessionPreferences?, now: Date = .now) async {
         let reports = SessionStatusService.reports(for: sessions, projects: projects, preferences: preferences)
+        for session in sessions {
+            let id = AgentSessionEntity(session).id
+            if let step = session.tab.currentStep, !step.isEmpty { overviewSteps[id] = step } else { overviewSteps[id] = nil }
+        }
         sessionsByHost[host.id] = reports.map { input($0.entity, state: $0.state.rawValue, now: now) }
         let retained = Set(sessionsByHost.values.flatMap { $0.map(\.entry.id) })
         starts = starts.filter { retained.contains($0.key) || chat?.session.entry.id == $0.key }
         entities = entities.filter { retained.contains($0.key) || chat?.session.entry.id == $0.key }
         tools = tools.filter { retained.contains($0.key) }
         details = details.filter { retained.contains($0.key) || chat?.session.entry.id == $0.key }
+        overviewSteps = overviewSteps.filter { retained.contains($0.key) }
         subagents = subagents.filter { retained.contains($0.key) || chat?.session.entry.id == $0.key }
         scheduleUpdate()
     }
@@ -112,8 +120,8 @@ final class SessionWorkingActivityController {
         return .init(entry: .init(id: entity.id, project: String((entity.project ?? entity.workspace).prefix(80)),
                                  provider: provider ?? entity.agent ?? "agent", tool: tool.map { String($0.prefix(60)) },
                                  computer: String(entity.computer.prefix(60)),
-                                 step: SessionActivityStep.format(tool: tool, detail: details[entity.id], status: statusText(state)),
-                                 subagents: subagents[entity.id] ?? 0),
+                                 step: SessionActivityStep.format(tool: tool, detail: details[entity.id] ?? (tool == nil ? overviewSteps[entity.id] : nil), status: statusText(state)),
+                                 subagents: subagents[entity.id] ?? 0, state: state),
                      state: state, startedAt: starts[entity.id] ?? now)
     }
 
@@ -121,7 +129,7 @@ final class SessionWorkingActivityController {
     private func statusText(_ state: String) -> String? {
         switch state.lowercased() {
         case "working": "Working"
-        case "waiting": "Waiting for input"
+        case "waiting": "Needs an answer"
         case "idle": "Idle"
         case "done": "Done"
         case "error": "Needs attention"
