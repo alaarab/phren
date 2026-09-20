@@ -22,6 +22,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   Hook can launch it, and `phren bridge install` writes an opencode plugin that
   mirrors sessions into the store's `.runtime/sessions` so the iOS app can read
   them. Identity needs `herdr integration install opencode` on the computer.
+- Codex CLI fan-outs now appear as child agents beside OpenCode ones: a
+  `provider: "codex"` manifest with a `codex exec --json` event log is read as
+  a redacted child transcript.
 
 ### Fixed
 
