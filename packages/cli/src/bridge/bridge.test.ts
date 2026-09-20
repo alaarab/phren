@@ -616,17 +616,45 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     expect(commands.filter(c => c.method === "agent.prompt")).toHaveLength(1);
     expect((await api("/v1/prompt", { target: { ...target, server: "../default" }, text: "must not send" })).status).toBe(400);
   });
-  // Known failure, task d78a0916: this requires an atomic Herdr contract.
-  // Keep the desired rejection assertion executable; an unexpected pass fails
-  // the suite so that it can become a normal regression once support exists.
-  it.fails.each([
-    ["prompt", "/v1/prompt", { text: "must stay in the original conversation" }],
-    ["stop", "/v1/keys", { keys: ["Escape"] }],
-  ] as const)("rejects %s if the conversation is replaced between validation and dispatch (Herdr limitation)", async (_operation, route, payload) => {
+  // Herdr types into a pane and cannot bind the write to a conversation. A
+  // prompt is bound at the other end instead: the agent that receives it
+  // reports through UserPromptSubmit, and a conversation the phone did not
+  // mean is told to drop it. An Escape has no such report; the residual race
+  // is a cancelled turn in a conversation that replaced the pane's occupant
+  // within the milliseconds after validation, kept visible as a known failure.
+  it.fails("rejects stop if the conversation is replaced between validation and dispatch (Herdr limitation)", async () => {
     replaceBeforeMutation = true;
-    const result = await api(route, { target, ...payload });
+    const result = await api("/v1/keys", { target, keys: ["Escape"] });
     expect({ status: result.status, deliveries }).toEqual({ status: 409, deliveries: [] });
   });
+  it("binds a typed prompt to its conversation through the receiving agent's UserPromptSubmit hook", async () => {
+    const other = "bbbbbbbb-1111-4111-8111-111111111111";
+    const submit = (session: string, prompt: string) => new Promise<any>((resolve, reject) => {
+      const payload = JSON.stringify({ target: { ...target, session }, event: "UserPromptSubmit", prompt });
+      const req = request({ socketPath: path.join(root, "bridge/agent.sock"), path: "/hook", method: "POST",
+        headers: { "Content-Length": Buffer.byteLength(payload) } }, res => {
+        let data = ""; res.on("data", bytes => data += bytes); res.on("end", () => resolve({ status: res.statusCode, ...JSON.parse(data) }));
+      }); req.on("error", reject); req.end(payload);
+    });
+    // The pane's occupant changed after validation: the replacement submits
+    // the pasted text, is refused, and the phone learns nothing was delivered.
+    const refused = api("/v1/prompt", { target, text: "must stay in the original conversation" });
+    await sleep(150);
+    expect(await submit(other, "<pasted_content id=\"7\">\nmust stay in the original conversation\n</pasted_content id=\"7\">")).toMatchObject({ decision: "block" });
+    expect((await refused).status).toBe(409);
+    // The intended conversation submits it: confirmed, not merely uncertain.
+    const confirmed = api("/v1/prompt", { target, text: "hello there" });
+    await sleep(150);
+    expect(await submit(session, "hello there")).toEqual({ status: 200 });
+    expect(await confirmed).toEqual({ status: 200, data: { ok: true, delivered: true } });
+    // A prompt nobody typed from the phone is never blocked, whoever submits it.
+    expect(await submit(other, "typed at the keyboard")).toEqual({ status: 200 });
+    // A busy agent submits queued text long after the phone stopped waiting;
+    // the record outlives that wait, so a wrong conversation is still refused.
+    expect((await api("/v1/prompt", { target, text: "queued while busy" })).data).toEqual({ ok: true });
+    expect(await submit(other, "queued while busy")).toMatchObject({ decision: "block" });
+    expect(await submit(session, "queued while busy")).toEqual({ status: 200 });
+  }, 15_000);
   it("reports uncertain prompt delivery after replacement and sends only once", async () => {
     replaceBeforeMutation = true;
     const response = await api("/v1/prompt", { target, text: "sent once" });

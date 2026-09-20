@@ -7,7 +7,7 @@ import { z } from "zod";
 import { BridgeError, bridgeRoot, object, objects, provider, serverName, sessionId, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
 import { herdrRoot, rpc, snapshot, trustedDirectory, validateTarget } from "./herdr.js";
 import { capturesChanges, ToolChanges } from "./changes.js";
-import { phrenStoreRoot } from "./transcripts.js";
+import { phrenStoreRoot, unwrapPastedContent } from "./transcripts.js";
 import { ApprovalPushService } from "./push.js";
 
 const opencodeSession = /^ses_[0-9A-Za-z]{1,64}$/;
@@ -93,11 +93,26 @@ export class ApprovalWatchLeases {
   }
   has(server: string) { return (this.servers.get(server) || 0) > this.now(); }
 }
+export type DeliveryOutcome = "delivered" | "blocked" | "pending";
+interface Delivery { source: Provider; session: string; settle: (outcome: DeliveryOutcome) => void; timer: ReturnType<typeof setTimeout> }
+
+/** What the agent hands its UserPromptSubmit hook is the terminal's pasted
+ * form of what Phren typed; compare the words, not the wrapping. */
+function promptKey(text: string): string {
+  return unwrapPastedContent(text).replace(/\s+/g, " ").trim();
+}
+
 /** This socket is deliberately separate from the phone's HTTP pipe. Only local
  * agent callbacks can register identities or create an approval request. */
 export class AgentHooks {
   readonly changes = new ToolChanges();
   private pending = new Map<string, Pending>();
+  /** Prompts Phren has typed into a pane, by their text, until the agent that
+   * actually receives one reports in through UserPromptSubmit. Herdr writes
+   * to a pane, not a conversation; the receiving agent's hook is the only
+   * party that knows which conversation consumed the text, so it is the one
+   * that can refuse it when that is not the conversation the phone meant. */
+  private deliveries = new Map<string, Delivery[]>();
   private watching = new Map<string, number>();
   readonly overview = new ApprovalWatchLeases();
   private server?: Server;
@@ -107,6 +122,40 @@ export class AgentHooks {
     const key = JSON.stringify(target);
     this.watching.set(key, (this.watching.get(key) || 0) + 1);
     return () => { const n = (this.watching.get(key) || 1) - 1; if (n) this.watching.set(key, n); else this.watching.delete(key); };
+  }
+  /** Register a prompt about to be typed into `target`'s pane. The returned
+   * promise settles "delivered" once that conversation's own hook submits the
+   * text, "blocked" if another conversation in the pane tried to, or "pending"
+   * after `waitMs`: a busy agent queues typed input and submits it only when
+   * its turn ends, so the record outlives the wait (up to ten minutes) and a
+   * late submission to the wrong conversation is still refused. */
+  expectDelivery(target: Target, text: string, waitMs = 1_500): Promise<DeliveryOutcome> {
+    const key = promptKey(text);
+    if (!key) return Promise.resolve("pending");
+    return new Promise<DeliveryOutcome>(resolve => {
+      let settled = false;
+      const list = this.deliveries.get(key) ?? [];
+      const remove = () => { const current = this.deliveries.get(key) ?? []; const index = current.indexOf(delivery); if (index >= 0) current.splice(index, 1); if (!current.length) this.deliveries.delete(key); };
+      const settle = (outcome: DeliveryOutcome) => { if (!settled) { settled = true; resolve(outcome); } if (outcome !== "pending") { clearTimeout(delivery.timer); remove(); } };
+      const delivery: Delivery = { source: target.source, session: target.session, settle, timer: setTimeout(() => settle("pending"), waitMs) };
+      delivery.timer.unref?.();
+      const expiry = setTimeout(remove, 600_000); expiry.unref?.();
+      list.push(delivery); this.deliveries.set(key, list);
+      while (this.deliveries.size > 256) this.deliveries.delete(this.deliveries.keys().next().value!);
+    });
+  }
+  /** The conversation `target` just submitted `prompt`. Nothing Phren typed
+   * matches: a locally typed prompt, always allowed. Otherwise the oldest
+   * matching delivery decides: its own conversation consumes it; any other
+   * conversation is told to drop it, so the text is never spoken to the
+   * wrong agent and the phone can safely send it again. */
+  private submitted(target: Target, prompt: string): Json {
+    const list = this.deliveries.get(promptKey(prompt));
+    const delivery = list?.[0];
+    if (!delivery) return {};
+    if (delivery.source === target.source && delivery.session === target.session) { delivery.settle("delivered"); return {}; }
+    delivery.settle("blocked");
+    return { decision: "block", reason: "Phren sent this message to a different conversation in this pane; it was not delivered here. Send it again from the phone." };
   }
   approval(target: Target): Json | undefined {
     const pending = [...this.pending.entries()].find(([, p]) => JSON.stringify(p.target) === JSON.stringify(target));
@@ -195,6 +244,9 @@ export class AgentHooks {
         const input = typeof body.input === "string" ? { patch: body.input } : object(body.input), command = [input.command, input.cmd].find(v => typeof v === "string") as string | undefined;
         // A shell call by name, or any tool whose input is a command line —
         // Codex has renamed its shell tool more than once.
+        if (body.event === "UserPromptSubmit") {
+          res.end(JSON.stringify(typeof body.prompt === "string" ? this.submitted(target, body.prompt.slice(0, 65_536)) : {})); return;
+        }
         if (["PreToolUse", "PostToolUse"].includes(String(body.event)) && capturesChanges(String(body.tool), input)) {
           const conversation = `${target.source}:${target.session}`, id = String(body.toolUseId || "").slice(0, 200);
           if (body.event === "PreToolUse") await this.changes.before(conversation, id, typeof body.cwd === "string" && path.isAbsolute(body.cwd) ? body.cwd : await trustedDirectory(pane), command ?? "", input);
@@ -253,13 +305,16 @@ export async function agentHook(source: Provider) {
   const target = targetSchema.parse({ server, workspace: process.env.HERDR_WORKSPACE_ID, tab: process.env.HERDR_TAB_ID,
     pane: process.env.HERDR_PANE_ID, source, session: value.session_id || value.sessionId });
   const event = String(value.hook_event_name || "SessionStart");
-  const data = JSON.stringify({ target, event, tool: value.tool_name, input: value.tool_input, toolUseId: value.tool_use_id, cwd: value.cwd });
+  const data = JSON.stringify({ target, event, tool: value.tool_name, input: value.tool_input, toolUseId: value.tool_use_id, cwd: value.cwd,
+    ...(event === "UserPromptSubmit" && typeof value.prompt === "string" ? { prompt: value.prompt.slice(0, 65_536) } : {}) });
   await new Promise<void>(resolve => {
     const req = request({ socketPath: localSocket(), path: "/hook", method: "POST", timeout: event === "PermissionRequest" ? 58_000 : event.endsWith("ToolUse") ? 8_000 : 1500,
       headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(data) } }, res => {
       let result = "";
       res.on("data", chunk => { result += chunk.toString(); if (result.length > 16_384) req.destroy(); });
-      res.on("end", () => { if (res.statusCode === 200 && event === "PermissionRequest") process.stdout.write(result); resolve(); });
+      // Only a decision reaches the agent: an approval answer, or a refusal of
+      // a prompt Phren meant for another conversation. An empty reply says nothing.
+      res.on("end", () => { if (res.statusCode === 200 && (event === "PermissionRequest" || (event === "UserPromptSubmit" && result.includes("\"decision\"")))) process.stdout.write(result); resolve(); });
       res.on("error", () => resolve());
     });
     req.on("error", () => resolve()); req.on("timeout", () => { req.destroy(); resolve(); }); req.end(data);

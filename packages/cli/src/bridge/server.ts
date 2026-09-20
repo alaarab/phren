@@ -228,14 +228,25 @@ export async function serve(version: string): Promise<void> {
           const pane = await validateTarget(target, sendsInput, sendsInput || url.pathname === "/v1/upload");
           if (url.pathname === "/v1/prompt") {
             const text = z.string().min(1).max(32768).refine(t => !/[\x00-\x08\x0b-\x1f\x7f]/.test(t)).parse(data.text);
+            // Herdr types into the pane; the agent that receives the text
+            // confirms or refuses it through its UserPromptSubmit hook, by
+            // conversation. That is the binding Herdr's own API lacks.
+            const expected = agentHooks.expectDelivery(target, text);
             await rpc(target.server, "agent.prompt", { target: target.pane, text });
-            // Delivery has already happened. Recheck fresh identity and never retry.
-            let confirmed = false;
-            try {
-              const current = objects((await snapshot(target.server)).panes).find(p => p.pane_id === target.pane && p.tab_id === target.tab && p.workspace_id === target.workspace && p.agent === target.source);
-              confirmed = !!current && current.terminal_id === pane.terminal_id && await paneIdentity(target.server, current, true) === target.session;
-            } catch { /* No reliable post-delivery identity. */ }
-            result = { ok: true, ...(!confirmed ? { deliveryUncertain: true } : {}) };
+            const outcome = await expected;
+            if (outcome === "blocked") throw new BridgeError(409, "The conversation in this pane changed; the message was not delivered. Reopen the chat and send it again.");
+            if (outcome === "delivered") { result = { ok: true, delivered: true }; }
+            else {
+              // The agent has not submitted it yet (a busy agent queues typed
+              // input). Recheck fresh identity and never retry; a late
+              // submission to another conversation is still refused above.
+              let confirmed = false;
+              try {
+                const current = objects((await snapshot(target.server)).panes).find(p => p.pane_id === target.pane && p.tab_id === target.tab && p.workspace_id === target.workspace && p.agent === target.source);
+                confirmed = !!current && current.terminal_id === pane.terminal_id && await paneIdentity(target.server, current, true) === target.session;
+              } catch { /* No reliable post-delivery identity. */ }
+              result = { ok: true, ...(!confirmed ? { deliveryUncertain: true } : {}) };
+            }
           } else if (url.pathname === "/v1/keys") {
             if (JSON.stringify(data.keys) !== '["Escape"]' || pane.agent_status !== "working") throw new BridgeError(409, "This agent is no longer working.");
             await rpc(target.server, "agent.send_keys", { target: target.pane, keys: ["esc"] }); result = { ok: true };
