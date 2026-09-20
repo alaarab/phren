@@ -47,6 +47,43 @@ final class AccountUsageTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(openRouter.spend).amountUSD, 6.2, accuracy: 0.000_001)
         XCTAssertEqual(openRouter.spend?.periodLabel, "This week · UTC")
     }
+    func testHookPayloadWithAllFourProvidersParses() throws {
+        let now = try XCTUnwrap(ISO8601Dates.parse("2026-09-20T07:41:48.502Z"))
+        let key = String(repeating: "a", count: 64)
+        let data = Data(#"{"accounts":[{"source":"codex","windows":[{"id":"codex:primary","name":"7-day limit","usedPercent":12,"resetsAt":"2026-09-26T13:12:01.000Z"}],"updatedAt":"2026-09-20T07:41:48.502Z"},{"source":"claude","windows":[{"id":"five_hour","name":"5-hour limit","usedPercent":35,"resetsAt":"2026-09-20T09:30:00.000Z"},{"id":"seven_day","name":"7-day limit","usedPercent":15,"resetsAt":"2026-09-26T20:00:00.000Z"},{"id":"seven_day_fable","name":"7-day · Fable","usedPercent":16,"resetsAt":"2026-09-26T20:00:00.000Z"}],"updatedAt":"2026-09-20T07:41:45.218Z"},{"source":"opencode","windows":[],"spend":{"amountUSD":4.5,"period":"rolling_7_days"},"updatedAt":"2026-09-20T07:41:45.218Z"},{"source":"openrouter","accountId":"\#(key)","windows":[],"spend":{"amountUSD":5.177927645,"period":"calendar_week"},"updatedAt":"2026-09-20T07:41:45.218Z"}]}"#.utf8)
+        let value = try AccountUsageSnapshot.read(data)
+        XCTAssertEqual(value.accounts.map(\.source), ["codex", "claude", "opencode", "openrouter"])
+
+        let codex = value.accounts[0]
+        XCTAssertEqual(codex.windows.map(\.id), ["codex:primary"])
+        XCTAssertEqual(codex.windows[0].usedPercent, 12)
+        XCTAssertEqual(codex.updatedDate, now)
+        XCTAssertEqual(codex.windows[0].resetDate, ISO8601Dates.parse("2026-09-26T13:12:01.000Z"))
+
+        let claude = value.accounts[1]
+        XCTAssertEqual(claude.windows.map(\.id), ["five_hour", "seven_day", "seven_day_fable"])
+        XCTAssertEqual(claude.windows.map(\.usedPercent), [35, 15, 16])
+        XCTAssertEqual(claude.windows[2].name, "7-day · Fable")
+
+        let openCode = value.accounts[2]
+        XCTAssertTrue(openCode.windows.isEmpty)
+        XCTAssertEqual(try XCTUnwrap(openCode.spend).amountUSD, 4.5, accuracy: 0.000_001)
+        XCTAssertEqual(openCode.spend?.periodLabel, "Past 7 days")
+
+        let openRouter = value.accounts[3]
+        XCTAssertTrue(openRouter.windows.isEmpty)
+        XCTAssertEqual(openRouter.accountId, key)
+        XCTAssertEqual(try XCTUnwrap(openRouter.spend).amountUSD, 5.177927645, accuracy: 0.000_000_001)
+        XCTAssertEqual(openRouter.spend?.periodLabel, "This week · UTC")
+    }
+    func testHookPayloadWithoutSpendingAccountsParses() throws {
+        let data = Data(#"{"accounts":[{"source":"codex","windows":[{"id":"codex:primary","name":"7-day limit","usedPercent":12}],"updatedAt":"2026-09-20T07:41:48.502Z"},{"source":"claude","windows":[],"message":"Usage appears after Claude Code replies on this computer."}]}"#.utf8)
+        let value = try AccountUsageSnapshot.read(data)
+        XCTAssertEqual(value.accounts.map(\.source), ["codex", "claude"])
+        XCTAssertTrue(value.accounts[1].windows.isEmpty)
+        XCTAssertNil(value.accounts[0].spend)
+        XCTAssertNil(value.accounts[0].accountId)
+    }
     func testInvalidProviderPercentDateAndDuplicateWindowsAreRejected() throws {
         let valid = #"{"accounts":[{"source":"codex","windows":[{"id":"primary","name":"5-hour limit","usedPercent":0,"resetsAt":"2026-09-12T09:00:00Z"}]}]}"#
         for invalid in [valid.replacingOccurrences(of: "codex", with: "unknown"),
