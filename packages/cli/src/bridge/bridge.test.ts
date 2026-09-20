@@ -699,6 +699,58 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     expect(JSON.stringify(frames[2])).toContain('"output_tokens":3');
     const closed = once(socket, "close"); current = "bbbbbbbb-1111-4111-8111-111111111111"; await closed;
   });
+  it("follows a child agent's transcript live through the parent's socket and pages its history", async () => {
+    // The parent records the launch; the child's own rollout names the parent.
+    const child = "cccccccc-2222-4222-8222-222222222222";
+    const activity = (kind: string) => ({ type: "event_msg", payload: { type: "item_completed", item: {
+      type: "SubAgentActivity", id: "spawn-1", kind, agent_thread_id: child, agent_path: "/root/reviewer" } } });
+    const childFile = path.join(root, `codex/sessions/2026/09/10/rollout-2026-09-10T00-00-01-${child}.jsonl`);
+    await writeFile(childFile, [JSON.stringify({ type: "session_meta", payload: { id: child, source: { subagent: { thread_spawn: { parent_thread_id: session } } } } }),
+      ...Array.from({ length: 70 }, (_, i) => JSON.stringify(row(`Child step ${i}`)))].join("\n") + "\n");
+    await appendFile(record, JSON.stringify(activity("started")) + "\n");
+    const tree = await api("/v1/subagents?" + new URLSearchParams(target));
+    expect(tree.status).toBe(200);
+    expect(tree.data.agents[0]).toMatchObject({ provider: "codex", callId: "spawn-1", state: "running" });
+    const id = tree.data.agents[0].id as string;
+    expect(id).toMatch(/^[a-f0-9]{32}$/);
+    const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/transcripts?${new URLSearchParams({ ...target, child: id })}`);
+    const frames: any[] = []; socket.on("message", data => frames.push(JSON.parse(data.toString())));
+    try {
+      await once(socket, "open");
+      for (let i = 0; i < 80 && !frames.length; i++) await sleep(25);
+      // The opening page is the child's recent rows, named by the public id.
+      expect(frames[0]).toMatchObject({ type: "backlog", source: "codex", session: id, hasMore: true });
+      expect(frames[0].entries).toHaveLength(60);
+      expect(JSON.stringify(frames[0])).toContain("Child step 69");
+      expect(JSON.stringify(frames[0])).not.toContain(child);
+      await appendFile(childFile, JSON.stringify(row("Child step 70")) + "\n");
+      for (let i = 0; i < 80 && frames.length < 2; i++) await sleep(25);
+      expect(frames[1]).toMatchObject({ type: "append", session: id });
+      expect(JSON.stringify(frames[1])).toContain("Child step 70"); expect(JSON.stringify(frames[1])).not.toContain("Child step 69");
+      socket.send(JSON.stringify({ type: "older", beforeLine: frames[0].startLine }));
+      for (let i = 0; i < 80 && !frames.some(f => f.type === "older"); i++) await sleep(25);
+      const older = frames.find(f => f.type === "older");
+      expect(older).toMatchObject({ session: id, startLine: 0, hasMore: false });
+      expect(JSON.stringify(older)).toContain("Child step 0");
+    } finally { socket.terminate(); }
+    const page = await api("/v1/transcripts/history?" + new URLSearchParams({ ...target, child: id, beforeLine: "11" }));
+    expect(page.status).toBe(200);
+    expect(page.data).toMatchObject({ type: "older", source: "codex", session: id, startLine: 0 });
+    // Line 0 is the session_meta row, which is not a conversation event.
+    expect(page.data.entries.map((e: any) => e.line)).toEqual(Array.from({ length: 10 }, (_, i) => i + 1));
+    // A child id the conversation never spawned is unknown, on every route.
+    const unknown = "0".repeat(32);
+    expect((await api("/v1/transcripts/history?" + new URLSearchParams({ ...target, child: unknown, beforeLine: "11" }))).status).toBe(404);
+    expect((await api("/v1/subagents/transcript?" + new URLSearchParams({ ...target, child: unknown }))).status).toBe(404);
+    const rejected = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/transcripts?${new URLSearchParams({ ...target, child: unknown })}`);
+    const [code] = await once(rejected, "close");
+    expect(code).toBe(1011);
+    // The child's socket follows the parent conversation's binding: when the
+    // parent is replaced, the stream closes.
+    const bound = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/transcripts?${new URLSearchParams({ ...target, child: id })}`);
+    await once(bound, "open");
+    const closed = once(bound, "close"); current = "bbbbbbbb-1111-4111-8111-111111111111"; await closed;
+  });
   it("rejects stale actions and prevents phone requests from registering agent hooks", async () => {
     expect((await api("/v1/approvals/answer", { target, actionId: "bbbbbbbb-1111-4111-8111-111111111111", decision: "approve" })).status).toBe(409);
     expect((await api("/hook", { target, event: "PermissionRequest" })).status).toBe(404);
