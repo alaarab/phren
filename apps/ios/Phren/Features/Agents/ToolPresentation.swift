@@ -5,6 +5,8 @@ import Foundation
 struct ToolPresentation {
     let title: String
     let body: String
+    /// The human summary Claude Code attaches to a Bash call.
+    let description: String?
     let patch: String?
     let path: String?
     /// A short qualifier after the path — "lines 10–50", "in src/".
@@ -116,7 +118,10 @@ struct ToolPresentation {
                 $0.replacingOccurrences(of: "*** Update File: ", with: "").replacingOccurrences(of: "*** Add File: ", with: "").replacingOccurrences(of: "*** Delete File: ", with: "").replacingOccurrences(of: "+++ b/", with: "")
             }
         }
-        self.title = title; self.body = body; self.path = path; patch = hasPatch ? body : nil
+        let described = (fields?["description"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.title = title; self.body = body
+        description = described.flatMap { $0.isEmpty ? nil : String($0.prefix(500)) }
+        self.path = path; patch = hasPatch ? body : nil
     }
 
     /// The last two path components — enough to tell files apart on a phone.

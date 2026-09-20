@@ -387,6 +387,10 @@ import UIKit
             claudeCall("agent-tests", "Task", ["description": "Run the full test suite", "subagent_type": "general-purpose", "name": "tester", "run_in_background": true,
                                                "prompt": "Run swift test in PhrenKit and the simulator suite; report failures only."])
             claudeResult("agent-tests", "Async agent launched successfully.\nagentId: fixture-tests (for resuming)\noutput_file: /tmp/phren-fixture/tester.txt")
+            claudeCall("background-tests", "Bash", ["command": "cd /tmp/phren-fixture && swift test", "description": "Run the full test suite", "run_in_background": true])
+            claudeResult("background-tests", "Command running in background with ID: fixture-background-tests")
+            claudeCall("background-worker", "Bash", ["command": #"cat p.txt | ~/.phren/global/skills/codex/scripts/run.sh --label "Per-computer color for session cards" --worktree /tmp/wt"#, "run_in_background": true])
+            claudeResult("background-worker", "Command running in background with ID: fixture-background-worker")
         }
         if flag("--chat-todos") {
             // The first list has an item the second dropped, so a test can
