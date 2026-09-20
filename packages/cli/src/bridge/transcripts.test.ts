@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { childAgent, childAgentTree, historicalImage, publicChildAgents, TranscriptReader } from "./transcripts.js";
+import { childAgent, childAgentTree, historicalImage, publicChildAgents, TranscriptReader, unwrapPastedContent, visibleEvent } from "./transcripts.js";
 import type { Json, Provider } from "./protocol.js";
 
 const text = { type: "text", text: "Keep this text and data:image/png;base64,AAAA unchanged." };
@@ -170,5 +170,37 @@ describe("child agent relationships", () => {
       expect(tree[0]).toMatchObject({ provider: "opencode", path: "DeepSeek review", state: "running" });
       expect(publicChildAgents(tree)[0]).not.toHaveProperty("transcript");
     } finally { process.env.PHREN_PATH = old; await rm(root, { recursive: true, force: true }); }
+  });
+});
+
+describe("pasted_content wrappers on Claude user turns", () => {
+  // Herdr's agent.prompt delivers the phone's message as a bracketed paste,
+  // which Claude Code files wrapped this way — even for one-line messages.
+  const wrapped = '\n\n<pasted_content id="ff37">\nThey are in /Projects actually\n</pasted_content id="ff37">\n';
+
+  it("keeps only what the user wrote", () => {
+    expect(unwrapPastedContent(wrapped)).toBe("They are in /Projects actually");
+    expect(unwrapPastedContent('<pasted_content>\nline 1\n\nline 2\n</pasted_content>\n\n and a typed remark'))
+      .toBe("line 1\n\nline 2\n\n and a typed remark");
+    expect(unwrapPastedContent("[Image #1]\n\n<pasted_content id=\"71ee\">\nLook at this\n</pasted_content id=\"71ee\">\n")).toBe("[Image #1]\n\nLook at this");
+    expect(unwrapPastedContent("plain text\n")).toBe("plain text\n");
+  });
+
+  it("unwraps string and text-block user content but leaves assistant and tool rows alone", () => {
+    expect(visibleEvent({ type: "user", message: { role: "user", content: wrapped } }, "claude"))
+      .toEqual({ type: "user", message: { role: "user", content: "They are in /Projects actually" } });
+    const blocks = { type: "user", message: { role: "user", content: [{ type: "text", text: wrapped }, { type: "image" }] } };
+    expect(visibleEvent(blocks, "claude")).toEqual({ type: "user", message: { role: "user", content: [{ type: "text", text: "They are in /Projects actually" }, { type: "image" }] } });
+    const assistant = { type: "assistant", message: { role: "assistant", content: [{ type: "text", text: wrapped }] } };
+    expect(visibleEvent(assistant, "claude")).toEqual(assistant);
+    const toolResult = { type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t", content: wrapped }] } };
+    expect(visibleEvent(toolResult, "claude")).toEqual(toolResult);
+  });
+
+  it("exports a queued phone message despite the wrapper, with matching enqueue and remove keys", () => {
+    const enqueue = visibleEvent({ type: "queue-operation", operation: "enqueue", timestamp: "t1", content: wrapped }, "claude");
+    expect(enqueue).toMatchObject({ type: "user", phrenQueued: true, message: { role: "user", content: "They are in /Projects actually" } });
+    const remove = visibleEvent({ type: "queue-operation", operation: "remove", timestamp: "t2", content: wrapped }, "claude");
+    expect(remove).toEqual({ type: "phren_queue_consumed", key: enqueue!.phrenQueueKey, timestamp: "t2" });
   });
 });

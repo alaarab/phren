@@ -246,6 +246,24 @@ export async function transcriptPath(source: Provider, session: string): Promise
   return file;
 }
 
+/** Claude Code files bracketed-paste input — which is how Herdr's
+ * `agent.prompt` delivers every message the phone sends — as
+ * `<pasted_content id="…">…</pasted_content id="…">`. The wrapper is the
+ * terminal's bookkeeping, not what the user wrote. */
+const PASTED_CONTENT = /<pasted_content\b[^>]*>\n?([\s\S]*?)\n?<\/pasted_content\b[^>]*>/g;
+export function unwrapPastedContent(text: string): string {
+  return text.includes("<pasted_content") ? text.replace(PASTED_CONTENT, "$1").trim() : text;
+}
+function unwrapUserText(message: Json): Json {
+  if (message.role !== "user") return message;
+  if (typeof message.content === "string") return { ...message, content: unwrapPastedContent(message.content) };
+  if (!Array.isArray(message.content)) return message;
+  return { ...message, content: message.content.map(block => {
+    const b = object(block);
+    return b.type === "text" && typeof b.text === "string" ? { ...b, text: unwrapPastedContent(b.text) } : block;
+  }) };
+}
+
 /** Public conversation/tool events and real usage only. Never export private reasoning. */
 export function visibleEvent(raw: Json, source: Provider, includeSidechain = false): Json | undefined {
   if (source === "opencode") {
@@ -279,6 +297,9 @@ export function visibleEvent(raw: Json, source: Provider, includeSidechain = fal
     }
     if (["function_call", "custom_tool_call", "function_call_output", "custom_tool_call_output"].includes(String(p.type))) return raw;
   } else if (source === "claude") {
+    // A queued phone message carries the same wrapper; unwrap before the
+    // digest so enqueue and remove keep matching keys.
+    if (raw.type === "queue-operation" && typeof raw.content === "string") raw = { ...raw, content: unwrapPastedContent(raw.content) };
     if (raw.type === "queue-operation" && raw.operation === "remove" && typeof raw.content === "string") {
       return { type: "phren_queue_consumed", key: createHash("sha256").update(raw.content).digest("hex"), timestamp: raw.timestamp };
     }
@@ -309,9 +330,9 @@ export function visibleEvent(raw: Json, source: Provider, includeSidechain = fal
     }
     if (raw.isMeta || (raw.isSidechain && !includeSidechain) || !["user", "assistant", "system"].includes(String(raw.type))) return undefined;
     raw = Object.fromEntries(Object.entries(raw).filter(([key]) => CLAUDE_KEYS.has(key)));
-    const message = object(raw.message);
+    const message = unwrapUserText(object(raw.message));
     // Keep indexes for historical images while removing thinking contents.
-    if (typeof message.content === "string") return raw.type === "user" && harnessPreamble(message.content) ? undefined : raw;
+    if (typeof message.content === "string") return raw.type === "user" && harnessPreamble(message.content) ? undefined : { ...raw, message };
     if (Array.isArray(message.content)) return { ...raw, message: { ...message, content: objects(message.content).map(b =>
       ["text", "image", "tool_use", "tool_result"].includes(String(b.type)) ? b : { type: "redacted" }) } };
   } else {
