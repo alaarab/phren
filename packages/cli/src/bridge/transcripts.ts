@@ -14,7 +14,7 @@ export interface Entry { line: number; raw: Json }
 export interface ChildAgentRelation {
   /** `id` is a parent-scoped public reference; `session` never leaves Hook. */
   id: string; session: string; transcript: string; provider: Provider; path: string; callId: string; state: "running" | "completed";
-  /** Only fan-out manifests name a model; other providers leave it absent. */
+  /** Fan-out manifests and Claude child transcripts can name a model. */
   model?: string;
   /** Public checkout labels for fan-outs; full paths remain private. */
   worktreeName?: string;
@@ -95,10 +95,57 @@ export async function childAgentTree(source: Provider, session: string, depth = 
 }
 
 const claudeRelationCache = new Map<string, { signature: string; relations: ChildAgentRelation[]; recheckAt?: number }>();
+type ClaudeChildModelCache = { dev: number; ino: number; size: number; model?: string };
+const claudeChildModelCache = new Map<string, ClaudeChildModelCache>();
+
+function cacheClaudeChildModel(file: string, entry: ClaudeChildModelCache): void {
+  claudeChildModelCache.set(file, entry);
+  while (claudeChildModelCache.size > 128) claudeChildModelCache.delete(claudeChildModelCache.keys().next().value!);
+}
+
+/** The model is available on the first assistant turn of a Claude sidechain.
+ * A growing transcript without that turn is retried; a known model is final. */
+async function claudeChildModel(file: string): Promise<string | undefined> {
+  const metadata = await stat(file), cached = claudeChildModelCache.get(file);
+  if (cached && cached.dev === metadata.dev && cached.ino === metadata.ino
+      && (cached.model !== undefined || metadata.size <= cached.size)) return cached.model;
+  let model: string | undefined;
+  if (metadata.size > 0) {
+    const bytes = Math.min(metadata.size, 65_536);
+    const input = createInterface({ input: createReadStream(file, { start: 0, end: bytes - 1 }), crlfDelay: Infinity });
+    let lines = 0;
+    for await (const line of input) {
+      ++lines;
+      try {
+        const raw = object(JSON.parse(line));
+        if (raw.type === "assistant") {
+          const value = object(raw.message).model;
+          if (typeof value === "string" && value.length > 0 && value.length <= 200) model = value;
+          break;
+        }
+      } catch { /* Ignore malformed rows while looking for the first assistant turn. */ }
+      if (lines === 200) break;
+    }
+  }
+  cacheClaudeChildModel(file, { dev: metadata.dev, ino: metadata.ino, size: metadata.size, ...(model !== undefined ? { model } : {}) });
+  return model;
+}
+
+async function withClaudeChildModels(relations: ChildAgentRelation[]): Promise<ChildAgentRelation[]> {
+  return Promise.all(relations.map(async relation => {
+    if (relation.model !== undefined) return relation;
+    const model = await claudeChildModel(relation.transcript).catch(() => undefined);
+    return model === undefined ? relation : { ...relation, model };
+  }));
+}
+
 async function claudeChildAgents(file: string, session: string): Promise<ChildAgentRelation[]> {
   const metadata = await stat(file), signature = `${metadata.dev}:${metadata.ino}:${metadata.size}:${metadata.mtimeMs}`;
   const cached = claudeRelationCache.get(file);
-  if (cached?.signature === signature && !(cached.recheckAt !== undefined && Date.now() >= cached.recheckAt)) return cached.relations;
+  if (cached?.signature === signature && !(cached.recheckAt !== undefined && Date.now() >= cached.recheckAt)) {
+    cached.relations = await withClaudeChildModels(cached.relations);
+    return cached.relations;
+  }
   const launches = new Map<string, { path: string; callId: string; state: "running" | "completed" }>();
   const lines = createInterface({ input: createReadStream(file, { encoding: "utf8" }), crlfDelay: Infinity });
   for await (const line of lines) {
@@ -128,8 +175,10 @@ async function claudeChildAgents(file: string, session: string): Promise<ChildAg
       if (launch.state === "running") awaiting = true;
       continue;
     }
+    const model = await claudeChildModel(childFile).catch(() => undefined);
     relations.push({ id: createHash("sha256").update(`claude\0${session}\0${agentId}`).digest("hex").slice(0, 32),
-      session: agentId, transcript: childFile, provider: "claude", ...launch, children: [] });
+      session: agentId, transcript: childFile, provider: "claude", ...launch,
+      ...(model !== undefined ? { model } : {}), children: [] });
   }
   claudeRelationCache.set(file, { signature, relations, ...(awaiting ? { recheckAt: Date.now() + 2_000 } : {}) });
   while (claudeRelationCache.size > 64) claudeRelationCache.delete(claudeRelationCache.keys().next().value!);
