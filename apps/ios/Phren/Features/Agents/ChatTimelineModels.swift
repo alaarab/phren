@@ -231,6 +231,7 @@ struct ChatBackgroundJob: Identifiable, Equatable {
     enum State: Equatable { case running, finished(exitCode: Int?) }
     let id: String
     let title: String
+    let worker: String?
     let command: String
     let output: String
     let state: State
@@ -241,7 +242,8 @@ struct ChatBackgroundJob: Identifiable, Equatable {
     /// and iOS killed the app for hanging (watchdog, 2026-09-15 11:33).
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.id == rhs.id && lhs.state == rhs.state && lhs.startedAt == rhs.startedAt && lhs.finishedAt == rhs.finishedAt
-            && lhs.title == rhs.title && lhs.output.utf8.count == rhs.output.utf8.count && lhs.command.utf8.count == rhs.command.utf8.count
+            && lhs.title == rhs.title && lhs.worker == rhs.worker
+            && lhs.output.utf8.count == rhs.output.utf8.count && lhs.command.utf8.count == rhs.command.utf8.count
     }
 }
 
@@ -274,7 +276,10 @@ enum ChatBackgroundJobs {
             let presentation = ToolPresentationCache.value(message)
             let notification = notifications[id]
             let output = notification?.output.isEmpty == false ? notification!.output : resultText
-            let summary = notification?.summary ?? presentation.preview
+            let worker = BackgroundJobLabel.parse(command: presentation.body)
+            let tool = message.title?.split(separator: ".").last.map(String.init)
+            let description = tool == "Bash" ? presentation.description : nil
+            let summary = worker.map { "Worker: \($0.label)" } ?? description ?? notification?.summary ?? presentation.preview
             let code = exitCode(notification?.summary) ?? exitCode(resultText)
             // The tool result of a background call arrives at once and only
             // says the job started; done means the task notification came,
@@ -289,6 +294,7 @@ enum ChatBackgroundJobs {
             // Finished jobs linger long enough to be read, then leave.
             if !includeExpired, let finishedAt, now.timeIntervalSince(finishedAt) > finishedLinger { return nil }
             return ChatBackgroundJob(id: id, title: summary.isEmpty ? "Background command" : summary,
+                                     worker: worker?.provider,
                                      command: presentation.body, output: output,
                                      state: finished ? .finished(exitCode: code) : .running,
                                      startedAt: startedAt, finishedAt: finishedAt)

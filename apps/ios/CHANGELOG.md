@@ -12,6 +12,8 @@ number counts up on its own.
 
 - Subagent transcripts open that agent's repository changes directly, with the
   same native file and diff views as the parent chat.
+- Background jobs show their human description, and wrapped Codex and opencode
+  workers show their label and provider mark while they run.
 - Graph nodes open in the graph's own docked dossier card, the same dark-glass
   dossier the web and VS Code viewers draw, with Focus, Open project and Share;
   the graph stays visible and the zoom controls step aside.

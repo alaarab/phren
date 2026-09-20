@@ -177,6 +177,14 @@ final class AgentChatTests: XCTestCase {
         let tests = app.descendants(matching: .any).matching(identifier: "chat-agent-card:agent-tests").firstMatch
         XCTAssertTrue(tests.exists); XCTAssertTrue(tests.label.contains("tester")); XCTAssertTrue(tests.label.contains("running"))
         XCTAssertTrue(app.staticTexts["background"].exists)
+        let describedJob = app.buttons["chat-background-job:background-tests"]
+        XCTAssertTrue(describedJob.waitForExistence(timeout: 5))
+        XCTAssertTrue(describedJob.label.contains("Run the full test suite"), describedJob.label)
+        XCTAssertFalse(describedJob.label.contains("cd "), "The command stays in the expanded details, not the title")
+        let workerJob = app.buttons["chat-background-job:background-worker"]
+        XCTAssertTrue(workerJob.waitForExistence(timeout: 5))
+        XCTAssertTrue(workerJob.label.contains("Worker: Per-computer color for session cards"), workerJob.label)
+        capture(app, "Background jobs by description")
         XCTAssertEqual(rawJSONTexts(app).count, 0, "No raw JSON on a card")
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "subagent_type")).firstMatch.exists)
         XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-read-run:")).firstMatch.exists)

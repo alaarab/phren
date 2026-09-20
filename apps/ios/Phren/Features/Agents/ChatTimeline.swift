@@ -21,6 +21,7 @@ struct ChatBackgroundJobsView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             HStack(spacing: 6) {
                                 Circle().fill(job.state == .running ? PhrenTheme.cyan : PhrenTheme.success).frame(width: 6, height: 6)
+                                if let worker = job.worker { AgentProviderGlyph(source: worker, size: 14) }
                                 Text(job.title).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
                                 Text(status(job, at: tick.date)).foregroundStyle(PhrenTheme.chatNeutralDim)
                                 Image(systemName: "chevron.down").rotationEffect(.degrees(expanded.contains(job.id) ? 180 : 0))
