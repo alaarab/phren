@@ -1,11 +1,15 @@
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { tmpdir, homedir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { fanoutChildren, visibleCodexExecEvent, visibleOpenCodeRunEvent } from "./fanouts.js";
 
 const parent = "aaaaaaaa-1111-4111-8111-111111111111";
 let roots: string[] = [];
+
+function objectPayload(event: unknown): Record<string, unknown> {
+  return (event as { payload: Record<string, unknown> }).payload;
+}
 
 async function fixture(id: string, overrides: Record<string, unknown> = {}, events = '{"type":"text"}\n') {
   const root = await mkdtemp(path.join(tmpdir(), "phren-fanouts-")); roots.push(root);
@@ -53,7 +57,7 @@ describe("fan-out manifests", () => {
     const bound = await codexFixture("job-codex", thread);
     const found = await fanoutChildren("codex", parent, bound.env);
     expect(found).toHaveLength(1);
-    expect(found[0]).toMatchObject({ provider: "codex", session: thread, path: "Review bridge", state: "running" });
+    expect(found[0]).toMatchObject({ provider: "codex", session: thread, path: "Review bridge", state: "running", model: "gpt-5-codex" });
 
     const mismatched = await codexFixture("job-codex-bad", "ses_abc");
     expect(await fanoutChildren("codex", parent, mismatched.env)).toEqual([]);
@@ -73,30 +77,52 @@ describe("fan-out manifests", () => {
     expect(visibleOpenCodeRunEvent({ type: "step_start", part: { reasoning: secret } })).toBeUndefined();
   });
 
-  it("translates Codex exec rows without leaking commands, output, or paths", () => {
-    const secret = "sk-secret";
+  it("exports Codex exec commands, output tails, and changed paths", () => {
+    const home = homedir(), homePath = path.join(home, ".ssh", "id_rsa");
     const command = "cat ~/.ssh/id_rsa";
-    const path = "/home/user/.ssh/id_rsa";
     const translated = [
       { type: "item.completed", item: { id: "item_0", type: "agent_message", text: "Visible" } },
       { type: "item.started", item: { id: "item_1", type: "command_execution", command, status: "in_progress" } },
-      { type: "item.completed", item: { id: "item_1", type: "command_execution", command, aggregated_output: secret, exit_code: 0, status: "completed" } },
-      { type: "item.started", item: { id: "item_9", type: "file_change", changes: [{ path, kind: "update" }], status: "in_progress" } },
-      { type: "item.completed", item: { id: "item_9", type: "file_change", changes: [{ path, kind: "update" }], status: "completed" } },
+      { type: "item.completed", item: { id: "item_1", type: "command_execution", command, aggregated_output: "some output", exit_code: 0, status: "completed" } },
+      { type: "item.started", item: { id: "item_9", type: "file_change", changes: [{ path: homePath, kind: "update" }], status: "in_progress" } },
+      { type: "item.completed", item: { id: "item_9", type: "file_change", changes: [{ path: homePath, kind: "update" }], status: "completed" } },
       { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 2 } },
       { type: "error", message: "boom" },
     ].map(visibleCodexExecEvent);
-    const json = JSON.stringify(translated);
-    expect(json).not.toContain(command);
-    expect(json).not.toContain(secret);
-    expect(json).not.toContain(path);
     expect(translated[0]).toMatchObject({ type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "Visible" }] } });
-    expect(translated[1]).toMatchObject({ type: "response_item", payload: { type: "function_call", name: "shell", call_id: "item_1", arguments: "{}" } });
-    expect(translated[2]).toMatchObject({ type: "response_item", payload: { type: "function_call_output", call_id: "item_1", output: "exit 0" } });
-    expect(translated[3]).toMatchObject({ type: "response_item", payload: { type: "function_call", name: "apply_patch", call_id: "item_9", arguments: "{}" } });
-    expect(translated[4]).toMatchObject({ type: "response_item", payload: { type: "function_call_output", call_id: "item_9", output: "1 file(s) changed" } });
+    expect(translated[1]).toMatchObject({ type: "response_item", payload: { type: "function_call", name: "shell", call_id: "item_1", arguments: JSON.stringify({ command }) } });
+    expect(translated[2]).toMatchObject({ type: "response_item", payload: { type: "function_call_output", call_id: "item_1", output: "some output\n[exit 0]" } });
+    expect(translated[3]).toMatchObject({ type: "response_item", payload: { type: "function_call", name: "apply_patch", call_id: "item_9",
+      arguments: JSON.stringify({ files: [{ path: `~${path.sep}.ssh${path.sep}id_rsa`, kind: "update" }] }) } });
+    expect(translated[4]).toMatchObject({ type: "response_item", payload: { type: "function_call_output", call_id: "item_9",
+      output: `1 file(s) changed\n~${path.sep}.ssh${path.sep}id_rsa` } });
     expect(translated[5]).toMatchObject({ type: "event_msg", payload: { type: "task_complete" } });
     expect(translated[6]).toMatchObject({ type: "event_msg", payload: { type: "error", message: "boom" } });
+
+    const oversizeCommand = "x".repeat(3_000);
+    const commandCall = visibleCodexExecEvent({ type: "item.started", item: { id: "long", type: "command_execution", command: oversizeCommand } });
+    const parsedArguments = JSON.parse(String(objectPayload(commandCall).arguments));
+    expect(parsedArguments.command).toHaveLength(2_000);
+    expect(parsedArguments.command).toBe(oversizeCommand.slice(0, 2_000));
+
+    const oversizeOutput = "0123456789".repeat(500);
+    const outputRow = visibleCodexExecEvent({ type: "item.completed", item: { id: "long", type: "command_execution", aggregated_output: oversizeOutput } });
+    const output = String(objectPayload(outputRow).output);
+    expect(output).toBe(`${oversizeOutput.slice(-4_000)}\n[finished]`);
+    expect(output.startsWith(oversizeOutput.slice(-4_000))).toBe(true);
+    expect(output).toContain(oversizeOutput.slice(-1));
+
+    const many = Array.from({ length: 60 }, (_, index) => ({ path: path.join(home, `file-${index}.ts`), kind: "add" }));
+    const patchStart = visibleCodexExecEvent({ type: "item.started", item: { id: "many", type: "file_change", changes: many } });
+    const files = JSON.parse(String(objectPayload(patchStart).arguments)).files;
+    expect(files).toHaveLength(50);
+    expect(files[0]).toEqual({ path: `~${path.sep}file-0.ts`, kind: "add" });
+    const patchDone = visibleCodexExecEvent({ type: "item.completed", item: { id: "many", type: "file_change", changes: many } });
+    const patchOutput = String(objectPayload(patchDone).output);
+    expect(patchOutput.split("\n")).toHaveLength(51);
+    expect(patchOutput.startsWith("50 file(s) changed\n")).toBe(true);
+    expect(patchOutput).toContain(`~${path.sep}file-49.ts`);
+    expect(patchOutput).not.toContain("file-50.ts");
   });
 
   it("ignores private or unknown Codex exec rows", () => {
@@ -106,6 +132,6 @@ describe("fan-out manifests", () => {
     expect(visibleCodexExecEvent({ type: "item.started", item: { id: "item_5", type: "reasoning" } })).toBeUndefined();
     expect(visibleCodexExecEvent({ type: "made.up" })).toBeUndefined();
     expect(visibleCodexExecEvent({ type: "item.completed", item: { id: "item_2", type: "command_execution", exit_code: null } }))
-      .toMatchObject({ type: "response_item", payload: { type: "function_call_output", call_id: "item_2", output: "finished" } });
+      .toMatchObject({ type: "response_item", payload: { type: "function_call_output", call_id: "item_2", output: "\n[finished]" } });
   });
 });

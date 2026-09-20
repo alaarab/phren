@@ -194,6 +194,7 @@ describe("child agent relationships", () => {
       const tree = await childAgentTree("copilot", parent);
       expect(tree).toHaveLength(1);
       expect(tree[0]).toMatchObject({ provider: "opencode", path: "DeepSeek review", state: "running" });
+      expect(publicChildAgents(tree)[0]).toMatchObject({ model: "deepseek" });
       expect(publicChildAgents(tree)[0]).not.toHaveProperty("transcript");
     } finally { process.env.PHREN_PATH = old; await rm(root, { recursive: true, force: true }); }
   });

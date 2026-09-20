@@ -46,6 +46,8 @@ export interface FanoutChild {
   id: string;
   provider: "opencode" | "codex";
   session?: string;
+  /** The model that manifest named, so the phone can label the worker. */
+  model?: string;
   path: string;
   callId: string;
   state: "running" | "completed";
@@ -91,7 +93,7 @@ export async function fanoutChildren(parentProvider: Provider, parentSession: st
       const transcript = await regularContainedFile(jobRoot, path.join(jobRoot, manifest.eventLog), MAX_EVENT_LOG_BYTES);
       if (!transcript) continue;
       const id = createHash("sha256").update(`${parentProvider}\0${parentSession}\0${manifest.id}`).digest("hex").slice(0, 32);
-      children.push({ id, provider: manifest.provider, session: manifest.session, path: manifest.taskLabel,
+      children.push({ id, provider: manifest.provider, session: manifest.session, model: manifest.model, path: manifest.taskLabel,
         callId: `fanout:${id}`, state: ["queued", "running"].includes(manifest.status) ? "running" : "completed",
         transcript, children: [] });
     } catch { /* Torn, old, or untrusted manifests do not become child agents. */ }
@@ -127,8 +129,8 @@ export function visibleOpenCodeRunEvent(raw: Json): Json | undefined {
 
 /** Project raw `codex exec --json` rows into the shape Codex's own rollout
  * files use, so the existing Codex transcript reader renders them unchanged.
- * Command text, output, file paths, diffs, usage, and costs are intentionally
- * omitted; only the exit code and change count of a tool call cross the wire. */
+ * Command text, a bounded output tail, and changed paths cross the wire so the
+ * owner can see what a worker is doing; diffs, usage, and costs do not. */
 export function visibleCodexExecEvent(raw: Json): Json | undefined {
   const item = object(raw.item), callId = () => String(item.id ?? "").slice(0, 200);
   if (raw.type === "item.completed" && item.type === "agent_message") {
@@ -138,24 +140,57 @@ export function visibleCodexExecEvent(raw: Json): Json | undefined {
   }
   if (raw.type === "item.started" && item.type === "command_execution") {
     return { type: "response_item", payload: { type: "function_call", name: "shell",
-      call_id: callId(), arguments: "{}" } };
+      call_id: callId(), arguments: JSON.stringify({ command: codexCommand(item) }) } };
   }
   if (raw.type === "item.completed" && item.type === "command_execution") {
     return { type: "response_item", payload: { type: "function_call_output", call_id: callId(),
-      output: typeof item.exit_code === "number" ? `exit ${item.exit_code}` : "finished" } };
+      output: codexCommandOutput(item) } };
   }
   if (raw.type === "item.started" && item.type === "file_change") {
     return { type: "response_item", payload: { type: "function_call", name: "apply_patch",
-      call_id: callId(), arguments: "{}" } };
+      call_id: callId(), arguments: JSON.stringify({ files: codexFiles(item) }) } };
   }
   if (raw.type === "item.completed" && item.type === "file_change") {
-    const changes = Array.isArray(item.changes) ? item.changes : [];
+    const files = codexFiles(item), header = `${files.length} file(s) changed`;
     return { type: "response_item", payload: { type: "function_call_output", call_id: callId(),
-      output: `${changes.length} file(s) changed` } };
+      output: files.length ? `${header}\n${files.map(file => file.path).join("\n")}` : header } };
   }
   if (raw.type === "turn.completed") return { type: "event_msg", payload: { type: "task_complete" } };
   if (raw.type === "error" && typeof raw.message === "string") {
     return { type: "event_msg", payload: { type: "error", message: raw.message.slice(0, 2000) } };
   }
   return undefined;
+}
+
+/** Replace a leading real home directory with `~` for display. */
+function collapseHome(value: string): string {
+  const home = homedir();
+  const trimmed = home.endsWith(path.sep) ? home.slice(0, -path.sep.length) : home;
+  for (const base of [home, trimmed]) {
+    if (value === base) return "~";
+    const prefix = `${base}${path.sep}`;
+    if (value.startsWith(prefix)) return `~${path.sep}${value.slice(prefix.length)}`;
+  }
+  return value;
+}
+
+function codexCommand(item: Json): string {
+  const value = item.command;
+  const text = Array.isArray(value) ? value.filter(part => typeof part === "string").join(" ")
+    : typeof value === "string" ? value : "";
+  return text.slice(0, 2000);
+}
+
+function codexCommandOutput(item: Json): string {
+  const text = typeof item.aggregated_output === "string" ? item.aggregated_output.slice(-4000) : "";
+  const status = typeof item.exit_code === "number" ? `[exit ${item.exit_code}]` : "[finished]";
+  return `${text}\n${status}`;
+}
+
+function codexFiles(item: Json): Array<{ path: string; kind: string }> {
+  const changes = Array.isArray(item.changes) ? item.changes : [];
+  return changes.slice(0, 50).map(change => {
+    const entry = object(change);
+    return { path: collapseHome(String(entry.path ?? "")).slice(0, 512), kind: String(entry.kind ?? "").slice(0, 512) };
+  });
 }
