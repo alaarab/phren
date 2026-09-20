@@ -58,6 +58,7 @@ Outside the pnpm workspace:
 | `packages/cli/src/shell/graph/` | The shell's Graph view: deterministic force layout, braille canvas, controller (data/camera/selection/keys), view renderer, watch mode (tails the lookup log), agents overlay |
 | `packages/cli/src/agents/` | Discovering coding agents running on this machine (`PHREN_FEATURE_AGENTS`). Host-agnostic `AgentRecord` contract plus `providers/` (herdr, phren-agent spawner). Nothing host-specific may leak outside `providers/`. |
 | `.claude-plugin/` | Claude Code plugin manifest + marketplace entry. Points at `global/skills/`, `.mcp.json` and `hooks/hooks.json`; keep the version in step with `packages/cli/package.json`. |
+| `apps/ios/scripts/worker-build.sh` | Shared derived-data and result-bundle hygiene for parallel simulator builds: `<family> build|test <udid>`, `clean`, `status` |
 | `scripts/graph-survey.ts` | Renders the Graph view against synthetic stores from 3 to 40 projects at several terminal sizes. Run it before and after any graph change — three defects were invisible on small fixtures. |
 | `packages/cli/src/status.ts` | `phren status`: health, project, stats overview |
 | `packages/cli/starter/global/skills/` | The `phren-*` slash commands `phren init` provisions into `~/.phren/global/skills` (and symlinks into `~/.claude/skills` under the managed preset). **This is the source `init` actually reads** — `setup.ts` copies from here. |
