@@ -15,13 +15,14 @@ import { paneChatState, paneIdentity, panes, rpc, servers, snapshot, trustedDire
 import { LaunchLimiter } from "./limits.js";
 import { locateProject } from "./locate.js";
 import { launchDirectory, repositoryBranch, repositoryDiff, webServers } from "./projects.js";
-import { BridgeError, bridgeRoot, id, type Json, MAX_FRAME, object, objects, PROTOCOL, type Provider, serverName, socketPath, startingTargetSchema, type Target, targetFromURL, targetSchema } from "./protocol.js";
+import { BridgeError, bridgeRoot, id, type Json, MAX_FRAME, object, objects, PROTOCOL, provider, type Provider, serverName, socketPath, startingTargetSchema, type Target, targetFromURL, targetSchema } from "./protocol.js";
 import { CodexQuestions } from "./questions.js";
 import { bootedSimulators, type SimulatorAction, simulatorAct, simulatorApps, simulatorScreenshot } from "./simulators.js";
 import { TabActivityStore } from "./tab-activity.js";
 import { childAgent, childAgentTree, conversationNamedPaths, historicalImage, publicChildAgents, TranscriptReader, transcriptPath } from "./transcripts.js";
 import { listUploads, saveUpload, uploadImage } from "./uploads.js";
 import { ModelCatalog } from "./models.js";
+import { currentStep } from "./steps.js";
 import { AccountUsageReader } from "./usage.js";
 
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
@@ -152,6 +153,14 @@ export async function serve(version: string): Promise<void> {
                 if (chat?.starting === true) tab.starting = true;
               }
               if (typeof tab.cwd === "string" && tab.agent) tab.branch = await repositoryBranch(tab.cwd);
+              // What a working agent is doing, for cards and the lock screen.
+              if (agents.length === 1 && agents[0].agent_status === "working") {
+                const session = chatStates.get(agents[0])?.sessionId;
+                if (typeof session === "string" && provider.safeParse(agents[0].agent).success) {
+                  const step = await currentStep(agents[0].agent as Provider, session).catch(() => undefined);
+                  if (step) tab.currentStep = step;
+                }
+              }
             }
             result = { ...workspaces, phren: info }; break;
           }
