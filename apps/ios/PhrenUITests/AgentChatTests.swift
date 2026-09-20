@@ -948,6 +948,11 @@ final class AgentChatTests: XCTestCase {
     func testLongToolOutputStaysBoundedAndOpensSeparately() {
         let app = launch(extra: ["--chat-long-tools"])
         app.buttons["live-chat:w7:w7:t9"].tap()
+        // Three commands that changed nothing fold into one read run now;
+        // open it to reach the three original tool rows.
+        let run = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-read-run:")).firstMatch
+        XCTAssertTrue(run.waitForExistence(timeout: 8))
+        run.tap()
         let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-tool-group:"))
         XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 8))
         XCTAssertEqual(rows.count, 3)
@@ -973,6 +978,11 @@ final class AgentChatTests: XCTestCase {
     func testDenseToolOutputPagesKeepEveryLineReachable() {
         let app = launch(extra: ["--chat-dense-tools"])
         app.buttons["live-chat:w7:w7:t9"].tap()
+        // Three commands that changed nothing fold into one read run now;
+        // open it to reach the three original tool rows.
+        let run = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-read-run:")).firstMatch
+        XCTAssertTrue(run.waitForExistence(timeout: 8))
+        run.tap()
         let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-tool-group:"))
         XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 8))
         rows.firstMatch.tap()
