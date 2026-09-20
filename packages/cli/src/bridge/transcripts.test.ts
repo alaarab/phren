@@ -98,6 +98,21 @@ describe("transcript image payloads", () => {
     expect(message.content).toEqual([text, { type: image.type }, text]);
     expect(await historicalImage(file, 0, 1, source)).toEqual(bytes);
   });
+
+  it("exports Claude compaction as a marker row and a bounded summary preview", async () => {
+    const summary = "s".repeat(30_000);
+    const rows = [
+      { type: "system", subtype: "compact_boundary", timestamp: "t1", compactMetadata: { trigger: "auto" } },
+      { type: "user", uuid: "u", isCompactSummary: true, timestamp: "t2", message: { role: "user", content: summary } },
+    ];
+    await writeFile(file, rows.map(JSON.stringify).join("\n") + "\n");
+    const page = await new TranscriptReader(file, "claude").read();
+    expect(page.entries.map(entry => entry.raw)).toEqual([
+      { type: "system", phrenCompacted: true, timestamp: "t1" },
+      { type: "user", isCompactSummary: true, timestamp: "t2", message: { role: "user", content: "s".repeat(4_000) } },
+    ]);
+    expect(JSON.stringify(page)).not.toContain("s".repeat(4_001));
+  });
 });
 
 describe("child agent relationships", () => {

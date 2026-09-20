@@ -262,7 +262,7 @@ export function childAgent(tree: ChildAgentRelation[], id: string): ChildAgentRe
   for (const node of tree) { if (node.id === id) return node; const nested = childAgent(node.children, id); if (nested) return nested; }
 }
 
-const CLAUDE_KEYS = new Set(["type", "uuid", "parentUuid", "timestamp", "message", "gitBranch", "cwd", "requestId", "isMeta", "isSidechain", "isCompactSummary", "phrenQueued", "phrenQueueKey", "phrenBackground"]);
+const CLAUDE_KEYS = new Set(["type", "uuid", "parentUuid", "timestamp", "message", "gitBranch", "cwd", "requestId", "isMeta", "isSidechain", "isCompactSummary", "phrenQueued", "phrenQueueKey", "phrenBackground", "phrenCompacted"]);
 const harnessPreamble = (text: string) => /^<(?:environment_context>|user_instructions>|permission_profile|system-reminder>|turn_context>)/.test(text.trimStart());
 
 function taskNotification(content: string): string | undefined {
@@ -447,6 +447,17 @@ export function visibleEvent(raw: Json, source: Provider, includeSidechain = fal
       if (raw.operation === "remove") return { type: "phren_queue_consumed", key, timestamp: raw.timestamp };
       return { type: "user", phrenQueued: true, phrenQueueKey: key, timestamp: raw.timestamp,
         message: { role: "user", content: text } };
+    }
+    // Claude Code appends a boundary marker and then the summary it hands the
+    // model as a user turn. The phone shows the marker and a bounded preview,
+    // never the full summary as a bubble.
+    if (raw.type === "system" && raw.subtype === "compact_boundary") {
+      return { type: "system", phrenCompacted: true, timestamp: raw.timestamp };
+    }
+    if (raw.type === "user" && raw.isCompactSummary === true) {
+      const content = object(raw.message).content;
+      return { type: "user", isCompactSummary: true, timestamp: raw.timestamp,
+        message: { role: "user", content: (typeof content === "string" ? content : "").slice(0, 4_000) } };
     }
     if (raw.isMeta || (raw.isSidechain && !includeSidechain) || !["user", "assistant", "system"].includes(String(raw.type))) return undefined;
     raw = Object.fromEntries(Object.entries(raw).filter(([key]) => CLAUDE_KEYS.has(key)));

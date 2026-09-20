@@ -274,7 +274,10 @@ export async function serve(version: string): Promise<void> {
             // Herdr types into the pane; the agent that receives the text
             // confirms or refuses it through its UserPromptSubmit hook, by
             // conversation. That is the binding Herdr's own API lacks.
-            const expected = agentHooks.expectDelivery(target, text);
+            // A working agent queues typed text and submits it when its turn
+            // ends, which can be minutes away; waiting for that only delays
+            // the phone. The record still guards the paste for ten minutes.
+            const expected = agentHooks.expectDelivery(target, text, String(pane.agent_status) === "working" ? 300 : 1_500);
             await rpc(target.server, "agent.prompt", { target: target.pane, text });
             const outcome = await expected;
             if (outcome === "blocked") throw new BridgeError(409, "The conversation in this pane changed; the message was not delivered. Reopen the chat and send it again.");
@@ -441,6 +444,7 @@ export async function serve(version: string): Promise<void> {
             const terminalPrompt = !pendingApproval && ["blocked", "waiting"].includes(String(pane.agent_status)) ? agentHooks.terminalPrompt(target) : undefined;
             send(client, { agentStatus: { source: target.source, session: target.session,
               status: pendingApproval ? "waiting" : pane.agent_status, pendingApproval, pendingQuestions, terminalPrompt,
+              compacting: agentHooks.compacting(target),
               capabilities: { ...capabilities, asyncQuestions: target.source === "codex" && codexQuestions.available }, branch } });
           }
           first = false;

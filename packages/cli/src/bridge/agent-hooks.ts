@@ -117,6 +117,9 @@ export class AgentHooks {
    * because nobody was there to hold it: what the phone shows above its
    * answer keys until the pane stops waiting. */
   private terminalPrompts = new Map<string, { tool: string; message: string; at: number }>();
+  /** Conversations Claude Code is compacting, by target, until the new context
+   * starts. The phone shows the state instead of the summary row's text. */
+  private compactingSince = new Map<string, number>();
   /** Panes where Phren just typed a bare slash command: the agent is drawing
    * that command's menu, which Herdr reports as an idle agent, so keys are
    * allowed there for a short while to walk and confirm it. */
@@ -179,6 +182,19 @@ export class AgentHooks {
     return { toolName: entry.tool, message: entry.message, at: new Date(entry.at).toISOString() };
   }
   clearTerminalPrompt(target: Target) { this.terminalPrompts.delete(JSON.stringify(target)); }
+  private startCompacting(target: Target) {
+    this.compactingSince.set(JSON.stringify(target), Date.now());
+    while (this.compactingSince.size > 64) this.compactingSince.delete(this.compactingSince.keys().next().value!);
+  }
+  private stopCompacting(target: Target) { this.compactingSince.delete(JSON.stringify(target)); }
+  /** True while Claude Code is compacting `target`; a boundary older than ten
+   * minutes is stale, so a missed SessionStart cannot pin the state forever. */
+  compacting(target: Target): boolean {
+    const key = JSON.stringify(target), at = this.compactingSince.get(key);
+    if (at === undefined) return false;
+    if (Date.now() - at > 600_000) { this.compactingSince.delete(key); return false; }
+    return true;
+  }
   menuOpened(target: Target) {
     this.menus.set(JSON.stringify(target), Date.now());
     while (this.menus.size > 64) this.menus.delete(this.menus.keys().next().value!);
@@ -275,6 +291,8 @@ export class AgentHooks {
         const input = typeof body.input === "string" ? { patch: body.input } : object(body.input), command = [input.command, input.cmd].find(v => typeof v === "string") as string | undefined;
         // A shell call by name, or any tool whose input is a command line —
         // Codex has renamed its shell tool more than once.
+        if (body.event === "PreCompact") { this.startCompacting(target); res.end("{}"); return; }
+        if (["SessionStart", "UserPromptSubmit", "Stop"].includes(String(body.event))) this.stopCompacting(target);
         if (body.event === "UserPromptSubmit") {
           res.end(JSON.stringify(typeof body.prompt === "string" ? this.submitted(target, body.prompt.slice(0, 65_536)) : {})); return;
         }

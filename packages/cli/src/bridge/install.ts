@@ -198,7 +198,7 @@ export async function planAgentHooks(program: string, remove = false): Promise<S
     const hooks = object(config.hooks);
     const command = `${quote(process.execPath)} ${quote(program)} hook ${source}`;
     const ownHook = (entry: unknown) => typeof entry === "string" && entry.endsWith(` ${quote(program)} hook ${source}`);
-    for (const event of ["SessionStart", "UserPromptSubmit", "Stop", "PermissionRequest", "PreToolUse", "PostToolUse"]) {
+    for (const event of ["SessionStart", "UserPromptSubmit", "Stop", "PermissionRequest", "PreToolUse", "PostToolUse", ...(source === "claude" ? ["PreCompact"] : [])]) {
       if (hooks[event] !== undefined && (!Array.isArray(hooks[event]) || (hooks[event] as unknown[]).some(v => !v || typeof v !== "object" || Array.isArray(v)))) throw new Error(`Invalid ${event} hooks: ${file}`);
       if (source !== "copilot" && objects(hooks[event]).some(g => !Array.isArray(g.hooks))) throw new Error(`Invalid ${event} hook group: ${file}`);
     }
@@ -209,7 +209,7 @@ export async function planAgentHooks(program: string, remove = false): Promise<S
         hooks[event] = remove ? entries : [...entries, { type: "command", bash: command, timeoutSec: 3 }];
       }
     } else {
-      for (const event of ["SessionStart", "UserPromptSubmit", "Stop", "PermissionRequest", "PreToolUse", "PostToolUse"]) {
+      for (const event of ["SessionStart", "UserPromptSubmit", "Stop", "PermissionRequest", "PreToolUse", "PostToolUse", ...(source === "claude" ? ["PreCompact"] : [])]) {
         const groups = objects(hooks[event]).map(group => ({ ...group, hooks: objects(group.hooks).filter(h => !ownHook(h.command)) })).filter(group => group.hooks.length);
         // Snapshot shell and file-edit calls so every card can show actual
         // changed-file rows, including files outside the original cwd.

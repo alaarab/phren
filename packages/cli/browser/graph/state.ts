@@ -46,7 +46,6 @@ export const state = {
   fg: null as any,
   fgNodeById: new Map<string, FGNode>(),
   container: null as HTMLElement | null,
-  tooltip: null as HTMLElement | null,
   selectedNodeId: null as string | null,
   hoveredNodeId: null as string | null,
   focusedProjectId: null as string | null,

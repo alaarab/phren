@@ -505,47 +505,6 @@ test.describe.serial("graph visualization e2e", () => {
     await page.locator(".graph-controls button").filter({ hasText: "R" }).click();
   });
 
-  test("node hover shows tooltip with label", async ({ page }) => {
-    await openGraphTab(page);
-
-    const tooltip = page.locator("#graph-tooltip");
-
-    // Move mouse over the center of the graph container where nodes likely are
-    const graphDiv = page.locator("#graph-canvas");
-    const box = await graphDiv.boundingBox();
-    expect(box).toBeTruthy();
-    const cx = box!.x + box!.width / 2;
-    const cy = box!.y + box!.height / 2;
-
-    // Hover over the center area (where nodes cluster)
-    await page.mouse.move(cx, cy);
-    await page.waitForTimeout(400);
-
-    // Check if tooltip became visible (uses classList "visible")
-    const tooltipVisible = await tooltip.evaluate((el) => el.classList.contains("visible"));
-    // Tooltip may or may not be visible depending on mouse position hitting a node.
-    // So we try multiple positions.
-    if (!tooltipVisible) {
-      // Try hovering at a few different positions
-      for (const offset of [[-40, -40], [40, 40], [0, -60], [-60, 0], [60, -30]]) {
-        await page.mouse.move(cx + offset[0], cy + offset[1]);
-        await page.waitForTimeout(400);
-        const vis = await tooltip.evaluate((el) => el.classList.contains("visible"));
-        if (vis) break;
-      }
-    }
-
-    // Even if we didn't hit a node, verify tooltip element exists and is functional.
-    // The tooltip is hidden by default — that's correct behavior when not hovering a node.
-    await expect(tooltip).toBeAttached();
-
-    // Move to far corner — tooltip should not be visible
-    await page.mouse.move(box!.x + 5, box!.y + 5);
-    await page.waitForTimeout(200);
-    const hiddenAfter = await tooltip.evaluate((el) => !el.classList.contains("visible"));
-    expect(hiddenAfter).toBe(true);
-  });
-
   test("fragment nodes exist and can be selected", async ({ page }) => {
     await openGraphTab(page);
 

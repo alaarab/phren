@@ -128,9 +128,10 @@ and tool-result content can still contain file contents or sensitive text.
 
 Claude top-level fields are allowlisted: `type`, `uuid`, `parentUuid`, `timestamp`,
 `message`, `gitBranch`, `cwd`, `requestId`, `isMeta`, `isSidechain`,
-`isCompactSummary`, `phrenQueued`, `phrenQueueKey`, and `phrenBackground`, plus
-fields added by the exporter. Provider metadata such as `toolUseResult`
-(including original files), `permissionMode`, and `wireToolInputs` is dropped.
+`isCompactSummary`, `phrenQueued`, `phrenQueueKey`, `phrenBackground`, and
+`phrenCompacted`, plus fields added by the exporter. Provider metadata such as
+`toolUseResult` (including original files), `permissionMode`, and
+`wireToolInputs` is dropped.
 Codex `event_msg.error` payloads export only `type` and string `message`.
 
 Codex response-item user messages and Claude string-content user rows are
@@ -163,6 +164,10 @@ Claude queue messages preserve these phone markers:
   is never forwarded: `output-file`, `result`, `usage`, `diagnostics`, and
   `worktree` are dropped. This is a small allowlisted status/summary envelope,
   not a size-limited copy of subagent output.
+- `phrenCompacted: true`: Claude Code's `compact_boundary` row becomes a system
+  marker with only its timestamp. The following `isCompactSummary` user turn is
+  exported as a collapsed preview with its content capped at 4000 characters,
+  so the full summary stays on the computer.
 
 ## Shell changes and local storage
 
