@@ -318,8 +318,8 @@ final class LocalCommandTests: XCTestCase {
     }
     func testShellLineAndOutput() {
         XCTAssertEqual(message("<bash-input>pwd</bash-input>").localCommand, .init(kind: .shell, text: "pwd"))
-        let output = message("<bash-stdout>/home/alaarab/Projects/hub</bash-stdout><bash-stderr></bash-stderr>").localCommand
-        XCTAssertEqual(output?.kind, .output); XCTAssertEqual(output?.text, "/home/alaarab/Projects/hub")
+        let output = message("<bash-stdout>/home/sam/Projects/hub</bash-stdout><bash-stderr></bash-stderr>").localCommand
+        XCTAssertEqual(output?.kind, .output); XCTAssertEqual(output?.text, "/home/sam/Projects/hub")
         XCTAssertEqual(message("<bash-stdout></bash-stdout><bash-stderr></bash-stderr>").localCommand?.text, "")
         XCTAssertEqual(message("<local-command-stdout>Set model to Opus 5</local-command-stdout>").localCommand, .init(kind: .output, text: "Set model to Opus 5"))
     }

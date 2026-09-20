@@ -3,24 +3,24 @@ import XCTest
 
 final class MachineRegistryTests: XCTestCase {
     func testParsesTheThreeFlatFiles() {
-        let machines = MachineRegistry.parseMachines("# machine-name: profile-name\nMac.attlocal.net: mac-mini\nSquids-Mac-mini.local: mac-mini\nomarchy: personal\n\"QL-PF5A48WS\": 'ql-laptop'\n")
-        XCTAssertEqual(machines, ["Mac.attlocal.net": "mac-mini", "Squids-Mac-mini.local": "mac-mini", "omarchy": "personal", "QL-PF5A48WS": "ql-laptop"])
+        let machines = MachineRegistry.parseMachines("# machine-name: profile-name\nMac.home.example: mac-mini\nDesk.local: mac-mini\nlinuxbox: personal\n\"WORK-LAPTOP\": 'ql-laptop'\n")
+        XCTAssertEqual(machines, ["Mac.home.example": "mac-mini", "Desk.local": "mac-mini", "linuxbox": "personal", "WORK-LAPTOP": "ql-laptop"])
         let profile = MachineRegistry.parseProfile("name: mac-mini\nprojects:\n  - alphalens\n  - phren # the app\n  - \"objectstudio\"\nother: 1\n")
         XCTAssertEqual(profile.name, "mac-mini")
         XCTAssertEqual(profile.projects, ["alphalens", "phren", "objectstudio"])
         XCTAssertEqual(MachineRegistry.parseProfile("name: inline\nprojects: [a, b]\n").projects, ["a", "b"])
-        XCTAssertEqual(MachineRegistry.parseSourcePath("ownership: repo-managed\nsourcePath: /home/alaarab/Projects/phren\n"), "/home/alaarab/Projects/phren")
+        XCTAssertEqual(MachineRegistry.parseSourcePath("ownership: repo-managed\nsourcePath: /home/sam/Projects/phren\n"), "/home/sam/Projects/phren")
         XCTAssertNil(MachineRegistry.parseSourcePath("ownership: detached\n"))
         XCTAssertNil(MachineRegistry.parseSourcePath("sourcePath: relative/path\n"))
     }
 
     func testHostLookupIgnoresTheLocalSuffixAndCase() {
-        let registry = MachineRegistry(machines: ["Squids-Mac-mini.local": "mac-mini", "omarchy": "personal"],
+        let registry = MachineRegistry(machines: ["Desk.local": "mac-mini", "linuxbox": "personal"],
                                        profiles: ["mac-mini": ["phren", "alphalens"], "personal": ["phren"]])
-        XCTAssertEqual(registry.hosts(for: "phren"), ["Squids-Mac-mini.local", "omarchy"])
-        XCTAssertEqual(registry.hosts(for: "alphalens"), ["Squids-Mac-mini.local"])
+        XCTAssertEqual(registry.hosts(for: "phren"), ["Desk.local", "omarchy"])
+        XCTAssertEqual(registry.hosts(for: "alphalens"), ["Desk.local"])
         XCTAssertTrue(registry.hosts("squids-mac-mini", project: "phren"))
-        XCTAssertTrue(registry.hosts("Squids-Mac-mini.local", project: "alphalens"))
+        XCTAssertTrue(registry.hosts("Desk.local", project: "alphalens"))
         XCTAssertFalse(registry.hosts("omarchy", project: "alphalens"))
         XCTAssertFalse(registry.hosts("laptop", project: "phren"))
     }

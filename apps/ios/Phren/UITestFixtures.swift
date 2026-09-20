@@ -94,8 +94,8 @@ enum UITestFixtures {
                         try await store.write("profiles/\(profile).yaml", content: "name: \(profile)\nprojects:\n  - phren\n  - ledger\n  - hub\n", blobSha: nil)
                     }
                 } else if tour {
-                    try await store.write("machines.yaml", content: "Mac mini: mac\nomarchy: omarchy\n", blobSha: nil)
-                    for profile in ["mac", "omarchy"] {
+                    try await store.write("machines.yaml", content: "Mac mini: mac\nlinuxbox: linuxbox\n", blobSha: nil)
+                    for profile in ["mac", "linuxbox"] {
                         try await store.write("profiles/\(profile).yaml", content: "name: \(profile)\nprojects:\n  - phren\n  - mina\n  - atlas\n", blobSha: nil)
                     }
                 } else {
@@ -107,8 +107,8 @@ enum UITestFixtures {
                 }
                 defaults.set(try LiveSessionPreferences.saving(mac(), in: Data()), forKey: preferencesKey)
                 if arguments.contains("--all-sessions-fixture") {
-                    let remote = try LiveHost(id: hostIDs[1], name: trailer ? "laptop" : tour ? "omarchy" : "Test Linux",
-                                             address: trailer ? "laptop" : tour ? "omarchy" : "remote.fixture.invalid", username: tour ? "ala" : "fixture",
+                    let remote = try LiveHost(id: hostIDs[1], name: trailer ? "laptop" : tour ? "linuxbox" : "Test Linux",
+                                             address: trailer ? "laptop" : tour ? "linuxbox" : "remote.fixture.invalid", username: tour ? "sam" : "fixture",
                                              fingerprint: "SHA256:" + String(repeating: "B", count: 43))
                     defaults.set(try LiveSessionPreferences.saving(remote, in: defaults.data(forKey: preferencesKey)!),
                                  forKey: preferencesKey)
