@@ -903,7 +903,12 @@ final class AgentChatTests: XCTestCase {
         app.navigationBars["Conversation image.jpg"].buttons["Done"].tap()
         app.buttons["chat-diff"].tap()
         XCTAssertTrue(app.staticTexts["Theme.swift"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Settings.swift"].exists, "Staged and unstaged files are listed in their own groups")
+        // A staged file under a folder path nests under its folders now;
+        // expand them to reach it, like Finder or VS Code's source control view.
+        app.buttons["Sources"].tap()
+        XCTAssertTrue(app.buttons["App"].waitForExistence(timeout: 5))
+        app.buttons["App"].tap()
+        XCTAssertTrue(app.staticTexts["Settings.swift"].waitForExistence(timeout: 5), "Staged and unstaged files are listed in their own groups")
         XCTAssertTrue(app.staticTexts["Notes.md"].exists, "Untracked files are listed too")
         capture(app, "Repository changes list")
         app.staticTexts["Theme.swift"].tap()
