@@ -159,11 +159,14 @@ Subcommands:
   phren config policy [get|set ...]     Memory retention, TTL, confidence, decay
   phren config workflow [get|set ...]   Risky-memory thresholds, task automation mode
   phren config index [get|set ...]      Indexer include/exclude globs
-  phren config proactivity [level]      Base auto-capture level (high|medium|low)
+  phren config proactivity [level] [--scope base|findings|tasks]
+                                        Auto-capture level (high|medium|low); --scope sets
+                                        the findings-only or task-only override instead
   phren config proactivity.findings [level]
                                         Findings-specific auto-capture level override
   phren config proactivity.tasks [level]
                                         Task-specific auto-capture level override
+                                        (all take --project <name> for one project)
   phren config task-mode [get|set <mode>]
                                         Task automation mode (off|manual|suggest|auto)
   phren config finding-sensitivity [get|set <level>]

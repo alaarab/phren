@@ -52,6 +52,8 @@ These control how much context the UserPromptSubmit hook injects into each promp
 | `PHREN_CONTEXT_SNIPPET_CHARS` | integer | `520` | Maximum characters per injected snippet. |
 | `PHREN_MAX_INJECT_TOKENS` | integer | `2000` | Maximum tokens injected per prompt (overrides token budget). Range: 200-20000. |
 | `PHREN_TASK_PRIORITY` | string | `high,medium` | Comma-separated list of task priorities to inject. Set to `high` to inject only high-priority items. |
+| `PHREN_PROACTIVITY` | `high`/`medium`/`low` | `high` | Auto-capture level for findings and tasks. Configured with `phren config proactivity <level>`; overrides the stored value. |
+| `PHREN_PROACTIVITY_FINDINGS`, `PHREN_PROACTIVITY_TASKS` | `high`/`medium`/`low` | base level | Findings-only and task-only overrides. Configured with `phren config proactivity <level> --scope findings|tasks` (or `proactivity.findings` / `proactivity.tasks`), per project with `--project`; over MCP, `set_config` domain `proactivity` with `scope`. Stored as `proactivityFindings` / `proactivityTask` in `.config/install-preferences.json`. |
 
 ## Memory Governance
 
