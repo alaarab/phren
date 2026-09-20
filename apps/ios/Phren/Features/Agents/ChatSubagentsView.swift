@@ -69,7 +69,7 @@ struct ChatSubagentsView: View {
                 .frame(minHeight: 44)
                 .accessibilityIdentifier("chat-subagents-done")
         }
-        .padding(.horizontal, 4).padding(.vertical, 2)
+        .padding(.horizontal, 12).padding(.vertical, 6)
         // A marker rather than an identifier on the row, so Done keeps its own id.
         .overlay(alignment: .topLeading) {
             Color.clear.frame(width: 1, height: 1).accessibilityElement().accessibilityIdentifier("chat-subagents-header")

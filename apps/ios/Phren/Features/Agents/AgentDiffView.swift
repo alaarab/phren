@@ -154,7 +154,10 @@ struct AgentDiffView: View {
         }
         .foregroundStyle(PhrenTheme.text)
         .padding(.horizontal, 4).padding(.vertical, 2)
-        .accessibilityIdentifier("agent-diff-header")
+        .overlay(alignment: .topLeading) {
+            // A marker, not an identifier on the row: the row's id would hide the buttons' ids.
+            Color.clear.frame(width: 1, height: 1).accessibilityElement().accessibilityIdentifier("agent-diff-header")
+        }
     }
 
     /// GitHub's "Files changed" summary line: the branch, the count, the
