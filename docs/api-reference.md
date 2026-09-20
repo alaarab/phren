@@ -19,7 +19,7 @@ Why: the full surface is about 53k characters of schema, roughly 13k tokens, dow
 | `session` | `action`: start, end, context, history | `session_start`, `session_end`, `session_context`, `session_history` |
 | `phren_admin` | `action`: any remaining tool by name, or `list_actions` | skills, hooks, config, notes, review queue, export/import, doctor, health, stores, projects, fragment graph, extraction, topic summaries (`get_topic_summaries`, `set_topic_summary`) |
 
-A composite takes `action` plus the target tool's own parameters, validated against that tool's schema; a miss returns the parameter list. `phren_admin list_actions` returns every admin action with its full parameter list. The individual tool sections below still describe each tool's parameters; in the core profile, reach them through the composite that stands for them.
+A composite takes `action` plus the target tool's own parameters, validated against that tool's schema; a miss returns the parameter list. A nested object parameter (`manage_task` `updates`, `set_config` `settings`, `add_finding` `citation`) may arrive as a real object or as its JSON string — some hosts serialize what a passthrough schema does not name — and both are accepted. `phren_admin list_actions` returns every admin action with its full parameter list. The individual tool sections below still describe each tool's parameters; in the core profile, reach them through the composite that stands for them.
 
 All tools return structured JSON: `{ ok, message, data?, error? }`.
 
