@@ -182,7 +182,7 @@ public struct AgentChatPanes: Decodable, Equatable, Sendable {
             throw PhrenKitError.validation("The agent in this pane changed. Reopen chat to choose its current conversation.")
         }
         if sending && pane.needsAnswer {
-            throw PhrenKitError.validation("This agent needs an approval or answer in the terminal before another message can be sent.")
+            throw PhrenKitError.validation("This agent is waiting for an answer; use the answer keys or the card above before sending another message.")
         }
         return pane
     }
