@@ -114,14 +114,17 @@ struct AgentChatView: View {
     @State private var historyChain = 0
     @State private var paginationReady = false
     @State private var requestedHistoryLine: Int?
+    /// Content and viewport stay separate so keyboard layout is never mistaken
+    /// for transcript growth, while every requested pin has a real lower bound.
     @State private var scrollHeight: CGFloat = 0
+    @State private var transcriptContentHeight: CGFloat = 0
+    @State private var scrollMetrics = ChatScrollMetrics(contentHeight: 0, viewportHeight: 0, offsetY: 0)
+    @State private var scrollPinRequest: ChatPinRequest?
     @State private var fellBackToTerminal = false
     @ScaledMetric(relativeTo: .body) private var composerTextSize = 14.0
     @FocusState private var composing: Bool
     /// The one paragraph showing native text selection, if any.
     @State private var textSelection = ChatTextSelection()
-    // Recalculate when the keyboard changes the viewport as well as when the
-    // transcript moves; either measurement can arrive first during layout.
 
     /// Starts recognising into the composer after whatever is already typed.
     private func startDictation() {
@@ -300,6 +303,9 @@ struct AgentChatView: View {
                     }
                     .padding(.horizontal, 18).padding(.top, 18).padding(.bottom, 6)
                     .frame(minHeight: scrollHeight, alignment: .bottom)
+                    .background(GeometryReader { geometry in
+                        Color.clear.preference(key: ChatContentHeight.self, value: geometry.size.height)
+                    })
                 }
                 .accessibilityIdentifier("chat-transcript")
                 .contentShape(Rectangle())
@@ -320,21 +326,19 @@ struct AgentChatView: View {
                     loadHistoryIfNeeded(proxy)
                 }
                 .onChange(of: model.history.startLine) { _, _ in loadHistoryIfNeeded(proxy, automatic: true) }
+                .onPreferenceChange(ChatContentHeight.self) { transcriptContentHeight = $0 }
                 .scrollDismissesKeyboard(.interactively)
                 .coordinateSpace(name: "chat-scroll")
                 .background(GeometryReader { geometry in
                     Color.clear.onAppear { scrollHeight = geometry.size.height }
                         .onChange(of: geometry.size.height) { _, height in
                             guard abs(height - scrollHeight) > 0.5 else { return }
-                            let grew = height > scrollHeight
                             scrollHeight = height
-                            // The keyboard leaving makes the viewport taller; the
-                            // content keeps its old offset and a blank band opens
-                            // under the last bubble. Stay pinned to the end.
-                            if grew && atBottom && !model.loadingHistory { pinToBottom(proxy) }
                         }
                 })
-                .modifier(ChatFollowScroll(viewport: scrollHeight) { old, new, userDriven in
+                .modifier(ChatFollowScroll(viewport: scrollHeight, contentHeight: transcriptContentHeight,
+                                           following: atBottom, pinRequest: scrollPinRequest) { _, new, userDriven in
+                    scrollMetrics = new
                     textSelection.scrolled(to: new.offsetY)
                     let near = new.distanceFromBottom <= ChatFollow.threshold
                     if userDriven {
@@ -342,13 +346,6 @@ struct AgentChatView: View {
                     } else if near, !atBottom {
                         atBottom = true
                     }
-                    guard atBottom, !userDriven else { return }
-                    let grew = new.contentHeight > old.contentHeight + 0.5
-                    let viewportChanged = abs(new.viewportHeight - old.viewportHeight) > 0.5
-                    let scrollable = new.contentHeight > new.viewportHeight + 0.5
-                    let offBottom = new.distanceFromBottom > 1
-                    let overscrolled = scrollable && new.distanceFromBottom < -1
-                    if grew || viewportChanged || offBottom || overscrolled { pinToBottom(proxy) }
                 })
                 .task {
                     pinToBottom(proxy)
@@ -382,16 +379,24 @@ struct AgentChatView: View {
                 .onChange(of: model.target?.id) { _, _ in
                     historyTask?.cancel(); historyTask = nil; requestedHistoryLine = nil
                     textSelection.end()
-                    proxy.scrollTo("chat-bottom", anchor: .bottom)
+                    pinToBottom(proxy)
                 }
                 .onChange(of: model.timeline.last?.id) { _, _ in
-                    if atBottom && !model.loadingHistory { withAnimation { proxy.scrollTo("chat-bottom", anchor: .bottom) } }
+                    if #unavailable(iOS 18.0), atBottom && !model.loadingHistory {
+                        pinToBottom(proxy, animated: true)
+                    }
                 }
                 .onChange(of: model.reveal.revision) { _, _ in
-                    if atBottom && !model.loadingHistory { proxy.scrollTo("chat-bottom", anchor: .bottom) }
+                    if #unavailable(iOS 18.0), atBottom && !model.loadingHistory { pinToBottom(proxy) }
                 }
                 .onChange(of: model.imagesByMessage) { _, _ in
-                    if atBottom && !model.loadingHistory { pinToBottom(proxy) }
+                    if #unavailable(iOS 18.0), atBottom && !model.loadingHistory { pinToBottom(proxy) }
+                }
+                .onChange(of: composing) { _, _ in
+                    // Focus changes start a keyboard/safe-area transaction.
+                    // Resolve the bottom anchor on the next run loop, after
+                    // that transaction has supplied its first real viewport.
+                    if atBottom && !model.loadingHistory { pinToBottom(proxy, animated: true) }
                 }
             }
             if let approval = model.approval, let prompt = approval.questionPrompt, let input = approval.questionInput {
@@ -717,8 +722,17 @@ struct AgentChatView: View {
     /// alone that pulls the whole history and hangs the phone.
     private static let automaticHistoryPages = 3
 
-    private func pinToBottom(_ proxy: ScrollViewProxy) {
-        DispatchQueue.main.async { proxy.scrollTo("chat-bottom", anchor: .bottom) }
+    private func pinToBottom(_ proxy: ScrollViewProxy, animated: Bool = false) {
+        DispatchQueue.main.async {
+            guard scrollMetrics.bottomOffset > 0.5 else { return }
+            if #available(iOS 18.0, *) {
+                scrollPinRequest = ChatPinRequest(animated: animated)
+            } else if animated {
+                withAnimation { proxy.scrollTo("chat-bottom", anchor: .bottom) }
+            } else {
+                proxy.scrollTo("chat-bottom", anchor: .bottom)
+            }
+        }
     }
 
     private func loadHistoryIfNeeded(_ proxy: ScrollViewProxy, automatic: Bool = false) {
@@ -1137,6 +1151,10 @@ private struct ChatBottomPosition: PreferenceKey {
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
+private struct ChatContentHeight: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
 
 private struct ChatHistoryPosition: PreferenceKey {
     static var defaultValue: CGFloat = -CGFloat.greatestFiniteMagnitude
@@ -1181,43 +1199,35 @@ private enum ChatFollow {
     static let threshold: CGFloat = 60
 }
 
-private struct ChatScrollMetrics: Equatable {
-    var distanceFromBottom: CGFloat = 0
-    var contentHeight: CGFloat = 0
-    var viewportHeight: CGFloat = 0
-    var offsetY: CGFloat = 0
+private struct ChatPinRequest: Equatable {
+    let id = UUID()
+    let animated: Bool
+}
 
+private extension ChatScrollMetrics {
     @available(iOS 18.0, *)
     init(_ geometry: ScrollGeometry) {
-        contentHeight = geometry.contentSize.height
-        viewportHeight = geometry.containerSize.height
-        offsetY = geometry.contentOffset.y
-        distanceFromBottom = contentHeight + geometry.contentInsets.bottom - viewportHeight - offsetY
-    }
-
-    init(position: CGFloat, viewportHeight: CGFloat) {
-        self.viewportHeight = viewportHeight
-        offsetY = position
-        distanceFromBottom = position - viewportHeight
+        self.init(contentHeight: geometry.contentSize.height,
+                  viewportHeight: geometry.containerSize.height,
+                  offsetY: geometry.contentOffset.y)
     }
 }
 
 private struct ChatFollowScroll: ViewModifier {
     let viewport: CGFloat
+    let contentHeight: CGFloat
+    let following: Bool
+    let pinRequest: ChatPinRequest?
     let changed: (ChatScrollMetrics, ChatScrollMetrics, Bool) -> Void
 
     @State private var userDriven = false
+    @State private var legacyMetrics = ChatScrollMetrics(contentHeight: 0, viewportHeight: 0, offsetY: 0)
+    @State private var legacyBottomPosition: CGFloat = 0
 
     func body(content: Content) -> some View {
         if #available(iOS 18.0, *) {
-            content
-                .onScrollPhaseChange { _, phase in
-                    let driving = phase == .tracking || phase == .interacting || phase == .decelerating
-                    if driving != userDriven { userDriven = driving }
-                }
-                .onScrollGeometryChange(for: ChatScrollMetrics.self) { ChatScrollMetrics($0) } action: { old, new in
-                    changed(old, new, userDriven)
-                }
+            ModernChatFollowScroll(content: content, following: following, pinRequest: pinRequest,
+                                   userDriven: $userDriven, changed: changed)
         } else {
             content
                 .simultaneousGesture(DragGesture(minimumDistance: 12).onChanged { value in
@@ -1225,9 +1235,72 @@ private struct ChatFollowScroll: ViewModifier {
                     if driving != userDriven { userDriven = driving }
                 }.onEnded { _ in userDriven = false })
                 .onPreferenceChange(ChatBottomPosition.self) { position in
-                    let metrics = ChatScrollMetrics(position: position, viewportHeight: viewport)
-                    changed(metrics, metrics, userDriven)
+                    // Before ScrollGeometry, combine the measured stack with
+                    // its end marker to recover the same real offset.
+                    legacyBottomPosition = position
+                    let new = ChatScrollMetrics(contentHeight: contentHeight,
+                                                viewportHeight: viewport,
+                                                offsetY: contentHeight - position)
+                    changed(legacyMetrics, new, userDriven)
+                    legacyMetrics = new
                 }
+                .onChange(of: contentHeight) { _, height in
+                    let new = ChatScrollMetrics(contentHeight: height,
+                                                viewportHeight: viewport,
+                                                offsetY: height - legacyBottomPosition)
+                    changed(legacyMetrics, new, userDriven)
+                    legacyMetrics = new
+                }
+        }
+    }
+}
+
+@available(iOS 18.0, *)
+private struct ModernChatFollowScroll<Content: View>: View {
+    let content: Content
+    let following: Bool
+    let pinRequest: ChatPinRequest?
+    @Binding var userDriven: Bool
+    let changed: (ChatScrollMetrics, ChatScrollMetrics, Bool) -> Void
+    @State private var position = ScrollPosition()
+    @State private var metrics = ChatScrollMetrics(contentHeight: 0, viewportHeight: 0, offsetY: 0)
+    @State private var handledPinID: UUID?
+
+    var body: some View {
+        content
+            .scrollPosition($position)
+            .onScrollPhaseChange { _, phase in
+                let driving = phase == .tracking || phase == .interacting || phase == .decelerating
+                if driving != userDriven { userDriven = driving }
+            }
+            .onScrollGeometryChange(for: ChatScrollMetrics.self) { ChatScrollMetrics($0) } action: { old, new in
+                metrics = new
+                changed(old, new, userDriven)
+                guard following,
+                      let target = ChatScrollMetrics.shouldRepin(old: old, new: new, userDriven: userDriven) else { return }
+                // A numeric target avoids ScrollViewReader resolving an
+                // estimated lazy-stack anchor beyond the real content.
+                position.scrollTo(y: target)
+            }
+            .onChange(of: pinRequest) { _, request in
+                guard let request else { return }
+                apply(request, to: metrics)
+            }
+            .onChange(of: metrics) { _, metrics in
+                guard let request = pinRequest else { return }
+                apply(request, to: metrics)
+            }
+    }
+
+    private func apply(_ request: ChatPinRequest, to metrics: ChatScrollMetrics) {
+        guard handledPinID != request.id, metrics.viewportHeight > 0.5 else { return }
+        handledPinID = request.id
+        let target = metrics.bottomOffset
+        guard target > 0.5 else { return }
+        if request.animated {
+            withAnimation { position.scrollTo(y: target) }
+        } else {
+            position.scrollTo(y: target)
         }
     }
 }

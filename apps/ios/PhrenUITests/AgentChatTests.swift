@@ -528,11 +528,15 @@ final class AgentChatTests: XCTestCase {
         XCTAssertLessThanOrEqual(box.frame.minY - lastLine.frame.maxY, 18)
         composer.tap(); composer.typeText("Keep this draft")
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Ready to test."].isHittable,
+                      "The last transcript message stays visible when the composer gains focus")
         XCTAssertLessThanOrEqual(box.frame.minY - lastLine.frame.maxY, 18)
         capture(app, "Smaller chat text and bottom composer")
         app.staticTexts["Ready to test."].tap()
         let hidden = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.keyboards.firstMatch)
         XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 5), .completed)
+        XCTAssertTrue(app.staticTexts["Ready to test."].isHittable,
+                      "The last transcript message stays visible after the keyboard is dismissed")
         XCTAssertEqual(composer.value as? String, "Keep this draft")
         XCTAssertGreaterThan(box.frame.maxY, app.frame.maxY - 50)
         XCTAssertLessThanOrEqual(box.frame.minY - lastLine.frame.maxY, 18)

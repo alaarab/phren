@@ -3,6 +3,27 @@ import XCTest
 @testable import PhrenKit
 
 final class AgentChatTests: XCTestCase {
+    func testChatScrollRepinsOnlyForContentGrowth() {
+        let old = ChatScrollMetrics(contentHeight: 900, viewportHeight: 500, offsetY: 400)
+        let grown = ChatScrollMetrics(contentHeight: 980, viewportHeight: 500, offsetY: 400)
+        XCTAssertEqual(ChatScrollMetrics.shouldRepin(old: old, new: grown, userDriven: false), 480)
+
+        let keyboard = ChatScrollMetrics(contentHeight: 900, viewportHeight: 300, offsetY: 400)
+        XCTAssertNil(ChatScrollMetrics.shouldRepin(old: old, new: keyboard, userDriven: false),
+                     "A keyboard-only viewport change is not transcript growth")
+        XCTAssertEqual(keyboard.bottomOffset, 600, "Any explicit pin remains clamped to the real bottom")
+        let keyboardOvershoot = ChatScrollMetrics(contentHeight: 900, viewportHeight: 300, offsetY: 750)
+        XCTAssertEqual(ChatScrollMetrics.shouldRepin(old: old, new: keyboardOvershoot, userDriven: false), 600,
+                       "An invalid offset is clamped even when only the viewport changed")
+
+        XCTAssertNil(ChatScrollMetrics.shouldRepin(old: old, new: grown, userDriven: true))
+
+        let shortOld = ChatScrollMetrics(contentHeight: 200, viewportHeight: 500, offsetY: 0)
+        let shortNew = ChatScrollMetrics(contentHeight: 260, viewportHeight: 500, offsetY: 0)
+        XCTAssertNil(ChatScrollMetrics.shouldRepin(old: shortOld, new: shortNew, userDriven: false))
+        XCTAssertEqual(shortNew.bottomOffset, 0)
+    }
+
     func testChildAgentTreeCountsNestedRunningAgents() throws {
         let data = Data(#"{"agents":[{"id":"a","provider":"codex","path":"/root/first","callId":"c1","state":"completed","children":[{"id":"b","provider":"codex","path":"/root/first/worker","callId":"c2","state":"running","children":[]}]},{"id":"c","provider":"codex","path":"/root/second","callId":"c3","state":"running","children":[]}]}"#.utf8)
         let tree = try AgentChildTree.read(data)
