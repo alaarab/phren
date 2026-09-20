@@ -251,7 +251,7 @@ struct AgentChatView: View {
     }
     private var hasAgentPanes: Bool { model.panes.contains(where: isAgent) }
 
-    var body: some View { ChatPerformance.measure("chat container") { content } }
+    var body: some View { ChatPerformance.measure("chat container") { chatSheets(content) } }
     private var content: some View {
         VStack(spacing: 0) {
             chatHeader
@@ -260,31 +260,7 @@ struct AgentChatView: View {
                 ScrollView {
                     VStack(spacing: 0) {
                         VStack(alignment: .leading, spacing: 12) {
-                            if model.target == nil && !model.loading {
-                                Text(hasAgentPanes ? "Choose an agent" : "No agent in this tab").font(.title2.weight(.semibold))
-                                ForEach(model.panes) { pane in
-                                    if isAgent(pane) {
-                                        Button {
-                                            model.choose(pane, session: session); refresh = UUID()
-                                        } label: {
-                                            HStack { VStack(alignment: .leading) { Text(pane.displayTitle); Text(pane.agent ?? "").font(.caption) }; Spacer(); Image(systemName: "chevron.right") }
-                                                .padding(16).phrenCard()
-                                        }.buttonStyle(.plain).accessibilityIdentifier("chat-pane:\(pane.id)")
-                                    } else {
-                                        Button { commandDestination = .init(paneID: pane.id, menu: false) } label: {
-                                            HStack { VStack(alignment: .leading) { Text(pane.displayTitle); Text("Open terminal").font(.caption) }; Spacer(); Image(systemName: "terminal") }
-                                                .padding(16).phrenCard()
-                                        }.buttonStyle(.plain).accessibilityIdentifier("chat-terminal-pane:\(pane.id)")
-                                    }
-                                }
-                                Text(hasAgentPanes ? "Native chat supports Codex, Claude Code, and GitHub Copilot sessions recognized on this computer."
-                                     : "Start Codex, Claude Code, or GitHub Copilot in the terminal and chat picks it up here.")
-                                    .font(.footnote).foregroundStyle(PhrenTheme.textMuted)
-                                if model.panes.contains(where: { $0.agent == "copilot" }) {
-                                    Link("Set up Copilot chat", destination: URL(string: "https://alaarab.github.io/phren/phren-hook.html")!)
-                                        .font(.footnote)
-                                }
-                            }
+                            if model.target == nil && !model.loading { panePicker }
                             if let error = model.error { connectionIssue(error, retry: !model.connected && model.target != nil) }
                             if currentHost != session.host { connectionIssue("This computer's connection changed. Reopen chat from the current session list.") }
                             if model.hasMore {
@@ -572,14 +548,13 @@ struct AgentChatView: View {
                 model.chooseAnother(); refresh = UUID()
             }
         }
-        .onChange(of: model.loading) { _, loading in
-            // A tab with only shells is a terminal, not a chat: go straight
-            // there once, and come back to the picker when an agent starts.
-            guard !loading, !fellBackToTerminal, model.target == nil, model.error == nil,
-                  !model.panes.isEmpty, !hasAgentPanes, commandDestination == nil else { return }
-            fellBackToTerminal = true
-            commandDestination = .init(paneID: model.panes[0].id, menu: false)
-        }
+    }
+
+    /// The second half of the chat chrome: dictation, sheets and lifecycle
+    /// tasks. Split from `content` so the type checker finishes.
+    private func chatSheets<V: View>(_ content: V) -> some View {
+        content
+        .onChange(of: model.loading) { _, loading in fallBackToTerminalIfShellOnly(loaded: !loading) }
         .sheet(isPresented: $showingAttachments) {
             if let openingTarget = model.target {
                 ChatAttachmentPicker(canAdd: model.attachments.count < ChatAttachmentLimit.maximum, add: { item in
@@ -612,36 +587,7 @@ struct AgentChatView: View {
         }
         .onChange(of: scenePhase) { _, phase in if phase != .active { stopDictation() } }
         .onDisappear { dictationTask?.cancel(); cleanupTask?.cancel(); dictating = false; if dictation.isRecording { dictation.stop() } }
-        .sheet(isPresented: $showingUsage) {
-            if let usage = model.progress.usage {
-                VStack(alignment: .leading, spacing: 16) {
-                    HStack {
-                        Text("Latest model response").font(.headline)
-                        Spacer()
-                        Button("Done") { showingUsage = false }
-                    }
-                    VStack(spacing: 10) {
-                        LabeledContent("Total input", value: usage.input.formatted())
-                            .accessibilityElement(children: .combine).accessibilityIdentifier("usage-total-input")
-                        if let cached = usage.cachedInput, let uncached = usage.uncachedInput {
-                            LabeledContent("Reused from cache", value: cached.formatted())
-                            LabeledContent("Uncached input", value: uncached.formatted())
-                        }
-                        Divider()
-                        LabeledContent("Output", value: usage.output.formatted())
-                            .accessibilityElement(children: .combine).accessibilityIdentifier("usage-output")
-                        if let reasoning = usage.reasoningOutput, reasoning > 0 {
-                            LabeledContent("Included reasoning", value: reasoning.formatted())
-                        }
-                    }.font(.subheadline).monospacedDigit()
-                    Text("Input includes conversation context, instructions, and tool results. Cached input is part of that total. These are tokens for one model response, not the whole conversation or your account quota.")
-                        .font(.footnote).foregroundStyle(PhrenTheme.textMuted)
-                }
-                .padding(24).foregroundStyle(PhrenTheme.text)
-                .presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
-                .presentationBackground(PhrenTheme.chatCanvas)
-            }
-        }
+        .sheet(isPresented: $showingUsage) { usageSheet }
         .sheet(isPresented: $showingChildAgents) {
             if let target = model.target { ChatSubagentsView(session: session, target: target, agents: childAgents) }
         }
@@ -669,12 +615,88 @@ struct AgentChatView: View {
             guard active else { return }
             await model.run(session)
         }
-        .task(id: "\(model.target?.id ?? ""):\(model.timelineRevision)") {
-            guard let target = model.target, !target.isStarting else { childAgents = []; return }
-            childAgents = (try? await PhrenConnection.childAgents(host: session.host,
-                privateKey: DeviceSSHKey.load(session.host.id), target: target).agents) ?? childAgents
+        .task(id: childAgentsIdentity) { await refreshChildAgents() }
+    }
+
+    private func refreshChildAgents() async {
+        guard let target = model.target, !target.isStarting else { childAgents = []; return }
+        do {
+            let key = try DeviceSSHKey.load(session.host.id)
+            let tree = try await PhrenConnection.childAgents(host: session.host, privateKey: key, target: target)
+            childAgents = tree.agents
+        } catch {}
+    }
+
+    /// The tab's panes when no conversation is open yet: agents to chat with,
+    /// shells to open as terminals.
+    @ViewBuilder private var panePicker: some View {
+        Text(hasAgentPanes ? "Choose an agent" : "No agent in this tab").font(.title2.weight(.semibold))
+        ForEach(model.panes) { pane in
+            if isAgent(pane) {
+                Button {
+                    model.choose(pane, session: session); refresh = UUID()
+                } label: {
+                    HStack { VStack(alignment: .leading) { Text(pane.displayTitle); Text(pane.agent ?? "").font(.caption) }; Spacer(); Image(systemName: "chevron.right") }
+                        .padding(16).phrenCard()
+                }.buttonStyle(.plain).accessibilityIdentifier("chat-pane:\(pane.id)")
+            } else {
+                Button { commandDestination = .init(paneID: pane.id, menu: false) } label: {
+                    HStack { VStack(alignment: .leading) { Text(pane.displayTitle); Text("Open terminal").font(.caption) }; Spacer(); Image(systemName: "terminal") }
+                        .padding(16).phrenCard()
+                }.buttonStyle(.plain).accessibilityIdentifier("chat-terminal-pane:\(pane.id)")
+            }
+        }
+        Text(hasAgentPanes ? "Native chat supports Codex, Claude Code, and GitHub Copilot sessions recognized on this computer."
+             : "Start Codex, Claude Code, or GitHub Copilot in the terminal and chat picks it up here.")
+            .font(.footnote).foregroundStyle(PhrenTheme.textMuted)
+        if model.panes.contains(where: { $0.agent == "copilot" }) {
+            Link("Set up Copilot chat", destination: URL(string: "https://alaarab.github.io/phren/phren-hook.html")!)
+                .font(.footnote)
         }
     }
+
+    /// Token counts for the latest model response.
+    @ViewBuilder private var usageSheet: some View {
+        if let usage = model.progress.usage {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack {
+                    Text("Latest model response").font(.headline)
+                    Spacer()
+                    Button("Done") { showingUsage = false }
+                }
+                VStack(spacing: 10) {
+                    LabeledContent("Total input", value: usage.input.formatted())
+                        .accessibilityElement(children: .combine).accessibilityIdentifier("usage-total-input")
+                    if let cached = usage.cachedInput, let uncached = usage.uncachedInput {
+                        LabeledContent("Reused from cache", value: cached.formatted())
+                        LabeledContent("Uncached input", value: uncached.formatted())
+                    }
+                    Divider()
+                    LabeledContent("Output", value: usage.output.formatted())
+                        .accessibilityElement(children: .combine).accessibilityIdentifier("usage-output")
+                    if let reasoning = usage.reasoningOutput, reasoning > 0 {
+                        LabeledContent("Included reasoning", value: reasoning.formatted())
+                    }
+                }.font(.subheadline).monospacedDigit()
+                Text("Input includes conversation context, instructions, and tool results. Cached input is part of that total. These are tokens for one model response, not the whole conversation or your account quota.")
+                    .font(.footnote).foregroundStyle(PhrenTheme.textMuted)
+            }
+            .padding(24).foregroundStyle(PhrenTheme.text)
+            .presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
+            .presentationBackground(PhrenTheme.chatCanvas)
+        }
+    }
+
+    /// A tab with only shells is a terminal, not a chat: go straight there
+    /// once, and come back to the picker when an agent starts.
+    private func fallBackToTerminalIfShellOnly(loaded: Bool) {
+        guard loaded, !fellBackToTerminal, model.target == nil, model.error == nil else { return }
+        guard let first = model.panes.first, !hasAgentPanes, commandDestination == nil else { return }
+        fellBackToTerminal = true
+        commandDestination = .init(paneID: first.id, menu: false)
+    }
+    /// Re-read the spawned agents when the conversation or its transcript changes.
+    private var childAgentsIdentity: String { (model.target?.id ?? "") + ":" + String(model.timelineRevision) }
 
     private func openAgentDrawer() {
         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.22)) { showingAgentSwitcher = true }
