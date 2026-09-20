@@ -65,6 +65,7 @@ public struct AgentChild: Codable, Equatable, Sendable, Identifiable {
     public enum State: String, Codable, Sendable { case running, completed }
     public let id: String
     public let provider: String
+    public let model: String?
     public let path: String
     public let callId: String
     public let state: State

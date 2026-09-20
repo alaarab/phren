@@ -196,15 +196,20 @@ final class AgentChatTests: XCTestCase {
     }
 
     @MainActor
-    func testSubagentCardOpensItsOwnTranscriptAndTheComposerRowOnlyCountsRunningAgents() {
+    func testSubagentCardOpensItsOwnTranscriptAndTheHeaderBadgeCountsRunningAgents() {
         let app = launch(extra: ["--chat-agent-card"])
         app.buttons["live-chat:w7:w7:t9"].tap()
         XCTAssertTrue(app.scrollViews["chat-transcript"].waitForExistence(timeout: 8))
-        // One agent is still out there, so the composer says so — and only
-        // counts that one; the finished audit is reached from its card.
-        let running = app.buttons["chat-child-agents"]
-        XCTAssertTrue(running.waitForExistence(timeout: 8))
-        XCTAssertEqual(running.label, "1 agent running")
+        let tree = app.buttons["chat-agent-tree"]
+        XCTAssertTrue(tree.waitForExistence(timeout: 8))
+        XCTAssertFalse(app.buttons["1 agent running"].exists, "The old agent label no longer takes a composer row")
+        XCTAssertTrue(tree.label.contains("1 running"), "The header badge counts only running agents")
+        tree.tap()
+        let modeledAgent = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "child-agent:", "gpt-5-codex")).firstMatch
+        XCTAssertTrue(modeledAgent.waitForExistence(timeout: 5))
+        XCTAssertTrue(modeledAgent.label.contains("Claude"), "The model appears beside its provider")
+        capture(app, "Agent tree in the chat header")
+        app.buttons["Done"].tap()
         let open = app.buttons["chat-agent-transcript:agent-audit"]
         XCTAssertTrue(open.waitForExistence(timeout: 8))
         XCTAssertEqual(open.label, "Open transcript")
@@ -213,7 +218,7 @@ final class AgentChatTests: XCTestCase {
         // The child's rows are all sidechain rows; they read as its conversation.
         let header = app.descendants(matching: .any).matching(identifier: "child-agent-header").firstMatch
         XCTAssertTrue(header.waitForExistence(timeout: 5))
-        XCTAssertTrue(header.label.contains("Claude subagent")); XCTAssertTrue(header.label.contains("Completed"))
+        XCTAssertTrue(header.label.contains("Claude")); XCTAssertTrue(header.label.contains("gpt-5-codex")); XCTAssertTrue(header.label.contains("Completed"))
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Child audit marker")).firstMatch.waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["This agent recorded no conversation."].exists)
         XCTAssertEqual(rawJSONTexts(app).count, 0, "No raw JSON in a child transcript")
@@ -1737,5 +1742,3 @@ final class AgentChatTests: XCTestCase {
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = name; shot.lifetime = .keepAlways; add(shot)
     }
 }
-
-

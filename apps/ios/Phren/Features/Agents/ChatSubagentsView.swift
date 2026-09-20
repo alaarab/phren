@@ -62,6 +62,9 @@ private extension AgentChild {
         default: return "Codex"
         }
     }
+    var providerAndModel: String {
+        [providerName, model].compactMap { $0 }.joined(separator: " · ")
+    }
     var descendantLabel: String? {
         let count = children.reduce(0) { $0 + $1.agentCount }
         guard count > 0 else { return nil }
@@ -137,7 +140,7 @@ private struct AgentTreeRowView: View {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(row.agent.name).font(.body.weight(.semibold)).foregroundStyle(PhrenTheme.text).lineLimit(2)
                     HStack(spacing: 6) {
-                        Text(row.agent.providerName)
+                        Text(row.agent.providerAndModel)
                         Text("·")
                         Text(stateName).foregroundStyle(stateColor)
                         if let descendants = row.agent.descendantLabel {
@@ -151,7 +154,7 @@ private struct AgentTreeRowView: View {
             .padding(14).phrenPanel(tool: true)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(row.agent.name), \(row.agent.providerName), \(stateName)" + (row.agent.descendantLabel.map { ", \($0)" } ?? ""))
+        .accessibilityLabel("\(row.agent.name), \(row.agent.providerName)" + (row.agent.model.map { ", \($0)" } ?? "") + ", \(stateName)" + (row.agent.descendantLabel.map { ", \($0)" } ?? ""))
     }
 
     private var treeGuide: some View {
@@ -281,7 +284,8 @@ struct ChildAgentTranscriptView: View {
             AgentProviderGlyph(source: agent.provider.lowercased(), size: 25)
                 .frame(width: 42, height: 42).background(PhrenTheme.phrenCardAccent.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
             VStack(alignment: .leading, spacing: 3) {
-                Text(agent.providerName + " subagent").font(.headline).foregroundStyle(PhrenTheme.text)
+                Text(agent.providerName + " subagent" + (agent.model.map { " · \($0)" } ?? ""))
+                    .font(.headline).foregroundStyle(PhrenTheme.text)
                 Text(stateLine).font(.caption).foregroundStyle(PhrenTheme.textMuted)
             }
             Spacer()
