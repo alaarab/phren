@@ -39,7 +39,8 @@ describe("fan-out manifests", () => {
     expect(found).toHaveLength(1);
     expect(found[0]).toMatchObject({ provider: "opencode", path: "Review bridge", state: "running", children: [] });
     expect(found[0].id).toMatch(/^[a-f0-9]{32}$/);
-    expect(JSON.stringify({ ...found[0], transcript: undefined, session: undefined })).not.toContain("/repo");
+    expect(found[0].cwd).toBe("/repo-wt");
+    expect(JSON.stringify({ ...found[0], transcript: undefined, session: undefined, cwd: undefined })).not.toContain("/repo");
     expect(await fanoutChildren("codex", "bbbbbbbb-2222-4222-8222-222222222222", env)).toEqual([]);
   });
 
