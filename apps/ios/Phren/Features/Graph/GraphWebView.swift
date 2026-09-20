@@ -9,14 +9,24 @@ struct GraphCommand: Equatable {
     let action: Action
 }
 
+enum GraphAction: Equatable {
+    case focus(String)
+    case openProject(String)
+    case share(String)
+    case close
+}
+
 /// Local renderer only. Native controls issue a small set of typed commands.
 struct GraphWebView: UIViewRepresentable {
     let payloadJSON: String
     let command: GraphCommand?
     let onSelect: (GraphNodeRef?) -> Void
+    let onAction: (GraphAction) -> Void
     let onError: (String) -> Void
 
-    func makeCoordinator() -> Coordinator { Coordinator(onSelect: onSelect, onError: onError) }
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onSelect: onSelect, onAction: onAction, onError: onError)
+    }
 
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
@@ -43,6 +53,7 @@ struct GraphWebView: UIViewRepresentable {
 
     func updateUIView(_ webView: WKWebView, context: Context) {
         context.coordinator.onSelect = onSelect
+        context.coordinator.onAction = onAction
         context.coordinator.onError = onError
         context.coordinator.pendingPayload = payloadJSON
         context.coordinator.pendingCommand = command
@@ -59,12 +70,13 @@ struct GraphWebView: UIViewRepresentable {
     }
 
     final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
-        static let handlers = ["graphReady", "graphSelect", "graphError"]
+        static let handlers = ["graphReady", "graphSelect", "graphAction", "graphError"]
         weak var webView: WKWebView?
         var resourceRoot: URL?
         var pendingPayload: String?
         var pendingCommand: GraphCommand?
         var onSelect: (GraphNodeRef?) -> Void
+        var onAction: (GraphAction) -> Void
         var onError: (String) -> Void
         var timeout: DispatchWorkItem?
         private var isReady = false
@@ -72,8 +84,11 @@ struct GraphWebView: UIViewRepresentable {
         private var lastRendered: String?
         private var lastCommand: UUID?
 
-        init(onSelect: @escaping (GraphNodeRef?) -> Void, onError: @escaping (String) -> Void) {
+        init(onSelect: @escaping (GraphNodeRef?) -> Void,
+             onAction: @escaping (GraphAction) -> Void,
+             onError: @escaping (String) -> Void) {
             self.onSelect = onSelect
+            self.onAction = onAction
             self.onError = onError
         }
 
@@ -142,6 +157,17 @@ struct GraphWebView: UIViewRepresentable {
                       let data = try? JSONSerialization.data(withJSONObject: message.body),
                       let node = try? JSONDecoder().decode(GraphNodeRef.self, from: data) else { return }
                 onSelect(node)
+            case "graphAction":
+                guard JSONSerialization.isValidJSONObject(message.body),
+                      let data = try? JSONSerialization.data(withJSONObject: message.body),
+                      let action = try? JSONDecoder().decode(GraphActionMessage.self, from: data) else { return }
+                switch action.action {
+                case "focus": onAction(.focus(action.id))
+                case "openProject": onAction(.openProject(action.id))
+                case "share": onAction(.share(action.id))
+                case "close": onAction(.close)
+                default: break
+                }
             case "graphError":
                 onError("The graph renderer couldn't load. Try opening it again.")
             default: break
@@ -171,4 +197,9 @@ struct GraphWebView: UIViewRepresentable {
             decisionHandler(.allow)
         }
     }
+}
+
+private struct GraphActionMessage: Decodable {
+    let action: String
+    let id: String
 }

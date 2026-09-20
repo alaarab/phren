@@ -2,27 +2,48 @@ import XCTest
 
 final class GraphInteractionTests: XCTestCase {
     @MainActor
-    func testNodePanelKeepsGraphVisibleAndCloses() {
+    func testNodeDossierKeepsGraphVisibleAndCloses() {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing"]
         app.launch()
-        XCTAssertTrue(app.buttons["Memory graph"].waitForExistence(timeout: 15))
-        app.buttons["Memory graph"].tap()
-        XCTAssertTrue(app.webViews.staticTexts["DEMO"].firstMatch.waitForExistence(timeout: 20))
-        app.buttons["Search graph"].tap()
-        let field = app.textFields["Search findings, tasks, projects"]
-        field.tap()
-        field.typeText("offline")
-        app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Cache repeated requests")).firstMatch.tap()
+        let panelText = openDossier(in: app)
 
-        let panelText = app.staticTexts["graph-node-text"]
-        XCTAssertTrue(panelText.waitForExistence(timeout: 5))
-        XCTAssertTrue(panelText.label.contains("Cache repeated requests for offline use"))
-        XCTAssertTrue(app.webViews.firstMatch.isHittable, "The graph should remain visible and interactive behind the panel")
+        XCTAssertTrue(panelText.waitForExistence(timeout: 5), "dossier text appears")
+        let webView = app.webViews.firstMatch
+        XCTAssertTrue(webView.exists, "web view stays hittable: web view exists")
+        XCTAssertGreaterThanOrEqual(
+            webView.frame.height,
+            app.frame.height * 0.5,
+            "web view stays hittable: graph occupies at least half of the screen"
+        )
+        let zoomIn = app.buttons["Zoom in"]
+        XCTAssertTrue(zoomIn.waitForExistence(timeout: 5), "zoom in exists")
+        XCTAssertTrue(zoomIn.isHittable, "zoom in hittable")
+        XCTAssertLessThan(
+            zoomIn.frame.minY,
+            panelText.frame.minY,
+            "zoom cluster sits above the dossier"
+        )
         capture(app, name: "Graph node panel")
 
-        app.buttons["graph-node-close"].tap()
-        XCTAssertFalse(panelText.waitForExistence(timeout: 2))
+        let closeButton = app.webViews.buttons["Close"]
+        if closeButton.waitForExistence(timeout: 2) {
+            closeButton.tap()
+        } else {
+            let closeGlyph = app.webViews.staticTexts["×"]
+            _ = closeGlyph.waitForExistence(timeout: 2)
+            closeGlyph.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        }
+        XCTAssertTrue(
+            closeButton.waitForNonExistence(timeout: 4),
+            "dossier closes: close button disappears"
+        )
+        // The graph's own node label carries the same words, so ask for the
+        // dialog rather than the text.
+        XCTAssertTrue(
+            app.webViews.otherElements["Node details"].waitForNonExistence(timeout: 2),
+            "dossier closes: dialog disappears"
+        )
     }
 
     @MainActor
@@ -79,6 +100,23 @@ final class GraphInteractionTests: XCTestCase {
     }
 
     @MainActor
+    private func openDossier(in app: XCUIApplication) -> XCUIElement {
+        _ = app.buttons["Memory graph"].waitForExistence(timeout: 15)
+        app.buttons["Memory graph"].tap()
+        _ = app.webViews.staticTexts["DEMO"].firstMatch.waitForExistence(timeout: 20)
+        app.buttons["Search graph"].tap()
+        let field = app.textFields["Search findings, tasks, projects"]
+        field.tap()
+        field.typeText("offline")
+        let result = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Cache repeated requests")).firstMatch
+        _ = result.waitForExistence(timeout: 5)
+        result.tap()
+        return app.webViews.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS %@", "Cache repeated requests for offline use")
+        ).firstMatch
+    }
+
+    @MainActor
     func testFocusSaveAndRestoreGraphView() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing"]
@@ -96,7 +134,7 @@ final class GraphInteractionTests: XCTestCase {
         field.tap()
         field.typeText("offline")
         app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Cache repeated requests")).firstMatch.tap()
-        let focus = app.buttons["Focus connections"]
+        let focus = app.webViews.buttons["Focus"]
         XCTAssertTrue(focus.waitForExistence(timeout: 5))
         focus.tap()
         XCTAssertTrue(app.buttons["Show full view"].waitForExistence(timeout: 5))
