@@ -2,7 +2,7 @@
 
 How project memory flows through the system, from user prompt to repo-backed state and back into bounded retrieval.
 
-Current public surface: 61 MCP tools across 14 modules, exposed through two profiles — `core` (10 tools, the default) and `full` — see `api-reference.md`.
+Current public surface: 62 MCP tools across 15 modules, exposed through two profiles: `core` (10 tools, the default) and `full`; see `api-reference.md`.
 
 ## System Overview
 
@@ -27,7 +27,7 @@ Claude / Copilot / Cursor / Codex
                 v
 +---------------+---------------+
 | MCP Server (phren-mcp)       |
-| 61 tools · core profile: 10  |
+| 62 tools · core profile: 10  |
 +---------------+---------------+
                 |
                 v
@@ -103,7 +103,7 @@ Running MCP servers can poll shared Git stores on a configurable interval (off b
 
 ## MCP Server Modules
 
-Phren MCP is split into 13 modules:
+Phren MCP is split into 15 modules:
 
 1. Search and browse
 2. Task management
@@ -118,6 +118,8 @@ Phren MCP is split into 13 modules:
 11. Hooks management
 12. Extraction
 13. Configuration
+14. Topic summaries
+15. Dispatch
 
 Finding lifecycle and editing tools:
 
@@ -320,3 +322,21 @@ chat mutation revalidates server, workspace, tab, pane, provider, and conversati
 An agent-only socket registers lifecycle callbacks and explicit permission
 requests; it is inaccessible through the phone dispatcher. No Moshi installation
 or service is required. See [the connection protocol](../apps/ios/AGENT_CONNECTIONS.md).
+
+## Scheduling
+
+A project's `schedules.yaml` names an assigned computer, a harness, and one of
+five timing forms. The assigned computer's Phren Hook evaluates them in its
+local time and launches the prompt through Herdr or a headless wrapper, keeping
+its own run ledger. `phren schedule` edits the store file directly and asks the
+Hook to run now or list local history. See [Scheduled prompts](schedules.md).
+
+## Conductor
+
+The conductor is the owner's single conversation that reads a project's tasks
+and sends independent worker briefs across enrolled computers. The first slice
+covers enrollment and placement: a reusable restricted dispatch key, pinned SSH
+peers in the Hook's private `hooks.yaml`, `POST /v1/dispatch` with named or
+`anywhere` placement, durable receipts, the `dispatch` MCP tool, and the
+`phren dispatch` command. Reports, remote tree rows and headless workers are
+later work packages. See [Conductor](conductor.md).

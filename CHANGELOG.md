@@ -7,6 +7,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- The menu window the Hook opens after a bare slash command stays open through
+  Enter, so a choice that opens a second confirmation (Codex full access) can
+  still be answered from the phone; Escape closes it.
 - The periodic store pull commits uncommitted writes (a task from `add_task`,
   a new finding) before it fetches or merges, so a managed sync can no longer
   discard or block on a write that arrived moments earlier; a divergent remote
@@ -16,6 +19,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- Modules design, built-in manifests and store/profile configuration resolution,
+  plus `phren modules list` to inspect configured enablement without changing
+  runtime registration.
 - Conductor design and independent worker briefs for remote reports, agent
   ancestry, phone navigation, headless workers and question relay, plus a
   shipped `conductor` skill with a concise dispatcher voice.
