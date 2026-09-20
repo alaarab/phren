@@ -150,8 +150,11 @@ export async function paneChatState(server: string, pane: Json): Promise<Json> {
   if (!provider.safeParse(pane.agent).success) return {};
   const sessionId = await paneIdentity(server, pane);
   const pids = await foregroundPids(server, pane);
+  // The token binds to the agent's own process, the oldest in the pane's
+  // foreground group. Helpers it spawns while starting up (Codex forks
+  // several in its first seconds) must not turn the phone's first send away.
   const startingToken = typeof pane.terminal_id === "string" && pids.length
-    ? createHmac("sha256", startingKey).update(JSON.stringify([server, pane.workspace_id, pane.tab_id, pane.pane_id, pane.terminal_id, pane.agent, pids])).digest("hex") : undefined;
+    ? createHmac("sha256", startingKey).update(JSON.stringify([server, pane.workspace_id, pane.tab_id, pane.pane_id, pane.terminal_id, pane.agent, pids[0]])).digest("hex") : undefined;
   // An ambiguous set of open logs is not a brand-new conversation.
   // Reuse the same two-second identity probe as context/overview polling;
   // discovering a new chat must not run lsof again for every list refresh.

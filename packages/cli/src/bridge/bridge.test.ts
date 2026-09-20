@@ -299,6 +299,7 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
   let replaceBeforeMutation = false;
   let deliveries: { method: string; session: string }[];
   let extraWorkspaces: Record<string, unknown>[] = [], extraTabs: Record<string, unknown>[] = [], extraPanes: Record<string, unknown>[] = [], failAgentStart = false;
+  let helperPIDs: number[] = [];
   function api(url: string, body?: unknown): Promise<{ status: number; data: any }> {
     return new Promise((resolve, reject) => {
       const payload = body === undefined ? undefined : JSON.stringify(body);
@@ -327,7 +328,7 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     }
     commands = []; current = session; agentStatus = "working"; reportIdentity = true; foregroundPID = process.pid; terminalID = "term-one"; log = ""; holdSnapshot = false; releaseSnapshot = undefined;
     replaceBeforeMutation = false; deliveries = [];
-    extraWorkspaces = []; extraTabs = []; extraPanes = []; failAgentStart = false;
+    extraWorkspaces = []; extraTabs = []; extraPanes = []; failAgentStart = false; helperPIDs = [];
     await mkdir(path.join(root, "herdr"));
     await mkdir(path.join(root, "codex/sessions/2026/09/10"), { recursive: true });
     record = path.join(root, `codex/sessions/2026/09/10/rollout-2026-09-10T00-00-00-${session}.jsonl`);
@@ -366,7 +367,7 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
         const snapshot = { panes: [pane, ...extraPanes], workspaces: [{ workspace_id: "w1", label: "Project" }, ...extraWorkspaces],
           tabs: [{ tab_id: "w1:t1", workspace_id: "w1", label: "1" }, ...extraTabs] };
         const answer = () => socket.end(JSON.stringify({ id: req.id, result: req.method === "session.snapshot" ? { snapshot }
-          : req.method === "pane.process_info" ? { process_info: { foreground_processes: [{ pid: foregroundPID }] } } : { ok: true } }) + "\n");
+          : req.method === "pane.process_info" ? { process_info: { foreground_processes: [{ pid: foregroundPID }, ...helperPIDs.map(pid => ({ pid }))] } } : { ok: true } }) + "\n");
         if (holdSnapshot && req.method === "session.snapshot") { holdSnapshot = false; releaseSnapshot = answer; }
         else answer();
       });
@@ -459,6 +460,9 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     const { session: _session, ...location } = target;
     const starting = { ...location, starting: true, startingToken: pane.startingToken };
     expect((await api("/v1/prompt", { target: { ...starting, startingToken: "0".repeat(64) }, text: "wrong token" })).status).toBe(409);
+    // Helpers the agent forks while starting up do not change the token.
+    helperPIDs = [foregroundPID + 100_000, foregroundPID + 100_001];
+    expect((await discover()).startingToken).toBe(pane.startingToken);
     for (const route of ["/v1/upload", "/v1/diff", "/v1/approvals/answer", "/v1/keys"]) {
       expect((await api(route, { target: starting, text: "must not run" })).status).toBe(400);
     }
@@ -729,6 +733,22 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     for (let i = 0; i < 60 && frames.length < 3; i++) await sleep(25);
     expect(JSON.stringify(frames[2])).toContain('"output_tokens":3');
     const closed = once(socket, "close"); current = "bbbbbbbb-1111-4111-8111-111111111111"; await closed;
+  });
+  it("streams an empty backlog for a conversation whose transcript does not exist yet, then the file once it appears", async () => {
+    await rm(record);
+    const query = new URLSearchParams(target).toString();
+    expect((await api(`/v1/transcripts/history?${query}&beforeLine=1`)).data).toMatchObject({ type: "older", entries: [], totalLines: 0 });
+    const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/transcripts?${query}`);
+    const frames: any[] = []; socket.on("message", data => frames.push(JSON.parse(data.toString())));
+    const closed = once(socket, "close");
+    await once(socket, "open");
+    for (let i = 0; i < 60 && !frames.length; i++) await sleep(25);
+    expect(frames[0]).toMatchObject({ type: "backlog", entries: [], totalLines: 0, session });
+    expect(socket.readyState).toBe(WebSocket.OPEN);
+    await writeFile(record, JSON.stringify({ type: "session_meta", payload: { id: session } }) + "\n" + JSON.stringify(row("First message")) + "\n");
+    for (let i = 0; i < 160 && frames.length < 2; i++) await sleep(25);
+    expect(frames[1].type).toBe("backlog"); expect(JSON.stringify(frames[1])).toContain("First message");
+    current = "bbbbbbbb-1111-4111-8111-111111111111"; await closed;
   });
   it("follows a child agent's transcript live through the parent's socket and pages its history", async () => {
     // The parent records the launch; the child's own rollout names the parent.
