@@ -15,6 +15,8 @@ number counts up on its own.
 
 ### New
 
+- Completed agents can be cleared from Agent work and restored when needed,
+  keeping active agent trees focused on work still in progress.
 - Agent work uses compact headers and flat session-style cards for spawned
   agents, with provider, model, checkout, and running state visible at a glance.
 - Agent work shows each fan-out worker's branch and worktree in its row and

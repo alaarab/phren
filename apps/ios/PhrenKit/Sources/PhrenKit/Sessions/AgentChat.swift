@@ -15,6 +15,7 @@ public struct AgentChatTarget: Codable, Equatable, Hashable, Sendable, Identifia
     public let startingToken: String?
     public var isStarting: Bool { startingToken != nil && sessionID.isEmpty }
     public var id: String { [hostID.uuidString, muxID, workspaceID, tabID, paneID, source, isStarting ? "starting-" + (startingToken ?? "") : sessionID].joined(separator: "/") }
+    public var conversationKey: String { "\(source):\(sessionID)" }
 
     public init(hostID: UUID, workspaceID: String, tabID: String, paneID: String, source: String, sessionID: String, muxID: String = "herdr:default", startingToken: String? = nil) throws {
         let starting = sessionID.isEmpty && startingToken?.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil
