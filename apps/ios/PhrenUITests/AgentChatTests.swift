@@ -1214,7 +1214,9 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(app.buttons["View attached Screenshot.png"].waitForExistence(timeout: 8))
         capture(app, "Sent image in conversation")
         if app.buttons["Latest messages"].isHittable { app.buttons["Latest messages"].tap() }
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@ AND label CONTAINS %@", "Received in codex", "/tmp/phren-fixture/")).firstMatch.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["Received in codex on w7:p1: Review this screenshot"].waitForExistence(timeout: 8))
+        // The upload note is its own paragraph, below the echoed reply.
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "/tmp/phren-fixture/")).firstMatch.exists)
         XCTAssertFalse(app.buttons["Remove Screenshot.png"].exists)
     }
 
