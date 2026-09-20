@@ -25,10 +25,13 @@ final class AgentChatTests: XCTestCase {
         let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
         composer.tap(); composer.typeText("Create the first file")
         app.buttons["chat-send"].tap()
-        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-queued-tag:")).firstMatch.waitForExistence(timeout: 3))
+        // The prompt is accepted before the real session attaches: the draft
+        // clears and the control shows busy, with no session to steer yet.
+        let waitingComposer = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", ""), object: composer)
+        XCTAssertEqual(XCTWaiter.wait(for: [waitingComposer], timeout: 3), .completed)
+        XCTAssertTrue(app.staticTexts["chat-starting"].exists)
         XCTAssertTrue(app.staticTexts["Received in codex on w7:p1: Create the first file"].waitForExistence(timeout: 12))
         XCTAssertFalse(app.staticTexts["chat-starting"].exists)
-        XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-queued-tag:")).firstMatch.exists)
         capture(app, "New session transcript attached")
     }
 
