@@ -33,8 +33,10 @@ struct GraphView: View {
     @State private var suggestedViewName = "Graph"
     @State private var notice: String?
     @State private var restoringView: GraphSavedView?
+    @State private var panelExpanded = false
     @AppStorage("graph.savedViews.v1") private var savedViewData = Data()
     @FocusState private var searchFocused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var selectedStore: String {
         storeId.isEmpty ? (initialStoreId ?? model.storeFilter ?? model.storeDescriptors.first?.id ?? "") : storeId
@@ -52,39 +54,60 @@ struct GraphView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            LiveStatusBar()
-            controls
-            ZStack(alignment: .bottomTrailing) {
-                if let visible, let json = payloadJSON, !visible.nodes.isEmpty {
-                    GraphWebView(payloadJSON: json, command: command,
-                                 onSelect: receiveSelection,
-                                 onError: { error = $0 })
-                        .id(rendererID)
-                        .accessibilityLabel("Interactive memory graph")
-                    cameraControls.padding(12)
-                } else if visible != nil {
-                    PhrenEmptyState(title: "No graph content yet",
-                                    message: "Findings, tasks, and projects appear here after your store syncs.")
-                } else if error == nil {
-                    ProgressView("Loading graph…").frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-
-                if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    searchResults
-                }
-                if let error {
-                    VStack(spacing: 12) {
-                        PhrenEmptyState(title: "Graph unavailable", message: error)
-                        Button("Try again") {
-                            self.error = nil
-                            rendererID = UUID()
-                            Task { await rebuild() }
-                        }.buttonStyle(.borderedProminent).tint(PhrenTheme.accentSolid)
+        GeometryReader { geometry in
+            VStack(spacing: 0) {
+                LiveStatusBar()
+                controls
+                ZStack(alignment: .bottomTrailing) {
+                    if let visible, let json = payloadJSON, !visible.nodes.isEmpty {
+                        GraphWebView(payloadJSON: json, command: command,
+                                     onSelect: receiveSelection,
+                                     onError: { error = $0 })
+                            .id(rendererID)
+                            .accessibilityLabel("Interactive memory graph")
+                        cameraControls.padding(12)
+                    } else if visible != nil {
+                        PhrenEmptyState(title: "No graph content yet",
+                                        message: "Findings, tasks, and projects appear here after your store syncs.")
+                    } else if error == nil {
+                        ProgressView("Loading graph…").frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(PhrenTheme.bg)
+
+                    if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        searchResults
+                    }
+                    if let error {
+                        VStack(spacing: 12) {
+                            PhrenEmptyState(title: "Graph unavailable", message: error)
+                            Button("Try again") {
+                                self.error = nil
+                                rendererID = UUID()
+                                Task { await rebuild() }
+                            }.buttonStyle(.borderedProminent).tint(PhrenTheme.accentSolid)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(PhrenTheme.bg)
+                    }
+
+                    if let node = selection {
+                        GraphNodePanel(
+                            node: node,
+                            selectedStore: selectedStore,
+                            expanded: panelExpanded,
+                            maxHeight: geometry.size.height * (panelExpanded ? 0.60 : 0.33),
+                            onToggleExpanded: { panelExpanded.toggle() },
+                            onClose: { selection = nil },
+                            onFocus: { focus(on: node.id) }
+                        )
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 12)
+                        .frame(maxWidth: .infinity)
+                        .transition(nodePanelTransition)
+                        .zIndex(2)
+                    }
                 }
+                .animation(reduceMotion ? .easeOut(duration: 0.15) : .snappy(duration: 0.28), value: selection?.id)
+                .animation(reduceMotion ? nil : .snappy(duration: 0.28), value: panelExpanded)
             }
         }
         .background(PhrenTheme.bg)
@@ -143,16 +166,19 @@ struct GraphView: View {
                 filtered = presentation.0; visible = presentation.1; payloadJSON = presentation.2
             } catch is CancellationError {} catch { self.error = error.localizedDescription }
         }
-        .sheet(item: $selection, onDismiss: {
+        .onChange(of: selection?.id) { previous, current in
+            if previous != current { panelExpanded = false }
+            guard previous != nil, current == nil else { return }
             switch command?.action {
             case .reset, .reveal: break
             default: command = GraphCommand(action: .clear)
             }
-        }) { node in
-            GraphNodeSheet(node: node) { focus(on: node.id) }
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
-                .presentationBackgroundInteraction(.enabled(upThrough: .medium))
+        }
+        .navigationDestination(for: ArchiveRoute.self) { route in
+            ArchiveBrowserView(storeId: route.storeId, project: route.project)
+        }
+        .navigationDestination(for: ArchiveTopicRoute.self) { route in
+            ArchiveTopicView(storeId: route.storeId, topic: route.topic)
         }
         .sheet(isPresented: $showingSavedViews) { savedViewsSheet }
         .alert("Save graph view", isPresented: $namingView) {
@@ -181,6 +207,10 @@ struct GraphView: View {
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showingInfo = false } } }
             }.presentationDetents([.medium, .large])
         }
+    }
+
+    private var nodePanelTransition: AnyTransition {
+        reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity)
     }
 
     private var controls: some View {
@@ -476,39 +506,165 @@ struct GraphNodeRef: Codable, Equatable, Identifiable {
     }
 }
 
-private struct GraphNodeSheet: View {
+private struct GraphNodePanel: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.dynamicTypeSize) private var typeSize
     let node: GraphNodeRef
+    let selectedStore: String
+    let expanded: Bool
+    let maxHeight: CGFloat
+    let onToggleExpanded: () -> Void
+    let onClose: () -> Void
     let onFocus: () -> Void
 
     var body: some View {
-        NavigationStack {
-            PhrenList {
-                Section {
-                    DocumentPreview(content: node.sourceText ?? node.label ?? node.id)
-                    if let store = node.store { LabeledContent("Store", value: model.storeName(for: store)) }
-                    if let project = node.project { LabeledContent("Project", value: project) }
-                    if node.id.hasPrefix("journal:") { Label("Team journal", systemImage: "person.2") }
-                }
-                if let project = node.project, let storeId = node.store {
-                    Section {
-                        Button("Focus connections", systemImage: "point.3.connected.trianglepath.dotted", action: onFocus)
-                        NavigationLink("Open project") { ProjectDetailView(storeId: storeId, project: project) }
-                        ShareLink(item: node.sourceText ?? node.label ?? node.id) {
-                            Label("Share", systemImage: "square.and.arrow.up")
-                        }
+        VStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
+            header
+            Group {
+                if expanded {
+                    ScrollView {
+                        nodeText.frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    ProjectSessionActions(storeId: storeId, project: project, presentation: .section)
+                    .scrollIndicators(.visible)
+                    .frame(maxHeight: max(88, maxHeight - (typeSize.isAccessibilitySize ? 232 : 180)))
+                } else {
+                    nodeText.lineLimit(4)
                 }
             }
-            .navigationTitle(node.isTask ? "Task" : (node.isFinding ? "Finding" : "Project"))
-            .navigationBarTitleDisplayMode(.inline)
-            .navigationDestination(for: ArchiveRoute.self) { route in
-                ArchiveBrowserView(storeId: route.storeId, project: route.project)
+
+            Button(action: onToggleExpanded) {
+                Label(expanded ? "Less" : "More", systemImage: expanded ? "chevron.down" : "chevron.up")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(PhrenTheme.sessionProject)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .trailing)
+                    .contentShape(Rectangle())
             }
-            .navigationDestination(for: ArchiveTopicRoute.self) { route in
-                ArchiveTopicView(storeId: route.storeId, topic: route.topic)
+            .buttonStyle(.plain)
+            .accessibilityLabel(expanded ? "Show less" : "Show more")
+
+            if let project = node.project, let storeId = node.store {
+                actions(storeId: storeId, project: project)
+            } else {
+                HStack(spacing: PhrenTheme.Space.small) {
+                    focusButton
+                    shareButton
+                }
+                .labelStyle(.iconOnly)
             }
         }
+        .padding(PhrenTheme.Space.medium)
+        .frame(maxWidth: .infinity, maxHeight: maxHeight, alignment: .topLeading)
+        .phrenCard()
+        .phrenElevation()
+        .accessibilityElement(children: .contain)
     }
+
+    private var header: some View {
+        HStack(spacing: PhrenTheme.Space.small) {
+            Text(kindTitle)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(PhrenTheme.sessionProject)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(PhrenTheme.sessionProject.opacity(0.1), in: Capsule())
+            VStack(alignment: .leading, spacing: 2) {
+                Text(node.project ?? node.label ?? node.id)
+                    .font(.subheadline)
+                    .foregroundStyle(PhrenTheme.textMuted)
+                    .lineLimit(1)
+                if let store = node.store, store != selectedStore {
+                    Text(model.storeName(for: store))
+                        .font(.caption)
+                        .foregroundStyle(PhrenTheme.textMuted)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 0)
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(PhrenTheme.textSecondary)
+                    .frame(width: 44, height: 44)
+                    .background(PhrenTheme.surfaceRaised, in: Circle())
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Close node details")
+            .accessibilityIdentifier("graph-node-close")
+        }
+        .frame(minHeight: 44)
+    }
+
+    private var nodeText: some View {
+        Text(text)
+            .font(.body)
+            .foregroundStyle(PhrenTheme.text)
+            .textSelection(.enabled)
+            .accessibilityIdentifier("graph-node-text")
+    }
+
+    @ViewBuilder
+    private func actions(storeId: String, project: String) -> some View {
+        if typeSize.isAccessibilitySize {
+            VStack(spacing: PhrenTheme.Space.small) {
+                HStack(spacing: PhrenTheme.Space.small) {
+                    focusButton
+                    openProject(storeId: storeId, project: project)
+                }
+                HStack(spacing: PhrenTheme.Space.small) {
+                    shareButton
+                    projectSession(storeId: storeId, project: project)
+                }
+            }
+        } else {
+            HStack(spacing: PhrenTheme.Space.small) {
+                focusButton
+                openProject(storeId: storeId, project: project)
+                shareButton
+                projectSession(storeId: storeId, project: project)
+            }
+            .labelStyle(.iconOnly)
+        }
+    }
+
+    private var focusButton: some View {
+        Button(action: onFocus) {
+            Label("Focus connections", systemImage: "point.3.connected.trianglepath.dotted")
+                .frame(maxWidth: .infinity, minHeight: 28)
+        }
+        .buttonStyle(.bordered)
+        .frame(maxWidth: .infinity, minHeight: 44)
+        .accessibilityLabel("Focus connections")
+    }
+
+    private func openProject(storeId: String, project: String) -> some View {
+        NavigationLink {
+            ProjectDetailView(storeId: storeId, project: project)
+        } label: {
+            Label("Open project", systemImage: "folder")
+                .frame(maxWidth: .infinity, minHeight: 28)
+        }
+        .buttonStyle(.bordered)
+        .frame(maxWidth: .infinity, minHeight: 44)
+        .accessibilityLabel("Open project")
+    }
+
+    private var shareButton: some View {
+        ShareLink(item: text) {
+            Label("Share", systemImage: "square.and.arrow.up")
+                .frame(maxWidth: .infinity, minHeight: 28)
+        }
+        .buttonStyle(.bordered)
+        .frame(maxWidth: .infinity, minHeight: 44)
+        .accessibilityLabel("Share")
+    }
+
+    private func projectSession(storeId: String, project: String) -> some View {
+        ProjectSessionActions(storeId: storeId, project: project, presentation: .menu)
+            .buttonStyle(.bordered)
+            .frame(maxWidth: .infinity, minHeight: 44)
+    }
+
+    private var text: String { node.sourceText ?? node.label ?? node.id }
+    private var kindTitle: String { node.isTask ? "Task" : (node.isFinding ? "Finding" : "Project") }
 }

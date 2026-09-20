@@ -2,6 +2,30 @@ import XCTest
 
 final class GraphInteractionTests: XCTestCase {
     @MainActor
+    func testNodePanelKeepsGraphVisibleAndCloses() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Memory graph"].waitForExistence(timeout: 15))
+        app.buttons["Memory graph"].tap()
+        XCTAssertTrue(app.webViews.staticTexts["DEMO"].firstMatch.waitForExistence(timeout: 20))
+        app.buttons["Search graph"].tap()
+        let field = app.textFields["Search findings, tasks, projects"]
+        field.tap()
+        field.typeText("offline")
+        app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Cache repeated requests")).firstMatch.tap()
+
+        let panelText = app.staticTexts["graph-node-text"]
+        XCTAssertTrue(panelText.waitForExistence(timeout: 5))
+        XCTAssertTrue(panelText.label.contains("Cache repeated requests for offline use"))
+        XCTAssertTrue(app.webViews.firstMatch.isHittable, "The graph should remain visible and interactive behind the panel")
+        capture(app, name: "Graph node panel")
+
+        app.buttons["graph-node-close"].tap()
+        XCTAssertFalse(panelText.waitForExistence(timeout: 2))
+    }
+
+    @MainActor
     func testGraphDragsStayOnMapAndBackButtonExits() {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing"]
