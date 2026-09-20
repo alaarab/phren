@@ -136,6 +136,35 @@ import UIKit
         let raw: [String: Any] = ["type": "response_item", "payload": ["type": "message", "role": "assistant", "content": [["type": "output_text", "text": "Earlier project discussion"]]]]
         return try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: ["type": "older", "source": target.source, "entries": [["line": 0, "raw": raw]], "startLine": 0, "totalLines": flag("--chat-long-history") ? 42 : 22, "hasMore": false]), source: target.source)
     }
+    /// The agents the `--chat-agent-card` conversation spawned, matched to
+    /// their cards by call id: the audit came back, the tester is still out.
+    static let auditChild = "a" + String(repeating: "1", count: 31), testsChild = "b" + String(repeating: "2", count: 31)
+    static func childAgents(_ target: AgentChatTarget) throws -> AgentChildTree {
+        let agents: [[String: Any]] = flag("--chat-agent-card") ? [
+            ["id": auditChild, "provider": "claude", "path": "Audit the chat timeline", "callId": "agent-audit", "state": "completed", "children": [] as [Any]],
+            ["id": testsChild, "provider": "claude", "path": "Run the full test suite", "callId": "agent-tests", "state": "running", "children": [] as [Any]],
+        ] : []
+        let tree: [String: Any] = ["agents": agents]
+        return try AgentChildTree.read(JSONSerialization.data(withJSONObject: tree))
+    }
+    /// A child's own conversation: every row is marked as Claude marks a
+    /// subagent's, `isSidechain`, and still reads as that agent's turns.
+    static func childTranscript(child: String) throws -> AgentChatTranscript {
+        let turns: [(String, String)] = child == auditChild
+            ? [("user", "Read ChatTimelineModels.swift and report which calls fold into a run."),
+               ("assistant", "Reading the timeline models now."),
+               ("assistant", "Child audit marker: three reads in a row fold into one run.")]
+            : [("user", "Run swift test in PhrenKit and the simulator suite; report failures only."),
+               ("assistant", "Child tests marker: PhrenKit suite is running.")]
+        let entries: [[String: Any]] = turns.enumerated().map { index, turn in
+            let message: [String: Any] = ["role": turn.0, "content": [["type": "text", "text": turn.1]]]
+            let raw: [String: Any] = ["type": turn.0, "isSidechain": true, "agentId": child, "message": message]
+            return ["line": index, "raw": raw]
+        }
+        let frame: [String: Any] = ["type": "backlog", "source": "claude", "session": child,
+                                    "entries": entries, "startLine": 0, "totalLines": entries.count, "hasMore": false]
+        return try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: frame), source: "claude", sidechain: true, session: child)
+    }
     static func panes(_ session: LiveAgentSession) throws -> AgentChatPanes {
         reads += 1
         if flag("--chat-offline") && hasReadTranscript { throw LiveConnectionError.disconnected }

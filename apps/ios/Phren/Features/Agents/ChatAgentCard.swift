@@ -9,8 +9,16 @@ struct ChatAgentCard: View {
     let agent: AgentSubagentPresentation
     let entry: ChatTimelineEntry
     @Environment(\.openToolOutput) private var openOutput
+    @Environment(\.chatChildAgents) private var childAgents
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showPrompt = false
+
+    /// The child conversation this card launched, once the computer has
+    /// matched its transcript to the call.
+    private var child: (agent: AgentChild, target: AgentChatTarget)? {
+        guard let childAgents, let agent = childAgents.agent(forCall: entry.callID) else { return nil }
+        return (agent, childAgents.target)
+    }
 
     private var status: ToolCardStatus {
         switch agent.state {
@@ -66,6 +74,16 @@ struct ChatAgentCard: View {
             } else if agent.state == .running {
                 Text(agent.background ? "Working in the background…" : "Working…")
                     .font(.caption).foregroundStyle(PhrenTheme.textMuted)
+            }
+            if let child, let session = childAgents?.session {
+                NavigationLink {
+                    ChildAgentTranscriptView(session: session, target: child.target, agent: child.agent)
+                } label: {
+                    Label(child.agent.state == .running ? "Follow transcript" : "Open transcript", systemImage: "text.bubble")
+                        .font(.caption.weight(.semibold)).foregroundStyle(PhrenTheme.accent)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("chat-agent-transcript:\(entry.callID)")
             }
             Button("Inspect agent") { openOutput(.init(title: agent.name, text: details)) }
                 .font(.caption.weight(.semibold)).foregroundStyle(PhrenTheme.accent)

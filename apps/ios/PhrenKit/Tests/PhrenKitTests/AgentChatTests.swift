@@ -11,6 +11,23 @@ final class AgentChatTests: XCTestCase {
         XCTAssertEqual(tree.agents[0].children[0].name, "worker")
     }
 
+    func testChildTranscriptReadsSidechainRowsAndRefusesAnotherConversation() throws {
+        // A Claude subagent's file marks every row isSidechain. The parent's
+        // reader still skips those; a child reader takes them as its turns.
+        let child = String(repeating: "c", count: 32)
+        let rows: [[String: Any]] = [
+            ["line": 0, "raw": ["type": "user", "isSidechain": true, "agentId": "abc", "message": ["role": "user", "content": "Inspect the scripts"]]],
+            ["line": 1, "raw": ["type": "assistant", "isSidechain": true, "agentId": "abc", "message": ["role": "assistant", "content": [["type": "text", "text": "Review complete"]]]]],
+        ]
+        let frame = try JSONSerialization.data(withJSONObject: ["type": "backlog", "source": "claude", "session": child, "entries": rows, "startLine": 0, "totalLines": 2, "hasMore": false])
+        XCTAssertEqual(try AgentChatTranscript.read(frame, source: "claude").messages.count, 0)
+        let transcript = try AgentChatTranscript.read(frame, source: "claude", sidechain: true, session: child)
+        XCTAssertEqual(transcript.messages.map(\.text), ["Inspect the scripts", "Review complete"])
+        XCTAssertEqual(transcript.messages.map(\.role), [.user, .assistant])
+        // An older Hook that ignores `child` answers with the parent's frames.
+        XCTAssertThrowsError(try AgentChatTranscript.read(frame, source: "claude", sidechain: true, session: String(repeating: "d", count: 32)))
+    }
+
     func testAttachmentsUseGeneratedNamesAndRejectUnsafeOrOversizedData() throws {
         let item = try AgentAttachment(name: "../../a screenshot.PNG", data: Data([1, 2, 3]), isImage: true)
         XCTAssertTrue(item.uploadName.hasSuffix(".png"))

@@ -11,11 +11,25 @@ struct ChatFullDiff: Identifiable, Hashable {
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
+/// The agents a conversation spawned, so a subagent card in the timeline
+/// can find its own transcript by the tool call that launched it.
+struct ChatChildAgents: Equatable {
+    let session: LiveAgentSession
+    let target: AgentChatTarget
+    let agents: [AgentChild]
+    func agent(forCall callID: String) -> AgentChild? {
+        guard !callID.isEmpty else { return nil }
+        return AgentTreeRow.flatten(agents).first { $0.agent.callId == callID }?.agent
+    }
+}
+
 private struct OpenChatDiffKey: EnvironmentKey { static let defaultValue: (ChatFullDiff) -> Void = { _ in } }
 private struct OpenToolOutputKey: EnvironmentKey { static let defaultValue: (FullToolOutput) -> Void = { _ in } }
+private struct ChatChildAgentsKey: EnvironmentKey { static let defaultValue: ChatChildAgents? = nil }
 extension EnvironmentValues {
     var openChatDiff: (ChatFullDiff) -> Void { get { self[OpenChatDiffKey.self] } set { self[OpenChatDiffKey.self] = newValue } }
     var openToolOutput: (FullToolOutput) -> Void { get { self[OpenToolOutputKey.self] } set { self[OpenToolOutputKey.self] = newValue } }
+    var chatChildAgents: ChatChildAgents? { get { self[ChatChildAgentsKey.self] } set { self[ChatChildAgentsKey.self] = newValue } }
 }
 
 /// What the SwiftUI side needs from UIKit: the navigation controller the

@@ -262,10 +262,14 @@ public struct AgentChatTranscript: Equatable, Sendable {
     /// answering and the branch the agent was on.
     public var context = AgentSessionContext()
 
-    public static func read(_ data: Data, source: String) throws -> Self {
+    /// `sidechain` reads a child agent's own transcript, where Claude marks
+    /// every row `isSidechain`: those are that conversation's turns, not the
+    /// parent's stray sidechain rows an older Hook would leak.
+    public static func read(_ data: Data, source: String, sidechain: Bool = false, session: String? = nil) throws -> Self {
         guard AgentChatTarget.sources.contains(source), data.count <= 8_388_608,
               let frame = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let kind = Kind(rawValue: frame["type"] as? String ?? ""), frame["source"] as? String == source,
+              session == nil || frame["session"] as? String == session,
               frame["entries"] == nil || frame["entries"] is [[String: Any]] else {
             throw PhrenKitError.validation("The computer returned an unsupported chat transcript.")
         }
@@ -279,7 +283,8 @@ public struct AgentChatTranscript: Equatable, Sendable {
         var context = AgentSessionContext()
         var seen: Set<String> = []
         for entry in entries {
-            guard let line = entry["line"] as? Int, line >= 0, let raw = entry["raw"] as? [String: Any] else { continue }
+            guard let line = entry["line"] as? Int, line >= 0, var raw = entry["raw"] as? [String: Any] else { continue }
+            if sidechain, raw["isSidechain"] as? Bool == true { raw.removeValue(forKey: "isSidechain") }
             if source == "claude", raw["type"] as? String == "phren_queue_consumed",
                let key = raw["key"] as? String, Self.validQueueKey(key) {
                 queueEvents.append(.init(line: line, key: key)); continue

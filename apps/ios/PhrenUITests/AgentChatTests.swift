@@ -196,6 +196,30 @@ final class AgentChatTests: XCTestCase {
     }
 
     @MainActor
+    func testSubagentCardOpensItsOwnTranscriptAndTheComposerRowOnlyCountsRunningAgents() {
+        let app = launch(extra: ["--chat-agent-card"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        XCTAssertTrue(app.scrollViews["chat-transcript"].waitForExistence(timeout: 8))
+        // One agent is still out there, so the composer says so — and only
+        // counts that one; the finished audit is reached from its card.
+        let running = app.buttons["chat-child-agents"]
+        XCTAssertTrue(running.waitForExistence(timeout: 8))
+        XCTAssertEqual(running.label, "1 agent running")
+        let open = app.buttons["chat-agent-transcript:agent-audit"]
+        XCTAssertTrue(open.waitForExistence(timeout: 8))
+        XCTAssertEqual(open.label, "Open transcript")
+        XCTAssertEqual(app.buttons["chat-agent-transcript:agent-tests"].label, "Follow transcript")
+        open.tap()
+        // The child's rows are all sidechain rows; they read as its conversation.
+        let header = app.descendants(matching: .any).matching(identifier: "child-agent-header").firstMatch
+        XCTAssertTrue(header.waitForExistence(timeout: 5))
+        XCTAssertTrue(header.label.contains("Claude subagent")); XCTAssertTrue(header.label.contains("Completed"))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Child audit marker")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["This agent recorded no conversation."].exists)
+        XCTAssertEqual(rawJSONTexts(app).count, 0, "No raw JSON in a child transcript")
+    }
+
+    @MainActor
     func testTodoCardsFoldTheEarlierListAndShowTheLatest() {
         let app = launch(extra: ["--chat-todos"])
         app.buttons["live-chat:w7:w7:t9"].tap()
@@ -1598,7 +1622,7 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(app.buttons["Herdr workspaces"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["Herdr terminal"].exists)
         XCTAssertFalse(app.buttons["Slash commands"].exists)
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap() // dismiss the menu
+        app.buttons["chat-options-done"].tap()
         XCTAssertTrue(reconnect.waitForExistence(timeout: 8))
         XCTAssertFalse(app.buttons["chat-send"].isEnabled)
         reconnect.tap()
