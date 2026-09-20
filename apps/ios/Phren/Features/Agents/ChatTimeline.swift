@@ -35,7 +35,11 @@ struct ChatBackgroundJobsView: View {
                 }
             }.padding(PhrenTheme.Space.medium).phrenPanel(tool: true)
                 .padding(.horizontal, 12).padding(.vertical, 4)
-                .accessibilityIdentifier("chat-background-jobs")
+                // A marker, not an identifier on the card: an identifier on the
+                // container would hide the rows' own ids from tests.
+                .overlay(alignment: .topLeading) {
+                    Color.clear.frame(width: 1, height: 1).accessibilityElement().accessibilityIdentifier("chat-background-jobs")
+                }
             }
         }
     }
