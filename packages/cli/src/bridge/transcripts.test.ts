@@ -149,10 +149,36 @@ describe("child agent relationships", () => {
       expect(tree[0].transcript).toMatch(new RegExp(`/subagents/agent-${agentId}\\.jsonl$`));
       expect(publicChildAgents(tree)[0]).not.toHaveProperty("session");
       expect(publicChildAgents(tree)[0]).not.toHaveProperty("transcript");
-      expect((await new TranscriptReader(childFile, "claude", undefined, undefined, true).read()).entries).toHaveLength(2);
+      const childPage = await new TranscriptReader(childFile, "claude", undefined, undefined, true).read();
+      expect(childPage.entries).toHaveLength(2);
+      // The rows reach the phone as ordinary turns of that conversation.
+      expect(childPage.entries.every(entry => entry.raw.isSidechain === undefined)).toBe(true);
       expect((await new TranscriptReader(childFile, "claude").read()).entries).toHaveLength(0);
     } finally { process.env.CLAUDE_CONFIG_DIR = old; await rm(root, { recursive: true, force: true }); }
   });
+
+  it("picks up a Claude child whose transcript appears after its launch was recorded", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "phren-claude-late-child-"));
+    const old = process.env.CLAUDE_CONFIG_DIR; process.env.CLAUDE_CONFIG_DIR = root;
+    const parent = "eeeeeeee-5555-4555-8555-555555555555", agentId = "late1worker";
+    const project = path.join(root, "projects/project"); await mkdir(project, { recursive: true });
+    const launch = { type: "user", toolUseResult: { status: "async_launched", agentId, description: "Late starter" },
+      message: { role: "user", content: [{ type: "tool_result", tool_use_id: "tool-late", content: "launched" }] } };
+    await writeFile(path.join(project, `${parent}.jsonl`), JSON.stringify(launch) + "\n");
+    try {
+      // The launch is in the parent; the child has not written a row yet.
+      expect(await childAgentTree("claude", parent)).toEqual([]);
+      await mkdir(path.join(project, parent, "subagents"), { recursive: true });
+      await writeFile(path.join(project, parent, "subagents", `agent-${agentId}.jsonl`), JSON.stringify({ type: "user", isSidechain: true,
+        sessionId: parent, agentId, message: { role: "user", content: "Start late" } }) + "\n");
+      // The parent file is unchanged, so a plain signature cache would still
+      // say "no children" — the pending launch is rechecked instead.
+      await new Promise(resolve => setTimeout(resolve, 2_100));
+      const tree = await childAgentTree("claude", parent);
+      expect(tree).toHaveLength(1);
+      expect(tree[0]).toMatchObject({ provider: "claude", path: "Late starter", callId: "tool-late", state: "running" });
+    } finally { process.env.CLAUDE_CONFIG_DIR = old; await rm(root, { recursive: true, force: true }); }
+  }, 10_000);
 
   it("merges parent-bound opencode fan-outs into the provider-neutral tree", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "phren-opencode-child-")), job = "review-job";

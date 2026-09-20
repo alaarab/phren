@@ -7,6 +7,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- Phren Hook follows a spawned agent's transcript live: `WS /v1/transcripts`
+  and `GET /v1/transcripts/history` take `child=<id>` from `/v1/subagents`,
+  bound to the parent conversation. Child rows are served as that
+  conversation's own turns, so a completed Claude Code subagent's transcript
+  no longer arrives as sidechain rows the phone hides; a launch whose file
+  has not been written yet is rechecked instead of cached as missing.
+
 - Direct APNs delivery for agent permission requests while the iPhone app is
   suspended. Phones register over the authenticated SSH gateway; notification
   actions use one-time expiring bindings and never expose commands or provider

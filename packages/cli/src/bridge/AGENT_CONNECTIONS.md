@@ -82,8 +82,9 @@ WebSockets on the same socket.
 | `POST /v1/projects/add` | Enroll a checkout (`directory`) or clone a GitHub URL (`cloneUrl`) into the projects folder first, then `phren add`; commits and pushes the store when it has a remote. Uses the launch admission limits. |
 | `GET /v1/activity`, `/v1/usage` | Activity metadata and account limits. |
 | `GET /v1/projects/files?project=…&directory=…&path=…` | Read-only checkout browser. The directory must match a fresh project-location result; path is relative. Returns `kind: directory` with at most 500 entries or `kind: file` with base64 `data`, at most 2 MB. Symlinks, traversal, `.git`, and non-regular files are refused. `repositoryFiles` advertises support. |
-| `WS /v1/transcripts`, `/v1/status` | Bounded transcript backlog/tail/history and live status. |
-| `GET /v1/transcripts/history`, `/v1/transcripts/blob` | Target-bound older rows and separately requested original embedded images. |
+| `WS /v1/transcripts`, `/v1/status` | Bounded transcript backlog/tail/history and live status. With `child=<id>` from `/v1/subagents`, the same socket follows that child agent's transcript instead: the parent target is what stays validated each tick, and the frames carry the child's parent-scoped id as `session`. |
+| `GET /v1/transcripts/history`, `/v1/transcripts/blob` | Target-bound older rows and separately requested original embedded images. `history` also takes `child=<id>`. |
+| `GET /v1/subagents`, `/v1/subagents/transcript` | The agents a conversation spawned (Codex `SubAgentActivity`, Claude Code `agent-<id>.jsonl` sidechains, phren fan-outs) as a tree of parent-scoped ids, and a one-shot recent page of one child's transcript. Child rows are served as that conversation's own turns (Claude's `isSidechain` flag is dropped). A Claude launch whose file has not appeared yet is looked for again within two seconds rather than missed until the parent next changes. |
 | `POST /v1/prompt`, `/v1/keys` | Send text or Escape after validating the live destination. |
 | `POST /v1/upload` | Bounded file/image upload under the selected conversation. |
 | `GET, POST /v1/files` | List/store files sent by the phone outside any conversation. |
