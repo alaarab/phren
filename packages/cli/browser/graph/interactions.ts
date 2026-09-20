@@ -1,6 +1,6 @@
 import * as THREE from "three";
-import type { FGNode, NodeDetail, RuntimeNode } from "./types.js";
-import { focusMode, nodeDetail, nodeRadius, scoreForNode, state } from "./state.js";
+import type { FGNode, NodeDetail } from "./types.js";
+import { focusMode, nodeDetail, nodeRadius, state } from "./state.js";
 import { applyHighlight, startIntroStagger } from "./nodes.js";
 import { mascotMoveTo, spawnLookupPulse } from "./mascot.js";
 import { syncProjectNavActive } from "./project-nav.js";
@@ -19,68 +19,11 @@ export function containerSize(): { w: number; h: number } {
   return { w: Math.max(1, w), h: Math.max(1, h) };
 }
 
-// ── Tooltip ─────────────────────────────────────────────────────────────
-
-export function hideTooltip(): void {
-  if (!state.tooltip) return;
-  state.tooltip.style.opacity = "0";
-  state.tooltip.classList.remove("visible");
-  state.tooltip.innerHTML = "";
-}
-
-function tooltipText(node: RuntimeNode): string {
-  if (node.kind === "finding") {
-    const text = node.fullLabel || node.label || "";
-    let preview = text.length > 100 ? text.slice(0, 97) + "..." : text;
-    const score = scoreForNode(node);
-    const rawDate = node.date && node.date !== "unknown" ? node.date : "";
-    const dateStr = rawDate || score?.lastUsedAt || "";
-    if (dateStr) {
-      const d = new Date(dateStr);
-      if (!isNaN(d.getTime())) {
-        const days = Math.floor((Date.now() - d.getTime()) / 86400000);
-        const rel = days < 1 ? "today" : days === 1 ? "yesterday" : days < 30 ? `${days}d ago` : days < 365 ? `${Math.floor(days / 30)}mo ago` : `${Math.floor(days / 365)}y ago`;
-        preview += `\n${node.date ? rel : "seen " + rel}`;
-      }
-    }
-    return preview;
-  }
-  if (node.kind === "task") {
-    const line = node.fullLabel || node.label || "";
-    const section = node.section ? `[${node.section}]` : "";
-    const priority = node.priority ? `${node.priority}◆` : "";
-    return `${line}\n${[section, priority].filter(Boolean).join(" ")}`;
-  }
-  if (node.kind === "entity") {
-    return `${node.label}\n${node.refCount || 0} refs • ${node.connectedProjects?.length || 0} projects`;
-  }
-  if (node.kind === "project") {
-    const findings = typeof node.findingCount === "number" ? node.findingCount : state.fullAdjacency.get(node.id)
-      ? [...state.fullAdjacency.get(node.id)!].filter((id) => state.nodeById.get(id)?.kind === "finding").length
-      : 0;
-    const tasks = typeof node.taskCount === "number" ? node.taskCount : state.fullAdjacency.get(node.id)
-      ? [...state.fullAdjacency.get(node.id)!].filter((id) => state.nodeById.get(id)?.kind === "task").length
-      : 0;
-    return `${node.label}\n${findings} findings • ${tasks} tasks`;
-  }
-  return node.label || node.id;
-}
+// ── Hover ───────────────────────────────────────────────────────────────
 
 export function onHover(fgNode: FGNode | null): void {
   state.hoveredNodeId = fgNode ? fgNode.id : null;
   if (state.container) state.container.style.cursor = fgNode ? "pointer" : "default";
-  if (fgNode && state.tooltip) {
-    const text = tooltipText(fgNode.raw);
-    if (text) {
-      state.tooltip.textContent = text;
-      state.tooltip.style.left = state.lastMouse.x + 14 + "px";
-      state.tooltip.style.top = state.lastMouse.y + 14 + "px";
-      state.tooltip.style.opacity = "1";
-      state.tooltip.classList.add("visible");
-    }
-  } else {
-    hideTooltip();
-  }
   applyHighlight();
 }
 
@@ -147,7 +90,6 @@ export function clearSelection(): void {
   state.selectedNodeId = null;
   state.focusedProjectId = null;
   state.hoveredNodeId = null;
-  hideTooltip();
   applyHighlight();
   syncProjectNavActive();
   refreshProjectPanel();
@@ -192,7 +134,6 @@ export function selectNode(nodeId: string): boolean {
   cancelProjectPaneReveal();
   state.selectedNodeId = nodeId;
   state.hoveredNodeId = nodeId;
-  hideTooltip();
   applyHighlight();
   syncProjectNavActive();
   refreshProjectPanel();

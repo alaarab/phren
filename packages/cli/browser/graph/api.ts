@@ -14,40 +14,15 @@ import { applyHighlight, refreshNodeVisual } from "./nodes.js";
 import { resetLabels, refreshLabels, updateEagerLabelText } from "./labels.js";
 import { applyFilters, disposeScene, setupForceGraph } from "./scene.js";
 import { buildFilterBar, buildHudOverlays } from "./hud.js";
-import { clearSelection, fitCameraToGraph, getNodeAt, hideTooltip, peekNode, runIntro, selectNode } from "./interactions.js";
+import { clearSelection, fitCameraToGraph, getNodeAt, peekNode, runIntro, selectNode } from "./interactions.js";
 import { disposePulses, mascot, startMascot, stopMascot, walkTo } from "./mascot.js";
 import { refreshProjectPanel } from "./project-panel.js";
 
 function mount(payload: GraphPayload): void {
   state.container = document.getElementById("graph-canvas");
-  state.tooltip = document.getElementById("graph-tooltip");
   if (!state.container) {
     console.error("[phrenGraph] #graph-canvas not found");
     return;
-  }
-
-  if (state.tooltip) {
-    Object.assign(state.tooltip.style, {
-      position: "absolute",
-      pointerEvents: "none",
-      zIndex: "1000",
-      maxWidth: "320px",
-      padding: "9px 12px",
-      borderRadius: "6px",
-      fontSize: "12px",
-      fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
-      backgroundColor: "rgba(8,10,22,0.92)",
-      color: "#dbe4ff",
-      border: "1px solid rgba(103,232,249,0.25)",
-      boxShadow: "0 4px 18px rgba(0,0,0,0.5), 0 0 14px rgba(103,232,249,0.08)",
-      opacity: "0",
-      transition: "opacity 150ms ease-in-out",
-      whiteSpace: "pre-wrap",
-      wordBreak: "break-word",
-      lineHeight: "1.5",
-      letterSpacing: "0.01em",
-    });
-    state.tooltip.classList.add("graph-tooltip");
   }
 
   state.payload = payload || {};
@@ -213,7 +188,6 @@ function removeNode(nodeId: string, opts?: { animate?: boolean }): boolean {
     if (mascot.currentNodeId === nodeId) mascot.currentNodeId = null;
     if (mascot.targetNodeId === nodeId) mascot.targetNodeId = null;
     buildFullAdjacency();
-    hideTooltip();
     applyFilters({ resetCamera: false, emitSelection: false });
     if (wasSelected) notifyClearOnce();
   };
@@ -272,7 +246,6 @@ function removeNode(nodeId: string, opts?: { animate?: boolean }): boolean {
 function destroy(): void {
   stopMascot();
   disposePulses();
-  hideTooltip();
   if (state.ambientRafId) cancelAnimationFrame(state.ambientRafId);
   state.ambientRafId = 0;
   state.themeObserver?.disconnect();
@@ -290,7 +263,6 @@ function destroy(): void {
   }
   state.fg = null;
   state.container = null;
-  state.tooltip = null;
   // A mount after destroy is a fresh scene — let the intro (and its camera
   // fit) run again rather than being treated as a camera-preserving remount.
   state.introPlayed = false;

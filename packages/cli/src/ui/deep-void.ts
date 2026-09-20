@@ -298,7 +298,6 @@ export const PHREN_DEEP_VOID_STYLES = `
     box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
   }
   [data-theme="dark"] .graph-controls button:hover { background: rgba(28, 28, 64, 0.85); border-color: var(--cyan); box-shadow: 0 0 18px rgba(40, 211, 242, 0.25); }
-  [data-theme="dark"] .graph-tooltip { background: rgba(10, 10, 26, 0.92); border: 1px solid rgba(124, 58, 237, 0.35); color: var(--ink); box-shadow: 0 0 20px rgba(124, 58, 237, 0.25); font-family: var(--mono); font-size: 11px; }
   [data-theme="dark"] .graph-filter-btn { background: rgba(18, 18, 42, 0.72); border: 1px solid rgba(156, 143, 248, 0.2); color: var(--muted); font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.08em; border-radius: 4px; }
   [data-theme="dark"] .graph-filter-btn:hover { border-color: var(--cyan); color: var(--ink); background: rgba(40, 211, 242, 0.08); box-shadow: 0 0 16px rgba(40, 211, 242, 0.2); }
   [data-theme="dark"] .graph-filter-btn.active { background: linear-gradient(180deg, rgba(124, 58, 237, 0.38), rgba(124, 58, 237, 0.22)); color: #fff; border-color: rgba(156, 143, 248, 0.55); box-shadow: 0 0 20px rgba(124, 58, 237, 0.42); }

@@ -253,7 +253,6 @@ ${NOTES_UI_STYLES}
   <div id="tab-graph" class="tab-content">
     <div class="graph-container">
       <div id="graph-canvas" aria-label="Knowledge graph"></div>
-      <div class="graph-tooltip" id="graph-tooltip"></div>
       <div class="graph-controls">
         <button id="graph-zoom-in" title="Zoom in">+</button>
         <button id="graph-zoom-out" title="Zoom out">-</button>
