@@ -690,6 +690,7 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
       await writeFile(path.join(worktree, "tracked.txt"), "first line\n");
       await execFileAsync("git", ["-C", worktree, "add", "tracked.txt"]);
       await execFileAsync("git", ["-C", worktree, "-c", "user.email=a@b.c", "-c", "user.name=t", "commit", "-qm", "start"]);
+      await execFileAsync("git", ["-C", worktree, "checkout", "-q", "-b", "codex/bridge-child"]);
       await writeFile(path.join(worktree, "tracked.txt"), "first line\nsecond line\n");
       const job = "child-diff-job", directory = path.join(root, ".phren/.runtime/agent-fanouts", job);
       await mkdir(directory, { recursive: true });
@@ -703,7 +704,9 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
       expect(tree.status).toBe(200);
       const child = tree.data.agents.find((agent: any) => agent.path === "Child worktree");
       expect(child?.id).toMatch(/^[a-f0-9]{32}$/);
+      expect(child).toMatchObject({ worktreeName: path.basename(worktree), branch: "codex/bridge-child" });
       expect(child).not.toHaveProperty("cwd");
+      expect(JSON.stringify(child)).not.toContain(worktree);
       const diff = await api("/v1/diff", { target, child: child.id });
       expect(diff.status, JSON.stringify(diff.data)).toBe(200);
       expect(diff.data.root).toBe(await realpathAsync(worktree));

@@ -1,10 +1,13 @@
+import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir, homedir } from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { fanoutChildren, visibleCodexExecEvent, visibleOpenCodeRunEvent } from "./fanouts.js";
 
 const parent = "aaaaaaaa-1111-4111-8111-111111111111";
+const execFileAsync = promisify(execFile);
 let roots: string[] = [];
 
 function objectPayload(event: unknown): Record<string, unknown> {
@@ -40,8 +43,24 @@ describe("fan-out manifests", () => {
     expect(found[0]).toMatchObject({ provider: "opencode", path: "Review bridge", state: "running", children: [] });
     expect(found[0].id).toMatch(/^[a-f0-9]{32}$/);
     expect(found[0].cwd).toBe("/repo-wt");
+    expect(found[0].worktreeName).toBeUndefined();
+    expect(found[0].branch).toBeUndefined();
     expect(JSON.stringify({ ...found[0], transcript: undefined, session: undefined, cwd: undefined })).not.toContain("/repo");
     expect(await fanoutChildren("codex", "bbbbbbbb-2222-4222-8222-222222222222", env)).toEqual([]);
+  });
+
+  it("labels an existing worktree without exposing its path", async () => {
+    const worktree = await mkdtemp(path.join(tmpdir(), "phren-worker-repo-")); roots.push(worktree);
+    await execFileAsync("git", ["-C", worktree, "init", "-q"]);
+    await writeFile(path.join(worktree, "tracked.txt"), "tracked\n");
+    await execFileAsync("git", ["-C", worktree, "add", "tracked.txt"]);
+    await execFileAsync("git", ["-C", worktree, "-c", "user.email=a@b.c", "-c", "user.name=t", "commit", "-qm", "start"]);
+    await execFileAsync("git", ["-C", worktree, "checkout", "-q", "-b", "codex/example"]);
+    const { env } = await fixture("job-worktree", { worktree });
+    const found = await fanoutChildren("codex", parent, env);
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatchObject({ worktreeName: path.basename(worktree), branch: "codex/example" });
+    expect(JSON.stringify({ ...found[0], cwd: undefined, transcript: undefined })).not.toContain(worktree);
   });
 
   it("rejects event-log symlinks and mismatched directory IDs", async () => {
