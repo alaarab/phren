@@ -141,12 +141,13 @@ describe("child agent relationships", () => {
     const childFile = path.join(project, parent, "subagents", `agent-${agentId}.jsonl`);
     await writeFile(childFile, [{ type: "user", isSidechain: true, sessionId: parent, agentId,
       message: { role: "user", content: "Inspect the scripts" } }, { type: "assistant", isSidechain: true,
-      sessionId: parent, agentId, message: { role: "assistant", content: "Review complete" } }].map(JSON.stringify).join("\n") + "\n");
+      sessionId: parent, agentId, message: { model: "claude-fable-5-1", role: "assistant", content: "Review complete" } }].map(JSON.stringify).join("\n") + "\n");
     try {
       const tree = await childAgentTree("claude", parent);
       expect(tree).toHaveLength(1);
-      expect(tree[0]).toMatchObject({ provider: "claude", path: "Review scripts", callId: "tool-claude", state: "completed" });
+      expect(tree[0]).toMatchObject({ provider: "claude", path: "Review scripts", callId: "tool-claude", state: "completed", model: "claude-fable-5-1" });
       expect(tree[0].transcript).toMatch(new RegExp(`/subagents/agent-${agentId}\\.jsonl$`));
+      expect(publicChildAgents(tree)[0]).toMatchObject({ model: "claude-fable-5-1" });
       expect(publicChildAgents(tree)[0]).not.toHaveProperty("session");
       expect(publicChildAgents(tree)[0]).not.toHaveProperty("transcript");
       const childPage = await new TranscriptReader(childFile, "claude", undefined, undefined, true).read();
@@ -177,6 +178,8 @@ describe("child agent relationships", () => {
       const tree = await childAgentTree("claude", parent);
       expect(tree).toHaveLength(1);
       expect(tree[0]).toMatchObject({ provider: "claude", path: "Late starter", callId: "tool-late", state: "running" });
+      expect(tree[0]).not.toHaveProperty("model");
+      expect(publicChildAgents(tree)[0]).not.toHaveProperty("model");
     } finally { process.env.CLAUDE_CONFIG_DIR = old; await rm(root, { recursive: true, force: true }); }
   }, 10_000);
 
