@@ -5,6 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { fanoutChildren, visibleCodexExecEvent, visibleOpenCodeRunEvent } from "./fanouts.js";
+import { object, objects } from "./protocol.js";
 
 const parent = "aaaaaaaa-1111-4111-8111-111111111111";
 const execFileAsync = promisify(execFile);
@@ -86,14 +87,26 @@ describe("fan-out manifests", () => {
     expect(await fanoutChildren("codex", parent, crossProvider.env)).toEqual([]);
   });
 
-  it("redacts OpenCode reasoning, arguments, outputs, costs, and snapshots", () => {
-    const secret = "sk-secret";
+  it("exports OpenCode commands, URLs, paths and output tails, never reasoning, other arguments, costs or snapshots", () => {
+    const secret = "sk-secret", home = homedir();
     expect(visibleOpenCodeRunEvent({ type: "text", timestamp: 1_789_845_268_396, part: { type: "text", text: "Visible", reasoning: secret } }))
       .toMatchObject({ type: "assistant/message", data: { message: { content: [{ text: "Visible" }] } } });
     const tool = visibleOpenCodeRunEvent({ type: "tool_use", part: { type: "tool", tool: "bash", callID: "call-1",
-      state: { status: "completed", input: { token: secret }, output: secret }, snapshot: secret } });
-    expect(tool).toMatchObject({ data: { message: { content: [{ name: "bash", input: {}, phrenStatus: "completed" }] } } });
+      state: { status: "completed", input: { command: `ls ${home}/repo`, token: secret }, output: "a.txt\n", metadata: { exit: 0, cost: secret } }, snapshot: secret } });
+    expect(tool).toMatchObject({ data: { message: { content: [
+      { type: "tool_use", id: "call-1", name: "bash", input: { command: "ls ~/repo" }, phrenStatus: "completed" },
+      { type: "tool_result", tool_use_id: "call-1", content: "a.txt\n[exit 0]" },
+    ] } } });
     expect(JSON.stringify(tool)).not.toContain(secret);
+    const write = visibleOpenCodeRunEvent({ type: "tool_use", part: { type: "tool", tool: "write", callID: "call-2",
+      state: { status: "completed", input: { filePath: `${home}/repo/notes.md`, content: secret }, output: "Wrote file" } } });
+    expect(write).toMatchObject({ data: { message: { content: [{ name: "write", input: { path: "~/repo/notes.md" } }, { content: "Wrote file" }] } } });
+    expect(JSON.stringify(write)).not.toContain(secret);
+    const fetch = visibleOpenCodeRunEvent({ type: "tool_use", part: { type: "tool", tool: "webfetch", callID: "call-3",
+      state: { status: "error", input: { url: "https://example.org/page", format: "markdown" }, error: "timed out" } } });
+    expect(fetch).toMatchObject({ data: { message: { content: [{ name: "webfetch", input: { url: "https://example.org/page" } }, { content: "timed out", is_error: true }] } } });
+    const running = visibleOpenCodeRunEvent({ type: "tool_use", part: { type: "tool", tool: "bash", callID: "call-4", state: { status: "running", input: { command: "sleep 1" } } } });
+    expect(objects(object(object(object(running).data).message).content)).toHaveLength(1);
     expect(visibleOpenCodeRunEvent({ type: "step_start", part: { reasoning: secret } })).toBeUndefined();
   });
 

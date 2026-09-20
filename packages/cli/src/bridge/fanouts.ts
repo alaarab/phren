@@ -134,8 +134,10 @@ export async function fanoutChildren(parentProvider: Provider, parentSession: st
 }
 
 /** Project raw `opencode run --format json` rows into the small public chat
- * contract. Reasoning, tool inputs/outputs, snapshots, costs, and metadata are
- * intentionally omitted. */
+ * contract. Reasoning, snapshots, costs, and metadata are omitted. Like the
+ * Codex mapping, the command, URL or path a tool was given and a bounded
+ * output tail cross the wire so the owner can see what a worker is doing;
+ * file contents being written and full arguments of other tools do not. */
 export function visibleOpenCodeRunEvent(raw: Json): Json | undefined {
   const part = object(raw.part), time = typeof raw.timestamp === "number" && Number.isFinite(raw.timestamp)
     ? new Date(raw.timestamp).toISOString() : undefined;
@@ -147,10 +149,12 @@ export function visibleOpenCodeRunEvent(raw: Json): Json | undefined {
   if (raw.type === "tool_use" && part.type === "tool" && typeof part.tool === "string") {
     const state = object(part.state), status = ["pending", "running", "completed", "error"].includes(String(state.status))
       ? String(state.status) : "completed";
-    return { type: "assistant/message", ...(time ? { time } : {}), data: { message: {
-      role: "assistant", content: [{ type: "tool_use", id: String(part.callID ?? "").slice(0, 200),
-        name: part.tool.slice(0, 200), input: {}, phrenStatus: status }],
-    } } };
+    const id = String(part.callID ?? "").slice(0, 200);
+    const content: Json[] = [{ type: "tool_use", id, name: part.tool.slice(0, 200), input: opencodeToolInput(part.tool, object(state.input)), phrenStatus: status }];
+    if (status === "completed" || status === "error") {
+      content.push({ type: "tool_result", tool_use_id: id, content: opencodeToolOutput(part.tool, state), ...(status === "error" ? { is_error: true } : {}) });
+    }
+    return { type: "assistant/message", ...(time ? { time } : {}), data: { message: { role: "assistant", content } } };
   }
   if (raw.type === "step_finish") {
     return { type: "system", ...(time ? { time } : {}), data: { message: {
@@ -192,6 +196,35 @@ export function visibleCodexExecEvent(raw: Json): Json | undefined {
     return { type: "event_msg", payload: { type: "error", message: raw.message.slice(0, 2000) } };
   }
   return undefined;
+}
+
+/** The one argument that says what a tool did: a command, a URL, a path or a
+ * pattern. Everything else (file contents, headers, MCP payloads) stays home. */
+function opencodeToolInput(tool: string, input: Json): Json {
+  const text = (key: string, max = 2000) => typeof input[key] === "string" ? collapseHomeText(String(input[key])).slice(0, max) : undefined;
+  switch (tool) {
+    case "bash": return { command: text("command") ?? "" };
+    case "webfetch": return { url: text("url") ?? "" };
+    case "read": case "edit": case "write": case "patch": return { path: text("filePath") ?? text("path") ?? "" };
+    case "grep": case "glob": case "list": return { pattern: text("pattern", 500) ?? "", path: text("path") ?? "" };
+    default: return {};
+  }
+}
+
+function opencodeToolOutput(tool: string, state: Json): string {
+  const metadata = object(state.metadata);
+  const raw = typeof state.output === "string" ? state.output : typeof state.error === "string" ? state.error : "";
+  const text = collapseHomeText(raw).slice(-4000);
+  if (tool === "bash") return `${text}${text && !text.endsWith("\n") ? "\n" : ""}${typeof metadata.exit === "number" ? `[exit ${metadata.exit}]` : "[finished]"}`;
+  return text;
+}
+
+/** Replace the real home directory wherever it appears in free text (a
+ * command line, an output tail) with `~`, so the account name stays home. */
+function collapseHomeText(value: string): string {
+  const home = homedir();
+  const base = home.endsWith(path.sep) ? home.slice(0, -path.sep.length) : home;
+  return base.length > 1 ? value.split(base).join("~") : value;
 }
 
 /** Replace a leading real home directory with `~` for display. */
