@@ -317,9 +317,13 @@ export async function serve(version: string): Promise<void> {
           } else if (url.pathname === "/v1/keys") {
             const keys = z.array(z.enum(ANSWER_KEYS)).min(1).max(4).parse(data.keys);
             const status = String(pane.agent_status), menu = agentHooks.menuOpen(target);
+            // A prompt the Hook itself saw go by (a permission request it could
+            // not hold) is being answered even when Herdr reads the pane as
+            // working or idle; Herdr's status lags the agent's own dialog.
+            const holding = menu || !!agentHooks.terminalPrompt(target);
             // Escape interrupts a working agent. Everything else answers a
             // prompt the agent is holding: a menu, a y/n, a trust question.
-            if (!menu && (keys.every(key => key === "Escape") ? !["working", "blocked", "waiting", "unknown"].includes(status)
+            if (!holding && (keys.every(key => key === "Escape") ? !["working", "blocked", "waiting", "unknown"].includes(status)
               : !["blocked", "waiting", "unknown"].includes(status))) throw new BridgeError(409, keys.every(key => key === "Escape") ? "This agent is no longer working." : "This agent is not waiting for an answer.");
             await rpc(target.server, "agent.send_keys", { target: target.pane, keys: keys.map(key => HERDR_KEYS[key] ?? key) });
             if (keys.some(key => key !== "Up" && key !== "Down" && key !== "Tab")) { agentHooks.clearTerminalPrompt(target); agentHooks.menuClosed(target); }
