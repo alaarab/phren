@@ -777,6 +777,9 @@ struct AgentChatView: View {
         return parts.joined(separator: " · ")
     }
 
+    private var childAgentCount: Int { childAgents.reduce(0) { $0 + $1.agentCount } }
+    private var runningChildAgentCount: Int { childAgents.reduce(0) { $0 + $1.runningCount } }
+
     private var chatHeader: some View {
         HStack(spacing: 10) {
             ChatDismissButton()
@@ -806,6 +809,22 @@ struct AgentChatView: View {
                     .font(.system(.caption2, design: .monospaced)).foregroundStyle(PhrenTheme.chatNeutral)
                     .accessibilityLabel(chatLocationSpoken).accessibilityIdentifier("chat-location")
             }.frame(maxWidth: .infinity, alignment: .leading)
+            if !childAgents.isEmpty {
+                Button { showingChildAgents = true } label: {
+                    Image(systemName: "point.3.filled.connected.trianglepath.dotted")
+                        .font(.system(size: 17)).frame(width: 40, height: 44).contentShape(Rectangle())
+                        .foregroundStyle(PhrenTheme.chatText)
+                        .overlay(alignment: .topTrailing) {
+                            Text("\(runningChildAgentCount > 0 ? runningChildAgentCount : childAgentCount)")
+                                .font(.system(.caption2, design: .monospaced).weight(.bold)).monospacedDigit()
+                                .foregroundStyle(runningChildAgentCount > 0 ? PhrenTheme.phrenCardAccent : PhrenTheme.textMuted)
+                                .padding(.horizontal, 4).padding(.vertical, 1)
+                                .background(PhrenTheme.chatPanel, in: Capsule())
+                        }
+                }
+                .accessibilityLabel("\(childAgentCount) spawned agents, \(runningChildAgentCount) running")
+                .accessibilityIdentifier("chat-agent-tree")
+            }
             if let target = model.target {
                 NavigationLink {
                     // Besides the pane's tree: whatever the session's commands
@@ -940,16 +959,6 @@ struct AgentChatView: View {
                             .font(.caption).foregroundStyle(PhrenTheme.warning)
                     }.accessibilityIdentifier("chat-answer-terminal")
                 }
-            }
-            // Only while something is still out there. Finished agents stay
-            // reachable from their cards in the timeline, not from the composer.
-            let runningAgents = childAgents.reduce(0) { $0 + $1.runningCount }
-            if runningAgents > 0 {
-                Button { showingChildAgents = true } label: {
-                    Label("\(runningAgents) agent\(runningAgents == 1 ? "" : "s") running", systemImage: "person.2.wave.2")
-                        .font(.caption.weight(.semibold)).frame(maxWidth: .infinity, alignment: .leading)
-                }.buttonStyle(.plain).foregroundStyle(PhrenTheme.phrenCardAccent)
-                    .accessibilityIdentifier("chat-child-agents")
             }
             if let error = model.deliveryError { Text(error).font(.caption).foregroundStyle(PhrenTheme.warning).accessibilityIdentifier("chat-delivery-error") }
             if let error = model.draftStorageError { Text(error).font(.caption).foregroundStyle(PhrenTheme.warning).accessibilityIdentifier("chat-draft-storage-error") }

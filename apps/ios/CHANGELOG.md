@@ -17,9 +17,8 @@ number counts up on its own.
   the chat) and **Open transcript** once it is back — with earlier activity
   one tap away. The transcript of a finished Claude Code subagent was
   showing empty.
-- The running-agents row above the composer appears only while at least one
-  spawned agent is still working; finished agents are reached from their
-  cards.
+- A compact agent-tree badge in the chat header shows how many spawned agents
+  are still running, and agent lists and transcripts now include model names.
 - The ⋯ button in the chat header opens a Chat options sheet (Herdr
   workspaces, project memory, skills, graph, project context, token usage,
   another agent). The menu behind it never opened on the phone.

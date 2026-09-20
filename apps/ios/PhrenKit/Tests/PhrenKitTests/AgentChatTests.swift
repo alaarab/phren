@@ -11,6 +11,13 @@ final class AgentChatTests: XCTestCase {
         XCTAssertEqual(tree.agents[0].children[0].name, "worker")
     }
 
+    func testChildAgentDecodesWithAndWithoutModel() throws {
+        let withModel = try JSONDecoder().decode(AgentChild.self, from: Data(#"{"id":"a","provider":"codex","model":"gpt-5-codex","path":"/root/first","callId":"c1","state":"running","children":[]}"#.utf8))
+        let withoutModel = try JSONDecoder().decode(AgentChild.self, from: Data(#"{"id":"b","provider":"claude","path":"/root/second","callId":"c2","state":"completed","children":[]}"#.utf8))
+        XCTAssertEqual(withModel.model, "gpt-5-codex")
+        XCTAssertNil(withoutModel.model)
+    }
+
     func testChildTranscriptReadsSidechainRowsAndRefusesAnotherConversation() throws {
         // A Claude subagent's file marks every row isSidechain. The parent's
         // reader still skips those; a child reader takes them as its turns.
