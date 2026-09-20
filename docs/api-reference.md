@@ -711,7 +711,7 @@ Update configuration for a specific domain. Unified setter for all config domain
 **Domain-specific settings:**
 
 - **proactivity**: `{ level: "high"|"medium"|"low", scope?: "base"|"findings"|"tasks" }`
-- **taskMode**: `{ mode: "off"|"manual"|"suggest"|"auto" }`
+- **taskMode**: `{ mode: "off"|"manual"|"suggest"|"auto" }`. In `auto`, the prompt hook files what it picks up on its own into **Queue**; a prompt that asks to be tracked ("add this to task") goes to Active, as does a prompt matching a task already in Active. Task proactivity `high` captures any actionable request, `medium` only prompts with that explicit signal, `low` none. Terminal paste wrappers (`<pasted_content>`) are read through; frames from another agent or the harness (`<cross-session-message>`, delivery notices, `<task-notification>`, `<system-reminder>`), questions, and replies that ask for nothing are never filed.
 - **findingSensitivity**: `{ level: "minimal"|"conservative"|"balanced"|"aggressive" }`
 - **retention**: `{ ttlDays?, retentionDays?, autoAcceptThreshold?, minInjectConfidence?, decay?: { d30?, d60?, d90?, d120? } }`
 - **workflow**: `{ lowConfidenceThreshold?, riskySections?, taskMode?, findingSensitivity? }`
