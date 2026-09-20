@@ -93,6 +93,13 @@ final class LiveSessionsTests: XCTestCase {
         XCTAssertEqual(try LiveSessionPreferences.read(data).hosts.first?.color, "#FF8A5B")
         XCTAssertEqual(try JSONDecoder().decode(LiveSessionPreferences.self, from: data).hosts.first?.color, "#FF8A5B")
 
+        data = try LiveSessionPreferences.settingColor(hostID: id, color: "#1A2B3C", in: data)
+        XCTAssertEqual(try LiveSessionPreferences.read(data).hosts.first?.color, "#1A2B3C")
+        data = try LiveSessionPreferences.settingColor(hostID: id, color: "#1a2b3c", in: data)
+        XCTAssertEqual(try LiveSessionPreferences.read(data).hosts.first?.color, "#1A2B3C")
+        XCTAssertThrowsError(try LiveSessionPreferences.settingColor(hostID: id, color: "#12345", in: data))
+        XCTAssertThrowsError(try LiveSessionPreferences.settingColor(hostID: id, color: "red", in: data))
+
         let first = LiveHost.defaultColor(for: id)
         XCTAssertEqual(first, LiveHost.defaultColor(for: id))
         XCTAssertTrue(LiveHost.colorPalette.contains(first))

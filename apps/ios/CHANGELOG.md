@@ -15,6 +15,8 @@ number counts up on its own.
 
 ### New
 
+- Connection settings now offers the full color picker and custom hex colors
+  for computers, alongside the quick swatches.
 - Completed agents can be cleared from Agent work and restored when needed,
   keeping active agent trees focused on work still in progress.
 - Agent work uses compact headers and flat session-style cards for spawned

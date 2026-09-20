@@ -202,6 +202,9 @@ public struct LiveHost: Codable, Equatable, Sendable, Identifiable {
         if let fingerprint, fingerprint.range(of: #"^SHA256:[A-Za-z0-9+/]{43}$"#, options: .regularExpression) == nil {
             throw PhrenKitError.validation("The saved SSH host fingerprint is invalid.")
         }
+        if let color, color.range(of: #"^#[0-9A-F]{6}$"#, options: .regularExpression) == nil {
+            throw PhrenKitError.validation("Choose a color as #RRGGBB.")
+        }
     }
 }
 
@@ -288,7 +291,16 @@ public struct LiveSessionPreferences: Codable, Equatable, Sendable {
         guard let index = value.hosts.firstIndex(where: { $0.id == hostID }) else {
             throw PhrenKitError.validation("Connection no longer exists.")
         }
-        value.hosts[index].color = color
+        let normalizedColor: String?
+        if let color {
+            guard color.range(of: #"^#[0-9A-Fa-f]{6}$"#, options: .regularExpression) != nil else {
+                throw PhrenKitError.validation("Choose a color as #RRGGBB.")
+            }
+            normalizedColor = color.uppercased()
+        } else {
+            normalizedColor = nil
+        }
+        value.hosts[index].color = normalizedColor
         return try JSONEncoder().encode(value)
     }
 

@@ -13,6 +13,7 @@ struct LiveHostEditor: View {
     @State private var username = ""
     @State private var herdrSession = ""
     @State private var selectedColor: String?
+    @State private var colorHex = ""
     @State private var key = ""
     @State private var error: String?
     @State private var saved = false
@@ -49,6 +50,25 @@ struct LiveHostEditor: View {
                         }
                     }
                 }
+                HStack(spacing: 12) {
+                    ColorPicker("Custom", selection: Binding(get: {
+                        PhrenTheme.hostColor(displayedColor)
+                    }, set: { color in
+                        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+                        guard UIColor(color).getRed(&red, green: &green, blue: &blue, alpha: &alpha) else { return }
+                        func channel(_ component: CGFloat) -> Int { Int((min(1, max(0, component)) * 255).rounded()) }
+                        chooseColor(String(format: "#%02X%02X%02X", channel(red), channel(green), channel(blue)))
+                    }), supportsOpacity: false)
+                    HStack(spacing: 1) {
+                        Text("#").foregroundStyle(PhrenTheme.textDim)
+                        TextField("RRGGBB", text: $colorHex)
+                            .textInputAutocapitalization(.characters).autocorrectionDisabled()
+                            .frame(width: 72)
+                            .accessibilityIdentifier("host-color-hex")
+                    }
+                    .font(.system(.caption, design: .monospaced))
+                }
+                .padding(.vertical, 4)
             }
             Section("SSH computer") {
                 TextField("Name", text: $name).accessibilityIdentifier("live-host-name")
@@ -111,6 +131,14 @@ struct LiveHostEditor: View {
                 herdrSession = existing.herdrSession ?? ""
                 createKey()
             }
+            colorHex = String(displayedColor.dropFirst())
+        }
+        .onChange(of: colorHex) { _, raw in
+            guard raw.range(of: #"^[0-9A-Fa-f]{6}$"#, options: .regularExpression) != nil else { return }
+            let normalized = raw.uppercased()
+            guard raw == normalized else { colorHex = normalized; return }
+            guard displayedColor != "#\(normalized)" else { return }
+            chooseColor("#\(normalized)")
         }
         .onDisappear {
             if existing == nil && !saved { try? DeviceSSHKey.delete(id) }
@@ -135,6 +163,7 @@ struct LiveHostEditor: View {
         catch { self.error = error.localizedDescription }
     }
     private func chooseColor(_ color: String) {
+        colorHex = String(color.dropFirst())
         guard existing != nil else { selectedColor = color; return }
         do {
             data = try LiveSessionPreferences.settingColor(hostID: id, color: color, in: data)

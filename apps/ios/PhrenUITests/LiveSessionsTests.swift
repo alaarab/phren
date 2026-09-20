@@ -29,6 +29,11 @@ final class LiveSessionsTests: XCTestCase {
         let orange = app.buttons["host-color:#FF8A5B"]
         XCTAssertTrue(orange.waitForExistence(timeout: 5))
         orange.tap()
+        let customColor = app.textFields["host-color-hex"]
+        customColor.tap()
+        customColor.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 6))
+        customColor.typeText("1A2B3C")
+        XCTAssertEqual(customColor.value as? String, "1A2B3C")
         app.buttons["Cancel"].tap()
         app.navigationBars["Test Mac"].buttons.element(boundBy: 0).tap()
         XCTAssertTrue(app.staticTexts["session-computer-name"].waitForExistence(timeout: 10))
