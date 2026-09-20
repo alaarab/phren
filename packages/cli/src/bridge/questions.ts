@@ -20,9 +20,24 @@ type Question = z.infer<typeof question>;
  * to item/tool/requestUserInput (that RPC is the synchronous tool). */
 export function asyncQuestion(raw: Json, id: string): Question[] | undefined {
   const p = object(raw.payload);
+  // Codex 0.155 asks through an agent message delivered async, with the
+  // questions on the item itself; older versions called a tool.
+  const asked = deliveredQuestion(raw);
+  if (asked) return asked.id === id ? asked.questions : undefined;
   if (raw.type !== "response_item" || p.type !== "function_call" || p.call_id !== id
       || !["request_user_input_async", "functions.request_user_input_async"].includes(String(p.name))) return;
   try { return questionSet.parse(object(JSON.parse(String(p.arguments))).questions); } catch { return; }
+}
+/** An `item_completed` event for an AgentMessage delivered async with
+ * questions attached: the newer shape, already acknowledged by nature. */
+export function deliveredQuestion(raw: Json): { id: string; questions: Question[] } | undefined {
+  const p = object(raw.payload), item = object(p.item);
+  if (raw.type !== "event_msg" || p.type !== "item_completed" || !["AgentMessage", "agentMessage"].includes(String(item.type))
+      || item.delivery !== "async" || !Array.isArray(item.questions) || typeof item.id !== "string" || !item.id) return;
+  try {
+    const questions = questionSet.parse(objects(item.questions).map(q => ({ ...q, options: Array.isArray(q.options) ? q.options : undefined })));
+    return { id: item.id.slice(0, 512), questions };
+  } catch { return; }
 }
 export function questionReply(questions: Question[], answers: unknown): string {
   const parsed = z.array(z.object({ optionIndexes: z.array(z.number().int().nonnegative()).max(1), text: z.string().max(4000).optional() })).parse(answers);
@@ -51,8 +66,10 @@ export async function pendingAsyncQuestions(file: string, targetID?: string): Pr
       if (!row.bytes || (bytes += row.bytes.length) > 8_388_608) throw new BridgeError(413, "The pending question history is too large to verify.");
       let raw: Json;
       try { raw = object(JSON.parse(row.bytes.toString())); } catch { continue; }
-      if (raw.type !== "response_item") continue;
-      const p = object(raw.payload), id = typeof p.call_id === "string" ? p.call_id : "";
+      const delivered = deliveredQuestion(raw);
+      if (delivered) acknowledged.add(delivered.id);
+      if (raw.type !== "response_item" && !delivered) continue;
+      const p = object(raw.payload), id = delivered ? delivered.id : typeof p.call_id === "string" ? p.call_id : "";
       if (p.type === "message" && p.role === "user") replies.push(objects(p.content).map(b => typeof b.text === "string" ? b.text : "").join("\n"));
       if (id && ["function_call_output", "custom_tool_call_output"].includes(String(p.type)) && !resolved.has(id) && !acknowledged.has(id)) {
         try { if (object(JSON.parse(String(p.output))).accepted === true) acknowledged.add(id); else resolved.add(id); }
