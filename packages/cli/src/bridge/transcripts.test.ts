@@ -71,15 +71,17 @@ describe("transcript image payloads", () => {
     expect(page.entries[1].raw).toMatchObject({ data: { stop_reason: "tool_use" } });
   });
 
-  it("reads redacted raw opencode run events from verified fan-out logs", async () => {
+  it("reads raw opencode run events from verified fan-out logs: commands and output, never reasoning or other arguments", async () => {
     const events = [
       { type: "text", part: { type: "text", text: "Review complete", reasoning: "private" } },
-      { type: "tool_use", part: { type: "tool", tool: "bash", callID: "call-1", state: { status: "completed", input: { secret: true }, output: "private" } } },
+      { type: "tool_use", part: { type: "tool", tool: "bash", callID: "call-1", state: { status: "completed", input: { command: "ls scripts", secret: true }, output: "run.sh", metadata: { exit: 0 } } } },
     ];
     await writeFile(file, events.map(JSON.stringify).join("\n") + "\n");
     const page = await new TranscriptReader(file, "opencode").read();
     expect(page.entries).toHaveLength(2);
     expect(JSON.stringify(page)).toContain("Review complete");
+    expect(JSON.stringify(page)).toContain("ls scripts");
+    expect(JSON.stringify(page)).toContain("run.sh\\n[exit 0]");
     expect(JSON.stringify(page)).not.toContain("private");
     expect(JSON.stringify(page)).not.toContain("secret");
   });
@@ -127,6 +129,35 @@ describe("child agent relationships", () => {
       expect(await childAgentTree("opencode", parent)).toEqual([]);
     } finally { process.env.CODEX_HOME = old; await rm(root, { recursive: true, force: true }); }
   });
+
+  it("lists a named Claude teammate as a child, running until it reports idle", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "phren-claude-team-"));
+    const old = process.env.CLAUDE_CONFIG_DIR; process.env.CLAUDE_CONFIG_DIR = root;
+    const parent = "dddddddd-4444-4444-8444-444444444444", name = "test-fixer", agentId = `a${name}-0123456789abcdef`;
+    const project = path.join(root, "projects/project"); await mkdir(path.join(project, parent, "subagents"), { recursive: true });
+    const launch = { type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: "tool-team", name: "Agent",
+      input: { description: "Fix the stale tests", subagent_type: "general-purpose", name, prompt: "secret prompt" } }] } };
+    const spawned = { type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "tool-team", content: `Spawned successfully.\nagent_id: ${name}@session-1\nname: ${name}` }] } };
+    const idle = { type: "user", message: { role: "user", content: `<teammate-message teammate_id="${name}" color="blue">\n{"type":"idle_notification","from":"${name}","result":"done"}\n</teammate-message>` } };
+    const parentFile = path.join(project, `${parent}.jsonl`);
+    await writeFile(parentFile, [launch, spawned].map(JSON.stringify).join("\n") + "\n");
+    const childFile = path.join(project, parent, "subagents", `agent-${agentId}.jsonl`);
+    await writeFile(childFile, [{ type: "user", isSidechain: true, sessionId: parent, agentId, message: { role: "user", content: "Fix them" } },
+      { type: "assistant", isSidechain: true, sessionId: parent, agentId, message: { model: "claude-sonnet-5", role: "assistant", content: "On it" } }].map(JSON.stringify).join("\n") + "\n");
+    await writeFile(path.join(project, parent, "subagents", `agent-${agentId}.meta.json`), JSON.stringify({ name, description: "Fix the stale tests", model: "sonnet" }));
+    try {
+      const running = await childAgentTree("claude", parent);
+      expect(running).toHaveLength(1);
+      expect(running[0]).toMatchObject({ provider: "claude", path: "Fix the stale tests", callId: "tool-team", state: "running", model: "claude-sonnet-5", session: agentId });
+      expect(JSON.stringify(publicChildAgents(running))).not.toContain("secret prompt");
+      await appendFile(parentFile, JSON.stringify(idle) + "\n");
+      const tree = await childAgentTree("claude", parent);
+      expect(tree[0]).toMatchObject({ state: "completed" });
+      const woken = { type: "user", message: { role: "user", content: `<teammate-message teammate_id="${name}">\nStarting on the second batch.\n</teammate-message>` } };
+      await appendFile(parentFile, JSON.stringify(woken) + "\n");
+      expect((await childAgentTree("claude", parent))[0]).toMatchObject({ state: "running" });
+    } finally { process.env.CLAUDE_CONFIG_DIR = old; await rm(root, { recursive: true, force: true }); }
+  }, 10_000);
 
   it("relation-gates Claude sidechain transcripts and tracks completion", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "phren-claude-children-"));

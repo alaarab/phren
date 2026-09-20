@@ -1,4 +1,4 @@
-import { realpath, stat } from "node:fs/promises";
+import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { createHash } from "node:crypto";
@@ -147,6 +147,11 @@ async function claudeChildAgents(file: string, session: string): Promise<ChildAg
     return cached.relations;
   }
   const launches = new Map<string, { path: string; callId: string; state: "running" | "completed" }>();
+  // Named teammates (the Agent tool with a `name`) run as their own session
+  // and never post a task-notification: they announce themselves idle in a
+  // teammate-message instead, and may be woken again later. Their file is
+  // `agent-a<name>-<hex>.jsonl` beside the Task sidechains.
+  const teammates = new Map<string, { path: string; callId: string; state: "running" | "completed" }>();
   const lines = createInterface({ input: createReadStream(file, { encoding: "utf8" }), crlfDelay: Infinity });
   for await (const line of lines) {
     try {
@@ -156,10 +161,23 @@ async function claudeChildAgents(file: string, session: string): Promise<ChildAg
         const blocks = objects(object(raw.message).content), callId = String(blocks.find(b => b.type === "tool_result")?.tool_use_id ?? "");
         if (callId) launches.set(agentId, { path: String(result.description || result.name || "Agent").slice(0, 200), callId, state: "running" });
       }
+      if (raw.type === "assistant") {
+        for (const block of objects(object(raw.message).content)) {
+          if (block.type !== "tool_use" || block.name !== "Agent") continue;
+          const input = object(block.input), name = String(input.name ?? "");
+          if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(name) || typeof block.id !== "string") continue;
+          teammates.set(name, { path: String(input.description || name).slice(0, 200), callId: block.id.slice(0, 200), state: "running" });
+        }
+      }
       const content = typeof raw.content === "string" ? raw.content : typeof object(raw.message).content === "string" ? String(object(raw.message).content) : "";
       if (content.includes("<task-notification>")) {
         const child = /<task-id>([^<>]{1,128})<\/task-id>/.exec(content)?.[1], taskStatus = /<status>([^<>]+)<\/status>/.exec(content)?.[1];
         const previous = child && launches.get(child); if (previous && ["completed", "failed", "cancelled"].includes(taskStatus ?? "")) previous.state = "completed";
+      }
+      if (content.includes("<teammate-message")) {
+        const from = /<teammate-message teammate_id="([A-Za-z0-9][A-Za-z0-9_-]{0,63})"/.exec(content)?.[1];
+        const teammate = from && teammates.get(from);
+        if (teammate) teammate.state = content.includes("\"type\":\"idle_notification\"") ? "completed" : "running";
       }
     } catch { /* Ignore unrelated/malformed rows. */ }
   }
@@ -179,6 +197,25 @@ async function claudeChildAgents(file: string, session: string): Promise<ChildAg
     relations.push({ id: createHash("sha256").update(`claude\0${session}\0${agentId}`).digest("hex").slice(0, 32),
       session: agentId, transcript: childFile, provider: "claude", ...launch,
       ...(model !== undefined ? { model } : {}), children: [] });
+  }
+  if (teammates.size && root) {
+    const names = (await readdir(root).catch(() => [] as string[])).filter(n => /^agent-a[A-Za-z0-9][A-Za-z0-9_-]{0,63}-[0-9a-f]{8,32}\.jsonl$/.test(n));
+    for (const [name, launch] of teammates) {
+      const fileName = names.find(n => n.startsWith(`agent-a${name}-`));
+      const agentId = fileName?.slice("agent-".length, -".jsonl".length);
+      const childFile = agentId && await realpath(path.join(root, fileName!)).catch(() => undefined);
+      if (!agentId || !childFile || !childFile.startsWith(root + path.sep) || !await claudeChildBelongsTo(childFile, session, agentId)) {
+        if (launch.state === "running") awaiting = true;
+        continue;
+      }
+      // The meta file names the model as the launcher chose it ("sonnet");
+      // the transcript's first assistant turn carries the full id and wins.
+      const meta = await readFile(childFile.slice(0, -".jsonl".length) + ".meta.json", "utf8").then(v => object(JSON.parse(v))).catch(() => ({} as Json));
+      const model = await claudeChildModel(childFile).catch(() => undefined) ?? (typeof meta.model === "string" && meta.model ? meta.model.slice(0, 200) : undefined);
+      relations.push({ id: createHash("sha256").update(`claude\0${session}\0${agentId}`).digest("hex").slice(0, 32),
+        session: agentId, transcript: childFile, provider: "claude", ...launch,
+        ...(model !== undefined ? { model } : {}), children: [] });
+    }
   }
   claudeRelationCache.set(file, { signature, relations, ...(awaiting ? { recheckAt: Date.now() + 2_000 } : {}) });
   while (claudeRelationCache.size > 64) claudeRelationCache.delete(claudeRelationCache.keys().next().value!);
