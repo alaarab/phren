@@ -6,12 +6,8 @@ final class LiveSessionsTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--live-sessions-fixture", "--live-sessions-offline"]
         app.launch()
-        XCTAssertTrue(app.buttons["More"].waitForExistence(timeout: 15))
-        app.buttons["More"].tap()
-        let liveItem = app.buttons.matching(NSPredicate(format: "label == %@", "Live sessions"))
-            .allElementsBoundByIndex.first { $0.isHittable }
-        XCTAssertNotNil(liveItem)
-        liveItem?.tap()
+        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 15))
+        app.tabBars.buttons["Agents"].tap()
         let computer = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Test Mac,")).firstMatch
         if !computer.exists {
             app.buttons["Add computer"].tap()
@@ -50,8 +46,10 @@ final class LiveSessionsTests: XCTestCase {
         XCTAssertTrue(app.webViews.staticTexts["DEMO"].firstMatch.waitForExistence(timeout: 20))
         app.buttons["graph-back"].tap()
         app.navigationBars["Session details"].buttons.element(boundBy: 0).tap()
+        // A snapshot reads as live for 90s after its last successful update;
+        // wait past that window for the disconnected fixture to go stale.
         let stale = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Showing previous status")).firstMatch
-        XCTAssertTrue(stale.waitForExistence(timeout: 20))
+        XCTAssertTrue(stale.waitForExistence(timeout: 100))
         // The card's last line only says what the section can't: Stale.
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Stale")).firstMatch.exists)
         let screenshot = XCTAttachment(screenshot: app.screenshot())
@@ -60,12 +58,8 @@ final class LiveSessionsTests: XCTestCase {
         add(screenshot)
 
         app.terminate(); app.launch()
-        XCTAssertTrue(app.buttons["More"].waitForExistence(timeout: 15))
-        app.buttons["More"].tap()
-        let reopenedLiveItem = app.buttons.matching(NSPredicate(format: "label == %@", "Live sessions"))
-            .allElementsBoundByIndex.first { $0.isHittable }
-        XCTAssertNotNil(reopenedLiveItem)
-        reopenedLiveItem?.tap()
+        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 15))
+        app.tabBars.buttons["Agents"].tap()
         computer.tap()
         XCTAssertTrue(app.buttons["live-detail:w1:w1:t1"].waitForExistence(timeout: 10))
         app.buttons["live-detail:w1:w1:t1"].tap()
