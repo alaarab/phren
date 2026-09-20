@@ -220,18 +220,14 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(app.buttons["chat-subagents-done"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.navigationBars["Agent work"].exists)
         let completedID = "a" + String(repeating: "1", count: 31)
-        let completedAgent = app.buttons["child-agent:\(completedID)"]
-        XCTAssertFalse(completedAgent.exists, "Completed agents stay out of Agent work by default")
-        let showCompleted = app.buttons["chat-subagents-show-completed"]
-        XCTAssertTrue(showCompleted.waitForExistence(timeout: 3))
-        showCompleted.tap()
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "codex/device-color")).firstMatch.waitForExistence(timeout: 5))
-        let modeledAgent = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "child-agent:", "gpt-5-codex")).firstMatch
-        XCTAssertTrue(modeledAgent.waitForExistence(timeout: 5))
-        XCTAssertTrue(modeledAgent.label.contains("Claude"), "The model appears beside its provider")
+        XCTAssertFalse(app.buttons["child-agent:\(completedID)"].exists, "Finished agents are out of scope in Agent work")
+        XCTAssertFalse(app.buttons["chat-subagents-show-completed"].exists, "Nothing brings finished agents back")
+        XCTAssertTrue(app.staticTexts["1 running"].waitForExistence(timeout: 5))
+        let runningAgent = app.buttons["child-agent:b" + String(repeating: "2", count: 31)]
+        XCTAssertTrue(runningAgent.waitForExistence(timeout: 5))
+        XCTAssertTrue(runningAgent.label.contains("Claude"), "The provider or model appears above the task name")
+        XCTAssertFalse(app.staticTexts["Running"].exists, "The avatar's dot already says the agent is running")
         capture(app, "Agent work cards")
-        showCompleted.tap()
-        XCTAssertTrue(completedAgent.waitForNonExistence(timeout: 5))
         app.buttons["chat-subagents-done"].tap()
         app.buttons["chat-switch-agent"].tap()
         let fixtureChildID = "b2222222222222222222222222222222"
@@ -1116,7 +1112,7 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(model.waitForExistence(timeout: 8))
         XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Command output: Set model to Opus 5")).firstMatch.exists)
         XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Command: pwd")).firstMatch.exists)
-        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Command output: /home/alaarab/Projects/hub")).firstMatch.exists)
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Command output: /home/sam/Projects/hub")).firstMatch.exists)
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "<command-name>")).firstMatch.exists)
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "<bash-stdout>")).firstMatch.exists)
         capture(app, "Slash and shell commands as inline system lines")
@@ -1370,6 +1366,23 @@ final class AgentChatTests: XCTestCase {
         waitForExpectations(timeout: 5)
         XCTAssertFalse(app.buttons["Latest messages"].exists, "A long transcript should open already pinned to the bottom")
         capture(app, "Long transcript opens at the last message")
+    }
+
+    @MainActor
+    func testUnevenTranscriptOpensAtItsRealEnd() {
+        let app = launch(extra: ["--chat-uneven"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let tail = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Uneven fixture reply 205.")).firstMatch
+        XCTAssertTrue(tail.waitForExistence(timeout: 15), "The end of the transcript should be laid out on open")
+        Thread.sleep(forTimeInterval: 1.5)
+        capture(app, "Uneven transcript on open")
+        XCTAssertTrue(tail.isHittable, "The last message must be on screen, not above a blank stretch the estimate left behind")
+        XCTAssertFalse(app.buttons["Latest messages"].exists)
+        let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
+        composer.tap()
+        Thread.sleep(forTimeInterval: 1.5)
+        capture(app, "Uneven transcript with the composer focused")
+        XCTAssertTrue(tail.isHittable, "Focusing the composer must keep the last message above the keyboard")
     }
 
     @MainActor

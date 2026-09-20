@@ -8,13 +8,11 @@ struct ChatSubagentsView: View {
     let agents: [AgentChild]
     @Environment(\.dismiss) private var dismiss
     @State private var diffChild: String?
-    @AppStorage("chat.subagents.showCompleted") private var showingCompleted = false
 
-    private var allRows: [AgentTreeRow] { AgentTreeRow.rows(agents, includeCompleted: true) }
-    private var rows: [AgentTreeRow] { AgentTreeRow.rows(agents, includeCompleted: showingCompleted) }
-    private var total: Int { allRows.count }
-    private var running: Int { allRows.filter { $0.agent.state == .running }.count }
-    private var hasCompleted: Bool { total > running }
+    /// Finished agents are out of scope here: the sheet is about work in
+    /// progress, and a finished worker's result lives in the transcript.
+    private var rows: [AgentTreeRow] { AgentTreeRow.rows(agents, includeCompleted: false) }
+    private var running: Int { rows.count }
     private var providers: [String] { Array(Set(rows.map { $0.agent.providerName })).sorted() }
 
     var body: some View {
@@ -31,22 +29,11 @@ struct ChatSubagentsView: View {
                     .padding(.bottom, 6)
                 }
                 List {
-                    if rows.isEmpty && !showingCompleted {
-                        HStack(spacing: 8) {
-                            Text("No agents running")
-                                .font(.caption)
-                                .foregroundStyle(PhrenTheme.textMuted)
-                            if hasCompleted {
-                                Button("Show completed") {
-                                    withAnimation(.easeInOut(duration: 0.15)) { showingCompleted = true }
-                                }
-                                .font(.caption.weight(.medium))
-                                .buttonStyle(.bordered)
-                                .buttonBorderShape(.capsule)
-                                .controlSize(.small)
-                                .frame(minHeight: 44)
-                            }
-                        }
+                    if rows.isEmpty {
+                        Text("No agents running")
+                            .font(.caption)
+                            .foregroundStyle(PhrenTheme.textMuted)
+                            .accessibilityIdentifier("chat-subagents-empty")
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
                         .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
@@ -83,19 +70,10 @@ struct ChatSubagentsView: View {
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 1) {
                 Text("Agent work").font(.subheadline.weight(.medium)).foregroundStyle(PhrenTheme.text)
-                Text(showingCompleted ? "\(total) agents · \(running) running" : "\(running) running")
+                Text("\(running) running")
                     .font(.caption).foregroundStyle(PhrenTheme.textMuted)
             }
             Spacer(minLength: 8)
-            Button(showingCompleted ? "Hide completed" : "Show completed") {
-                withAnimation(.easeInOut(duration: 0.15)) { showingCompleted.toggle() }
-            }
-                .font(.caption.weight(.medium))
-                .buttonStyle(.bordered)
-                .buttonBorderShape(.capsule)
-                .controlSize(.small)
-                .frame(minHeight: 44)
-                .accessibilityIdentifier("chat-subagents-show-completed")
             Button("Done") { dismiss() }
                 .font(.caption.weight(.medium))
                 .buttonStyle(.bordered)
@@ -174,22 +152,20 @@ private struct AgentTreeRowView: View {
             HStack(spacing: 12) {
                 AgentProviderAvatar(provider: row.agent.provider, state: row.agent.state)
                 VStack(alignment: .leading, spacing: 3) {
+                    // The branch names the checkout; the worktree folder
+                    // repeats it, and the task name repeats it again below.
                     HStack(spacing: 5) {
-                        Text(row.agent.providerAndModel).foregroundStyle(PhrenTheme.sessionProject)
-                        if let branch = row.agent.branch, !branch.isEmpty {
-                            Text("⑂ \(branch)")
-                        }
-                        if let worktree = row.agent.worktreeName, !worktree.isEmpty {
-                            Text("· \(worktree)")
+                        Text(row.agent.providerAndModel).foregroundStyle(PhrenTheme.sessionProject).layoutPriority(1)
+                        if let checkout = row.agent.checkoutLabel, !checkout.isEmpty {
+                            Text("⑂ \(checkout)")
                         }
                     }
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(PhrenTheme.sessionMeta)
-                    .lineLimit(1).truncationMode(.middle)
+                    .lineLimit(1).truncationMode(.tail)
                     Text(row.agent.name).font(.body.weight(.medium)).foregroundStyle(PhrenTheme.text).lineLimit(2)
                 }
                 Spacer(minLength: 8)
-                if row.agent.state == .running { AgentRunningCapsule() }
             }
             .padding(12).sessionCard()
         }

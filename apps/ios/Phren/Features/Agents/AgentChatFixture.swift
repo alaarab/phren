@@ -192,9 +192,9 @@ import UIKit
     }
     static func transcript(_ target: AgentChatTarget) throws -> AgentChatTranscript {
         hasReadTranscript = true
-        if flag("--chat-heavy") {
+        if flag("--chat-heavy") || flag("--chat-uneven") {
             if let cached = heavyFrames[target.source] { return cached }
-            let frame = try AgentChatTranscript.read(ChatHeavyFixture.data(source: target.source), source: target.source)
+            let frame = try AgentChatTranscript.read(ChatHeavyFixture.data(source: target.source, uneven: flag("--chat-uneven")), source: target.source)
             heavyFrames[target.source] = frame
             return frame
         }
@@ -245,7 +245,7 @@ import UIKit
             append("user", "<command-name>/model</command-name>\n            <command-message>model</command-message>\n            <command-args></command-args>")
             append("user", "<local-command-stdout>Set model to Opus 5 (1M context) and saved as your default for new sessions</local-command-stdout>")
             append("user", "<bash-input>pwd</bash-input>")
-            append("user", "<bash-stdout>/home/alaarab/Projects/hub</bash-stdout><bash-stderr></bash-stderr>")
+            append("user", "<bash-stdout>/home/sam/Projects/hub</bash-stdout><bash-stderr></bash-stderr>")
         }
         if flag("--chat-design") {
             append("user", "Make the conversation easier to read. Keep the details close by.")
