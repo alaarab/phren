@@ -72,6 +72,11 @@ private extension AgentChild {
     /// The model is what the owner wants to know; the provider is already
     /// the glyph, so it only stands in when no model was recorded.
     var providerAndModel: String { model ?? providerName }
+    var checkoutDisplayLabel: String? {
+        guard let checkoutLabel else { return nil }
+        if let branch, let worktreeName { return "\(branch) · \(worktreeName)" }
+        return checkoutLabel
+    }
     var descendantLabel: String? {
         let count = children.reduce(0) { $0 + $1.agentCount }
         guard count > 0 else { return nil }
@@ -159,6 +164,9 @@ private struct AgentTreeRowView: View {
                             Text("·"); Text(descendants)
                         }
                     }.font(.caption).foregroundStyle(PhrenTheme.textMuted).lineLimit(1)
+                    if let checkout = row.agent.checkoutDisplayLabel {
+                        AgentCheckoutLine(label: checkout)
+                    }
                 }
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(PhrenTheme.textDim)
@@ -166,7 +174,7 @@ private struct AgentTreeRowView: View {
             .padding(14).phrenPanel(tool: true)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(row.agent.name), \(row.agent.providerName)" + (row.agent.model.map { ", \($0)" } ?? "") + ", \(stateName)" + (row.agent.descendantLabel.map { ", \($0)" } ?? ""))
+        .accessibilityLabel("\(row.agent.name), \(row.agent.providerName)" + (row.agent.model.map { ", \($0)" } ?? "") + ", \(stateName)" + (row.agent.descendantLabel.map { ", \($0)" } ?? "") + (row.agent.branch.map { ", \($0)" } ?? ""))
     }
 
     private var treeGuide: some View {
@@ -179,6 +187,19 @@ private struct AgentTreeRowView: View {
                 path.addLine(to: CGPoint(x: proxy.size.width - 3, y: proxy.size.height / 2))
             }.stroke(PhrenTheme.border, style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
         }.accessibilityHidden(true)
+    }
+}
+
+private struct AgentCheckoutLine: View {
+    let label: String
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "arrow.triangle.branch").font(.caption2)
+            Text(label).font(.caption.monospaced()).lineLimit(1).truncationMode(.middle)
+        }
+        .foregroundStyle(PhrenTheme.textMuted)
+        .lineLimit(1)
     }
 }
 
@@ -306,6 +327,9 @@ struct ChildAgentTranscriptView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(agent.providerName + " subagent" + (agent.model.map { " · \($0)" } ?? ""))
                     .font(.headline).foregroundStyle(PhrenTheme.text)
+                if let checkout = agent.checkoutDisplayLabel {
+                    AgentCheckoutLine(label: checkout)
+                }
                 Text(stateLine).font(.caption).foregroundStyle(PhrenTheme.textMuted)
             }
             Spacer()

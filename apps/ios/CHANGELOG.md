@@ -10,6 +10,8 @@ number counts up on its own.
 
 ### New
 
+- Agent work shows each fan-out worker's branch and worktree in its row and
+  transcript header.
 - Subagent transcripts open that agent's repository changes directly, with the
   same native file and diff views as the parent chat.
 - Background jobs show their human description, and wrapped Codex and opencode

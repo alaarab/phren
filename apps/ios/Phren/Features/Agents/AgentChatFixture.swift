@@ -141,7 +141,7 @@ import UIKit
     static let auditChild = "a" + String(repeating: "1", count: 31), testsChild = "b" + String(repeating: "2", count: 31)
     static func childAgents(_ target: AgentChatTarget) throws -> AgentChildTree {
         let agents: [[String: Any]] = flag("--chat-agent-card") ? [
-            ["id": auditChild, "provider": "claude", "model": "gpt-5-codex", "path": "Audit the chat timeline", "callId": "agent-audit", "state": "completed", "children": [] as [Any]],
+            ["id": auditChild, "provider": "claude", "model": "gpt-5-codex", "path": "Audit the chat timeline", "callId": "agent-audit", "state": "completed", "worktreeName": "phren-color-ui", "branch": "codex/device-color", "children": [] as [Any]],
             ["id": testsChild, "provider": "claude", "path": "Run the full test suite", "callId": "agent-tests", "state": "running", "children": [] as [Any]],
         ] : []
         let tree: [String: Any] = ["agents": agents]
