@@ -485,15 +485,24 @@ export class TranscriptReader {
   constructor(readonly file: string, readonly source: Provider, private readonly imageLine?: number, private readonly changes?: ChangeLookup,
               private readonly includeSidechain = false, private readonly cwd?: string) {}
   async read(before?: number, signal?: AbortSignal): Promise<{ entries: Entry[]; totalLines: number; startLine: number; hasMore: boolean; reset: boolean }> {
+    return this.readPage(before, undefined, signal);
+  }
+  /** Resume a fresh live reader after the last raw line the client retained. */
+  async readAfter(afterLine: number, signal?: AbortSignal): Promise<{ entries: Entry[]; totalLines: number; startLine: number; hasMore: boolean; reset: boolean }> {
+    if (!Number.isSafeInteger(afterLine) || afterLine < 0) throw new BridgeError(400, "Invalid transcript cursor.");
+    return this.readPage(undefined, afterLine, signal);
+  }
+  private async readPage(before?: number, afterLine?: number, signal?: AbortSignal): Promise<{ entries: Entry[]; totalLines: number; startLine: number; hasMore: boolean; reset: boolean }> {
     return withTranscriptIndex(this.file, async (handle, index) => {
       const reset = this.revision !== index.revision;
       const end = Math.min(before ?? index.lines, index.lines);
-      const lower = this.imageLine ?? (reset || before !== undefined ? 0 : this.nextLine);
+      const resuming = before === undefined && afterLine !== undefined && this.revision === undefined;
+      const lower = this.imageLine ?? (resuming ? Math.min(afterLine + 1, index.lines) : reset || before !== undefined ? 0 : this.nextLine);
       const entries: Entry[] = [];
       // The first page of a conversation is what the phone parses and lays
       // out before anything shows; keep it light and let scrolling fetch the
       // rest in fuller pages. A live tail (nextLine known) stays small too.
-      const opening = before === undefined && (reset || this.nextLine === 0);
+      const opening = before === undefined && !resuming && (reset || this.nextLine === 0);
       const entryBudget = opening ? 60 : 200;
       const byteBudget = opening ? 1_048_576 : 4_194_304;
       let bytes = 0, cursor = end, held: number | undefined;

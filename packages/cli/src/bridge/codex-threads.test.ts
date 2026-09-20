@@ -1,8 +1,8 @@
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { materializeCodexThread } from "./codex-threads.js";
+import { materializeCodexThread, materializedPath, threadHealth } from "./codex-threads.js";
 import { TranscriptReader, transcriptPath } from "./transcripts.js";
 import { currentStep } from "./steps.js";
 
@@ -19,6 +19,7 @@ describe("Codex thread store", () => {
     const sqlite = await import("node:sqlite");
     db = new sqlite.DatabaseSync(path.join(process.env.CODEX_HOME, "thread_history_1.sqlite"));
     db.exec("create table thread_items (thread_id text, turn_id text, item_id text, rollout_ordinal integer, created_at_ms integer, item_json text, item_type text, updated_at_ordinal integer, primary key (thread_id, turn_id, item_id))");
+    db.exec("create table thread_turns (thread_id text, turn_id text, rollout_ordinal integer, status text, started_at integer, rollout_end_ordinal integer, primary key (thread_id, turn_id))");
     const state = new sqlite.DatabaseSync(path.join(process.env.CODEX_HOME, "state_5.sqlite"));
     state.exec("create table threads (id text primary key, rollout_path text, model text, cwd text)");
     state.prepare("insert into threads values (?, ?, ?, ?)").run(thread, "/home/sam/.codex/sessions/2026/09/20/rollout-x.jsonl", "gpt-5.6-sol", "/home/sam/app");
@@ -31,6 +32,13 @@ describe("Codex thread store", () => {
   });
   const insert = (ordinal: number, item: Record<string, unknown>, updated = ordinal) =>
     db.prepare("insert or replace into thread_items values (?, 'turn-1', ?, ?, ?, ?, ?, ?)").run(thread, String(item.id), ordinal, 1000 + ordinal, JSON.stringify(item), String(item.type), updated);
+  const turn = (status: string, end: number | null = null) =>
+    db.prepare("insert or replace into thread_turns values (?, 'turn-1', 1, ?, 1, ?)").run(thread, status, end);
+  const ageCursor = async (minutes: number) => {
+    const date = new Date(Date.now() - minutes * 60_000);
+    await utimes(materializedPath(thread) + ".state.json", date, date);
+    return date;
+  };
 
   it("materializes a thread as an append-only rollout and follows its updates", async () => {
     insert(1, { type: "userMessage", id: "u1", content: [{ type: "text", text: "Fix the build" }] });
@@ -69,5 +77,30 @@ describe("Codex thread store", () => {
 
   it("stays a 404 for a thread the store does not know", async () => {
     await expect(transcriptPath("codex", "01a0bbbb-1111-7222-8333-444444444444")).rejects.toThrow("not available");
+  });
+
+  it("keeps a working thread healthy while its cursor is fresh", async () => {
+    insert(1, { type: "agentMessage", id: "m1", text: "Still recording" });
+    turn("inProgress");
+    await materializeCodexThread(thread);
+    await expect(threadHealth(thread, "working")).resolves.toEqual({ stalled: false });
+  });
+
+  it("reports when a working thread's unfinished turn stopped recording", async () => {
+    insert(1, { type: "agentMessage", id: "m1", text: "Last recorded item" });
+    turn("inProgress");
+    await materializeCodexThread(thread);
+    const stoppedAt = await ageCursor(11);
+    const health = await threadHealth(thread, "working");
+    expect(health.stalled).toBe(true);
+    expect(Math.abs(Date.parse(health.since!) - stoppedAt.getTime())).toBeLessThan(2_000);
+  });
+
+  it("does not report a stale unfinished turn while its pane is idle", async () => {
+    insert(1, { type: "agentMessage", id: "m1", text: "Finished pane" });
+    turn("inProgress");
+    await materializeCodexThread(thread);
+    await ageCursor(11);
+    await expect(threadHealth(thread, "idle")).resolves.toEqual({ stalled: false });
   });
 });

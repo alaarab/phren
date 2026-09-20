@@ -270,6 +270,7 @@ async function main() {
     import("./tools/config.js"),
     import("./tools/notes.js"),
     import("./tools/summaries.js"),
+    import("./tools/dispatch.js"),
   ]);
   for (const mod of toolModules) mod.register(server, ctx);
   gate.finish();

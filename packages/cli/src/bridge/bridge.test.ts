@@ -19,6 +19,7 @@ import { repositoryBranch, repositoryDiff } from "./projects.js";
 import { object } from "./protocol.js";
 import { historicalImage, phrenStoreRoot, TranscriptReader, transcriptPath, visibleEvent } from "./transcripts.js";
 import { dispatch } from "./transport.js";
+import { enrollComputer, publicComputerKey } from "./computers.js";
 
 const execFileAsync = promisify(execFile);
 const session = "aaaaaaaa-1111-4111-8111-111111111111";
@@ -300,6 +301,7 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
   let deliveries: { method: string; session: string }[];
   let extraWorkspaces: Record<string, unknown>[] = [], extraTabs: Record<string, unknown>[] = [], extraPanes: Record<string, unknown>[] = [], failAgentStart = false;
   let helperPIDs: number[] = [];
+  let remoteHook: ChildProcess | undefined;
   function api(url: string, body?: unknown): Promise<{ status: number; data: any }> {
     return new Promise((resolve, reject) => {
       const payload = body === undefined ? undefined : JSON.stringify(body);
@@ -328,7 +330,8 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     }
     commands = []; current = session; agentStatus = "working"; reportIdentity = true; foregroundPID = process.pid; terminalID = "term-one"; log = ""; holdSnapshot = false; releaseSnapshot = undefined;
     replaceBeforeMutation = false; deliveries = [];
-    extraWorkspaces = []; extraTabs = []; extraPanes = []; failAgentStart = false; helperPIDs = [];
+    extraWorkspaces = []; extraTabs = []; extraPanes = []; failAgentStart = false; helperPIDs = []; remoteHook = undefined;
+    await mkdir(path.join(root, "bin"));
     await mkdir(path.join(root, "herdr"));
     await mkdir(path.join(root, "codex/sessions/2026/09/10"), { recursive: true });
     record = path.join(root, `codex/sessions/2026/09/10/rollout-2026-09-10T00-00-00-${session}.jsonl`);
@@ -377,6 +380,7 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     const expired = path.join(root, "bridge/changes/expired.jsonl");
     await writeFile(expired, "{}\n"); await utimes(expired, 1, 1);
     hook = spawn(process.execPath, [hookBundle, "serve"], { env: { ...process.env,
+      PATH: `${path.join(root, "bin")}:${process.env.PATH}`, PHREN_PATH: path.join(root, ".phren"),
       HOME: root, PHREN_BRIDGE_HOME: path.join(root, "bridge"), PHREN_HERDR_HOME: path.join(root, "herdr"), CODEX_HOME: path.join(root, "codex") }, stdio: ["ignore", "ignore", "pipe"] });
     hook.stderr!.on("data", bytes => log += bytes);
     let ready = false;
@@ -386,8 +390,66 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
   afterEach(async () => {
     releaseSnapshot?.();
     if (hook && hook.exitCode === null) { hook.kill("SIGTERM"); await once(hook, "exit"); }
+    if (remoteHook && remoteHook.exitCode === null) { remoteHook.kill("SIGTERM"); await once(remoteHook, "exit"); }
     if (herdr) await new Promise<void>(resolve => herdr.close(() => resolve()));
     if (root) await rm(root, { recursive: true, force: true });
+  });
+  async function dispatchFixture(): Promise<void> {
+    const remoteRoot = path.join(root, "remote");
+    await mkdir(path.join(root, "remote-store/phren"), { recursive: true });
+    await mkdir(path.join(root, "checkout"));
+    await writeFile(path.join(root, "remote-store/phren/phren.project.yaml"), `sourcePath: ${JSON.stringify(path.join(root, "checkout"))}\n`);
+    const line = await enrollComputer("Desk", path.join(root, "bridge"));
+    const hostKey = publicComputerKey(line.slice(line.indexOf("ssh-ed25519")));
+    await writeFile(path.join(root, "bridge/hooks.yaml"), JSON.stringify({ version: 1, computers: [
+      { name: "Linuxbox", address: "desk.example", username: "sam", hostKey },
+    ] }), { mode: 0o600 });
+    // The fake SSH executable preserves the byte-pipe boundary; the receiver
+    // is a second real Hook with its own store and runtime identity.
+    await writeFile(path.join(root, "bin/ssh"), `#!${process.execPath}
+const fs = require('node:fs');
+const net = require('node:net');
+const args = process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(path.join(root, "ssh-calls.jsonl"))}, JSON.stringify(args) + '\\n');
+if (args.at(-1) !== 'phren-hook v1 pipe' || !args.includes('StrictHostKeyChecking=yes')) process.exit(2);
+const socket = net.connect(${JSON.stringify(path.join(remoteRoot, "hook.sock"))});
+socket.on('connect', () => { process.stdin.pipe(socket); socket.pipe(process.stdout); });
+socket.on('error', () => process.exit(1));
+socket.on('close', () => process.exit(0));
+`, { mode: 0o700 });
+    remoteHook = spawn(process.execPath, [hookBundle, "serve"], { env: { ...process.env,
+      HOME: root, PHREN_PATH: path.join(root, "remote-store"), PHREN_BRIDGE_HOME: remoteRoot,
+      PHREN_HERDR_HOME: path.join(root, "herdr"), CODEX_HOME: path.join(root, "codex") }, stdio: ["ignore", "ignore", "pipe"] });
+    remoteHook.stderr!.on("data", bytes => log += bytes);
+    for (let i = 0; i < 80; i++) {
+      if (await stat(path.join(remoteRoot, "hook.sock")).catch(() => undefined)) return;
+      await sleep(25);
+    }
+    throw new Error(`Remote Hook did not start: ${log}`);
+  }
+
+  it("dispatches through a fake SSH pipe to a second Hook and its registered project", async () => {
+    await dispatchFixture();
+    const sent = await api("/v1/dispatch", { computer: "Linuxbox", project: "phren", harness: "codex", model: "test-model", label: "Worker", prompt: "Run the assigned checks" });
+    expect(sent.status, JSON.stringify(sent.data)).toBe(200);
+    expect(sent.data).toMatchObject({ ok: true, computer: "Linuxbox", state: "accepted", target: { source: "codex", starting: true, pane: "w9:p1" } });
+    // The remote Hook resolves the checkout through realpath; on macOS /tmp is a symlink.
+    expect(commands.find(c => c.method === "workspace.create")?.params.cwd).toBe(await realpathAsync(path.join(root, "checkout")));
+    expect(commands.find(c => c.method === "agent.start")?.params.args).toEqual(["--model", "test-model"]);
+    expect(commands.filter(c => c.method === "agent.prompt").map(c => c.params)).toEqual([{ target: "w9:p1", text: "Run the assigned checks" }]);
+    expect((await api("/v1/dispatch")).data.dispatches[0]).toMatchObject({ id: sent.data.id, state: "accepted" });
+    const connections = (await readFile(path.join(root, "ssh-calls.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
+    expect(connections).toHaveLength(3);
+    expect(connections.every(args => args.includes("IdentityAgent=none"))).toBe(true);
+  });
+
+  it("does not launch when the remote project is absent or the request is invalid", async () => {
+    await dispatchFixture();
+    const brief = { computer: "Linuxbox", project: "missing", harness: "codex", label: "Worker", prompt: "Brief" };
+    expect((await api("/v1/dispatch", brief)).data).toMatchObject({ ok: false, state: "failed" });
+    expect((await api("/v1/dispatch", { ...brief, project: "../phren" })).status).toBe(400);
+    expect((await api("/v1/dispatch", { ...brief, cwd: root })).status).toBe(400);
+    expect(commands.some(c => ["workspace.create", "agent.start", "agent.prompt"].includes(c.method))).toBe(false);
   });
   it("discovers workspaces through a private protocol without any TCP helper", async () => {
     const checkout = path.join(root, "Projects", "browser-test");
@@ -423,6 +485,39 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     expect(permissions.mode & 0o777).toBe(0o600);
     expect(await stat(path.join(root, "bridge/changes/expired.jsonl")).catch(() => undefined)).toBeUndefined();
     expect((await stat(path.join(root, "bridge/computer-id"))).mode & 0o777).toBe(0o600);
+  });
+  it("lists, launches, and reports scheduled prompts", async () => {
+    const health = await api("/v1/health"), computer = health.data.computer.name;
+    const project = path.join(root, ".phren/demo");
+    await mkdir(project, { recursive: true });
+    await writeFile(path.join(project, "phren.project.yaml"), `sourcePath: ${JSON.stringify(root)}\n`);
+    await writeFile(path.join(project, "schedules.yaml"), `version: 1
+schedules:
+  - id: 7f3a2c1d
+    name: Nightly test sweep
+    enabled: true
+    computer: ${JSON.stringify(computer)}
+    harness: codex
+    model: gpt-5.6-sol
+    every: daily
+    at: "07:30"
+    prompt: Run the test suite.
+    createdAt: 2099-09-20T21:00:00Z
+    updatedAt: 2099-09-20T21:00:00Z
+`);
+    const listing = await api("/v1/schedules", {});
+    expect(listing.status).toBe(200);
+    expect(listing.data.computer).toBe(computer);
+    expect(listing.data.schedules[0]).toMatchObject({ id: "7f3a2c1d", project: "demo", running: false, lastRun: null });
+    const launched = await api("/v1/schedules/run", { project: "demo", id: "7f3a2c1d" });
+    expect(launched.status, JSON.stringify(launched.data)).toBe(200);
+    expect(launched.data.run).toMatchObject({ scheduleId: "7f3a2c1d", project: "demo", status: "running",
+      launch: { mode: "herdr" } });
+    expect(commands.some(command => command.method === "agent.prompt" && command.params.text === "Run the test suite.")).toBe(true);
+    expect((await api("/v1/schedules/run", { project: "demo", id: "7f3a2c1d" })).status).toBe(409);
+    const history = await api("/v1/schedules/history", { project: "demo", id: "7f3a2c1d", limit: 10 });
+    expect(history.status).toBe(200);
+    expect(history.data.runs[0]).toMatchObject({ scheduleId: "7f3a2c1d", project: "demo" });
   });
   it("serves the phone's own uploaded images by path and nothing outside the uploads folder", async () => {
     // A picture the phone sent lands in a Claude transcript as the text
@@ -938,6 +1033,26 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     for (let i = 0; i < 60 && frames.length < 3; i++) await sleep(25);
     expect(JSON.stringify(frames[2])).toContain('"output_tokens":3');
     const closed = once(socket, "close"); current = "bbbbbbbb-1111-4111-8111-111111111111"; await closed;
+  });
+  it("resumes a disconnected transcript after the phone's last line", async () => {
+    const query = new URLSearchParams(target).toString();
+    const first = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/transcripts?${query}`);
+    const opening: any[] = []; first.on("message", data => opening.push(JSON.parse(data.toString())));
+    await once(first, "open");
+    for (let i = 0; i < 60 && !opening.length; i++) await sleep(25);
+    expect(opening[0]).toMatchObject({ type: "backlog", totalLines: 2 });
+    const disconnected = once(first, "close"); first.terminate(); await disconnected;
+
+    await appendFile(record, JSON.stringify(row("While disconnected 1")) + "\n" + JSON.stringify(row("While disconnected 2")) + "\n");
+    const resumed = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/transcripts?${new URLSearchParams({ ...target, afterLine: String(opening[0].totalLines - 1) })}`);
+    const frames: any[] = []; resumed.on("message", data => frames.push(JSON.parse(data.toString())));
+    try {
+      await once(resumed, "open");
+      for (let i = 0; i < 60 && !frames.length; i++) await sleep(25);
+      expect(frames[0]).toMatchObject({ type: "backlog", totalLines: 4 });
+      expect(frames[0].entries.map((entry: any) => entry.line)).toEqual([2, 3]);
+      expect(JSON.stringify(frames[0])).not.toContain("First message");
+    } finally { resumed.terminate(); }
   });
   it("streams an empty backlog for a conversation whose transcript does not exist yet, then the file once it appears", async () => {
     await rm(record);
