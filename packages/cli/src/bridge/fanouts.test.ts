@@ -5,6 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { fanoutChildren, visibleCodexExecEvent, visibleOpenCodeRunEvent } from "./fanouts.js";
+import type { ChangedFile } from "./changes.js";
 import { object, objects } from "./protocol.js";
 
 const parent = "aaaaaaaa-1111-4111-8111-111111111111";
@@ -99,8 +100,8 @@ describe("fan-out manifests", () => {
     ] } } });
     expect(JSON.stringify(tool)).not.toContain(secret);
     const write = visibleOpenCodeRunEvent({ type: "tool_use", part: { type: "tool", tool: "write", callID: "call-2",
-      state: { status: "completed", input: { filePath: `${home}/repo/notes.md`, content: secret }, output: "Wrote file" } } });
-    expect(write).toMatchObject({ data: { message: { content: [{ name: "write", input: { path: "~/repo/notes.md" } }, { content: "Wrote file" }] } } });
+      state: { status: "completed", input: { filePath: `${home}/repo/notes.md`, content: "notes" }, output: "Wrote file", metadata: { cost: secret } } } });
+    expect(write).toMatchObject({ data: { message: { content: [{ name: "write", input: { path: "~/repo/notes.md", content: "notes" } }, { content: "Wrote file" }] } } });
     expect(JSON.stringify(write)).not.toContain(secret);
     const fetch = visibleOpenCodeRunEvent({ type: "tool_use", part: { type: "tool", tool: "webfetch", callID: "call-3",
       state: { status: "error", input: { url: "https://example.org/page", format: "markdown" }, error: "timed out" } } });
@@ -108,6 +109,51 @@ describe("fan-out manifests", () => {
     const running = visibleOpenCodeRunEvent({ type: "tool_use", part: { type: "tool", tool: "bash", callID: "call-4", state: { status: "running", input: { command: "sleep 1" } } } });
     expect(objects(object(object(object(running).data).message).content)).toHaveLength(1);
     expect(visibleOpenCodeRunEvent({ type: "step_start", part: { reasoning: secret } })).toBeUndefined();
+  });
+
+  it("keeps MCP tool inputs and draws changed-file diffs for edit, write and patch", () => {
+    const inputOf = (event: unknown) => (event as { data: { message: { content: Array<{ input?: Record<string, unknown> }> } } })
+      .data.message.content[0].input ?? {};
+
+    const mcp = visibleOpenCodeRunEvent({ type: "tool_use", part: { type: "tool", tool: "phren_get_tasks", callID: "m1",
+      state: { status: "completed", input: { project: "phren", limit: 20 }, output: "[]" } } });
+    expect(inputOf(mcp)).toEqual({ project: "phren", limit: 20 });
+
+    const long = "x".repeat(10_000);
+    const truncated = visibleOpenCodeRunEvent({ type: "tool_use", part: { type: "tool", tool: "phren_add_finding", callID: "m2",
+      state: { status: "completed", input: { finding: [long] }, output: "ok" } } });
+    const finding = (inputOf(truncated).finding as string[])[0];
+    expect(finding).toHaveLength(4_001);
+    expect(finding).toBe(`${long.slice(0, 4_000)}…`);
+
+    const diff = "@@ -1,2 +1,2 @@\n-old\n+new\n context\n";
+    const edit = visibleOpenCodeRunEvent({ type: "tool_use", part: { type: "tool", tool: "edit", callID: "e1",
+      state: { status: "completed", input: { filePath: "/repo/src/a.ts", oldString: "old", newString: "new" },
+        metadata: { diff, filediff: { file: "/repo/src/a.ts", patch: diff, additions: 1, deletions: 1 } } } } });
+    expect((edit as { phren_changes: Record<string, ChangedFile[]> }).phren_changes).toEqual({ e1: [
+      { root: "", path: "/repo/src/a.ts", status: "M", patch: diff, added: 1, removed: 1 },
+    ] });
+
+    const relative = visibleOpenCodeRunEvent({ type: "tool_use", part: { type: "tool", tool: "edit", callID: "e2",
+      state: { status: "completed", input: { filePath: "/repo/src/a.ts" }, metadata: { diff } } } }, "/repo");
+    expect((relative as { phren_changes: Record<string, ChangedFile[]> }).phren_changes.e2[0])
+      .toMatchObject({ path: `src${path.sep}a.ts` });
+
+    const write = visibleOpenCodeRunEvent({ type: "tool_use", part: { type: "tool", tool: "write", callID: "w1",
+      state: { status: "completed", input: { filePath: "/repo/src/b.ts", content: "one\ntwo\n" },
+        metadata: { filepath: "/repo/src/b.ts", exists: false } } } });
+    const added = (write as { phren_changes: Record<string, ChangedFile[]> }).phren_changes.w1[0];
+    expect(added).toMatchObject({ path: "/repo/src/b.ts", status: "A", added: 2, removed: 0 });
+    expect(added.patch).toContain("+one\n+two");
+
+    const patched = visibleOpenCodeRunEvent({ type: "tool_use", part: { type: "tool", tool: "patch", callID: "p1",
+      state: { status: "completed", input: { patch: "--- a/src/c.ts\n+++ b/src/c.ts\n@@ -1 +1 @@\n-x\n+y\n" } } } });
+    expect((patched as { phren_changes: Record<string, ChangedFile[]> }).phren_changes.p1[0])
+      .toMatchObject({ path: "src/c.ts", status: "M", added: 1, removed: 1 });
+
+    const bash = visibleOpenCodeRunEvent({ type: "tool_use", part: { type: "tool", tool: "bash", callID: "b1",
+      state: { status: "completed", input: { command: "ls" }, output: "a\n" } } });
+    expect(bash).not.toHaveProperty("phren_changes");
   });
 
   it("exports Codex exec commands, output tails, and changed paths", () => {
@@ -156,6 +202,29 @@ describe("fan-out manifests", () => {
     expect(patchOutput.startsWith("50 file(s) changed\n")).toBe(true);
     expect(patchOutput).toContain(`~${path.sep}file-49.ts`);
     expect(patchOutput).not.toContain("file-50.ts");
+  });
+
+  it("bounds MCP inputs by UTF-8 bytes and never invents an overwrite diff", () => {
+    const event = (tool: string, input: Record<string, unknown>, metadata = {}) => visibleOpenCodeRunEvent({
+      type: "tool_use", part: { type: "tool", tool, callID: "call", state: { status: "completed", input, metadata } },
+    });
+    const mcp = event("phren_add_finding", { finding: "界".repeat(8_000) });
+    const input = objects(object(object(object(mcp).data).message).content)[0].input;
+    expect(Buffer.byteLength(JSON.stringify(input))).toBeLessThanOrEqual(8_192);
+    expect(event("write", { path: "a.ts", content: "new" }, { exists: true })).not.toHaveProperty("phren_changes");
+    const newline = event("write", { path: "a.ts", content: "\n" }, { exists: false });
+    expect(object(newline).phren_changes).toMatchObject({ call: [{ added: 1, removed: 0 }] });
+  });
+
+  it("keeps multi-file patches separate and names a deleted file from its old header", () => {
+    const patch = "--- a/old.ts\n+++ /dev/null\n@@ -1 +0,0 @@\n-old\n"
+      + "--- /dev/null\n+++ b/new.ts\n@@ -0,0 +1 @@\n+new\n";
+    const event = visibleOpenCodeRunEvent({ type: "tool_use", part: { type: "tool", tool: "patch", callID: "call",
+      state: { status: "completed", input: { patch } } } });
+    expect(object(event).phren_changes).toMatchObject({ call: [
+      { path: "old.ts", status: "D", added: 0, removed: 1 },
+      { path: "new.ts", status: "A", added: 1, removed: 0 },
+    ] });
   });
 
   it("ignores private or unknown Codex exec rows", () => {

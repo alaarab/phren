@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
+import type { ChangedFile } from "./changes.js";
 import { type Json, object, type Provider, sessionId } from "./protocol.js";
 
 const MAX_MANIFEST_BYTES = 64 * 1024;
@@ -136,9 +137,10 @@ export async function fanoutChildren(parentProvider: Provider, parentSession: st
 /** Project raw `opencode run --format json` rows into the small public chat
  * contract. Reasoning, snapshots, costs, and metadata are omitted. Like the
  * Codex mapping, the command, URL or path a tool was given and a bounded
- * output tail cross the wire so the owner can see what a worker is doing;
- * file contents being written and full arguments of other tools do not. */
-export function visibleOpenCodeRunEvent(raw: Json): Json | undefined {
+ * output tail cross the wire so the owner can see what a worker is doing.
+ * An MCP tool keeps its own arguments and an edit, write or patch carries the
+ * changed-file diff the phone draws under the card; both are bounded. */
+export function visibleOpenCodeRunEvent(raw: Json, cwd?: string): Json | undefined {
   const part = object(raw.part), time = typeof raw.timestamp === "number" && Number.isFinite(raw.timestamp)
     ? new Date(raw.timestamp).toISOString() : undefined;
   if (raw.type === "text" && part.type === "text" && typeof part.text === "string") {
@@ -154,7 +156,9 @@ export function visibleOpenCodeRunEvent(raw: Json): Json | undefined {
     if (status === "completed" || status === "error") {
       content.push({ type: "tool_result", tool_use_id: id, content: opencodeToolOutput(part.tool, state), ...(status === "error" ? { is_error: true } : {}) });
     }
-    return { type: "assistant/message", ...(time ? { time } : {}), data: { message: { role: "assistant", content } } };
+    const files = status === "completed" ? opencodeChanges(part.tool, state, cwd) : undefined;
+    return { type: "assistant/message", ...(time ? { time } : {}),
+      ...(files?.length ? { phren_changes: { [id]: files } } : {}), data: { message: { role: "assistant", content } } };
   }
   if (raw.type === "step_finish") {
     return { type: "system", ...(time ? { time } : {}), data: { message: {
@@ -198,17 +202,131 @@ export function visibleCodexExecEvent(raw: Json): Json | undefined {
   return undefined;
 }
 
+const OPENCODE_BUILTINS = new Set(["bash", "read", "edit", "write", "patch", "grep", "glob", "list", "webfetch", "todowrite", "todoread", "task", "skill"]);
+
 /** The one argument that says what a tool did: a command, a URL, a path or a
- * pattern. Everything else (file contents, headers, MCP payloads) stays home. */
+ * pattern. MCP tools (anything outside OpenCode's own set) keep their whole
+ * argument object, and an edit, write or patch keeps the text it touched. */
 function opencodeToolInput(tool: string, input: Json): Json {
   const text = (key: string, max = 2000) => typeof input[key] === "string" ? collapseHomeText(String(input[key])).slice(0, max) : undefined;
   switch (tool) {
     case "bash": return { command: text("command") ?? "" };
     case "webfetch": return { url: text("url") ?? "" };
-    case "read": case "edit": case "write": case "patch": return { path: text("filePath") ?? text("path") ?? "" };
+    case "read": return { path: text("filePath") ?? text("path") ?? "" };
+    case "edit": return { path: text("filePath") ?? text("path") ?? "", oldString: text("oldString", 4000) ?? "", newString: text("newString", 4000) ?? "" };
+    case "write": return { path: text("filePath") ?? text("path") ?? "", content: text("content", 4000) ?? "" };
+    case "patch": return { path: text("filePath") ?? text("path") ?? "", patch: text("patch", 4000) ?? text("content", 4000) ?? "" };
     case "grep": case "glob": case "list": return { pattern: text("pattern", 500) ?? "", path: text("path") ?? "" };
-    default: return {};
+    default: return OPENCODE_BUILTINS.has(tool) ? {} : mcpToolInput(input);
   }
+}
+
+const MCP_INPUT_BYTES = 8 * 1024;
+const MCP_STRING_CHARS = 4000;
+const MCP_INPUT_DEPTH = 4;
+
+/** An MCP tool's arguments as the phone shows them: home paths collapsed,
+ * long strings cut, nesting bounded, and the whole object kept under 8 KB by
+ * shortening the strings further rather than dropping the call. */
+function mcpToolInput(input: Json): Json {
+  for (const cap of [MCP_STRING_CHARS, 2000, 1000, 500, 250, 120, 60, 0]) {
+    const value = boundedValue(input, 0, cap);
+    if (Buffer.byteLength(JSON.stringify(value)) <= MCP_INPUT_BYTES) return object(value);
+  }
+  return {};
+}
+
+function boundedValue(value: unknown, depth: number, cap: number): unknown {
+  if (depth > MCP_INPUT_DEPTH) return undefined;
+  if (typeof value === "string") {
+    const text = collapseHomeText(value);
+    return text.length > cap ? `${text.slice(0, cap)}…` : text;
+  }
+  if (typeof value === "number" || typeof value === "boolean" || value === null) return value;
+  if (Array.isArray(value)) return value.slice(0, 64).map(item => boundedValue(item, depth + 1, cap)).filter(item => item !== undefined);
+  if (value && typeof value === "object") {
+    const out: Json = Object.create(null);
+    for (const [key, item] of Object.entries(value).slice(0, 64)) {
+      const bounded = boundedValue(item, depth + 1, cap);
+      if (bounded !== undefined) out[key] = bounded;
+    }
+    return out;
+  }
+  return undefined;
+}
+
+const MAX_CHANGE_PATCH = 64 * 1024;
+
+/** The files an OpenCode edit, write or patch touched, in the ChangedFile
+ * shape `phren_changes` already carries. `cwd` is the worker's checkout when
+ * the caller knows it, so the path is shown relative to it. */
+function opencodeChanges(tool: string, state: Json, cwd?: string): ChangedFile[] | undefined {
+  if (!["edit", "write", "patch"].includes(tool)) return undefined;
+  const input = object(state.input), metadata = object(state.metadata), filediff = object(metadata.filediff);
+  let patch = [metadata.diff, filediff.patch, input.patch, input.diff].find(value => typeof value === "string" && value) as string | undefined;
+  let status = patch ? changeStatus(patch) : "M";
+  if (tool === "write" && !patch && metadata.exists === false) {
+    patch = addedFilePatch(typeof input.content === "string" ? input.content : "");
+    status = "A";
+  }
+  if (!patch) return undefined;
+  patch = collapseHomeText(patch);
+  const chunks = patch.split(/(?=^diff --git )/m).filter(Boolean);
+  const patches = chunks.length > 1 ? chunks : patch.split(/(?=^--- [^\n]+\n\+\+\+ )/m).filter(Boolean);
+  const multiple = patches.length > 1;
+  return patches.slice(0, 50).flatMap(patch => {
+    const given = multiple ? patchPath(patch) :
+      [filediff.file, metadata.filepath, input.filePath, input.path].find(value => typeof value === "string" && value) as string | undefined
+        ?? patchPath(patch);
+    if (!given) return [];
+    const counted = diffCounts(patch);
+    const validCount = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+    const added = !multiple && validCount(filediff.additions) ? filediff.additions : counted.added;
+    const removed = !multiple && validCount(filediff.deletions) ? filediff.deletions : counted.removed;
+    // The phone draws worker patches without needing their private checkout root.
+    return [{ root: "", path: relativeChangePath(given, cwd), status: multiple ? changeStatus(patch) : status,
+      patch: patch.slice(0, MAX_CHANGE_PATCH), added, removed }];
+  });
+}
+
+/** A patch tool may carry only the diff; its `+++` (or `Index:`) header names
+ * the file. */
+function patchPath(patch: string): string | undefined {
+  const next = /^\+\+\+ (?:b\/)?(.+)$/m.exec(patch)?.[1]?.trim();
+  if (next && next !== "/dev/null") return next;
+  return (/^--- (?:a\/)?(.+)$/m.exec(patch) ?? /^Index: (.+)$/m.exec(patch))?.[1]?.trim() || undefined;
+}
+
+function relativeChangePath(value: string, cwd?: string): string {
+  if (cwd && path.isAbsolute(value)) {
+    const relative = path.relative(cwd, value);
+    if (relative && relative !== ".." && !relative.startsWith(`..${path.sep}`)) return relative;
+  }
+  return collapseHome(value);
+}
+
+/** Does a unified diff add, delete or change the file? */
+function changeStatus(patch: string): string {
+  if (/^new file mode\b/m.test(patch) || /^--- \/dev\/null$/m.test(patch) || /^@@ -0,0 /m.test(patch)) return "A";
+  if (/^deleted file mode\b/m.test(patch) || /^\+\+\+ \/dev\/null$/m.test(patch)) return "D";
+  return "M";
+}
+
+function diffCounts(patch: string): { added: number; removed: number } {
+  let added = 0, removed = 0;
+  for (const line of patch.split("\n")) {
+    if (line.startsWith("+++") || line.startsWith("---")) continue;
+    if (line.startsWith("+")) added++;
+    else if (line.startsWith("-")) removed++;
+  }
+  return { added, removed };
+}
+
+/** The `@@` hunk the phone's diff card expects from a new file's content. */
+function addedFilePatch(content: string): string {
+  const text = content.endsWith("\n") ? content.slice(0, -1) : content;
+  const lines = content ? text.split("\n") : [];
+  return [`@@ -0,0 +1,${lines.length} @@`, ...lines.map(line => `+${line}`)].join("\n");
 }
 
 function opencodeToolOutput(tool: string, state: Json): string {

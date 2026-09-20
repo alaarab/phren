@@ -1,14 +1,24 @@
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { withTranscriptIndex } from "./transcript-index.js";
 import { refreshTranscript, transcriptPath, visibleEvent } from "./transcripts.js";
+import { claudeName } from "./models.js";
 import { BridgeError, object, objects, type Json, type Provider } from "./protocol.js";
 
 /** What a working agent is doing right now, in the words the lock screen
  * uses: the newest tool call in its transcript, or that it is writing or
  * reading. Bounded to the tail; cached until the file changes. */
 const cache = new Map<string, { key: string; step?: string }>();
-const TAIL_ROWS = 24, LIMIT = 40;
+const modelCache = new Map<string, { key: string; model?: string }>();
+const TAIL_ROWS = 24, MODEL_TAIL_ROWS = 200, LIMIT = 40;
+// A command often opens with `export FOO=1`-style assignments; they name the
+// computer's setup, not the work, and can carry an absolute path.
+const SHELL_ASSIGNMENTS = /^(?:(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|[^\s;]*)[;\s]+)+/;
+// The scratchpad a wrapper like Claude Code runs in is a temp path the account
+// name hides inside; only its last component tells the person anything.
+const TEMP_ROOTS = [tmpdir(), "/private/tmp", "/tmp"].map(root => root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+const TEMP_PATH = new RegExp(`(?:${TEMP_ROOTS.join("|")})(?:/[A-Za-z0-9._@+-]+)+`, "g");
+const collapseTemp = (value: string) => value.replace(TEMP_PATH, m => "…/" + (m.split("/").filter(Boolean).pop() ?? ""));
 
 export async function currentStep(source: Provider, session: string): Promise<string | undefined> {
   let file: string;
@@ -30,6 +40,44 @@ export async function currentStep(source: Provider, session: string): Promise<st
     while (cache.size > 128) cache.delete(cache.keys().next().value!);
     return step;
   });
+}
+
+/** The model the agent's newest answer ran on, for the lock screen's row
+ * label. Codex names it once per turn; Claude stamps it on every assistant
+ * row, and its raw id reads as the family and version the phone shows. */
+export async function currentModel(source: Provider, session: string): Promise<string | undefined> {
+  let file: string;
+  try { file = await transcriptPath(source, session); await refreshTranscript(file, source, session); } catch (error) { if (error instanceof BridgeError) return undefined; throw error; }
+  return withTranscriptIndex(file, async (handle, index) => {
+    const key = `${index.revision}:${index.lines}`;
+    const cached = modelCache.get(file);
+    if (cached?.key === key) return cached.model;
+    let model: string | undefined;
+    for await (const row of index.rows(handle, index.lines, Math.max(0, index.lines - MODEL_TAIL_ROWS))) {
+      if (!row.bytes) continue;
+      let raw: Json | undefined;
+      // Model metadata need not be a visible transcript row (OpenCode strips it).
+      try { raw = object(JSON.parse(row.bytes.toString())); } catch { continue; }
+      if (!raw) continue;
+      const decided = modelOf(raw, source);
+      if (decided) { model = decided; break; }
+    }
+    modelCache.delete(file); modelCache.set(file, { key, model });
+    while (modelCache.size > 128) modelCache.delete(modelCache.keys().next().value!);
+    return model;
+  });
+}
+
+/** The model a visible row names, in the shape the chat header reads. */
+export function modelOf(raw: Json, source: Provider): string | undefined {
+  if (source === "claude" && (raw.type !== "assistant" || raw.isSidechain === true || raw.isMeta === true)) return undefined;
+  if (source === "codex" && raw.type !== "turn_context") return undefined;
+  if ((source === "phren" || source === "opencode") && raw.type !== "assistant/message") return undefined;
+  const message = source === "phren" || source === "opencode" ? object(object(raw.data).message) : object(raw.message);
+  const value = source === "codex" ? object(raw.payload).model : message.model;
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const name = source === "claude" ? claudeName(value.trim()) : value.trim();
+  return name.slice(0, 100);
 }
 
 /** One row's verdict, newest first: a tool call names the step; an
@@ -74,10 +122,11 @@ export function describe(tool: string, args: unknown): string {
   const name = tool.toLowerCase();
   let value: string;
   if (["bash", "shell", "exec_command", "exec", "parallel", "tools", "write_stdin", "container.exec"].includes(name)) {
-    // Drop the shell wrapper and a leading `cd <dir> &&`, and keep the home
-    // directory (and the account name in it) off the lock screen.
-    const command = firstLine(text("command", "cmd")).replace(/^(?:\/\S*\/)?(?:bash|sh|zsh)\s+-l?c\s+/, "")
-      .replace(/^(['"])(.*)\1$/, "$2").replace(/^cd\s+\S+\s*(?:&&|;)\s*/, "").split(homedir()).join("~");
+    // Drop the shell wrapper, a leading run of variable assignments, and a
+    // `cd <dir> &&`, and keep the home directory (and the account name in it)
+    // and any scratchpad path off the lock screen.
+    const command = collapseTemp(firstLine(text("command", "cmd")).replace(/^(?:\/\S*\/)?(?:bash|sh|zsh)\s+-l?c\s+/, "")
+      .replace(/^(['"])(.*)\1$/, "$2").replace(SHELL_ASSIGNMENTS, "").replace(/^cd\s+(?:"[^"]*"|'[^']*'|\S+)\s*(?:&&|;)\s*/, "").replace(SHELL_ASSIGNMENTS, "").split(homedir()).join("~"));
     value = command ? `${tool}: ${command}` : tool;
   } else if (["edit", "multiedit", "write", "notebookedit", "patch", "apply_patch", "str_replace_editor", "str_replace"].includes(name)) {
     const patchTarget = /\*\*\* (?:Update|Add|Delete) File: (.+)/.exec(text("input", "patch"))?.[1];

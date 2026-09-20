@@ -7,6 +7,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- Phren Hook serves git status, log, branches, pull requests, a working tree
+  listing and stage, unstage and discard for the phone's Changes screen,
+  bound to the pane's repository.
+- Phren Hook reports each agent pane's model in the workspace overview and
+  keeps temp paths and shell variable prefixes out of the lock screen step.
+- OpenCode worker transcripts keep MCP tool inputs and show changed-file
+  diffs under edit, write and patch calls.
+- The chat's model picker lists OpenCode's models for an opencode pane, the
+  OpenCode Go plan's first, with the configured default marked.
+
 - Phren Hook reports a compacting Claude Code conversation to the phone and
   exports compaction as a marker row instead of the full summary.
 

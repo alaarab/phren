@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { claudeName, ModelCatalog, readClaudeModels } from "./models.js";
+import { claudeName, ModelCatalog, readClaudeModels, readOpenCodeModels } from "./models.js";
 
 describe("model catalogue", () => {
   let root: string | undefined;
@@ -39,6 +39,19 @@ describe("model catalogue", () => {
     expect(await catalog.list("codex")).toEqual([{ id: "gpt-x", name: "X" }]);
     expect(await catalog.list("codex")).toEqual([{ id: "gpt-x", name: "X" }]);
     expect(calls).toBe(1);
-    expect(await catalog.list("opencode")).toEqual([]);
+    expect(await catalog.list("copilot")).toEqual([]);
+  });
+
+  it("lists OpenCode's models with the Go plan first and the configured one marked", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "phren-opencode-"));
+    const bin = path.join(dir, "opencode");
+    await writeFile(bin, "#!/bin/sh\nprintf 'opencode/big-pickle\\nopenrouter/deepseek/deepseek-v4.1-flash\\nopencode-go/kimi-k3\\nopencode/mimo-v2.5-free\\nnot a model line\\n'\n", { mode: 0o755 });
+    await writeFile(path.join(dir, "opencode.json"), JSON.stringify({ model: "openrouter/deepseek/deepseek-v4.1-flash" }));
+    const models = await readOpenCodeModels(bin, dir);
+    expect(models.map(model => model.id)).toEqual(["opencode-go/kimi-k3", "opencode/big-pickle", "opencode/mimo-v2.5-free", "openrouter/deepseek/deepseek-v4.1-flash"]);
+    expect(models[0]).toMatchObject({ name: "kimi-k3", description: "OpenCode Go plan." });
+    expect(models[2].description).toBe("OpenCode Zen, free.");
+    expect(models[3]).toMatchObject({ isDefault: true, description: "Through openrouter." });
+    await rm(dir, { recursive: true, force: true });
   });
 });
