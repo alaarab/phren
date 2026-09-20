@@ -87,10 +87,11 @@ export async function childAgentTree(source: Provider, session: string, depth = 
   return [...verified, ...fanouts];
 }
 
-const claudeRelationCache = new Map<string, { signature: string; relations: ChildAgentRelation[] }>();
+const claudeRelationCache = new Map<string, { signature: string; relations: ChildAgentRelation[]; recheckAt?: number }>();
 async function claudeChildAgents(file: string, session: string): Promise<ChildAgentRelation[]> {
   const metadata = await stat(file), signature = `${metadata.dev}:${metadata.ino}:${metadata.size}:${metadata.mtimeMs}`;
-  const cached = claudeRelationCache.get(file); if (cached?.signature === signature) return cached.relations;
+  const cached = claudeRelationCache.get(file);
+  if (cached?.signature === signature && !(cached.recheckAt !== undefined && Date.now() >= cached.recheckAt)) return cached.relations;
   const launches = new Map<string, { path: string; callId: string; state: "running" | "completed" }>();
   const lines = createInterface({ input: createReadStream(file, { encoding: "utf8" }), crlfDelay: Infinity });
   for await (const line of lines) {
@@ -109,14 +110,21 @@ async function claudeChildAgents(file: string, session: string): Promise<ChildAg
     } catch { /* Ignore unrelated/malformed rows. */ }
   }
   const relations: ChildAgentRelation[] = [];
+  // Claude Code records the launch in the parent before the child's own
+  // file exists. A launch without a transcript yet is looked for again
+  // shortly, rather than being missed until the parent next changes.
+  let awaiting = false;
   const root = await realpath(path.join(path.dirname(file), session, "subagents")).catch(() => undefined);
-  if (root) for (const [agentId, launch] of launches) {
-    const childFile = await realpath(path.join(root, `agent-${agentId}.jsonl`)).catch(() => undefined);
-    if (!childFile || !childFile.startsWith(root + path.sep) || !await claudeChildBelongsTo(childFile, session, agentId)) continue;
+  for (const [agentId, launch] of launches) {
+    const childFile = root && await realpath(path.join(root, `agent-${agentId}.jsonl`)).catch(() => undefined);
+    if (!childFile || !childFile.startsWith(root + path.sep) || !await claudeChildBelongsTo(childFile, session, agentId)) {
+      if (launch.state === "running") awaiting = true;
+      continue;
+    }
     relations.push({ id: createHash("sha256").update(`claude\0${session}\0${agentId}`).digest("hex").slice(0, 32),
       session: agentId, transcript: childFile, provider: "claude", ...launch, children: [] });
   }
-  claudeRelationCache.set(file, { signature, relations });
+  claudeRelationCache.set(file, { signature, relations, ...(awaiting ? { recheckAt: Date.now() + 2_000 } : {}) });
   while (claudeRelationCache.size > 64) claudeRelationCache.delete(claudeRelationCache.keys().next().value!);
   return relations;
 }
@@ -360,7 +368,10 @@ export class TranscriptReader {
         signal?.throwIfAborted();
         let entry: Entry | undefined;
         try {
-          const raw = row.bytes && visibleEvent(object(JSON.parse(row.bytes.toString())), this.source, this.includeSidechain);
+          let raw = row.bytes && visibleEvent(object(JSON.parse(row.bytes.toString())), this.source, this.includeSidechain);
+          // A child agent's transcript is the sidechain. Its rows are that
+          // conversation's own turns, not something for the reader to skip.
+          if (raw && this.includeSidechain && raw.isSidechain === true) { const { isSidechain: _sidechain, ...own } = raw; raw = own; }
           if (raw) entry = { line: row.line, raw: this.imageLine === row.line ? raw : chatFrame(raw, this.source) };
         } catch { /* A malformed old row cannot block the next readable page. */ }
         if (entry && this.changes && this.imageLine === undefined) {
