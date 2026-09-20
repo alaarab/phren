@@ -77,11 +77,10 @@ WebSockets on the same socket.
 | `GET /v1/dispatch`, `/v1/dispatch/capacity` | Local placement receipts; running Herdr servers and working-agent count for scheduling. These are not worker completion reports. |
 | `GET /v1/muxes` | Running Herdr servers. |
 | `GET /v1/workspaces`, `/v1/workspaces/panes` | Workspace overview, pane identity, context, branch, activity and watched approvals. |
-| `POST /v1/workspaces/launch` | Create a workspace/tab and start the selected agent. |
+| `POST /v1/workspaces/launch` | Create a workspace/tab and start the selected agent. Accepts the phone's `cwd` or a mutually exclusive `project` slug resolved from this computer's registered sourcePath. Returns a session or starting `target` when identity is available. |
 | `POST /v1/schedules` | List every store schedule with its project, this computer's next run, latest local run, and running state. A schedule assigned to another computer has `nextRun: null`. |
 | `POST /v1/schedules/run` | Launch `{ project, id }` immediately through the same Herdr or headless scheduler path. Unknown schedules are 404; an active run or another computer assignment is 409. |
 | `POST /v1/schedules/history` | Newest-first computer-local schedule runs, filtered by optional `project` and `id`; `limit` defaults to 50 and is capped at 500. |
-| `POST /v1/workspaces/launch` | Create a workspace/tab and start the selected agent. Accepts the phone's `cwd` or a mutually exclusive `project` slug resolved from this computer's registered sourcePath. Returns a session or starting `target` when identity is available. |
 | `POST /v1/workspaces/create`, `/focus`, `/rename`, `/close` | Existing workspace actions. Creation uses the same launch admission limits. |
 | `GET /v1/projects/locate` | Existing project candidates from activity, Herdr, store registration and local search roots. |
 | `GET /v1/projects/repos` | Git checkouts on this computer for "Add project" — activity, Herdr, then one level under the project roots — each marked whether phren already tracks it. |

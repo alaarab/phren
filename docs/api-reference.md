@@ -57,6 +57,16 @@ CLI equivalent:
 
 ---
 
+## Scheduled prompts
+
+A project's `schedules.yaml` names an assigned computer, a harness, and one of
+five timing forms (interval, daily, weekly, once, cron) that the assigned
+computer's Phren Hook evaluates in its local time. Manage them with
+`phren schedule list|add|remove|enable|disable|run|history`; `run` and `history`
+call the local Hook, the other commands edit the store file directly. See
+[Scheduled prompts](schedules.md) for the store format, timing forms and run
+history.
+
 ---
 
 ## Search and Browse
