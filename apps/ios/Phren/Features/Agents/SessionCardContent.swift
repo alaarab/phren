@@ -38,7 +38,7 @@ struct SessionCardContent: View, Equatable {
     /// The project name the store matched to this session, when it has one.
     var project: String? = nil
     /// The computer, shown when the list spans several.
-    var computer: String? = nil
+    var computer: LiveHost? = nil
     /// Kept for callers that build their own line; unused when `project` is given.
     var subtitle: String = ""
     let identifierPrefix: String
@@ -99,9 +99,12 @@ struct SessionCardContent: View, Equatable {
                     if let computer {
                         HStack(spacing: 3) {
                             Image(systemName: "desktopcomputer").font(.system(size: 9, weight: .semibold))
-                            Text(computer).lineLimit(1)
-                        }.font(.system(.caption2, design: .monospaced)).foregroundStyle(PhrenTheme.sessionMeta)
-                            .accessibilityLabel("on \(computer)")
+                                .foregroundStyle(PhrenTheme.sessionMeta)
+                            Text(computer.name).lineLimit(1).fontWeight(.medium)
+                                .foregroundStyle(PhrenTheme.hostColor(computer.color ?? LiveHost.defaultColor(for: computer.id)))
+                                .accessibilityLabel("on \(computer.name)")
+                                .accessibilityIdentifier("session-computer-name")
+                        }.font(.system(.caption2, design: .monospaced))
                     }
                     if let changedAt = session.tab.lastChangedAt {
                         SessionRelativeTimeLabel(changedAt: changedAt)

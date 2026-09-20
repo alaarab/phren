@@ -485,6 +485,7 @@ struct HerdrTerminalView: View {
                 .accessibilityLabel(model.connected && active ? "Connected" : "Disconnected")
             VStack(alignment: .leading, spacing: 1) {
                 Text(host.name).font(.subheadline.weight(.medium)).lineLimit(1)
+                    .foregroundStyle(PhrenTheme.hostColor(host.color ?? LiveHost.defaultColor(for: host.id)))
                 if case .shell(let directory, let agent) = route {
                     Text((agent?.title ?? "Shell") + " · " + (directory as NSString).lastPathComponent)
                         .font(.caption2).foregroundStyle(PhrenTheme.textMuted).lineLimit(1)

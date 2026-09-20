@@ -10,6 +10,8 @@ number counts up on its own.
 
 ### New
 
+- Computer names use a device color you can choose in Connection settings,
+  making it easier to see which machine a session is running on.
 - Memory graph nodes open in a compact in-screen panel, keeping the graph
   visible and interactive while details and project actions stay close by.
 - A subagent's card in the chat opens that agent's own transcript —

@@ -164,7 +164,11 @@ private struct HerdrPanesView: View {
     var body: some View {
         PhrenList {
             Section {
-                Text("\(session.host.name) · \(session.host.herdrSession ?? "default")").font(.caption).foregroundStyle(PhrenTheme.textMuted)
+                HStack(spacing: 4) {
+                    Text(session.host.name).fontWeight(.medium)
+                        .foregroundStyle(PhrenTheme.hostColor(session.host.color ?? LiveHost.defaultColor(for: session.host.id)))
+                    Text("· \(session.host.herdrSession ?? "default")").foregroundStyle(PhrenTheme.textMuted)
+                }.font(.caption)
                 NavigationLink { HerdrTerminalView(host: session.host, session: session) } label: { Label("Open tab in terminal", systemImage: "terminal") }
                 AgentConversationLink(session: session) { Label("Chat with agent", systemImage: "bubble.left.and.bubble.right") }
             }

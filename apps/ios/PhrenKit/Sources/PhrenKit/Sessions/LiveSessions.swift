@@ -152,6 +152,11 @@ public struct LiveWorkspaces: Codable, Equatable, Sendable {
 }
 
 public struct LiveHost: Codable, Equatable, Sendable, Identifiable {
+    public static let colorPalette = [
+        "#6E9BFF", "#35C9C0", "#4CD37A", "#F2B441",
+        "#FF8A5B", "#FF6FA5", "#A78BFA", "#9AA5B8",
+    ]
+
     public let id: UUID
     public let name: String
     public let address: String
@@ -159,10 +164,12 @@ public struct LiveHost: Codable, Equatable, Sendable, Identifiable {
     public let username: String
     public var fingerprint: String?
     public var herdrSession: String?
+    public var color: String?
     public var muxID: String { "herdr:" + (herdrSession ?? "default") }
 
     public init(id: UUID = UUID(), name: String, address: String, port: Int = 22,
-                username: String, fingerprint: String? = nil, herdrSession: String? = nil) throws {
+                username: String, fingerprint: String? = nil, herdrSession: String? = nil,
+                color: String? = nil) throws {
         self.id = id
         self.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         self.address = address.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -170,7 +177,13 @@ public struct LiveHost: Codable, Equatable, Sendable, Identifiable {
         self.username = username.trimmingCharacters(in: .whitespacesAndNewlines)
         self.fingerprint = fingerprint
         self.herdrSession = herdrSession
+        self.color = color
         try validate()
+    }
+
+    public static func defaultColor(for id: UUID) -> String {
+        let index = id.uuidString.utf8.reduce(0) { (($0 &* 31) &+ Int($1)) % colorPalette.count }
+        return colorPalette[index]
     }
 
     public func validate() throws {
@@ -267,6 +280,15 @@ public struct LiveSessionPreferences: Codable, Equatable, Sendable {
         try host.validate()
         value.hosts.removeAll { $0.id == host.id }
         value.hosts.append(host)
+        return try JSONEncoder().encode(value)
+    }
+
+    public static func settingColor(hostID: UUID, color: String?, in data: Data) throws -> Data {
+        var value = try read(data)
+        guard let index = value.hosts.firstIndex(where: { $0.id == hostID }) else {
+            throw PhrenKitError.validation("Connection no longer exists.")
+        }
+        value.hosts[index].color = color
         return try JSONEncoder().encode(value)
     }
 

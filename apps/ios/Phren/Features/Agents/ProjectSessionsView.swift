@@ -158,7 +158,7 @@ struct ProjectSessionsView: View {
             HStack(spacing: 0) {
                 Button { open(session, assign: assign) } label: {
                     SessionCardContent(session: session, fresh: fresh, project: assign ? nil : project,
-                                       computer: session.host.name, identifierPrefix: "discovered")
+                                       computer: session.host, identifierPrefix: "discovered")
                 }
                 .buttonStyle(.plain)
                 .accessibilityHint(openChat ? (assign ? "Use for \(project) and chat" : "Chat with agent")

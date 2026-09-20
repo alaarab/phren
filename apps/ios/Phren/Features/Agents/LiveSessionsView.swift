@@ -57,7 +57,8 @@ struct LiveSessionsView: View {
                     if screen.preferencesReadable {
                         ForEach(screen.computers) { computer in
                             NavigationLink { LiveHostView(hostID: computer.id) } label: {
-                                PhrenMenuRow(title: computer.host.name, subtitle: computer.connecting ? "Connecting…" : computer.host.address, icon: "desktopcomputer")
+                                PhrenMenuRow(title: computer.host.name, subtitle: computer.connecting ? "Connecting…" : computer.host.address,
+                                             icon: "desktopcomputer", titleColor: PhrenTheme.hostColor(computer.host.color ?? LiveHost.defaultColor(for: computer.host.id)))
                             }
                             .accessibilityIdentifier("live-host:\(computer.id)")
                             .plainListCardRow()
@@ -252,7 +253,8 @@ struct LiveSessionsView: View {
                 ForEach(problems) { computer in
                     NavigationLink { LiveHostView(hostID: computer.id) } label: {
                         HStack {
-                            Text(computer.host.name)
+                            Text(computer.host.name).fontWeight(.medium)
+                                .foregroundStyle(PhrenTheme.hostColor(computer.host.color ?? LiveHost.defaultColor(for: computer.host.id)))
                             Spacer()
                             Text(computer.needsVerification ? "Verify connection" : "Offline")
                                 .font(.caption).foregroundStyle(PhrenTheme.warning)
@@ -771,7 +773,7 @@ private struct LiveSessionCard: View, Equatable {
         HStack(spacing: 0) {
             AgentConversationLink(session: session, onOpenInPhren: onChat) {
                 SessionCardContent(session: session, fresh: fresh, project: project,
-                                   computer: showHost ? session.host.name : nil, identifierPrefix: prefix, onDetails: onDetails)
+                                   computer: showHost ? session.host : nil, identifierPrefix: prefix, onDetails: onDetails)
                     .equatable()
             }
             .buttonStyle(.plain)
@@ -890,7 +892,8 @@ private struct LiveSessionDetailView: View {
                                         Label(branch, systemImage: "arrow.triangle.branch").font(.system(.caption, design: .monospaced)).foregroundStyle(PhrenTheme.chatNeutral)
                                     }
                                     Text("·").foregroundStyle(PhrenTheme.textDim)
-                                    Text(session.host.name).font(.subheadline).foregroundStyle(PhrenTheme.textMuted)
+                                    Text(session.host.name).font(.subheadline).fontWeight(.medium)
+                                        .foregroundStyle(PhrenTheme.hostColor(session.host.color ?? LiveHost.defaultColor(for: session.host.id)))
                                     if let date = session.tab.lastChangedAt {
                                         SessionRelativeTimeLabel(changedAt: date)
                                     }
