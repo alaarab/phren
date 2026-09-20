@@ -79,6 +79,8 @@ public struct AgentInteractionStatus: Equatable, Sendable {
     public var pendingQuestions: [AgentQuestionPrompt]? = nil
     /// The pane's current git branch, read by Phren Hook on the computer.
     public var branch: String? = nil
+    /// True while the agent is summarizing the conversation to reclaim context.
+    public var compacting = false
     public static func read(_ data: Data, target: AgentChatTarget) throws -> Self? {
         guard data.count <= 1_048_576 else { throw PhrenKitError.validation("Agent status is too large.") }
         guard let frame = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -110,7 +112,8 @@ public struct AgentInteractionStatus: Equatable, Sendable {
                          guard var prompt = AgentQuestionPrompt.read(id: id, questions: raw["questions"]) else { return nil }
                          prompt.isAsync = true; return prompt
                      } },
-                     branch: (status["branch"] as? String).flatMap { $0.isEmpty ? nil : String($0.prefix(200)) })
+                     branch: (status["branch"] as? String).flatMap { $0.isEmpty ? nil : String($0.prefix(200)) },
+                     compacting: status["compacting"] as? Bool ?? false)
     }
 }
 

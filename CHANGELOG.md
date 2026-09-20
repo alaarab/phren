@@ -7,6 +7,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- Phren Hook reports a compacting Claude Code conversation to the phone and
+  exports compaction as a marker row instead of the full summary.
+
 - Phren Hook follows a spawned agent's transcript live: `WS /v1/transcripts`
   and `GET /v1/transcripts/history` take `child=<id>` from `/v1/subagents`,
   bound to the parent conversation. Child rows are served as that

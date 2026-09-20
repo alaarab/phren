@@ -47,7 +47,9 @@ private struct ChatTranscriptRow: View, Equatable {
         #if DEBUG
         let _ = ChatPerformance.enabled ? Self._printChanges() : ()
         #endif
-        if let phren = entry.phren {
+        if let compaction = entry.messages.first, compaction.isCompaction {
+            ChatCompactionRow(message: compaction)
+        } else if let phren = entry.phren {
             PhrenToolCard(presentation: phren, messages: entry.messages)
         } else if entry.card != nil {
             ChatToolCard(entry: entry)
@@ -191,6 +193,55 @@ private struct LocalCommandRow: View {
             .contextMenu {
                 Button("View full output") { openOutput(.init(title: "Command output", text: command.text)) }
                 Button("Copy", systemImage: "doc.on.doc") { ChatClipboard.copy(command.text) }
+            }
+        }
+    }
+}
+
+/// Claude Code summarizing the conversation: one small centered system line.
+/// The summary's words stay behind a tap, so a 25 KB summary can never draw
+/// a giant bubble or throw the scroll position.
+private struct ChatCompactionRow: View {
+    let message: AgentChatMessage
+    @State private var showing = false
+    private var hasText: Bool { !message.text.isEmpty }
+    var body: some View {
+        if hasText {
+            Button { showing = true } label: { label }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Conversation compacted")
+                .accessibilityHint("Open the summary")
+                .accessibilityIdentifier("chat-compaction")
+                .sheet(isPresented: $showing) { summarySheet }
+        } else {
+            label
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Conversation compacted")
+                .accessibilityIdentifier("chat-compaction")
+        }
+    }
+    private var label: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 11, weight: .semibold))
+            Text("Conversation compacted").font(.caption)
+        }
+        .foregroundStyle(PhrenTheme.textMuted)
+        .frame(maxWidth: .infinity).frame(height: 32)
+        .contentShape(Rectangle())
+    }
+    private var summarySheet: some View {
+        NavigationStack {
+            ScrollView {
+                Text(message.text).font(.system(.body, design: .monospaced))
+                    .foregroundStyle(PhrenTheme.chatText).textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(16)
+            }
+            .background(PhrenTheme.chatPanel)
+            .navigationTitle("Conversation compacted").navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { showing = false }.accessibilityIdentifier("chat-compaction-done")
+                }
             }
         }
     }

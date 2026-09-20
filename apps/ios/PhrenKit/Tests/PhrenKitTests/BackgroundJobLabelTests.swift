@@ -24,6 +24,17 @@ final class BackgroundJobLabelTests: XCTestCase {
         ))
     }
 
+    func testRejectsALabelTheShellHadNotExpanded() {
+        // A loop launching several workers passes the label as a variable;
+        // the raw text is not a name the person should see.
+        XCTAssertNil(BackgroundJobLabel.parse(
+            command: #"for n in a b; do cat $S/$n.txt | ~/.phren/global/skills/deepseek/scripts/run.sh --label "${L[$n]}" --worktree $S/wt/$n; done"#
+        ))
+        XCTAssertNil(BackgroundJobLabel.parse(
+            command: #"~/.phren/global/skills/codex/scripts/run.sh --label "$(cat title.txt)""#
+        ))
+    }
+
     func testRejectsUnrelatedLabeledCommand() {
         XCTAssertNil(BackgroundJobLabel.parse(
             command: #"./scripts/run.sh --label "Unrelated worker""#

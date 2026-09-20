@@ -340,9 +340,8 @@ struct FullToolOutputView: View {
                 }
             }
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }.accessibilityIdentifier("chat-tool-output-done")
-                }
+                // Pushed onto the chat's stack: the back chevron is the way
+                // out, and a Done beside it only asked which one to tap.
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button(wrap ? "Show long lines" : "Wrap lines", systemImage: wrap ? "arrow.left.and.right.text.vertical" : "text.justify.leading") { wrap.toggle() }
                         .accessibilityIdentifier("chat-tool-output-wrap")

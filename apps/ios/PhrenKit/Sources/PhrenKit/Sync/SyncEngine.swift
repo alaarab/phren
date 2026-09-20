@@ -1007,6 +1007,24 @@ public actor SyncEngine {
                 throw PhrenKitError.validation("\(path) is not a skill path.")
             }
             return [FileEdit(path: path, content: nil)]
+
+        case .setProjectKnobs(let project, let knobs, let expected):
+            let path = "\(project)/\(MachineRegistry.projectFile)"
+            guard LocalStore.isProjectConfigPath(path) else {
+                throw PhrenKitError.validation("\(path) cannot hold project settings.")
+            }
+            let current = await read(path, overlay: overlay)
+            let next = knobs.apply(to: current ?? "")
+            // Same conflict rule as `saveAuthoredFile`: the bytes the user read
+            // must still be the bytes on disk, unless the write already landed.
+            guard current == expected || current == next else {
+                throw PhrenKitError.validation(
+                    "\(path) changed since you opened it. Review the latest version before saving again."
+                )
+            }
+            // Every knob back to "inherit" with no file to edit is a no-op.
+            if current == nil && next.isEmpty { return [] }
+            return [FileEdit(path: path, content: next)]
         }
     }
 }

@@ -33,6 +33,22 @@ public struct ChatScrollMetrics: Equatable, Sendable {
         return metrics.bottomOffset
     }
 
+    /// A requested target, held to the real end. `scrollTo(y:)` does not
+    /// clamp, and a lazy stack's `contentHeight` can be an estimate taller
+    /// than the rows it has laid out, so an unclamped pin lands on empty space.
+    public static func clamp(_ target: CGFloat, in metrics: ChatScrollMetrics) -> CGFloat {
+        max(0, min(target, metrics.bottomOffset))
+    }
+
+    /// Whether a reported content height jumped far beyond the viewport in one
+    /// settling window. A lazy stack guessing its size does this; the rows that
+    /// would justify the jump are not laid out yet, so following it scrolls
+    /// into blank space. Real growth arrives in small increments per frame.
+    public static func isEstimateJump(old: ChatScrollMetrics, new: ChatScrollMetrics) -> Bool {
+        guard new.viewportHeight > 0.5 else { return false }
+        return new.contentHeight - old.contentHeight > 3 * new.viewportHeight
+    }
+
     /// Returns the clamped bottom offset for transcript growth or an already
     /// invalid offset. A keyboard or surrounding control changing the viewport
     /// alone must not enqueue another follow scroll against intermediate

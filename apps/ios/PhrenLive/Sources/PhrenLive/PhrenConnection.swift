@@ -62,35 +62,38 @@ public enum PhrenConnection {
                           receive: (@Sendable (Data) throws -> Void)? = nil) async throws -> Data {
         try host.validate()
         let request = request.scoped(to: host)
-        let loop = MultiThreadedEventLoopGroup.singleton.next()
+        // The connection is shared; this request is one session channel on it.
+        // Nothing has been sent before the channel opens, so a connection that
+        // died in the pool is simply replaced.
+        let connection = try await GatewayConnections.shared.connection(for: host, key: key)
+        let loop = connection.loop
         let result = loop.makePromise(of: Data.self)
         let exchange = Exchange(result: result)
         exchange.onFrame = receive
         // All Exchange access is confined to this event loop, including cancel.
         let deadline = loop.scheduleTask(in: .seconds(Int64(request.timeoutSeconds ?? (request.body == nil ? 20 : 60)))) { exchange.finish(.failure(LiveConnectionError.timeout)) }
         if receive != nil { exchange.onFirstFrame = { deadline.cancel() } }
-        result.futureResult.whenComplete { _ in
+        result.futureResult.whenComplete { outcome in
             deadline.cancel()
-            exchange.parent?.close(promise: nil)
-        }
-        let bootstrap = ClientBootstrap(group: loop).connectTimeout(.seconds(10)).channelInitializer { channel in
-            exchange.parent = channel
-            guard !exchange.finished else { return channel.close() }
-            return channel.eventLoop.makeCompletedFuture {
-                let ssh = NIOSSHHandler(
-                    role: .client(.init(
-                        userAuthDelegate: DeviceAuthentication(username: host.username, key: key, exchange: exchange),
-                        serverAuthDelegate: PinnedHost(fingerprint: host.fingerprint)
-                    )), allocator: channel.allocator,
-                    inboundChildChannelInitializer: { channel, _ in
-                        channel.eventLoop.makeFailedFuture(LiveConnectionError.disconnected)
-                    })
-                try channel.pipeline.syncOperations.addHandlers(ssh, GatewayChannel(exchange: exchange, request: request))
+            exchange.child?.close(promise: nil)
+            // A transport failure means the shared connection may be gone
+            // (the phone changed networks, the computer slept): drop it so
+            // the next request reconnects instead of timing out again.
+            let healthy: Bool
+            switch outcome {
+            case .success: healthy = true
+            case .failure(let error):
+                switch error {
+                case LiveConnectionError.timeout, LiveConnectionError.disconnected: healthy = false
+                case is LiveConnectionError, is CancellationError, is PhrenKitError: healthy = true
+                default: healthy = false
+                }
             }
+            GatewayConnections.shared.release(connection, healthy: healthy)
         }
         return try await withTaskCancellationHandler {
-            try Task.checkCancellation()
-            bootstrap.connect(host: host.address, port: host.port).whenFailure { exchange.finish(.failure($0)) }
+            guard !Task.isCancelled else { loop.execute { exchange.finish(.failure(CancellationError())) }; throw CancellationError() }
+            loop.execute { openGatewayChannel(on: connection, exchange: exchange, request: request) }
             return try await result.futureResult.get()
         } onCancel: {
             loop.execute { exchange.finish(.failure(CancellationError())) }
@@ -107,7 +110,7 @@ public enum PhrenConnection {
 // NIO callbacks and cancellations are serialized onto the owning event loop.
 final class Exchange: @unchecked Sendable {
     let result: EventLoopPromise<Data>
-    var parent: Channel?
+    var child: Channel?
     var onFrame: (@Sendable (Data) throws -> Void)?
     var onFirstFrame: (() -> Void)?
     private(set) var finished = false
@@ -164,40 +167,32 @@ final class DeviceAuthentication: NIOSSHClientUserAuthenticationDelegate {
     }
 }
 
-private final class GatewayChannel: ChannelInboundHandler {
-    typealias InboundIn = ByteBuffer
-    let exchange: Exchange
-    let request: GatewayRequest
-    init(exchange: Exchange, request: GatewayRequest) { self.exchange = exchange; self.request = request }
-
-    func userInboundEventTriggered(context: ChannelHandlerContext, event: Any) {
-        guard event is UserAuthSuccessEvent, !exchange.finished else { return }
-        do {
-            let ssh = try context.pipeline.syncOperations.handler(type: NIOSSHHandler.self)
-            let child = context.eventLoop.makePromise(of: Channel.self)
-            child.futureResult.whenFailure { [exchange] in exchange.finish(.failure($0)) }
-            ssh.createChannel(child, channelType: .session) { [exchange, request] channel, type in
-                guard case .session = type else {
-                    return channel.eventLoop.makeFailedFuture(LiveConnectionError.disconnected)
-                }
-                if let socket = request.terminalSocket {
-                    return channel.pipeline.addHandler(PhrenTerminalChannel(exchange: exchange, socket: socket,
-                        route: request.terminalRoute ?? .herdr(server: "default"), columns: request.terminalColumns, rows: request.terminalRows))
-                }
-                return channel.pipeline.addHandler(PhrenExecChannel(exchange: exchange)).flatMap {
-                    if request.webSocket { return installTranscriptHandlers(channel: channel, exchange: exchange, request: request) }
-                    return channel.eventLoop.makeCompletedFuture {
-                        try channel.pipeline.syncOperations.addHandlers(
-                            SSHHTTPBytes(), HTTPRequestEncoder(),
-                            ByteToMessageHandler(HTTPResponseDecoder(leftOverBytesStrategy: .dropBytes)),
-                            GatewayResponse(exchange: exchange, request: request))
-                    }
-                }
+/// Opens this request's session channel on an authenticated connection.
+/// Runs on the connection's event loop.
+private func openGatewayChannel(on connection: GatewayConnections.Connection, exchange: Exchange, request: GatewayRequest) {
+    guard !exchange.finished else { return }
+    guard connection.channel.isActive else { exchange.finish(.failure(LiveConnectionError.disconnected)); return }
+    let child = connection.loop.makePromise(of: Channel.self)
+    child.futureResult.whenFailure { [exchange] in exchange.finish(.failure($0)) }
+    connection.ssh.createChannel(child, channelType: .session) { [exchange, request] channel, type in
+        exchange.child = channel
+        guard case .session = type else {
+            return channel.eventLoop.makeFailedFuture(LiveConnectionError.disconnected)
+        }
+        if let socket = request.terminalSocket {
+            return channel.pipeline.addHandler(PhrenTerminalChannel(exchange: exchange, socket: socket,
+                route: request.terminalRoute ?? .herdr(server: "default"), columns: request.terminalColumns, rows: request.terminalRows))
+        }
+        return channel.pipeline.addHandler(PhrenExecChannel(exchange: exchange)).flatMap {
+            if request.webSocket { return installTranscriptHandlers(channel: channel, exchange: exchange, request: request) }
+            return channel.eventLoop.makeCompletedFuture {
+                try channel.pipeline.syncOperations.addHandlers(
+                    SSHHTTPBytes(), HTTPRequestEncoder(),
+                    ByteToMessageHandler(HTTPResponseDecoder(leftOverBytesStrategy: .dropBytes)),
+                    GatewayResponse(exchange: exchange, request: request))
             }
-        } catch { exchange.finish(.failure(error)) }
+        }
     }
-    func errorCaught(context: ChannelHandlerContext, error: Error) { exchange.finish(.failure(error)) }
-    func channelInactive(context: ChannelHandlerContext) { exchange.finish(.failure(LiveConnectionError.disconnected)) }
 }
 
 /// HTTPRequestEncoder emits IOData, while the SSH child expects SSHChannelData.

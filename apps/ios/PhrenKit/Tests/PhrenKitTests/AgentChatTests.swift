@@ -299,6 +299,31 @@ final class AgentChatTests: XCTestCase {
         XCTAssertNil(message?.toolCallID)
     }
 
+    func testClaudeCompactionCollapsesToASingleBoundedPart() throws {
+        let summary = String(repeating: "s", count: 6_000)
+        let rows: [[String: Any]] = [
+            ["type": "system", "phrenCompacted": true, "timestamp": "2026-09-12T01:00:00Z"],
+            ["type": "user", "isCompactSummary": true, "timestamp": "2026-09-12T01:00:00Z",
+             "message": ["role": "user", "content": summary]],
+        ]
+        let transcript = try AgentChatTranscript.read(frame(rows, source: "claude"), source: "claude")
+        XCTAssertEqual(transcript.messages.count, 1, "The boundary and its summary draw as one row")
+        let message = try XCTUnwrap(transcript.messages.first)
+        XCTAssertTrue(message.isCompaction)
+        XCTAssertEqual(message.text.count, 4_000)
+        XCTAssertFalse(transcript.messages.contains { $0.role == .user }, "The summary never renders as a user bubble")
+
+        // The legacy shape: the summary as a plain user row opened by the
+        // continuation preamble, which older Hooks send without the flag.
+        let legacy = "This session is being continued from a previous conversation that ran out of context. " + String(repeating: "t", count: 5_000)
+        let legacyTranscript = try AgentChatTranscript.read(frame([["type": "user", "message": ["role": "user", "content": legacy]]], source: "claude"), source: "claude")
+        XCTAssertEqual(legacyTranscript.messages.count, 1)
+        let legacyMessage = try XCTUnwrap(legacyTranscript.messages.first)
+        XCTAssertTrue(legacyMessage.isCompaction)
+        XCTAssertEqual(legacyMessage.text.count, 4_000)
+        XCTAssertFalse(legacyTranscript.messages.contains { $0.role == .user })
+    }
+
     private func panes(status: String = "idle") throws -> AgentChatPanes {
         let body: [String: Any] = ["kind": "herdr", "groupId": "w7", "childId": "w7:t1", "panes": [
             ["id": "w7:p1", "label": "1", "agent": "codex", "agentStatus": status, "sessionId": "session-one"],

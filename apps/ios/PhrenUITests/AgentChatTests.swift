@@ -48,7 +48,8 @@ final class AgentChatTests: XCTestCase {
         XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-read-run:")).firstMatch.exists)
         capture(app, "Phren memory and task cards")
         app.buttons["chat-phren-card:phren-search"].tap()
-        XCTAssertTrue(app.buttons["chat-tool-output-done"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["chat-tool-output-wrap"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["chat-tool-output-done"].exists, "Back is the only way out of a pushed detail")
         // Recalled memories wrap by default: the whole line fits the screen instead of running off it.
         let text = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "one long line the phone must wrap")).firstMatch
         XCTAssertTrue(text.waitForExistence(timeout: 5))
@@ -60,11 +61,11 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(text.waitForExistence(timeout: 3))
         XCTAssertGreaterThan(text.frame.maxX, app.frame.maxX, "Long lines mode lets the line run past the screen")
         wrapToggle.tap()
-        app.buttons["chat-tool-output-done"].tap()
+        app.navigationBars.buttons.firstMatch.tap()
         app.buttons["chat-phren-card:phren-finding"].tap()
-        XCTAssertTrue(app.buttons["chat-tool-output-done"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["chat-tool-output-wrap"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "findingType")).firstMatch.exists)
-        app.buttons["chat-tool-output-done"].tap()
+        app.navigationBars.buttons.firstMatch.tap()
     }
 
     @MainActor
@@ -97,9 +98,9 @@ final class AgentChatTests: XCTestCase {
         for _ in 0..<4 where !readAll.isHittable { transcript.swipeUp() }
         XCTAssertTrue(readAll.waitForExistence(timeout: 5)); XCTAssertEqual(readAll.label, "Read all")
         readAll.tap()
-        XCTAssertTrue(app.buttons["chat-tool-output-done"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["chat-tool-output-wrap"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final fetched marker line")).firstMatch.exists)
-        app.buttons["chat-tool-output-done"].tap()
+        app.navigationBars.buttons.firstMatch.tap()
         // The search's sources read as links, not as Claude Code's JSON line.
         for _ in 0..<8 where !search.isHittable { transcript.swipeDown() }
         search.tap()
@@ -130,9 +131,9 @@ final class AgentChatTests: XCTestCase {
         XCTAssertLessThan(chip.frame.minY, runs.element(boundBy: 1).frame.minY)
         capture(app, "Skill chip between two read runs")
         chip.tap()
-        XCTAssertTrue(app.buttons["chat-tool-output-done"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["chat-tool-output-wrap"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final skill marker line")).firstMatch.exists)
-        app.buttons["chat-tool-output-done"].tap()
+        app.navigationBars.buttons.firstMatch.tap()
     }
 
     @MainActor
@@ -159,9 +160,9 @@ final class AgentChatTests: XCTestCase {
         XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-tool-group:")).firstMatch.exists, "Cards, not pills")
         capture(app, "Cards for other MCP servers")
         pull.tap()
-        XCTAssertTrue(app.buttons["chat-tool-output-done"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["chat-tool-output-wrap"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "pull_number")).firstMatch.exists)
-        app.buttons["chat-tool-output-done"].tap()
+        app.navigationBars.buttons.firstMatch.tap()
     }
 
     // MARK: Tool cards — subagents, todos, plan mode
@@ -197,9 +198,9 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(full.exists)
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final audit marker")).firstMatch.exists)
         full.tap()
-        XCTAssertTrue(app.buttons["chat-tool-output-done"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["chat-tool-output-wrap"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final audit marker")).firstMatch.exists)
-        app.buttons["chat-tool-output-done"].tap()
+        app.navigationBars.buttons.firstMatch.tap()
         // The prompt stays behind a tap.
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Read ChatTimelineModels.swift")).firstMatch.exists)
         app.buttons["chat-agent-prompt:agent-audit"].tap()
@@ -309,9 +310,9 @@ final class AgentChatTests: XCTestCase {
         // The plan is cut to a screenful; the reader has the rest.
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final step marker")).firstMatch.exists)
         app.buttons["chat-plan-full:fixture-plan-action"].tap()
-        XCTAssertTrue(app.buttons["chat-tool-output-done"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["chat-tool-output-wrap"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final step marker")).firstMatch.exists)
-        app.buttons["chat-tool-output-done"].tap()
+        app.navigationBars.buttons.firstMatch.tap()
         XCTAssertTrue(approve.waitForExistence(timeout: 5))
         approve.tap()
         XCTAssertTrue(app.staticTexts["Answer received in this conversation."].waitForExistence(timeout: 8))
@@ -418,6 +419,21 @@ final class AgentChatTests: XCTestCase {
         let cards = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-tool-group:"))
         XCTAssertGreaterThanOrEqual(cards.count, 3)
         XCTAssertTrue(cards.firstMatch.isHittable)
+    }
+
+    @MainActor
+    func testCompactionShowsAsOneSmallRow() {
+        let app = launch(extra: ["--chat-compaction"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let transcript = app.scrollViews["chat-transcript"]
+        XCTAssertTrue(transcript.waitForExistence(timeout: 8))
+        let row = app.descendants(matching: .any).matching(identifier: "chat-compaction").firstMatch
+        for _ in 0..<6 where !row.isHittable { transcript.swipeUp() }
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        XCTAssertLessThan(row.frame.height, 60, "A compaction is one small row, not a bubble")
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "compaction filler")).firstMatch.exists,
+                       "The summary stays behind the row, never inline in the transcript")
+        capture(app, "Compaction as one small row")
     }
 
     @MainActor
@@ -997,7 +1013,7 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Tool Result"].waitForExistence(timeout: 3))
         app.buttons["chat-tool-output-last"].tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final output marker 0")).firstMatch.exists)
-        app.buttons["chat-tool-output-done"].tap()
+        app.navigationBars.buttons.firstMatch.tap()
         rows.firstMatch.tap()
         XCTAssertEqual(rows.firstMatch.value as? String, "Collapsed")
         XCTAssertTrue(app.buttons["chat-close"].isHittable)
@@ -1031,7 +1047,7 @@ final class AgentChatTests: XCTestCase {
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final dense output marker 0")).firstMatch.exists)
         app.buttons["chat-tool-output-first"].tap()
         XCTAssertEqual(range.label, "Lines 1–120 of 8001")
-        app.buttons["chat-tool-output-done"].tap()
+        app.navigationBars.buttons.firstMatch.tap()
         XCTAssertEqual(rows.element(boundBy: 1).value as? String, "Collapsed")
         XCTAssertTrue(app.buttons["chat-close"].isHittable)
     }

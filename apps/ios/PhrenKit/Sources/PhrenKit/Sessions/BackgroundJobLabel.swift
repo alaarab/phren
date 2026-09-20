@@ -18,7 +18,10 @@ public enum BackgroundJobLabel {
             range: NSRange(command.startIndex..., in: command)
         ), let range = Range(match.range(at: 2), in: command) else { return nil }
         let label = command[range].trimmingCharacters(in: .whitespacesAndNewlines)
-        return label.isEmpty ? nil : (provider, label)
+        // A label the shell had yet to expand ("${L[$n]}", "$(...)", `...`) is
+        // not a name; the call's own description reads better than that.
+        guard !label.isEmpty, !label.contains("$"), !label.contains("`") else { return nil }
+        return (provider, label)
     }
 
     private static let labelExpression = try! NSRegularExpression(

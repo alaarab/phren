@@ -130,7 +130,12 @@ struct FileViewerView: View {
 
     private var context: StoreContext? { model.storeContexts.first { $0.id == storeId } }
     private var content: String { context?.store.read(path) ?? "" }
-    private var isWritable: Bool { model.canPush(storeId: storeId) && LocalStore.isWritablePath(path) }
+    // `phren.project.yaml` is writable in the store but not by this editor:
+    // the Knobs screen owns it, and a raw edit could drop sibling keys.
+    private var isWritable: Bool {
+        model.canPush(storeId: storeId) && LocalStore.isWritablePath(path)
+            && !LocalStore.isProjectConfigPath(path)
+    }
 
     var body: some View {
         DocumentContentView(path: path, content: content)

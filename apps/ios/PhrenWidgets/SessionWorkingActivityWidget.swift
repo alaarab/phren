@@ -7,6 +7,10 @@ struct SessionWorkingActivityWidget: Widget {
         ActivityConfiguration(for: SessionWorkingActivityAttributes.self) { context in
             SessionWorkingSummary(state: context.state)
                 .padding(10)
+                // The lock screen re-renders the activity for Always-On with
+                // its own type settings; capping Dynamic Type keeps every
+                // row on the one line the design gives it.
+                .dynamicTypeSize(...DynamicTypeSize.large)
                 .activityBackgroundTint(.black)
                 .activitySystemActionForegroundColor(.white)
                 .widgetURL(routeURL(context))
@@ -80,6 +84,10 @@ struct SessionWorkingActivityWidget: Widget {
 /// and what else is running when there is more than one.
 private struct SessionWorkingSummary: View {
     let state: SessionWorkingActivityAttributes.ContentState
+    /// Always-On draws the activity dimmed and with its own text metrics;
+    /// the rows keep their fixed heights and the timer, which does not tick
+    /// there, gives way to the step alone.
+    @Environment(\.isLuminanceReduced) private var dimmed
 
     private var total: Int { state.working + state.waiting }
     private var others: [SessionWorkingActivityAttributes.Entry] { Array(state.entries.dropFirst().prefix(3)) }
@@ -90,19 +98,22 @@ private struct SessionWorkingSummary: View {
                 PhrenActivityMark(size: 18)
                 if let entry = state.primary {
                     Text(entry.project).privacySensitive().font(.subheadline.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
-                    Text(entry.computer).privacySensitive().font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        .layoutPriority(1)
+                    Text(entry.computer).privacySensitive().font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
                 } else {
                     Text(state.headline).font(.subheadline.weight(.medium)).lineLimit(1).minimumScaleFactor(0.8)
                 }
                 Spacer(minLength: 4)
-                ElapsedTimer(start: state.startedAt)
+                if !dimmed { ElapsedTimer(start: state.startedAt) }
             }
+            .frame(height: 22)
             if let entry = state.primary {
                 HStack(spacing: 6) {
                     StepLine(entry: entry)
                     Spacer(minLength: 4)
                     if entry.subagents > 0 { SubagentPill(count: entry.subagents) }
                 }
+                .frame(height: 18)
             }
             if total > 1 {
                 HStack(spacing: 6) {
@@ -112,11 +123,13 @@ private struct SessionWorkingSummary: View {
                                 .background(Circle().fill(.black).padding(-2))
                         }
                     }
-                    Text(state.headline).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    Text(state.headline).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
                 }
+                .frame(height: 16)
                 .accessibilityElement(children: .combine)
             }
         }
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -133,7 +146,7 @@ private struct StepLine: View {
         HStack(spacing: 5) {
             Image(systemName: isWaiting ? "hand.raised.fill" : entry.state == "idle" ? "checkmark.circle.fill" : "circle.fill")
                 .font(.system(size: isWaiting ? 10 : 6)).foregroundStyle(color)
-            Text(text).privacySensitive().font(.caption).foregroundStyle(color).lineLimit(1)
+            Text(text).privacySensitive().font(.caption).foregroundStyle(color).lineLimit(1).truncationMode(.tail)
         }
     }
 }

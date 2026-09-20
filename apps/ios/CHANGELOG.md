@@ -10,6 +10,26 @@ number counts up on its own.
 
 ### Changed
 
+- Sending is faster: the phone keeps one SSH connection per computer and
+  runs every request as a channel on it, and a send, a key or a password no
+  longer asks the computer about the pane first (the Hook checks the
+  conversation itself right before it types). A busy agent no longer holds
+  the reply for a confirmation that cannot come until its turn ends.
+- Claude Code compaction shows as one small row and a header state instead
+  of a giant bubble that blanked the chat.
+- Focusing the composer no longer throws the chat past its end; pins are
+  clamped to the laid-out content.
+- Memory graph: the hover bubble is gone; findings and tasks can be edited
+  and deleted from the node panel.
+- Lock screen: the activity keeps its rows on one line each when the display
+  dims for Always-On; the timer, which cannot tick there, steps aside.
+- A background worker launched from a shell loop no longer shows the
+  unexpanded label variable as its name.
+- Projects: a Knobs screen sets finding sensitivity, proactivity and task
+  mode per project, written to phren.project.yaml; empty means the global
+  setting.
+- A tool's output screen no longer shows a Done button beside the back
+  chevron; back is the way out.
 - Spawned agents now sit under their parent agent in the sidebar, and the
   agent-tree control lives beside the agent switcher in chat input.
 

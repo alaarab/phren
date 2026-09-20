@@ -13,6 +13,8 @@ enum GraphAction: Equatable {
     case focus(String)
     case openProject(String)
     case share(String)
+    case edit(String)
+    case delete(String)
     case close
 }
 
@@ -165,6 +167,8 @@ struct GraphWebView: UIViewRepresentable {
                 case "focus": onAction(.focus(action.id))
                 case "openProject": onAction(.openProject(action.id))
                 case "share": onAction(.share(action.id))
+                case "edit": onAction(.edit(action.id))
+                case "delete": onAction(.delete(action.id))
                 case "close": onAction(.close)
                 default: break
                 }

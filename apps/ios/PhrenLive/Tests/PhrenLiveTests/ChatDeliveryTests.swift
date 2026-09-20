@@ -34,6 +34,7 @@ final class ChatDeliveryTests: XCTestCase {
         let target = try AgentChatTarget(hostID: host.id, workspaceID: "w1", tabID: "w1:t1", paneID: "w1:p1",
                                          source: "codex", sessionID: "current-session", muxID: host.muxID)
         let key = ssh.deviceKey
+        let openedBefore = GatewayConnections.shared.opened
         // Reproduce the old client selecting the helper's unusable recorded
         // location despite also supplying the live pane.
         let old = try JSONSerialization.data(withJSONObject: ["source": "codex", "sessionId": target.sessionID,
@@ -50,11 +51,15 @@ final class ChatDeliveryTests: XCTestCase {
 
         let changed = try AgentChatTarget(hostID: host.id, workspaceID: "w1", tabID: "w1:t1", paneID: "w1:p1",
                                           source: "codex", sessionID: "previous-session", muxID: host.muxID)
+        // The Hook is the gate: it checks the pane's conversation with fresh
+        // identity right before typing, so the phone sends without asking
+        // first and the refusal comes back as the Hook's own rejection.
         do {
             try await PhrenConnection.sendChat(host: host, privateKey: key.rawRepresentation, target: changed, text: "Must not arrive")
             XCTFail("Changed conversation must reject before input")
-        } catch { XCTAssertTrue(error.localizedDescription.contains("changed")) }
-        XCTAssertEqual(helper.promptCount, 2)
+        } catch { XCTAssertEqual(error as? LiveConnectionError, .gatewayRejection(status: 409, reason: "wrong destination")) }
+        XCTAssertEqual(helper.promptCount, 3)
+        XCTAssertEqual(helper.messages, ["Keep it up"])
 
         // A rejected live-pane request is also a single attempt. There is no
         // alternate target or automatic replay on any delivery error.
@@ -62,8 +67,10 @@ final class ChatDeliveryTests: XCTestCase {
             try await PhrenConnection.sendChat(host: host, privateKey: key.rawRepresentation, target: target, text: "Reject this")
             XCTFail("Expected live-pane rejection")
         } catch { XCTAssertEqual(error as? LiveConnectionError, .gatewayRejection(status: 422, reason: "target pane not found")) }
-        XCTAssertEqual(helper.promptCount, 3)
+        XCTAssertEqual(helper.promptCount, 4)
         XCTAssertEqual(helper.messages, ["Keep it up"])
+        // Every request above rode one SSH connection; a send used to open two.
+        XCTAssertEqual(GatewayConnections.shared.opened - openedBefore, 1)
         try await ssh.close(); try await helper.channel.close()
     }
 
@@ -78,11 +85,13 @@ final class ChatDeliveryTests: XCTestCase {
         let path = try await PhrenConnection.uploadChatAttachment(host: host, privateKey: ssh.deviceKey.rawRepresentation,
                                                                 target: target, attachment: attachment)
         XCTAssertEqual(path, "/tmp/phren-upload-fixture/notes.txt")
+        // The Hook holds the gate: with a question pending it refuses the
+        // prompt, and the phone shows that refusal instead of guessing.
         do {
             try await PhrenConnection.sendChat(host: host, privateKey: ssh.deviceKey.rawRepresentation, target: target, text: "New prompt")
             XCTFail("A pending question must still block prompt delivery")
-        } catch { XCTAssertTrue(error is PhrenKitError) }
-        XCTAssertEqual(helper.promptCount, 0)
+        } catch { XCTAssertEqual(error as? LiveConnectionError, .gatewayRejection(status: 409, reason: "This agent needs input in the terminal first.")) }
+        XCTAssertEqual(helper.promptCount, 1)
         XCTAssertTrue(helper.messages.isEmpty)
     }
 
@@ -154,6 +163,8 @@ private final class DeliveryHelper: @unchecked Sendable {
             let target = request["target"] as? [String: String] ?? [:]
             if request["sessionId"] != nil {
                 status = .unprocessableEntity; value = ["error": "prompt target does not support text input"]
+            } else if agentStatus == "waiting" {
+                status = .conflict; value = ["error": "This agent needs input in the terminal first."]
             } else if target != ["server": "phone-test", "workspace": "w1", "tab": "w1:t1", "pane": "w1:p1", "source": "codex", "session": "current-session"] {
                 status = .conflict; value = ["error": "wrong destination"]
             } else if request["text"] as? String == "Reject this" {

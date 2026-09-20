@@ -56,7 +56,10 @@ public actor LocalStore {
     /// the store — `.config/` (except skill preferences), `phren.root.yaml`, `stores.yaml`,
     /// `.phren-team.yaml`, `summary.md`, `truths.md`, and `reference/` — is
     /// read-only. Authored skills and canonical AGENTS.md instructions are
-    /// explicitly writable in project directories and global/.
+    /// explicitly writable in project directories and global/. A project's
+    /// `phren.project.yaml` is writable through ``PendingOp/setProjectKnobs``
+    /// alone, so the knobs screen can set per-project overrides without letting
+    /// the generic editor rewrite `sourcePath` or a retention block.
     ///
     /// `journal/YYYY-MM-DD-<actor>.md` is writable *and* gated on exactly the
     /// same ``isProjectDirName`` predicate as `FINDINGS.md`, which is what
@@ -65,6 +68,10 @@ public actor LocalStore {
     /// `global/FINDINGS.md` is.
     public static func isWritablePath(_ path: String) -> Bool {
         if path == SkillPreferences.path { return true }
+        // The one registry file the phone may write, and only through
+        // ``PendingOp/setProjectKnobs`` — the raw file editor still refuses it,
+        // because a raw edit could drop the sibling keys the CLI reads.
+        if isProjectConfigPath(path) { return true }
         // Authored content is separate from global's read-only findings tier.
         if isSkillPath(path) || AgentInstructions.isPath(path) { return true }
         let parts = path.split(separator: "/").map(String.init)
@@ -156,6 +163,16 @@ public actor LocalStore {
     /// so a name typed in the editor can never escape `skills/`.
     static func isSkillNameSegment(_ name: String) -> Bool {
         JSRegex(#"^[A-Za-z0-9][A-Za-z0-9._-]*$"#).test(name) && !name.contains("..")
+    }
+
+    /// `<project>/phren.project.yaml` — a registry file the phone reads as a
+    /// whole and edits only through ``PendingOp/setProjectKnobs``. Kept apart
+    /// from ``isSkillPath`` and ``AgentInstructions/isPath`` so the generic
+    /// whole-file editor cannot be pointed at it.
+    public static func isProjectConfigPath(_ path: String) -> Bool {
+        let parts = path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        return parts.count == 2 && isProjectDirName(parts[0])
+            && parts[1] == MachineRegistry.projectFile
     }
 
     /// The cross-project tier: consolidated findings that apply everywhere,
@@ -384,6 +401,12 @@ public actor LocalStore {
         public var skillPreferencesContent: String? = nil
         /// Which computers carry which projects, and where.
         public var machines: MachineRegistry = .empty
+        /// project → the knobs set in its `phren.project.yaml`. Absent means
+        /// the file carries none, i.e. every knob inherits the global setting.
+        public var projectKnobs: [String: ProjectKnobs] = [:]
+        /// project → the raw `phren.project.yaml` bytes, so a knob write can
+        /// carry the exact content it read as its conflict check.
+        public var projectConfigs: [String: String] = [:]
 
         public static let empty = Snapshot(projects: [], findings: [:], tasks: [:], notes: [:], reviewQueue: [], summaries: [:])
     }
@@ -409,6 +432,8 @@ public actor LocalStore {
         var instructions: [String: String] = [:]
         var instructionPaths: [String: String] = [:]
         var machines = MachineRegistry()
+        var projectKnobs: [String: ProjectKnobs] = [:]
+        var projectConfigs: [String: String] = [:]
 
         for path in paths {
             let parts = path.split(separator: "/").map(String.init)
@@ -472,6 +497,8 @@ public actor LocalStore {
                 case "truths.md":
                     truths[project] = TruthsFile(content: content).truths
                 case MachineRegistry.projectFile:
+                    projectConfigs[project] = content
+                    projectKnobs[project] = ProjectKnobs.parse(content)
                     if let sourcePath = MachineRegistry.parseSourcePath(content) { machines.sourcePaths[project] = sourcePath }
                 default:
                     break
@@ -535,7 +562,8 @@ public actor LocalStore {
             notes: notes, reviewQueue: queue, summaries: summaries,
             truths: truths, consolidated: consolidated, skills: skills, instructions: instructions,
             instructionPaths: instructionPaths,
-            skillPreferencesContent: read(SkillPreferences.path), machines: machines
+            skillPreferencesContent: read(SkillPreferences.path), machines: machines,
+            projectKnobs: projectKnobs, projectConfigs: projectConfigs
         )
         cachedSnapshot = files.map { ($0, result) }
         return result

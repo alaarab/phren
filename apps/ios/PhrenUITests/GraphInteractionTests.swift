@@ -47,6 +47,34 @@ final class GraphInteractionTests: XCTestCase {
     }
 
     @MainActor
+    func testFindingDossierOffersEdit() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing"]
+        app.launch()
+        _ = openDossier(in: app)
+
+        let edit = app.webViews.buttons["Edit"]
+        XCTAssertTrue(edit.waitForExistence(timeout: 5), "finding offers Edit")
+        edit.tap()
+        XCTAssertTrue(app.navigationBars["Edit finding"].waitForExistence(timeout: 5),
+                      "Edit finding sheet appears")
+    }
+
+    @MainActor
+    func testFindingDossierOffersDeleteWithConfirmation() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing"]
+        app.launch()
+        _ = openDossier(in: app)
+
+        let delete = app.webViews.buttons["Delete"]
+        XCTAssertTrue(delete.waitForExistence(timeout: 5), "finding offers Delete")
+        delete.tap()
+        XCTAssertTrue(app.sheets.buttons["Delete"].waitForExistence(timeout: 5),
+                      "delete confirmation appears")
+    }
+
+    @MainActor
     func testGraphDragsStayOnMapAndBackButtonExits() {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing"]

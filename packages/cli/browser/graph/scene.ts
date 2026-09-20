@@ -304,14 +304,10 @@ export function setupForceGraph(): void {
   state.container.appendChild(overlay);
   state.cleanupFns.push(() => overlay.remove());
 
-  // Mouse tracking for tooltip placement.
+  // Track the pointer so selection notifications have a fallback anchor.
   const onMouseMove = (event: MouseEvent) => {
     const rect = state.container!.getBoundingClientRect();
     state.lastMouse = { x: event.clientX - rect.left, y: event.clientY - rect.top };
-    if (state.tooltip && state.tooltip.style.opacity === "1") {
-      state.tooltip.style.left = state.lastMouse.x + 14 + "px";
-      state.tooltip.style.top = state.lastMouse.y + 14 + "px";
-    }
   };
   state.container.addEventListener("mousemove", onMouseMove);
   state.cleanupFns.push(() => state.container?.removeEventListener("mousemove", onMouseMove));

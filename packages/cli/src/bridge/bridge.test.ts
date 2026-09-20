@@ -655,6 +655,27 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     expect(await submit(other, "queued while busy")).toMatchObject({ decision: "block" });
     expect(await submit(session, "queued while busy")).toEqual({ status: 200 });
   }, 15_000);
+  it("reports a compacting conversation and clears it when the new context starts", async () => {
+    const post = (event: string) => new Promise<any>((resolve, reject) => {
+      const payload = JSON.stringify({ target, event, source: "compact" });
+      const req = request({ socketPath: path.join(root, "bridge/agent.sock"), path: "/hook", method: "POST",
+        headers: { "Content-Length": Buffer.byteLength(payload) } }, res => {
+        let data = ""; res.on("data", bytes => data += bytes); res.on("end", () => resolve({ status: res.statusCode, ...JSON.parse(data) }));
+      }); req.on("error", reject); req.end(payload);
+    });
+    const status = async () => {
+      const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
+      const frames: any[] = []; socket.on("message", data => frames.push(JSON.parse(data.toString())));
+      await once(socket, "open");
+      for (let i = 0; i < 80 && !frames.length; i++) await sleep(25);
+      socket.terminate();
+      return frames[0].agentStatus;
+    };
+    expect(await post("PreCompact")).toEqual({ status: 200 });
+    expect((await status()).compacting).toBe(true);
+    expect(await post("SessionStart")).toEqual({ status: 200 });
+    expect((await status()).compacting).toBe(false);
+  });
   it("remembers a permission request it could not hold and shows it while the pane waits", async () => {
     agentStatus = "blocked";
     const callback = JSON.stringify({ target, event: "PermissionRequest", tool: "Shell", input: { command: "xcrun simctl list runtimes", justification: "Inspect the runtimes" } });

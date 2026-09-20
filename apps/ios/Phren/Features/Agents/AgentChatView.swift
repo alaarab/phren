@@ -434,10 +434,15 @@ struct AgentChatView: View {
                     if atBottom && !model.loadingHistory { pinToBottom(proxy) }
                 }
                 .onChange(of: composing) { _, _ in
-                    // Focus changes start a keyboard/safe-area transaction.
-                    // Resolve the bottom anchor on the next run loop, after
-                    // that transaction has supplied its first real viewport.
-                    if atBottom && !model.loadingHistory { pinToBottom(proxy, animated: true) }
+                    // The keyboard's safe-area change keeps the bottom
+                    // anchored on its own, so a view already at the end needs
+                    // no help; pinning it again fights the transaction and,
+                    // against a lazy stack's estimate, throws the transcript
+                    // past its end. Only a view that had drifted is pulled
+                    // back, without animation (reduce motion included).
+                    guard atBottom, !model.loadingHistory,
+                          scrollMetrics.distanceFromBottom > 8 else { return }
+                    pinToBottom(proxy)
                 }
             }
             if let approval = model.approval, let prompt = approval.questionPrompt, let input = approval.questionInput {
@@ -888,6 +893,7 @@ struct AgentChatView: View {
                                           reconnecting: active && model.target != nil && !model.connected && !model.loading && !model.automaticReconnectSuspended,
                                           waiting: model.awaitingReply, revealing: model.reveal.isRevealing,
                                           needsAnswer: model.needsAnswer || model.approval != nil,
+                                          compacting: model.isCompacting,
                                           phase: model.activityPhase)
                         .padding(1).background(PhrenTheme.chatPanel, in: Circle())
                         .offset(x: 4, y: 4)
@@ -1444,6 +1450,10 @@ private struct ModernChatFollowScroll<Content: View>: View {
     /// the keyboard changes the container over several frames, and a pin
     /// resolved against the first of them lands short of, or past, the end.
     @State private var settlingUntil: Date?
+    /// The metrics a pin started from. An estimate jump is measured against
+    /// this, not the previous frame, so a run of small lazy-stack corrections
+    /// cannot add up to a target that was never real.
+    @State private var settlingBase: ChatScrollMetrics?
 
     var body: some View {
         content
@@ -1460,14 +1470,25 @@ private struct ModernChatFollowScroll<Content: View>: View {
                     return
                 }
                 if let settlingUntil, settlingUntil > .now, !userDriven {
-                    if new.bottomOffset > 0.5, abs(new.offsetY - new.bottomOffset) > 0.5 { position.scrollTo(y: new.bottomOffset) }
+                    // An estimate that corrected downward (or content that
+                    // shrank) leaves the offset past the new bottom; the
+                    // corrective check above already scrolled to it. Here the
+                    // only question is whether the bottom just moved because
+                    // the transcript grew.
+                    var target = ChatScrollMetrics.clamp(new.bottomOffset, in: new)
+                    if let base = settlingBase, ChatScrollMetrics.isEstimateJump(old: base, new: new) {
+                        // A lazy stack that suddenly claims many viewports more
+                        // than it had has not laid those rows out yet. Stop one
+                        // viewport past the bottom trusted before the jump and
+                        // let the corrected geometry pull the view down.
+                        target = ChatScrollMetrics.clamp(base.bottomOffset + new.viewportHeight, in: new)
+                    }
+                    if target > 0.5, abs(new.offsetY - target) > 0.5 { position.scrollTo(y: target) }
                     return
                 }
                 guard following,
                       let target = ChatScrollMetrics.shouldRepin(old: old, new: new, userDriven: userDriven) else { return }
-                // A numeric target avoids ScrollViewReader resolving an
-                // estimated lazy-stack anchor beyond the real content.
-                position.scrollTo(y: target)
+                position.scrollTo(y: ChatScrollMetrics.clamp(target, in: new))
             }
             .onChange(of: pinRequest) { _, request in
                 guard let request else { return }
@@ -1482,9 +1503,13 @@ private struct ModernChatFollowScroll<Content: View>: View {
     private func apply(_ request: ChatPinRequest, to metrics: ChatScrollMetrics) {
         guard handledPinID != request.id, metrics.viewportHeight > 0.5 else { return }
         handledPinID = request.id
-        let target = metrics.bottomOffset
+        // A numeric target avoids ScrollViewReader resolving an estimated
+        // lazy-stack anchor beyond the real content; clamping holds it there
+        // even when the estimate is already too tall.
+        let target = ChatScrollMetrics.clamp(metrics.bottomOffset, in: metrics)
         guard target > 0.5 else { return }
         settlingUntil = .now + (request.animated ? 0.6 : 0.3)
+        settlingBase = metrics
         if request.animated {
             withAnimation { position.scrollTo(y: target) }
         } else {

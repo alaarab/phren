@@ -20,7 +20,6 @@
     -webkit-tap-highlight-color: transparent;
   }
   #graph-canvas { position: absolute; inset: 0; }
-  #graph-tooltip { position: absolute; }
   /* SwiftUI provides search, filters and camera controls. Desktop overlays
      would cover most of a phone's canvas and offer unsupported actions. */
   .phren-project-nav, .phren-project-panel, .phren-pp-reopen,
@@ -141,7 +140,6 @@
 </head>
 <body>
   <div id="graph-canvas" data-fx="off"></div>
-  <div id="graph-tooltip"></div>
   <div id="graph-status">Loading graph…</div>
   <aside id="graph-dossier" role="dialog" aria-label="Node details" aria-hidden="true" hidden>
     <button class="dossier-close" type="button" aria-label="Close" data-action="close">×</button>
@@ -154,6 +152,8 @@
       <button type="button" data-action="focus">Focus</button>
       <button type="button" data-action="openProject">Open project</button>
       <button type="button" data-action="share">Share</button>
+      <button type="button" data-action="edit" aria-label="Edit" hidden>Edit</button>
+      <button type="button" data-action="delete" aria-label="Delete" hidden>Delete</button>
     </div>
   </aside>
 
@@ -165,6 +165,8 @@
     var dossierKind = document.getElementById("dossier-kind");
     var dossierProject = document.getElementById("dossier-project");
     var dossierText = document.getElementById("dossier-text");
+    var dossierEdit = dossier.querySelector('[data-action="edit"]');
+    var dossierDelete = dossier.querySelector('[data-action="delete"]');
     var selectedNode = null;
     function setStatus(text) {
       if (!text) { status.hidden = true; return; }
@@ -218,6 +220,12 @@
 
     function showDossier(node) {
       selectedNode = node;
+      var id = String(node.id || "");
+      // Only findings written to FINDINGS.md and tasks have a line to rewrite;
+      // journal findings and projects do not.
+      var editable = id.indexOf("finding:") === 0 || id.indexOf(":task:") !== -1;
+      dossierEdit.hidden = !editable;
+      dossierDelete.hidden = !editable;
       dossier.style.display = "";
       dossier.hidden = false;
       dossier.setAttribute("aria-hidden", "false");
@@ -229,6 +237,8 @@
 
     function hideDossier() {
       selectedNode = null;
+      dossierEdit.hidden = true;
+      dossierDelete.hidden = true;
       dossier.hidden = true;
       dossier.setAttribute("aria-hidden", "true");
       dossier.style.display = "none";

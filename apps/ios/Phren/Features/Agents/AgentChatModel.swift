@@ -120,6 +120,9 @@ final class AgentChatModel {
     private(set) var sentAt: Date?
     private var submittedAfterLine = -1
     var liveActivity: String?
+    /// The agent is summarizing the conversation to reclaim context; the
+    /// header says so and the turn stays busy until it finishes.
+    var isCompacting = false
     private var preferProgressActivity = false
     var activityPhase: AgentChatProgress.Phase? {
         if preferProgressActivity { return progress.phase }
@@ -194,7 +197,7 @@ final class AgentChatModel {
     var queue: [QueuedMessage] = [] { didSet { if let target, !restoringDraft { AgentChatQueues.items[target.id] = queue } } }
     /// True while a send would interrupt the agent: it is working, or a reply
     /// is still on its way, and nothing is waiting on the person.
-    var isBusy: Bool { !needsAnswer && approval == nil && (awaitingReply || (target?.isStarting != true && activityPhase == .working)) }
+    var isBusy: Bool { !needsAnswer && approval == nil && (awaitingReply || isCompacting || (target?.isStarting != true && activityPhase == .working)) }
     private var drainTask: Task<Void, Never>?
     private var failedQueueItem: UUID?
     private var lastSession: LiveAgentSession?
@@ -230,7 +233,7 @@ final class AgentChatModel {
                 restoringDraft = false
             }
             history = .init(); progress = .init(); reveal.finish(); hasTranscript = false
-            awaitingReply = false; sentAt = nil; liveActivity = nil; modelName = nil; preferProgressActivity = false
+            awaitingReply = false; sentAt = nil; liveActivity = nil; isCompacting = false; modelName = nil; preferProgressActivity = false
             transcriptContext = .init(); statusBranch = nil
             connected = false; error = nil; deliveryError = nil
             sentImages = []; needsAnswer = false; approval = nil; questionState = AgentQuestionState()
@@ -278,7 +281,7 @@ final class AgentChatModel {
         statusTask?.cancel(); statusTask = nil; interactionConnected = false; approval = nil
         target = nil; history = .init(); connected = false; queue = []; drainTask?.cancel(); drainTask = nil
         rejectedStreamTarget = nil
-        progress = .init(); reveal.finish(); hasTranscript = false; awaitingReply = false; sentAt = nil; liveActivity = nil; modelName = nil
+        progress = .init(); reveal.finish(); hasTranscript = false; awaitingReply = false; sentAt = nil; liveActivity = nil; isCompacting = false; modelName = nil
         transcriptContext = .init(); statusBranch = nil
         draft = ""; attachments = []; sentImages = []; deliveryError = nil; needsAnswer = false
     }
@@ -359,7 +362,7 @@ final class AgentChatModel {
     func handleConnectionFailure(_ error: Error) {
         progressTask?.cancel(); progressTask = nil
         streamTask?.cancel(); streamTask = nil; streamTarget = nil
-        statusTask?.cancel(); statusTask = nil; interactionConnected = false; approval = nil
+        statusTask?.cancel(); statusTask = nil; interactionConnected = false; approval = nil; isCompacting = false
         connected = false; loading = false
         // Polling failures cannot remove a rejected-transcript latch and cause
         // the same oversized backlog to be decoded again after the host recovers.
@@ -484,7 +487,7 @@ final class AgentChatModel {
     }
 
     private func beginStatus(_ session: LiveAgentSession, target: AgentChatTarget, run: UUID) {
-        statusTask?.cancel(); interactionConnected = false; approval = nil
+        statusTask?.cancel(); interactionConnected = false; approval = nil; isCompacting = false
         let statusRun = UUID(); statusGeneration = statusRun
         statusTask = Task {
             while !Task.isCancelled {
@@ -514,6 +517,7 @@ final class AgentChatModel {
                         if let prompts = status.pendingQuestions { questionState.replaceAsync(prompts) }
                         questionsSupported = status.questionsSupported; asyncQuestionsSupported = status.asyncQuestionsSupported
                         acceptActivity(status.activity); interactionConnected = true
+                        isCompacting = status.compacting
                         if let name = status.modelName, modelName != name { modelName = name }
                         if statusBranch != status.branch { statusBranch = status.branch }
                         if approval != nil || ["waiting", "blocked"].contains(status.activity ?? "") { awaitingReply = false }
@@ -521,7 +525,7 @@ final class AgentChatModel {
                     }
                 } catch {}
                 guard !Task.isCancelled, self.target == target, generation == run, statusGeneration == statusRun else { return }
-                approval = nil; terminalPrompt = nil; interactionConnected = false
+                approval = nil; terminalPrompt = nil; interactionConnected = false; isCompacting = false
                 do { try await Task.sleep(for: .seconds(3)) } catch { return }
             }
         }

@@ -177,7 +177,7 @@ import UIKit
         if flag("--chat-offline") && hasReadTranscript { throw LiveConnectionError.disconnected }
         // A session launched from a project runs the harness that was picked.
         let launchedKind = launches.last.map(\.kind).flatMap { session.workspaceID == "w9" ? $0 : nil }
-        let agent = launchedKind ?? (flag("--chat-copilot") ? "copilot" : (trailer || flag("--chat-claude-queue") || flag("--chat-claude-image") || flag("--chat-read-images") || flag("--chat-approval-question") || flag("--chat-agent-card") || flag("--chat-todos") || flag("--chat-plan-mode") || flag("--chat-web-tools") || flag("--chat-skill-chip") || flag("--chat-mcp-card") || (tour && flag("--chat-phren-tools"))) ? "claude" : "codex")
+        let agent = launchedKind ?? (flag("--chat-copilot") ? "copilot" : (trailer || flag("--chat-claude-queue") || flag("--chat-claude-image") || flag("--chat-read-images") || flag("--chat-approval-question") || flag("--chat-agent-card") || flag("--chat-todos") || flag("--chat-plan-mode") || flag("--chat-web-tools") || flag("--chat-skill-chip") || flag("--chat-mcp-card") || flag("--chat-compaction") || (tour && flag("--chat-phren-tools"))) ? "claude" : "codex")
         var panes: [[String: Any]] = [["id": "\(session.workspaceID):p1", "label": "1", "title": tour ? "Ship the onboarding flow" : "Polish the phone app", "agent": agent,
                                      "agentStatus": ((flag("--chat-blocked") || flag("--chat-approval") || flag("--chat-approval-question") || flag("--chat-plan-mode") || flag("--chat-question")) && !answered) ? "blocked" : (flag("--chat-queue-completion") || (flag("--chat-working") && !stopped) ? "working" : "idle"), "sessionId": agent == "copilot" ? "00000000-0000-0000-0000-000000000023" : "fixture-\(agent)-session", "cwd": root]]
         if flag("--starting-session-fixture") {
@@ -543,6 +543,14 @@ import UIKit
         } else if answered { append("assistant", "Answer received in this conversation.") }
         if denied { append("assistant", "Permission denied in this conversation.") }
         if !flag("--chat-claude-queue"), stopped { append("assistant", "Turn stopped in the selected pane.") }
+        if flag("--chat-compaction"), target.source == "claude" {
+            // Claude Code's compaction boundary and the summary that follows,
+            // as Phren Hook reports them: the summary's 6,000 characters must
+            // stay behind one small row, never a giant bubble.
+            entries.append(["line": firstLine + entries.count, "raw": ["type": "system", "phrenCompacted": true, "timestamp": "2026-09-12T01:00:00Z"]])
+            entries.append(["line": firstLine + entries.count, "raw": ["type": "user", "isCompactSummary": true, "timestamp": "2026-09-12T01:00:00Z",
+                "message": ["role": "user", "content": String(repeating: "compaction filler ", count: 334)]]])
+        }
         for (id, text) in sent where id == target.id || flag("--starting-session-fixture") {
             if flag("--chat-claude-queue") {
                 let key = String(repeating: "a", count: 64)

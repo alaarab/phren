@@ -93,7 +93,9 @@ public struct MachineRegistry: Equatable, Sendable {
         return nil
     }
 
-    private static func unquote(_ value: String) -> String {
+    /// Strips a trailing `# comment` and a matching pair of quotes. Shared with
+    /// ``ProjectKnobs``, which reads the same flat YAML.
+    static func unquote(_ value: String) -> String {
         var text = value.trimmingCharacters(in: .whitespaces)
         if let hash = text.range(of: " #") { text = String(text[..<hash.lowerBound]).trimmingCharacters(in: .whitespaces) }
         if text.count >= 2, let first = text.first, let last = text.last, first == last, first == "\"" || first == "'" {

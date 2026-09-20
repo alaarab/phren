@@ -234,6 +234,9 @@ public struct AgentChatMessage: Equatable, Sendable, Identifiable {
     /// A file a shell call changed, attached by Phren Hook — shown under the
     /// call as a diff rather than counted as a call of its own.
     public var isChange: Bool { role == .tool && title == "Changes" }
+    /// Claude Code summarizing the conversation: the boundary row and its
+    /// summary draw as one collapsed system line, never a bubble.
+    public var isCompaction: Bool { role == .tool && title == "Conversation compacted" }
     /// A slash command or `!` shell line typed at Claude Code's own prompt,
     /// which the transcript records as a user turn wrapped in tags — shown
     /// as a system line rather than a bubble of angle brackets.
@@ -350,10 +353,29 @@ public struct AgentChatTranscript: Equatable, Sendable {
                 messages.append(message)
             }
         }
-        return Self(kind: kind, messages: messages.sorted { $0.line < $1.line }, hasMore: frame["hasMore"] as? Bool ?? false,
+        let ordered = messages.sorted { $0.line < $1.line }
+        return Self(kind: kind, messages: Self.collapsedCompactions(ordered), hasMore: frame["hasMore"] as? Bool ?? false,
                     totalLines: frame["totalLines"] as? Int ?? 0,
                     startLine: frame["startLine"] as? Int ?? entries.compactMap { $0["line"] as? Int }.min(), questionEvents: questionEvents,
                     progressEvents: progressEvents, queueEvents: queueEvents, context: context)
+    }
+
+    /// A compaction boundary and its summary arrive as adjacent rows. Draw
+    /// them as one: keep the row that carries the summary, drop the empty
+    /// boundary beside it. A boundary with no summary still shows.
+    private static func collapsedCompactions(_ messages: [AgentChatMessage]) -> [AgentChatMessage] {
+        var result: [AgentChatMessage] = []
+        var index = 0
+        while index < messages.count {
+            guard messages[index].isCompaction else { result.append(messages[index]); index += 1; continue }
+            var end = index
+            while end < messages.count, messages[end].isCompaction { end += 1 }
+            let group = messages[index..<end]
+            if let withText = group.first(where: { !$0.text.isEmpty }) { result.append(withText) }
+            else if let first = group.first { result.append(first) }
+            index = end
+        }
+        return result
     }
 
     struct Part {
@@ -569,6 +591,11 @@ public struct AgentChatTranscript: Equatable, Sendable {
         }
     }
     private static func claude(_ raw: [String: Any], maximumParts: Int) throws -> [Part] {
+        // Claude Code's compaction boundary: the point in the transcript where
+        // the conversation was summarized. It carries no words of its own.
+        if raw["type"] as? String == "system", raw["phrenCompacted"] as? Bool == true {
+            return [Part(role: .tool, title: "Conversation compacted", text: "")]
+        }
         if raw["phrenBackground"] as? Bool == true,
            let message = raw["message"] as? [String: Any], let content = message["content"] as? String {
             return [Part(role: .tool, title: "Background notification", text: content)]
@@ -576,12 +603,21 @@ public struct AgentChatTranscript: Equatable, Sendable {
         guard raw["isMeta"] as? Bool != true, raw["isSidechain"] as? Bool != true,
               let message = raw["message"] as? [String: Any],
               let role = AgentChatMessage.Role(rawValue: message["role"] as? String ?? ""), role != .tool else { return [] }
+        // The summary that follows the boundary: flagged by the Hook, or, on
+        // older Hooks, a user turn opened by the continuation preamble. Its
+        // words are capped so one summary can never draw a giant bubble.
+        if role == .user, raw["isCompactSummary"] as? Bool == true {
+            return [Part(role: .tool, title: "Conversation compacted", text: String(Self.text(message["content"]).prefix(4_000)))]
+        }
         if let content = message["content"] as? String {
             // Claude Code also records a background job's completion as a user
             // turn wrapped in <task-notification>; that is the Background row's
             // business, not a bubble of angle brackets.
             if role == .user, Self.isTaskNotification(content) {
                 return [Part(role: .tool, title: "Background notification", text: content)]
+            }
+            if role == .user, content.hasPrefix("This session is being continued from a previous conversation") {
+                return [Part(role: .tool, title: "Conversation compacted", text: String(content.prefix(4_000)))]
             }
             if role == .user, Self.isHarnessPreamble(content) { return [] }
             guard content.isEmpty || maximumParts > 0 else { throw LimitError.tooManyMessages }

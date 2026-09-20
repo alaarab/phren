@@ -47,7 +47,7 @@ struct ChatTranscriptPreparation {
         currentToolName = nil; currentToolDetail = nil
         for message in messages.reversed() where message.role == .tool {
             if message.isToolResult { if let id = message.toolCallID { completed.insert(id) } }
-            else if !message.isChange, message.title != "Background notification",
+            else if !message.isChange, !message.isCompaction, message.title != "Background notification",
                     message.toolCallID.map({ !completed.contains($0) }) ?? true {
                 currentToolName = message.title
                 // The card's own short read of the input: a command's first

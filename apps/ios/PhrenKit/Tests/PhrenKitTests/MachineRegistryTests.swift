@@ -26,10 +26,17 @@ final class MachineRegistryTests: XCTestCase {
     }
 
     func testSyncedPathsAdmitTheRegistryFilesReadOnly() {
-        for path in ["machines.yaml", "profiles/mac-mini.yaml", "phren/phren.project.yaml"] {
+        for path in ["machines.yaml", "profiles/mac-mini.yaml"] {
             XCTAssertTrue(LocalStore.isSyncedPath(path), path)
             XCTAssertFalse(LocalStore.isWritablePath(path), path)
         }
+        // A project's own `phren.project.yaml` is the one registry file the
+        // phone may write, and only through `PendingOp.setProjectKnobs`.
+        XCTAssertTrue(LocalStore.isSyncedPath("phren/phren.project.yaml"))
+        XCTAssertTrue(LocalStore.isWritablePath("phren/phren.project.yaml"))
+        XCTAssertTrue(LocalStore.isProjectConfigPath("phren/phren.project.yaml"))
+        XCTAssertFalse(LocalStore.isProjectConfigPath("machines.yaml"))
+        XCTAssertFalse(LocalStore.isProjectConfigPath("phren/summary.md"))
         XCTAssertFalse(LocalStore.isSyncedPath("profiles/nested/x.yaml"))
         XCTAssertFalse(LocalStore.isSyncedPath("profiles/../x.yaml"))
     }

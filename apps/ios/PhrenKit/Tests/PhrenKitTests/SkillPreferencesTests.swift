@@ -50,7 +50,7 @@ final class SkillPreferencesTests: XCTestCase {
         try await engine.enqueue(op)
         let persisted = PendingOpsQueue.load(from: root.appendingPathComponent("pending-ops.json"))
         XCTAssertEqual(persisted.queue.pending.map(\.op), [op])
-        XCTAssertEqual(persisted.queue.schemaVersion, 3)
+        XCTAssertEqual(persisted.queue.schemaVersion, PendingOpsQueue.currentSchemaVersion)
         let remote = try SkillPreferences.setting(nil, scope: "other", name: "audit", enabled: true, expected: nil)
         await client.setRemote(SkillPreferences.path, remote)
         await client.failNextPut(on: [SkillPreferences.path])

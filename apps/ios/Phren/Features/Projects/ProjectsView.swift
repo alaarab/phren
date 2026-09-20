@@ -266,6 +266,7 @@ struct ProjectDetailView: View {
     @State private var tab: Tab = .findings
     @State private var showingSkills = false
     @State private var skillsPresentationID = UUID()
+    @State private var showingKnobs = false
 
     enum Tab: String, CaseIterable {
         case findings = "Findings"
@@ -292,6 +293,21 @@ struct ProjectDetailView: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Project skills")
             .accessibilityIdentifier("project-skills")
+            .padding(.horizontal, 16).padding(.bottom, 8)
+            Button { showingKnobs = true } label: {
+                HStack(spacing: 10) {
+                    Label("Knobs", systemImage: "slider.horizontal.3")
+                    Spacer()
+                    Text(knobsSummary).foregroundStyle(PhrenTheme.textMuted)
+                    Image(systemName: "chevron.right").font(.caption.weight(.semibold))
+                }
+                .font(.subheadline)
+                .padding(.horizontal, 14).frame(minHeight: 44)
+                .background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Project knobs")
+            .accessibilityIdentifier("project-knobs-row")
             .padding(.horizontal, 16).padding(.bottom, 8)
             Picker("Section", selection: $tab) {
                 ForEach(Tab.allCases, id: \.self) { Text($0.rawValue) }
@@ -332,6 +348,16 @@ struct ProjectDetailView: View {
             SkillsView(project: project, storeId: storeId, returnToProject: { showingSkills = false })
             .id(skillsPresentationID)
         }
+        .sheet(isPresented: $showingKnobs) {
+            ProjectKnobsView(storeId: storeId, project: project)
+        }
+    }
+
+    /// "2 set" when the project overrides anything, "Global" when it inherits
+    /// everything.
+    private var knobsSummary: String {
+        let count = model.snapshot(for: storeId).projectKnobs[project]?.setCount ?? 0
+        return count == 0 ? "Global" : "\(count) set"
     }
 }
 

@@ -19,6 +19,8 @@ struct GraphView: View {
     @State private var payloadJSON: String?
     @State private var error: String?
     @State private var selection: GraphNodeRef?
+    @State private var editingNode: GraphNodeRef?
+    @State private var deletingNode: GraphNodeRef?
     @State private var command: GraphCommand?
     @State private var query = ""
     @State private var showingSearch = false
@@ -174,6 +176,24 @@ struct GraphView: View {
         .sheet(isPresented: $showingSavedViews) { savedViewsSheet }
         .sheet(isPresented: $shareText.isPresent()) {
             ActivityView(activityItems: [shareText ?? ""])
+        }
+        .sheet(item: $editingNode) { node in
+            TextEntrySheet(
+                title: node.isTask ? "Edit task" : "Edit finding",
+                initialText: node.fullLabel ?? node.text ?? "",
+                confirmLabel: "Save"
+            ) { text, _ in
+                await applyEdit(node, text: text)
+            }
+        }
+        .confirmationDialog(
+            deletingNode?.isTask == true ? "Delete this task?" : "Delete this finding?",
+            isPresented: $deletingNode.isPresent(),
+            titleVisibility: .visible
+        ) {
+            if let node = deletingNode {
+                Button("Delete", role: .destructive) { Task { await applyDelete(node) } }
+            }
         }
         .alert("Save graph view", isPresented: $namingView) {
             TextField(suggestedViewName, text: $savedViewName)
@@ -333,9 +353,58 @@ struct GraphView: View {
         case .share(let id):
             guard let selection, selection.id == id else { return }
             shareText = selection.sourceText ?? selection.label ?? selection.id
+        case .edit(let id):
+            guard let selection, selection.id == id,
+                  selection.store != nil, selection.project != nil else { return }
+            editingNode = selection
+        case .delete(let id):
+            guard let selection, selection.id == id,
+                  selection.store != nil, selection.project != nil else { return }
+            deletingNode = selection
         case .close:
             selection = nil
         }
+    }
+
+    /// Findings and tasks carry their markdown line back to the store: findings
+    /// match on their text (a graph finding has no stable id), tasks on the id
+    /// embedded in the node id (`<project>:task:<taskId>`).
+    private func applyEdit(_ node: GraphNodeRef, text: String) async {
+        guard let storeId = node.store, let project = node.project,
+              node.isTask || node.isFinding else { return }
+        if node.isTask {
+            await model.perform(
+                .updateTask(project: project, match: matchFor(node), text: text, priority: nil, section: nil),
+                in: storeId
+            )
+        } else if node.isFinding {
+            await model.perform(
+                .editFinding(project: project, match: node.fullLabel ?? node.text ?? "", newText: text),
+                in: storeId
+            )
+        }
+        selection = nil
+        await rebuild()
+    }
+
+    private func applyDelete(_ node: GraphNodeRef) async {
+        guard let storeId = node.store, let project = node.project,
+              node.isTask || node.isFinding else { return }
+        if node.isTask {
+            await model.perform(.removeTask(project: project, match: matchFor(node)), in: storeId)
+        } else if node.isFinding {
+            await model.perform(
+                .removeFinding(project: project, match: node.fullLabel ?? node.text ?? ""),
+                in: storeId
+            )
+        }
+        selection = nil
+        await rebuild()
+    }
+
+    private func matchFor(_ node: GraphNodeRef) -> String {
+        guard let range = node.id.range(of: ":task:") else { return node.fullLabel ?? node.text ?? "" }
+        return String(node.id[range.upperBound...])
     }
 
     private func resetSelection() {

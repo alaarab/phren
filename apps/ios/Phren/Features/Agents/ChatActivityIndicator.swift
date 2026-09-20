@@ -7,11 +7,13 @@ struct ChatActivityIndicator: View {
     let waiting: Bool
     let revealing: Bool
     let needsAnswer: Bool
+    let compacting: Bool
     let phase: AgentChatProgress.Phase?
-    private var busy: Bool { connected && !needsAnswer && (waiting || revealing || phase == .working) }
+    private var busy: Bool { connected && !needsAnswer && (compacting || waiting || revealing || phase == .working) }
     private var label: String {
         if reconnecting { return "Reconnecting" }
         if !connected { return "Disconnected" }
+        if compacting { return "Compacting conversation…" }
         if needsAnswer { return "Waiting for your answer" }
         if waiting { return "Waiting for agent…" }
         if revealing { return "Receiving reply…" }

@@ -49,9 +49,8 @@ extension PhrenConnection {
 
     public static func uploadChatAttachment(host: LiveHost, privateKey: Data, target: AgentChatTarget, attachment: AgentAttachment) async throws -> String {
         guard target.hostID == host.id && target.muxID == host.muxID else { throw PhrenKitError.validation("The chat belongs to another computer.") }
-        // Uploading a file does not send input to the agent. Still validate
-        // the conversation binding; sendChat separately gates prompt delivery.
-        _ = try await chatPanes(host: host, privateKey: privateKey, workspaceID: target.workspaceID, tabID: target.tabID).validate(target)
+        // Uploading a file does not send input to the agent. The Hook checks
+        // the conversation binding itself; sendChat separately gates delivery.
         if target.isStarting {
             // Before there is a conversation directory, use the existing
             // computer-file upload. Prompt delivery still revalidates the pane.
@@ -67,8 +66,8 @@ extension PhrenConnection {
     public static func answerWithKeys(host: LiveHost, privateKey: Data, target: AgentChatTarget, keys: [AgentAnswerKey]) async throws {
         guard target.hostID == host.id && target.muxID == host.muxID else { throw PhrenKitError.validation("The chat belongs to another computer.") }
         guard !keys.isEmpty, keys.count <= 4 else { throw PhrenKitError.validation("Press one key at a time.") }
-        let pane = try await chatPanes(host: host, privateKey: privateKey, workspaceID: target.workspaceID, tabID: target.tabID).validate(target)
-        guard pane.needsAnswer || pane.agentStatus == "unknown" else { throw PhrenKitError.validation("This agent is not waiting for an answer.") }
+        // The Hook decides whether the agent is holding a prompt; a second
+        // round trip to ask first only slowed the answer down.
         let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: .keys(target, keys: keys))
         guard (try JSONSerialization.jsonObject(with: data) as? [String: Any])?["ok"] as? Bool == true else {
             throw PhrenKitError.validation("The key was not confirmed. Check the terminal.")
@@ -84,8 +83,7 @@ extension PhrenConnection {
               !text.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
             throw PhrenKitError.validation("Enter 1 to 256 characters without control characters or newlines.")
         }
-        let pane = try await chatPanes(host: host, privateKey: privateKey, workspaceID: target.workspaceID, tabID: target.tabID).validate(target)
-        guard pane.needsAnswer || pane.agentStatus == "unknown" else { throw PhrenKitError.validation("This agent is not waiting for an answer.") }
+        // The Hook refuses a secret unless the terminal is holding a prompt.
         let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: .secret(target, text: text))
         guard (try JSONSerialization.jsonObject(with: data) as? [String: Any])?["ok"] as? Bool == true else {
             throw PhrenKitError.validation("The secret was not confirmed. Check the terminal.")
@@ -95,8 +93,7 @@ extension PhrenConnection {
     /// Only Escape is exposed. The caller cannot supply terminal key sequences.
     public static func stopChatTurn(host: LiveHost, privateKey: Data, target: AgentChatTarget) async throws {
         guard !target.isStarting, target.hostID == host.id && target.muxID == host.muxID else { throw PhrenKitError.validation("The chat belongs to another computer.") }
-        let pane = try await chatPanes(host: host, privateKey: privateKey, workspaceID: target.workspaceID, tabID: target.tabID).validate(target, sending: true)
-        guard pane.agentStatus == "working" else { throw PhrenKitError.validation("This agent is no longer working.") }
+        // The Hook refuses Escape unless the agent is still working.
         let request = try GatewayRequest.stop(target)
         let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: request)
         guard (try JSONSerialization.jsonObject(with: data) as? [String: Any])?["ok"] as? Bool == true else {
@@ -184,8 +181,9 @@ extension PhrenConnection {
               !text.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) && $0 != "\n" && $0 != "\t" }) else {
             throw PhrenKitError.validation("Enter a message up to 32 KB without terminal control characters.")
         }
-        let panes = try await chatPanes(host: host, privateKey: privateKey, workspaceID: target.workspaceID, tabID: target.tabID)
-        _ = try panes.validate(target, sending: true)
+        // No preflight: the Hook validates the pane's conversation with fresh
+        // identity right before it types, which is the check that matters,
+        // and a second SSH round trip per send was most of the delay.
         try Task.checkCancellation()
         let request = try GatewayRequest.prompt(target, text: text)
         // Exactly one attempt. An interrupted reply must not replay terminal input.
