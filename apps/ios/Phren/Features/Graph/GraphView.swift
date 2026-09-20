@@ -1,10 +1,12 @@
 import PhrenKit
 import SwiftUI
+import UIKit
 
 /// Native phone controls around the shared terminal/VS Code graph contract.
 struct GraphView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var focusProject: String?
     var initialStoreId: String?
     @State private var storeId = ""
@@ -33,10 +35,10 @@ struct GraphView: View {
     @State private var suggestedViewName = "Graph"
     @State private var notice: String?
     @State private var restoringView: GraphSavedView?
-    @State private var panelExpanded = false
+    @State private var projectRoute: ProjectRoute?
+    @State private var shareText: String?
     @AppStorage("graph.savedViews.v1") private var savedViewData = Data()
     @FocusState private var searchFocused: Bool
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var selectedStore: String {
         storeId.isEmpty ? (initialStoreId ?? model.storeFilter ?? model.storeDescriptors.first?.id ?? "") : storeId
@@ -54,7 +56,7 @@ struct GraphView: View {
     }
 
     var body: some View {
-        GeometryReader { geometry in
+        GeometryReader { _ in
             VStack(spacing: 0) {
                 LiveStatusBar()
                 controls
@@ -62,10 +64,16 @@ struct GraphView: View {
                     if let visible, let json = payloadJSON, !visible.nodes.isEmpty {
                         GraphWebView(payloadJSON: json, command: command,
                                      onSelect: receiveSelection,
+                                     onAction: handleGraphAction,
                                      onError: { error = $0 })
                             .id(rendererID)
                             .accessibilityLabel("Interactive memory graph")
-                        cameraControls.padding(12)
+                        cameraControls
+                            .padding(12)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity,
+                                   alignment: selection == nil ? .bottomTrailing : .topTrailing)
+                            .animation(reduceMotion ? .easeOut(duration: 0.15) : .snappy(duration: 0.28),
+                                       value: selection?.id)
                     } else if visible != nil {
                         PhrenEmptyState(title: "No graph content yet",
                                         message: "Findings, tasks, and projects appear here after your store syncs.")
@@ -88,26 +96,7 @@ struct GraphView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .background(PhrenTheme.bg)
                     }
-
-                    if let node = selection {
-                        GraphNodePanel(
-                            node: node,
-                            selectedStore: selectedStore,
-                            expanded: panelExpanded,
-                            maxHeight: geometry.size.height * (panelExpanded ? 0.60 : 0.33),
-                            onToggleExpanded: { panelExpanded.toggle() },
-                            onClose: { selection = nil },
-                            onFocus: { focus(on: node.id) }
-                        )
-                        .padding(.horizontal, 12)
-                        .padding(.bottom, 12)
-                        .frame(maxWidth: .infinity)
-                        .transition(nodePanelTransition)
-                        .zIndex(2)
-                    }
                 }
-                .animation(reduceMotion ? .easeOut(duration: 0.15) : .snappy(duration: 0.28), value: selection?.id)
-                .animation(reduceMotion ? nil : .snappy(duration: 0.28), value: panelExpanded)
             }
         }
         .background(PhrenTheme.bg)
@@ -167,7 +156,6 @@ struct GraphView: View {
             } catch is CancellationError {} catch { self.error = error.localizedDescription }
         }
         .onChange(of: selection?.id) { previous, current in
-            if previous != current { panelExpanded = false }
             guard previous != nil, current == nil else { return }
             switch command?.action {
             case .reset, .reveal: break
@@ -180,7 +168,13 @@ struct GraphView: View {
         .navigationDestination(for: ArchiveTopicRoute.self) { route in
             ArchiveTopicView(storeId: route.storeId, topic: route.topic)
         }
+        .navigationDestination(item: $projectRoute) { route in
+            ProjectDetailView(storeId: route.storeId, project: route.project)
+        }
         .sheet(isPresented: $showingSavedViews) { savedViewsSheet }
+        .sheet(isPresented: $shareText.isPresent()) {
+            ActivityView(activityItems: [shareText ?? ""])
+        }
         .alert("Save graph view", isPresented: $namingView) {
             TextField(suggestedViewName, text: $savedViewName)
             Button("Save") { saveCurrentView() }
@@ -194,7 +188,7 @@ struct GraphView: View {
                 PhrenList {
                     Section("Explore") {
                         Text("Drag to rotate. Pinch to zoom. Tap a node to read its details or open its project.")
-                        Text("Search finds content in this view. Choose a project to load more of its findings and tasks. Open a node's details and choose Focus connections to follow one or two steps of actual links.")
+                        Text("Search finds content in this view. Choose a project to load more of its findings and tasks. Open a node's details and choose Focus to follow one or two steps of actual links.")
                         Text("Save views from the options menu. Bookmarks stay on this iPhone and restore the view using the latest synced data.")
                     }
                     Section("Your data") {
@@ -207,10 +201,6 @@ struct GraphView: View {
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showingInfo = false } } }
             }.presentationDetents([.medium, .large])
         }
-    }
-
-    private var nodePanelTransition: AnyTransition {
-        reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity)
     }
 
     private var controls: some View {
@@ -330,6 +320,22 @@ struct GraphView: View {
         guard node.store == selectedStore,
               visible?.nodes.contains(where: { $0.id == node.id }) == true else { return }
         selection = node
+    }
+
+    private func handleGraphAction(_ action: GraphAction) {
+        switch action {
+        case .focus(let id):
+            focus(on: id)
+        case .openProject(let id):
+            guard let selection, selection.id == id,
+                  let storeId = selection.store, let project = selection.project else { return }
+            projectRoute = ProjectRoute(storeId: storeId, project: project)
+        case .share(let id):
+            guard let selection, selection.id == id else { return }
+            shareText = selection.sourceText ?? selection.label ?? selection.id
+        case .close:
+            selection = nil
+        }
     }
 
     private func resetSelection() {
@@ -506,165 +512,18 @@ struct GraphNodeRef: Codable, Equatable, Identifiable {
     }
 }
 
-private struct GraphNodePanel: View {
-    @Environment(AppModel.self) private var model
-    @Environment(\.dynamicTypeSize) private var typeSize
-    let node: GraphNodeRef
-    let selectedStore: String
-    let expanded: Bool
-    let maxHeight: CGFloat
-    let onToggleExpanded: () -> Void
-    let onClose: () -> Void
-    let onFocus: () -> Void
+private struct ProjectRoute: Identifiable, Hashable {
+    let storeId: String
+    let project: String
+    var id: String { "\(storeId):\(project)" }
+}
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
-            header
-            Group {
-                if expanded {
-                    ScrollView {
-                        nodeText.frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .scrollIndicators(.visible)
-                    .frame(maxHeight: max(88, maxHeight - (typeSize.isAccessibilitySize ? 232 : 180)))
-                } else {
-                    nodeText.lineLimit(4)
-                }
-            }
+private struct ActivityView: UIViewControllerRepresentable {
+    let activityItems: [Any]
 
-            Button(action: onToggleExpanded) {
-                Label(expanded ? "Less" : "More", systemImage: expanded ? "chevron.down" : "chevron.up")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(PhrenTheme.sessionProject)
-                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .trailing)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(expanded ? "Show less" : "Show more")
-
-            if let project = node.project, let storeId = node.store {
-                actions(storeId: storeId, project: project)
-            } else {
-                HStack(spacing: PhrenTheme.Space.small) {
-                    focusButton
-                    shareButton
-                }
-                .labelStyle(.iconOnly)
-            }
-        }
-        .padding(PhrenTheme.Space.medium)
-        .frame(maxWidth: .infinity, maxHeight: maxHeight, alignment: .topLeading)
-        .phrenCard()
-        .phrenElevation()
-        .accessibilityElement(children: .contain)
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
     }
 
-    private var header: some View {
-        HStack(spacing: PhrenTheme.Space.small) {
-            Text(kindTitle)
-                .font(.caption.weight(.medium))
-                .foregroundStyle(PhrenTheme.sessionProject)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 3)
-                .background(PhrenTheme.sessionProject.opacity(0.1), in: Capsule())
-            VStack(alignment: .leading, spacing: 2) {
-                Text(node.project ?? node.label ?? node.id)
-                    .font(.subheadline)
-                    .foregroundStyle(PhrenTheme.textMuted)
-                    .lineLimit(1)
-                if let store = node.store, store != selectedStore {
-                    Text(model.storeName(for: store))
-                        .font(.caption)
-                        .foregroundStyle(PhrenTheme.textMuted)
-                        .lineLimit(1)
-                }
-            }
-            Spacer(minLength: 0)
-            Button(action: onClose) {
-                Image(systemName: "xmark")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(PhrenTheme.textSecondary)
-                    .frame(width: 44, height: 44)
-                    .background(PhrenTheme.surfaceRaised, in: Circle())
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Close node details")
-            .accessibilityIdentifier("graph-node-close")
-        }
-        .frame(minHeight: 44)
-    }
-
-    private var nodeText: some View {
-        Text(text)
-            .font(.body)
-            .foregroundStyle(PhrenTheme.text)
-            .textSelection(.enabled)
-            .accessibilityIdentifier("graph-node-text")
-    }
-
-    @ViewBuilder
-    private func actions(storeId: String, project: String) -> some View {
-        if typeSize.isAccessibilitySize {
-            VStack(spacing: PhrenTheme.Space.small) {
-                HStack(spacing: PhrenTheme.Space.small) {
-                    focusButton
-                    openProject(storeId: storeId, project: project)
-                }
-                HStack(spacing: PhrenTheme.Space.small) {
-                    shareButton
-                    projectSession(storeId: storeId, project: project)
-                }
-            }
-        } else {
-            HStack(spacing: PhrenTheme.Space.small) {
-                focusButton
-                openProject(storeId: storeId, project: project)
-                shareButton
-                projectSession(storeId: storeId, project: project)
-            }
-            .labelStyle(.iconOnly)
-        }
-    }
-
-    private var focusButton: some View {
-        Button(action: onFocus) {
-            Label("Focus connections", systemImage: "point.3.connected.trianglepath.dotted")
-                .frame(maxWidth: .infinity, minHeight: 28)
-        }
-        .buttonStyle(.bordered)
-        .frame(maxWidth: .infinity, minHeight: 44)
-        .accessibilityLabel("Focus connections")
-    }
-
-    private func openProject(storeId: String, project: String) -> some View {
-        NavigationLink {
-            ProjectDetailView(storeId: storeId, project: project)
-        } label: {
-            Label("Open project", systemImage: "folder")
-                .frame(maxWidth: .infinity, minHeight: 28)
-        }
-        .buttonStyle(.bordered)
-        .frame(maxWidth: .infinity, minHeight: 44)
-        .accessibilityLabel("Open project")
-    }
-
-    private var shareButton: some View {
-        ShareLink(item: text) {
-            Label("Share", systemImage: "square.and.arrow.up")
-                .frame(maxWidth: .infinity, minHeight: 28)
-        }
-        .buttonStyle(.bordered)
-        .frame(maxWidth: .infinity, minHeight: 44)
-        .accessibilityLabel("Share")
-    }
-
-    private func projectSession(storeId: String, project: String) -> some View {
-        ProjectSessionActions(storeId: storeId, project: project, presentation: .menu)
-            .buttonStyle(.bordered)
-            .frame(maxWidth: .infinity, minHeight: 44)
-    }
-
-    private var text: String { node.sourceText ?? node.label ?? node.id }
-    private var kindTitle: String { node.isTask ? "Task" : (node.isFinding ? "Finding" : "Project") }
+    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }

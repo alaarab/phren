@@ -21,8 +21,8 @@
   }
   #graph-canvas { position: absolute; inset: 0; }
   #graph-tooltip { position: absolute; }
-  /* SwiftUI provides search, filters, details and camera controls. Desktop
-     overlays would cover most of a phone's canvas and offer unsupported actions. */
+  /* SwiftUI provides search, filters and camera controls. Desktop overlays
+     would cover most of a phone's canvas and offer unsupported actions. */
   .phren-project-nav, .phren-project-panel, .phren-pp-reopen,
   .phren-hud-legend, .phren-hud-stats { display: none !important; }
   #graph-canvas .phren-label { max-width: 132px; overflow: hidden; text-overflow: ellipsis; }
@@ -38,17 +38,134 @@
     pointer-events: none; transition: opacity 200ms ease;
   }
   #graph-status[hidden] { display: none; }
+
+  #graph-dossier {
+    position: absolute;
+    right: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom));
+    left: 12px;
+    z-index: 20;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    max-height: 45%;
+    padding: 12px;
+    overflow: hidden;
+    color: #dbe4ff;
+    background: rgba(8, 10, 22, 0.92);
+    border: 1px solid rgba(103, 232, 249, 0.22);
+    border-radius: 14px;
+    box-shadow: 0 16px 60px rgba(0, 0, 0, 0.6), 0 0 30px rgba(103, 232, 249, 0.05);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    pointer-events: auto;
+  }
+  #graph-dossier[hidden] { display: none; }
+  .dossier-close {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 1;
+    display: grid;
+    place-items: center;
+    box-sizing: border-box;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: 1px solid rgba(103, 232, 249, 0.22);
+    border-radius: 999px;
+    background: rgba(22, 27, 52, 0.9);
+    color: #dbe4ff;
+    font: 18px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  .dossier-eyebrow {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: baseline;
+    gap: 9px;
+    min-width: 0;
+    padding-right: 36px;
+    font: 700 9.5px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+  #dossier-kind { color: #67e8f9; }
+  #dossier-project {
+    overflow: hidden;
+    color: #8b96c9;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  #dossier-text {
+    flex: 1 1 auto;
+    min-height: 0;
+    margin-top: 11px;
+    overflow-y: auto;
+    color: #dbe4ff;
+    font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+    touch-action: pan-y;
+    -webkit-overflow-scrolling: touch;
+    -webkit-user-select: text;
+    user-select: text;
+  }
+  .dossier-actions {
+    display: grid;
+    flex: 0 0 auto;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    padding-top: 12px;
+  }
+  .dossier-actions button {
+    height: 36px;
+    min-width: 0;
+    padding: 0 8px;
+    overflow: hidden;
+    border: 1px solid rgba(103, 232, 249, 0.22);
+    border-radius: 8px;
+    background: rgba(12, 15, 30, 0.78);
+    color: #dbe4ff;
+    font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .dossier-actions button:active, .dossier-close:active {
+    border-color: rgba(103, 232, 249, 0.55);
+    color: #e6f6ff;
+    background: rgba(22, 27, 52, 0.96);
+  }
+
 </style>
 </head>
 <body>
   <div id="graph-canvas" data-fx="off"></div>
   <div id="graph-tooltip"></div>
   <div id="graph-status">Loading graph…</div>
+  <aside id="graph-dossier" role="dialog" aria-label="Node details" aria-hidden="true" hidden>
+    <button class="dossier-close" type="button" aria-label="Close" data-action="close">×</button>
+    <div class="dossier-eyebrow">
+      <span id="dossier-kind"></span>
+      <span id="dossier-project"></span>
+    </div>
+    <div id="dossier-text"></div>
+    <div class="dossier-actions">
+      <button type="button" data-action="focus">Focus</button>
+      <button type="button" data-action="openProject">Open project</button>
+      <button type="button" data-action="share">Share</button>
+    </div>
+  </aside>
 
   <script src="phren-graph.js"></script>
   <script>
   (function () {
     var status = document.getElementById("graph-status");
+    var dossier = document.getElementById("graph-dossier");
+    var dossierKind = document.getElementById("dossier-kind");
+    var dossierProject = document.getElementById("dossier-project");
+    var dossierText = document.getElementById("dossier-text");
+    var selectedNode = null;
     function setStatus(text) {
       if (!text) { status.hidden = true; return; }
       status.hidden = false;
@@ -99,15 +216,52 @@
       clear: function () { window.phrenGraph.clearSelection(); },
     };
 
+    function showDossier(node) {
+      selectedNode = node;
+      dossier.style.display = "";
+      dossier.hidden = false;
+      dossier.setAttribute("aria-hidden", "false");
+      dossierKind.textContent = kindTitle(node);
+      dossierProject.textContent = node.project || node.projectName || node.label || node.id;
+      dossierText.textContent = node.fullLabel || node.label || node.text || node.id;
+      document.body.classList.add("dossier-open");
+    }
+
+    function hideDossier() {
+      selectedNode = null;
+      dossier.hidden = true;
+      dossier.setAttribute("aria-hidden", "true");
+      dossier.style.display = "none";
+      dossierText.textContent = "";
+      document.body.classList.remove("dossier-open");
+    }
+
+    function kindTitle(node) {
+      if (node.kind === "task" || String(node.group || "").indexOf("task-") === 0) return "Task";
+      if (node.kind === "finding" || String(node.group || "").indexOf("topic:") === 0) return "Finding";
+      return "Project";
+    }
+
+    dossier.addEventListener("click", function (event) {
+      var button = event.target.closest("button[data-action]");
+      if (!button || !selectedNode) return;
+      var action = button.getAttribute("data-action");
+      var id = selectedNode.id;
+      if (action === "close") hideDossier();
+      post("graphAction", { action: action, id: id });
+    });
+
     var wired = false;
     function wire() {
       if (wired) return;
       wired = true;
 
       window.phrenGraph.onNodeSelect(function (node) {
+        showDossier(node);
         post("graphSelect", serialize(node));
       });
       window.phrenGraph.onSelectionClear(function () {
+        hideDossier();
         post("graphSelect", null);
       });
     }
