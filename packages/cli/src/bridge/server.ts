@@ -15,7 +15,7 @@ import { paneChatState, paneIdentity, panes, rpc, servers, snapshot, trustedDire
 import { LaunchLimiter } from "./limits.js";
 import { locateProject } from "./locate.js";
 import { launchDirectory, repositoryBranch, repositoryDiff, webServers } from "./projects.js";
-import { BridgeError, bridgeRoot, id, type Json, MAX_FRAME, object, objects, PROTOCOL, serverName, socketPath, startingTargetSchema, type Target, targetFromURL, targetSchema } from "./protocol.js";
+import { BridgeError, bridgeRoot, id, type Json, MAX_FRAME, object, objects, PROTOCOL, type Provider, serverName, socketPath, startingTargetSchema, type Target, targetFromURL, targetSchema } from "./protocol.js";
 import { CodexQuestions } from "./questions.js";
 import { bootedSimulators, type SimulatorAction, simulatorAct, simulatorApps, simulatorScreenshot } from "./simulators.js";
 import { TabActivityStore } from "./tab-activity.js";
@@ -167,7 +167,7 @@ export async function serve(version: string): Promise<void> {
             await validateTarget(target);
             const child = url.searchParams.get("child");
             const { reader, source, session } = child === null ? await conversationReader(target) : await childConversationReader(target, child);
-            const page = await reader.read(before, abort.signal);
+            const page = reader ? await reader.read(before, abort.signal) : emptyPage;
             result = { ...page, type: "older", source, session }; break;
           }
           case "/v1/subagents": {
@@ -286,10 +286,19 @@ export async function serve(version: string): Promise<void> {
   });
   http.requestTimeout = 20_000; http.headersTimeout = 10_000; http.maxHeadersCount = 32;
   const ws = new WebSocketServer({ noServer: true, maxPayload: 65_536, perMessageDeflate: false });
-  async function conversationReader(target: Target) {
-    const reader = new TranscriptReader(await transcriptPath(target.source, target.session), target.source, undefined, agentHooks.changes.view(`${target.source}:${target.session}`));
-    return { reader, source: target.source, session: target.session };
+  /** A conversation the agent has identified but not written yet (Claude
+   * Code creates its file on the first turn) is an empty transcript, not a
+   * missing one: `reader` stays undefined until the file appears. */
+  async function conversationReader(target: Target): Promise<{ reader?: TranscriptReader; source: Provider; session: string }> {
+    try {
+      const reader = new TranscriptReader(await transcriptPath(target.source, target.session), target.source, undefined, agentHooks.changes.view(`${target.source}:${target.session}`));
+      return { reader, source: target.source, session: target.session };
+    } catch (error) {
+      if (error instanceof BridgeError && error.status === 404) return { source: target.source, session: target.session };
+      throw error;
+    }
   }
+  const emptyPage = { entries: [], totalLines: 0, startLine: 0, hasMore: false, reset: true };
   /** The transcript of an agent the conversation spawned. The child is a
    * parent-scoped id from `/v1/subagents`; the file is only ever reached
    * through the relation, never by a path or session the phone names. */
@@ -318,6 +327,7 @@ export async function serve(version: string): Promise<void> {
     let reader: TranscriptReader | undefined, timer: ReturnType<typeof setInterval> | undefined;
     let unwatch: (() => void) | undefined;
     let busy = false, ready = false, first = true;
+    let awaitingTranscript = false, lastTranscriptLookup = 0;
     let initialPane: Json;
     const pending: number[] = [];
     const stop = () => { abort.abort(); clearInterval(timer); unwatch?.(); pending.length = 0; };
@@ -330,12 +340,23 @@ export async function serve(version: string): Promise<void> {
     // each tick, and the frames name the child by its parent-scoped id.
     const child = url.pathname === "/v1/transcripts" ? url.searchParams.get("child") : null;
     let conversation = { source: target.source, session: target.session };
+    // The transcript file of a fresh conversation appears with its first
+    // turn; until then the socket carries an empty backlog and keeps looking.
+    const findTranscript = async () => {
+      if (Date.now() - lastTranscriptLookup < 2_000) return;
+      lastTranscriptLookup = Date.now();
+      const opened = await conversationReader(target);
+      if (opened.reader) { reader = opened.reader; conversation = { source: opened.source, session: opened.session }; awaitingTranscript = false; }
+    };
     const tick = async () => {
       if (busy || !ready || abort.signal.aborted) return; busy = true;
       try {
         if (first || pending.length === 0) {
           const pane = first ? initialPane : await validateTarget(target);
-          if (reader) {
+          if (awaitingTranscript) await findTranscript();
+          if (awaitingTranscript) {
+            if (first) send(client, { ...emptyPage, type: "backlog", ...conversation });
+          } else if (reader) {
             const page = await reader.read(undefined, abort.signal);
             if (first || page.entries.length || page.reset) send(client, { ...page, type: first || page.reset ? "backlog" : "append", ...conversation });
           } else {
@@ -375,10 +396,11 @@ export async function serve(version: string): Promise<void> {
       if (url.pathname === "/v1/transcripts") {
         const opened = child === null ? await conversationReader(target) : await childConversationReader(target, child);
         reader = opened.reader; conversation = { source: opened.source, session: opened.session };
+        awaitingTranscript = child === null && !reader; lastTranscriptLookup = Date.now();
       }
       if (abort.signal.aborted) { stop(); return; }
       ready = true;
-      timer = setInterval(() => { void tick(); }, reader ? 500 : 1500);
+      timer = setInterval(() => { void tick(); }, reader || awaitingTranscript ? 500 : 1500);
       await tick();
     } catch (error) { stop(); throw error; }
   }
