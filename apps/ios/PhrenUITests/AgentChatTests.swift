@@ -213,6 +213,7 @@ final class AgentChatTests: XCTestCase {
         XCTAssertFalse(app.buttons["1 agent running"].exists, "The old agent label no longer takes a composer row")
         XCTAssertTrue(tree.label.contains("1 running"), "The header badge counts only running agents")
         tree.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "codex/device-color")).firstMatch.waitForExistence(timeout: 5))
         let modeledAgent = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "child-agent:", "gpt-5-codex")).firstMatch
         XCTAssertTrue(modeledAgent.waitForExistence(timeout: 5))
         XCTAssertTrue(modeledAgent.label.contains("Claude"), "The model appears beside its provider")

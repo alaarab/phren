@@ -18,6 +18,20 @@ final class AgentChatTests: XCTestCase {
         XCTAssertNil(withoutModel.model)
     }
 
+    func testChildAgentDecodesCheckoutDetails() throws {
+        let both = try JSONDecoder().decode(AgentChild.self, from: Data(#"{"id":"a","provider":"codex","path":"/root/first","callId":"c1","state":"running","worktreeName":"phren-child-wt-ui","branch":"codex/child-worktree-ui","children":[]}"#.utf8))
+        let worktreeOnly = try JSONDecoder().decode(AgentChild.self, from: Data(#"{"id":"b","provider":"codex","path":"/root/second","callId":"c2","state":"running","worktreeName":"phren-child-wt-api","children":[]}"#.utf8))
+        let neither = try JSONDecoder().decode(AgentChild.self, from: Data(#"{"id":"c","provider":"claude","path":"/root/third","callId":"c3","state":"completed","children":[]}"#.utf8))
+        XCTAssertEqual(both.branch, "codex/child-worktree-ui")
+        XCTAssertEqual(both.worktreeName, "phren-child-wt-ui")
+        XCTAssertEqual(both.checkoutLabel, "codex/child-worktree-ui")
+        XCTAssertNil(worktreeOnly.branch)
+        XCTAssertEqual(worktreeOnly.checkoutLabel, "phren-child-wt-api")
+        XCTAssertNil(neither.worktreeName)
+        XCTAssertNil(neither.branch)
+        XCTAssertNil(neither.checkoutLabel)
+    }
+
     func testChildTranscriptReadsSidechainRowsAndRefusesAnotherConversation() throws {
         // A Claude subagent's file marks every row isSidechain. The parent's
         // reader still skips those; a child reader takes them as its turns.

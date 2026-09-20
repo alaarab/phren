@@ -69,7 +69,10 @@ public struct AgentChild: Codable, Equatable, Sendable, Identifiable {
     public let path: String
     public let callId: String
     public let state: State
+    public let worktreeName: String?
+    public let branch: String?
     public let children: [AgentChild]
+    public var checkoutLabel: String? { branch ?? worktreeName }
     public var name: String {
         let leaf = path.split(separator: "/").last.map(String.init) ?? "Agent"
         return leaf.replacingOccurrences(of: "_", with: " ")
