@@ -174,6 +174,18 @@ export async function panes(server: string, workspace: string, tab: string): Pro
       ...await paneChatState(server, p) }))) };
 }
 
+/** The pane a starting target names, if its terminal/process binding still
+ * holds. Status is not checked here: a starting agent's first prompt (folder
+ * trust, a login) is exactly what the phone answers with a key. */
+export async function startingPane(target: StartingTarget): Promise<Json> {
+  const s = await snapshot(target.server);
+  const pane = objects(s.panes).find(p => p.pane_id === target.pane && p.tab_id === target.tab && p.workspace_id === target.workspace && p.agent === target.source);
+  if (!pane) throw new BridgeError(409, "This agent pane changed. Reopen the chat.");
+  const state = await paneChatState(target.server, pane);
+  if (state.sessionId || state.startingToken !== target.startingToken) throw new BridgeError(409, "This starting agent changed. Reopen the chat.");
+  return pane;
+}
+
 export async function validateStartingTarget(target: StartingTarget): Promise<Json> {
   const s = await snapshot(target.server);
   const pane = objects(s.panes).find(p => p.pane_id === target.pane && p.tab_id === target.tab && p.workspace_id === target.workspace && p.agent === target.source);

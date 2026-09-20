@@ -1369,6 +1369,47 @@ final class AgentChatTests: XCTestCase {
     }
 
     @MainActor
+    func testTerminalOnlyPromptIsAnsweredWithKeysFromTheChat() {
+        let app = launch(extra: ["--chat-blocked"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let keys = app.otherElements["chat-answer-keys"]
+        XCTAssertTrue(keys.waitForExistence(timeout: 10), "A prompt the Hook cannot structure still gets an answer row")
+        XCTAssertTrue(app.buttons["chat-answer-key:y"].exists)
+        XCTAssertTrue(app.buttons["chat-answer-key:Escape"].exists)
+        XCTAssertTrue(app.buttons["chat-answer-terminal"].exists, "The terminal stays one tap away")
+        capture(app, "Answer keys for a terminal prompt")
+        app.buttons["chat-answer-key:Down"].tap()
+        XCTAssertTrue(keys.waitForExistence(timeout: 3), "Moving through a menu keeps the row")
+        app.buttons["chat-answer-key:Enter"].tap()
+        XCTAssertTrue(keys.waitForNonExistence(timeout: 10), "Once the agent stops waiting the row goes")
+        XCTAssertFalse(app.staticTexts["chat-delivery-error"].exists)
+    }
+
+    @MainActor
+    func testSlashModelOpensAPickerAndSendsTheArgumentFormWithoutTheTerminal() {
+        let app = launch()
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
+        XCTAssertTrue(composer.waitForExistence(timeout: 8))
+        composer.tap(); composer.typeText("/model")
+        app.buttons["chat-send"].tap()
+        let terra = app.buttons["chat-model:gpt-5.6-terra"]
+        XCTAssertTrue(terra.waitForExistence(timeout: 5), "The /model command opens the phone's own picker")
+        capture(app, "Model picker")
+        terra.tap()
+        let echoed = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "/model gpt-5.6-terra")).firstMatch
+        XCTAssertTrue(echoed.waitForExistence(timeout: 8), "The chosen model goes out as the command's argument form")
+        XCTAssertFalse(app.otherElements["herdr-terminal-header"].exists, "A model choice is answered in the transcript, not in the terminal")
+        XCTAssertTrue(composer.waitForExistence(timeout: 3))
+        // The same picker is one row in the options sheet.
+        app.buttons["Chat options"].tap()
+        XCTAssertTrue(app.buttons["chat-options-model"].waitForExistence(timeout: 5))
+        app.buttons["chat-options-model"].tap()
+        XCTAssertTrue(app.buttons["chat-model:gpt-5.6-sol"].waitForExistence(timeout: 5))
+        app.buttons["chat-model-cancel"].tap()
+    }
+
+    @MainActor
     func testUnevenTranscriptOpensAtItsRealEnd() {
         let app = launch(extra: ["--chat-uneven"])
         app.buttons["live-chat:w7:w7:t9"].tap()

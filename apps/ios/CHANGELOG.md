@@ -15,6 +15,18 @@ number counts up on its own.
 
 ### New
 
+- Prompts an agent draws only in its terminal (folder trust, a yes/no, a
+  menu) can be answered from the chat with a row of keys: Y, N, Enter, the
+  arrows and Esc. The Hook accepts exactly those keys and nothing typed.
+- Typing /model, or Model in the chat options, opens a picker with the
+  agent's usual models and a field for any id; the choice is applied in the
+  transcript without switching to the terminal.
+- Inserting an image from the terminal now uploads it to the computer and
+  types its path at the cursor; the terminal stays open.
+- Sending while dictating starts a fresh recognition segment, so words already
+  sent never come back into the composer.
+- Coming back to a chat after the phone slept re-pins the transcript to its
+  end instead of leaving it partway up the conversation.
 - The chat transcript no longer lands past its end when the keyboard
   appears or goes away, or when a long conversation opens: any offset past
   the last message is pulled back on the next layout.

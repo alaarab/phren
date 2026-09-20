@@ -61,6 +61,20 @@ extension PhrenConnection {
         return try AgentAttachment.uploadedPath(from: data)
     }
 
+    /// Answers a prompt the agent draws in its terminal (a menu, a y/n, a
+    /// trust question) with one of the few keys the Hook accepts. The
+    /// caller cannot supply key sequences or text.
+    public static func answerWithKeys(host: LiveHost, privateKey: Data, target: AgentChatTarget, keys: [AgentAnswerKey]) async throws {
+        guard target.hostID == host.id && target.muxID == host.muxID else { throw PhrenKitError.validation("The chat belongs to another computer.") }
+        guard !keys.isEmpty, keys.count <= 4 else { throw PhrenKitError.validation("Press one key at a time.") }
+        let pane = try await chatPanes(host: host, privateKey: privateKey, workspaceID: target.workspaceID, tabID: target.tabID).validate(target)
+        guard pane.needsAnswer || pane.agentStatus == "unknown" else { throw PhrenKitError.validation("This agent is not waiting for an answer.") }
+        let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: .keys(target, keys: keys))
+        guard (try JSONSerialization.jsonObject(with: data) as? [String: Any])?["ok"] as? Bool == true else {
+            throw PhrenKitError.validation("The key was not confirmed. Check the terminal.")
+        }
+    }
+
     /// Only Escape is exposed. The caller cannot supply terminal key sequences.
     public static func stopChatTurn(host: LiveHost, privateKey: Data, target: AgentChatTarget) async throws {
         guard !target.isStarting, target.hostID == host.id && target.muxID == host.muxID else { throw PhrenKitError.validation("The chat belongs to another computer.") }
@@ -216,6 +230,15 @@ struct GatewayRequest: Sendable {
     }
     static func stop(_ target: AgentChatTarget) throws -> Self {
         Self(path: "/v1/keys", body: try targetBody(target, fields: ["keys": ["Escape"]]))
+    }
+    static func keys(_ target: AgentChatTarget, keys: [AgentAnswerKey]) throws -> Self {
+        if target.isStarting {
+            var route: [String: Any] = targetQuery(target)
+            route.removeValue(forKey: "session")
+            route["starting"] = true; route["startingToken"] = target.startingToken
+            return Self(path: "/v1/keys", body: try JSONSerialization.data(withJSONObject: ["target": route, "keys": keys.map(\.rawValue)], options: [.sortedKeys]))
+        }
+        return Self(path: "/v1/keys", body: try targetBody(target, fields: ["keys": keys.map(\.rawValue)]))
     }
     static func prompt(_ target: AgentChatTarget, text: String) throws -> Self {
         if target.isStarting {

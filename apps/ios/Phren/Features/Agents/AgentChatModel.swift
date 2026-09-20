@@ -159,6 +159,8 @@ final class AgentChatModel {
     var deliveryError: String?
     var loading = true
     var connected = false
+    /// Counts reconnect backlogs; the view pins to the end on each when following.
+    var reconnectRevision = 0
     var sending = false
     var loadingHistory = false
     var stopping = false
@@ -410,6 +412,11 @@ final class AgentChatModel {
         if frame.messages.contains(where: { $0.line > submittedAfterLine && $0.role != .user }) { awaitingReply = false }
         if !progressConnected, !frame.progressEvents.isEmpty { acceptProgress(frame) }
         acceptContext(frame)
+        // A backlog after the transcript was already showing is a reconnect
+        // (the phone slept, the link dropped). The rows are re-laid out from
+        // scratch, which leaves the scroll offset pointing somewhere earlier
+        // in the conversation; the view re-pins if it was following the end.
+        if frame.kind == .backlog, hasTranscript { reconnectRevision &+= 1 }
         mergeHistory(frame); hasTranscript = true; connected = true; receivedAt = .now; error = nil; loading = false
         reconcileHandedOffQueue()
         scheduleDrain()
@@ -553,6 +560,20 @@ final class AgentChatModel {
     }
 
     var historyError: String?
+
+    /// One key into the agent's terminal for a prompt only it can see. The
+    /// row stays until the pane's status leaves "needs answer".
+    func answer(_ session: LiveAgentSession, key: AgentAnswerKey) async {
+        guard let target, !answering else { return }
+        answering = true; deliveryError = nil
+        defer { answering = false }
+        do {
+            #if DEBUG && targetEnvironment(simulator)
+            if AgentChatFixture.enabled { try await AgentChatFixture.answer(target, key: key); return }
+            #endif
+            try await PhrenConnection.answerWithKeys(host: session.host, privateKey: try DeviceSSHKey.load(session.host.id), target: target, keys: [key])
+        } catch { deliveryError = error.localizedDescription }
+    }
 
     func showLatest() {
         history = .init(); reveal.finish(); hasTranscript = false

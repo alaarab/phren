@@ -555,6 +555,12 @@ import UIKit
         return try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: ["type": "backlog", "source": target.source,
                                                                                     "entries": entries, "startLine": flag("--chat-history") ? 20 : 0, "totalLines": (flag("--chat-history") ? 20 : 0) + entries.count, "hasMore": flag("--chat-history")]), source: target.source)
     }
+    static var answeredKeys: [String] = []
+    static func answer(_ target: AgentChatTarget, key: AgentAnswerKey) async throws {
+        try await Task.sleep(for: .milliseconds(150))
+        answeredKeys.append(key.rawValue)
+        if key == .enter || key == .yes || key == .no { answered = true }
+    }
     static func send(_ target: AgentChatTarget, text: String) async throws {
         try await Task.sleep(for: .milliseconds(250))
         sendAttempts += 1

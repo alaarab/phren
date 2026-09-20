@@ -114,6 +114,7 @@ struct AgentChatView: View {
     @State private var showingAgentSwitcher = false
     @State private var showingUsage = false
     @State private var showingOptions = false
+    @State private var showingModelPicker = false
     @State private var showingChildAgents = false
     @State private var childAgents: [AgentChild] = []
     private struct OpenedChild: Identifiable, Hashable {
@@ -162,6 +163,18 @@ struct AgentChatView: View {
             dictationPrefix = dictationBase
             do { dictating = true; try dictation.start(); model.deliveryError = nil } catch { dictating = false; model.deliveryError = error.localizedDescription }
         }
+    }
+    /// The draft is leaving as a message while the mic stays on. The
+    /// recogniser's segment still holds every word said so far and would put
+    /// them straight back into the empty composer on its next partial
+    /// result; start a fresh segment with nothing banked instead, so what
+    /// follows is a new message.
+    private func restartDictationSegment() {
+        guard dictating else { return }
+        dictating = false
+        dictation.stop()
+        dictationBase = ""; dictationPrefix = ""; dictationPreview = nil
+        do { try dictation.start(); dictating = true } catch { model.deliveryError = error.localizedDescription }
     }
     /// Stops and preserves the raw words in the draft. When opted in, Apple
     /// Intelligence prepares a candidate that remains separate until chosen.
@@ -415,6 +428,9 @@ struct AgentChatView: View {
                 .onChange(of: model.imagesByMessage) { _, _ in
                     if #unavailable(iOS 18.0), atBottom && !model.loadingHistory { pinToBottom(proxy) }
                 }
+                .onChange(of: model.reconnectRevision) { _, _ in
+                    if atBottom && !model.loadingHistory { pinToBottom(proxy) }
+                }
                 .onChange(of: composing) { _, _ in
                     // Focus changes start a keyboard/safe-area transaction.
                     // Resolve the bottom anchor on the next run loop, after
@@ -625,6 +641,13 @@ struct AgentChatView: View {
         .onChange(of: scenePhase) { _, phase in if phase != .active { stopDictation() } }
         .onDisappear { dictationTask?.cancel(); cleanupTask?.cancel(); dictating = false; if dictation.isRecording { dictation.stop() } }
         .sheet(isPresented: $showingOptions) { chatOptionsSheet }
+        .sheet(isPresented: $showingModelPicker) {
+            ChatModelPickerSheet(source: model.target?.source ?? "", current: model.modelName) { command in
+                showingModelPicker = false
+                model.draft = command
+                sendDraft(handoffCommands: false)
+            }
+        }
         .sheet(isPresented: $showingUsage) { usageSheet }
         .sheet(isPresented: $showingChildAgents) {
             if let target = model.target { ChatSubagentsView(session: session, target: target, agents: childAgents) }
@@ -917,6 +940,13 @@ struct AgentChatView: View {
                         Button { afterOptions { model.chooseAnother(); refresh = UUID() } } label: { Label("Choose another agent", systemImage: "person.2") }
                             .disabled(model.sending)
                     }
+                    if AgentModelChoice.supportsPicker(source: model.target?.source ?? "") {
+                        Button { afterOptions { showingModelPicker = true } } label: {
+                            Label(model.modelName.map { "Model · \($0)" } ?? "Model", systemImage: "cpu")
+                        }
+                        .disabled(model.sending || model.target == nil)
+                        .accessibilityIdentifier("chat-options-model")
+                    }
                 }
                 if let project {
                     Section("Project") {
@@ -1002,16 +1032,36 @@ struct AgentChatView: View {
                                  choose: { model.draft = $0 + " " }, openAll: openCommandMenu)
             }
             if model.needsAnswer && model.approval == nil && model.question == nil {
-                HStack(spacing: 8) {
-                    if answersInComposer {
-                        Text("Agent needs input — check the terminal prompt")
+                // A prompt only the terminal shows: answer it with the keys
+                // such prompts take, without leaving the chat.
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        Text("Agent is waiting for an answer in its terminal")
                             .font(.caption).foregroundStyle(PhrenTheme.warning)
+                        Spacer(minLength: 4)
+                        NavigationLink { HerdrTerminalView(host: session.host, session: session, target: model.target) } label: {
+                            Label("Terminal", systemImage: "terminal")
+                                .font(.caption).foregroundStyle(PhrenTheme.warning)
+                        }.accessibilityIdentifier("chat-answer-terminal")
                     }
-                    NavigationLink { HerdrTerminalView(host: session.host, session: session, target: model.target) } label: {
-                        Label("Open terminal", systemImage: "terminal")
-                            .font(.caption).foregroundStyle(PhrenTheme.warning)
-                    }.accessibilityIdentifier("chat-answer-terminal")
+                    HStack(spacing: 6) {
+                        ForEach(AgentAnswerKey.row) { key in
+                            Button { sendTask = Task { await model.answer(session, key: key) } } label: {
+                                Text(key.label)
+                                    .font(.system(.footnote, design: .monospaced).weight(.semibold))
+                                    .frame(minWidth: 40, minHeight: 36)
+                                    .padding(.horizontal, 6)
+                                    .background(PhrenTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 9))
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(model.answering || !active || !model.connected)
+                            .accessibilityLabel(key.spoken)
+                            .accessibilityIdentifier("chat-answer-key:\(key.rawValue)")
+                        }
+                    }
                 }
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("chat-answer-keys")
             }
             if let error = model.deliveryError { Text(error).font(.caption).foregroundStyle(PhrenTheme.warning).accessibilityIdentifier("chat-delivery-error") }
             if let error = model.draftStorageError { Text(error).font(.caption).foregroundStyle(PhrenTheme.warning).accessibilityIdentifier("chat-draft-storage-error") }
@@ -1074,21 +1124,18 @@ struct AgentChatView: View {
                         .disabled(model.target == nil || model.sending)
                     Button {
                         composing = false
+                        let trimmed = model.draft.trimmingCharacters(in: .whitespacesAndNewlines)
                         if showsStop {
                             sendTask = Task { await model.stop(session) }
-                        } else if model.draft.trimmingCharacters(in: .whitespacesAndNewlines) == "/", model.attachments.isEmpty {
+                        } else if trimmed == "/", model.attachments.isEmpty {
                             openCommandMenu()
+                        } else if trimmed == "/model", model.attachments.isEmpty, AgentModelChoice.supportsPicker(source: model.target?.source ?? "") {
+                            // The agent's own /model is a terminal menu; the
+                            // phone offers the same choice as a sheet and sends
+                            // the argument form, which applies without one.
+                            showingModelPicker = true
                         } else {
-                            let isCommand = AgentSlashCommand.isCommand(model.draft), pane = model.target?.paneID
-                            sendTask = Task {
-                                await model.send(session)
-                                if model.deliveryError == nil, !isCommand { PhrenAppShortcuts.donateMessage(to: session) }
-                                if isCommand, model.deliveryError == nil, let pane {
-                                    commandDestination = .init(paneID: pane, menu: false)
-                                    // /new, /clear and /resume may change the session ID.
-                                    model.chooseAnother()
-                                }
-                            }
+                            sendDraft()
                         }
                     } label: {
                         Group {
@@ -1120,6 +1167,29 @@ struct AgentChatView: View {
         .buttonStyle(.plain).foregroundStyle(PhrenTheme.chatText)
         .padding(.horizontal, 10).padding(.top, 6).padding(.bottom, 8)
         .background(PhrenTheme.chatCanvas.ignoresSafeArea(.container, edges: .bottom))
+    }
+    /// Sends the draft. A slash command normally hands off to the terminal,
+    /// where the agent draws its menu; a command with its answer already in
+    /// it (`/model sonnet`) is answered in the transcript and stays here.
+    private func sendDraft(handoffCommands: Bool = true) {
+        let isCommand = AgentSlashCommand.isCommand(model.draft), pane = model.target?.paneID
+        if dictating {
+            // Bank the words the recogniser has not committed yet, then let
+            // the message go.
+            let spoken = SpeechSettings.apply(dictation.bestTranscript)
+            if !spoken.isEmpty { model.draft = dictationPrefix + spoken }
+            model.draft = model.draft.trimmingCharacters(in: .whitespaces)
+            restartDictationSegment()
+        }
+        sendTask = Task {
+            await model.send(session)
+            if model.deliveryError == nil, !isCommand { PhrenAppShortcuts.donateMessage(to: session) }
+            if isCommand, handoffCommands, model.deliveryError == nil, let pane {
+                commandDestination = .init(paneID: pane, menu: false)
+                // /new, /clear and /resume may change the session ID.
+                model.chooseAnother()
+            }
+        }
     }
     private struct CommandDestination: Hashable { let paneID: String; let menu: Bool }
     private func openCommandMenu() {

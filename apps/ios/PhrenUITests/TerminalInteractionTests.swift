@@ -194,7 +194,7 @@ final class TerminalInteractionTests: XCTestCase {
     }
 
     @MainActor
-    func testCtrlHoldUploadsImageToTheCurrentTerminalAgent() throws {
+    func testCtrlHoldUploadsImageIntoTheTerminalAndStaysThere() throws {
         let app = launch("--terminal-uploads-fixture")
         app.buttons["Ctrl"].press(forDuration: 0.7)
         XCTAssertTrue(app.buttons["Uploads shortcuts"].waitForExistence(timeout: 5))
@@ -202,16 +202,18 @@ final class TerminalInteractionTests: XCTestCase {
         app.buttons["Attach from Photos"].tap()
         XCTAssertTrue(app.buttons["Add test image"].waitForExistence(timeout: 5))
         app.buttons["Add test image"].tap()
-        XCTAssertTrue(app.buttons["Preview Screenshot.png"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["chat-location"].label.contains("Other work"), "Resolve current focus, not the first workspace or original terminal tab")
-        XCTAssertTrue(app.staticTexts["chat-location"].label.contains("Test Mac"))
-        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Received in codex")).firstMatch.exists)
-        capture(app, "Image draft opened from Herdr on the current agent")
-        app.buttons["chat-send"].tap()
-        XCTAssertTrue(app.buttons["View attached Screenshot.png"].waitForExistence(timeout: 8))
-        app.buttons["chat-close"].tap()
-        XCTAssertTrue(app.otherElements["herdr-terminal-header"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.keyboards.firstMatch.exists)
+        // The picture is stored on the computer and its path typed at the
+        // cursor; the terminal stays and no chat opens.
+        let deadline = Date().addingTimeInterval(8)
+        var typed = try state(app).input
+        while !typed.contains(".png") && Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            typed = try state(app).input
+        }
+        XCTAssertTrue(typed.contains("uploads/files/phren-") && typed.hasSuffix(".png "), "The uploaded file's path is typed into the terminal: \(typed)")
+        XCTAssertTrue(app.otherElements["herdr-terminal-header"].exists)
+        XCTAssertFalse(app.buttons["chat-send"].exists, "Attaching from the terminal must not open the chat")
+        capture(app, "Image uploaded into the terminal")
     }
 
     @MainActor
@@ -397,10 +399,18 @@ final class TerminalInteractionTests: XCTestCase {
     private func launchToHost(_ fixture: String) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--session-details-fixture", "--native-chat-fixture", fixture]
-        app.launch()
-        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 15))
-        app.tabBars.buttons["Agents"].tap()
-        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Test Mac,")).firstMatch.tap()
+        let host = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Test Mac,")).firstMatch
+        // The first launch after a simulator reset can come up before the
+        // fixture bootstrap finishes; a relaunch always lands.
+        for attempt in 0..<2 {
+            app.launch()
+            XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 15))
+            app.tabBars.buttons["Agents"].tap()
+            if host.waitForExistence(timeout: attempt == 0 ? 12 : 25) { break }
+            if attempt == 0 { app.terminate() }
+        }
+        XCTAssertTrue(host.waitForExistence(timeout: 5), "The fixture computer must appear in Agents")
+        host.tap()
         return app
     }
 

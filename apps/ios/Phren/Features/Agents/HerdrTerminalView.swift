@@ -352,6 +352,8 @@ struct HerdrTerminalView: View {
     @State private var shortcuts = false
     @State private var reconnect = UUID()
     @State private var uploadRequest: TerminalUploadRequest?
+    @State private var uploadTask: Task<Void, Never>?
+    @State private var uploadStatus: String?
     @State private var chatOpen: ChatOpen?
     @State private var showingAgents = false
     @State private var showingDictation = false
@@ -399,12 +401,17 @@ struct HerdrTerminalView: View {
                 Label(error, systemImage: "wifi.exclamationmark").font(.caption).foregroundStyle(PhrenTheme.warning).padding(.horizontal, 12).padding(.bottom, 8)
             }
             if currentHost != host { Text("Connection settings changed. Reopen Herdr from the computer list.").font(.footnote).padding() }
+            if let uploadStatus {
+                Text(uploadStatus).font(.caption).foregroundStyle(PhrenTheme.textMuted)
+                    .padding(.horizontal, 12).padding(.bottom, 4)
+                    .accessibilityIdentifier("terminal-upload-status")
+            }
             HerdrTerminalSurface(model: model).frame(maxWidth: .infinity, maxHeight: .infinity).padding(.horizontal, 4)
             if !toolbarHidden {
                 TerminalControls(terminal: model.terminal, hostID: host.id,
                                  source: paneAgent ?? "", enabled: model.connected && active, control: $model.control,
                                  shortcuts: $shortcuts, send: model.input,
-                                 attach: { uploadRequest = TerminalUploadRequest(attachments: $0) },
+                                 attach: { uploadIntoTerminal($0) },
                                  openAgents: { showingAgents = true }, openChat: openChat)
                     .padding(.bottom, 6)
             }
@@ -519,4 +526,43 @@ struct HerdrTerminalView: View {
     }
 
     private struct Run: Equatable { let active: Bool; let reconnect: UUID }
+}
+
+extension HerdrTerminalView {
+    /// An image picked from the terminal stays in the terminal: it is stored
+    /// on the computer through the Hook and its path is typed at the cursor,
+    /// which is what a pasted screenshot means to an agent reading a prompt.
+    /// Nothing is sent; the person finishes the line and presses Return.
+    fileprivate func uploadIntoTerminal(_ attachments: [AgentAttachment]) {
+        guard !attachments.isEmpty else { return }
+        uploadTask?.cancel()
+        uploadTask = Task {
+            uploadStatus = attachments.count == 1 ? "Uploading image…" : "Uploading \(attachments.count) images…"
+            var paths: [String] = []
+            do {
+                #if DEBUG && targetEnvironment(simulator)
+                if AgentChatFixture.enabled {
+                    try await Task.sleep(for: .milliseconds(200))
+                    paths = attachments.map { "~/.local/share/phren/bridge/uploads/files/\($0.uploadName)" }
+                }
+                #endif
+                if paths.isEmpty {
+                    let key = try DeviceSSHKey.load(host.id)
+                    for attachment in attachments {
+                        try Task.checkCancellation()
+                        paths.append(try await PhrenConnection.uploadFile(host: host, privateKey: key, name: attachment.uploadName, data: attachment.data))
+                    }
+                }
+            } catch is CancellationError {
+                uploadStatus = nil; return
+            } catch {
+                uploadStatus = error.localizedDescription
+                Task { try? await Task.sleep(for: .seconds(6)); if uploadStatus == error.localizedDescription { uploadStatus = nil } }
+                return
+            }
+            guard !Task.isCancelled else { return }
+            model.input(paths.map { $0.contains(" ") ? "'\($0)'" : $0 }.joined(separator: " ") + " ")
+            uploadStatus = nil
+        }
+    }
 }
