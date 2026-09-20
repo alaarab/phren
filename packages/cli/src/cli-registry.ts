@@ -515,6 +515,27 @@ export const REGISTRY: Command[] = [
 
   // Config
   {
+    name: "modules",
+    topic: "config",
+    usage: "phren modules list [--profile <name>]",
+    summary: "List configured modules (registration is unchanged)",
+    subcommands: [{ name: "list", usage: "phren modules list [--profile <name>]", summary: "Show built-in modules and configured enablement" }],
+    run: async (args, ctx) => {
+      if (args[0] !== "list" || (args.length !== 1 && (args.length !== 3 || args[1] !== "--profile" || !args[2] || args[2].startsWith("-")))) {
+        console.error("Usage: phren modules list [--profile <name>]");
+        return 1;
+      }
+      const { BUILTIN_MODULES, enabled } = await import("./modules/registry.js");
+      const profile = args[2] ?? ctx.profile();
+      const selected = new Set(enabled(ctx.phrenPath(), profile).map(module => module.name));
+      console.log(`Configured modules for profile ${profile}. Registration is unchanged in this release.`);
+      console.log("Module\tVersion\tConfigured");
+      for (const module of BUILTIN_MODULES) {
+        console.log(`${module.name}\t${module.version}\t${selected.has(module.name) ? "enabled" : "disabled"}`);
+      }
+    },
+  },
+  {
     name: "config",
     topic: "config",
     usage: "phren config <subcommand>",
