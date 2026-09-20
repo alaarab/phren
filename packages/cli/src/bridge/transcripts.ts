@@ -381,9 +381,9 @@ function unwrapUserText(message: Json): Json {
 }
 
 /** Public conversation/tool events and real usage only. Never export private reasoning. */
-export function visibleEvent(raw: Json, source: Provider, includeSidechain = false): Json | undefined {
+export function visibleEvent(raw: Json, source: Provider, includeSidechain = false, cwd?: string): Json | undefined {
   if (source === "opencode") {
-    const runEvent = visibleOpenCodeRunEvent(raw); if (runEvent) return runEvent;
+    const runEvent = visibleOpenCodeRunEvent(raw, cwd); if (runEvent) return runEvent;
   }
   if (source === "phren" || source === "opencode") {
     // phren-agent's event log (experimental/agent/src/session/log.ts): the
@@ -483,7 +483,7 @@ export class TranscriptReader {
   private revision?: string;
   private nextLine = 0;
   constructor(readonly file: string, readonly source: Provider, private readonly imageLine?: number, private readonly changes?: ChangeLookup,
-              private readonly includeSidechain = false) {}
+              private readonly includeSidechain = false, private readonly cwd?: string) {}
   async read(before?: number, signal?: AbortSignal): Promise<{ entries: Entry[]; totalLines: number; startLine: number; hasMore: boolean; reset: boolean }> {
     return withTranscriptIndex(this.file, async (handle, index) => {
       const reset = this.revision !== index.revision;
@@ -501,7 +501,7 @@ export class TranscriptReader {
         signal?.throwIfAborted();
         let entry: Entry | undefined;
         try {
-          let raw = row.bytes && visibleEvent(object(JSON.parse(row.bytes.toString())), this.source, this.includeSidechain);
+          let raw = row.bytes && visibleEvent(object(JSON.parse(row.bytes.toString())), this.source, this.includeSidechain, this.cwd);
           // A child agent's transcript is the sidechain. Its rows are that
           // conversation's own turns, not something for the reader to skip.
           if (raw && this.includeSidechain && raw.isSidechain === true) { const { isSidechain: _sidechain, ...own } = raw; raw = own; }
@@ -515,7 +515,9 @@ export class TranscriptReader {
           if (before === undefined && ids.some(id => this.changes!.pending(id))) { held = row.line; entries.length = 0; bytes = 0; cursor = row.line; continue; }
           const attached: Json = {};
           for (const id of ids) { const files = await this.changes.changes(id); if (files) attached[id] = files; }
-          if (Object.keys(attached).length) entry.raw = { ...entry.raw, phren_changes: attached };
+          // A row that already carries a worker's own diff (OpenCode edit,
+          // write or patch) keeps it; the shell lookup only fills in the rest.
+          if (Object.keys(attached).length) entry.raw = { ...entry.raw, phren_changes: { ...attached, ...object(entry.raw.phren_changes) } };
         }
         if (entry) {
           const size = Buffer.byteLength(JSON.stringify(entry));

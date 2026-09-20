@@ -90,6 +90,8 @@ WebSockets on the same socket.
 | `GET, POST /v1/files` | List/store files sent by the phone outside any conversation. |
 | `GET /v1/uploads/image` | Bytes of one image the phone uploaded, by absolute `path`; only a real file inside the Hook's own uploads folder whose bytes are an image, at most 8 MiB. |
 | `POST /v1/diff` | Pane repository diff and authorized optional `paths`, grouped by repository. With `child=<id>` from `/v1/subagents` it returns that spawned agent's whole repository diff instead: its own worktree for a fan-out, the parent's checkout otherwise. |
+| `POST /v1/git/status`, `/log`, `/branches`, `/pulls`, `/tree` | Read-only Git data for the phone's Changes screen: working-tree status per section with `+/-` counts, recent commits with refs and the uncommitted summary, local and remote branches with upstream ahead/behind, open pull requests through `gh`, and a one-level tracked/untracked tree. All take the full target and an optional `child=<id>` resolved exactly as `/v1/diff`; the repository is the pane's trusted directory (or the child's worktree), so a non-repository is 409. `/log` accepts `limit` (1–200, default 60) and an optional commit/branch `ref`; unknown refs are 400. `/branches.current` is null for a detached HEAD. `/pulls` answers `{ available: false, pulls: [] }` when `gh` is missing or not signed in. |
+| `POST /v1/git/stage`, `/unstage`, `/discard` | Stage, unstage, or discard up to 64 repo-relative paths. `discard` is destructive (the phone confirms first): tracked files go back to the index and untracked files are removed with `git clean -f` (never `-d`, never `-x`). Every path must be relative, free of `..`, not start with `-`, and resolve through `realpath` inside the repository root, including existing ancestors of deleted paths. All paths are validated before a write begins. |
 | `GET /v1/web-servers` | Discover local web servers; discovery does not constrain the SSH web relay. |
 | `GET /v1/simulators`, `/v1/simulators/apps`, `/v1/simulators/screenshot` | Booted simulators, installed apps and a selected device screenshot on macOS. |
 | `POST /v1/simulators/action` | Validated simulator lifecycle, launch, URL, tap, home/lock and text actions. |
@@ -112,6 +114,16 @@ existing parent. Relative Git pathspecs starting with `:` are rejected, and
 file paths passed to Git are literal pathspecs. Merely being somewhere under home
 does not grant access to a second repository. Diff responses contain file patches,
 not just status/provenance.
+
+The Git routes act on the same repository as `/v1/diff`, so they inherit its
+pane/child binding: a path the phone sends is never used to choose the
+repository. `stage`, `unstage` and `discard` take 1..64 repo-relative paths that
+are rejected (400) if absolute, containing `..`, or starting with `-`, and
+return 403 if they still resolve outside the root; they are passed to Git as
+literal pathspecs. Status counts come from `git diff --numstat` and
+`git diff --cached --numstat`, with untracked files counting their lines as
+additions. Git commands run with `GIT_OPTIONAL_LOCKS=0` and a 10-second timeout;
+`gh` runs with a 15-second timeout and its absence is reported, not thrown.
 
 Uploads remain limited to 8 MiB each, 256 MiB total, and 14-day retention. Image
 extensions require matching image bytes. Files are stored in private bridge

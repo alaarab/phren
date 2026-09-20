@@ -107,6 +107,37 @@ export async function readClaudeModels(now = Date.now()): Promise<AgentModel[]> 
   return models.map(model => model.id === configured ? { ...model, isDefault: true } : model);
 }
 
+/** `opencode models` prints one `provider/model` id per line. The Go plan's
+ * models sit under `opencode-go/`, Zen's under `opencode/`, and everything
+ * else under the gateway it came from; the configured default is marked. */
+export async function readOpenCodeModels(executable = "opencode", configDir = path.join(homedir(), ".config/opencode")): Promise<AgentModel[]> {
+  const listed = await new Promise<string>(resolve => {
+    const child = spawn(executable, ["models"], { cwd: homedir(), stdio: ["ignore", "pipe", "ignore"] });
+    let out = "", done = false;
+    const finish = () => { if (!done) { done = true; clearTimeout(timer); resolve(out); } };
+    const timer = setTimeout(() => { child.kill("SIGTERM"); finish(); }, 12_000);
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => { if (out.length < 262_144) out += chunk; });
+    child.on("error", finish); child.on("exit", finish);
+  });
+  const ids = [...new Set(listed.split(/\r?\n/).map(line => line.trim()).filter(line => /^[a-z0-9~.-]+\/[^\s]+$/i.test(line)))].slice(0, 400);
+  if (!ids.length) return [];
+  let configured: string | undefined;
+  for (const file of ["opencode.json", "opencode.jsonc"]) {
+    try {
+      const text = await readFile(path.join(configDir, file), "utf8");
+      const model = /"model"\s*:\s*"([^"]+)"/.exec(text)?.[1];
+      if (model) { configured = model.slice(0, 200); break; }
+    } catch { /* No config means no default to mark. */ }
+  }
+  const rank = (id: string) => id.startsWith("opencode-go/") ? 0 : id.startsWith("opencode/") ? 1 : 2;
+  return ids.sort((a, b) => rank(a) - rank(b) || a.localeCompare(b)).map(id => {
+    const provider = id.slice(0, id.indexOf("/")), name = id.slice(id.indexOf("/") + 1);
+    const description = provider === "opencode-go" ? "OpenCode Go plan." : provider === "opencode" ? (name.endsWith("-free") ? "OpenCode Zen, free." : "OpenCode Zen, per token.") : `Through ${provider}.`;
+    return { id, name, description, ...(id === configured ? { isDefault: true } : {}) };
+  });
+}
+
 /** "claude-fable-5-1" reads as "Fable 5.1"; a date suffix is dropped. */
 export function claudeName(id: string): string {
   const parts = id.replace(/^claude-/, "").replace(/-\d{8}$/, "").replace(/\[1m\]$/, "").split("-");
@@ -119,11 +150,12 @@ export function claudeName(id: string): string {
 /** Catalogues change rarely and app-server takes seconds to start. */
 export class ModelCatalog {
   private cache = new Map<string, { at: number; value: Promise<AgentModel[]> }>();
-  constructor(private readonly codex = () => readCodexModels(), private readonly claude = () => readClaudeModels()) {}
+  constructor(private readonly codex = () => readCodexModels(), private readonly claude = () => readClaudeModels(),
+              private readonly opencode = () => readOpenCodeModels()) {}
   list(source: string): Promise<AgentModel[]> {
     const cached = this.cache.get(source);
     if (cached && Date.now() - cached.at < 600_000) return cached.value;
-    const value = (source === "codex" ? this.codex() : source === "claude" ? this.claude() : Promise.resolve([])).catch(() => [] as AgentModel[]);
+    const value = (source === "codex" ? this.codex() : source === "claude" ? this.claude() : source === "opencode" ? this.opencode() : Promise.resolve([])).catch(() => [] as AgentModel[]);
     this.cache.set(source, { at: Date.now(), value });
     return value;
   }

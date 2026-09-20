@@ -709,8 +709,9 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     cleared.terminate();
   });
   it("tells the overview what a working agent is doing", async () => {
+    await appendFile(record, JSON.stringify({ type: "turn_context", payload: { model: "gpt-6-astra" } }) + "\n");
     const before = await api("/v1/workspaces");
-    expect(before.data.groups[0].children[0]).toMatchObject({ currentStep: "Writing a reply" });
+    expect(before.data.groups[0].children[0]).toMatchObject({ currentStep: "Writing a reply", model: "gpt-6-astra" });
     await appendFile(record, JSON.stringify({ type: "response_item", payload: { type: "function_call", name: "shell", call_id: "s1", arguments: JSON.stringify({ command: ["bash", "-lc", "swift build"] }) } }) + "\n");
     expect((await api("/v1/workspaces")).data.groups[0].children[0].currentStep).toBe("shell: swift build");
     agentStatus = "idle";
@@ -747,7 +748,10 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     const claude = await api("/v1/models?source=claude");
     expect(claude.status).toBe(200);
     expect(claude.data.models.map((m: any) => m.id)).toEqual(expect.arrayContaining(["fable", "opus", "sonnet", "haiku"]));
-    expect((await api("/v1/models?source=opencode")).data).toEqual({ models: [] });
+    // OpenCode's list comes from its own binary: every id names its provider,
+    // and a computer without opencode simply offers nothing.
+    const opencode = (await api("/v1/models?source=opencode")).data.models;
+    expect(opencode.every((m: any) => /^[^/]+\/.+/.test(m.id) && typeof m.name === "string")).toBe(true);
     expect((await api("/v1/models?source=../etc")).data).toEqual({ models: [] });
   });
   it("presses answer keys only while the agent waits, and never anything typed", async () => {
@@ -890,6 +894,20 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
       expect(JSON.stringify(diff.data.files)).not.toContain(worktree);
       expect((await api("/v1/diff", { target, child: "0".repeat(32) })).status).toBe(404);
     } finally { await rm(worktree, { recursive: true, force: true }); }
+  });
+  it("serves git routes for the pane's repository and refuses them outside one", async () => {
+    // The mock pane's cwd is the hook root, which is not a repository yet.
+    expect((await api("/v1/git/status", { target })).status).toBe(409);
+    await execFileAsync("git", ["-C", root, "init", "-q"]);
+    const status = await api("/v1/git/status", { target });
+    expect(status.status, JSON.stringify(status.data)).toBe(200);
+    expect(typeof status.data.branch).toBe("string");
+    expect(Array.isArray(status.data.files)).toBe(true);
+    const tree = await api("/v1/git/tree", { target });
+    expect(tree.status).toBe(200);
+    expect(Array.isArray(tree.data.entries)).toBe(true);
+    expect((await api("/v1/git/stage", { target, paths: ["../x"] })).status).toBe(400);
+    expect((await api("/v1/git/stage", { target, paths: ["/etc/passwd"] })).status).toBe(400);
   });
   it("streams incremental transcript and real usage frames, then closes after a conversation replacement", async () => {
     const query = new URLSearchParams(target).toString();
