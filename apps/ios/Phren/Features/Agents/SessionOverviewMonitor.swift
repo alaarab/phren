@@ -95,6 +95,11 @@ final class SessionOverviewMonitor {
         computers.isEmpty || computers.contains { ($0.monitor.snapshot?.capabilities?.allows(.schedules)) ?? true }
     }
 
+    /// The Code cell shows when any connected computer serves the code index.
+    func allowsCode() -> Bool {
+        computers.isEmpty || computers.contains { ($0.monitor.snapshot?.capabilities?.allows(.code)) ?? true }
+    }
+
     func stopRunning() {
         ownedRun?.cancel(); ownedRun = nil; ownedHosts = []
     }

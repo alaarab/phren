@@ -10,13 +10,14 @@ public struct LiveCapabilities: Codable, Equatable, Sendable {
     public let schedules: Bool?
     public let dispatch: Bool?
     public let codeMap: Bool?
+    public let code: Bool?
     public let terminal: String?
     public let shell: String?
     public let webPreview: String?
     public let approvalPush: String?
     public let providers: [String]?
 
-    public enum Feature: String, Sendable { case tasks, schedules, changes, dispatch, codeMap }
+    public enum Feature: String, Sendable { case tasks, schedules, changes, dispatch, codeMap, code }
     public func allows(_ feature: Feature) -> Bool {
         switch feature {
         case .tasks: tasks == true
@@ -24,6 +25,7 @@ public struct LiveCapabilities: Codable, Equatable, Sendable {
         case .changes: git == true || (git == nil && diff == true)
         case .dispatch: dispatch == true
         case .codeMap: codeMap == true
+        case .code: code == true
         }
     }
 }

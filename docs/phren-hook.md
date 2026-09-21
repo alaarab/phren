@@ -72,6 +72,9 @@ No extra request per iPhone row is needed.
   inbox command (`codex queue --thread … --message …`). Synchronous questions
   and unsupported provider interactions open in Phren's terminal.
 - Git diffs, local HTTP app discovery, and SSH browser previews.
+- The project's code index, when the `code` module is on and the project has
+  been indexed: symbol search, file outlines, definitions, references and the
+  hottest and coldest symbols.
 - Local project activity history, retained on the computer.
 
 From a project, the iPhone can open a new session on a computer:
@@ -100,6 +103,20 @@ computer's own git credentials, never a token from the phone. Either way it is
 `phren add` with the store's default ownership, followed by a commit and, when
 the store has a remote, a pull and push so the phone can fetch the new project.
 The reply says `store: pushed | committed | unchanged | error`.
+
+`GET /v1/code/status?project=<name>` reports the project's symbol index on this
+computer: file, symbol and reference counts, languages, kinds, the last index
+time and the most-used symbols. `GET /v1/code/search?project=&q=&kind=&limit=`
+ranks symbols by exact name, prefix, full-text relevance and usage;
+`/v1/code/outline?project=&path=` returns a file's symbols in source order;
+`/v1/code/definition?project=&symbol=` returns the definition, a source snippet
+and the last change (a blame hash and date, never a name);
+`/v1/code/references?project=&symbol=&limit=` groups resolved references by
+file; and `/v1/code/usage?project=&top=` returns the hottest and coldest
+symbols. All six need the `code` module and an index for that project; a project
+with no index is a 404 naming `phren code index`. The Hook re-indexes a project
+after the git module records a file change (debounced), and runs a full
+re-index when the repository's HEAD moves.
 
 The iPhone explicitly renews a 25-second approval watch with
 `GET /v1/workspaces?watchApprovals=1`. Ordinary overview reads do not hold prompts.

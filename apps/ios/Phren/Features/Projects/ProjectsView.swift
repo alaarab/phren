@@ -1,5 +1,6 @@
 import SwiftUI
 import PhrenKit
+import PhrenLive
 
 struct MemoryMaintenanceRoute: Hashable { }
 
@@ -251,10 +252,12 @@ struct ProjectDetailView: View {
     let project: String
 
     @Environment(AppModel.self) private var model
+    @AppStorage("sessions.live.preferences.v1") private var hostData = Data()
     @State private var tab: Tab = .findings
     @State private var showingSkills = false
     @State private var skillsPresentationID = UUID()
     @State private var showingKnobs = false
+    @State private var codeSymbols: Int?
 
     enum Tab: String, CaseIterable {
         case findings = "Findings"
@@ -309,6 +312,7 @@ struct ProjectDetailView: View {
         .sheet(isPresented: $showingKnobs) {
             ProjectKnobsView(storeId: storeId, project: project)
         }
+        .task(id: project) { await loadCodeSymbols() }
     }
 
     /// One 44pt band with three equal cells: the project's controls, each a
@@ -336,6 +340,15 @@ struct ProjectDetailView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Project schedules")
                 .accessibilityIdentifier("project-schedules-row")
+            }
+            if SessionOverviewMonitor.shared.allowsCode() {
+                controlDivider
+                NavigationLink { CodeView(storeId: storeId, project: project) } label: {
+                    controlCell(icon: "chevron.left.forwardslash.chevron.right", title: "Code", value: codeSummary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Project code")
+                .accessibilityIdentifier("project-code-row")
             }
         }
         .frame(minHeight: 44)
@@ -391,6 +404,23 @@ struct ProjectDetailView: View {
         let state = next.map { ScheduleWords.relative($0, now: .now) }
             ?? (schedules.contains(where: \.enabled) ? "done" : "paused")
         return "\(schedules.count) · \(state)"
+    }
+
+    /// The project's symbol count from the first computer that serves the code
+    /// index; "Index" until it answers, and nothing when no computer can.
+    private var codeSummary: String {
+        guard let codeSymbols else { return "Index" }
+        return "\(codeSymbols) symbols"
+    }
+
+    private func loadCodeSymbols() async {
+        guard SessionOverviewMonitor.shared.allowsCode() else { return }
+        #if DEBUG && targetEnvironment(simulator)
+        if CodeFixture.enabled { codeSymbols = CodeFixture.status.symbols; return }
+        #endif
+        let hosts = ((try? LiveSessionPreferences.read(hostData))?.hosts ?? []).filter { SessionOverviewMonitor.shared.allows(.code, on: $0) }
+        guard let host = hosts.first else { return }
+        codeSymbols = (try? await PhrenConnection.codeStatus(host: host, privateKey: DeviceSSHKey.load(host.id), project: project))?.symbols
     }
 }
 

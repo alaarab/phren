@@ -1,0 +1,156 @@
+import { execFileSync } from "node:child_process";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { makeTempDir } from "../test-helpers.js";
+import { indexProject } from "../code/indexer.js";
+import { search } from "../code/query.js";
+import { BUILTIN_MODULES } from "../modules/registry.js";
+import { CodeReindexer, CodeRoutes } from "./code-routes.js";
+import { capabilitiesForModules, requireRoute } from "./server.js";
+
+const FIXTURES = path.join(__dirname, "..", "code", "__fixtures__");
+
+let tmp: ReturnType<typeof makeTempDir>;
+let repo: string;
+let store: string;
+let routes: CodeRoutes;
+
+function git(...args: string[]): void {
+  execFileSync(
+    "git",
+    ["-c", "user.name=Fixture Author", "-c", "user.email=fixture@example.com", "-c", "commit.gpgsign=false", ...args],
+    { cwd: repo, stdio: ["ignore", "pipe", "pipe"] },
+  );
+}
+
+function changed(root: string, file: string) {
+  return { root, path: file, status: "M", patch: "", added: 1, removed: 0 };
+}
+
+async function waitFor(condition: () => Promise<boolean>, timeout = 4_000): Promise<boolean> {
+  const started = Date.now();
+  while (Date.now() - started < timeout) {
+    if (await condition()) return true;
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  return false;
+}
+
+beforeEach(async () => {
+  tmp = makeTempDir("code-routes-");
+  repo = path.join(tmp.path, "repo");
+  store = path.join(tmp.path, "store");
+  fs.cpSync(FIXTURES, repo, { recursive: true });
+  git("init", "-q");
+  git("add", "-A");
+  git("commit", "-q", "-m", "fixtures");
+  fs.mkdirSync(path.join(store, "fixture"), { recursive: true });
+  fs.writeFileSync(path.join(store, "fixture", "phren.project.yaml"), `sourcePath: ${repo}\n`);
+  await indexProject(store, "fixture", { repoRoot: repo });
+  routes = new CodeRoutes(store);
+});
+
+afterEach(() => {
+  tmp.cleanup();
+});
+
+describe("code Hook routes", () => {
+  it("reports an indexed project's status", async () => {
+    const status = await routes.status("fixture");
+    expect(status.available).toBe(true);
+    expect(status.symbols).toBeGreaterThan(0);
+    expect(status.references).toBeGreaterThan(0);
+    expect(status.languages.map(entry => entry.language)).toContain("typescript");
+  });
+
+  it("searches symbols with the query shape", async () => {
+    const result = await routes.search("fixture", "add", null, null);
+    expect(result.project).toBe("fixture");
+    const hit = result.symbols.find(symbol => symbol.name === "add");
+    expect(hit).toBeDefined();
+    expect(hit).toMatchObject({ kind: "function", file: expect.stringContaining("typescript/") });
+    expect(typeof hit!.line).toBe("number");
+    expect(typeof hit!.signature).toBe("string");
+    expect(typeof hit!.uses).toBe("number");
+  });
+
+  it("returns a file outline in source order", async () => {
+    const result = await routes.outline("fixture", "typescript/app.ts");
+    expect(result.entries.length).toBeGreaterThan(0);
+    expect(result.entries.map(entry => entry.name)).toContain("add");
+    expect(Array.isArray(result.entries[0].children)).toBe(true);
+  });
+
+  it("returns a definition with its snippet and blame", async () => {
+    const result = await routes.definition("fixture", "Point");
+    expect(result.definition.symbol.name).toBe("Point");
+    expect(result.definition.snippet).toContain("Point");
+    expect(result.definition.blame?.authorHash).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it("groups references by file", async () => {
+    const result = await routes.references("fixture", "add", null);
+    expect(result.references.symbol.name).toBe("add");
+    expect(result.references.total).toBeGreaterThan(0);
+    expect(result.references.groups[0].references[0]).toHaveProperty("line");
+  });
+
+  it("returns hot and cold usage", async () => {
+    const result = await routes.usage("fixture", null);
+    expect(result.usage.hot.length).toBeGreaterThan(0);
+    expect(result.usage.cold.length).toBeGreaterThan(0);
+  });
+
+  it("404s a project with no index and 400s an invalid name", async () => {
+    await expect(routes.status("missing")).rejects.toMatchObject({ status: 404, message: expect.stringContaining("No code index") });
+    await expect(routes.search("Bad Name", "x", null, null)).rejects.toThrow();
+  });
+
+  it("404s a symbol that is not indexed", async () => {
+    await expect(routes.definition("fixture", "NoSuchSymbol")).rejects.toMatchObject({ status: 404 });
+  });
+});
+
+describe("code module gate", () => {
+  const snapshot = (names: string[]) => ({ store: "/store", profile: "work", generation: "test",
+    modules: BUILTIN_MODULES.filter(module => names.includes(module.name)), has: (name: string) => names.includes(name) });
+
+  it("advertises the code capability and serves the routes only when the module is on", () => {
+    const on = snapshot(["memory", "code"]);
+    expect(capabilitiesForModules(on).code).toBe(true);
+    expect(() => requireRoute(on, "GET", "/v1/code/status")).not.toThrow();
+
+    const off = snapshot(["memory"]);
+    expect(capabilitiesForModules(off).code).toBeUndefined();
+    expect(() => requireRoute(off, "GET", "/v1/code/status")).toThrow("enable it with phren modules enable code");
+  });
+});
+
+describe("code re-index on change", () => {
+  it("re-indexes a changed file incrementally", async () => {
+    const file = path.join(repo, "typescript/util.ts");
+    fs.appendFileSync(file, "\nexport function freshlyAdded(): number { return 1; }\n");
+    const reindexer = new CodeReindexer({ store, debounceMs: 20, log: () => {} });
+    reindexer.record([changed(fs.realpathSync(repo), "typescript/util.ts")]);
+    const found = await waitFor(async () => (await search(store, "fixture", "freshlyAdded")).value.length > 0);
+    reindexer.close();
+    expect(found).toBe(true);
+  });
+
+  it("runs a full re-index after a branch switch", async () => {
+    const calls: Array<{ full?: boolean }> = [];
+    const reindexer = new CodeReindexer({ store, debounceMs: 20, log: () => {},
+      index: async (target, project, options) => { calls.push(options ?? {}); return indexProject(target, project, options); } });
+    const root = fs.realpathSync(repo);
+    reindexer.record([changed(root, "typescript/util.ts")]);
+    await waitFor(async () => calls.length === 1);
+    expect(calls[0].full).toBe(false);
+
+    git("checkout", "-q", "-b", "another-branch");
+    reindexer.record([changed(root, "typescript/util.ts")]);
+    await waitFor(async () => calls.length === 2);
+    reindexer.close();
+    expect(calls[1].full).toBe(true);
+  });
+});

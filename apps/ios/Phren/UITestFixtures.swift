@@ -116,6 +116,11 @@ enum UITestFixtures {
                 try await store.write("other/schedules.yaml", content: Self.otherSchedules, blobSha: nil)
                 defaults.set(try LiveSessionPreferences.saving(mac(), in: Data()), forKey: preferencesKey)
             }
+            if owner == primary, arguments.contains("--code-fixture") {
+                // The Code screen answers from CodeFixture; a host is still
+                // needed so the screen resolves one and the cell shows.
+                defaults.set(try LiveSessionPreferences.saving(mac(), in: Data()), forKey: preferencesKey)
+            }
             if owner == primary, arguments.contains("--automatic-sessions-fixture") {
                 let savedPins = (try? LiveSessionPreferences.read(defaults.data(forKey: preferencesKey) ?? Data()))?.pinnedSessions ?? []
                 if trailer {

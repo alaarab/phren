@@ -15,6 +15,11 @@ lock screen and Changes screen done properly.
 
 - Conductor is a launch role with its own provider, model and effort choice,
   a pinned dispatch-marked session card, and matching chat and Lock Screen identity.
+
+- Code: the project page's Code cell opens a symbol search over the computer's
+  code index, with the hottest and coldest symbols when no query is typed. Tap a
+  symbol for its dossier: the definition, the last change, its references by
+  file and a Findings section reserved for later.
 - Memory is map or list: the full graph with its node dossier, or the same findings,
   notes, tasks and topics as a filterable list. A search icon and two drop-down
   filters for kinds and projects sit above both; mode and filters are remembered.
