@@ -11,7 +11,7 @@ phren's store is a git repo (`~/.phren`, or `$PHREN_PATH`) that syncs across mac
 ## Pull (new machine, or "sync my config")
 
 ```bash
-git -C ~/.phren pull --rebase          # or on a new machine: git clone <store-url> ~/.phren
+phren store sync                       # or on a new machine: git clone <store-url> ~/.phren
 phren profile switch <profile>          # maps this machine (hostname) to a profile in machines.yaml
 phren init -y                           # wires MCP, hooks, skill mirrors, project links for that profile
 phren doctor                            # anything still red is either a repo not cloned here or a team store to join
@@ -31,7 +31,7 @@ The stop hook auto-saves too; a manual push is only for "I want it on the other 
 
 ## Conflicts
 
-`git pull --rebase` may conflict when two machines edited the same file. `tasks.md` and `FINDINGS.md`: keep both sides. `AGENTS.md` and skills: show the user both and let them choose. Never drop a side silently.
+`phren store sync` union-merges conflicts in `tasks.md`, `FINDINGS.md`, and task archives. For other conflicts, it aborts the merge and reports the paths for manual resolution. Never drop a side silently.
 
 ## Related
 

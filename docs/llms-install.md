@@ -117,7 +117,7 @@ Notes are explicitly searchable but excluded from automatic hook context, findin
 | `get_contradictions` | `project?`, `finding_text?` | List unresolved contradicted findings across one project or all projects, optionally filtered by selector. |
 | `edit_finding` | `project`, `old_text`, `new_text` | Edit a finding in place while preserving inline metadata such as `fid` and citations. |
 | `remove_finding` | `project`, `finding: string \| string[]` | Remove one or more findings by text match. Pass a string or array. |
-| `push_changes` | `message?` | Commit and push all phren changes. Retries with rebase on push conflicts. |
+| `push_changes` | `message?` | Commit and push all phren changes. Fetches and merges on push conflicts. |
 | `auto_extract_findings` | `project`, `text`, `model?`, `dryRun?` | Extract findings from text (max 10000 chars). |
 
 ### Memory Quality
@@ -207,7 +207,7 @@ Copilot CLI, Cursor, and Codex receive generated hook config files plus session 
 
 | Hook | Event | What it does |
 |------|-------|-------------|
-| `hook-session-start` | SessionStart | Pulls latest phren changes (`git pull --rebase`), runs doctor self-heal, schedules daily maintenance. |
+| `hook-session-start` | SessionStart | Fetches and merges latest phren changes, runs doctor self-heal, schedules daily maintenance. |
 | `hook-prompt` | UserPromptSubmit | Extracts keywords from the user's prompt, searches phren, injects relevant context snippets. Checks consolidation thresholds and fires a one-time notice per session. |
 | `hook-tool` | PostToolUse | Watches Claude tool results and queues compact review candidates from interesting file/command activity. |
 | `hook-stop` | Stop | Auto-commits and pushes `~/.phren` changes after every agent response. |

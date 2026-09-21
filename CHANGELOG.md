@@ -7,6 +7,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- A store that was never set up stays that way: the modules migration no longer creates
+  `.config` on it, so `phren add` still says to run `phren init`, and module gating
+  falls back to the unscoped view while `phren init` is creating the profiles.
+- Store sync now merges divergent commits with union handling for findings and
+  tasks, aborts unresolved merges cleanly, and leaves existing Git operations
+  untouched. Module migration backups now stay under `.runtime/`.
 - The Hook's OpenCode plugin updates with the Hook. The plugin now rides inside the
   Hook bundle, carries an "Installed by Phren Hook" first line, and an installed copy
   with that line is replaced on update while a copy you wrote yourself is left alone.
