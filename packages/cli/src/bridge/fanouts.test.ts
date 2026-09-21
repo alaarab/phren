@@ -78,6 +78,16 @@ describe("fan-out manifests", () => {
     expect(JSON.stringify({ ...found[0], cwd: undefined, transcript: undefined })).not.toContain(worktree);
   });
 
+  it("reports a blocked worker as failed with the reason even when exit.txt says 0", async () => {
+    const { directory, env } = await fixture("job-blocked", { status: "completed", exitCode: 0 });
+    await writeFile(path.join(directory, "exit.txt"), "0\n");
+    await writeFile(path.join(directory, "blocked.json"), JSON.stringify({ type: "external_directory",
+      pattern: "/private/tmp/elsewhere", message: "external_directory: /private/tmp/elsewhere", at: "2026-09-19T19:00:03.000Z" }));
+    const found = await fanoutChildren("codex", parent, env);
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatchObject({ state: "failed", reason: "blocked: external_directory /private/tmp/elsewhere" });
+  });
+
   it("rejects event-log symlinks and mismatched directory IDs", async () => {
     const first = await fixture("job-link");
     const outside = path.join(first.root, "outside.jsonl"); await writeFile(outside, "secret");

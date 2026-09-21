@@ -13,7 +13,9 @@ import { fanoutChildren, visibleCodexExecEvent, visibleOpenCodeRunEvent } from "
 export interface Entry { line: number; raw: Json }
 export interface ChildAgentRelation {
   /** `id` is a parent-scoped public reference; local session and transcript details never leave Hook. */
-  id: string; session?: string; transcript?: string; provider: Provider; path: string; callId: string; state: "running" | "completed" | "unavailable";
+  id: string; session?: string; transcript?: string; provider: Provider; path: string; callId: string; state: "running" | "completed" | "failed" | "unavailable";
+  /** Why a fan-out worker did not finish: `blocked: <type> <pattern>`. */
+  reason?: string;
   /** Fan-out manifests and Claude child transcripts can name a model. */
   model?: string;
   /** Public checkout labels for fan-outs; full paths remain private. */
@@ -263,8 +265,11 @@ async function childTranscriptBelongsTo(file: string, parent: string): Promise<b
 /** Explicit wire projection prevents a provider's private transcript identity
  * from being returned if relation internals grow later. */
 export function publicChildAgents(tree: ChildAgentRelation[]): Json[] {
-  return tree.map(({ id, provider, path: agentPath, callId, state, model, worktreeName, branch, computer, remote, children }) =>
-    ({ id, provider, path: agentPath, callId, state, ...(model !== undefined ? { model } : {}),
+  return tree.map(({ id, provider, path: agentPath, callId, state, reason, model, worktreeName, branch, computer, remote, children }) =>
+    // A blocked worker is finished; the phone's relation contract has no failed
+    // state, so the reason carries what happened without breaking old clients.
+    ({ id, provider, path: agentPath, callId, state: state === "failed" ? "completed" : state,
+      ...(reason !== undefined ? { reason } : {}), ...(model !== undefined ? { model } : {}),
       ...(worktreeName !== undefined ? { worktreeName } : {}), ...(branch !== undefined ? { branch } : {}),
       ...(computer !== undefined ? { computer: { id: computer.id, name: computer.name } } : {}),
       ...(remote !== undefined ? { remote: { target: remote.target, ...(remote.child !== undefined ? { child: remote.child } : {}) } } : {}),

@@ -801,7 +801,8 @@ schedules:
 
     it("remembers a permission request it could not hold and shows it while the pane waits", async () => {
       agentStatus = "blocked";
-      const callback = JSON.stringify({ target, event: "PermissionRequest", tool: "Shell", input: { command: "xcrun simctl list runtimes", justification: "Inspect the runtimes" } });
+      const callback = JSON.stringify({ target, event: "PermissionRequest", tool: "Shell", input: { command: "xcrun simctl list runtimes",
+        justification: "Inspect the runtimes", options: [{ label: "Yes, proceed", key: "y" }, { label: "No", key: "esc" }] } });
       const reply = await new Promise<string>((resolve, reject) => {
         const req = request({ socketPath: path.join(root, "bridge/agent.sock"), path: "/hook", method: "POST", headers: { "Content-Length": Buffer.byteLength(callback) } },
           res => { let data = ""; res.on("data", bytes => data += bytes); res.on("end", () => resolve(data)); });
@@ -814,6 +815,9 @@ schedules:
       for (let i = 0; i < 80 && !frames.length; i++) await sleep(25);
       expect(frames[0].agentStatus).toMatchObject({ status: "blocked", terminalPrompt: { toolName: "Shell" } });
       expect(frames[0].agentStatus.terminalPrompt.message).toContain("xcrun simctl list runtimes");
+      // The command and its options ride along for the phone's question card.
+      expect(frames[0].agentStatus.terminalPrompt.choice).toEqual({ title: "Inspect the runtimes", body: "xcrun simctl list runtimes",
+        options: [{ label: "Yes, proceed", key: "y" }, { label: "No", key: "Escape" }] });
       socket.terminate();
       // Answering with a key clears it; moving through the menu does not.
       expect((await api("/v1/keys", { target, keys: ["Down"] })).status).toBe(200);
@@ -1148,7 +1152,8 @@ schedules:
       await once(socket, "open");
       for (let i = 0; i < 60 && !frames.length; i++) await sleep(25);
       const reply = new Promise<any>((resolve, reject) => {
-        const payload = JSON.stringify({ target, event: "PermissionRequest", tool: "Bash", input: { command: "fixture-command" } });
+        const payload = JSON.stringify({ target, event: "PermissionRequest", tool: "Bash", input: { command: "fixture-command",
+          options: [{ label: "Yes, proceed", key: "y" }, { label: "No, and tell Codex what to do differently", key: "esc" }] } });
         const req = request({ socketPath: path.join(root, "bridge/agent.sock"), path: "/hook", method: "POST",
           headers: { "Content-Length": Buffer.byteLength(payload) } }, res => {
           let data = ""; res.on("data", bytes => data += bytes); res.on("end", () => resolve(JSON.parse(data)));
@@ -1157,6 +1162,9 @@ schedules:
       for (let i = 0; i < 100 && !frames.some(f => f.agentStatus.pendingApproval); i++) await sleep(25);
       const approval = frames.find(f => f.agentStatus.pendingApproval)?.agentStatus.pendingApproval;
       expect(approval?.message).toContain("fixture-command");
+      // A held Codex approval publishes its choices for the phone's question card.
+      expect(approval?.choice).toEqual({ body: "fixture-command",
+        options: [{ label: "Yes, proceed", key: "y" }, { label: "No, and tell Codex what to do differently", key: "Escape" }] });
       expect(Date.parse(approval?.expiresAt)).toBeGreaterThan(Date.now());
       const wrong = await api("/v1/approvals/answer", { target: { ...target, session: "bbbbbbbb-1111-4111-8111-111111111111" }, actionId: approval.actionId, decision: "approve" });
       expect(wrong.status).toBe(409);

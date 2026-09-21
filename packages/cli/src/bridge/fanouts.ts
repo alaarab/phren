@@ -10,6 +10,7 @@ import { type Json, object, type Provider, sessionId } from "./protocol.js";
 
 const MAX_MANIFEST_BYTES = 64 * 1024;
 const MAX_EVENT_LOG_BYTES = 64 * 1024 * 1024;
+const MAX_BLOCKED_BYTES = 16 * 1024;
 const MAX_JOBS = 128;
 const WORKTREE_CACHE_MS = 15_000;
 const exec = promisify(execFile);
@@ -51,6 +52,18 @@ const manifestSchema = z.object({
 });
 
 export type FanoutManifest = z.infer<typeof manifestSchema>;
+
+/** What the opencode plugin writes when it refuses a fan-out worker's
+ * permission: the ask that was denied, so the Hook can report a worker that
+ * exited 0 as blocked rather than finished. */
+const blockedSchema = z.object({
+  type: z.string().min(1).max(200),
+  pattern: z.string().max(2000).optional(),
+  message: z.string().max(4000).optional(),
+  at: z.string().max(100).optional(),
+}).passthrough();
+type Blocked = z.infer<typeof blockedSchema>;
+
 export interface FanoutChild {
   /** Parent-scoped opaque ID. Filesystem paths never cross the bridge. */
   id: string;
@@ -64,7 +77,9 @@ export interface FanoutChild {
   cwd: string;
   path: string;
   callId: string;
-  state: "running" | "completed";
+  state: "running" | "completed" | "failed";
+  /** `blocked: <type> <pattern>` when the plugin refused a permission. */
+  reason?: string;
   transcript: string;
   children: FanoutChild[];
 }
@@ -110,6 +125,17 @@ async function regularContainedFile(root: string, candidate: string, maxBytes: n
   } catch { return; }
 }
 
+async function readBlocked(jobRoot: string): Promise<Blocked | undefined> {
+  const file = await regularContainedFile(jobRoot, path.join(jobRoot, "blocked.json"), MAX_BLOCKED_BYTES);
+  if (!file) return undefined;
+  try { return blockedSchema.parse(JSON.parse(await readFile(file, "utf8"))); } catch { return undefined; }
+}
+
+export function blockedReason(value: Blocked): string {
+  const pattern = typeof value.pattern === "string" ? value.pattern.trim() : "";
+  return (pattern ? `blocked: ${value.type} ${pattern}` : `blocked: ${value.type}`).slice(0, 500);
+}
+
 /** Read only manifests explicitly bound to the already validated parent. */
 export async function fanoutChildren(parentProvider: Provider, parentSession: string, env: NodeJS.ProcessEnv = process.env,
   parentComputer?: string): Promise<FanoutChild[]> {
@@ -137,12 +163,50 @@ export async function fanoutChildren(parentProvider: Provider, parentSession: st
       if (!transcript) continue;
       const worktree = await worktreeDetails(manifest.worktree);
       const id = createHash("sha256").update(`${parentProvider}\0${parentSession}\0${manifest.id}`).digest("hex").slice(0, 32);
+      // A denied permission aborts the turn while the launcher still records a
+      // zero exit; blocked.json is the only evidence the worker did not finish.
+      const blocked = await readBlocked(jobRoot);
       children.push({ id, provider: manifest.provider, session: manifest.session, model: manifest.model, ...worktree, cwd: manifest.worktree,
-        path: manifest.taskLabel, callId: `fanout:${id}`, state: ["queued", "running"].includes(manifest.status) ? "running" : "completed",
-        transcript, children: [] });
+        path: manifest.taskLabel, callId: `fanout:${id}`,
+        state: blocked ? "failed" : ["queued", "running"].includes(manifest.status) ? "running" : "completed",
+        ...(blocked ? { reason: blockedReason(blocked) } : {}), transcript, children: [] });
     } catch { /* Torn, old, or untrusted manifests do not become child agents. */ }
   }
   return children.sort((a, b) => a.path.localeCompare(b.path) || a.id.localeCompare(b.id));
+}
+
+/** A blocked fan-out job, with the parent it belongs to, for a push. */
+export interface BlockedFanout {
+  id: string;
+  provider: FanoutChild["provider"];
+  label: string;
+  parent?: { provider: Provider; session: string; computer?: string };
+  reason: string;
+  at?: string;
+}
+
+/** Every fan-out job that left a blocked.json, for the Hook's push watcher. */
+export async function blockedFanouts(env: NodeJS.ProcessEnv = process.env): Promise<BlockedFanout[]> {
+  const configured = fanoutRoot(env);
+  let root: string;
+  try { root = await realpath(configured); } catch { return []; }
+  const names = (await readdir(root).catch(() => [])).filter(name => jobID.safeParse(name).success).slice(0, MAX_JOBS);
+  const blocked: BlockedFanout[] = [];
+  for (const name of names) {
+    const jobRoot = await realpath(path.join(root, name)).catch(() => undefined);
+    if (!jobRoot || !jobRoot.startsWith(root + path.sep)) continue;
+    const manifestFile = await regularContainedFile(root, path.join(jobRoot, "manifest.json"), MAX_MANIFEST_BYTES);
+    if (!manifestFile) continue;
+    try {
+      const manifest = manifestSchema.parse(JSON.parse(await readFile(manifestFile, "utf8")));
+      if (manifest.id !== name) continue;
+      const value = await readBlocked(jobRoot);
+      if (!value) continue;
+      blocked.push({ id: manifest.id, provider: manifest.provider, label: manifest.taskLabel,
+        ...(manifest.parent ? { parent: manifest.parent } : {}), reason: blockedReason(value), ...(value.at ? { at: value.at } : {}) });
+    } catch { /* Torn or untrusted jobs are not pushed. */ }
+  }
+  return blocked;
 }
 
 /** Project raw `opencode run --format json` rows into the small public chat
