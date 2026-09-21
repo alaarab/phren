@@ -9,7 +9,11 @@ final class ShortcutPanelTests: XCTestCase {
         openSettings(app)
         reset(app)
         app.buttons["panel-toggle:codex"].tap()
-        XCTAssertEqual(app.buttons["panel-toggle:codex"].label, "Enable Codex")
+        // Disabling moves the panel to the Inactive section at the bottom.
+        let codex = app.buttons["panel-toggle:codex"]
+        scrollTo(codex, app)
+        XCTAssertEqual(codex.label, "Enable Codex")
+        for _ in 0..<8 { app.swipeDown() }
         app.buttons["panel-edit:favorites"].tap()
         app.buttons["shortcut-add"].tap()
         XCTAssertTrue(app.navigationBars["New Shortcut"].waitForExistence(timeout: 5))
@@ -32,7 +36,10 @@ final class ShortcutPanelTests: XCTestCase {
         capture(app, "Editable Favorites shortcuts")
         app.terminate(); app.launch()
         openSettings(app)
-        XCTAssertEqual(app.buttons["panel-toggle:codex"].label, "Enable Codex")
+        let codexAgain = app.buttons["panel-toggle:codex"]
+        scrollTo(codexAgain, app)
+        XCTAssertEqual(codexAgain.label, "Enable Codex")
+        for _ in 0..<8 { app.swipeDown() }
         app.buttons["panel-edit:favorites"].tap()
         XCTAssertTrue(edit.waitForExistence(timeout: 5)); edit.tap()
         XCTAssertEqual(app.textFields["shortcut-binding"].value as? String, "C-b, S-t")
@@ -59,7 +66,10 @@ final class ShortcutPanelTests: XCTestCase {
         app.buttons["Terminal gestures"].tap()
         app.buttons["terminal-customize-shortcuts"].tap()
         XCTAssertTrue(app.navigationBars["Shortcuts"].waitForExistence(timeout: 5))
-        reset(app)
+        // Scroll to the reset button and tap it; swiping back down here would
+        // drag the sheet away before its Done button can close it.
+        let resetAll = app.buttons["shortcuts-reset-all"]
+        scrollTo(resetAll, app); resetAll.tap()
         app.buttons["Done"].tap()
         app.buttons["Close shortcuts"].tap()
         XCTAssertEqual(app.buttons["Ctrl"].value as? String, "Off")

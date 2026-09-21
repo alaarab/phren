@@ -266,8 +266,9 @@ final class AgentChatTests: XCTestCase {
     @MainActor
     func testRemoteAgentWorkKeepsComputerIdentityAndBackgroundReturnVisible() {
         let app = launch(extra: ["--chat-agent-card", "--all-sessions-fixture", "--all-sessions-offline",
-                                 "--agent-work-navigation", "--agent-work-unknown", "--chat-question"])
-        app.buttons["live-chat:w7:w7:t9"].tap()
+                                 "--agent-work-navigation", "--agent-work-unknown", "--chat-question"],
+                         chat: "live-chat:w1:w1:t1")
+        app.buttons["live-chat:w1:w1:t1"].tap()
         XCTAssertTrue(app.buttons["chat-background-job:background-tests"].waitForExistence(timeout: 8),
                       "Background work remains a Background row in the conductor chat")
 
@@ -313,7 +314,7 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(header.label.contains("Linuxbox"), "VoiceOver names the remote computer")
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Remote parser fixture marker")).firstMatch.waitForExistence(timeout: 5))
         app.buttons["chat-subagent-diff"].tap()
-        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "agent-diff-header").firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "changes-header").firstMatch.waitForExistence(timeout: 5))
     }
 
     @MainActor
@@ -1967,7 +1968,7 @@ final class AgentChatTests: XCTestCase {
     }
 
     @MainActor
-    private func launch(extra: [String] = []) -> XCUIApplication {
+    private func launch(extra: [String] = [], chat: String = "live-chat:w7:w7:t9") -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["PHREN_PERFORMANCE_LOG"] = "1"
         app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--session-details-fixture", "--native-chat-fixture"] + extra
@@ -1992,7 +1993,7 @@ final class AgentChatTests: XCTestCase {
         }
         XCTAssertTrue(host.waitForExistence(timeout: 5), "The fixture computer must appear in Agents")
         host.tap()
-        XCTAssertTrue(app.buttons["live-chat:w7:w7:t9"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons[chat].waitForExistence(timeout: 10))
         return app
     }
     /// Texts showing a brace — tool JSON leaking onto a card. The fixture's

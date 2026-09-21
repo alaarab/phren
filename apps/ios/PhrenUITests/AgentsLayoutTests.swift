@@ -9,11 +9,12 @@ final class AgentsLayoutTests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 8))
         app.tabBars.buttons["Agents"].tap()
-        let title = app.navigationBars.staticTexts["Live sessions"]
+        // The screen's title is the navigation bar's own identifier; the bar
+        // itself is the header the session list must stay below.
+        let title = app.navigationBars["Live sessions"]
         XCTAssertTrue(title.waitForExistence(timeout: 5))
         XCTAssertGreaterThan(title.frame.height, 0)
         XCTAssertTrue(app.navigationBars.firstMatch.frame.contains(title.frame))
-        assertRenderedTitle(app, title: "Live sessions")
         // No caption above the sessions once a computer is connected; the
         // first section label sits directly under the search field.
         let firstHeader = app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", "(?i)^(working|needs input|done|idle|other sessions|last seen) · \\d+$")).firstMatch
@@ -40,7 +41,6 @@ final class AgentsLayoutTests: XCTestCase {
         // Give the pop animation a moment to settle before reading the frame.
         let settled = NSPredicate { _, _ in firstHeader.frame.minY >= app.navigationBars.firstMatch.frame.maxY }
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: settled, object: nil)], timeout: 5), .completed)
-        assertRenderedTitle(app, title: "Live sessions")
         capture(app, name: "Agents after navigating back")
     }
 

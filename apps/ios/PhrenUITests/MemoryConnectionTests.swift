@@ -19,7 +19,9 @@ final class MemoryConnectionTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Received in codex on w7:p1: Agent without GitHub"].waitForExistence(timeout: 8))
         app.buttons["chat-close"].tap()
         app.tabBars.buttons["Settings"].tap()
-        app.buttons["settings-connect-memory"].tap()
+        let connect = app.buttons["settings-connect-memory"]
+        for _ in 0..<8 where !connect.isHittable { app.swipeUp() }
+        XCTAssertTrue(connect.waitForExistence(timeout: 5)); connect.tap()
         XCTAssertTrue(app.staticTexts["Connect project memory"].waitForExistence(timeout: 5))
         app.buttons["Connect with a GitHub token"].tap()
         XCTAssertTrue(app.navigationBars["Token sign-in"].waitForExistence(timeout: 5))

@@ -142,6 +142,8 @@ lock screen and Changes screen done properly.
 - Dictation keeps what you said across pauses and keeps listening after a send.
 - The lock screen counts a session as running while its fan-out workers run,
   and says how many.
+- The Add computer button on an unknown remote agent's page is a full
+  44-point target again.
 
 ## 1.0.0
 

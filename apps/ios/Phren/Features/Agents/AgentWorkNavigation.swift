@@ -85,10 +85,11 @@ private struct UnknownAgentComputerView: View {
                 Text("This iPhone has not enrolled a connection for that computer. The agent row cannot supply an address, host pin, or key.")
                     .font(PhrenTheme.Font.body).foregroundStyle(PhrenTheme.textMuted)
                     .multilineTextAlignment(.center)
-                Button("Add computer") { adding = true }
-                    .buttonStyle(.borderedProminent).tint(PhrenTheme.accent)
-                    .frame(minHeight: 44)
-                    .accessibilityIdentifier("agent-computer-add")
+                Button { adding = true } label: {
+                    Text("Add computer").frame(minWidth: 44, minHeight: 44)
+                }
+                .buttonStyle(.borderedProminent).tint(PhrenTheme.accent)
+                .accessibilityIdentifier("agent-computer-add")
             }
             .padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
         }

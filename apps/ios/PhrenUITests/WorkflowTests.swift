@@ -84,7 +84,10 @@ final class WorkflowTests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Task details"].waitForExistence(timeout: 5))
         let start = app.buttons["task-start-agent"]
         XCTAssertTrue(start.waitForExistence(timeout: 5)); start.tap()
+        let chooser = app.buttons["launch-computer"]
+        XCTAssertTrue(chooser.waitForExistence(timeout: 5)); chooser.tap()
         XCTAssertTrue(app.buttons["launch-computer:A1000000-0000-0000-0000-000000000001"].waitForExistence(timeout: 5))
+        app.buttons["launch-computer-done"].tap()
         XCTAssertTrue(app.buttons["launch-harness:codex"].exists)
         app.swipeUp()
         let launch = app.buttons["launch-open"]
@@ -112,7 +115,10 @@ final class WorkflowTests: XCTestCase {
         XCTAssertTrue(task.waitForExistence(timeout: 8)); task.tap()
         XCTAssertTrue(app.navigationBars["Task details"].waitForExistence(timeout: 5))
         app.buttons["task-start-agent"].tap()
+        let chooser = app.buttons["launch-computer"]
+        XCTAssertTrue(chooser.waitForExistence(timeout: 5)); chooser.tap()
         XCTAssertTrue(app.buttons["launch-computer:A1000000-0000-0000-0000-000000000001"].waitForExistence(timeout: 5))
+        app.buttons["launch-computer-done"].tap()
         app.swipeUp()
         let launch = app.buttons["launch-open"]
         XCTAssertTrue(launch.waitForExistence(timeout: 5)); launch.tap()
