@@ -1,3 +1,5 @@
+import { toolOwner, disabledHint } from "../modules/registry.js";
+import type { ModuleManifest } from "../modules/manifest.js";
 /**
  * MCP tool profiles.
  *
@@ -156,13 +158,16 @@ export interface ToolGate {
  */
 export function createToolGate(opts: {
   profile: McpProfile;
+  modules?: readonly ModuleManifest[];
   register: (name: string, config: ToolConfig, handler: ToolHandler) => unknown;
   /** Wraps every handler (guards, telemetry) before it is stored or exposed. */
   wrap?: (name: string, handler: ToolHandler) => ToolHandler;
   /** Extra tools to mark always-loaded for Claude Code, on top of the core set. */
   alwaysLoad?: Iterable<string>;
 }): ToolGate {
-  const alwaysLoad = new Set<string>([...CORE_TOOLS, ...(opts.alwaysLoad ?? [])]);
+  const allowed = opts.modules && new Set(opts.modules.flatMap(module => module.tools.map(tool => tool.name)));
+  const core = opts.modules ? CORE_TOOLS.filter(name => opts.modules!.some(module => module.tools.some(tool => tool.name === name && tool.profiles.includes("core")))) : CORE_TOOLS;
+  const alwaysLoad = new Set<string>([...core, ...(opts.alwaysLoad ?? [])]);
   const catalog: Catalog = new Map();
   const exposed = new Set<string>();
   const expose = (name: string, config: ToolConfig, handler: ToolHandler) => {
@@ -175,17 +180,18 @@ export function createToolGate(opts: {
     exposed.add(name);
   };
   const registerTool = (name: string, config: ToolConfig, handler: ToolHandler) => {
+    if (allowed && !allowed.has(name)) return;
     if (catalog.has(name)) throw new Error(`Duplicate MCP tool registration: "${name}"`);
     const wrapped = opts.wrap ? opts.wrap(name, handler) : handler;
     let entry: CatalogEntry = { name, config, handler: wrapped };
     if (name === "add_finding") entry = decorateAddFinding(entry, catalog);
     catalog.set(name, entry);
-    if (opts.profile === "core" && !CORE_TOOLS.includes(name)) return;
+    if (opts.profile === "core" && !core.includes(name)) return;
     expose(name, entry.config, entry.handler);
   };
   const finish = () => {
     for (const tool of buildCompositeTools(catalog)) {
-      if (catalog.has(tool.name)) continue;
+      if (catalog.has(tool.name) || (allowed && !allowed.has(tool.name))) continue;
       catalog.set(tool.name, { name: tool.name, config: tool.config, handler: tool.handler });
       expose(tool.name, tool.config, tool.handler);
     }
@@ -252,7 +258,10 @@ function decodeJsonArguments(schema: z.ZodObject<z.ZodRawShape>, args: Record<st
 /** Run a catalog tool by name after validating the arguments against its own schema. */
 export async function dispatch(catalog: Catalog, target: string, args: Record<string, unknown>): Promise<unknown> {
   const entry = catalog.get(target);
-  if (!entry) return errorResponse(`Unknown tool "${target}"`);
+  if (!entry) {
+    const owner = toolOwner(target);
+    return errorResponse(`Unknown tool "${target}"${owner ? `: ${disabledHint(owner.name)}` : ""}`, { errorCode: "UNAVAILABLE" });
+  }
   const schema = schemaOf(entry);
   if (schema) {
     const parsed = schema.safeParse(decodeJsonArguments(schema, args));
@@ -286,11 +295,11 @@ export function buildCompositeTools(catalog: Catalog): BuiltTool[] {
       config: {
         title: composite.title,
         description: `${composite.summary}\nActions:\n${lines.map((l) => `- ${l}`).join("\n")}`,
-        inputSchema: z.object({ action: z.enum(actionNames).describe("Which change to make.") }).passthrough(),
+        inputSchema: z.object({ action: z.string().describe(`Which change to make: ${actionNames.join(", ")}.`) }).passthrough(),
       },
       handler: (args) => {
         const { action, ...rest } = args as { action: string } & Record<string, unknown>;
-        return dispatch(catalog, map[action], rest);
+        return dispatch(catalog, map[action] ?? composite.actions[action] ?? action, rest);
       },
     });
   }
@@ -310,7 +319,7 @@ export function buildCompositeTools(catalog: Catalog): BuiltTool[] {
           "Everything else phren can do — skills, hooks, config, notes, review queue, export/import, doctor, the fragment graph — behind one tool. " +
           "Pass `action` plus that action's parameters; `list_actions` returns every action with its full parameter list.\nActions:\n" +
           lines.map((l) => `- ${l}`).join("\n"),
-        inputSchema: z.object({ action: z.enum(actionNames).describe("Which admin action to run, or list_actions.") }).passthrough(),
+        inputSchema: z.object({ action: z.string().describe(`Which admin action to run: ${actionNames.join(", ")}.`) }).passthrough(),
       },
       handler: (args) => {
         const { action, ...rest } = args as { action: string } & Record<string, unknown>;

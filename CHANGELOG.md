@@ -24,6 +24,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- Modules: phren's features are switchable per store and profile. Memory and
+  tasks stay on; conductor, schedules and the rest can be turned off, the MCP
+  and CLI surfaces shrink to match, the Hook reports its capabilities so the
+  phone hides what a computer does not run, and `phren modules list` shows
+  what is on and why. Existing installs migrate once.
+- Conductor: a headless receiver launches the fan-out wrappers in isolated
+  worktrees with durable dispatch handles and a bounded number of leads,
+  relays remote questions without duplicates, and returns each lead's report
+  to the exact parent conversation through an at-most-once outbox that
+  survives a restart.
+- The workspace overview reports each pane's running fan-out workers and
+  their providers, so the phone can count them.
+- Phren Hook records OpenCode Go spend per model over 5 hours, 7 days and
+  30 days, with limits when the plan reports them.
 - Conductor dispatch receipts can retain a validated local conversation parent
   and durable remote computer identity, while `/v1/subagents` projects remote
   leads and their bounded local fan-out trees without exporting checkout paths.

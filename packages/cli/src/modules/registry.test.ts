@@ -173,9 +173,9 @@ describe("phren modules list", () => {
     const before = fs.readFileSync(path.join(tmp.path, ".config", "modules.yaml"), "utf8");
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
     await lookupCommand("modules")!.run(["list"], { phrenPath: () => tmp.path, profile: () => "work" });
-    expect(log).toHaveBeenCalledWith(expect.stringContaining("Registration is unchanged"));
-    expect(log).toHaveBeenCalledWith(`memory\t${VERSION}\tenabled`);
-    expect(log).toHaveBeenCalledWith(`tasks\t${VERSION}\tdisabled`);
+    expect(log).toHaveBeenCalledWith("Module\tVersion\tEffective\tSource\tRequires");
+    expect(log).toHaveBeenCalledWith(`memory\t${VERSION}\tenabled\tdefault\t-`);
+    expect(log).toHaveBeenCalledWith(`tasks\t${VERSION}\tdisabled\tprofile\tmemory`);
     expect(fs.readFileSync(path.join(tmp.path, ".config", "modules.yaml"), "utf8")).toBe(before);
   });
 
@@ -185,10 +185,10 @@ describe("phren modules list", () => {
     const profile = vi.fn(() => "work");
     await lookupCommand("modules")!.run(["list", "--profile", "personal"], { phrenPath: () => tmp.path, profile });
     expect(profile).not.toHaveBeenCalled();
-    expect(log).toHaveBeenCalledWith(`tasks\t${VERSION}\tdisabled`);
+    expect(log).toHaveBeenCalledWith(`tasks\t${VERSION}\tdisabled\tprofile\tmemory`);
   });
 
-  it.each([[], ["enable", "tasks"], ["disable", "hook"], ["list", "extra"], ["list", "--profile"], ["list", "--profile", "--bad"]])
+  it.each([[], ["enable"], ["disable"], ["list", "extra"], ["list", "--profile"], ["list", "--profile", "--bad"]])
     ("rejects unsupported invocations without touching the store: %j", async (...args: string[]) => {
       vi.spyOn(console, "error").mockImplementation(() => {});
       const phrenPath = vi.fn(() => tmp.path);

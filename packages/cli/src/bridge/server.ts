@@ -1,3 +1,5 @@
+import { activateModules as moduleSnapshot, type ModuleSnapshot } from "../modules/runtime.js";
+import { BUILTIN_MODULES, disabledHint } from "../modules/registry.js";
 import { randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage } from "node:http";
@@ -32,10 +34,41 @@ import { AccountUsageReader } from "./usage.js";
 import { createScheduleLauncher, Scheduler, scheduleRunsFile } from "./schedules.js";
 import { defaultPhrenPath } from "../shared.js";
 
+const CHILD_ACTIVITY_CACHE_MS = 5_000;
+interface ChildActivity { runningChildren: number; childProviders: Provider[] }
+const childActivityCache = new Map<string, { at: number; result: Promise<ChildActivity> }>();
+
+async function childActivity(source: Provider, session: string): Promise<ChildActivity> {
+  const key = `${source}\0${session}`, now = Date.now(), cached = childActivityCache.get(key);
+  if (cached && now - cached.at < CHILD_ACTIVITY_CACHE_MS) return cached.result;
+  const result = childAgentTree(source, session).then(tree => {
+    const running = tree.flatMap(function visit(child): typeof tree {
+      return [child, ...child.children.flatMap(visit)];
+    }).filter(child => child.state === "running");
+    return { runningChildren: running.length, childProviders: [...new Set(running.map(child => child.provider))].sort() };
+  }).catch(() => ({ runningChildren: 0, childProviders: [] as Provider[] }));
+  childActivityCache.set(key, { at: now, result });
+  while (childActivityCache.size > 128) childActivityCache.delete(childActivityCache.keys().next().value!);
+  return result;
+}
+
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", shell: "ssh-pty", herdr: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
   files: true, repositoryFiles: true, subagents: true, dispatch: true, approvalPush: "direct-apns", simulators: process.platform === "darwin" };
+
+export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
+  const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
+  const result: Record<string, unknown> = Object.fromEntries(Object.entries(capabilities).filter(([name]) => allowed.has(name)));
+  for (const name of ["memory", "tasks", "hook", "git", "schedules"]) if (snapshot.has(name)) result[name] = true;
+  return result;
+}
+
+export function requireRoute(snapshot: ModuleSnapshot, method: string, route: string): void {
+  const owner = BUILTIN_MODULES.find(module => module.hookRoutes.some(entry => entry.method === method && entry.path === route));
+  if (owner && !snapshot.has(owner.name)) throw new BridgeError(404, disabledHint(owner.name));
+}
+
 
 /** A file from the phone: a plain name and base64 bytes, bounded. */
 function uploadBody(data: Json): { name: string; bytes: Buffer } {
@@ -83,6 +116,9 @@ async function gitRepository(pane: Json, target: Target, child: unknown): Promis
 
 export async function serve(version: string): Promise<void> {
   process.umask(0o077);
+  const modules = moduleSnapshot(defaultPhrenPath(), undefined, true);
+  if (!modules.has("hook")) throw new BridgeError(404, disabledHint("hook"));
+  const activeCapabilities = capabilitiesForModules(modules);
   const root = bridgeRoot();
   await mkdir(root, { recursive: true, mode: 0o700 }); await chmod(root, 0o700);
   let computerID: string;
@@ -90,20 +126,24 @@ export async function serve(version: string): Promise<void> {
   try { computerID = (await readFile(identityFile, "utf8")).trim(); }
   catch { computerID = randomUUID(); await writeFile(identityFile, computerID, { flag: "wx", mode: 0o600 }); }
   const launches = new LaunchLimiter();
-  const dispatches = new DispatchService({ computerID, validateParentTarget: target => validateTarget(target, false, true) });
+  const dispatches = modules.has("conductor")
+    ? new DispatchService({ computerID, validateParentTarget: target => validateTarget(target, false, true) })
+    : undefined;
   const locatedDirectories = new Set<string>();
   const journal = new ActivityJournal();
-  const agentHooks = new AgentHooks();
+  const agentHooks = new AgentHooks(undefined, modules);
   const modelCatalog = new ModelCatalog();
   const contextUsage = new WorkspaceContextUsage();
   const accountUsage = new AccountUsageReader();
   const tabActivity = new TabActivityStore();
   const codexQuestions = new CodexQuestions();
   const scheduleStore = defaultPhrenPath();
-  const scheduler = new Scheduler({ now: () => new Date(), store: scheduleStore, runsFile: scheduleRunsFile(),
+  const scheduler = modules.has("schedules") ? new Scheduler({ now: () => new Date(), store: scheduleStore, runsFile: scheduleRunsFile(),
     launch: createScheduleLauncher((server, data) => launchSession(server, data), scheduleStore),
-    locateProject: async project => (await locateProject(project, await journal.recent()))[0]?.directory });
-  const info = { product: "phren-hook", protocol: PROTOCOL, version, computer: { id: computerID, name: hostname() }, capabilities };
+    locateProject: async project => (await locateProject(project, await journal.recent()))[0]?.directory }) : undefined;
+  const info = { product: "phren-hook", protocol: PROTOCOL, version, computer: { id: computerID, name: hostname() }, capabilities: activeCapabilities,
+    modules: Object.fromEntries(modules.modules.map(module => [module.name, module.version])),
+    store: modules.store, profile: modules.profile, generation: modules.generation };
   const old = await lstat(socketPath()).catch(() => null);
   if (old) {
     if (!old.isSocket() || (process.getuid && old.uid !== process.getuid())) throw new Error("Refusing to replace an unexpected hook socket.");
@@ -114,14 +154,15 @@ export async function serve(version: string): Promise<void> {
     await unlink(socketPath());
   }
 
-  const stopRetention = await startChangeRetention();
-  await rm(path.join(root, "changes-scratch"), { recursive: true, force: true });
+  const stopRetention = modules.has("git") ? await startChangeRetention() : () => {};
+  if (modules.has("git")) await rm(path.join(root, "changes-scratch"), { recursive: true, force: true });
   const http = createServer(async (request, response) => {
     response.setHeader("X-Phren-Protocol", String(PROTOCOL));
     response.setHeader("Cache-Control", "no-store");
     try {
       const url = new URL(request.url || "/", "http://phren.local");
       if (url.origin !== "http://phren.local") throw new BridgeError(400, "Invalid request origin.");
+      requireRoute(modules, request.method ?? "", url.pathname);
       let result: unknown;
       if (request.method === "GET") {
         switch (url.pathname) {
@@ -184,16 +225,21 @@ export async function serve(version: string): Promise<void> {
                 const chat = chatStates.get(agents[0]);
                 if (chat?.starting === true) tab.starting = true;
               }
-              if (typeof tab.cwd === "string" && tab.agent) tab.branch = await repositoryBranch(tab.cwd);
+              if (modules.has("git") && typeof tab.cwd === "string" && tab.agent) tab.branch = await repositoryBranch(tab.cwd);
               // The model the pane's agent is running, and what it is doing
               // right now, for cards and the lock screen.
               if (agents.length === 1 && provider.safeParse(agents[0].agent).success) {
                 const session = chatStates.get(agents[0])?.sessionId;
+                tab.runningChildren = 0; tab.childProviders = [];
                 if (typeof session === "string") {
-                  const model = await currentModel(agents[0].agent as Provider, session).catch(() => undefined);
+                  const source = agents[0].agent as Provider;
+                  const [model, children] = await Promise.all([
+                    currentModel(source, session).catch(() => undefined), childActivity(source, session),
+                  ]);
                   if (model) tab.model = model;
+                  tab.runningChildren = children.runningChildren; tab.childProviders = children.childProviders;
                   if (agents[0].agent_status === "working") {
-                    const step = await currentStep(agents[0].agent as Provider, session).catch(() => undefined);
+                    const step = await currentStep(source, session).catch(() => undefined);
                     if (step) tab.currentStep = step;
                   }
                 }
@@ -251,16 +297,16 @@ export async function serve(version: string): Promise<void> {
       } else if (request.method === "POST") {
         const data = await body(request);
         if (url.pathname === "/v1/schedules") {
-          result = await scheduler.statuses();
+          result = await scheduler!.statuses();
         } else if (url.pathname === "/v1/schedules/run") {
           const input = z.object({ project: z.string().min(1).max(200), id: z.string().regex(/^[a-f0-9]{8}$/) }).parse(data);
-          result = { ok: true, run: await scheduler.launchNow(input.project, input.id) };
+          result = { ok: true, run: await scheduler!.launchNow(input.project, input.id) };
         } else if (url.pathname === "/v1/schedules/history") {
           const input = z.object({ project: z.string().min(1).max(200).optional(), id: z.string().regex(/^[a-f0-9]{8}$/).optional(),
             limit: z.number().int().min(1).max(500).optional() }).parse(data);
-          result = { runs: await scheduler.history(input) };
+          result = { runs: await scheduler!.history(input) };
         } else if (url.pathname === "/v1/dispatch") {
-          result = await dispatches.dispatch(data);
+          result = await dispatches!.dispatch(data);
         } else if (url.pathname === "/v1/push/register") {
           await agentHooks.push.register(data); result = { ok: true };
         } else if (url.pathname === "/v1/push/answer") {
@@ -458,7 +504,7 @@ export async function serve(version: string): Promise<void> {
    * missing one: `reader` stays undefined until the file appears. */
   async function conversationReader(target: Target): Promise<{ reader?: TranscriptReader; source: Provider; session: string }> {
     try {
-      const reader = new TranscriptReader(await transcriptPath(target.source, target.session), target.source, undefined, agentHooks.changes.view(`${target.source}:${target.session}`));
+      const reader = new TranscriptReader(await transcriptPath(target.source, target.session), target.source, undefined, modules.has("git") ? agentHooks.changes.view(`${target.source}:${target.session}`) : undefined);
       return { reader, source: target.source, session: target.session };
     } catch (error) {
       if (error instanceof BridgeError && error.status === 404) return { source: target.source, session: target.session };
@@ -479,6 +525,7 @@ export async function serve(version: string): Promise<void> {
     try {
       const url = new URL(request.url || "/", "http://phren.local");
       if (!["/v1/transcripts", "/v1/status"].includes(url.pathname) || url.origin !== "http://phren.local") { socket.destroy(); return; }
+      requireRoute(modules, "WS", url.pathname);
       ws.handleUpgrade(request, socket, head, client => {
         while (ws.clients.size > 16) {
           const oldest = ws.clients.values().next().value!;
@@ -538,14 +585,15 @@ export async function serve(version: string): Promise<void> {
             const pendingApproval = agentHooks.approval(target);
             const pendingQuestions = target.source === "codex" ? await codexQuestions.pending(target).catch(() => undefined) : undefined;
             const cwd = await trustedDirectory(pane).catch(() => undefined);
-            const branch = cwd ? await repositoryBranch(cwd) : undefined;
+            const branch = modules.has("git") && cwd ? await repositoryBranch(cwd) : undefined;
             const terminalPrompt = !pendingApproval && ["blocked", "waiting"].includes(String(pane.agent_status)) ? agentHooks.terminalPrompt(target) : undefined;
             const historyHealth = target.source === "codex" ? await threadHealth(target.session, pane.agent_status) : { stalled: false };
             send(client, { agentStatus: { source: target.source, session: target.session,
               status: pendingApproval ? "waiting" : pane.agent_status, pendingApproval, pendingQuestions, terminalPrompt,
               compacting: agentHooks.compacting(target),
               ...(historyHealth.stalled ? { historyStalled: true, historyStalledSince: historyHealth.since } : {}),
-              capabilities: { ...capabilities, asyncQuestions: target.source === "codex" && codexQuestions.available }, branch } });
+              modules: info.modules, store: info.store, profile: info.profile, generation: info.generation,
+              capabilities: { ...activeCapabilities, asyncQuestions: target.source === "codex" && codexQuestions.available }, branch } });
           }
           first = false;
         }
@@ -586,8 +634,8 @@ export async function serve(version: string): Promise<void> {
   await new Promise<void>((resolve, reject) => { http.once("error", reject); http.listen(socketPath(), () => resolve()); });
   await chmod(socketPath(), 0o600);
   await agentHooks.start();
-  void scheduler.tick().catch(() => {});
-  const scheduleTimer = setInterval(() => { void scheduler.tick().catch(() => {}); }, 30_000);
+  void scheduler?.tick().catch(() => {});
+  const scheduleTimer = scheduler ? setInterval(() => { void scheduler.tick().catch(() => {}); }, 30_000) : undefined;
   let recording = false;
   const activityTimer = setInterval(() => {
     if (recording) return;
@@ -606,7 +654,7 @@ export async function serve(version: string): Promise<void> {
     })().finally(() => { recording = false; }).catch(() => {});
   }, 5000);
   await new Promise<void>(resolve => {
-    const stop = () => { stopRetention(); clearInterval(scheduleTimer); clearInterval(activityTimer); scheduler.close(); agentHooks.close(); ws.clients.forEach(c => c.terminate()); ws.close(); http.close(() => resolve()); http.closeAllConnections(); };
+    const stop = () => { stopRetention(); clearInterval(scheduleTimer); clearInterval(activityTimer); scheduler?.close(); agentHooks.close(); ws.clients.forEach(c => c.terminate()); ws.close(); http.close(() => resolve()); http.closeAllConnections(); };
     process.once("SIGTERM", stop); process.once("SIGINT", stop);
   });
   await unlink(socketPath()).catch(() => {});

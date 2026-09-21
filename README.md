@@ -17,6 +17,8 @@ Persistent memory for AI agents. Findings, tasks, and patterns live in markdown 
 
 ---
 
+[Modules](docs/modules.md) let you keep phren as memory alone or enable tasks, phone Hook, Git, schedules and conductor with `phren modules enable|disable <name>`.
+
 ## Install
 
 ```bash

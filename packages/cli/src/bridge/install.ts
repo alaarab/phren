@@ -1,3 +1,6 @@
+import { activateModules as moduleSnapshot, type ModuleSnapshot } from "../modules/runtime.js";
+import { defaultPhrenPath } from "../shared.js";
+import { disabledHint } from "../modules/registry.js";
 import { execFile } from "node:child_process";
 import { usageStatusLine } from "./usage.js";
 import { chmod, copyFile, mkdir, open, readFile, rename, symlink, unlink, lstat, writeFile } from "node:fs/promises";
@@ -87,12 +90,14 @@ async function startService() {
 export async function install(version: string, noService = false): Promise<void> {
   if (!["darwin", "linux"].includes(process.platform)) throw new Error("Phren Hook supports macOS and Linux.");
   if (!/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(version)) throw new Error("Invalid helper version.");
+  const modules = moduleSnapshot(defaultPhrenPath(), undefined, true);
+  if (!modules.has("hook")) throw new Error(disabledHint("hook"));
   const root = bridgeRoot(), herdr = herdrRoot(), versions = path.join(root, "versions");
   await mkdir(versions, { recursive: true, mode: 0o700 }); await chmod(root, 0o700);
   const serviceLog = path.join(root, "service.log");
   const log = await open(serviceLog, "a", 0o600);
   try { await log.chmod(0o600); } finally { await log.close(); }
-  const hookEdits = await planAgentHooks(path.join(root, "current/bridge-hook.mjs"));
+  const hookEdits = await planAgentHooks(path.join(root, "current/bridge-hook.mjs"), false, modules);
   const own = fileURLToPath(import.meta.url);
   const bundle = own.endsWith("bridge-hook.mjs") ? own : path.join(path.dirname(own), "..", "bridge-hook.mjs");
   const destination = path.join(versions, version);
@@ -102,16 +107,16 @@ export async function install(version: string, noService = false): Promise<void>
   const stagedBundle = installedBundle + `.phren-${process.pid}`;
   await copyFile(bundle, stagedBundle); await rename(stagedBundle, installedBundle);
   const previous = await readFile(path.join(root, "installed.json"), "utf8").then(v => JSON.parse(v) as { version: string; previous?: string }).catch(() => null);
-  await atomic(path.join(root, "dispatch"), `#!/bin/sh\nexport PHREN_BRIDGE_HOME=${quote(root)}\nexport PHREN_HERDR_HOME=${quote(herdr)}\nexec ${quote(process.execPath)} ${quote(path.join(root, "current/bridge-hook.mjs"))} ssh\n`, 0o700);
+  await atomic(path.join(root, "dispatch"), `#!/bin/sh\nexport PHREN_BRIDGE_HOME=${quote(root)}\nexport PHREN_HERDR_HOME=${quote(herdr)}\nexport PHREN_PATH=${quote(modules.store)}\nexport PHREN_PROFILE=${quote(modules.profile)}\nexec ${quote(process.execPath)} ${quote(path.join(root, "current/bridge-hook.mjs"))} ssh\n`, 0o700);
   const environmentPath = [path.dirname(process.execPath), path.join(homedir(), ".local/bin"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin"].join(":");
   const program = path.join(root, "current/bridge-hook.mjs");
   if (!noService) {
     if (process.platform === "darwin") {
       const folder = path.join(homedir(), "Library/LaunchAgents"); await mkdir(folder, { recursive: true });
-      await atomic(path.join(folder, `${label}.plist`), `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>Label</key><string>${label}</string><key>ProgramArguments</key><array><string>${xml(process.execPath)}</string><string>${xml(program)}</string><string>serve</string></array><key>Umask</key><integer>63</integer><key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>ThrottleInterval</key><integer>5</integer><key>EnvironmentVariables</key><dict><key>PATH</key><string>${xml(environmentPath)}</string><key>PHREN_BRIDGE_HOME</key><string>${xml(root)}</string><key>PHREN_HERDR_HOME</key><string>${xml(herdr)}</string></dict><key>StandardErrorPath</key><string>${xml(path.join(root, "service.log"))}</string></dict></plist>\n`);
+      await atomic(path.join(folder, `${label}.plist`), `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>Label</key><string>${label}</string><key>ProgramArguments</key><array><string>${xml(process.execPath)}</string><string>${xml(program)}</string><string>serve</string></array><key>Umask</key><integer>63</integer><key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>ThrottleInterval</key><integer>5</integer><key>EnvironmentVariables</key><dict><key>PATH</key><string>${xml(environmentPath)}</string><key>PHREN_BRIDGE_HOME</key><string>${xml(root)}</string><key>PHREN_HERDR_HOME</key><string>${xml(herdr)}</string><key>PHREN_PATH</key><string>${xml(modules.store)}</string><key>PHREN_PROFILE</key><string>${xml(modules.profile)}</string></dict><key>StandardErrorPath</key><string>${xml(path.join(root, "service.log"))}</string></dict></plist>\n`);
     } else {
       const folder = path.join(homedir(), ".config/systemd/user"); await mkdir(folder, { recursive: true });
-      await atomic(path.join(folder, unit), `[Unit]\nDescription=Phren Hook\n[Service]\nExecStart=${systemdQuote(process.execPath)} ${systemdQuote(program)} serve\nEnvironment=${systemdQuote("PATH=" + environmentPath)} ${systemdQuote("PHREN_BRIDGE_HOME=" + root)} ${systemdQuote("PHREN_HERDR_HOME=" + herdr)}\nRestart=on-failure\nRestartSec=3\nUMask=0077\n[Install]\nWantedBy=default.target\n`);
+      await atomic(path.join(folder, unit), `[Unit]\nDescription=Phren Hook\n[Service]\nExecStart=${systemdQuote(process.execPath)} ${systemdQuote(program)} serve\nEnvironment=${systemdQuote("PATH=" + environmentPath)} ${systemdQuote("PHREN_BRIDGE_HOME=" + root)} ${systemdQuote("PHREN_HERDR_HOME=" + herdr)} ${systemdQuote("PHREN_PATH=" + modules.store)} ${systemdQuote("PHREN_PROFILE=" + modules.profile)}\nRestart=on-failure\nRestartSec=3\nUMask=0077\n[Install]\nWantedBy=default.target\n`);
     }
     await stopService();
   }
@@ -178,7 +183,7 @@ async function missingFile<T>(operation: Promise<T>): Promise<T | undefined> {
   }
 }
 
-export async function planAgentHooks(program: string, remove = false): Promise<SettingsEdit[]> {
+export async function planAgentHooks(program: string, remove = false, modules?: ModuleSnapshot): Promise<SettingsEdit[]> {
   const edits: SettingsEdit[] = [];
   for (const [source, file] of [
     ["codex", path.join(process.env.CODEX_HOME || path.join(homedir(), ".codex"), "hooks.json")],
@@ -190,7 +195,7 @@ export async function planAgentHooks(program: string, remove = false): Promise<S
       throw new Error(`Agent settings require a manual update: ${file}`);
     }
     const before = await missingFile(readFile(file, "utf8"));
-    if (remove && before === undefined) continue;
+    if ((remove || modules?.has("hook") === false) && before === undefined) continue;
     const parsed: unknown = before === undefined ? {} : JSON.parse(before);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(`Invalid agent settings: ${file}`);
     const config = object(parsed);
@@ -198,6 +203,11 @@ export async function planAgentHooks(program: string, remove = false): Promise<S
     const hooks = object(config.hooks);
     const command = `${quote(process.execPath)} ${quote(program)} hook ${source}`;
     const ownHook = (entry: unknown) => typeof entry === "string" && entry.endsWith(` ${quote(program)} hook ${source}`);
+    if (remove || modules?.has("hook") === false) {
+      const owned = Object.values(hooks).flatMap(objects).some(group => ownHook(group.command) || ownHook(group.bash) || objects(group.hooks).some(hook => ownHook(hook.command)));
+      const statusChanged = source === "claude" && JSON.stringify(usageStatusLine(config.statusLine, program, true)) !== JSON.stringify(config.statusLine);
+      if (!owned && !statusChanged) continue;
+    }
     for (const event of ["SessionStart", "UserPromptSubmit", "Stop", "PermissionRequest", "PreToolUse", "PostToolUse", ...(source === "claude" ? ["PreCompact"] : [])]) {
       if (hooks[event] !== undefined && (!Array.isArray(hooks[event]) || (hooks[event] as unknown[]).some(v => !v || typeof v !== "object" || Array.isArray(v)))) throw new Error(`Invalid ${event} hooks: ${file}`);
       if (source !== "copilot" && objects(hooks[event]).some(g => !Array.isArray(g.hooks))) throw new Error(`Invalid ${event} hook group: ${file}`);
@@ -206,7 +216,7 @@ export async function planAgentHooks(program: string, remove = false): Promise<S
       config.version = 1;
       for (const event of ["SessionStart", "UserPromptSubmit"]) {
         const entries = objects(hooks[event]).filter(h => !ownHook(h.bash) && !ownHook(h.command));
-        hooks[event] = remove ? entries : [...entries, { type: "command", bash: command, timeoutSec: 3 }];
+        hooks[event] = remove || modules?.has("hook") === false ? entries : [...entries, { type: "command", bash: command, timeoutSec: 3 }];
       }
     } else {
       for (const event of ["SessionStart", "UserPromptSubmit", "Stop", "PermissionRequest", "PreToolUse", "PostToolUse", ...(source === "claude" ? ["PreCompact"] : [])]) {
@@ -217,12 +227,13 @@ export async function planAgentHooks(program: string, remove = false): Promise<S
         // inside the Hook. Claude can narrow its registration here.
         const group = event.endsWith("ToolUse") ? { ...(source === "claude" ? { matcher: "Bash|Write|Edit|MultiEdit|NotebookEdit|apply_patch|str_replace_editor" } : {}), hooks: [{ type: "command", command, timeout: 10 }] }
           : { hooks: [{ type: "command", command, timeout: event === "PermissionRequest" ? 60 : 3 }] };
-        hooks[event] = remove ? groups : [...groups, group];
+        const owner = event.endsWith("ToolUse") ? "git" : "hook";
+        hooks[event] = remove || modules?.has("hook") === false || modules?.has(owner) === false ? groups : [...groups, group];
       }
     }
     config.hooks = hooks;
     if (source === "claude") {
-      const statusLine = usageStatusLine(config.statusLine, program, remove);
+      const statusLine = usageStatusLine(config.statusLine, program, remove || modules?.has("hook") === false);
       if (statusLine === undefined) delete config.statusLine; else config.statusLine = statusLine;
     }
     const after = JSON.stringify(config, null, 2) + "\n";
@@ -246,9 +257,14 @@ async function opencodePluginSource(): Promise<string | undefined> {
 }
 async function applyOpencodePlugin(remove = false): Promise<boolean> {
   const dir = opencodePluginsDir(), file = path.join(dir, "phren-transcript.js");
-  if (remove) { await unlink(file).catch(() => {}); return false; }
-  if (!(await lstat(path.dirname(dir)).catch(() => null))?.isDirectory()) return false;
   const source = await opencodePluginSource();
+  const existing = await missingFile(readFile(file, "utf8"));
+  if (remove) {
+    if (source !== undefined && existing === source) await unlink(file);
+    return false;
+  }
+  if (existing !== undefined && existing !== source) return false;
+  if (!(await lstat(path.dirname(dir)).catch(() => null))?.isDirectory()) return false;
   if (source === undefined) return false;
   await mkdir(dir, { recursive: true });
   await atomic(file, source, 0o644);
@@ -277,4 +293,14 @@ export async function rollback() {
   if (!config.previous || !/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(config.previous)) throw new Error("No previous helper version is available.");
   await stopService(); await activate(config.previous); await startService();
   await atomic(path.join(bridgeRoot(), "installed.json"), JSON.stringify({ version: config.previous, previous: config.version }) + "\n");
+}
+
+export async function reconcileModuleHooks(store: string, profile?: string): Promise<void> {
+  const modules = moduleSnapshot(store, profile);
+  const root = bridgeRoot();
+  // Synced enablement alone never installs a host service or enrolls a key.
+  if (!await missingFile(readFile(path.join(root, "installed.json")))) return;
+  await applyAgentHooks(await planAgentHooks(path.join(root, "current/bridge-hook.mjs"), false, modules));
+  await applyOpencodePlugin(!modules.has("hook"));
+  if (!modules.has("hook")) await stopService();
 }

@@ -1,3 +1,4 @@
+import { reconcileModuleHooks } from "../bridge/install.js";
 import * as fs from "fs";
 import * as path from "path";
 import * as readline from "readline";
@@ -567,6 +568,8 @@ export async function runLink(phrenPath: string, opts: LinkOptions = {}) {
   } else {
     log(`  Hooks registration skipped (hooks-mode is off)`);
   }
+
+  await reconcileModuleHooks(phrenPath, profile);
 
   // Write phren.SKILL.md
   try {

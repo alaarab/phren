@@ -1,3 +1,4 @@
+import { moduleEnabled } from "../modules/runtime.js";
 // cli-hooks.ts — Thin orchestrator. Delegates to focused modules:
 //   shared-retrieval.ts     — shared search, scoring, ranking, snippet selection
 //   cli-hooks-citations.ts  — citation parsing and validation
@@ -221,7 +222,7 @@ export async function handleHookPrompt() {
 
   // Resolve git context AFTER the enabled check — it spawns 3 git processes and is
   // wasted work when the project has hooks disabled.
-  const gitCtx = getGitContext(cwd);
+  const gitCtx = moduleEnabled(getPhrenPath(), "git") ? getGitContext(cwd) : null;
 
   const resolvedConfig = mergeConfig(getPhrenPath(), detectedProject ?? undefined);
 
@@ -257,7 +258,7 @@ export async function handleHookPrompt() {
     const findingsProactivity = resolvedConfig.proactivity.findings
       ?? resolvedConfig.proactivity.base
       ?? getProactivityLevelForFindings(getPhrenPath());
-    if (isFeatureEnabled("PHREN_FEATURE_AUTO_EXTRACT", true) && findingsProactivity !== "low" && sessionId && detectedProject && cwd) {
+    if (moduleEnabled(getPhrenPath(), "git") && isFeatureEnabled("PHREN_FEATURE_AUTO_EXTRACT", true) && findingsProactivity !== "low" && sessionId && detectedProject && cwd) {
       const marker = sessionMarker(getPhrenPath(), `extracted-${sessionId}-${detectedProject}`);
       if (!fs.existsSync(marker)) {
         try {
@@ -378,14 +379,14 @@ export async function handleHookPrompt() {
     const taskLevel = resolvedConfig.proactivity.tasks
       ?? resolvedConfig.proactivity.base
       ?? getProactivityLevelForTask(getPhrenPath());
-    const taskLifecycle = handleTaskPromptLifecycle({
+    const taskLifecycle = moduleEnabled(getPhrenPath(), "tasks") ? handleTaskPromptLifecycle({
       phrenPath: getPhrenPath(),
       prompt,
       project: detectedProject,
       sessionId,
       intent,
       taskLevel,
-    });
+    }) : { noticeLines: [] };
     if (taskLifecycle.noticeLines.length > 0) {
       parts.push("");
       parts.push(...taskLifecycle.noticeLines);

@@ -1,5 +1,10 @@
 # Feature Flags
 
+[Modules](modules.md) are the outer enablement boundary. Configure them with
+`phren modules enable|disable <name> [--profile <name>]`; feature flags and
+management presets apply only within enabled modules. A flag cannot restore a
+disabled module's tools, hooks or background work.
+
 phren uses environment variables as feature flags to control optional behaviors. Defaults are mixed — some flags ship on, some ship off; each section below states its own default. A flag that defaults to enabled is turned off by setting it to `0`, `false`, `off`, or `no`; a flag that defaults to disabled is turned on by setting it to `1` (or any value other than that disable list).
 
 ## Precedence with management presets

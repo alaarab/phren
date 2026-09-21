@@ -1,3 +1,4 @@
+import { moduleEnabled } from "../modules/runtime.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type McpContext, mcpResponse, resolveStoreForProject } from "./types.js";
 import { z } from "zod";
@@ -449,6 +450,7 @@ function computeSessionDiff(phrenPath: string, project: string, lastSessionEnd: 
 
 export function register(server: McpServer, ctx: McpContext): void {
   const { phrenPath } = ctx;
+  const tasksEnabled = moduleEnabled(phrenPath, "tasks", ctx.profile);
 
   server.registerTool("session_start", {
     title: "◆ phren · session start",
@@ -664,7 +666,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         try { return resolveStoreForProject(ctx, endedState.project, "read").phrenPath; } catch { return phrenPath; }
       })();
       try {
-        const trackedActiveTask = getActiveTaskForSession(projectStorePath, state.sessionId, endedState.project);
+        const trackedActiveTask = moduleEnabled(projectStorePath, "tasks", ctx.profile) ? getActiveTaskForSession(projectStorePath, state.sessionId, endedState.project) : null;
         const activeTask = trackedActiveTask ?? (() => {
           const tasks = readTasks(projectStorePath, endedState.project!);
           if (!tasks.ok) return null;
@@ -676,7 +678,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           const snapshotRoot =
             getProjectSourcePath(projectStorePath, endedState.project, projectConfig) ||
             path.join(projectStorePath, endedState.project);
-          const { gitStatus, editedFiles } = collectGitStatusSnapshot(snapshotRoot);
+          const { gitStatus, editedFiles } = moduleEnabled(projectStorePath, "git", ctx.profile) ? collectGitStatusSnapshot(snapshotRoot) : { gitStatus: "", editedFiles: [] };
           const resumptionHint = extractResumptionHint(
             effectiveSummary,
             activeTask.line,
@@ -716,18 +718,18 @@ export function register(server: McpServer, ctx: McpContext): void {
       PHREN_SESSION_ID: state.sessionId,
       PHREN_DURATION_MINS: String(durationMins),
       PHREN_FINDINGS_ADDED: String(endedState.findingsAdded),
-      PHREN_TASKS_COMPLETED: String(Number.isFinite(endedState.tasksCompleted) ? endedState.tasksCompleted : 0),
+      ...(tasksEnabled ? { PHREN_TASKS_COMPLETED: String(Number.isFinite(endedState.tasksCompleted) ? endedState.tasksCompleted : 0) } : {}),
       ...(endedState.project ? { PHREN_PROJECT: endedState.project } : {}),
     });
 
     return mcpResponse({
       ok: true,
-      message: `Session ended. Duration: ~${durationMins} min. ${endedState.findingsAdded} finding(s) added, ${Number.isFinite(endedState.tasksCompleted) ? endedState.tasksCompleted : 0} task(s) completed.${summary ? " Summary saved for next session." : ""}`,
+      message: `Session ended. Duration: ~${durationMins} min. ${endedState.findingsAdded} finding(s) added${tasksEnabled ? `, ${Number.isFinite(endedState.tasksCompleted) ? endedState.tasksCompleted : 0} task(s) completed` : ""}.${summary ? " Summary saved for next session." : ""}`,
       data: {
         sessionId: state.sessionId,
         durationMins,
         findingsAdded: endedState.findingsAdded,
-        tasksCompleted: Number.isFinite(endedState.tasksCompleted) ? endedState.tasksCompleted : 0,
+        ...(tasksEnabled ? { tasksCompleted: Number.isFinite(endedState.tasksCompleted) ? endedState.tasksCompleted : 0 } : {}),
       },
     });
   });
@@ -757,7 +759,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       `Started: ${state.startedAt}`,
       `Duration: ~${durationMins} min`,
       `Findings added: ${state.findingsAdded}`,
-      `Tasks completed: ${Number.isFinite(state.tasksCompleted) ? state.tasksCompleted : 0}`,
+      ...(tasksEnabled ? [`Tasks completed: ${Number.isFinite(state.tasksCompleted) ? state.tasksCompleted : 0}`] : []),
     ];
     if (state.summary) parts.push(`Prior summary: ${state.summary}`);
 
@@ -766,10 +768,10 @@ export function register(server: McpServer, ctx: McpContext): void {
 
   server.registerTool("session_history", {
     title: "◆ phren · session history",
-    description: "List past sessions with their duration, findings count, and summary. Optionally drill into a specific session to see all findings and tasks created during it.",
+    description: "List past sessions with their duration, findings count, and summary. Optionally drill into a specific session to see all artifacts created during it.",
     inputSchema: z.object({
       limit: z.number().optional().describe("Max sessions to return (default 20)."),
-      sessionId: z.string().optional().describe("If provided, return full artifacts (findings + tasks) for this session instead of listing all sessions."),
+      sessionId: z.string().optional().describe("If provided, return full session artifacts for this session instead of listing all sessions."),
       project: z.string().optional().describe("Filter sessions and artifacts by project."),
     }),
   }, async ({ limit, sessionId: targetSessionId, project }) => {
@@ -787,7 +789,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         `Status: ${session.status}`,
         `Duration: ~${session.durationMins ?? 0} min`,
         `Findings: ${artifacts.findings.length}`,
-        `Tasks: ${artifacts.tasks.length}`,
+        ...(tasksEnabled ? [`Tasks: ${artifacts.tasks.length}`] : []),
       ];
       if (session.summary) parts.push(`\nSummary: ${session.summary}`);
       if (artifacts.findings.length > 0) {
@@ -816,7 +818,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       const dur = s.durationMins != null ? `${s.durationMins}m` : "?";
       const status = s.status === "active" ? " ●" : "";
       const findings = s.findingsAdded > 0 ? ` ${s.findingsAdded}f` : "";
-      const tasks = s.tasksCompleted > 0 ? ` ${s.tasksCompleted}t` : "";
+      const tasks = tasksEnabled && s.tasksCompleted > 0 ? ` ${s.tasksCompleted}t` : "";
       const date = s.startedAt.slice(0, 16).replace("T", " ");
       return `${id}${status}  ${date}  ${dur}${findings}${tasks}  ${proj}${s.summary ? "  " + s.summary.slice(0, 60) : ""}`;
     });

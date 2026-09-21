@@ -1,9 +1,13 @@
 # Modules
 
-Status: design and declaration seam. This change adds manifests, a read-only
-configuration resolver and `phren modules list`. It does **not** filter existing
-MCP tools, CLI commands, agent hooks, Hook routes, starters or phone screens.
-`enable` and `disable` below are the planned interface, not implemented commands.
+Status: implemented for the built-in modules. Store/profile overrides gate MCP
+registration, CLI dispatch and help, generated integrations, Hook routes and
+background services. The phone retains typed host capabilities and hides
+unavailable live entry points. Use `phren modules enable|disable <name>` and
+run `phren init` (or `phren link`) to reconcile generated integrations; restart
+MCP and Hook processes to publish a changed tool or route list. Third-party
+loading, live adapter replacement and a code-map implementation remain future
+work.
 
 Phren must remain useful as memory alone. Tasks, the phone Hook, repository
 Changes, scheduled prompts, conductor and a future code map are independently
@@ -11,9 +15,9 @@ enabled contributions. Disabling one removes its active surface and background
 work while preserving its data for re-enablement. No module switch uninstalls
 the user's agents, deletes their tasks or stops an agent they launched.
 
-## Current seams and the boundaries they need
+## Runtime integration boundaries
 
-| Surface | Current behavior | Required change |
+| Surface | Previous behavior | Runtime boundary |
 | --- | --- | --- |
 | `packages/cli/src/index.ts` | Imports all 15 `tools/*` registrars and calls `gate.finish()` | Resolve modules before importing optional registrars |
 | `packages/cli/src/mcp/profile.ts` | `core` exposes ten tools; the catalog keeps all tools, composites dispatch into it | Filter catalog membership by module first, then apply the MCP presentation profile |
@@ -54,9 +58,8 @@ version; external modules will version independently.
 
 The six built-ins are enumerated in
 [`modules/registry.ts`](../packages/cli/src/modules/registry.ts). Tool names,
-CLI paths and HTTP/WS routes there refer to current implementations. New
-capability names (`memory`, `tasks`, `hook`, `git`, `schedules`) are proposed
-negotiation fields, not fields already emitted by this release.
+CLI paths and HTTP/WS routes there refer to current implementations. Capability names (`memory`, `tasks`, `hook`, `git`, `schedules`) are emitted
+from the same snapshot that gates Hook routes.
 
 Declarations are an ownership inventory, not a complete filesystem deletion
 allowlist. Shared structural directories such as `global/skills` have individual
@@ -129,8 +132,8 @@ revise_finding    session            phren_admin
 Enabling tasks adds `get_tasks`, `add_task` and `manage_task`, preserving today's
 ten-tool core surface for default installations. This deliberately defines a
 seven-tool memory core rather than keeping inert task tools in memory. The
-current `CORE_TOOLS` constant remains unchanged in this seam. The later gate
-refactor derives the set from enabled manifests and preserves listing order.
+`CORE_TOOLS` ordering remains stable; the gate intersects it with the enabled
+manifests before building the presentation.
 
 `full` remains an explicit presentation choice: it exposes all tools of the
 enabled modules, not every installed module. Memory's remaining handlers stay
@@ -211,35 +214,26 @@ empty/malformed YAML, unsupported versions, non-boolean values, unknown names,
 `memory: false` in any scope, or unsatisfied active dependencies are errors.
 No read mutates or caches configuration. A version-only document uses defaults.
 
-The implemented command is:
+The management commands are:
 
 ```sh
 phren modules list
-phren modules list --profile personal
-```
-
-It prints all six built-ins, version and configured status, and explicitly says
-registration is unchanged. The normal CLI store context selects the store;
-`PHREN_PATH` can select another store today. It rejects `enable`/`disable` and
-extra arguments, and does not create `.config/modules.yaml`.
-
-The planned mutation interface is:
-
-```sh
 phren modules list --store personal --profile work
 phren modules enable git --store personal
 phren modules disable tasks --store personal --profile work
 ```
 
-Without `--store`, mutate the selected primary store. Without `--profile`,
-mutate the store override; with it, mutate only that profile override. `list`
-shows the effective active profile by default and later includes the origin
-(default/store/profile), dependencies and configured-versus-active status.
+Without `--store`, use the selected primary store (`PHREN_PATH` can select it).
+Without `--profile`, mutations change the store override; with it, they change
+only that profile override. Listing uses the resolved active profile by default
+and shows effective state, origin (`default`, `store`, `profile`) and dependencies.
+A running MCP or Hook process keeps its startup snapshot until restarted.
+
 Mutations validate the complete proposed config, preserve unrelated overrides,
-take the store write lock and atomically replace the YAML. Enabling conductor
-requires Hook already enabled; report the missing dependency rather than
-silently changing another switch. Disabling Hook while conductor depends on it
-is rejected with the dependent names. There is no implicit cascading disable.
+take the configuration write lock and atomically replace the YAML. Enabling
+conductor requires Hook already enabled. Disabling Hook while conductor depends
+on it is rejected, including dependencies in inactive profile overrides. There
+is no implicit cascading disable and no deletion of optional data.
 
 ## Runtime integration and hot swapping
 
@@ -306,14 +300,14 @@ simulator or push delivery is ready. Absent or false capability means the phone
 hides the corresponding action and stops its polling; the server must also
 reject direct requests. Unknown capabilities are ignored.
 
-The requested `PhrenConnection.fetch` inspection reveals an important gap:
+Before module negotiation, `PhrenConnection.fetch` exposed a gap:
 it reads `/v1/workspaces`, validates `phren.product` and `phren.protocol`, then
-decodes `LiveWorkspaces`. That model currently drops the `phren` capability map.
+decodes `LiveWorkspaces`. The model now retains the `phren` capability map and carries it into sessions.
 `computerName` separately calls `/v1/health`. `WebPreviewTunnel` checks the
 `webPreview` capability, and `AgentInteractions` checks question capabilities,
 but those checks do not govern overall navigation.
 
-Today `MainTabView` in `PhrenApp.swift` always creates Projects, Agents, Tasks,
+Before module negotiation, `MainTabView` in `PhrenApp.swift` always creates Projects, Agents, Tasks,
 Search and Settings. Readiness chooses onboarding/content. `ProjectsView` and
 `AgentsView` add Schedules links without a module check; `AgentChatView` adds
 Changes when it has a target; `AgentChangesView` renders all Changes sections.
@@ -333,9 +327,10 @@ Settings and connection setup remain reachable. An offline host retains its
 last-known presentation with disconnected status but permits no unconfirmed
 live operation; a reachable host omitting a capability hides that feature.
 For an old store with no module config, apply migration defaults. For an old
-Hook with no `modules` field, use an explicit, versioned compatibility adapter
-for capabilities it actually reported; do not infer every optional module from
-protocol `1`. Deploy phone compatibility before removing server capabilities.
+Hook with no capabilities dictionary, the phone preserves legacy navigation by
+treating features as enabled. Once a dictionary is present, missing or false
+capabilities hide their actions. Unknown capabilities are ignored. Typed
+transport fields and provider lists retain their wire types.
 
 ## Migration
 
@@ -370,19 +365,22 @@ files; generated hooks and skill mirrors are reconciled by ownership. Disabling
 the module never removes its data. Explicit data removal, if later offered, is
 a separate operation.
 
-This release performs no migration, writes no enablement config and changes no
-defaults of active runtime behavior. Its list output describes the resolver's
-configured intent, which may differ from today's unconditional registration.
+Runtime activation migrates legacy stores once, preserving explicit config if
+already present. A fresh `phren init` writes a version-only config before
+provisioning, so it uses the memory/tasks defaults. Existing memory installs
+retain Git extraction; an existing Hook or conductor installation preserves its
+bundled optional surfaces. Migration records explicit values and stages a
+`.config/modules.yaml.migration-backup` before publishing them. It does not
+install a service or enroll credentials on a computer receiving synced config.
 
 ## Ordered independent work packages
 
-Each package should land with its own fixtures and contract tests. Keep runtime
-gating behind the rollout boundary until migration and phone compatibility have
-landed. None requires implementing the future code map or an npm loader.
+Each package should land with its own fixtures and contract tests. The built-in runtime consumes the writer, migration and phone capability
+contract together; adapter hot replacement remains deferred. None requires implementing the future code map or an npm loader.
 
 | Order | Package and files | Acceptance tests |
 | --- | --- | --- |
-| 1 | Declaration seam, delivered here: `modules/manifest.ts`, `modules/registry.ts`, `modules/registry.test.ts`, `cli-registry.ts`, this document and root changelog | Inventory matches current MCP registrations, commands, routes and skills; missing/default/store/profile/invalid/dependency configs; read-only list dispatch; memory declarations through the existing gate |
+| 1 | Declaration inventory: `modules/manifest.ts`, `modules/registry.ts`, `modules/registry.test.ts`, `cli-registry.ts`, this document and root changelog | Inventory matches current MCP registrations, commands, routes and skills; missing/default/store/profile/invalid/dependency configs; read-only list dispatch; memory declarations through the existing gate |
 | 2 | Config writer and migration: `modules/config.ts` (new), `init/setup.ts`, `init/preferences.ts`, `profile-store.ts`, `cli-registry.ts`, `cli/namespaces-store.ts` | Atomic concurrent updates, idempotent migration, new and legacy stores, differing host profiles, no service install from synced config, dependency errors, preservation of disabled data |
 | 3 | MCP catalog ownership: `index.ts`, `mcp/profile.ts`, `tools/tasks.ts`, `tools/session.ts`, `tools/finding.ts`, `tools/extract.ts`, `tools/dispatch.ts` | Exactly seven memory core tools; ten with tasks; `full` excludes disabled modules; admin/composite bypass attempts fail; no optional imports; target-store enforcement; VS Code full-profile contract |
 | 4 | CLI and active views: `entrypoint.ts`, `cli-registry.ts`, `cli-help.ts`, `cli/namespaces-tasks.ts`, `cli/govern.ts`, `shell/`, `ui/memory-ui.ts`, `packages/cli/browser/` | Help and execution agree; disabled aliases, nested and internal commands cannot bypass; repair works on invalid config; task panes and counts disappear; read-only list remains cheap |
@@ -417,7 +415,7 @@ Concrete suite targets, relative to `packages/cli/src` unless stated otherwise:
 - Packages 8 and 9: new `modules/reload.test.ts` and `modules/discovery.test.ts`,
   including migration and trust fixtures that never launch real host services.
 
-The declaration seam has Vitest coverage ready for the orchestrator. In this
+The runtime has Vitest coverage ready for the orchestrator. In this
 worktree Vitest, Xcode and Swift execution are unavailable; the permitted local
 compiler check is `pnpm exec tsc --noEmit -p packages/cli` (or the installed
 `node_modules/.bin/tsc` directly if pnpm cannot bootstrap). Before rollout the

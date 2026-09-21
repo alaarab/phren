@@ -1,7 +1,8 @@
+import type { ModuleSnapshot } from "./modules/runtime.js";
 // Help formatters. Pure functions over the command registry.
 
 import {
-  REGISTRY,
+  commandsForModules,
   TOPIC_ORDER,
   DOC_TOPICS,
   lookupCommand,
@@ -31,12 +32,12 @@ function pad(usage: string, summary: string | undefined): string {
   return text + " ".repeat(gap) + summary;
 }
 
-function visibleCommands(): Command[] {
-  return REGISTRY.filter((c) => !c.hidden);
+function visibleCommands(snapshot?: ModuleSnapshot): Command[] {
+  return commandsForModules(snapshot).filter((c) => !c.hidden);
 }
 
-function commandsInTopic(topic: Topic): Command[] {
-  return visibleCommands().filter((c) => c.topic === topic);
+function commandsInTopic(topic: Topic, snapshot?: ModuleSnapshot): Command[] {
+  return visibleCommands(snapshot).filter((c) => c.topic === topic);
 }
 
 function renderCommandLine(cmd: Command): string {
@@ -63,12 +64,12 @@ function renderCommandWithSubs(cmd: Command): string[] {
 
 // ── Cheat sheet (phren --help) ───────────────────────────────────────────────
 
-export function formatCheatSheet(): string {
+export function formatCheatSheet(snapshot?: ModuleSnapshot): string {
   const lines: string[] = [];
   lines.push("phren - persistent memory for AI agents");
   lines.push("");
   lines.push(pad("phren", "Interactive memory shell"));
-  for (const cmd of visibleCommands()) {
+  for (const cmd of visibleCommands(snapshot)) {
     if (!cmd.featured) continue;
     lines.push(renderCheatSheetLine(cmd));
   }
@@ -84,8 +85,8 @@ export function formatCheatSheet(): string {
 
 // ── Topic help (phren help <topic>) ──────────────────────────────────────────
 
-export function formatTopic(topic: Topic): string {
-  const cmds = commandsInTopic(topic);
+export function formatTopic(topic: Topic, snapshot?: ModuleSnapshot): string {
+  const cmds = commandsInTopic(topic, snapshot);
   const lines: string[] = [];
   lines.push(`${TOPIC_TITLES[topic]}:`);
   for (const cmd of cmds) {
@@ -105,8 +106,8 @@ export function formatDocTopic(name: string): string | null {
 
 // ── Single command (phren <name> --help / phren help <name>) ─────────────────
 
-export function formatCommand(name: string): string | null {
-  const cmd = lookupCommand(name);
+export function formatCommand(name: string, snapshot?: ModuleSnapshot): string | null {
+  const cmd = lookupCommand(name, snapshot);
   if (!cmd) return null;
   const lines: string[] = [];
   lines.push(`${cmd.usage}`);
@@ -124,21 +125,21 @@ export function formatCommand(name: string): string | null {
 
 // ── Full help (phren help all) ───────────────────────────────────────────────
 
-export function formatFullHelp(): string {
+export function formatFullHelp(snapshot?: ModuleSnapshot): string {
   const lines: string[] = [];
   lines.push("phren - persistent knowledge for your agents");
   lines.push("");
   lines.push("Usage:");
   lines.push(pad("phren", "Interactive shell"));
-  for (const cmd of visibleCommands()) {
+  for (const cmd of visibleCommands(snapshot)) {
     if (!cmd.featured) continue;
     lines.push(renderCheatSheetLine(cmd));
   }
   lines.push("");
   for (const topic of TOPIC_ORDER) {
-    const cmds = commandsInTopic(topic);
+    const cmds = commandsInTopic(topic, snapshot);
     if (!cmds.length) continue;
-    lines.push(formatTopic(topic));
+    lines.push(formatTopic(topic, snapshot));
   }
   for (const [docName, body] of Object.entries(DOC_TOPICS)) {
     lines.push(`${docName.charAt(0).toUpperCase()}${docName.slice(1)} reference:`);

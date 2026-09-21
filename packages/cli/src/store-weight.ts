@@ -1,3 +1,4 @@
+import { moduleEnabled } from "./modules/runtime.js";
 /**
  * How much text a store carries, by kind. None of the tidying phren does stays
  * done unless the weight is visible, so `phren status` prints this and doctor
@@ -46,7 +47,7 @@ export function storeWeight(phrenPath: string, profile = ""): StoreWeight {
   const w: StoreWeight = { projects: projectDirs.length, findings: 0, reference: 0, tasks: 0, skills: 0, globalClaude: words(path.join(phrenPath, "global", "AGENTS.md")) };
   for (const dir of projectDirs) {
     w.findings += words(path.join(dir, "FINDINGS.md"));
-    w.tasks += words(path.join(dir, "tasks.md"));
+    if (moduleEnabled(phrenPath, "tasks", profile)) w.tasks += words(path.join(dir, "tasks.md"));
     w.reference += walkWords(path.join(dir, "reference"), (n) => n.endsWith(".md"));
     w.skills += walkWords(path.join(dir, "skills"), (n) => n.endsWith(".md"));
   }

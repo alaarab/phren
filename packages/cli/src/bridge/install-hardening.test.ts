@@ -51,3 +51,36 @@ it("creates the service log privately even when service startup is disabled", as
   const log = await stat(path.join(process.env.PHREN_BRIDGE_HOME!, "service.log"));
   expect(log.size).toBe(0); expect(log.mode & 0o777).toBe(0o600);
 });
+
+it("reconciles Hook and Git owners independently and preserves user hooks", async () => {
+  const { reconcileModuleHooks } = await import("./install.js");
+  const { setModuleEnabled, initializeModules } = await import("../modules/config.js");
+  const store = path.join(state.home, "store");
+  vi.stubEnv("PHREN_PATH", store);
+  initializeModules(store);
+  setModuleEnabled(store, "hook", true);
+  setModuleEnabled(store, "git", true);
+  const settings = path.join(process.env.CLAUDE_CONFIG_DIR!, "settings.json");
+  await mkdir(path.dirname(settings), { recursive: true });
+  const own = { hooks: [{ type: "command", command: "user-callback" }] };
+  await writeFile(settings, JSON.stringify({ hooks: { SessionStart: [own], PostToolUse: [own] } }));
+  await install("0.2.14", true);
+  expect(await readFile(settings, "utf8")).toContain("bridge-hook.mjs");
+  setModuleEnabled(store, "git", false);
+  await reconcileModuleHooks(store);
+  let config = JSON.parse(await readFile(settings, "utf8"));
+  expect(config.hooks.PostToolUse).toEqual([own]);
+  expect(JSON.stringify(config.hooks.SessionStart)).toContain("bridge-hook.mjs");
+  setModuleEnabled(store, "hook", false);
+  await reconcileModuleHooks(store);
+  config = JSON.parse(await readFile(settings, "utf8"));
+  expect(config.hooks.SessionStart).toEqual([own]);
+  expect(config.hooks.PostToolUse).toEqual([own]);
+  expect(config.statusLine).toBeUndefined();
+  setModuleEnabled(store, "hook", true);
+  setModuleEnabled(store, "git", true);
+  await reconcileModuleHooks(store);
+  config = JSON.parse(await readFile(settings, "utf8"));
+  expect(JSON.stringify(config.hooks.PostToolUse)).toContain("bridge-hook.mjs");
+  expect(config.hooks.PostToolUse[0]).toEqual(own);
+});

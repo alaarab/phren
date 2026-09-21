@@ -256,7 +256,10 @@ export async function runSnippetCommand(_args: string[]): Promise<number> {
   }
 }
 
-export async function runLinkRemovedNotice(_args: string[]): Promise<number> {
-  console.error("`phren link` has been removed. Use `phren init` instead.");
-  return 1;
+export async function runLinkRemovedNotice(args: string[]): Promise<number> {
+  if (args.length) {
+    console.error("The old `phren link` option interface has been removed. Use `phren init` instead.");
+    return 1;
+  }
+  return runInitCommand(args);
 }

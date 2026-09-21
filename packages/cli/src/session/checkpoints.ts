@@ -1,3 +1,4 @@
+import { moduleEnabled } from "../modules/runtime.js";
 import * as fs from "fs";
 import * as path from "path";
 import { errorMessage } from "../utils.js";
@@ -70,6 +71,7 @@ function readCheckpointFile(filePath: string): TaskCheckpoint | null {
 }
 
 export function writeTaskCheckpoint(phrenPath: string, checkpoint: TaskCheckpoint): void {
+  if (!moduleEnabled(phrenPath, "tasks")) return;
   const filePath = checkpointPath(phrenPath, checkpoint.project, checkpoint.taskId);
   const normalizedCheckpoint: TaskCheckpoint = {
     ...checkpoint,
@@ -79,6 +81,7 @@ export function writeTaskCheckpoint(phrenPath: string, checkpoint: TaskCheckpoin
 }
 
 export function listTaskCheckpoints(phrenPath: string, project?: string): TaskCheckpoint[] {
+  if (!moduleEnabled(phrenPath, "tasks")) return [];
   const dir = checkpointDir(phrenPath);
   let files: string[];
   try {

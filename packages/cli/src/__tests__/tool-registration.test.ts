@@ -1,3 +1,5 @@
+import { BUILTIN_MODULES } from "../modules/registry.js";
+import { createToolGate, dispatch } from "../mcp/profile.js";
 import { describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
@@ -122,5 +124,36 @@ describe("MCP tool registration", () => {
     const [, documentedToolCount, documentedModuleCount] = match!;
     expect(names.length).toBe(Number(documentedToolCount));
     expect(ALL_REGISTER_FNS.length).toBe(Number(documentedModuleCount));
+  });
+});
+
+
+describe("MCP module enablement", () => {
+  const ctx: McpContext = {
+    phrenPath: "/nonexistent", profile: "test", db: () => { throw new Error("not used"); },
+    rebuildIndex: async () => {}, updateFileInIndex: () => {}, withWriteQueue: async fn => fn(),
+  };
+  it.each([
+    { names: ["memory", "tasks"], core: 10 },
+    { names: ["memory"], core: 7 },
+    { names: ["memory", "git"], core: 7 },
+  ])("filters both presentation profiles for $names", async ({ names, core }) => {
+    const modules = BUILTIN_MODULES.filter(module => names.includes(module.name));
+    for (const profile of ["core", "full"] as const) {
+      const gate = createToolGate({ profile, modules, register: () => {} });
+      for (const register of ALL_REGISTER_FNS) register(gate as any, ctx);
+      gate.finish();
+      const expected = modules.flatMap(module => module.tools.filter(tool => tool.profiles.includes(profile)).map(tool => tool.name));
+      expect([...gate.exposed].sort()).toEqual(expected.sort());
+      if (profile === "core") expect(gate.exposed.size).toBe(core);
+      expect(gate.catalog.has("get_tasks")).toBe(names.includes("tasks"));
+      expect(gate.catalog.has("auto_extract_findings")).toBe(names.includes("git"));
+      expect(gate.catalog.has("dispatch")).toBe(false);
+      expect(JSON.stringify(await gate.catalog.get("phren_admin")!.handler({ action: "dispatch" }))).toContain("module conductor is disabled");
+      if (!names.includes("tasks")) {
+        expect(JSON.stringify(await dispatch(gate.catalog, "manage_task", { action: "complete" }))).toContain("module tasks is disabled");
+        expect(JSON.stringify(await gate.catalog.get("phren_admin")!.handler({ action: "add_task" }))).toContain("module tasks is disabled");
+      }
+    }
   });
 });

@@ -1,3 +1,6 @@
+import { BUILTIN_MODULES } from "./modules/registry.js";
+import { commandsForModules, disabledCommand } from "./cli-registry.js";
+import type { ModuleSnapshot } from "./modules/runtime.js";
 import { describe, expect, it } from "vitest";
 import {
   formatCheatSheet,
@@ -141,5 +144,25 @@ describe("formatFullHelp", () => {
 
   it("includes the env doc topic body", () => {
     expect(out).toContain("PHREN_PATH");
+  });
+});
+
+
+describe("module-aware help", () => {
+  const snapshot: ModuleSnapshot = { store: "/store", profile: "work", generation: "test",
+    modules: BUILTIN_MODULES.filter(module => ["memory", "hook"].includes(module.name)),
+    has: name => ["memory", "hook"].includes(name) };
+  it("hides commands, aliases and separately owned nested commands together", () => {
+    const help = formatFullHelp(snapshot);
+    for (const command of ["phren task ", "phren tasks", "phren schedule", "phren dispatch", "phren maintain extract", "enroll-computer"]) expect(help).not.toContain(command);
+    expect(formatCommand("tasks", snapshot)).toBeNull();
+    expect(formatCommand("bridge", snapshot)).not.toContain("enroll-computer");
+    expect(formatCommand("maintain", snapshot)).not.toContain("maintain extract");
+    expect(help).toContain("phren modules");
+    expect(disabledCommand("extract-memories demo", snapshot)).toContain("enable it with phren modules enable git");
+  });
+  it("guards a nested dispatch even when the namespace is enabled", async () => {
+    const bridge = commandsForModules(snapshot).find(command => command.name === "bridge")!;
+    expect(await bridge.run(["enroll-computer", "Desk"], { phrenPath: () => "/store", profile: () => "work" })).toBe(1);
   });
 });

@@ -1,3 +1,4 @@
+import { moduleEnabled } from "../modules/runtime.js";
 /**
  * Give the archive a shape.
  *
@@ -343,11 +344,12 @@ export async function summarizeProject(phrenPath: string, project: string, opts:
   const summaryPath = storeAwareProjectPath(phrenPath, project, "summary.md");
   if (!summaryPath) return { project, topics: results, summaryPath: null, summaryUpdated: false };
   const findingsPath = storeAwareProjectPath(phrenPath, project, "FINDINGS.md");
-  const tasksPath = storeAwareProjectPath(phrenPath, project, "tasks.md");
+  const tasksEnabled = moduleEnabled(path.dirname(path.dirname(summaryPath)), "tasks");
+  const tasksPath = tasksEnabled ? storeAwareProjectPath(phrenPath, project, "tasks.md") : null;
   const active = findingsPath ? countActiveFindingsIn(findingsPath) : 0;
   const archived = results.reduce((n, r) => n + r.bullets, 0);
   const open = tasksPath ? countOpenTasks(tasksPath) : 0;
-  const lines = [`- ${plural(active, "active finding")}, ${archived} archived across ${plural(results.filter((r) => r.bullets > 0).length, "topic")}, ${plural(open, "open task")}.`];
+  const lines = [`- ${plural(active, "active finding")}, ${archived} archived across ${plural(results.filter((r) => r.bullets > 0).length, "topic")}${tasksEnabled ? `, ${plural(open, "open task")}` : ""}.`];
   for (const r of results.filter((r) => r.bullets > 0).sort((a, b) => b.bullets - a.bullets)) {
     const first = r.now.split(/(?<=\.)\s/)[0] ?? r.now;
     lines.push(`- **${r.slug}** — ${first}`);

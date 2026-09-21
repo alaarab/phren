@@ -1,3 +1,4 @@
+import { moduleEnabled } from "../modules/runtime.js";
 import * as fs from "fs";
 import * as path from "path";
 import {
@@ -114,7 +115,7 @@ export class PhrenShell {
     // last session happened to leave behind; without one we always land home.
     if (startup.project) this.state.project = startup.project;
     this.graphLive = startup.live;
-    this.state.view = startup.view ?? "Projects";
+    this.state.view = startup.view === "Tasks" && !moduleEnabled(phrenPath, "tasks", profile) ? "Findings" : startup.view ?? "Projects";
     this.message = startup.notice
       ? `  ${style.yellow("⚠")}  ${startup.notice}`
       : this.state.view === "Graph"
@@ -185,6 +186,7 @@ export class PhrenShell {
   }
 
   setView(view: ShellView): void {
+    if (view === "Tasks" && !moduleEnabled(this.phrenPath, "tasks", this.profile)) view = "Findings";
     if (this.state.view === "Graph" && view !== "Graph") this._graph?.stopAnimation();
     const hadMouse = this.state.view === "Graph";
     this.state.view = view;

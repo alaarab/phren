@@ -827,6 +827,21 @@ schedules:
     agentStatus = "idle";
     expect((await api("/v1/workspaces")).data.groups[0].children[0]).not.toHaveProperty("currentStep");
   });
+  it("reports only running workers and their providers in the workspace overview", async () => {
+    const fanoutRoot = path.join(root, ".phren/.runtime/agent-fanouts");
+    for (const worker of [{ id: "running-worker", status: "running", provider: "opencode" },
+      { id: "completed-worker", status: "completed", provider: "codex" }] as const) {
+      const directory = path.join(fanoutRoot, worker.id);
+      await mkdir(directory, { recursive: true });
+      await writeFile(path.join(directory, "events.jsonl"), "{}\n");
+      await writeFile(path.join(directory, "manifest.json"), JSON.stringify({ schemaVersion: 1, id: worker.id,
+        parent: { provider: "codex", session }, provider: worker.provider, taskLabel: worker.id,
+        cwd: root, worktree: root, eventLog: "events.jsonl", createdAt: "2026-09-20T12:00:00.000Z",
+        startedAt: "2026-09-20T12:00:00.000Z", updatedAt: "2026-09-20T12:00:00.000Z", status: worker.status }));
+    }
+    const tab = (await api("/v1/workspaces")).data.groups[0].children[0];
+    expect(tab).toMatchObject({ runningChildren: 1, childProviders: ["opencode"] });
+  });
   it("takes typed text for a waiting agent only when no structured prompt is pending", async () => {
     agentStatus = "blocked";
     expect((await api("/v1/prompt", { target, text: "deploy as-is" })).status).toBe(200);
@@ -1377,5 +1392,26 @@ schedules:
     await appendFile(record, next.slice(30) + "\n"); expect((await reader.read()).entries[0].line).toBe(2);
     await writeFile(record, JSON.stringify(row("Reset")) + "\n");
     const reset = await reader.read(); expect(reset.reset).toBe(true); expect(reset.entries[0].line).toBe(0);
+  });
+});
+
+describe("Hook module capabilities", () => {
+  it("uses the same snapshot for typed capabilities and disabled routes", async () => {
+    const { BUILTIN_MODULES } = await import("../modules/registry.js");
+    const { capabilitiesForModules, requireRoute } = await import("./server.js");
+    const names = ["memory", "hook", "schedules"];
+    const snapshot = { store: "/store", profile: "work", generation: "test",
+      modules: BUILTIN_MODULES.filter(module => names.includes(module.name)), has: (name: string) => names.includes(name) };
+    const capabilities = capabilitiesForModules(snapshot);
+    expect(capabilities.schedules).toBe(true);
+    expect(capabilities.git).toBeUndefined();
+    expect(capabilities.diff).toBeUndefined();
+    expect(capabilities.dispatch).toBeUndefined();
+    expect(capabilities.terminal).toBe("ssh-pty");
+    expect(capabilities.webPreview).toBe("ssh-exec");
+    expect(capabilities.providers).toEqual(["codex", "claude", "copilot", "opencode"]);
+    expect(() => requireRoute(snapshot, "POST", "/v1/git/status")).toThrow("enable it with phren modules enable git");
+    expect(() => requireRoute(snapshot, "POST", "/v1/dispatch")).toThrow("module conductor is disabled");
+    expect(() => requireRoute(snapshot, "POST", "/v1/schedules")).not.toThrow();
   });
 });

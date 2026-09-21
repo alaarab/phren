@@ -1,6 +1,6 @@
 # MCP API Reference
 
-Phren exposes 62 MCP tools across 15 modules, through two profiles. **`core`**, the default, gives a client ten tools: the handful an agent reaches for during normal work, plus `phren_admin`, which reaches everything else by name. **`full`** exposes every tool under its own name (all 62, plus the three composites below), for clients that scripted against the old surface. Switch with `phren config mcp-profile core|full` or the `PHREN_MCP_PROFILE` environment variable; restart the client afterwards.
+Phren exposes 62 MCP tools across 15 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the six built-in [Modules](modules.md). **`core`**, the default, exposes the seven memory tools plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default ten. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
 
 Why: the full surface is about 53k characters of schema, roughly 13k tokens, downloaded before a session says a word, and 59 similar verbs to pick the wrong one from. Core is about 17k characters.
 

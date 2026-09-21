@@ -1,3 +1,7 @@
+import { createHash } from "node:crypto";
+import { atomicWriteText } from "../phren-paths.js";
+import { moduleSnapshot } from "../modules/runtime.js";
+import { getRegisteredTools } from "../tool-registry.js";
 import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "js-yaml";
@@ -301,8 +305,10 @@ export function writeSkillMd(phrenPath: string) {
   const promptCmd = lifecycle.userPromptSubmit.replace(/"/g, '\\"');
   const stopCmd = lifecycle.stop.replace(/"/g, '\\"');
   const version = VERSION;
-  const toolCount = getToolCount();
-  const toolCatalog = renderToolCatalogMarkdown();
+  const allowed = new Set(moduleSnapshot(phrenPath).modules.flatMap(module => module.tools.map(tool => tool.name)));
+  const excluded = getRegisteredTools().filter(tool => !allowed.has(tool.name));
+  const toolCount = getToolCount() - excluded.length;
+  const toolCatalog = excluded.length ? renderToolCatalogMarkdown(allowed) : renderToolCatalogMarkdown();
 
   const content = `---
 name: phren
@@ -344,5 +350,17 @@ ${toolCatalog}
 `;
 
   const dest = path.join(phrenPath, "phren.SKILL.md");
-  fs.writeFileSync(dest, content);
+  const ledger = path.join(phrenPath, ".runtime", "module-skill.sha256");
+  const digest = (text: string) => createHash("sha256").update(text).digest("hex");
+  const stat = fs.lstatSync(dest, { throwIfNoEntry: false });
+  if (stat) {
+    if (!stat.isFile() || stat.isSymbolicLink()) return;
+    const existing = fs.readFileSync(dest, "utf8");
+    const previous = fs.existsSync(ledger) ? fs.readFileSync(ledger, "utf8").trim() : "";
+    const legacy = content.replace(`## MCP tools (${toolCount})\n\n${toolCatalog}`, `## MCP tools (${getToolCount()})\n\n${renderToolCatalogMarkdown()}`);
+    if (existing !== content && existing !== legacy && digest(existing) !== previous) return;
+  }
+  atomicWriteText(dest, content);
+  fs.mkdirSync(path.dirname(ledger), { recursive: true });
+  atomicWriteText(ledger, digest(content) + "\n");
 }

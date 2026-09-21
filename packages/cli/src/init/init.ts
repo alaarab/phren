@@ -1,3 +1,7 @@
+import { migrateInstalledModules, moduleEnabled } from "../modules/runtime.js";
+import { initializeModules } from "../modules/config.js";
+import { skillEnabled } from "../modules/provision.js";
+import { reconcileModuleHooks } from "../bridge/install.js";
 /**
  * CLI orchestrator for phren init, mcp-mode, hooks-mode, and uninstall.
  * Delegates to focused helpers in init-config, init-setup, init-preferences,
@@ -531,6 +535,9 @@ export async function runInit(opts: InitOptions = {}) {
     }
   }
 
+  if (hasExistingInstall) migrateInstalledModules(phrenPath);
+  else initializeModules(phrenPath);
+
   if (hasExistingInstall) {
       writeRootManifest(phrenPath, {
         version: 1,
@@ -550,12 +557,13 @@ export async function runInit(opts: InitOptions = {}) {
       log(`  MCP mode: ${mcpLabel}`);
       log(`  Hooks mode: ${hooksLabel}`);
       log(`  Default project ownership: ${ownershipDefault}`);
-      log(`  Task mode: ${getWorkflowPolicy(phrenPath).taskMode}`);
+      if (moduleEnabled(phrenPath, "tasks")) log(`  Task mode: ${getWorkflowPolicy(phrenPath).taskMode}`);
       log(`  Git repo: ${existingGitRepo.detail}`);
 
       // Always reconfigure MCP and hooks (picks up new features on upgrade)
       configureMcpTargets(phrenPath, { mcpEnabled, hooksEnabled, caps: managementCaps }, "Updated");
       configureHooksIfEnabled(phrenPath, hooksEnabled, "Updated", managementCaps);
+      await reconcileModuleHooks(phrenPath);
 
       const prefs = readInstallPreferences(phrenPath);
       const previousVersion = prefs.installedVersion;
@@ -657,6 +665,8 @@ export async function runInit(opts: InitOptions = {}) {
   function copyDir(src: string, dest: string) {
     fs.mkdirSync(dest, { recursive: true });
     for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+      if (entry.name === "tasks.md" && !moduleEnabled(phrenPath, "tasks")) continue;
+      if (path.basename(src) === "skills" && !skillEnabled(phrenPath, entry.name)) continue;
       const srcPath = path.join(src, entry.name);
       const destPath = path.join(dest, entry.name);
       if (entry.isDirectory()) {
@@ -754,7 +764,7 @@ export async function runInit(opts: InitOptions = {}) {
   log(`  MCP mode: ${mcpLabel}`);
   log(`  Hooks mode: ${hooksLabel}`);
   log(`  Default project ownership: ${ownershipDefault}`);
-  log(`  Task mode: ${getWorkflowPolicy(phrenPath).taskMode}`);
+  if (moduleEnabled(phrenPath, "tasks")) log(`  Task mode: ${getWorkflowPolicy(phrenPath).taskMode}`);
   log(`  Git repo: ${localGitRepo.detail}`);
   if (repaired.removedLegacyProjects > 0) {
     log(`  Removed ${repaired.removedLegacyProjects} legacy starter project entr${repaired.removedLegacyProjects === 1 ? "y" : "ies"} from profiles.`);
@@ -767,6 +777,7 @@ export async function runInit(opts: InitOptions = {}) {
   // Configure MCP for all detected AI coding tools and hooks
   configureMcpTargets(phrenPath, { mcpEnabled, hooksEnabled, caps: managementCaps }, "Configured");
   configureHooksIfEnabled(phrenPath, hooksEnabled, "Configured", managementCaps);
+  await reconcileModuleHooks(phrenPath);
 
   writeInstallPreferences(phrenPath, { mcpEnabled, hooksEnabled, skillsScope, installedVersion: VERSION, syncIntent });
 
