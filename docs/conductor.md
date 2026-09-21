@@ -498,3 +498,27 @@ developer instructions; OpenCode via a Hook-written agent definition
 agent name is prefixed `conductor-`, so the phone can distinguish it without
 reading harness session files. Only one conductor runs per store; a second
 launch returns 409 with the running one's target.
+
+## Direction: the conductor as the owner's one conversation (September 21)
+
+Owner: "I tell my conductor: I want this in phren. My conductor tells it to
+you, or spins up an agent to work on it." The conductor is the session the
+owner talks to; it decides whether the request goes to a running session or a
+new worker. Two capabilities make that real:
+
+1. **Talk to a running session.** A `hand_off` MCP tool (full profile) and
+   `phren_admin(action: "hand_off")` in core: `{ computer, target | session,
+   text }` delivers a prompt to an existing pane through the local Hook's
+   `/v1/prompt`, or a peer's over the pinned pipe, exactly as the phone's
+   composer does. The conductor sees the sessions it may address through
+   `/v1/workspaces` (locally) and `/v1/dispatch/capacity` plus the peer's
+   workspaces (remotely). A hand-off is a normal prompt in that session; the
+   session's own transcript and questions keep flowing to the phone.
+2. **Choose between hand-off and dispatch.** The conductor skill says: if a
+   session already owns that project and is idle or working on a related
+   task, hand off; otherwise dispatch a new worker. It writes one line either
+   way ("Desk phren: sent to the running Claude session" / "Linuxbox: parser
+   checks sent to Codex").
+
+Voice comes later (the owner's earlier note: talk to the conductor, spoken or
+short replies), on top of this.
