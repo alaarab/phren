@@ -219,10 +219,22 @@ export class DispatchHeadless {
         ...(input.model ? ["--model", input.model] : []), ...(input.mode ? ["--mode", input.mode] : [])];
       const events = await open(path.join(path.dirname(manifestPath(this.root, jobId)), manifest.eventLog), "a", 0o600);
       const errors = await open(path.join(path.dirname(manifestPath(this.root, jobId)), manifest.stderrLog), "a", 0o600);
-      let child: ChildProcess;
+      let child: ChildProcess, started: Promise<void>;
+      let spawned = false;
+      let receiptSaved = false, closed: { code: number | null; signal: NodeJS.Signals | null } | undefined;
       try {
         // Separate argv values and a stdin brief keep labels, models and prompts out of a shell.
         child = this.spawn(wrapper, args, { cwd: manifest.worktree, detached: true, stdio: ["pipe", events.fd, errors.fd] });
+        // Node reports spawn or error on the next tick, so these listeners must exist before anything is awaited.
+        started = new Promise<void>((resolve, reject) => {
+          child.once("spawn", () => { spawned = true; resolve(); });
+          child.once("error", reject);
+        });
+        started.catch(() => {});
+        child.once("close", (code, signal) => {
+          if (receiptSaved) void this.finish(jobId, code, signal);
+          else closed = { code, signal };
+        });
       } catch (error) {
         await events.close(); await errors.close();
         manifest = { ...manifest, status: "failed", updatedAt: new Date().toISOString(), finishedAt: new Date().toISOString(), error: "The fanout wrapper could not start." };
@@ -230,17 +242,8 @@ export class DispatchHeadless {
         throw asBridgeError(error, "The fanout wrapper could not start.");
       }
       await events.close(); await errors.close();
-      let spawned = false;
-      let receiptSaved = false, closed: { code: number | null; signal: NodeJS.Signals | null } | undefined;
-      child.once("close", (code, signal) => {
-        if (receiptSaved) void this.finish(jobId, code, signal);
-        else closed = { code, signal };
-      });
       try {
-        await new Promise<void>((resolve, reject) => {
-          child.once("spawn", () => { spawned = true; resolve(); });
-          child.once("error", reject);
-        });
+        await started;
         child.stdin?.end(input.prompt);
         child.unref();
         await this.afterSpawn?.(child);
