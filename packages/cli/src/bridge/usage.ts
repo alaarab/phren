@@ -346,7 +346,7 @@ function openCodeGoUsage(totals: GoTotals, limits: GoLimits, now: Date, hasKey: 
     const modelTotals = totals.get(model)!;
     for (const period of goPeriods) {
       const local = modelTotals[period.id], limit = goLimitFor(limits, model, period.id);
-      const usedPercent = limit ? Math.min(100, local.usedUSD / limit.limitUSD * 100) : undefined;
+      const usedPercent = limit ? Math.min(100, Math.round(local.usedUSD / limit.limitUSD * 10_000) / 100) : undefined;
       windows.push({ id: goWindowID(model, period.id), name: `${model} · ${period.label}`, usedUSD: local.usedUSD,
         usedTokens: local.usedTokens, ...(limit ? { limitUSD: limit.limitUSD, usedPercent, resetsAt: limit.resetsAt } : {}) });
     }
