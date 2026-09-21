@@ -194,6 +194,18 @@ export function pickSymbol(rows: SymbolHit[], container?: string): { chosen?: Sy
   return { chosen: sorted[0], candidates: pool.length };
 }
 
+/**
+ * Resolve one symbol name against an already-open index.
+ *
+ * Used by the memory link to turn a finding's text (or an explicit citation)
+ * into a symbol without opening the database per candidate. Returns the chosen
+ * hit and how many symbols shared the name, exactly as `definition` does.
+ */
+export function resolveSymbol(db: SqlJsDatabase, symbol: string): { chosen?: SymbolHit; candidates: number } {
+  const parsed = parseSymbolQuery(symbol);
+  return pickSymbol(symbolRowsByName(db, parsed.name), parsed.container);
+}
+
 // ── SQLite plumbing ──────────────────────────────────────────────────────────
 
 async function withCodeDb<T>(

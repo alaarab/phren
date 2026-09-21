@@ -109,12 +109,20 @@ stays readable and hand-editable.
 | `<!-- phren:supersedes "..." -->` | This entry replaces another, referenced by text snippet ⚠️ |
 | `<!-- phren:superseded_by "..." [date] -->` | Inverse of the above |
 | `<!-- phren:contradicts "..." -->` | Conflicts with another entry, by text snippet ⚠️ |
-| `<!-- phren:cite {json} -->` | Provenance: commit, file, line, timestamps |
+| `<!-- phren:cite {json} -->` | Provenance: commit, file, line, symbol, timestamps |
 | `<!-- phren:archive:start -->` / `:end` | Legacy archive block delimiters (§5.2) |
 | `<!-- source: ... -->` | Capture origin |
 
 Legacy forms still **read** but no longer written: `<!-- superseded_by: "..." -->`,
 `<!-- conflicts_with: "..." -->`.
+
+A citation may name a code symbol instead of a file: `{"symbol":"Type.member"}`,
+where the value is `Name`, `Type.member` or `name()`. The writer attaches one
+automatically when the finding names exactly one symbol the project's code index
+resolves (four or more characters, and not a local variable unless exported).
+An explicit symbol is validated against the index and stored even when it does
+not resolve, in which case `"symbol_unresolved":true` is recorded and the trust
+filter treats the entry as `invalid_citation`.
 
 ⚠️ **`supersedes` and `contradicts` reference entries by a 60-character text
 snippet, not by `fid`.** Resolution is a normalised prefix match. Editing the

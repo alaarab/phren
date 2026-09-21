@@ -11,6 +11,7 @@ import {
   type OutlineEntry,
   type UsageEntry,
 } from "../code/query.js";
+import { findingsCitingSymbol, formatCitingFinding } from "../code/citations.js";
 
 /**
  * Read tools over the `code` module's local symbol index (stage 2).
@@ -107,7 +108,9 @@ export function register(server: McpServer, ctx: McpContext): void {
         candidates > 1 ? `${candidates} candidates shared this name; showing the best.` : "",
         blame ? `last change ${blame.at} ${blame.authorHash.slice(0, 12)}` : "",
       ];
-      return text(compactLines([...lines, snippet].filter(Boolean).join("\n")));
+      const citing = findingsCitingSymbol(target.store, target.project, symbol);
+      const findingsBlock = citing.length > 0 ? ["Findings", ...citing.map(formatCitingFinding)] : [];
+      return text(compactLines([...lines, snippet, ...findingsBlock].filter(Boolean).join("\n")));
     },
   );
 
