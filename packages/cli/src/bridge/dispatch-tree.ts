@@ -175,7 +175,7 @@ function projectAgents(
     const cycleKey = `${routed.computer.id}\0${source.data}\0${cycleIdentity}`;
     if (state.seen.has(cycleKey)) continue;
     state.seen.add(cycleKey); state.count++;
-    const childState = ["running", "completed", "unavailable"].includes(String(raw.state))
+    const childState = ["running", "completed", "failed", "unavailable"].includes(String(raw.state))
       ? raw.state as ChildAgentRelation["state"] : "unavailable";
     const children = Array.isArray(raw.children)
       ? projectAgents(raw.children, parent, receipt, fallbackComputer, fallbackTarget, depth + 1, state, descendant) : [];
@@ -185,6 +185,7 @@ function projectAgents(
       path,
       callId,
       state: childState,
+      ...(typeof raw.reason === "string" && raw.reason.length > 0 && raw.reason.length <= 500 ? { reason: raw.reason } : {}),
       ...(typeof raw.model === "string" && raw.model.length > 0 && raw.model.length <= 200 ? { model: raw.model } : {}),
       ...(typeof raw.worktreeName === "string" && raw.worktreeName.length > 0 && raw.worktreeName.length <= 200
         && !/[/\\]/.test(raw.worktreeName) ? { worktreeName: raw.worktreeName } : {}),
