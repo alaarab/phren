@@ -8,6 +8,7 @@ import { BUILTIN_MODULES, readConfig, resolveModules, validateConfig } from "./r
 import type { ModulesConfig } from "./manifest.js";
 
 export function setModuleEnabled(store: string, name: string, value: boolean, profile?: string): void {
+  if (!BUILTIN_MODULES.some(module => module.name === name)) throw new Error(`Unknown module "${name}".`);
   const file = path.join(store, ".config", "modules.yaml");
   withFileLock(file, () => {
     const config: ModulesConfig = readConfig(store) ?? { version: 1 };
