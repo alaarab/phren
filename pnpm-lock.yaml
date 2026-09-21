@@ -100,6 +100,9 @@ importers:
       sql.js-fts5:
         specifier: ^1.4.0
         version: 1.4.0
+      web-tree-sitter:
+        specifier: ^0.27.0
+        version: 0.27.0
       ws:
         specifier: '>=8.21.0'
         version: 8.21.3
@@ -2731,6 +2734,9 @@ packages:
       jsdom:
         optional: true
 
+  web-tree-sitter@0.27.0:
+    resolution: {integrity: sha512-XK08gj6RwTMQatAG7uVRP8MunqotL/XC19vHgkSPKmELgbGPBj4ECvB8haHOUnyj6ls2B8t42UTro14zxGgAHg==}
+
   whatwg-encoding@3.1.1:
     resolution: {integrity: sha512-6qN4hJdMwfYBtE3YBTTHhoeuUrDBPZmbQaxWAqSALV/MeEnR5z1xd8UKud2RAkFoPkmB+hli1TZSnyi84xz1vQ==}
     engines: {node: '>=18'}
@@ -5315,6 +5321,8 @@ snapshots:
       '@vitest/coverage-v8': 4.1.11(vitest@4.1.11)
     transitivePeerDependencies:
       - msw
+
+  web-tree-sitter@0.27.0: {}
 
   whatwg-encoding@3.1.1:
     dependencies:

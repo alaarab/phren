@@ -342,6 +342,17 @@ export const REGISTRY: Command[] = [
     },
   },
   {
+    name: "code",
+    topic: "core",
+    usage: "phren code <index|status> [project] [--full] [--repo <path>]",
+    summary: "Index a project's code symbols and references",
+    subcommands: [
+      { name: "index", usage: "phren code index <project> [--full] [--repo <path>]", summary: "Build or refresh the code index" },
+      { name: "status", usage: "phren code status <project> [--top <n>]", summary: "Show index counts, languages and hot symbols" },
+    ],
+    run: async (args, ctx) => (await import("./code/command.js")).runCodeCommand(args, ctx),
+  },
+  {
     name: "shell",
     topic: "core",
     usage: "phren shell [--view <view>] [--project <name>] [--here]",

@@ -1,0 +1,8 @@
+# A file with an extension no grammar claims.
+
+def custom_helper(arg):
+    return arg
+
+
+class CustomThing:
+    pass

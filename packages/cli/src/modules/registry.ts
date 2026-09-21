@@ -130,6 +130,14 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
     capabilities: ["dispatch"], storeFiles: ["global/skills/conductor/**"],
     localFiles: ["<bridge>/hooks.yaml", "<bridge>/dispatches/*.json"], phoneScreens: [], skills: ["conductor"],
   },
+  {
+    // Stage 1 ships the local indexer and store only. Tools, Hook routes, the
+    // phone screen and the skill arrive in later stages, which is why the
+    // declarations below are empty.
+    schemaVersion: 1, name: "code", version: VERSION, defaultEnabled: false, requires: ["memory"],
+    tools: [], cliCommands: ["code index", "code status"], agentHooks: [], hookRoutes: [], capabilities: [],
+    storeFiles: [], localFiles: ["<store>/.runtime/code/*.sqlite"], phoneScreens: [], skills: [],
+  },
 ];
 
 const overrides = z.record(z.string(), z.boolean());
