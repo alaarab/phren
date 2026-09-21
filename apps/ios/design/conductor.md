@@ -108,3 +108,59 @@ Required checks:
 - Simulator checks cover chips, VoiceOver labels, drawer selection, Background
   returns and exact answer actions. Run affected Swift package and simulator
   tests on the authorized worker. Do not enable automatic iOS CI.
+
+## Conductor as a role you launch (owner, September 21)
+
+Owner's words: "I want to be able to choose which provider my conductor is
+set to, or model or whatever", "how do I distinguish it from the rest".
+
+### Launching
+
+The launch flow gains a **Role** row above Harness: a `PhrenSingleSelect`
+with two values, "Agent" (default) and "Conductor". Harness, computer and
+model stay free choices for both roles, so a conductor can be Claude Opus,
+Codex Sol or an OpenCode Go model. Under Conductor the model row shows an
+**Effort** drop-down when the harness supports one (Claude `--effort
+low|medium|high`, Codex reasoning through `-c model_reasoning_effort`,
+OpenCode `--variant`), default medium. Ids: `launch-role`,
+`launch-role:agent`, `launch-role:conductor`, `launch-effort`,
+`launch-effort:<level>`.
+
+The phone remembers the last conductor choice (harness, model, effort) per
+store so the next launch is one tap; the row reads "Conductor · Claude Opus
+· medium" until changed.
+
+### What the Hook does with it
+
+`/v1/workspaces/launch` accepts `role: "conductor"` and `effort`. For a
+conductor it starts the harness with the conductor brief attached and the
+concise voice on: Claude gets `--append-system-prompt <brief> --effort
+<level>`, Codex gets the brief as its first system message through
+`-c` developer instructions plus the effort config, OpenCode gets
+`--agent conductor` (a generated agent file under
+`~/.config/opencode/agents/conductor.md` the Hook writes from the same
+brief) plus `--variant`. The brief is the shipped
+`starter/global/skills/conductor/SKILL.md` body. The Hook records the role
+in the pane's Herdr agent name (`conductor-<label>`) and reports
+`role: "conductor"` on the tab in the overview, so nothing depends on the
+harness's own session files.
+
+### Telling it apart
+
+- **Agents list**: the card's glyph is the dispatch mark (a baton:
+  `wand.and.rays` in PhrenTheme accent) inside the provider ring, the title
+  line reads "Conductor" before the session title, and the card is pinned
+  first in Working. Remote leads nest under it with computer chips.
+- **Lock screen line**: the same glyph replaces the provider glyph; the
+  step column reads "N leads on M computers".
+- **Chat**: the header shows the baton and "Conductor"; replies stay the
+  one-line dispatch log the skill prescribes.
+- One conductor per store at a time; launching a second offers to open the
+  running one instead.
+
+### Ids and tests
+
+`conductor-card:<key>` on the card marker, `chat-conductor-mark` in the
+header, `launch-role*` and `launch-effort*` above. One UI test: launch a
+conductor with the fixture, see the card pinned with the mark, open its
+chat, see the header mark. No accessibility-size tests.

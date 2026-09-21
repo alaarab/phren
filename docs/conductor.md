@@ -485,3 +485,16 @@ property in the question-reordering fixture. Vitest and real SSH behavior remain
 unverified here. The skill's YAML/frontmatter and unfinished-placeholder checks
 passed using the repository parser; the standalone skill validator required
 unavailable PyYAML. The sandbox refused a process-status (`ps`) diagnostic.
+
+## Launching a conductor from the phone (September 21)
+
+`POST /v1/workspaces/launch` takes `role: "agent" | "conductor"` (default
+agent) and `effort: "low" | "medium" | "high"`. A conductor launch attaches the
+conductor brief (the shipped `conductor` skill body) to whichever harness the
+owner chose and sets its effort: Claude via `--append-system-prompt` and
+`--effort`; Codex via `-c model_reasoning_effort=<level>` and the brief as
+developer instructions; OpenCode via a Hook-written agent definition
+`conductor` and `--variant`. The overview tab reports `role`, and the Herdr
+agent name is prefixed `conductor-`, so the phone can distinguish it without
+reading harness session files. Only one conductor runs per store; a second
+launch returns 409 with the running one's target.
