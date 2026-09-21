@@ -56,7 +56,8 @@ struct ProjectKnobsView: View {
     }
 
     private var header: some View {
-        PhrenSheetHeader(title: "Knobs", cancel: { dismiss() }, save: { dismiss() })
+        // Every change is already saved, so there is nothing to cancel.
+        PhrenSheetHeader(title: "Knobs", save: { dismiss() })
     }
 
     private var findingSensitivityOptions: some View {

@@ -267,7 +267,8 @@ struct PhrenSheetHeader: View {
     var trailingTitle = "Done"
     var canSave = true
     var identifierPrefix: String? = nil
-    let cancel: () -> Void
+    /// Nil when there is nothing to cancel (the screen saves each change as it is made).
+    var cancel: (() -> Void)? = nil
     let save: () -> Void
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -293,11 +294,13 @@ struct PhrenSheetHeader: View {
 
     private var actions: some View {
             HStack {
-                Button(action: cancel) {
-                    Text("Cancel").frame(minWidth: 44, minHeight: 44, alignment: .leading)
-                        .contentShape(Rectangle())
+                if let cancel {
+                    Button(action: cancel) {
+                        Text("Cancel").frame(minWidth: 44, minHeight: 44, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }
+                        .accessibilityIdentifier(identifierPrefix.map { "\($0)-cancel" } ?? "sheet-cancel")
                 }
-                    .accessibilityIdentifier(identifierPrefix.map { "\($0)-cancel" } ?? "sheet-cancel")
                 Spacer()
                 Button(action: save) {
                     Text(trailingTitle)

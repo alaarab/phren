@@ -155,7 +155,6 @@ struct ScheduleEditorView: View {
                 harnessGroup
                 if harness != nil, !computer.isEmpty { modelGroup }
                 whenGroup
-                enabledGroup
                 notifyGroup
                 if schedule != nil { deleteGroup }
             }
@@ -354,6 +353,7 @@ struct ScheduleEditorView: View {
                 }
                 cronPreview
             }
+            switchRow("Enabled", identifier: "schedule-enabled", isOn: $enabled)
         }
     }
 
@@ -375,12 +375,6 @@ struct ScheduleEditorView: View {
                     .foregroundStyle(PhrenTheme.danger)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-        }
-    }
-
-    private var enabledGroup: some View {
-        PhrenGroup("Enabled", identifier: "schedule-group:enabled") {
-            switchRow("Enabled", identifier: "schedule-enabled", isOn: $enabled)
         }
     }
 

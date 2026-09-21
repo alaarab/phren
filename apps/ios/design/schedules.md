@@ -168,14 +168,15 @@ Groups in order:
      it "Next" with the next three runs as muted caption lines computed on
      the phone, or "Not a valid cron line" in `PhrenTheme.danger`.
    Under every kind, a muted caption line "Times are the computer's local
-   time" is NOT shown; the computer's time zone is implicit.
-8. **Enabled.** One 44pt row: "Enabled" in `PhrenTypography.body` leading,
-   `PhrenSwitch` trailing. Identifier `schedule-enabled`.
-9. **Notify.** Three 44pt rows: Start, Finish and Failure, each with a
+   time" is NOT shown; the computer's time zone is implicit. The group closes
+   with one 44pt row: "Enabled" in `PhrenTypography.body` leading,
+   `PhrenSwitch` trailing (identifier `schedule-enabled`); it has no header of
+   its own, since the row already says what it is.
+8. **Notify.** Three 44pt rows: Start, Finish and Failure, each with a
    `PhrenSwitch` trailing. Identifiers `schedule-notify:start`,
    `schedule-notify:finish` and `schedule-notify:failure`. Finish and Failure
    are on by default; Start is off.
-10. **Delete** (edit only): a 44pt full-width "Delete schedule" button,
+9. **Delete** (edit only): a 44pt full-width "Delete schedule" button,
    `PhrenTheme.danger` text on `PhrenTheme.surfaceRaised`, radius 12, with the
    same in-place confirm as the list row.
 
