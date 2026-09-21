@@ -48,3 +48,6 @@ docs/wp*.png
 packages/vscode/scratch/gwv.bundle.cjs
 packages/vscode/scratch/vscode-webview.html
 .pnpm-store/
+
+# Fan-out workers keep scratch files here
+.scratch/
