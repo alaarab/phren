@@ -14,6 +14,7 @@ import {
   openCodeUsage,
   readClaudeToken,
   readCodexLimits,
+  readOpenCodeGoUsage,
   usageStatusLine,
 } from "./usage.js";
 
@@ -23,6 +24,7 @@ const limits = { primary: { usedPercent: 23.5, windowDurationMins: 300, resetsAt
   secondary: { usedPercent: 0, windowDurationMins: 10080, resetsAt: reset + 86400 } };
 const openCode = async (date: Date) => openCodeUsage("Total Cost  $0.00", date);
 const noOpenRouter = async () => undefined;
+const noOpenCodeGo = async () => ({ source: "opencode-go" as const, windows: [] });
 
 describe("account usage", () => {
   it("keeps quota percentages and reset times separate from token counts", () => {
@@ -95,7 +97,7 @@ describe("account usage", () => {
   it("shares in-flight Codex requests and caches account reads for a minute", async () => {
     let calls = 0, time = 0;
     const reader = new AccountUsageReader(async () => { calls++; return codexUsage({ rateLimits: limits }, now); }, () => time,
-      async () => undefined, openCode, noOpenRouter);
+      async () => undefined, openCode, noOpenRouter, noOpenCodeGo);
     await Promise.all([reader.read(), reader.read()]);
     expect(calls).toBe(1);
     time = 59_999; await reader.read(); expect(calls).toBe(1);
@@ -107,6 +109,58 @@ describe("account usage", () => {
     expect(value).toEqual({ source: "opencode", windows: [], spend: { amountUSD: 4.39, period: "rolling_7_days" }, updatedAt: now.toISOString() });
     expect(JSON.stringify(value)).not.toContain("private session title");
     expect(openCodeUsage("no cost here").message).toContain("opencode stats");
+  });
+  it("accounts for OpenCode Go fan-outs by model and rolling window", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "phren-go-usage-"));
+    const jobs = path.join(root, ".runtime", "agent-fanouts");
+    const writeJob = async (id: string, model: string, events: unknown[]) => {
+      const directory = path.join(jobs, id); await mkdir(directory, { recursive: true });
+      await writeFile(path.join(directory, "manifest.json"), JSON.stringify({ provider: "opencode", model, eventLog: "events.jsonl" }));
+      await writeFile(path.join(directory, "events.jsonl"), events.map(event => JSON.stringify(event)).join("\n") + "\n");
+    };
+    try {
+      await writeJob("go-kimi", "opencode-go/kimi-k3", [
+        { type: "step_finish", timestamp: "2026-09-12T07:00:00Z", part: { cost: 1.2, tokens: { input: 100, output: 20 } } },
+        { type: "step_finish", timestamp: "2026-09-06T08:00:00Z", part: { cost: 3.6, tokens: 360 } },
+        { type: "step_finish", timestamp: "2026-08-15T08:00:00Z", part: { cost: 4.3, tokens: 430 } },
+      ]);
+      await writeJob("go-qwen", "opencode-go/qwen3", [
+        { type: "step_finish", timestamp: "2026-09-12T07:30:00Z", part: { cost: 0.25, tokens: 25 } },
+      ]);
+      await writeJob("not-go", "openrouter/example", [
+        { type: "step_finish", timestamp: "2026-09-12T07:00:00Z", part: { cost: 99, tokens: 99_999 } },
+      ]);
+      const calls: { url: string; method?: string; authorization?: string }[] = [];
+      const fetchImpl = (async (url: string | URL, init?: RequestInit) => {
+        calls.push({ url: String(url), method: init?.method, authorization: (init?.headers as Record<string, string>).authorization });
+        return { ok: true, headers: { get: () => null }, json: async () => ({ limits: {
+        "opencode-go/kimi-k3": { "5h": { limitUSD: 2 }, "7d": { limitUSD: 5 }, "30d": { limitUSD: 10 } },
+        } }) };
+      }) as unknown as typeof fetch;
+      const value = await readOpenCodeGoUsage(now, { root: jobs, readKey: async () => "go-test-key-not-a-secret", fetchImpl });
+      expect(calls).toEqual([
+        { url: "https://opencode.ai/zen/go/v1/usage", method: "GET", authorization: "Bearer go-test-key-not-a-secret" },
+        { url: "https://opencode.ai/zen/go/v1/limits", method: "GET", authorization: "Bearer go-test-key-not-a-secret" },
+        { url: "https://opencode.ai/zen/go/v1/credits", method: "GET", authorization: "Bearer go-test-key-not-a-secret" },
+        { url: "https://opencode.ai/zen/go/v1/models", method: "HEAD", authorization: "Bearer go-test-key-not-a-secret" },
+      ]);
+      expect(value.source).toBe("opencode-go");
+      expect(JSON.stringify(value)).not.toContain("go-test-key-not-a-secret");
+      expect(value.windows).toHaveLength(6);
+      expect(value.windows.filter(window => window.name.startsWith("opencode-go/kimi-k3"))).toMatchObject([
+        { name: "opencode-go/kimi-k3 · 5h", usedUSD: 1.2, usedTokens: 120, limitUSD: 2, usedPercent: 60 },
+        { name: "opencode-go/kimi-k3 · 7d", usedUSD: 4.8, usedTokens: 480, limitUSD: 5, usedPercent: 96 },
+        { name: "opencode-go/kimi-k3 · 30d", usedUSD: 9.1, usedTokens: 910, limitUSD: 10, usedPercent: 91 },
+      ]);
+      expect(value.windows.find(window => window.name == "opencode-go/qwen3 · 30d")).toMatchObject({ usedUSD: 0.25 });
+      expect(value.windows.some(window => window.usedUSD === 99)).toBe(false);
+      expect(value.spend).toEqual({ amountUSD: 9.35, period: "rolling_30_days" });
+
+      const withoutKey = await readOpenCodeGoUsage(now, { root: jobs, readKey: async () => undefined });
+      expect(withoutKey.message).toBe("Connect OpenCode Go on this computer to see its usage.");
+      expect(withoutKey.windows).toHaveLength(6);
+      expect(withoutKey.windows.every(window => window.limitUSD === undefined && window.usedPercent === undefined)).toBe(true);
+    } finally { await rm(root, { recursive: true, force: true }); }
   });
   it("reads OpenRouter's current calendar-week spend without returning its key", async () => {
     let authorization = "";
@@ -169,13 +223,13 @@ describe("account usage", () => {
 
     let claudeCalls = 0;
     const reader = new AccountUsageReader(async () => codexUsage({ rateLimits: limits }, now), () => 0,
-      async () => { claudeCalls++; return claudeUsage({ rate_limits: { five_hour: { used_percentage: 42 } } }, now); }, openCode, noOpenRouter);
+      async () => { claudeCalls++; return claudeUsage({ rate_limits: { five_hour: { used_percentage: 42 } } }, now); }, openCode, noOpenRouter, noOpenCodeGo);
     const first = await reader.read();
     expect(first.accounts[1].windows[0].usedPercent).toBe(42);
     await reader.read(); expect(claudeCalls).toBe(1);
 
     const fallback = new AccountUsageReader(async () => codexUsage({ rateLimits: limits }, now), () => 0,
-      async () => undefined, openCode, noOpenRouter);
+      async () => undefined, openCode, noOpenRouter, noOpenCodeGo);
     const empty = await mkdtemp(path.join(tmpdir(), "phren-empty-"));
     const previousBridge = process.env.PHREN_BRIDGE_HOME, previousConfig = process.env.CLAUDE_CONFIG_DIR;
     process.env.PHREN_BRIDGE_HOME = empty; process.env.CLAUDE_CONFIG_DIR = empty;

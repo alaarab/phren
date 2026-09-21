@@ -31,7 +31,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
       "add-finding", "pin", "review", "session-context", "sessions", "finding", "note", "notes",
       "search-fragments", "related-docs", "truths", "promote", "skills", "detect-skills", "hooks", "config",
       "maintain", "consolidation-status", "quality-feedback", "mcp-mode", "hooks-mode", "preset", "snippet",
-      "verify", "uninstall", "update", "profile", "store", "team", "modules list",
+      "verify", "uninstall", "update", "profile", "store", "team", "modules list", "modules enable", "modules disable",
       "hook-prompt", "hook-session-start", "hook-stop", "hook-context", "hook-tool", "background-sync",
       "background-maintenance", "background-reindex", "debug-injection", "inspect-index", "skill-list",
       "policy", "workflow", "index-policy", "govern-memories", "prune-memories", "consolidate-memories", "link",
@@ -60,7 +60,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
       ...core(["get_tasks", "add_task", "manage_task"]),
       ...full(["complete_task", "remove_task", "update_task", "tidy_done_tasks", "pin_task"]),
     ],
-    cliCommands: ["task", "tasks"], agentHooks: [], hookRoutes: [], capabilities: ["tasks"],
+    cliCommands: ["task", "tasks", "config task-mode", "config proactivity.tasks"], agentHooks: [], hookRoutes: [], capabilities: ["tasks"],
     storeFiles: ["<project>/tasks.md", ".sessions/checkpoint-*.json"], localFiles: [],
     phoneScreens: [{ screen: "TasksView", capability: "tasks" }], skills: [],
   },
@@ -139,7 +139,7 @@ const configSchema = z.object({
   profiles: z.record(z.string(), z.object({ enabled: overrides.optional() }).strict()).optional(),
 }).strict();
 
-function readConfig(store: string): ModulesConfig | undefined {
+export function readConfig(store: string): ModulesConfig | undefined {
   let source: string;
   try { source = fs.readFileSync(path.join(store, ".config", "modules.yaml"), "utf8"); }
   catch (error) {
@@ -149,6 +149,13 @@ function readConfig(store: string): ModulesConfig | undefined {
   let config: ModulesConfig;
   try { config = configSchema.parse(yaml.load(source, { schema: yaml.CORE_SCHEMA })); }
   catch { throw new Error("Invalid .config/modules.yaml: expected version: 1 and boolean module overrides."); }
+  return validateConfig(config);
+}
+
+export function validateConfig(input: unknown): ModulesConfig {
+  const parsed = configSchema.safeParse(input);
+  if (!parsed.success) throw new Error("Invalid .config/modules.yaml: expected version: 1 and boolean module overrides.");
+  const config = parsed.data;
   const names = new Set(BUILTIN_MODULES.map(module => module.name));
   for (const values of [config.enabled, ...Object.values(config.profiles ?? {}).map(profile => profile.enabled)]) {
     for (const [name, value] of Object.entries(values ?? {})) {
@@ -159,9 +166,12 @@ function readConfig(store: string): ModulesConfig | undefined {
   return config;
 }
 
-/** Resolves configuration only; registration remains unchanged until consumers opt in. */
+/** Reads never mutate configuration or enable dependencies implicitly. */
 export function enabled(store: string, profile?: string): readonly ModuleManifest[] {
-  const config = readConfig(store);
+  return resolveModules(readConfig(store), profile);
+}
+
+export function resolveModules(config: ModulesConfig | undefined, profile?: string): readonly ModuleManifest[] {
   const selected = profile && config?.profiles && Object.hasOwn(config.profiles, profile) ? config.profiles[profile].enabled : undefined;
   const modules = BUILTIN_MODULES.filter(module => selected?.[module.name] ?? config?.enabled?.[module.name] ?? module.defaultEnabled);
   const names = new Set(modules.map(module => module.name));
@@ -171,4 +181,27 @@ export function enabled(store: string, profile?: string): readonly ModuleManifes
     }
   }
   return modules;
+}
+
+export function moduleSource(config: ModulesConfig | undefined, name: string, profile?: string): "default" | "store" | "profile" {
+  if (profile && Object.hasOwn(config?.profiles ?? {}, profile) && Object.hasOwn(config?.profiles?.[profile].enabled ?? {}, name)) return "profile";
+  return Object.hasOwn(config?.enabled ?? {}, name) ? "store" : "default";
+}
+
+export function toolOwner(name: string): ModuleManifest | undefined {
+  return BUILTIN_MODULES.find(module => module.tools.some(tool => tool.name === name));
+}
+
+export function commandOwner(command: string): ModuleManifest | undefined {
+  command = command.toLowerCase();
+  let owner: ModuleManifest | undefined;
+  let length = 0;
+  for (const module of BUILTIN_MODULES) for (const entry of module.cliCommands) {
+    if ((command === entry || command.startsWith(entry + " ")) && entry.length > length) { owner = module; length = entry.length; }
+  }
+  return owner;
+}
+
+export function disabledHint(name: string): string {
+  return `module ${name} is disabled; enable it with phren modules enable ${name}`;
 }

@@ -1,3 +1,4 @@
+import { moduleEnabled } from "./modules/runtime.js";
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
@@ -96,12 +97,12 @@ export async function runStatus() {
         ? `${resolved.taskMode} ${DIM}(project override)${RESET}`
         : resolved.taskMode;
       console.log(`  ${DIM}sensitivity${RESET}  ${projectSensitivity}`);
-      console.log(`  ${DIM}task mode${RESET}    ${projectTaskMode}`);
+      if (moduleEnabled(phrenPath, "tasks", profile)) console.log(`  ${DIM}task mode${RESET}    ${projectTaskMode}`);
       if (resolved.proactivity.base || resolved.proactivity.findings || resolved.proactivity.tasks) {
         const parts: string[] = [];
         if (resolved.proactivity.base) parts.push(`base:${resolved.proactivity.base}`);
         if (resolved.proactivity.findings) parts.push(`findings:${resolved.proactivity.findings}`);
-        if (resolved.proactivity.tasks) parts.push(`tasks:${resolved.proactivity.tasks}`);
+        if (moduleEnabled(phrenPath, "tasks", profile) && resolved.proactivity.tasks) parts.push(`tasks:${resolved.proactivity.tasks}`);
         console.log(`  ${DIM}proactivity${RESET}  ${parts.join(" ")} ${DIM}(project override)${RESET}`);
       }
     } catch (err: unknown) {
@@ -115,7 +116,7 @@ export async function runStatus() {
   try {
     const w = storeWeight(phrenPath, profile);
     const k = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n));
-    console.log(`  ${DIM}weight${RESET}   ${k(w.findings)} words of findings · ${k(w.reference)} archived · ${k(w.tasks)} in tasks · ${k(w.skills)} in skills · AGENTS.md ${w.globalClaude} words`);
+    console.log(`  ${DIM}weight${RESET}   ${k(w.findings)} words of findings · ${k(w.reference)} archived${moduleEnabled(phrenPath, "tasks", profile) ? ` · ${k(w.tasks)} in tasks` : ""} · ${k(w.skills)} in skills · AGENTS.md ${w.globalClaude} words`);
   } catch (err: unknown) {
     logger.debug("status", `weight: ${errorMessage(err)}`);
   }
@@ -347,12 +348,12 @@ export async function runStatus() {
   for (const dir of projectDirs) {
     const projName = path.basename(dir);
     totalFindings += countBullets(path.join(phrenPath, projName, FINDINGS_FILENAME));
-    const taskPath = resolveTaskFilePath(phrenPath, projName);
+    const taskPath = moduleEnabled(phrenPath, "tasks", profile) ? resolveTaskFilePath(phrenPath, projName) : null;
     if (taskPath) totalTask += countBullets(taskPath);
     totalQueue += countQueueItems(phrenPath, projName);
   }
 
-  console.log(`\n  ${DIM}phren holds${RESET}  ${projectDirs.length} projects, ${totalFindings} findings, ${totalTask} tasks, ${totalQueue} queued`);
+  console.log(`\n  ${DIM}phren holds${RESET}  ${projectDirs.length} projects, ${totalFindings} findings${moduleEnabled(phrenPath, "tasks", profile) ? `, ${totalTask} tasks` : ""}, ${totalQueue} queued`);
 
   const gitTarget = manifest?.installMode === "project-local" && manifest.workspaceRoot ? manifest.workspaceRoot : phrenPath;
   const isGitRepo = runGit(gitTarget, ["rev-parse", "--is-inside-work-tree"]) === "true";

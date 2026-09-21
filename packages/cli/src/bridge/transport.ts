@@ -1,3 +1,6 @@
+import { activateModules as moduleSnapshot } from "../modules/runtime.js";
+import { disabledHint } from "../modules/registry.js";
+import { defaultPhrenPath } from "../shared.js";
 import { connect, type NetConnectOpts } from "node:net";
 import { request } from "node:http";
 import { spawn } from "node:child_process";
@@ -57,7 +60,10 @@ async function pipe(destination: NetConnectOpts): Promise<void> {
 
 /** The SSH key is forced to this allowlisted dispatcher. The supplied command is data, never a shell. */
 export async function dispatch(command: string): Promise<void> {
-  if (command === "phren-hook v1 pipe") {
+  const requireHook = () => {
+    if (!moduleSnapshot(defaultPhrenPath(), undefined, true).has("hook")) throw new BridgeError(404, disabledHint("hook"));
+  };
+  if (command === "phren-hook v1 pipe") { requireHook();
     await pipe({ path: socketPath() });
     return;
   }
@@ -65,6 +71,7 @@ export async function dispatch(command: string): Promise<void> {
   // Herdr boundaries. Preview bytes instead use this exact loopback command.
   const preview = /^phren-hook v1 web (127\.0\.0\.1|::1) ([1-9][0-9]{0,4})$/.exec(command);
   if (preview && preview[0] === command && Number(preview[2]) <= 65535) {
+    requireHook();
     await pipe({ host: preview[1], port: Number(preview[2]) });
     return;
   }
@@ -72,6 +79,7 @@ export async function dispatch(command: string): Promise<void> {
   // on the SSH PTY itself. Nothing persists after the phone disconnects.
   const shell = /^phren-hook v1 shell ([A-Za-z0-9_-]{1,8192})(?: (codex|claude|copilot|opencode))?$/.exec(command);
   if (shell && shell[0] === command) {
+    requireHook();
     const raw = decodeShellDirectory(shell[1]);
     if (!raw) throw new BridgeError(403, "The shell folder is not a valid absolute path.");
     const cwd = await launchDirectory(raw);
@@ -83,6 +91,7 @@ export async function dispatch(command: string): Promise<void> {
   }
   const terminal = /^phren-hook v1 terminal ([A-Za-z0-9_.-]{1,100})$/.exec(command);
   if (!terminal || terminal[0] !== command) throw new BridgeError(403, "This SSH key only permits Phren Hook, loopback web previews, project shells, and existing Herdr terminals.");
+  requireHook();
   const server = serverName.parse(terminal[1]);
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("Request an SSH terminal first.");
   // Verify the named server exists; never create a workspace or an agent implicitly.

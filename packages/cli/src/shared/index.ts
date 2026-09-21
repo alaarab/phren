@@ -1,3 +1,5 @@
+import { moduleSnapshot } from "../modules/runtime.js";
+import { skillEnabled } from "../modules/provision.js";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -613,6 +615,7 @@ function globAllFiles(phrenPath: string, profile?: string): { filePaths: string[
   for (const dir of projectDirs) {
     const projectName = path.basename(dir);
     const storePath = path.dirname(dir);
+    const modules = moduleSnapshot(storePath, profile);
     const config = readProjectConfig(storePath, projectName);
     const ownership = getProjectOwnershipMode(storePath, projectName, config);
     const mdFilesSet = new Set<string>();
@@ -632,6 +635,8 @@ function globAllFiles(phrenPath: string, profile?: string): { filePaths: string[
       if (ownership === "repo-managed" && ["agents.md", "claude.md"].includes(filename.toLowerCase())) continue;
       const fullPath = path.join(dir, relFile);
       const type = classifyFile(filename, relFile);
+      if (type === "task" && !modules.has("tasks")) continue;
+      if (relFile.startsWith("skills/") && !skillEnabled(storePath, relFile.split("/")[1], profile)) continue;
       entries.push({ fullPath, project: projectName, filename, type, relFile });
       allAbsolutePaths.push(fullPath);
     }
@@ -648,6 +653,7 @@ function globAllFiles(phrenPath: string, profile?: string): { filePaths: string[
   if (fs.existsSync(globalSkillsDir)) {
     const skillFiles = globSync("**/*.md", { cwd: globalSkillsDir, nodir: true });
     for (const relFile of skillFiles) {
+      if (!skillEnabled(phrenPath, relFile.split("/")[0], profile)) continue;
       const fullPath = path.join(globalSkillsDir, relFile);
       const filename = path.basename(relFile);
       entries.push({ fullPath, project: "global", filename, type: "skill", relFile: `skills/${relFile}` });
@@ -856,6 +862,9 @@ export function updateFileInIndex(db: SqlJsDatabase, filePath: string, phrenPath
     const project = rel.split(path.sep)[0];
     const relFile = rel.split(path.sep).slice(1).join(path.sep);
     const type = classifyFile(filename, relFile);
+    const modules = moduleSnapshot(phrenPath);
+    if (type === "task" && !modules.has("tasks")) return;
+    if (relFile.startsWith("skills/") && !skillEnabled(phrenPath, relFile.split("/")[1])) return;
     const entry: FileEntry = { fullPath: resolvedPath, project, filename, type, relFile };
     // Single read feeds the insert, fragment extraction and the content hash.
     const raw = readFileOrNull(resolvedPath);
@@ -1783,7 +1792,7 @@ function isDbOpen(db: SqlJsDatabase): boolean {
 
 export async function buildIndex(phrenPath: string, profile?: string, options: { force?: boolean } = {}): Promise<SqlJsDatabase> {
   const debounceMs = getIndexDebounceMs();
-  const buildKey = `${phrenPath}|${profile ?? ""}`;
+  const buildKey = storeCacheKey(phrenPath, profile);
   if (
     !options.force &&
     debounceMs > 0 &&
@@ -1825,8 +1834,10 @@ function ftsCacheRoot(): string {
  * Identity therefore has to live in the path.
  */
 function storeCacheKey(phrenPath: string, profile?: string): string {
+  const generations = [...new Set([phrenPath, ...getAllStoreProjectDirs(phrenPath, profile).map(dir => path.dirname(dir))])]
+    .sort().map(store => moduleSnapshot(store, profile).generation).join("|");
   return crypto.createHash("sha1")
-    .update(`${path.resolve(phrenPath)}|${profile ?? ""}`)
+    .update(`${path.resolve(phrenPath)}|${profile ?? ""}|${generations}`)
     .digest("hex")
     .slice(0, 16);
 }

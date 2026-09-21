@@ -1,3 +1,4 @@
+import { moduleEnabled } from "../modules/runtime.js";
 import type { ShellState } from "../data/access.js";
 import type { runDoctor } from "../link/link.js";
 
@@ -43,4 +44,8 @@ export interface DoctorResultLike {
   machine?: string;
   profile?: string;
   checks: DoctorCheck[];
+}
+
+export function enabledSubViews(store: string, profile?: string): readonly typeof SUB_VIEWS[number][] {
+  return moduleEnabled(store, "tasks", profile) ? SUB_VIEWS : SUB_VIEWS.filter(view => view !== "Tasks");
 }

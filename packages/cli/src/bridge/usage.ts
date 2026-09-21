@@ -1,17 +1,29 @@
 import { execFile, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, open, readFile, rename, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, readdir, realpath, rename, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { fanoutRoot } from "./fanouts.js";
 import { bridgeRoot, type Json, object } from "./protocol.js";
 
 const exec = promisify(execFile);
 
-export interface UsageWindow { id: string; name: string; usedPercent: number; resetsAt?: string; asOf?: string }
-export interface UsageSpend { amountUSD: number; period: "rolling_7_days" | "calendar_week" }
+export interface UsageWindow {
+  id: string;
+  name: string;
+  /** A percentage is omitted rather than invented when a service has no limit. */
+  usedPercent?: number;
+  /** Local Go-ledger values; quota readers deliberately do not use these. */
+  usedUSD?: number;
+  limitUSD?: number;
+  usedTokens?: number;
+  resetsAt?: string;
+  asOf?: string;
+}
+export interface UsageSpend { amountUSD: number; period: "rolling_7_days" | "rolling_30_days" | "calendar_week" }
 export interface AccountUsage {
-  source: "codex" | "claude" | "opencode" | "openrouter";
+  source: "codex" | "claude" | "opencode" | "opencode-go" | "openrouter";
   windows: UsageWindow[];
   updatedAt?: string;
   message?: string;
@@ -90,6 +102,284 @@ export async function readOpenRouterKey(): Promise<string | undefined> {
       return typeof key === "string" && key.length >= 16 && key.length <= 4_096 && !/[\x00-\x1f\x7f]/.test(key) ? key : undefined;
     } finally { await handle.close(); }
   } catch { return undefined; }
+}
+
+/** OpenCode Go's key stays local and is sent only to the Go gateway. */
+export async function readOpenCodeGoKey(): Promise<string | undefined> {
+  try {
+    const handle = await open(openCodeAuthFile(), "r");
+    try {
+      const metadata = await handle.stat();
+      if (!metadata.isFile() || metadata.size > 65_536) return undefined;
+      const key = object(object(JSON.parse(await handle.readFile("utf8")))["opencode-go"]).key;
+      return typeof key === "string" && key.length >= 16 && key.length <= 4_096 && !/[\x00-\x1f\x7f]/.test(key) ? key : undefined;
+    } finally { await handle.close(); }
+  } catch { return undefined; }
+}
+
+type GoPeriod = "5h" | "7d" | "30d";
+type GoLimit = { limitUSD: number; resetsAt?: string };
+type GoLimits = Map<string, Partial<Record<GoPeriod, GoLimit>>>;
+type GoTotals = Map<string, Record<GoPeriod, { usedUSD: number; usedTokens: number }>>;
+const goPeriods: { id: GoPeriod; label: string; milliseconds: number }[] = [
+  { id: "5h", label: "5h", milliseconds: 5 * 60 * 60 * 1_000 },
+  { id: "7d", label: "7d", milliseconds: 7 * 24 * 60 * 60 * 1_000 },
+  { id: "30d", label: "30d", milliseconds: 30 * 24 * 60 * 60 * 1_000 },
+];
+const GO_GATEWAY = "https://opencode.ai/zen/go/v1";
+const MAX_GO_JOBS = 128;
+const MAX_GO_MANIFEST_BYTES = 64 * 1_024;
+const MAX_GO_EVENTS_BYTES = 64 * 1_024 * 1_024;
+const GO_KEY_MESSAGE = "Connect OpenCode Go on this computer to see its usage.";
+
+function goPeriod(value: unknown): GoPeriod | undefined {
+  const text = String(value ?? "").toLowerCase().replace(/[\s_-]/g, "");
+  if (text === "5h" || text === "5hour" || text === "fivehour" || text === "300m" || text === "300minute") return "5h";
+  if (text === "7d" || text === "7day" || text === "week" || text === "weekly") return "7d";
+  if (text === "30d" || text === "30day" || text === "month" || text === "monthly") return "30d";
+  return undefined;
+}
+function goModel(value: unknown, allowBare = false): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const model = value.trim();
+  if (/^opencode-go\/[A-Za-z0-9][A-Za-z0-9._/-]{0,190}$/.test(model)) return model;
+  const reserved = new Set(["data", "limits", "usage", "models", "credits", "window", "period", "monthly", "weekly",
+    "5h", "7d", "30d", "fivehour", "seven_day", "month", "limit", "quota", "max", "plan", "account", "rate", "ratelimit",
+    "ratelimits", "remaining", "reset"]);
+  return allowBare && /^[A-Za-z0-9][A-Za-z0-9._/-]{0,190}$/.test(model) && !reserved.has(model.toLowerCase())
+    ? `opencode-go/${model}` : undefined;
+}
+function amount(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1_000_000_000 ? value : undefined;
+}
+function resetAt(value: unknown): string | undefined {
+  if (typeof value === "string" && Number.isFinite(Date.parse(value))) return new Date(value).toISOString();
+  if (typeof value === "string" && /^\d+(?:\.\d+)?$/.test(value)) return resetAt(Number(value));
+  if (typeof value === "number" && Number.isFinite(value) && value > 0 && value < 32_503_680_000) {
+    return new Date(value * 1_000).toISOString();
+  }
+  return undefined;
+}
+function recordGoLimit(limits: GoLimits, model: string, period: GoPeriod, limitUSD: number | undefined, resetsAt?: string): void {
+  if (limitUSD === undefined || limitUSD <= 0) return;
+  const current = limits.get(model) ?? {};
+  const existing = current[period];
+  // A response can repeat a limit at several levels. Keep the first numeric
+  // value, but retain a reset time wherever the service supplied one.
+  current[period] = existing ? { ...existing, ...(existing.resetsAt ? {} : { resetsAt }) } : { limitUSD, resetsAt };
+  limits.set(model, current);
+}
+function numberFrom(value: Record<string, unknown>, names: string[]): number | undefined {
+  for (const name of names) {
+    const found = amount(value[name]);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+function parseGoLimits(value: unknown, limits: GoLimits, model?: string, period?: GoPeriod, depth = 0): void {
+  if (depth > 8) return;
+  if (typeof value === "number") {
+    if (period) recordGoLimit(limits, model ?? "*", period, amount(value));
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value.slice(0, 64)) parseGoLimits(item, limits, model, period, depth + 1);
+    return;
+  }
+  const item = object(value);
+  if (!Object.keys(item).length) return;
+  const nestedModel = goModel(item.model, true) ?? goModel(item.modelId, true) ?? goModel(item.model_id, true) ?? model;
+  const nestedPeriod = goPeriod(item.window) ?? goPeriod(item.period) ?? goPeriod(item.interval) ?? goPeriod(item.windowName) ?? period;
+  const limitUSD = numberFrom(item, ["limitUSD", "limit_usd", "dollarLimit", "dollar_limit", "creditLimit", "credit_limit", "limit", "quota", "max"]);
+  const reset = resetAt(item.resetsAt) ?? resetAt(item.resets_at) ?? resetAt(item.resetAt) ?? resetAt(item.reset_at);
+  if (nestedPeriod) recordGoLimit(limits, nestedModel ?? "*", nestedPeriod, limitUSD, reset);
+  for (const [key, nested] of Object.entries(item).slice(0, 64)) {
+    const keyPeriod = goPeriod(key) ?? nestedPeriod;
+    const keyModel = goModel(key) ?? nestedModel ?? (typeof nested === "object" && !keyPeriod ? goModel(key, true) : undefined);
+    // Scalar metadata such as a plan name cannot carry a usable limit.
+    if (typeof nested !== "object" && typeof nested !== "number") continue;
+    parseGoLimits(nested, limits, keyModel, keyPeriod, depth + 1);
+  }
+}
+function completeGoLimits(limits: GoLimits): void {
+  for (const [model, windows] of limits) {
+    const monthly = windows["30d"]?.limitUSD ?? (windows["7d"] ? windows["7d"].limitUSD * 2 : windows["5h"] ? windows["5h"].limitUSD * 5 : undefined);
+    if (!monthly || !Number.isFinite(monthly) || monthly <= 0) continue;
+    recordGoLimit(limits, model, "5h", monthly * 0.2);
+    recordGoLimit(limits, model, "7d", monthly * 0.5);
+    recordGoLimit(limits, model, "30d", monthly);
+  }
+}
+function header(response: Response, name: string): string | undefined {
+  try { return response.headers.get(name) ?? undefined; } catch { return undefined; }
+}
+function parseGoHeaders(response: Response, limits: GoLimits): void {
+  const limit = amount(Number(header(response, "x-ratelimit-limit")));
+  const remaining = amount(Number(header(response, "x-ratelimit-remaining")));
+  if (limit === undefined || remaining === undefined || remaining > limit) return;
+  const period = goPeriod(header(response, "x-ratelimit-window"));
+  const reset = resetAt(header(response, "x-ratelimit-reset"));
+  // Gateway headers do not identify a model. Their plan-wide limit is the
+  // monthly amount unless the response explicitly names its window.
+  recordGoLimit(limits, "*", period ?? "30d", limit, reset);
+}
+
+/** Best-effort gateway discovery. All four requests are independent because
+ * undocumented routes vary by OpenCode release and account. */
+export async function fetchOpenCodeGoLimits(key: string, fetchImpl: typeof fetch = fetch): Promise<GoLimits> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8_000);
+  const limits: GoLimits = new Map();
+  try {
+    const responses = await Promise.allSettled([
+      ["GET", `${GO_GATEWAY}/usage`],
+      ["GET", `${GO_GATEWAY}/limits`],
+      ["GET", `${GO_GATEWAY}/credits`],
+      ["HEAD", `${GO_GATEWAY}/models`],
+    ].map(async ([method, url]) => {
+      const response = await fetchImpl(url, { method, headers: { authorization: `Bearer ${key}`, accept: "application/json" },
+        redirect: "error", signal: controller.signal });
+      if (!response.ok) return;
+      parseGoHeaders(response, limits);
+      if (method === "GET") {
+        try { parseGoLimits(await response.json(), limits); } catch { /* An HTML or empty gateway response has no limits. */ }
+      }
+    }));
+    // Keep every request observed: one undocumented endpoint failing must not
+    // prevent headers or a second endpoint from describing the account.
+    void responses;
+  } finally {
+    clearTimeout(timer);
+  }
+  completeGoLimits(limits);
+  return limits;
+}
+
+async function containedRegularFile(root: string, candidate: string, maximum: number): Promise<string | undefined> {
+  try {
+    const link = await lstat(candidate);
+    if (!link.isFile() || link.isSymbolicLink() || link.size > maximum) return undefined;
+    const resolved = await realpath(candidate);
+    if (!resolved.startsWith(root + path.sep)) return undefined;
+    const metadata = await stat(resolved);
+    return metadata.isFile() && metadata.size <= maximum ? resolved : undefined;
+  } catch { return undefined; }
+}
+function goEventTime(value: Record<string, unknown>): number | undefined {
+  const raw = value.timestamp ?? value.time ?? value.createdAt ?? value.created_at;
+  if (typeof raw === "string" && Number.isFinite(Date.parse(raw))) return Date.parse(raw);
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) return undefined;
+  return raw < 32_503_680_000 ? raw * 1_000 : raw;
+}
+function goTokenCount(value: unknown, depth = 0): number {
+  if (depth > 5) return 0;
+  if (typeof value === "number") return Number.isFinite(value) && value >= 0 && value <= 10_000_000_000 ? value : 0;
+  const item = object(value);
+  const total = amount(item.total) ?? amount(item.totalTokens) ?? amount(item.total_tokens);
+  if (total !== undefined) return total;
+  return Object.values(item).reduce<number>((sum, part) => sum + goTokenCount(part, depth + 1), 0);
+}
+function goStepCost(event: Record<string, unknown>, part: Record<string, unknown>): number | undefined {
+  const raw = part.cost ?? event.cost;
+  if (typeof raw === "number") return amount(raw);
+  const cost = object(raw);
+  return numberFrom(cost, ["total", "amount", "usd", "cost"]);
+}
+
+/** Sum only completed OpenCode Go fan-outs. Their ledger stays on the
+ * computer and malformed jobs are ignored rather than becoming usage. */
+export async function readOpenCodeGoLedger(root = fanoutRoot(), now = new Date()): Promise<GoTotals> {
+  const totals: GoTotals = new Map();
+  let directory: string;
+  try { directory = await realpath(root); } catch { return totals; }
+  const names = (await readdir(directory).catch(() => [])).slice(0, MAX_GO_JOBS);
+  for (const name of names) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(name)) continue;
+    const manifestFile = await containedRegularFile(directory, path.join(directory, name, "manifest.json"), MAX_GO_MANIFEST_BYTES);
+    if (!manifestFile) continue;
+    let manifest: Record<string, unknown>;
+    try { manifest = object(JSON.parse(await readFile(manifestFile, "utf8"))); } catch { continue; }
+    const model = goModel(manifest.model);
+    const eventLog = typeof manifest.eventLog === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.jsonl$/.test(manifest.eventLog)
+      ? manifest.eventLog : undefined;
+    if (manifest.provider !== "opencode" || !model || !eventLog) continue;
+    const jobRoot = await realpath(path.join(directory, name)).catch(() => undefined);
+    if (!jobRoot || !jobRoot.startsWith(directory + path.sep)) continue;
+    const eventsFile = await containedRegularFile(jobRoot, path.join(jobRoot, eventLog), MAX_GO_EVENTS_BYTES);
+    if (!eventsFile) continue;
+    let events: string;
+    try { events = await readFile(eventsFile, "utf8"); } catch { continue; }
+    for (const line of events.split("\n")) {
+      if (!line || Buffer.byteLength(line) > 1_048_576) continue;
+      let event: Record<string, unknown>;
+      try { event = object(JSON.parse(line)); } catch { continue; }
+      if (event.type !== "step_finish") continue;
+      const at = goEventTime(event), part = object(event.part);
+      const cost = goStepCost(event, part), tokens = goTokenCount(part.tokens ?? event.tokens);
+      if (at === undefined || (cost === undefined && tokens === 0) || at > now.getTime()) continue;
+      for (const period of goPeriods) {
+        if (at < now.getTime() - period.milliseconds) continue;
+        const modelTotals = totals.get(model) ?? {
+          "5h": { usedUSD: 0, usedTokens: 0 }, "7d": { usedUSD: 0, usedTokens: 0 }, "30d": { usedUSD: 0, usedTokens: 0 },
+        };
+        const usedUSD = modelTotals[period.id].usedUSD + (cost ?? 0);
+        if (usedUSD > 1_000_000_000) continue;
+        modelTotals[period.id].usedUSD = usedUSD;
+        modelTotals[period.id].usedTokens += tokens;
+        totals.set(model, modelTotals);
+      }
+    }
+  }
+  return totals;
+}
+
+function goLimitFor(limits: GoLimits, model: string, period: GoPeriod): GoLimit | undefined {
+  return limits.get(model)?.[period] ?? limits.get("*")?.[period];
+}
+function goWindowID(model: string, period: GoPeriod): string {
+  return `opencode-go:${model.slice("opencode-go/".length).replace(/[^A-Za-z0-9]+/g, "_").replace(/^_|_$/g, "")}:${period}`;
+}
+function openCodeGoUsage(totals: GoTotals, limits: GoLimits, now: Date, hasKey: boolean): AccountUsage {
+  const windows: UsageWindow[] = [];
+  let total30Days = 0;
+  for (const model of [...totals.keys()].sort((a, b) => a.localeCompare(b))) {
+    const modelTotals = totals.get(model)!;
+    for (const period of goPeriods) {
+      const local = modelTotals[period.id], limit = goLimitFor(limits, model, period.id);
+      const usedPercent = limit ? Math.min(100, local.usedUSD / limit.limitUSD * 100) : undefined;
+      windows.push({ id: goWindowID(model, period.id), name: `${model} · ${period.label}`, usedUSD: local.usedUSD,
+        usedTokens: local.usedTokens, ...(limit ? { limitUSD: limit.limitUSD, usedPercent, resetsAt: limit.resetsAt } : {}) });
+    }
+    total30Days += modelTotals["30d"].usedUSD;
+  }
+  return { source: "opencode-go", windows, updatedAt: now.toISOString(),
+    ...(windows.length ? { spend: { amountUSD: total30Days, period: "rolling_30_days" as const } } : {}),
+    ...(!hasKey ? { message: GO_KEY_MESSAGE } : {}) };
+}
+
+let goDiscoveryCached: { at: number; limits: GoLimits } | undefined;
+let goDiscoveryPending: Promise<GoLimits> | undefined;
+async function cachedOpenCodeGoLimits(key: string, now: Date): Promise<GoLimits> {
+  if (!goDiscoveryCached || now.getTime() - goDiscoveryCached.at >= 10 * 60_000) {
+    goDiscoveryPending ??= fetchOpenCodeGoLimits(key).catch(() => new Map<string, Partial<Record<GoPeriod, GoLimit>>>())
+      .then(limits => { goDiscoveryCached = { at: now.getTime(), limits }; return limits; })
+      .finally(() => { goDiscoveryPending = undefined; });
+  }
+  return goDiscoveryPending ? await goDiscoveryPending : goDiscoveryCached?.limits ?? new Map();
+}
+
+export async function readOpenCodeGoUsage(now = new Date(), options: {
+  root?: string;
+  readKey?: () => Promise<string | undefined>;
+  fetchImpl?: typeof fetch;
+} = {}): Promise<AccountUsage> {
+  const [totals, key] = await Promise.all([readOpenCodeGoLedger(options.root, now), (options.readKey ?? readOpenCodeGoKey)()]);
+  if (!key) return openCodeGoUsage(totals, new Map(), now, false);
+  let limits: GoLimits = new Map();
+  try {
+    limits = options.fetchImpl ? await fetchOpenCodeGoLimits(key, options.fetchImpl) : await cachedOpenCodeGoLimits(key, now);
+  } catch { /* Gateway discovery is optional; local accounting is still useful. */ }
+  return openCodeGoUsage(totals, limits, now, true);
 }
 
 /** OpenRouter reports the current UTC calendar week's charged usage per key. */
@@ -320,7 +610,8 @@ export class AccountUsageReader {
   constructor(private readCodex = readCodexLimits, private now = Date.now,
               private readClaudeLive: (now: Date) => Promise<AccountUsage | undefined> = liveClaudeUsage,
               private readOpenCode: (now: Date) => Promise<AccountUsage> = now => readOpenCodeUsage("opencode", now),
-              private readOpenRouter: (now: Date) => Promise<AccountUsage | undefined> = liveOpenRouterUsage) {}
+              private readOpenRouter: (now: Date) => Promise<AccountUsage | undefined> = liveOpenRouterUsage,
+              private readOpenCodeGo: (now: Date) => Promise<AccountUsage> = readOpenCodeGoUsage) {}
   async read(): Promise<{ accounts: AccountUsage[] }> {
     if (!this.cached || this.now() - this.cached.at >= 60_000) {
       this.pending ??= this.readCodex().then(value => { this.cached = { at: this.now(), value }; return value; }).finally(() => { this.pending = undefined; });
@@ -332,8 +623,8 @@ export class AccountUsageReader {
   private async spending(): Promise<AccountUsage[]> {
     if (!this.spendingCached || this.now() - this.spendingCached.at >= 60_000) {
       const at = this.now();
-      this.spendingPending ??= Promise.all([this.readOpenCode(new Date(at)), this.readOpenRouter(new Date(at))])
-        .then(([openCode, openRouter]) => [openCode, ...(openRouter ? [openRouter] : [])])
+      this.spendingPending ??= Promise.all([this.readOpenCode(new Date(at)), this.readOpenCodeGo(new Date(at)), this.readOpenRouter(new Date(at))])
+        .then(([openCode, openCodeGo, openRouter]) => [openCode, openCodeGo, ...(openRouter ? [openRouter] : [])])
         .then(value => { this.spendingCached = { at, value }; return value; })
         .finally(() => { this.spendingPending = undefined; });
     }

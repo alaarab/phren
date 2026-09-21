@@ -1,3 +1,4 @@
+import { moduleEnabled } from "../modules/runtime.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type McpContext, mcpResponse, resolveStoreForProject } from "./types.js";
 import { z } from "zod";
@@ -551,6 +552,7 @@ async function handleGetProjectSummary(ctx: McpContext, { name }: { name: string
       const projDir = path.join(store.path, lookupName);
       const fsDocs: Array<{ project: string; filename: string; type: string; content: string; path: string }> = [];
       for (const [file, type] of [["summary.md", "summary"], ["AGENTS.md", "claude"], [FINDINGS_FILENAME, "findings"], ["tasks.md", "task"], ["truths.md", "canonical"]] as const) {
+        if (type === "task" && !moduleEnabled(store.path, "tasks", ctx.profile)) continue;
         const filePath = path.join(projDir, file);
         if (fs.existsSync(filePath)) {
           fsDocs.push({ project: lookupName, filename: file, type, content: fs.readFileSync(filePath, "utf8").slice(0, 8000), path: filePath });
@@ -678,7 +680,7 @@ async function handleListProjects(ctx: McpContext, { page, page_size }: { page?:
       if (fs.existsSync(path.join(projDir, "AGENTS.md"))) badges.push("AGENTS.md");
       if (fs.existsSync(path.join(projDir, FINDINGS_FILENAME))) badges.push("FINDINGS");
       if (fs.existsSync(path.join(projDir, "summary.md"))) badges.push("summary");
-      if (fs.existsSync(path.join(projDir, "tasks.md"))) badges.push("task");
+      if (store && moduleEnabled(store.path, "tasks", ctx.profile) && fs.existsSync(path.join(projDir, "tasks.md"))) badges.push("task");
     }
     return { name: entry.name, store: entry.store, brief: "", badges, fileCount: badges.length };
   });

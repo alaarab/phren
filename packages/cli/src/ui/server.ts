@@ -1,3 +1,5 @@
+import { moduleSnapshot } from "../modules/runtime.js";
+import { disabledHint } from "../modules/registry.js";
 import * as http from "http";
 import * as crypto from "crypto";
 import { timingSafeEqual } from "crypto";
@@ -1324,6 +1326,7 @@ export function createWebUiHttpServer(
     logger.debug("web-ui", `web-ui repair: ${errorMessage(err)}`);
   }
 
+  const modules = moduleSnapshot(phrenPath, profile);
   const ctx: RouteCtx = {
     phrenPath, profile, authToken: opts?.authToken, csrfTokens: opts?.csrfTokens, renderPage,
   };
@@ -1344,6 +1347,10 @@ export function createWebUiHttpServer(
 
     // Auth gate for all GET /api/* routes
     if (pathname.startsWith("/api/") && req.method === "GET" && !requireGetAuth(req, res, url, ctx.authToken)) return;
+
+    if (!modules.has("tasks") && (pathname === "/api/tasks" || pathname.startsWith("/api/tasks/") || pathname === "/api/settings/task-mode")) {
+      return jsonErr(res, disabledHint("tasks"), 404);
+    }
 
     // ── GET routes ──
     if (req.method === "GET") {

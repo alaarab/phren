@@ -1,3 +1,5 @@
+import { moduleEnabled } from "../modules/runtime.js";
+import { disabledHint } from "../modules/registry.js";
 import * as fs from "fs";
 import * as path from "path";
 import { randomBytes, randomUUID } from "crypto";
@@ -410,6 +412,7 @@ function taskArchivePath(phrenPath: string, project: string): string {
 }
 
 export function readTasks(phrenPath: string, project: string): PhrenResult<TaskDoc> {
+  if (!moduleEnabled(phrenPath, "tasks")) return phrenErr(disabledHint("tasks"), PhrenError.VALIDATION_ERROR);
   const ensured = ensureProject(phrenPath, project);
   if (!ensured.ok) return forwardErr(ensured);
 
