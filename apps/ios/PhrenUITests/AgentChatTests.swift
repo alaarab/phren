@@ -253,10 +253,14 @@ final class AgentChatTests: XCTestCase {
         XCTAssertFalse(app.staticTexts["This agent recorded no conversation."].exists)
         XCTAssertEqual(rawJSONTexts(app).count, 0, "No raw JSON in a child transcript")
         app.buttons["chat-subagent-diff"].tap()
-        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "agent-diff-header").firstMatch.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Theme.swift"].waitForExistence(timeout: 5))
+        // The child's changes are the Changes screen scoped to its checkout:
+        // its branch up top, its diff in Diff mode.
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "changes-header").firstMatch.waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["changes-title"].label, "deepseek/compact-phone")
+        app.buttons["changes-mode-diff"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "+let accent = purple")).firstMatch.waitForExistence(timeout: 5))
         capture(app, "Subagent changes")
-        app.buttons["agent-diff-back"].tap()
+        app.navigationBars.buttons.element(boundBy: 0).tap()
     }
 
     @MainActor
@@ -1014,21 +1018,29 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Conversation image.jpg"].waitForExistence(timeout: 5))
         app.navigationBars["Conversation image.jpg"].buttons["Done"].tap()
         app.buttons["chat-diff"].tap()
-        XCTAssertTrue(app.staticTexts["Theme.swift"].waitForExistence(timeout: 5))
-        // A staged file under a folder path nests under its folders now;
-        // expand them to reach it, like Finder or VS Code's source control view.
-        app.buttons["Sources"].tap()
-        XCTAssertTrue(app.buttons["App"].waitForExistence(timeout: 5))
-        app.buttons["App"].tap()
-        XCTAssertTrue(app.staticTexts["Settings.swift"].waitForExistence(timeout: 5), "Staged and unstaged files are listed in their own groups")
-        XCTAssertTrue(app.staticTexts["Notes.md"].exists, "Untracked files are listed too")
+        // The header's Changes screen: staged, unstaged and untracked files
+        // in List mode, the change itself in Diff mode.
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "changes-header").firstMatch.waitForExistence(timeout: 5))
+        app.buttons["changes-mode-list"].tap()
+        let listed = { (path: String) in app.staticTexts.matching(NSPredicate(format: "label == %@", path)).firstMatch }
+        XCTAssertTrue(listed("Sources/App.swift").waitForExistence(timeout: 5))
+        XCTAssertTrue(listed("Sources/App/Settings.swift").exists, "Staged and unstaged files are listed in their own groups")
+        XCTAssertTrue(listed("Notes.md").exists, "Untracked files are listed too")
         capture(app, "Repository changes list")
-        app.staticTexts["Theme.swift"].tap()
-        capture(app, "Native repository diff")
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "+let accent = purple")).firstMatch.exists)
+        app.buttons["changes-mode-diff"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "+let accent = purple")).firstMatch.waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "-let accent = green")).firstMatch.exists)
-        XCTAssertFalse(app.buttons["diff-previous-change"].isEnabled, "One change: nothing before it")
-        XCTAssertFalse(app.buttons["diff-next-change"].isEnabled, "One change: nothing after it")
+        capture(app, "Native repository diff")
+        // A file under a folder nests under it in the working tree, like
+        // Finder or VS Code's source control view; expand the folder to reach
+        // it, and the file opens its own diff with the side-by-side option.
+        app.buttons["changes-tab-tree"].tap()
+        let sources = app.buttons["changes-tree-entry:Sources"]
+        XCTAssertTrue(sources.waitForExistence(timeout: 5)); sources.tap()
+        let appFile = app.buttons["changes-tree-entry:Sources/App.swift"]
+        XCTAssertTrue(appFile.waitForExistence(timeout: 5)); appFile.tap()
+        let fileBar = app.navigationBars["App.swift"]
+        XCTAssertTrue(fileBar.waitForExistence(timeout: 5))
         app.buttons["diff-options"].tap()
         app.buttons["Side by side"].tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "-let accent = green, +let accent = purple")).firstMatch.waitForExistence(timeout: 5))
@@ -1036,9 +1048,9 @@ final class AgentChatTests: XCTestCase {
         app.buttons["diff-options"].tap()
         app.buttons["Inline"].tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "+let accent = purple")).firstMatch.waitForExistence(timeout: 5))
+        fileBar.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.buttons["changes-tab-tree"].waitForExistence(timeout: 5))
         app.navigationBars.buttons.element(boundBy: 0).tap()
-        // The diff screen draws its own compact header, not a navigation bar.
-        app.buttons["agent-diff-back"].tap()
         app.buttons["chat-composer-terminal"].tap()
         XCTAssertTrue(app.otherElements["herdr-terminal-header"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.buttons["Toggle terminal keyboard"].waitForExistence(timeout: 8))
@@ -1280,23 +1292,15 @@ final class AgentChatTests: XCTestCase {
         // The header's diff screen covers the whole tree, plus every place the
         // session's commands wrote to.
         app.buttons["chat-diff"].tap()
-        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "agent-diff-header").firstMatch.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Repository changes"].exists)
-        let row = app.buttons["diff-file:unstaged:Theme.swift"]
-        XCTAssertTrue(row.waitForExistence(timeout: 5)); row.tap()
+        // The header's Changes screen covers the pane's whole tree: the
+        // shell edit is an unstaged file in List mode and a diff in Diff mode.
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "changes-header").firstMatch.waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["changes-title"].label, "Uncommitted changes")
+        app.buttons["changes-mode-list"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label == %@", "Sources/App.swift")).firstMatch.waitForExistence(timeout: 5))
+        app.buttons["changes-mode-diff"].tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "+let accent = purple")).firstMatch.waitForExistence(timeout: 5))
         capture(app, "Repository changes from a shell edit, syntax coloured")
-        // The same command appended to the phren store, which a hook committed
-        // straight away: it appears as its own repository, with the commit.
-        app.navigationBars.buttons.firstMatch.tap()
-        // The store's commit sits under its own folder path; expand it first.
-        app.buttons["phone"].tap()
-        let store = app.buttons["diff-file:committed:phone/FINDINGS.md"]
-        XCTAssertTrue(store.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "phren: capture finding")).firstMatch.exists)
-        store.tap()
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "+- Accent is purple now")).firstMatch.waitForExistence(timeout: 5))
-        capture(app, "A hook's commit in another repository, from the same command")
     }
 
     /// The Changes screen's pull requests and working tree tabs: the fixture's

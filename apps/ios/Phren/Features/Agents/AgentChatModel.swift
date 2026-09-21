@@ -879,7 +879,7 @@ final class AgentChatModel {
 
 enum AgentDeliveryMessage {
     static func sendFailure(_ error: Error, rejected: Bool) -> String {
-        if rejected { return "Your message wasn't sent. \(error.localizedDescription)" }
+        if rejected { return "Your message hasn't been sent. \(error.localizedDescription)" }
         if error is CancellationError || (error as NSError).code == NSURLErrorCancelled {
             return "The connection closed before Phren received confirmation. Check the conversation before sending again. Phren did not retry."
         }

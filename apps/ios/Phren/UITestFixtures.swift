@@ -1,4 +1,5 @@
 #if DEBUG && targetEnvironment(simulator)
+import ActivityKit
 import Foundation
 import PhrenKit
 
@@ -27,9 +28,15 @@ enum UITestFixtures {
     ]
     private static let preferencesKey = "sessions.live.preferences.v1"
 
+    private static func endLiveActivities() async {
+        for activity in Activity<ApprovalActivityAttributes>.activities { await activity.end(nil, dismissalPolicy: .immediate) }
+        for activity in Activity<SessionWorkingActivityAttributes>.activities { await activity.end(nil, dismissalPolicy: .immediate) }
+    }
+
     static func bootstrap() async throws -> Bootstrap {
         let arguments = ProcessInfo.processInfo.arguments
         let defaults = AppRuntime.defaults
+        await endLiveActivities()
         defaults.removeObject(forKey: AgentLaunch.pendingKey)
         defaults.removeObject(forKey: AgentLaunch.pendingProjectKey)
         defaults.removeObject(forKey: AgentFocusFilterStore.key)
@@ -113,7 +120,10 @@ enum UITestFixtures {
                 } else {
                 try await store.write("phone/FINDINGS.md", content: "# Findings\n\n- [decision] Keep phone sessions connected to project memory\n", blobSha: nil)
                 // The store knows this computer carries the project, and where.
-                try await store.write("machines.yaml", content: "Test Mac: mac\n", blobSha: nil)
+                // The schedules fixture registered Desk above; keep it, or its
+                // schedules read "unknown computer" when both fixtures run.
+                let desk = arguments.contains("--schedules-fixture") ? "Desk: desk\n" : ""
+                try await store.write("machines.yaml", content: "Test Mac: mac\n" + desk, blobSha: nil)
                 try await store.write("profiles/mac.yaml", content: "name: mac\nprojects:\n  - phone\n", blobSha: nil)
                 try await store.write("phone/phren.project.yaml", content: "ownership: repo-managed\nsourcePath: /work/phone\n", blobSha: nil)
                 }

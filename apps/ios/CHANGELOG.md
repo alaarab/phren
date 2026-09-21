@@ -96,6 +96,14 @@ lock screen and Changes screen done properly.
 
 ### Fixed
 
+- Schedules: Run now takes its own tap beside the chips, the swipe actions no
+  longer peek through the card's corners, and the all-projects list resolves
+  the computer and next run like the per-project list.
+- The schedule editor puts the keyboard away as soon as you scroll.
+- Chat options lists the conversation's token usage above the project rows, and
+  the token sheet starts at the top instead of floating mid-sheet.
+- Account usage: each provider's windows keep their own accessibility ids.
+- Working tree folders open on the first tap again.
 - Dictation keeps what you said across pauses and keeps listening after a send.
 - The lock screen counts a session as running while its fan-out workers run,
   and says how many.

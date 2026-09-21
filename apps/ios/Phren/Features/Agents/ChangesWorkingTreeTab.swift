@@ -210,8 +210,10 @@ private struct WorkingTreeRow: View {
             .frame(minHeight: 32)
             .listRowInsets(EdgeInsets(top: 0, leading: 12 + CGFloat(level) * 12, bottom: 0, trailing: 12))
             .accessibilityIdentifier("changes-tree-entry:\(entry.path)")
-            .overlay {
-                Color.clear.frame(maxWidth: .infinity, minHeight: 32).accessibilityElement()
+            // A marker beside the button, not over it: an element covering
+            // the row would take the hit test away from the button itself.
+            .overlay(alignment: .leading) {
+                Color.clear.frame(width: 1, height: 32).accessibilityElement()
                     .accessibilityIdentifier("changes-tree-row:\(entry.path)")
                     .allowsHitTesting(false)
             }

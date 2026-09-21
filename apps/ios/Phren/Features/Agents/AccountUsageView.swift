@@ -125,7 +125,12 @@ private struct AccountUsageCard: View {
             }
         }
         .padding(.vertical, 4)
-        .accessibilityIdentifier("account-usage:\(account.source)")
+        // A marker, not an identifier on the card: the card's id would
+        // replace each window's own.
+        .overlay(alignment: .topLeading) {
+            Color.clear.frame(width: 1, height: 1).accessibilityElement()
+                .accessibilityIdentifier("account-usage:\(account.source)")
+        }
     }
 
     @ViewBuilder private func caption(_ window: AccountUsageSnapshot.Window) -> some View {

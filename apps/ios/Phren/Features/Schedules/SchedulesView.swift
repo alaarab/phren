@@ -297,29 +297,35 @@ struct ScheduleRow: View {
 
     private var card: some View {
         VStack(alignment: .leading, spacing: PhrenTheme.Space.xs) {
-            ZStack(alignment: .bottomTrailing) {
-                Button(action: onOpen) {
-                    VStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
-                        HStack(spacing: PhrenTheme.Space.small) {
-                            Circle().fill(stateColor).frame(width: 8, height: 8)
-                            Text(schedule.name)
-                                .font(PhrenTypography.subheadline.weight(.semibold))
-                                .foregroundStyle(PhrenTheme.text)
-                                .lineLimit(1).truncationMode(.tail).layoutPriority(1)
-                            Spacer(minLength: PhrenTheme.Space.xs)
-                            Text(nextRunText)
-                                .font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
-                        }
-                        metadata.padding(.trailing, 44).frame(minHeight: 44, alignment: .leading)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(accessibilityText)
-                .accessibilityValue(state?.running == true ? "running" : "")
-                .accessibilityIdentifier("schedule-row:\(schedule.id)")
+            HStack(spacing: PhrenTheme.Space.small) {
+                Circle().fill(stateColor).frame(width: 8, height: 8)
+                Text(schedule.name)
+                    .font(PhrenTypography.subheadline.weight(.semibold))
+                    .foregroundStyle(PhrenTheme.text)
+                    .lineLimit(1).truncationMode(.tail).layoutPriority(1)
+                Spacer(minLength: PhrenTheme.Space.xs)
+                Text(nextRunText)
+                    .font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
+            }
+            .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+            .contentShape(Rectangle())
+            // A tap, not a Button: a Button would take the horizontal drag
+            // before the card's swipe saw it, and the strip would never open.
+            .onTapGesture(perform: onOpen)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(accessibilityText)
+            .accessibilityValue(state?.running == true ? "running" : "")
+            .accessibilityIdentifier("schedule-row:\(schedule.id)")
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction(named: "Edit") { onOpen() }
+
+            // The run button sits beside the chips, never under the row
+            // element, so it takes its own taps and hit tests.
+            HStack(alignment: .center, spacing: PhrenTheme.Space.xs) {
+                metadata
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .contentShape(Rectangle()).onTapGesture(perform: onOpen)
+                    .accessibilityHidden(true)
 
                 Button { launch() } label: {
                     ZStack {
@@ -397,6 +403,10 @@ struct ScheduleRow: View {
         }
         .buttonStyle(.plain)
         .frame(minHeight: 104)
+        // The card's corners are rounded; the strip only shows once the
+        // card slides, so its colours never peek through at the corners.
+        .clipShape(RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium, style: .continuous))
+        .opacity(isOpen ? 1 : 0)
         .allowsHitTesting(isOpen)
         .accessibilityHidden(!isOpen)
     }

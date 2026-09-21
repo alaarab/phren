@@ -800,6 +800,8 @@ struct AgentChatView: View {
                 Text("Input includes conversation context, instructions, and tool results. Cached input is part of that total. These are tokens for one model response, not the whole conversation or your account quota.")
                     .font(.footnote).foregroundStyle(PhrenTheme.textMuted)
             }
+            // Pinned to the top: a medium sheet otherwise floats the counts in its middle.
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .padding(24).foregroundStyle(PhrenTheme.text)
             .presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
             .presentationBackground(PhrenTheme.chatCanvas)
@@ -982,6 +984,11 @@ struct AgentChatView: View {
                         .accessibilityIdentifier("chat-options-model")
                     }
                 }
+                if model.progress.usage != nil || model.progressUnavailable {
+                    // Above the project rows: the medium sheet's fold would
+                    // otherwise hide the conversation's own section.
+                    Section("This conversation") { tokenUsage }
+                }
                 if let project {
                     Section("Project") {
                         NavigationLink { ProjectDetailView(storeId: project.storeID, project: project.name) } label: { Label("Project memory", systemImage: "brain.head.profile") }
@@ -989,9 +996,6 @@ struct AgentChatView: View {
                         NavigationLink { GraphView(focusProject: project.name, initialStoreId: project.storeID) } label: { Label("Explore graph", systemImage: "point.3.connected.trianglepath.dotted") }
                         Button { afterOptions { showingContext = true } } label: { Label("Add project context", systemImage: "brain") }
                     }
-                }
-                if model.progress.usage != nil || model.progressUnavailable {
-                    Section("This conversation") { tokenUsage }
                 }
             }
             .navigationTitle("Chat options").navigationBarTitleDisplayMode(.inline)

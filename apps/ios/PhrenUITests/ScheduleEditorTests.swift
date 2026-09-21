@@ -119,7 +119,7 @@ final class ScheduleEditorTests: XCTestCase {
     private func tap(_ element: XCUIElement, in app: XCUIApplication) {
         let scroll = app.scrollViews["schedule-editor-scroll"]
         XCTAssertTrue(element.waitForExistence(timeout: 5))
-        for _ in 0..<8 where !element.isHittable { scroll.swipeUp() }
+        for _ in 0..<8 where !element.isHittable { scroll.swipeUp(velocity: .slow) }
         XCTAssertTrue(element.isHittable)
         element.tap()
     }

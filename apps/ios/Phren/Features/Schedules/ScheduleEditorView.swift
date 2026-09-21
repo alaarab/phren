@@ -40,6 +40,7 @@ struct ScheduleEditorView: View {
     @State private var openedContents: [String: String] = [:]
     @State private var openedProjects: Set<String> = []
     @State private var capturedOpeningState = false
+    @FocusState private var typing: Bool
 
     private enum WhenKind: String, Hashable {
         case interval, daily, weekly, once, cron
@@ -159,7 +160,7 @@ struct ScheduleEditorView: View {
                 if schedule != nil { deleteGroup }
             }
             .accessibilityIdentifier("schedule-editor-scroll")
-            .scrollDismissesKeyboard(.interactively)
+            .scrollDismissesKeyboard(.immediately)
         }
         .background(PhrenTheme.bg)
         // The container id would hide the scroller's and rows' ids from UI tests.
@@ -188,6 +189,7 @@ struct ScheduleEditorView: View {
     private var nameGroup: some View {
         PhrenGroup("Name", identifier: "schedule-group:name") {
             TextField("Nightly test sweep", text: $name)
+                .focused($typing)
                 .font(PhrenTypography.body)
                 .foregroundStyle(PhrenTheme.text)
                 .padding(.horizontal, PhrenTheme.Space.medium)
@@ -202,6 +204,7 @@ struct ScheduleEditorView: View {
     private var promptGroup: some View {
         PhrenGroup("Prompt", identifier: "schedule-group:prompt") {
             PhrenCodeField(text: $prompt, placeholder: "What should the agent do?")
+                .focused($typing)
                 .accessibilityIdentifier("schedule-prompt")
                 .onChange(of: prompt) { _, value in if value.count > 8_000 { prompt = String(value.prefix(8_000)) } }
             if prompt.count > 6_000 {
@@ -217,6 +220,7 @@ struct ScheduleEditorView: View {
         PhrenGroup("Project", identifier: "schedule-group:project") {
             ForEach(projects, id: \.self) { option in
                 PhrenOptionRow(title: option, selected: selectedProject == option) {
+                    typing = false
                     selectedProject = option
                     captureProject(option)
                 }
@@ -237,6 +241,7 @@ struct ScheduleEditorView: View {
                     trailing: choice.host == nil ? AnyView(PhrenOptionRow.trailingCaption("offline")) : nil,
                     muted: choice.host == nil
                 ) {
+                    typing = false
                     computer = choice.name
                     modelID = nil
                     customModel = ""
@@ -251,6 +256,7 @@ struct ScheduleEditorView: View {
             ForEach(Self.harnesses, id: \.self) { option in
                 PhrenOptionRow(title: ScheduleWords.harnessName(option), selected: harness == option,
                                glyph: AnyView(AgentProviderGlyph(source: option.rawValue, size: 18))) {
+                    typing = false
                     harness = option
                     modelID = nil
                     customModel = ""
@@ -303,6 +309,7 @@ struct ScheduleEditorView: View {
     private func modelRow(label: String, detail: String?, id: String?, isDefault: Bool) -> some View {
         PhrenOptionRow(title: label, caption: detail, selected: modelID == id,
                        trailing: isDefault ? AnyView(PhrenChip(text: "default")) : nil) {
+            typing = false
             modelID = id
             customModel = id ?? ""
         }
