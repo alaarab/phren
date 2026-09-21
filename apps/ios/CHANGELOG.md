@@ -98,6 +98,14 @@ lock screen and Changes screen done properly.
   chevron; back is the way out.
 - What's new appears once after every update again; it used to count the
   marketing version alone, which every TestFlight build shares.
+- Session details: Chat and Terminal sit side by side, each half the width and
+  44 points tall, instead of two stacked full-width buttons.
+- Project names take a per-project colour chosen in the project's Knobs screen
+  (a row of colour dots, phone-local); the Agents list, Memory, chat header and
+  lock screen follow it.
+- The lock screen line shows each agent's branch, or the worktree folder when
+  it is off the main checkout, instead of the current step; running fan-out
+  workers read as "N workers" with their provider glyphs.
 
 ### Fixed
 

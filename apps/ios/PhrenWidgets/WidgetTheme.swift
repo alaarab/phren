@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 /// A trimmed copy of `Phren/DesignSystem/PhrenTheme.swift` for the widget
@@ -22,6 +23,17 @@ enum WidgetTheme {
     static let cyan = Color(widgetHex: 0x28D3F2)        // --cyan
     static let green = Color(widgetHex: 0x8AC8AC)       // stateDone
     static let border = Color(widgetHex: 0x9C8FF8).opacity(0.18)    // --border
+    /// The project name's default colour when an activity carries no resolved
+    /// hex (a live activity from before this field existed).
+    static let projectFallback = Color(widgetHex: 0xC2AAFF)
+
+    /// A `#RRGGBB` string the app resolved for a project's name; falls back to
+    /// the default project colour when absent or malformed.
+    static func projectNameColor(_ hex: String?) -> Color {
+        guard let hex, hex.range(of: #"^#[0-9A-Fa-f]{6}$"#, options: .regularExpression) != nil,
+              let value = UInt32(hex.dropFirst(), radix: 16) else { return projectFallback }
+        return Color(widgetHex: value)
+    }
 }
 
 extension Color {

@@ -421,7 +421,7 @@ struct MemoryRowCard: View {
             PhrenChip(text: tag, color: item.kind == .task ? Self.priorityColor(tag) : PhrenTheme.chipColor(.type))
         }
         if showProject, item.kind != .project, !item.project.isEmpty {
-            PhrenChip(text: item.project, role: .project)
+            PhrenChip(text: item.project, color: PhrenTheme.projectColor(storeId: item.storeId, project: item.project))
         }
         if let detail = item.detail {
             Text(detail).font(PhrenTypography.caption2).foregroundStyle(PhrenTheme.textMuted).lineLimit(1)

@@ -1,4 +1,5 @@
 import ActivityKit
+import Foundation
 import SwiftUI
 import WidgetKit
 
@@ -75,10 +76,10 @@ private struct SessionWorkingSummary: View {
     }
 }
 
-/// One fixed-height agent row: provider, project, model, computer, a state dot
-/// with the step (a wait replaces it with "Needs an answer"), and its own
-/// elapsed timer. Every text truncates at the tail so a long value can never
-/// wrap the row or stretch the activity.
+/// One fixed-height agent row: provider, project, model, computer, then the
+/// branch or worktree (or the worker count, or the state word) with a state
+/// dot, and its own elapsed timer. Every text truncates so a long value can
+/// never wrap the row or stretch the activity.
 private struct AgentRow: View {
     let entry: SessionWorkingActivityAttributes.Entry
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -86,14 +87,29 @@ private struct AgentRow: View {
 
     private var isWaiting: Bool { entry.state == "waiting" }
     private var isIdle: Bool { entry.state == "idle" || entry.state == "done" }
-    private var step: String { isWaiting ? "Needs an answer" : (entry.step ?? entry.tool ?? "Working") }
+    /// The middle column: the branch (or worktree folder), otherwise how many
+    /// fan-out workers are running, otherwise the state word.
+    private var detail: String {
+        if let branch = entry.branch?.trimmingCharacters(in: .whitespacesAndNewlines), !branch.isEmpty { return branch }
+        if entry.subagents > 0 { return "\(entry.subagents) \(entry.subagents == 1 ? "worker" : "workers")" }
+        return stateWord
+    }
+    private var stateWord: String {
+        if isWaiting { return "Needs an answer" }
+        switch entry.state {
+        case "idle": return "Idle"
+        case "done": return "Done"
+        default: return "Working"
+        }
+    }
     private var color: Color { isWaiting ? WidgetTheme.warning : isIdle ? WidgetTheme.green : WidgetTheme.activitySecondary }
+    private var projectColor: Color { WidgetTheme.projectNameColor(entry.projectColor) }
 
     var body: some View {
         if dynamicTypeSize.isAccessibilitySize {
             VStack(alignment: .leading, spacing: 4) {
-                Text(entry.project).font(WidgetTheme.Font.caption.weight(.semibold))
-                Text([entry.model, entry.computer, step].compactMap { $0 }.joined(separator: " · "))
+                Text(entry.project).font(WidgetTheme.Font.caption.weight(.semibold)).foregroundStyle(projectColor)
+                Text([entry.model, entry.computer, detail].compactMap { $0 }.joined(separator: " · "))
                     .font(WidgetTheme.Font.caption2).foregroundStyle(color)
             }
         } else {
@@ -105,7 +121,7 @@ private struct AgentRow: View {
         HStack(spacing: 6) {
             ProviderActivityGlyphStack(providers: [entry.provider] + entry.childProviders, size: 14)
             Text(entry.project).privacySensitive().font(WidgetTheme.Font.caption.weight(.semibold))
-                .lineLimit(1).truncationMode(.tail).layoutPriority(1)
+                .foregroundStyle(projectColor).lineLimit(1).truncationMode(.tail).layoutPriority(1)
             if let model = entry.model {
                 Text(model).font(WidgetTheme.Font.caption2.monospaced()).foregroundStyle(WidgetTheme.activitySecondary)
                     .lineLimit(1).truncationMode(.tail)
@@ -115,16 +131,8 @@ private struct AgentRow: View {
             Spacer(minLength: 4)
             HStack(spacing: 4) {
                 Circle().fill(color).frame(width: 6, height: 6)
-                Text(step).privacySensitive().font(WidgetTheme.Font.caption2).foregroundStyle(color)
-                    .lineLimit(1).truncationMode(.tail)
-            }
-            if entry.subagents > 0 {
-                Text("\(entry.subagents) \(entry.subagents == 1 ? "agent" : "agents")")
-                    .font(WidgetTheme.Font.caption2.weight(.semibold)).monospacedDigit()
-                    .foregroundStyle(WidgetTheme.cyan)
-                    .padding(.horizontal, 5).padding(.vertical, 2)
-                    .background(WidgetTheme.cyan.opacity(0.15), in: Capsule())
-                    .fixedSize()
+                Text(detail).privacySensitive().font(WidgetTheme.Font.caption2).foregroundStyle(color)
+                    .lineLimit(1).truncationMode(.middle)
             }
             if !isLuminanceReduced, !isIdle, let startedAt = entry.startedAt {
                 Text(startedAt, style: .timer).font(WidgetTheme.Font.caption2.monospacedDigit())

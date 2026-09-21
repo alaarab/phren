@@ -56,8 +56,9 @@ struct ProjectsView: View {
                             NavigationLink(value: item) {
                                 VStack(alignment: .leading, spacing: 3) {
                                     HStack(spacing: 6) {
-                                        // The same themeable colour the Agents list gives a project.
-                                        Text(item.project.name).font(.headline).foregroundStyle(PhrenTheme.sessionProject)
+                                        // The project's own name colour, or the theme's project colour.
+                                        Text(item.project.name).font(.headline)
+                                            .foregroundStyle(PhrenTheme.projectColor(storeId: item.storeId, project: item.project.name))
                                         if model.hasMultipleStores {
                                             TagChip(text: item.storeName, role: .store)
                                         }

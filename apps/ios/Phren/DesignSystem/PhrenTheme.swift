@@ -46,6 +46,11 @@ enum PhrenTheme {
     static var sessionProject: Color { Color(hex: palette.sessionProject ?? palette.link ?? palette.action) }
     static var sessionTitle: Color { Color(hex: palette.sessionTitle ?? palette.secondary) }
     static var sessionMeta: Color { Color(hex: palette.sessionMeta ?? palette.muted) }
+    /// A project's own name colour, chosen per store+project on this phone,
+    /// falling back to the theme's project colour.
+    static func projectColor(storeId: String, project: String) -> Color {
+        ProjectNameColor.stored(storeId: storeId, project: project).color
+    }
     static func hostColor(_ hex: String?) -> Color {
         guard let hex, hex.range(of: #"^#[0-9A-Fa-f]{6}$"#, options: .regularExpression) != nil,
               let value = UInt32(hex.dropFirst(), radix: 16) else { return textMuted }

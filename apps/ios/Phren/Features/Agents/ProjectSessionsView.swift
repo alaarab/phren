@@ -158,6 +158,7 @@ struct ProjectSessionsView: View {
             HStack(spacing: 0) {
                 Button { open(session, assign: assign) } label: {
                     SessionCardContent(session: session, fresh: fresh, project: assign ? nil : project,
+                                       projectStoreId: assign ? nil : storeID,
                                        computer: session.host, identifierPrefix: "discovered")
                 }
                 .buttonStyle(.plain)

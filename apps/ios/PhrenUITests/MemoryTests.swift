@@ -99,7 +99,9 @@ final class MemoryTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(done.frame.height, 44)
         capture(app, "Memory task actions")
         done.tap()
-        expectation(for: NSPredicate(format: "label CONTAINS %@", "Done"), evaluatedWith: row)
+        // A finished task sorts below the open ones, so the lazy list may no
+        // longer draw this row; either it reads Done or it has left the view.
+        expectation(for: NSPredicate(format: "exists == false OR label CONTAINS %@", "Done"), evaluatedWith: row)
         waitForExpectations(timeout: 10)
 
         app.tabBars.buttons["Tasks"].tap()

@@ -43,16 +43,18 @@ final class SessionWorkingActivityController {
         } else { scheduleUpdate() }
     }
 
-    func observe(session: LiveAgentSession, project: String?, provider: String?, branch: String?,
+    func observe(session: LiveAgentSession, project: String?, projectStoreID: String? = nil,
+                 provider: String?, branch: String?,
                  activity state: String?, toolName: String?, toolDetail: String? = nil, now: Date = .now) async {
         SessionOverviewMonitor.shared.ensureRunning(hosts: AgentSessions.hosts)
         var entity = AgentSessionEntity(session); entity.project = project
+        entity.projectStoreID = projectStoreID
         subagents[entity.id] = session.tab.runningChildren
         childProviders[entity.id] = session.tab.childProviders
         let state = normalized(state)
         tools[entity.id] = state == "working" ? toolName : nil
         details[entity.id] = state == "working" ? toolDetail : nil
-        chat = (input(entity, state: state, provider: provider, now: now), now)
+        chat = (input(entity, state: state, provider: provider, branch: branch, now: now), now)
         scheduleUpdate()
     }
 
@@ -85,7 +87,15 @@ final class SessionWorkingActivityController {
             subagents[id] = session.tab.runningChildren
             childProviders[id] = session.tab.childProviders
         }
-        sessionsByHost[host.id] = reports.map { input($0.entity, state: lockState($0.state), now: now) }
+        let reportsByID = Dictionary(reports.map { ($0.entity.id, $0) }, uniquingKeysWith: { _, latest in latest })
+        let sourceFolders = Dictionary(projects.compactMap { project in
+            project.sourceFolder.map { ("\(project.storeId)/\(project.project)", $0) }
+        }, uniquingKeysWith: { first, _ in first })
+        sessionsByHost[host.id] = sessions.compactMap { session in
+            guard let report = reportsByID[AgentSessionEntity(session).id] else { return nil }
+            let branch = branchLine(session: session, entity: report.entity, sourceFolders: sourceFolders)
+            return input(report.entity, state: lockState(report.state), branch: branch, now: now)
+        }
         let retained = Set(sessionsByHost.values.flatMap { $0.map(\.entry.id) })
         starts = starts.filter { retained.contains($0.key) || chat?.session.entry.id == $0.key }
         states = states.filter { retained.contains($0.key) || chat?.session.entry.id == $0.key }
@@ -154,7 +164,8 @@ final class SessionWorkingActivityController {
         default: state.rawValue
         }
     }
-    private func input(_ entity: AgentSessionEntity, state: String, provider: String? = nil, now: Date) -> SessionWorkingActivityBuilder.Session {
+    private func input(_ entity: AgentSessionEntity, state: String, provider: String? = nil,
+                       branch: String? = nil, now: Date) -> SessionWorkingActivityBuilder.Session {
         entities[entity.id] = entity
         let reportedState = state
         let workers = subagents[entity.id] ?? 0
@@ -175,9 +186,35 @@ final class SessionWorkingActivityController {
                                  provider: provider ?? entity.agent ?? "agent", tool: tool.map { String($0.prefix(60)) },
                                  computer: String(entity.computer.prefix(60)),
                                  model: overviewModels[entity.id].map { String($0.prefix(40)) },
-                                 step: presentation.step, subagents: workers,
+                                 step: presentation.step, branch: branch.map { String($0.prefix(80)) },
+                                 projectColor: projectColorHex(entity), subagents: workers,
                                  childProviders: childProviders[entity.id] ?? [], state: state, startedAt: began),
                      state: state, startedAt: began)
+    }
+
+    /// The line the lock screen shows for a pane: its branch, or the worktree
+    /// folder when the pane sits outside the project's main checkout.
+    private func branchLine(session: LiveAgentSession, entity: AgentSessionEntity,
+                            sourceFolders: [String: String]) -> String? {
+        if let branch = session.tab.branch?.trimmingCharacters(in: .whitespacesAndNewlines), !branch.isEmpty { return branch }
+        guard let cwd = session.tab.cwd, let name = Self.lastPathComponent(cwd),
+              let storeID = entity.projectStoreID, let project = entity.project,
+              let source = sourceFolders["\(storeID)/\(project)"],
+              Self.lastPathComponent(source) != name else { return nil }
+        return name
+    }
+
+    private func projectColorHex(_ entity: AgentSessionEntity) -> String? {
+        guard let storeID = entity.projectStoreID, let project = entity.project else { return nil }
+        return ProjectNameColor.stored(storeId: storeID, project: project)
+            .widgetHex(for: PhrenAppearance.shared.palette)
+    }
+
+    /// The last path component, with trailing slashes dropped; nil when empty.
+    static func lastPathComponent(_ path: String) -> String? {
+        let trimmed = path.count > 1 ? path.replacingOccurrences(of: #"/+$"#, with: "", options: .regularExpression) : path
+        let name = trimmed.split(separator: "/").last.map(String.init)
+        return (name?.isEmpty == false) ? name : nil
     }
 
     /// The step's fallback when no tool is known: the session's own status.

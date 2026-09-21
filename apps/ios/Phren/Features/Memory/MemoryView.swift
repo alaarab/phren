@@ -197,7 +197,7 @@ struct MemoryView: View {
                 .phrenIdentifier("memory-store")
             }
             PhrenChipRow(items: scopeOptions, selection: $project, identifier: "memory-scope",
-                         tint: { $0.isEmpty ? PhrenTheme.accent : PhrenTheme.sessionProject })
+                         tint: { $0.isEmpty ? PhrenTheme.accent : PhrenTheme.projectColor(storeId: selectedStore, project: $0) })
         }
     }
 

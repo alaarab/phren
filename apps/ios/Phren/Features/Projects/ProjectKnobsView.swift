@@ -14,6 +14,8 @@ struct ProjectKnobsView: View {
 
     @State private var knobs = ProjectKnobs()
     @State private var baseline = ProjectKnobs()
+    /// The project's name colour, phone-local, so it is not part of `knobs`.
+    @State private var nameColour: ProjectNameColor = .default
     /// The raw `phren.project.yaml` the screen opened, carried into each write
     /// as its conflict check.
     @State private var expectedContent: String?
@@ -39,6 +41,7 @@ struct ProjectKnobsView: View {
                     selection: knobs.proactivityTask
                 ) { knobs.proactivityTask = $0 }
                 taskModeOptions
+                nameColourOptions
 
                 Text("Changes save automatically. Inherit global uses your shared setting.")
                     .font(PhrenTheme.Font.caption)
@@ -86,6 +89,24 @@ struct ProjectKnobsView: View {
         }
     }
 
+    /// The project name's colour everywhere it is drawn. Phone-local, so it
+    /// saves the moment a dot is chosen and never leaves this device.
+    private var nameColourOptions: some View {
+        PhrenGroup("Name colour", identifier: "knob-nameColour") {
+            PhrenColorDotRow(
+                items: ProjectNameColor.allCases.map {
+                    PhrenOption(id: $0.rawValue, value: $0, title: $0.title)
+                },
+                selection: Binding(get: { nameColour }, set: { value in
+                    nameColour = value
+                    ProjectNameColor.set(value, storeId: storeId, project: project)
+                }),
+                identifier: "knob-nameColour",
+                color: { $0.color }
+            )
+        }
+    }
+
     private func inheritedOptions<Value: RawRepresentable & Hashable>(_ values: [Value]) -> [PhrenOption<Value?>]
         where Value.RawValue == String {
         [PhrenOption<Value?>(id: "inherit", value: nil, title: "Inherit global")]
@@ -98,6 +119,7 @@ struct ProjectKnobsView: View {
         knobs = loaded
         baseline = loaded
         expectedContent = snapshot.projectConfigs[project]
+        nameColour = ProjectNameColor.stored(storeId: storeId, project: project)
     }
 
     private func save(_ new: ProjectKnobs) {

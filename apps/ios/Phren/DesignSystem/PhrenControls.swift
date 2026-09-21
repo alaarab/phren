@@ -710,6 +710,56 @@ struct PhrenChipRow<Value: Hashable>: View {
     }
 }
 
+/// A single choice drawn as a row of 32-point colour dots, each inside a
+/// 44-point target. The dot carries a check when selected; the spoken label
+/// comes from the option, never the colour. Wraps at accessibility sizes.
+struct PhrenColorDotRow<Value: Hashable>: View {
+    let items: [PhrenOption<Value>]
+    @Binding var selection: Value
+    let identifier: String
+    let color: (Value) -> Color
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: PhrenTheme.Space.small) { dots }
+                .accessibilityElement(children: .contain)
+        } else {
+            PhrenFlowLayout(spacing: PhrenTheme.Space.small) { dots }
+                .accessibilityElement(children: .contain)
+        }
+    }
+
+    private var dots: some View {
+        ForEach(items) { item in
+            let selected = item.value == selection
+            Button {
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
+                    selection = PhrenOptionSelection.single(item.value, in: items, current: selection)
+                }
+            } label: {
+                Circle().fill(color(item.value))
+                    .frame(width: 32, height: 32)
+                    .overlay(Circle().strokeBorder(selected ? PhrenTheme.text : .clear, lineWidth: 2))
+                    .overlay {
+                        if selected {
+                            Image(systemName: "checkmark").font(.system(size: 13, weight: .bold))
+                                .foregroundStyle(PhrenTheme.bg)
+                        }
+                    }
+                    .frame(width: 44, height: 44).contentShape(Circle())
+            }
+            .buttonStyle(.plain).disabled(!item.isEnabled)
+            .opacity(isEnabled && item.isEnabled ? 1 : 0.45)
+            .accessibilityLabel(item.accessibilityLabel ?? item.title)
+            .accessibilityAddTraits(selected ? .isSelected : [])
+            .phrenIdentifier("\(identifier):\(item.id)")
+        }
+    }
+}
+
 /// Leading-aligned rows of whatever fits; the layout behind wrapping chips.
 struct PhrenFlowLayout: Layout {
     var spacing: CGFloat = PhrenTheme.Space.small

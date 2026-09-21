@@ -94,6 +94,12 @@ struct SessionWorkingActivityAttributes: ActivityAttributes {
         /// The current step, already trimmed for the lock screen (`nil` when
         /// only the status shows). Kept as text so the widget never formats.
         let step: String?
+        /// The branch, or a worktree folder name when the pane is not on the
+        /// project's main checkout; nil when neither is known.
+        let branch: String?
+        /// The project name's colour, as a `#RRGGBB` string resolved by the
+        /// app (the widget cannot read the app's appearance or defaults).
+        let projectColor: String?
         /// Running subagents in this session; 0 when none.
         let subagents: Int
         /// Distinct providers among the running children, for the leading glyph stack.
@@ -105,13 +111,15 @@ struct SessionWorkingActivityAttributes: ActivityAttributes {
         let startedAt: Date?
 
         init(id: String, project: String, provider: String, tool: String? = nil, computer: String,
-             model: String? = nil, step: String? = nil, subagents: Int = 0, childProviders: [String] = [], state: String? = nil,
+             model: String? = nil, step: String? = nil, branch: String? = nil, projectColor: String? = nil,
+             subagents: Int = 0, childProviders: [String] = [], state: String? = nil,
              startedAt: Date? = nil) {
             self.id = id; self.project = project; self.provider = provider; self.tool = tool
-            self.computer = computer; self.model = model; self.step = step; self.subagents = subagents
+            self.computer = computer; self.model = model; self.step = step; self.branch = branch
+            self.projectColor = projectColor; self.subagents = subagents
             self.childProviders = childProviders; self.state = state; self.startedAt = startedAt
         }
-        private enum CodingKeys: String, CodingKey { case id, project, provider, tool, computer, model, step, subagents, childProviders, state, startedAt }
+        private enum CodingKeys: String, CodingKey { case id, project, provider, tool, computer, model, step, branch, projectColor, subagents, childProviders, state, startedAt }
         /// Decode activities created before the step/subagent/model fields too,
         /// so an upgrade does not make an already-live activity undecodable.
         init(from decoder: Decoder) throws {
@@ -123,6 +131,8 @@ struct SessionWorkingActivityAttributes: ActivityAttributes {
             computer = try values.decode(String.self, forKey: .computer)
             model = try values.decodeIfPresent(String.self, forKey: .model)
             step = try values.decodeIfPresent(String.self, forKey: .step)
+            branch = try values.decodeIfPresent(String.self, forKey: .branch)
+            projectColor = try values.decodeIfPresent(String.self, forKey: .projectColor)
             subagents = try values.decodeIfPresent(Int.self, forKey: .subagents) ?? 0
             childProviders = try values.decodeIfPresent([String].self, forKey: .childProviders) ?? []
             state = try values.decodeIfPresent(String.self, forKey: .state)

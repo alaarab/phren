@@ -289,6 +289,7 @@ struct AgentChatView: View {
     private var selectedPane: AgentChatPanes.Pane? { model.panes.first { $0.id == model.target?.paneID } }
     private struct WorkingActivityObservation: Equatable {
         let project: String?
+        let projectStoreID: String?
         let provider: String?
         let branch: String?
         let activity: String?
@@ -296,7 +297,8 @@ struct AgentChatView: View {
         let toolDetail: String?
     }
     private var workingActivityObservation: WorkingActivityObservation {
-        WorkingActivityObservation(project: project?.name, provider: model.target?.source ?? session.tab.agent,
+        WorkingActivityObservation(project: project?.name, projectStoreID: project?.storeID,
+                                   provider: model.target?.source ?? session.tab.agent,
                                    branch: model.branch ?? session.tab.branch,
                                    activity: model.activityPhase == .working ? "working" : model.liveActivity ?? session.tab.agentStatus,
                                    toolName: model.currentToolName, toolDetail: model.currentToolDetail)
@@ -597,7 +599,8 @@ struct AgentChatView: View {
         .onChange(of: workingActivityObservation, initial: true) { _, value in
             Task {
                 await SessionWorkingActivityController.shared.observe(
-                    session: session, project: value.project, provider: value.provider,
+                    session: session, project: value.project, projectStoreID: value.projectStoreID,
+                    provider: value.provider,
                     branch: value.branch, activity: value.activity, toolName: value.toolName,
                     toolDetail: value.toolDetail
                 )
@@ -884,12 +887,26 @@ struct AgentChatView: View {
     /// the project, then the model answering and the branch it is on. The
     /// computer is already the session list's business.
     private var chatLocation: String {
+        [chatLocationProject, chatLocationTail].filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
+    /// The project part of the location line, drawn in the project's own colour.
+    private var chatLocationProject: String {
+        session.usesFolderFallback(mappedProject: project?.name)
+            ? "~/\(session.projectDisplayName(nil))" : session.projectDisplayName(project?.name)
+    }
+
+    /// The model and branch after the project name.
+    private var chatLocationTail: String {
         let modelName = model.modelName.map { name in
             name.hasPrefix("claude-") ? String(name.dropFirst("claude-".count)) : name
         }
-        let location = session.usesFolderFallback(mappedProject: project?.name)
-            ? "~/\(session.projectDisplayName(nil))" : session.projectDisplayName(project?.name)
-        return [location, modelName, model.branch].compactMap { $0 }.joined(separator: " · ")
+        return [modelName, model.branch].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    private var chatLocationColor: Color {
+        guard !session.usesFolderFallback(mappedProject: project?.name), let project = project else { return PhrenTheme.chatNeutral }
+        return PhrenTheme.projectColor(storeId: project.storeID, project: project.name)
     }
 
     /// The computer and workspace left the visible line; VoiceOver still
@@ -921,9 +938,13 @@ struct AgentChatView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(selectedPane?.displayTitle ?? session.projectDisplayName(project?.name))
                     .font(PhrenTypography.subheadline.weight(.semibold)).lineLimit(1)
+                    .foregroundStyle(selectedPane == nil && project != nil
+                                     ? PhrenTheme.projectColor(storeId: project!.storeID, project: project!.name)
+                                     : PhrenTheme.chatText)
                 HStack(spacing: 4) {
                     if session.usesFolderFallback(mappedProject: project?.name) { Image(systemName: "folder").font(.caption2) }
-                    Text(chatLocation).lineLimit(1)
+                    Text(chatLocationProject).foregroundStyle(chatLocationColor).lineLimit(1)
+                    if !chatLocationTail.isEmpty { Text(" · " + chatLocationTail).lineLimit(1) }
                     if project == nil, session.tab.cwd != nil {
                         Button("Link to project", systemImage: "link") { assigningProject = true }
                             .labelStyle(.iconOnly).frame(width: 28, height: 24)

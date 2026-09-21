@@ -37,6 +37,9 @@ struct SessionCardContent: View, Equatable {
     let fresh: Bool
     /// The project name the store matched to this session, when it has one.
     var project: String? = nil
+    /// The store the matched project lives in, so its name can take the
+    /// per-project colour chosen on this phone.
+    var projectStoreId: String? = nil
     /// The computer, shown when the list spans several.
     var computer: LiveHost? = nil
     /// Kept for callers that build their own line; unused when `project` is given.
@@ -47,11 +50,16 @@ struct SessionCardContent: View, Equatable {
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.session == rhs.session && lhs.fresh == rhs.fresh && lhs.project == rhs.project
+            && lhs.projectStoreId == rhs.projectStoreId
             && lhs.computer == rhs.computer && lhs.subtitle == rhs.subtitle
             && lhs.identifierPrefix == rhs.identifierPrefix && (lhs.onDetails == nil) == (rhs.onDetails == nil)
     }
 
     private var headline: String { session.projectDisplayName(project) }
+    private var headlineColor: Color {
+        guard let project = project, let projectStoreId = projectStoreId else { return PhrenTheme.sessionProject }
+        return PhrenTheme.projectColor(storeId: projectStoreId, project: project)
+    }
     /// The quiet last line. The list is already sectioned by state, so the
     /// state itself is only the dot's colour here; words are for what the
     /// section can't say — a permission waiting, a stale computer — and the
@@ -87,7 +95,7 @@ struct SessionCardContent: View, Equatable {
                         Image(systemName: "folder").font(.caption).foregroundStyle(PhrenTheme.textMuted)
                             .accessibilityLabel("Folder")
                     }
-                    Text(headline).font(.subheadline.weight(.semibold)).foregroundStyle(PhrenTheme.sessionProject).lineLimit(1)
+                    Text(headline).font(.subheadline.weight(.semibold)).foregroundStyle(headlineColor).lineLimit(1)
                     // Where in the code, then where it runs — one quiet line.
                     if let branch = session.tab.branch, !branch.isEmpty {
                         HStack(spacing: 3) {

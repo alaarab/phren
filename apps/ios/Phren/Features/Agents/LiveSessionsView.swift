@@ -847,12 +847,14 @@ private struct LiveSessionCard: View, Equatable {
 
     var body: some View {
         let preferences = try? LiveSessionPreferences.read(data)
-        let project = showHost ? resolvedProject : preferences?.projectMatch(hostID: session.host.id, cwd: session.tab.cwd,
-                                                projects: model.sessionProjects)?.project.name
+        let match = showHost ? nil : preferences?.projectMatch(hostID: session.host.id, cwd: session.tab.cwd,
+                                                projects: model.sessionProjects)
+        let project = showHost ? resolvedProject : match?.project.name
+        let projectStoreId = showHost ? nil : match?.project.storeID
         let prefix = showHost ? "overview" : "live"
         HStack(spacing: 0) {
             AgentConversationLink(session: session, onOpenInPhren: onChat) {
-                SessionCardContent(session: session, fresh: fresh, project: project,
+                SessionCardContent(session: session, fresh: fresh, project: project, projectStoreId: projectStoreId,
                                    computer: showHost ? session.host : nil, identifierPrefix: prefix, onDetails: onDetails)
                     .equatable()
             }
@@ -976,7 +978,8 @@ private struct LiveSessionDetailView: View {
                                     .fixedSize(horizontal: false, vertical: true)
                                 HStack(spacing: 6) {
                                     if project == nil { Image(systemName: "folder").foregroundStyle(PhrenTheme.textMuted) }
-                                    Text(session.projectDisplayName(project?.name)).font(.system(.subheadline, design: .monospaced)).foregroundStyle(project == nil ? PhrenTheme.textMuted : PhrenTheme.success)
+                                    Text(session.projectDisplayName(project?.name)).font(.system(.subheadline, design: .monospaced))
+                                        .foregroundStyle(project.map { PhrenTheme.projectColor(storeId: $0.storeID, project: $0.name) } ?? PhrenTheme.textMuted)
                                     if let branch = session.tab.branch, !branch.isEmpty {
                                         Text("·").foregroundStyle(PhrenTheme.textDim)
                                         Label(branch, systemImage: "arrow.triangle.branch").font(.system(.caption, design: .monospaced)).foregroundStyle(PhrenTheme.chatNeutral)
@@ -997,19 +1000,25 @@ private struct LiveSessionDetailView: View {
                             .frame(maxWidth: .infinity).padding(.vertical, 28).padding(.horizontal, 20)
                             .background(session.tab.activity.color.opacity(fresh ? 0.08 : 0.03), in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.large, style: .continuous))
 
-                            // The two ways in.
-                            AgentConversationLink(session: session) {
-                                Label("Chat with agent", systemImage: "bubble.left.and.bubble.right").font(.body.weight(.semibold))
-                                    .frame(maxWidth: .infinity, minHeight: 54)
-                                    .background(PhrenTheme.accent.opacity(0.9), in: Capsule()).foregroundStyle(.black)
+                            // The two ways in, side by side.
+                            HStack(spacing: 10) {
+                                AgentConversationLink(session: session) {
+                                    Label("Chat", systemImage: "bubble.left.and.bubble.right").font(.body.weight(.semibold))
+                                        .frame(maxWidth: .infinity, minHeight: 44)
+                                        .background(PhrenTheme.accent.opacity(0.9), in: Capsule()).foregroundStyle(.black)
+                                }
+                                .buttonStyle(.plain).disabled(!fresh)
+                                .accessibilityLabel("Chat with agent")
+                                .accessibilityIdentifier("session-detail-chat")
+                                NavigationLink { HerdrTerminalView(host: session.host, session: session) } label: {
+                                    Label("Terminal", systemImage: "terminal").font(.body.weight(.semibold))
+                                        .frame(maxWidth: .infinity, minHeight: 44)
+                                        .background(PhrenTheme.surface, in: Capsule()).foregroundStyle(PhrenTheme.text)
+                                }
+                                .buttonStyle(.plain).disabled(!fresh)
+                                .accessibilityLabel("Open terminal")
+                                .accessibilityIdentifier("session-detail-terminal")
                             }
-                            .buttonStyle(.plain).disabled(!fresh).accessibilityIdentifier("session-detail-chat")
-                            NavigationLink { HerdrTerminalView(host: session.host, session: session) } label: {
-                                Label("Open terminal", systemImage: "terminal").font(.body.weight(.semibold))
-                                    .frame(maxWidth: .infinity, minHeight: 54)
-                                    .background(PhrenTheme.surface, in: Capsule()).foregroundStyle(PhrenTheme.text)
-                            }
-                            .buttonStyle(.plain).disabled(!fresh)
                             if !fresh { Text("Reconnect this computer to resume its session.").font(.caption).foregroundStyle(PhrenTheme.textMuted) }
 
                             SessionAwaySummaryCard(
