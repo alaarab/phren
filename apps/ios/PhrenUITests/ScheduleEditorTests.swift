@@ -22,7 +22,8 @@ final class ScheduleEditorTests: XCTestCase {
         tap(app.buttons["schedule-harness:codex"], in: app)
         let model = app.buttons["schedule-model:gpt-5.6-sol"]
         tap(model, in: app)
-        tap(app.buttons["Daily"], in: app)
+        tap(app.buttons["schedule-every:daily"], in: app)
+        capture(app, "Schedule editor daily fields")
         app.buttons["schedule-save"].tap()
 
         let saved = app.descendants(matching: .any).matching(NSPredicate(
@@ -32,18 +33,20 @@ final class ScheduleEditorTests: XCTestCase {
     }
 
     @MainActor
-    func testEditsDailyScheduleToWeeklyWithTwoDays() {
+    func testEditsDailyScheduleToWeeklyWithThreeDays() {
         let app = launchSchedules()
         let row = app.descendants(matching: .any)["schedule-row:7f3a2c1d"]
         XCTAssertTrue(row.waitForExistence(timeout: 8))
         row.tap()
         XCTAssertTrue(app.descendants(matching: .any)["schedule-editor"].waitForExistence(timeout: 5))
 
-        tap(app.buttons["Weekly"], in: app)
+        capture(app, "Schedule editor name and prompt")
+        tap(app.buttons["schedule-every:weekly"], in: app)
         let tuesday = app.buttons["schedule-day:tue"]
         let thursday = app.buttons["schedule-day:thu"]
         tap(tuesday, in: app)
         tap(thursday, in: app)
+        capture(app, "Schedule editor weekly fields")
         app.buttons["schedule-save"].tap()
 
         XCTAssertTrue(app.descendants(matching: .any)
@@ -63,8 +66,17 @@ final class ScheduleEditorTests: XCTestCase {
             .matching(NSPredicate(format: "identifier BEGINSWITH %@", "schedule-history-row:"))
         XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 8))
         XCTAssertEqual(rows.count, 3)
+        capture(app, "Schedule run history")
         XCTAssertTrue(app.descendants(matching: .any)
             .matching(NSPredicate(format: "label CONTAINS[c] %@", "failed:")).firstMatch.exists)
+    }
+
+    @MainActor
+    private func capture(_ app: XCUIApplication, _ name: String) {
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = name
+        shot.lifetime = .keepAlways
+        add(shot)
     }
 
     @MainActor

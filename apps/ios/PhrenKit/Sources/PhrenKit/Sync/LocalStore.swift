@@ -418,7 +418,7 @@ public actor LocalStore {
         public var schedules: [String: [Schedule]] = [:]
         /// Raw bytes used to preserve unknown top-level keys and detect edits
         /// made elsewhere while the schedule editor was open.
-        public var scheduleContents: [String: String] = [:]
+        public var schedulesContent: [String: String] = [:]
 
         public static let empty = Snapshot(projects: [], findings: [:], tasks: [:], notes: [:], reviewQueue: [], summaries: [:])
     }
@@ -447,7 +447,7 @@ public actor LocalStore {
         var projectKnobs: [String: ProjectKnobs] = [:]
         var projectConfigs: [String: String] = [:]
         var schedules: [String: [Schedule]] = [:]
-        var scheduleContents: [String: String] = [:]
+        var schedulesContent: [String: String] = [:]
 
         for path in paths {
             let parts = path.split(separator: "/").map(String.init)
@@ -515,7 +515,7 @@ public actor LocalStore {
                     projectKnobs[project] = ProjectKnobs.parse(content)
                     if let sourcePath = MachineRegistry.parseSourcePath(content) { machines.sourcePaths[project] = sourcePath }
                 case SchedulesFile.fileName:
-                    scheduleContents[project] = content
+                    schedulesContent[project] = content
                     schedules[project] = SchedulesFile.parse(content)
                 default:
                     break
@@ -581,7 +581,7 @@ public actor LocalStore {
             instructionPaths: instructionPaths,
             skillPreferencesContent: read(SkillPreferences.path), machines: machines,
             projectKnobs: projectKnobs, projectConfigs: projectConfigs,
-            schedules: schedules, scheduleContents: scheduleContents
+            schedules: schedules, schedulesContent: schedulesContent
         )
         cachedSnapshot = files.map { ($0, result) }
         return result

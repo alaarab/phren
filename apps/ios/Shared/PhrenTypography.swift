@@ -2,6 +2,7 @@ import SwiftUI
 
 /// Shared by the app and widget targets so their text scales together.
 enum PhrenTypography {
+    static func icon(_ size: CGFloat, weight: Font.Weight = .regular) -> Font { .system(size: size, weight: weight) }
     static let title = Font.title
     static let title2 = Font.title2
     static let body = Font.body

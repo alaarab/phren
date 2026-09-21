@@ -131,6 +131,14 @@ private struct NavigationControllerBridge: UIViewControllerRepresentable {
                         navigationController.interactivePopGestureRecognizer?.isEnabled = navigationController.viewControllers.count > 1
                     }
                 },
+                // Coming back from another app, SwiftUI restores the stack's bar
+                // without a viewWillAppear; a screen that draws its own header
+                // hides it again as soon as the scene is active.
+                center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+                    guard let self, hidesNavigationBar, viewIfLoaded?.window != nil,
+                          let navigationController, navigationController.topViewController === parent else { return }
+                    navigationController.setNavigationBarHidden(true, animated: false)
+                },
             ]
         }
         @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }

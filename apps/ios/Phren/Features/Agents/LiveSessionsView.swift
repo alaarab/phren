@@ -124,6 +124,12 @@ struct LiveSessionsView: View {
                     .accessibilityIdentifier("all-files")
             }
             Button("Refresh all sessions", systemImage: "arrow.clockwise") { refreshID = UUID() }
+            if let storeId = model.storeDescriptors.first(where: { model.storeFilter == nil || $0.id == model.storeFilter })?.id {
+                NavigationLink { SchedulesView(storeId: storeId, project: nil) } label: {
+                    Label("Schedules", systemImage: "clock.badge.checkmark")
+                }
+                .accessibilityIdentifier("schedules-all")
+            }
         }
         .onAppear { if IntegrationSettings.enabled(IntegrationSettings.agentsKeepScreenOnKey, default: false) { UIApplication.shared.isIdleTimerDisabled = true } }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }

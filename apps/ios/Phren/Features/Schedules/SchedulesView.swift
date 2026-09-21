@@ -8,6 +8,7 @@ struct SchedulesView: View {
 
     @Environment(AppModel.self) private var model
     @AppStorage("sessions.live.preferences.v1") private var hostData = Data()
+    @State private var reachableHosts: Set<UUID> = []
     @State private var liveState: [String: ScheduleRuntimeState] = [:]
     @State private var enabledOverrides: [String: Bool] = [:]
     @State private var removed: Set<String> = []
@@ -89,9 +90,9 @@ struct SchedulesView: View {
         ForEach(sorted(values)) { entry in
             let key = Self.key(project: entry.project, id: entry.schedule.id)
             ScheduleRow(
-                schedule: entry.schedule,
+                storeId: storeId,
                 project: entry.project,
-                showsProject: project == nil,
+                schedule: entry.schedule,
                 state: liveState[key],
                 host: connectedHost(for: entry.schedule.computer),
                 computerKnown: computerIsKnown(entry.schedule.computer),
@@ -106,17 +107,17 @@ struct SchedulesView: View {
     private var emptyState: some View {
         VStack(spacing: PhrenTheme.Space.small) {
             Image(systemName: "clock.badge.checkmark")
-                .font(.system(size: 28))
+                .font(PhrenTypography.icon(28))
                 .foregroundStyle(PhrenTheme.textDim)
             Text("No schedules")
-                .font(.subheadline)
+                .font(PhrenTypography.subheadline)
                 .foregroundStyle(PhrenTheme.textSecondary)
             Button("New schedule") { adding = true }
-                .font(.subheadline.weight(.semibold))
+                .font(PhrenTypography.subheadline.weight(.semibold))
                 .foregroundStyle(PhrenTheme.accentSolid)
                 .frame(minHeight: 44)
                 .padding(.horizontal, PhrenTheme.Space.large)
-                .background(PhrenTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
+                .background(PhrenTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.questionOption))
         }
         .frame(maxWidth: .infinity)
     }
@@ -144,7 +145,7 @@ struct SchedulesView: View {
     }
 
     private func connectedHost(for computer: String) -> LiveHost? {
-        hosts.first { Self.canonicalHost($0.name) == Self.canonicalHost(computer) }
+        hosts.first { reachableHosts.contains($0.id) && Self.canonicalHost($0.name) == Self.canonicalHost(computer) }
     }
 
     private func computerIsKnown(_ computer: String) -> Bool {
@@ -159,6 +160,7 @@ struct SchedulesView: View {
 
     private func refreshLiveState() async {
         var refreshed: [String: ScheduleRuntimeState] = [:]
+        var reachable: Set<UUID> = []
         let scheduledComputers = Dictionary(uniqueKeysWithValues: entries.map {
             (Self.key(project: $0.project, id: $0.schedule.id), Self.canonicalHost($0.schedule.computer))
         })
@@ -174,6 +176,7 @@ struct SchedulesView: View {
                 }
             }
             for await (host, statuses) in group {
+                if statuses != nil { reachable.insert(host.id) }
                 for status in statuses ?? [] {
                     let key = Self.key(project: status.project, id: status.id)
                     guard scheduledComputers[key] == Self.canonicalHost(host.name) else { continue }
@@ -182,6 +185,7 @@ struct SchedulesView: View {
             }
         }
         liveState = refreshed
+        reachableHosts = reachable
     }
 
     private func save(_ entry: ScheduleListEntry, enabled: Bool) {
@@ -194,7 +198,12 @@ struct SchedulesView: View {
         schedules[index].updatedAt = .now
         let content = SchedulesFile.render(schedules, preserving: original)
         Task {
-            await model.perform(.saveSchedules(project: entry.project, content: content, expectedContent: original), in: storeId)
+            do {
+                try await model.enqueue(.saveSchedules(project: entry.project, content: content, expectedContent: original), in: storeId)
+                await model.refresh()
+            } catch { model.lastActionError = error.localizedDescription }
+            enabledOverrides.removeValue(forKey: key)
+            removed.remove(key)
         }
     }
 
@@ -205,7 +214,12 @@ struct SchedulesView: View {
         let schedules = (snapshot.schedules[entry.project] ?? []).filter { $0.id != entry.schedule.id }
         let content = SchedulesFile.render(schedules, preserving: original)
         Task {
-            await model.perform(.saveSchedules(project: entry.project, content: content, expectedContent: original), in: storeId)
+            do {
+                try await model.enqueue(.saveSchedules(project: entry.project, content: content, expectedContent: original), in: storeId)
+                await model.refresh()
+            } catch { model.lastActionError = error.localizedDescription }
+            enabledOverrides.removeValue(forKey: key)
+            removed.remove(key)
         }
     }
 
@@ -246,9 +260,9 @@ struct SchedulesView: View {
 }
 
 struct ScheduleRow: View {
-    let schedule: Schedule
+    let storeId: String
     let project: String
-    let showsProject: Bool
+    let schedule: Schedule
     let state: ScheduleRuntimeState?
     let host: LiveHost?
     let computerKnown: Bool
@@ -275,132 +289,124 @@ struct ScheduleRow: View {
                 else { card }
             }
             .offset(x: presentedOffset)
-            .highPriorityGesture(swipeGesture)
+            .simultaneousGesture(swipeGesture)
         }
         .clipped()
         .onDisappear { deleteTask?.cancel() }
     }
 
     private var card: some View {
-        ZStack(alignment: .centerTrailing) {
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(spacing: 8) {
-                    Circle().fill(stateColor).frame(width: 8, height: 8)
-                    Text(schedule.name)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(PhrenTheme.text)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .layoutPriority(1)
-                    Spacer(minLength: 4)
-                    Text(nextRunText)
-                        .font(.caption)
-                        .foregroundStyle(PhrenTheme.textMuted)
-                        .lineLimit(1)
-                }
-                metadata
-                    .padding(.trailing, 48)
-                HStack(spacing: 8) {
-                    Text(ScheduleWords.describe(schedule))
-                        .font(.caption)
-                        .foregroundStyle(PhrenTheme.textSecondary)
-                        .lineLimit(2)
-                    Spacer(minLength: 4)
-                    if let lastRun = state?.lastRun {
-                        HStack(spacing: 4) {
-                            Image(systemName: lastRunIcon)
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(lastRunColor)
-                            Text(ScheduleWords.relative(lastRun.finishedAt ?? lastRun.startedAt, now: .now))
-                                .font(.caption)
-                                .foregroundStyle(PhrenTheme.textMuted)
+        VStack(alignment: .leading, spacing: PhrenTheme.Space.xs) {
+            ZStack(alignment: .bottomTrailing) {
+                Button(action: onOpen) {
+                    VStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
+                        HStack(spacing: PhrenTheme.Space.small) {
+                            Circle().fill(stateColor).frame(width: 8, height: 8)
+                            Text(schedule.name)
+                                .font(PhrenTypography.subheadline.weight(.semibold))
+                                .foregroundStyle(PhrenTheme.text)
+                                .lineLimit(1).truncationMode(.tail).layoutPriority(1)
+                            Spacer(minLength: PhrenTheme.Space.xs)
+                            Text(nextRunText)
+                                .font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
                         }
-                        .lineLimit(1)
+                        metadata.padding(.trailing, 44).frame(minHeight: 44, alignment: .leading)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
-            }
-            .padding(12)
-            .contentShape(Rectangle())
-            .onTapGesture { onOpen() }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(accessibilityText)
-            .accessibilityValue(state?.running == true ? "running" : "")
-            .accessibilityIdentifier("schedule-row:\(schedule.id)")
-            .accessibilityAddTraits(.isButton)
-            .accessibilityAction { onOpen() }
+                .buttonStyle(.plain)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(accessibilityText)
+                .accessibilityValue(state?.running == true ? "running" : "")
+                .accessibilityIdentifier("schedule-row:\(schedule.id)")
 
-            Button { launch() } label: {
-                ZStack {
-                    Circle().fill(PhrenTheme.surfaceRaised).frame(width: 32, height: 32)
-                    Group {
+                Button { launch() } label: {
+                    ZStack {
+                        Circle().fill(PhrenTheme.surfaceRaised).frame(width: 32, height: 32)
                         if launching { ProgressView().controlSize(.small).tint(PhrenTheme.accent) }
-                        else { Image(systemName: "play.fill").font(.system(size: 12, weight: .semibold)) }
+                        else { Image(systemName: "play.fill").font(PhrenTypography.icon(12, weight: .semibold)) }
                     }
                     .foregroundStyle(host == nil ? PhrenTheme.textDim : PhrenTheme.accent)
+                    .frame(width: 44, height: 44).contentShape(Rectangle())
                 }
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                .disabled(host == nil || launching || state?.running == true)
+                .accessibilityLabel("Run \(schedule.name) now")
+                .accessibilityIdentifier("schedule-run:\(schedule.id)")
             }
-            .buttonStyle(.plain)
-            .disabled(host == nil || launching || state?.running == true)
-            .accessibilityLabel("Run \(schedule.name) now")
-            .accessibilityIdentifier("schedule-run:\(schedule.id)")
-            .padding(.trailing, 6)
+            HStack(spacing: PhrenTheme.Space.small) {
+                Text(ScheduleWords.describe(schedule))
+                    .font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .contentShape(Rectangle()).onTapGesture(perform: onOpen)
+                    .accessibilityHidden(true)
+                if let lastRun = state?.lastRun {
+                    NavigationLink {
+                        ScheduleHistoryView(storeId: storeId, project: project, schedule: schedule)
+                    } label: {
+                        HStack(spacing: PhrenTheme.Space.xs) {
+                            Image(systemName: lastRunIcon)
+                                .font(PhrenTypography.icon(10, weight: .semibold)).foregroundStyle(lastRunColor)
+                            Text(ScheduleWords.relative(lastRun.finishedAt ?? lastRun.startedAt, now: .now))
+                                .font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
+                        }
+                        .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("History for \(schedule.name)")
+                    .accessibilityIdentifier("schedule-history:\(schedule.id)")
+                }
+            }
         }
+        .padding(PhrenTheme.Space.medium)
         .sessionCard()
     }
 
-    @ViewBuilder
     private var metadata: some View {
-        let chips = HStack(spacing: 5) {
-            PhrenChip(text: schedule.computer, icon: "desktopcomputer", role: computerKnown ? .project : .bad)
+        ScheduleChipFlow(spacing: PhrenTheme.Space.xs) {
+            PhrenChip(text: schedule.computer, icon: "desktopcomputer", role: computerKnown ? .host : .bad)
             PhrenChip(text: harnessName, role: .type)
             if let model = schedule.model, !model.isEmpty {
-                PhrenChip(text: model, role: .type)
-            }
-        }
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 5) {
-                if showsProject { PhrenChip(text: project, role: .project) }
-                chips
-            }
-            VStack(alignment: .leading, spacing: 5) {
-                if showsProject { PhrenChip(text: project, role: .project) }
-                chips
+                PhrenChip(text: model, role: .type, monospaced: true)
             }
         }
     }
 
     private var actionStrip: some View {
         HStack(spacing: 0) {
-            Button(schedule.enabled ? "Pause" : "Resume") {
+            Button {
                 closeSwipe()
                 onToggle(!schedule.enabled)
+            } label: {
+                Text(schedule.enabled ? "Pause" : "Resume")
+                    .foregroundStyle(PhrenTheme.textSecondary)
+                    .frame(width: 72).frame(maxHeight: .infinity)
+                    .background(PhrenTheme.surfaceRaised).contentShape(Rectangle())
             }
-            .foregroundStyle(PhrenTheme.textSecondary)
-            .frame(width: 72)
-            .frame(maxHeight: .infinity)
-            .background(PhrenTheme.surfaceRaised)
             .accessibilityIdentifier("schedule-pause:\(schedule.id)")
 
-            Button("Delete") { showDeleteConfirmation() }
-                .foregroundStyle(.white)
-                .frame(width: 72)
-                .frame(maxHeight: .infinity)
-                .background(PhrenTheme.danger)
-                .accessibilityIdentifier("schedule-delete:\(schedule.id)")
+            Button { showDeleteConfirmation() } label: {
+                Text("Delete")
+                    .foregroundStyle(PhrenTheme.onAccent)
+                    .frame(width: 72).frame(maxHeight: .infinity)
+                    .background(PhrenTheme.danger).contentShape(Rectangle())
+            }
+            .accessibilityIdentifier("schedule-delete:\(schedule.id)")
         }
         .buttonStyle(.plain)
         .frame(minHeight: 104)
         .allowsHitTesting(isOpen)
+        .accessibilityHidden(!isOpen)
     }
 
     private var deleteConfirmation: some View {
         HStack(spacing: PhrenTheme.Space.small) {
             Text("Delete this schedule?")
-                .font(.subheadline.weight(.semibold))
+                .font(PhrenTypography.subheadline.weight(.semibold))
                 .foregroundStyle(PhrenTheme.text)
-            Spacer(minLength: 4)
+            Spacer(minLength: PhrenTheme.Space.xs)
             Button("Keep") { cancelDelete() }
                 .foregroundStyle(PhrenTheme.textSecondary)
                 .frame(minWidth: 60, minHeight: 44)
@@ -412,7 +418,7 @@ struct ScheduleRow: View {
             .frame(minWidth: 60, minHeight: 44)
             .accessibilityIdentifier("schedule-delete-confirm:\(schedule.id)")
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, PhrenTheme.Space.medium)
         .frame(minHeight: 82)
         .sessionCard()
     }
@@ -420,9 +426,11 @@ struct ScheduleRow: View {
     private var swipeGesture: some Gesture {
         DragGesture(minimumDistance: 10)
             .updating($dragOffset) { value, state, _ in
+                guard abs(value.translation.width) > abs(value.translation.height) else { return }
                 state = value.translation.width
             }
             .onEnded { value in
+                guard abs(value.translation.width) > abs(value.translation.height) else { return }
                 let projected = offset + value.predictedEndTranslation.width
                 let open = projected < -72
                 animate { offset = open ? -144 : 0 }
@@ -432,7 +440,7 @@ struct ScheduleRow: View {
     private var stateColor: Color {
         if state?.running == true { return PhrenTheme.stateWorking }
         if !schedule.enabled { return PhrenTheme.textDim }
-        if state?.lastRun?.status == "failed" { return PhrenTheme.stateWaiting }
+        if state?.lastRun?.status == .failed { return PhrenTheme.stateWaiting }
         return PhrenTheme.stateDone
     }
 
@@ -440,6 +448,7 @@ struct ScheduleRow: View {
         if !computerKnown { return "unknown computer" }
         if host == nil { return "\(schedule.computer) offline" }
         if !schedule.enabled { return "paused" }
+        if case .once = schedule.every, state?.lastRun != nil, state?.nextRun == nil { return "done" }
         if let next = state?.nextRun ?? ScheduleWords.nextRun(schedule, after: .now, calendar: .current) {
             return ScheduleWords.relative(next, now: .now)
         }
@@ -447,28 +456,22 @@ struct ScheduleRow: View {
         return "paused"
     }
 
-    private var harnessName: String {
-        switch schedule.harness {
-        case .claude: "Claude"
-        case .codex: "Codex"
-        case .opencode: "OpenCode"
-        }
-    }
+    private var harnessName: String { ScheduleWords.harnessName(schedule.harness) }
 
     private var lastRunIcon: String {
         if state?.running == true { return "circle.fill" }
-        return state?.lastRun?.status == "failed" ? "xmark" : "checkmark"
+        return state?.lastRun?.status == .failed ? "xmark" : "checkmark"
     }
 
     private var lastRunColor: Color {
         if state?.running == true { return PhrenTheme.stateWorking }
-        return state?.lastRun?.status == "failed" ? PhrenTheme.danger : PhrenTheme.stateDone
+        return state?.lastRun?.status == .failed ? PhrenTheme.danger : PhrenTheme.stateDone
     }
 
     private var accessibilityText: String {
         var parts = [schedule.name, nextRunText, schedule.computer, harnessName, ScheduleWords.describe(schedule)]
         if let run = state?.lastRun {
-            parts.append("last run \(run.status) \(ScheduleWords.relative(run.finishedAt ?? run.startedAt, now: .now))")
+            parts.append("last run \(run.status.rawValue) \(ScheduleWords.relative(run.finishedAt ?? run.startedAt, now: .now))")
         }
         return parts.joined(separator: ", ")
     }
@@ -504,33 +507,19 @@ struct ScheduleRow: View {
 }
 
 struct ScheduleRuntimeState: Sendable {
-    struct LastRun: Sendable {
-        let startedAt: Date
-        let finishedAt: Date?
-        let status: String
-        let reason: String?
-
-        init(_ run: ScheduleRun) {
-            startedAt = run.startedAt
-            finishedAt = run.finishedAt
-            status = run.status
-            reason = run.reason
-        }
-    }
-
     let nextRun: Date?
-    let lastRun: LastRun?
+    let lastRun: ScheduleRun?
     let running: Bool
 
     init(_ status: ScheduleStatus) {
         nextRun = status.nextRun
-        lastRun = status.lastRun.map(LastRun.init)
+        lastRun = status.lastRun
         running = status.running
     }
 
     init(run: ScheduleRun, nextRun: Date?, running: Bool) {
         self.nextRun = nextRun
-        lastRun = LastRun(run)
+        lastRun = run
         self.running = running
     }
 }

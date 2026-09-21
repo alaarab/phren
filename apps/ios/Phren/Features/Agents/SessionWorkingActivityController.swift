@@ -107,8 +107,22 @@ final class SessionWorkingActivityController {
         scheduleUpdate()
     }
 
+    func routeURL(for session: LiveAgentSession) -> URL? {
+        let entity = AgentSessionEntity(session)
+        entities[entity.id] = entity
+        var url = URLComponents()
+        url.scheme = "phren"
+        url.host = "session"
+        url.queryItems = [URLQueryItem(name: "route", value: entity.id)]
+        return url.url
+    }
+
     func open(routeID: String) throws {
         AppModel.current?.selectedTab = .agents
+        if let entity = entities[routeID] {
+            try AgentLaunch.openIndexedSession(entity, destination: .chat)
+            return
+        }
         guard let data = AppRuntime.defaults.data(forKey: Self.routeKey),
               let route = try? JSONDecoder().decode(Route.self, from: data), route.id == routeID else { return }
         try AgentLaunch.openIndexedSession(route.entity, destination: .chat)

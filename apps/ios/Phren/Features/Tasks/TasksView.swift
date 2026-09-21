@@ -69,6 +69,9 @@ struct TaskListView: View {
     @State private var isSelecting = false
     @State private var selectedIDs: Set<String> = []
     @State private var isMoving = false
+    /// Projects the person folded in the cross-project list; the count badge
+    /// keeps saying how much sits inside a folded section.
+    @State private var collapsedProjects: Set<String> = []
     @FocusState private var searchFocused: Bool
     @State private var priority: PhrenTask.Priority?
     @State private var age: TaskAge = .all
@@ -150,7 +153,34 @@ struct TaskListView: View {
                 .padding(.bottom, 6)
             }
             PhrenList(plain: true) {
-                if !visibleRows.isEmpty {
+                if !visibleRows.isEmpty, !isProjectScoped, selectedProject == nil {
+                    // Across projects the backlog reads per project: the busiest
+                    // first, each with its count, foldable to skim the rest.
+                    ForEach(projectGroups(visibleRows), id: \.project) { group in
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                if collapsedProjects.contains(group.project) { collapsedProjects.remove(group.project) }
+                                else { collapsedProjects.insert(group.project) }
+                            }
+                        } label: {
+                            HStack(spacing: 8) {
+                                Text(group.project).plainListSectionLabel()
+                                PhrenCountBadge(count: group.rows.count)
+                                Spacer(minLength: 0)
+                                Image(systemName: "chevron.down")
+                                    .font(.caption2.weight(.semibold)).foregroundStyle(PhrenTheme.textDim)
+                                    .rotationEffect(.degrees(collapsedProjects.contains(group.project) ? -90 : 0))
+                                    .padding(.trailing, 14)
+                            }
+                            .frame(minHeight: 32).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("\(group.project), \(group.rows.count) tasks")
+                        .accessibilityIdentifier("tasks-project:\(group.project)")
+                        .listRowInsets(EdgeInsets()).listRowSeparator(.hidden).listRowBackground(Color.clear)
+                        if !collapsedProjects.contains(group.project) { taskRows(group.rows) }
+                    }
+                } else if !visibleRows.isEmpty {
                     Text(section == .queue ? "Backlog" : section.rawValue)
                         .plainListSectionLabel()
                     taskRows(visibleRows)
@@ -366,6 +396,13 @@ struct TaskListView: View {
     }
 
     @ViewBuilder
+    /// Rows by project, the fullest project first; ties by name.
+    private func projectGroups(_ rows: [TaskListRow]) -> [(project: String, rows: [TaskListRow])] {
+        let grouped = Dictionary(grouping: rows, by: \.project)
+        return grouped.map { (project: $0.key, rows: $0.value) }
+            .sorted { $0.rows.count != $1.rows.count ? $0.rows.count > $1.rows.count : $0.project < $1.project }
+    }
+
     private func taskRows(_ items: [TaskListRow]) -> some View {
         ForEach(items) { row in
             let canWrite = !isMoving && model.canWrite(storeId: row.storeId, project: row.project)

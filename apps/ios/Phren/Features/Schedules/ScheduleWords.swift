@@ -17,7 +17,7 @@ enum ScheduleWords {
             } else if days == Set([.sat, .sun]) {
                 prefix = "Weekends"
             } else {
-                prefix = orderedDays.filter(days.contains).map(shortDay).joined(separator: ", ")
+                prefix = Schedule.Weekday.allCases.filter(days.contains).map(shortDay).joined(separator: ", ")
             }
             return "\(prefix) at \(time(hour: hour, minute: minute))"
         case .once(let date):
@@ -66,9 +66,9 @@ enum ScheduleWords {
     }
 
     static func relative(_ date: Date, now: Date) -> String {
-        guard date > now else { return "now" }
+        guard date > now else { return SessionRelativeTime.text(since: date, at: now) }
         let calendar = Calendar.current
-        if calendar.isDateInTomorrow(date) {
+        if let tomorrow = calendar.date(byAdding: .day, value: 1, to: now), calendar.isDate(date, inSameDayAs: tomorrow) {
             return "tomorrow \(clock(date, calendar: calendar))"
         }
         let seconds = date.timeIntervalSince(now)
@@ -84,9 +84,15 @@ enum ScheduleWords {
         return "in \(max(1, days))d"
     }
 
-    private static let orderedDays: [Schedule.Weekday] = [.mon, .tue, .wed, .thu, .fri, .sat, .sun]
+    static func harnessName(_ harness: Schedule.Harness) -> String {
+        switch harness {
+        case .claude: "Claude"
+        case .codex: "Codex"
+        case .opencode: "OpenCode"
+        }
+    }
 
-    private static func shortDay(_ day: Schedule.Weekday) -> String {
+    static func shortDay(_ day: Schedule.Weekday) -> String {
         switch day {
         case .mon: return "Mon"
         case .tue: return "Tue"

@@ -41,7 +41,7 @@ struct ProjectKnobsView: View {
                     ) { knobs.proactivityTask = $0 }
                     taskModeOptions
 
-                    Text("Saved to this project's phren.project.yaml; empty means the global setting.")
+                    Text("Changes save automatically. Inherit global uses your shared setting.")
                         .font(PhrenTheme.Font.caption)
                         .foregroundStyle(PhrenTheme.textMuted)
                 }
@@ -59,21 +59,7 @@ struct ProjectKnobsView: View {
     }
 
     private var header: some View {
-        ZStack {
-            Text("Knobs")
-                .font(PhrenTheme.Font.subheadline.weight(.semibold))
-                .foregroundStyle(PhrenTheme.text)
-            HStack {
-                Button("Cancel") { dismiss() }
-                    .frame(minWidth: 44, minHeight: 44, alignment: .leading)
-                Spacer()
-                Button("Done") { dismiss() }
-                    .frame(minWidth: 44, minHeight: 44, alignment: .trailing)
-            }
-            .foregroundStyle(PhrenTheme.accentSolid)
-        }
-        .padding(.horizontal, PhrenTheme.Space.large)
-        .frame(height: 56)
+        PhrenSheetHeader(title: "Knobs", cancel: { dismiss() }, save: { dismiss() })
     }
 
     private var findingSensitivityOptions: some View {

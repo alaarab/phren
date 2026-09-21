@@ -100,11 +100,29 @@ export async function readClaudeModels(now = Date.now()): Promise<AgentModel[]> 
     const settings = object(JSON.parse(await readFile(path.join(root, "settings.json"), "utf8")));
     if (typeof settings.model === "string" && settings.model) configured = settings.model.slice(0, 100);
   } catch { /* The default model is fine to leave unnamed. */ }
+  // Claude Code's own menu lists exact models (Fable 5.1, Opus 5, Sonnet 5,
+  // Haiku 4.5, the 1M context variant), the default first. An alias stands
+  // in only for a family this computer has no exact id for.
+  const family = (id: string) => id.replace(/^claude-/, "").split("-")[0];
   const ids = [...seen.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([id]) => id);
-  const full: AgentModel[] = ids.map(id => ({ id, name: claudeName(id), description: "Run on this computer recently." }));
-  const models = [...aliases, ...full];
-  if (configured && !models.some(model => model.id === configured)) models.push({ id: configured, name: claudeName(configured), description: "Set in Claude Code's settings." });
+  if (configured && !ids.includes(configured)) ids.push(configured);
+  const rank = ["fable", "opus", "sonnet", "haiku"];
+  const exact: AgentModel[] = ids
+    .sort((a, b) => (a === configured ? -1 : b === configured ? 1 : 0) || rank.indexOf(family(a)) - rank.indexOf(family(b)) || a.localeCompare(b))
+    .map(id => ({ id, name: claudeName(id), description: id === configured ? "Set in Claude Code's settings." : familyDescription(family(id)) }));
+  const known = new Set(ids.map(family));
+  const models = [...exact, ...aliases.filter(alias => !known.has(alias.id))];
   return models.map(model => model.id === configured ? { ...model, isDefault: true } : model);
+}
+
+function familyDescription(family: string): string {
+  switch (family) {
+    case "fable": return "Most intelligent.";
+    case "opus": return "Most capable for long work.";
+    case "sonnet": return "Fast and capable.";
+    case "haiku": return "Fastest and lightest.";
+    default: return "Run on this computer recently.";
+  }
 }
 
 /** `opencode models` prints one `provider/model` id per line. The Go plan's

@@ -47,6 +47,7 @@ final class ScheduleWordsTests: XCTestCase {
         calendar.locale = Locale(identifier: "en_US_POSIX")
         let now = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 9, day: 20, hour: 10)))
         XCTAssertEqual(ScheduleWords.relative(try XCTUnwrap(calendar.date(byAdding: .hour, value: 4, to: now)), now: now), "in 4h")
+        XCTAssertEqual(ScheduleWords.relative(now.addingTimeInterval(-7_200), now: now), "2h ago")
 
         let tomorrow = try XCTUnwrap(calendar.date(byAdding: .day, value: 1, to: now))
         let tomorrowMorning = try XCTUnwrap(calendar.date(bySettingHour: 7, minute: 30, second: 0, of: tomorrow))

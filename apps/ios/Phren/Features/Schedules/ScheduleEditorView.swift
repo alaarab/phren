@@ -25,6 +25,10 @@ struct ScheduleEditorView: View {
     @State private var days: Set<Schedule.Weekday>
     @State private var onceDate: Date
     @State private var cron: String
+    @State private var validTime = true
+    @State private var validDuration = true
+    @State private var validDate = true
+    @State private var modelsUnavailable = false
     @State private var enabled: Bool
     @State private var models: [AgentModelChoice] = []
     @State private var loadingModels = false
@@ -42,7 +46,7 @@ struct ScheduleEditorView: View {
     private struct ComputerChoice: Identifiable {
         let name: String
         let host: LiveHost?
-        var id: String { ScheduleEditorView.canonical(name) }
+        var id: String { SchedulesView.canonicalHost(name) }
     }
 
     init(storeId: String, project: String?, schedule: Schedule?) {
@@ -97,23 +101,24 @@ struct ScheduleEditorView: View {
     private var hosts: [LiveHost] { preferences?.hosts ?? [] }
     private var chosenHost: LiveHost? {
         hosts.first { host in
-            [host.name, host.address].contains { Self.canonical($0) == Self.canonical(computer) }
+            [host.name, host.address].contains { SchedulesView.canonicalHost($0) == SchedulesView.canonicalHost(computer) }
         }
     }
     private var computerChoices: [ComputerChoice] {
-        var choices = hosts.map { ComputerChoice(name: $0.name, host: $0) }
+        let online = Set(SessionOverviewMonitor.shared.screen.computers.filter(\.fresh).map(\.id))
+        var choices = hosts.sorted { online.contains($0.id) && !online.contains($1.id) }.map { ComputerChoice(name: $0.name, host: $0) }
         var seen = Set(choices.map(\.id))
-        for name in snapshot.machines.machines.keys.sorted() where seen.insert(Self.canonical(name)).inserted {
+        for name in snapshot.machines.machines.keys.sorted() where seen.insert(SchedulesView.canonicalHost(name)).inserted {
             choices.append(ComputerChoice(name: name, host: nil))
         }
-        if !computer.isEmpty, seen.insert(Self.canonical(computer)).inserted {
+        if !computer.isEmpty, seen.insert(SchedulesView.canonicalHost(computer)).inserted {
             choices.append(ComputerChoice(name: computer, host: nil))
         }
         return choices
     }
     private var selectedProjectName: String? { project ?? selectedProject }
     private var modelLoadID: String {
-        computer + "|" + (harness.map { ScheduleModelLoader.source(for: $0) } ?? "")
+        computer + "|" + (harness.map { $0.rawValue } ?? "")
     }
     private var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var trimmedPrompt: String { prompt.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -123,10 +128,10 @@ struct ScheduleEditorView: View {
     }
     private var whenIsValid: Bool {
         switch whenKind {
-        case .interval: intervalMinutes >= 5
-        case .daily: (0...23).contains(hour) && (0...59).contains(minute)
-        case .weekly: !days.isEmpty && (0...23).contains(hour) && (0...59).contains(minute)
-        case .once: true
+        case .interval: validDuration && intervalMinutes >= 5
+        case .daily: validTime && (0...23).contains(hour) && (0...59).contains(minute)
+        case .weekly: validTime && !days.isEmpty && (0...23).contains(hour) && (0...59).contains(minute)
+        case .once: validDate
         case .cron: CronPreview.next(cron, count: 3, from: .now, calendar: .current)?.count == 3
         }
     }
@@ -146,7 +151,7 @@ struct ScheduleEditorView: View {
                     if project == nil { projectGroup }
                     computerGroup
                     harnessGroup
-                    if harness != nil { modelGroup }
+                    if harness != nil, !computer.isEmpty { modelGroup }
                     whenGroup
                     enabledGroup
                     if schedule != nil { deleteGroup }
@@ -174,26 +179,9 @@ struct ScheduleEditorView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 0) {
-            Button("Cancel") { dismiss() }
-                .frame(width: 76, minHeight: 44, alignment: .leading)
-                .accessibilityIdentifier("schedule-cancel")
-            Spacer(minLength: 0)
-            Text(schedule == nil ? "New schedule" : "Edit schedule")
-                .font(PhrenTypography.subheadline.weight(.semibold))
-                .foregroundStyle(PhrenTheme.text)
-                .lineLimit(1)
-            Spacer(minLength: 0)
-            Button("Save") { Task { await save() } }
-                .foregroundStyle(canSave ? PhrenTheme.accentSolid : PhrenTheme.textDim)
-                .frame(width: 76, minHeight: 44, alignment: .trailing)
-                .disabled(!canSave)
-                .accessibilityIdentifier("schedule-save")
-        }
-        .padding(.horizontal, PhrenTheme.Space.large)
-        .frame(height: 56)
-        .background(PhrenTheme.bg)
-        .overlay(alignment: .bottom) { Rectangle().fill(PhrenTheme.border).frame(height: 0.5) }
+        PhrenSheetHeader(title: schedule == nil ? "New schedule" : "Edit schedule",
+                         trailingTitle: "Save", canSave: canSave, identifierPrefix: "schedule",
+                         cancel: { dismiss() }, save: { Task { await save() } })
     }
 
     private var nameGroup: some View {
@@ -239,33 +227,18 @@ struct ScheduleEditorView: View {
     private var computerGroup: some View {
         editorGroup("Computer") {
             ForEach(computerChoices) { choice in
-                ZStack(alignment: .leading) {
-                    ChatQuestionOptionRow(
-                        label: "     \(choice.name)",
-                        selected: Self.canonical(computer) == choice.id
-                    ) {
-                        computer = choice.name
-                        modelID = nil
-                        customModel = ""
-                    }
-                    .accessibilityIdentifier("schedule-computer:\(choice.name)")
-                    Circle()
-                        .fill(choice.host.map { PhrenTheme.hostColor($0.color ?? LiveHost.defaultColor(for: $0.id)) }
-                              ?? PhrenTheme.textDim)
-                        .frame(width: 8, height: 8)
-                        .padding(.leading, 45)
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
-                    if choice.host == nil {
-                        Text("offline")
-                            .font(PhrenTypography.caption)
-                            .foregroundStyle(PhrenTheme.textMuted)
-                            .frame(maxWidth: .infinity, alignment: .trailing)
-                            .padding(.trailing, PhrenTheme.Space.medium)
-                            .allowsHitTesting(false)
-                    }
+                ChatQuestionOptionRow(
+                    label: choice.name, selected: SchedulesView.canonicalHost(computer) == choice.id,
+                    radius: PhrenTheme.Radius.questionOption,
+                    colorDot: choice.host.map { PhrenTheme.hostColor($0.color ?? LiveHost.defaultColor(for: $0.id)) },
+                    trailingCaption: choice.host == nil ? "offline" : nil,
+                    muted: choice.host == nil
+                ) {
+                    computer = choice.name
+                    modelID = nil
+                    customModel = ""
                 }
-                .opacity(choice.host == nil ? 0.7 : 1)
+                .accessibilityIdentifier("schedule-computer:\(choice.name)")
             }
         }
     }
@@ -273,17 +246,14 @@ struct ScheduleEditorView: View {
     private var harnessGroup: some View {
         editorGroup("Harness") {
             ForEach(Self.harnesses, id: \.self) { option in
-                ZStack(alignment: .leading) {
-                    ChatQuestionOptionRow(label: "       \(Self.harnessName(option))", selected: harness == option) {
-                        harness = option
-                        modelID = nil
-                        customModel = ""
-                    }
-                    .accessibilityIdentifier("schedule-harness:\(ScheduleModelLoader.source(for: option))")
-                    AgentProviderGlyph(source: ScheduleModelLoader.source(for: option), size: 18)
-                        .padding(.leading, 43)
-                        .allowsHitTesting(false)
+                ChatQuestionOptionRow(label: ScheduleWords.harnessName(option), selected: harness == option,
+                                      radius: PhrenTheme.Radius.questionOption,
+                                      provider: option.rawValue) {
+                    harness = option
+                    modelID = nil
+                    customModel = ""
                 }
+                .accessibilityIdentifier("schedule-harness:\(option.rawValue)")
             }
         }
     }
@@ -297,7 +267,7 @@ struct ScheduleEditorView: View {
                         .frame(height: 44)
                         .accessibilityHidden(true)
                 }
-            } else if chosenHost == nil {
+            } else if chosenHost == nil || modelsUnavailable {
                 Text("Connect \(computer) to list models")
                     .font(PhrenTypography.subheadline)
                     .foregroundStyle(PhrenTheme.textMuted)
@@ -309,6 +279,7 @@ struct ScheduleEditorView: View {
                              isDefault: choice.isDefault)
                 }
             }
+            if chosenHost == nil || modelsUnavailable {
             TextField("Model id", text: $customModel)
                 .font(PhrenTypography.monoSubheadline)
                 .foregroundStyle(PhrenTheme.text)
@@ -323,22 +294,17 @@ struct ScheduleEditorView: View {
                     let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
                     modelID = trimmed.isEmpty ? nil : trimmed
                 }
+            }
         }
     }
 
     private func modelRow(label: String, detail: String?, id: String?, isDefault: Bool) -> some View {
-        ZStack(alignment: .trailing) {
-            ChatQuestionOptionRow(label: label, detail: detail, selected: modelID == id) {
-                modelID = id
-                customModel = id ?? ""
-            }
-            .accessibilityIdentifier("schedule-model:\(id ?? "default")")
-            if isDefault {
-                PhrenChip(text: "default")
-                    .padding(.trailing, PhrenTheme.Space.medium)
-                    .allowsHitTesting(false)
-            }
+        ChatQuestionOptionRow(label: label, detail: detail, selected: modelID == id,
+                              radius: PhrenTheme.Radius.questionOption, badge: isDefault ? "default" : nil) {
+            modelID = id
+            customModel = id ?? ""
         }
+        .accessibilityIdentifier("schedule-model:\(id ?? "default")")
     }
 
     private var whenGroup: some View {
@@ -349,28 +315,27 @@ struct ScheduleEditorView: View {
                 .init(value: .weekly, icon: "calendar", label: "Weekly"),
                 .init(value: .once, icon: "1.circle", label: "Once"),
                 .init(value: .cron, icon: "terminal", label: "Cron"),
-            ], selection: $whenKind)
-            .accessibilityIdentifier("schedule-every:\(whenKind.rawValue)")
+            ], selection: $whenKind, identifier: { "schedule-every:\($0.rawValue)" })
 
             switch whenKind {
             case .interval:
                 fieldRow("Interval") {
-                    PhrenDurationField(minutes: $intervalMinutes)
+                    PhrenDurationField(minutes: $intervalMinutes, isValid: $validDuration)
                 }
             case .daily:
                 fieldRow("At") {
-                    PhrenTimeField(hour: $hour, minute: $minute)
+                    PhrenTimeField(hour: $hour, minute: $minute, isValid: $validTime)
                 }
             case .weekly:
                 fieldRow("Days", alignment: .top) {
                     PhrenDayChips(days: $days)
                 }
                 fieldRow("At") {
-                    PhrenTimeField(hour: $hour, minute: $minute)
+                    PhrenTimeField(hour: $hour, minute: $minute, isValid: $validTime)
                 }
             case .once:
                 fieldRow("On") {
-                    PhrenDateField(date: $onceDate)
+                    PhrenDateField(date: $onceDate, isValid: $validDate)
                 }
             case .cron:
                 fieldRow("Cron") {
@@ -416,9 +381,9 @@ struct ScheduleEditorView: View {
                 Text("Enabled").font(PhrenTypography.body).foregroundStyle(PhrenTheme.text)
                 Spacer()
                 PhrenSwitch(isOn: $enabled)
+                    .accessibilityIdentifier("schedule-enabled")
             }
             .frame(minHeight: 44)
-            .accessibilityIdentifier("schedule-enabled")
         }
     }
 
@@ -430,16 +395,18 @@ struct ScheduleEditorView: View {
                         .font(PhrenTypography.subheadline)
                         .foregroundStyle(PhrenTheme.text)
                     Spacer(minLength: PhrenTheme.Space.small)
-                    Button("Keep") { confirmingDelete = false }
-                        .frame(minHeight: 44)
-                    Button("Delete", role: .destructive) { Task { await deleteSchedule() } }
-                        .foregroundStyle(PhrenTheme.danger)
-                        .frame(minHeight: 44)
+                    Button { confirmingDelete = false } label: {
+                        Text("Keep").frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                    }
+                    Button(role: .destructive) { Task { await deleteSchedule() } } label: {
+                        Text("Delete").foregroundStyle(PhrenTheme.danger)
+                            .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                    }
+                    .accessibilityIdentifier("schedule-delete-confirm:\(id)")
                 }
                 .padding(.horizontal, PhrenTheme.Space.medium)
                 .background(PhrenTheme.surfaceRaised,
                             in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.questionOption, style: .continuous))
-                .accessibilityIdentifier("schedule-delete-confirm:\(id)")
             } else if let id = schedule?.id {
                 Button("Delete schedule", role: .destructive) { beginDeleteConfirmation() }
                     .font(PhrenTypography.body)
@@ -461,13 +428,18 @@ struct ScheduleEditorView: View {
 
     private func fieldRow<Content: View>(_ label: String, alignment: VerticalAlignment = .center,
                                          @ViewBuilder content: () -> Content) -> some View {
-        HStack(alignment: alignment, spacing: PhrenTheme.Space.medium) {
-            Text(label)
-                .font(PhrenTypography.caption)
-                .foregroundStyle(PhrenTheme.textMuted)
-                .frame(width: 96, minHeight: 44, alignment: .leading)
-            content()
-                .frame(maxWidth: .infinity, alignment: .leading)
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: alignment, spacing: PhrenTheme.Space.medium) {
+                Text(label)
+                    .font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
+                    .frame(width: 96, alignment: .leading).frame(minHeight: 44, alignment: .leading)
+                content()
+                Spacer(minLength: 0)
+            }
+            VStack(alignment: .leading, spacing: PhrenTheme.Space.xs) {
+                Text(label).font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
+                content().frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
     }
 
@@ -489,13 +461,18 @@ struct ScheduleEditorView: View {
 
     private func loadModels() async {
         models = []
+        modelsUnavailable = false
+        let loadID = modelLoadID
         guard let harness, let host = chosenHost else { loadingModels = false; return }
         loadingModels = true
-        defer { loadingModels = false }
+        defer { if loadID == modelLoadID { loadingModels = false } }
         do {
-            models = try await ScheduleModelLoader.load(host: host, harness: harness)
+            let choices = try await ScheduleModelLoader.load(host: host, harness: harness)
+            guard !Task.isCancelled, loadID == modelLoadID else { return }
+            models = choices
         } catch {
-            models = AgentModelChoice.choices(source: ScheduleModelLoader.source(for: harness))
+            guard !Task.isCancelled, loadID == modelLoadID else { return }
+            modelsUnavailable = true
         }
     }
 
@@ -520,7 +497,7 @@ struct ScheduleEditorView: View {
         var schedules = current
         if let index = schedules.firstIndex(where: { $0.id == value.id }) { schedules[index] = value }
         else { schedules.append(value) }
-        await persist(schedules, project: selectedProjectName, dismissWhenDone: true)
+        await persist(schedules, project: selectedProjectName)
     }
 
     private func deleteSchedule() async {
@@ -528,17 +505,17 @@ struct ScheduleEditorView: View {
         saving = true
         defer { saving = false }
         let schedules = (snapshot.schedules[selectedProjectName] ?? []).filter { $0.id != schedule.id }
-        await persist(schedules, project: selectedProjectName, dismissWhenDone: true)
+        await persist(schedules, project: selectedProjectName)
     }
 
-    private func persist(_ schedules: [Schedule], project: String, dismissWhenDone: Bool) async {
+    private func persist(_ schedules: [Schedule], project: String) async {
         let expected = openedProjects.contains(project) ? openedContents[project] : snapshot.schedulesContent[project]
         let content = SchedulesFile.render(schedules, preserving: expected)
         do {
             try await model.enqueue(.saveSchedules(project: project, content: content, expectedContent: expected), in: storeId)
             model.lastActionError = nil
             await model.refresh()
-            if dismissWhenDone { dismiss() }
+            dismiss()
         } catch {
             let message = error.localizedDescription
             model.lastActionError = message.localizedCaseInsensitiveContains("conflict")
@@ -570,24 +547,10 @@ struct ScheduleEditorView: View {
     }
 
     private func newID(excluding existing: Set<String>) -> String {
-        for _ in 0..<8 {
-            let id = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(8)
-            if !existing.contains(String(id)) { return String(id) }
-        }
-        return String(UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(8))
+        var id = Schedule.generateID()
+        while existing.contains(id) { id = Schedule.generateID() }
+        return id
     }
 
     private static let harnesses: [Schedule.Harness] = [.claude, .codex, .opencode]
-    private static func harnessName(_ harness: Schedule.Harness) -> String {
-        switch harness {
-        case .claude: "Claude"
-        case .codex: "Codex"
-        case .opencode: "OpenCode"
-        }
-    }
-    private static func canonical(_ value: String) -> String {
-        var result = value.lowercased()
-        if result.hasSuffix(".local") { result.removeLast(".local".count) }
-        return result
-    }
 }

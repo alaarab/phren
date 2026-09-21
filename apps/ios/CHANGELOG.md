@@ -13,6 +13,8 @@ lock screen and Changes screen done properly.
 
 ### New
 
+- Schedules: scheduled prompts per project and computer with a chosen harness
+  and model, maintained from the phone.
 - Changes is a new screen laid out like a source-control sheet: the branch
   and counts up top, then Changes (List or Diff, with stage, unstage and
   revert, a line-number gutter, word-level highlights and folded unchanged
@@ -25,9 +27,30 @@ lock screen and Changes screen done properly.
 
 ### Changed
 
+- Denser chat and Changes screens: the header sits under the status bar, the
+  composer sits on the home indicator, tool cards are 44pt, and the Changes
+  tabs, rows and tree are slimmer.
+- Knobs are chosen with phren's own option rows instead of system pickers.
+- A Codex thread that stopped recording says so in the chat instead of going
+  stale.
+- Returning to agent chat after the app has been idle keeps the newest local
+  messages visible while the transcript resumes from the computer.
+- Claude usage labels the all-models and model-specific seven-day allowances
+  separately. The Live sessions ring now uses the primary window from the
+  newest computer report, matching the Account usage screen.
 - A prompt from the agent's terminal is asked as a card with Yes and No rows;
   the raw keys sit in a quiet strip beneath, and the orange waiting sentence
   is gone.
+- Choosing Full Access under /permissions on Codex also confirms Codex's
+  "Enable full access?" dialog, so the terminal no longer sits on it.
+- Tasks: across projects the backlog is grouped by project, fullest first,
+  with a count on each section; tap a project name to fold it.
+- Coming back to a chat from another app no longer shows the system bar
+  above the chat's own header.
+- Projects: project names take the theme's project colour, as on the Agents
+  list.
+- The Projects tab's dictate button is gone; Siri and the capture shortcut
+  are the way to speak a note or task.
 - The /model picker waits for the computer's list instead of flashing the
   built-in names first; those appear only when the computer cannot answer.
 - Sending is faster: the phone keeps one SSH connection per computer and

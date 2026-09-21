@@ -9,6 +9,7 @@ import { hookPeers, peerRequest } from "./peers.js";
 vi.mock("./peers.js", () => ({ hookPeers: vi.fn(), peerRequest: vi.fn() }));
 const target = { server: "default", workspace: "w1", tab: "t1", pane: "p1", source: "codex", starting: true, startingToken: "a".repeat(64) };
 const brief = { computer: "anywhere", project: "phren", harness: "codex", prompt: "A private worker brief", label: "Tests" };
+const remoteID = "30000000-0000-4000-8000-000000000001";
 
 describe("dispatch receipts and selection", () => {
   let root: string;
@@ -16,7 +17,7 @@ describe("dispatch receipts and selection", () => {
     root = await mkdtemp(path.join(tmpdir(), "phren-dispatch-")); vi.stubEnv("PHREN_BRIDGE_HOME", root);
     vi.mocked(hookPeers).mockResolvedValue(["Desk", "Linuxbox"].map(name => ({ name, address: "desk.example", username: "sam", port: 22, hostKey: "unused", server: "default" })));
     vi.mocked(peerRequest).mockImplementation(async (peer, route) => route === "/v1/dispatch/capacity"
-      ? { product: "phren-hook", protocol: 1, servers: ["default"], working: peer.name === "Desk" ? 3 : 1 }
+      ? { product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working: peer.name === "Desk" ? 3 : 1 }
       : route.startsWith("/v1/workspaces/launch") ? { ok: true, target } : { ok: true });
   });
   afterEach(async () => { vi.unstubAllEnvs(); vi.resetAllMocks(); await rm(root, { recursive: true, force: true }); });
@@ -34,7 +35,7 @@ describe("dispatch receipts and selection", () => {
 
   it("keeps an uncertain target after lost prompt acknowledgement and never retries", async () => {
     vi.mocked(peerRequest).mockImplementation(async (_peer, route) => {
-      if (route === "/v1/dispatch/capacity") return { product: "phren-hook", protocol: 1, servers: ["default"], working: 0 };
+      if (route === "/v1/dispatch/capacity") return { product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working: 0 };
       if (route.startsWith("/v1/workspaces/launch")) return { ok: true, target };
       throw new BridgeError(504, "Reply lost");
     });
@@ -49,7 +50,7 @@ describe("dispatch receipts and selection", () => {
     await expect(new DispatchService().dispatch({ ...brief, computer: "Desk" })).rejects.toThrow("Key not enrolled");
     await expect(new DispatchService().dispatch(brief)).rejects.toThrow("No enrolled computer");
     vi.mocked(peerRequest).mockImplementation(async (_peer, route) => route === "/v1/dispatch/capacity"
-      ? { product: "phren-hook", protocol: 1, servers: ["default"], working: 0 }
+      ? { product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working: 0 }
       : route.startsWith("/v1/workspaces/launch") ? { target } : { ok: true, deliveryUncertain: true });
     expect(await new DispatchService().dispatch(brief)).toMatchObject({ computer: "Desk", state: "uncertain" });
   });
@@ -57,17 +58,17 @@ describe("dispatch receipts and selection", () => {
   it("excludes offline peers and refuses a peer without Herdr before launching", async () => {
     vi.mocked(peerRequest).mockImplementation(async (peer, route) => {
       if (peer.name === "Desk") throw new BridgeError(503, "Offline");
-      return route === "/v1/dispatch/capacity" ? { product: "phren-hook", protocol: 1, servers: ["default"], working: 2 }
+      return route === "/v1/dispatch/capacity" ? { product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working: 2 }
         : route.startsWith("/v1/workspaces/launch") ? { target } : { ok: true };
     });
     expect(await new DispatchService().dispatch(brief)).toMatchObject({ computer: "Linuxbox", state: "accepted" });
-    vi.mocked(peerRequest).mockResolvedValue({ product: "phren-hook", protocol: 1, servers: [], working: 0 });
+    vi.mocked(peerRequest).mockResolvedValue({ product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: [], working: 0 });
     await expect(new DispatchService().dispatch({ ...brief, computer: "Desk" })).rejects.toThrow("Herdr is not running");
   });
 
   it("retains ambiguous launches and refuses to prompt a mismatched target", async () => {
     vi.mocked(peerRequest).mockImplementation(async (_peer, route) => route === "/v1/dispatch/capacity"
-      ? { product: "phren-hook", protocol: 1, servers: ["default"], working: 0 }
+      ? { product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working: 0 }
       : { target: { ...target, source: "claude" } });
     const result = await new DispatchService().dispatch({ ...brief, computer: "Desk" });
     expect(result).toMatchObject({ ok: false, state: "uncertain" });
@@ -85,7 +86,7 @@ describe("dispatch receipts and selection", () => {
     const first = service.dispatch({ ...brief, computer: "Desk" });
     await expect(service.dispatch({ ...brief, computer: "Desk" })).rejects.toMatchObject({ status: 429 });
     await vi.waitFor(() => expect(release).toBeTypeOf("function"));
-    release({ product: "phren-hook", protocol: 1, servers: ["default"], working: 0 });
+    release({ product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working: 0 });
     expect(await first).toMatchObject({ ok: true });
   });
 
@@ -94,5 +95,20 @@ describe("dispatch receipts and selection", () => {
     await expect(new DispatchService().dispatch({ ...brief, prompt: "x".repeat(32769) })).rejects.toThrow();
     await expect(new DispatchService().dispatch({ ...brief, computer: "Missing" })).rejects.toThrow("Unknown computer");
     expect(peerRequest).not.toHaveBeenCalled();
+  });
+
+  it("validates and persists an explicit parent with the remote computer identity", async () => {
+    const computerID = "10000000-0000-4000-8000-000000000001";
+    const parentTarget = { server: "default", workspace: "parent-w", tab: "parent-t", pane: "parent-p", source: "codex" as const,
+      session: "aaaaaaaa-1111-4111-8111-111111111111" };
+    const parent = { provider: "codex" as const, session: parentTarget.session, computer: computerID };
+    const validateParentTarget = vi.fn(async () => ({}));
+    const result = await new DispatchService({ computerID, validateParentTarget }).dispatch({
+      ...brief, computer: "Desk", parent, parentTarget,
+    });
+    expect(validateParentTarget).toHaveBeenCalledWith(parentTarget);
+    expect(result).toMatchObject({ parent, parentTarget, computerId: remoteID });
+    const stored = JSON.parse(await readFile(path.join(root, `dispatches/${result.id}.json`), "utf8"));
+    expect(stored).toMatchObject({ parent, parentTarget, computerId: remoteID });
   });
 });

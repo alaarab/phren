@@ -80,7 +80,12 @@ struct ChatQuestionOptionRow: View {
     var inline = true
     var busy = false
     var radius = PhrenTheme.Radius.small
-    var minimumHeight: CGFloat? = nil
+    var minimumHeight: CGFloat? = 44
+    var colorDot: Color? = nil
+    var provider: String? = nil
+    var trailingCaption: String? = nil
+    var badge: String? = nil
+    var muted = false
     let action: () -> Void
 
     var body: some View {
@@ -89,8 +94,13 @@ struct ChatQuestionOptionRow: View {
                 Image(systemName: selected ? (multi ? "checkmark.square.fill" : "checkmark.circle.fill") : (multi ? "square" : "circle"))
                     .foregroundStyle(selected ? PhrenTheme.cyan : PhrenTheme.textDim)
                     .padding(.top, 1)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(label).foregroundStyle(PhrenTheme.text).fixedSize(horizontal: false, vertical: true)
+                if let colorDot {
+                    Circle().fill(colorDot).frame(width: 8, height: 8)
+                        .padding(.top, PhrenTheme.Space.xs).accessibilityHidden(true)
+                }
+                if let provider { AgentProviderGlyph(source: provider, size: 18).accessibilityHidden(true) }
+                VStack(alignment: .leading, spacing: PhrenTheme.Space.xs) {
+                    Text(label).foregroundStyle(muted ? PhrenTheme.textMuted : PhrenTheme.text).fixedSize(horizontal: false, vertical: true)
                     if let detail, !detail.isEmpty {
                         Text(detail).font(PhrenTheme.Font.caption).foregroundStyle(PhrenTheme.textMuted)
                             .fixedSize(horizontal: false, vertical: true)
@@ -108,6 +118,10 @@ struct ChatQuestionOptionRow: View {
                     }
                 }
                 Spacer(minLength: 0)
+                if let trailingCaption {
+                    Text(trailingCaption).font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
+                }
+                if let badge { PhrenChip(text: badge) }
             }
             .padding(12)
             .frame(maxWidth: .infinity, minHeight: minimumHeight, alignment: .leading)

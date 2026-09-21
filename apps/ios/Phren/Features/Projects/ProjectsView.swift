@@ -56,7 +56,8 @@ struct ProjectsView: View {
                             NavigationLink(value: item) {
                                 VStack(alignment: .leading, spacing: 3) {
                                     HStack(spacing: 6) {
-                                        Text(item.project.name).font(.headline)
+                                        // The same themeable colour the Agents list gives a project.
+                                        Text(item.project.name).font(.headline).foregroundStyle(PhrenTheme.sessionProject)
                                         if model.hasMultipleStores {
                                             TagChip(text: item.storeName, role: .store)
                                         }
@@ -179,23 +180,8 @@ struct ProjectsView: View {
                         }
                     }
                 }
-                // Global quick capture: dictate a note or a task without
-                // opening a project first. Hidden (not just disabled) when no
-                // store is writable — mirrors TasksView's addTargets-gated
-                // + button.
-                if !voiceCaptureTargets.isEmpty {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            showVoiceCapture = true
-                        } label: {
-                            Image(systemName: "mic.fill")
-                        }
-                        // The sheet captures either kind, and asks where it
-                        // goes — the label has to say so, since VoiceOver
-                        // users get no other preview of what the button does.
-                        .accessibilityLabel("Dictate a note or task")
-                    }
-                }
+                // Quick capture by voice comes through Siri and the capture
+                // intent, not a toolbar mic; the sheet stays for that route.
             }
             .navigationDestination(for: StoreProject.self) { item in
                 ProjectDetailView(storeId: item.storeId, project: item.project.name)
@@ -763,16 +749,6 @@ struct NotesTab: View {
         .refreshable { await model.pullToRefresh() }
         .phrenScreen()
         .toolbar {
-            if voiceCaptureTarget != nil {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        showVoiceCapture = true
-                    } label: {
-                        Image(systemName: "mic.fill")
-                    }
-                    .accessibilityLabel("Dictate a note or task")
-                }
-            }
             if !isReadOnly {
                 ToolbarItem(placement: .primaryAction) {
                     Button { showAdd = true } label: { Image(systemName: "plus") }

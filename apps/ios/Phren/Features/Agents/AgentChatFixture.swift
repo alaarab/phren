@@ -741,13 +741,17 @@ import UIKit
     }
 
     private static func scheduleStatus(project: String, id: String, next: Date?, last: [String: Any]) -> [String: Any] {
-        var value: [String: Any] = [
+        let content = project == "demo" ? UITestFixtures.demoSchedules : UITestFixtures.otherSchedules
+        let schedule = SchedulesFile.parse(content).first { $0.id == id }!
+        let encoded = try! JSONEncoder().encode(schedule)
+        var value = try! JSONSerialization.jsonObject(with: encoded) as! [String: Any]
+        value.merge([
             "project": project,
             "id": id,
             "lastRun": last,
             "running": scheduleStarts[SchedulesView.key(project: project, id: id)]
                 .map { Date.now.timeIntervalSince($0) < 2 } ?? false,
-        ]
+        ], uniquingKeysWith: { _, new in new })
         if let next { value["nextRun"] = scheduleDate(next) }
         if let started = scheduleStarts[SchedulesView.key(project: project, id: id)] {
             let running = Date.now.timeIntervalSince(started) < 2

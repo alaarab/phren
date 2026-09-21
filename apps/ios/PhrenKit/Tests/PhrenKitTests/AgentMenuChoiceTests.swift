@@ -10,5 +10,9 @@ final class AgentMenuChoiceTests: XCTestCase {
         XCTAssertNil(AgentMenuChoice.menu(command: "/model", source: "codex"))
         XCTAssertEqual(AgentMenuChoice.keys(selecting: 0), [.enter])
         XCTAssertEqual(AgentMenuChoice.keys(selecting: 2), [.down, .down, .enter])
+        // Full Access opens Codex's "Enable full access?" dialog; one Enter confirms it.
+        XCTAssertEqual(AgentMenuChoice.confirmationKeys(command: "/permissions", source: "codex", index: 2), [.enter])
+        XCTAssertEqual(AgentMenuChoice.confirmationKeys(command: "/permissions", source: "codex", index: 1), [])
+        XCTAssertEqual(AgentMenuChoice.confirmationKeys(command: "/permissions", source: "claude", index: 2), [])
     }
 }

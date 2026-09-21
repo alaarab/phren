@@ -625,6 +625,11 @@ final class AgentChatModel {
         guard deliveryError == nil else { return }
         try? await Task.sleep(for: .milliseconds(700))
         await answer(session, keys: AgentMenuChoice.keys(selecting: index))
+        let confirmation = AgentMenuChoice.confirmationKeys(command: command, source: target?.source ?? "", index: index)
+        guard !confirmation.isEmpty, deliveryError == nil else { return }
+        // The agent draws its confirmation after the choice lands.
+        try? await Task.sleep(for: .milliseconds(900))
+        await answer(session, keys: confirmation)
     }
 
     func showLatest() {

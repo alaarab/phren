@@ -48,7 +48,7 @@ final class ScheduleRoutesTests: XCTestCase {
         """#.utf8)
         let status = try JSONDecoder().decode(ScheduleStatus.self, from: data)
         XCTAssertEqual(status.id, "7f3a2c1d")
-        XCTAssertEqual(status.every, .daily(at: "07:30"))
+        XCTAssertEqual(status.every, .daily(hour: 7, minute: 30))
         XCTAssertEqual(status.lastRun?.scheduleID, "7f3a2c1d")
         XCTAssertEqual(status.lastRun?.launch.paneID, "w1:p1")
         XCTAssertTrue(status.running)

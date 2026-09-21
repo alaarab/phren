@@ -3,6 +3,7 @@ import PhrenKit
 import SwiftUI
 
 struct PhrenTimeField: View {
+    @Binding private var isValid: Bool
     @Binding private var hour: Int
     @Binding private var minute: Int
     @State private var hourText: String
@@ -11,11 +12,12 @@ struct PhrenTimeField: View {
 
     private enum Field: Hashable { case hour, minute }
 
-    init(hour: Binding<Int>, minute: Binding<Int>) {
+    init(hour: Binding<Int>, minute: Binding<Int>, isValid: Binding<Bool> = .constant(true)) {
+        _isValid = isValid
         _hour = hour
         _minute = minute
-        _hourText = State(initialValue: Self.twoDigits(hour.wrappedValue))
-        _minuteText = State(initialValue: Self.twoDigits(minute.wrappedValue))
+        _hourText = State(initialValue: ScheduleFieldText.twoDigits(hour.wrappedValue))
+        _minuteText = State(initialValue: ScheduleFieldText.twoDigits(minute.wrappedValue))
     }
 
     var body: some View {
@@ -41,28 +43,28 @@ struct PhrenTimeField: View {
             if previous != nil, previous != current { commit() }
         }
         .onChange(of: hour) { _, value in
-            if focusedField != .hour { hourText = Self.twoDigits(value) }
+            if focusedField != .hour { hourText = ScheduleFieldText.twoDigits(value) }
         }
         .onChange(of: minute) { _, value in
-            if focusedField != .minute { minuteText = Self.twoDigits(value) }
+            if focusedField != .minute { minuteText = ScheduleFieldText.twoDigits(value) }
         }
-        .onDisappear { commit() }
+        .onChange(of: hourText + ":" + minuteText, initial: true) { _, _ in
+            isValid = validationMessage == nil
+            if isValid {
+                hour = Int(hourText) ?? hour
+                minute = Int(minuteText) ?? minute
+            }
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Time")
     }
 
     private func numberField(_ label: String, text: Binding<String>, field: Field) -> some View {
         TextField("00", text: text)
-            .font(PhrenTypography.monoSubheadline.monospacedDigit())
-            .foregroundStyle(PhrenTheme.text)
-            .keyboardType(.numberPad)
-            .multilineTextAlignment(.center)
-            .textFieldStyle(.plain)
-            .frame(width: 30, height: 44)
+            .scheduleNumberField(label: label)
             .focused($focusedField, equals: field)
-            .accessibilityLabel(label)
             .onChange(of: text.wrappedValue) { _, value in
-                let filtered = Self.digits(value, limit: 2)
+                let filtered = ScheduleFieldText.digits(value, limit: 2)
                 if filtered != value { text.wrappedValue = filtered }
             }
     }
@@ -78,20 +80,14 @@ struct PhrenTimeField: View {
         let nextMinute = min(59, max(0, Int(minuteText) ?? minute))
         hour = nextHour
         minute = nextMinute
-        hourText = Self.twoDigits(nextHour)
-        minuteText = Self.twoDigits(nextMinute)
+        hourText = ScheduleFieldText.twoDigits(nextHour)
+        minuteText = ScheduleFieldText.twoDigits(nextMinute)
     }
 
-    private static func twoDigits(_ value: Int) -> String {
-        String(format: "%02d", value)
-    }
-
-    private static func digits(_ value: String, limit: Int) -> String {
-        String(value.filter(\.isNumber).prefix(limit))
-    }
 }
 
 struct PhrenDurationField: View {
+    @Binding private var isValid: Bool
     @Binding private var minutes: Int
     @State private var amountText: String
     @State private var unit: Unit
@@ -126,7 +122,8 @@ struct PhrenDurationField: View {
         }
     }
 
-    init(minutes: Binding<Int>) {
+    init(minutes: Binding<Int>, isValid: Binding<Bool> = .constant(true)) {
+        _isValid = isValid
         _minutes = minutes
         let value = Self.parts(for: minutes.wrappedValue)
         _amountText = State(initialValue: String(value.amount))
@@ -157,9 +154,10 @@ struct PhrenDurationField: View {
                         } label: {
                             Text(candidate.label)
                                 .font(PhrenTypography.caption.weight(.semibold))
-                                .foregroundStyle(unit == candidate ? .white : PhrenTheme.textSecondary)
+                                .foregroundStyle(unit == candidate ? PhrenTheme.onAccent : PhrenTheme.textSecondary)
                                 .frame(minWidth: 40, minHeight: 40)
                                 .background(unit == candidate ? PhrenTheme.accentSolid : .clear, in: Capsule())
+                                .frame(minWidth: 44, minHeight: 44)
                                 .contentShape(Rectangle())
                         }
                         .frame(minWidth: 44, minHeight: 44)
@@ -188,7 +186,10 @@ struct PhrenDurationField: View {
             unit = parts.unit
             amountText = String(parts.amount)
         }
-        .onDisappear { commit() }
+        .onChange(of: amountText + unit.label, initial: true) { _, _ in
+            isValid = validationMessage == nil
+            if isValid, let value = enteredMinutes { minutes = value }
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Interval")
     }
@@ -229,6 +230,7 @@ struct PhrenDurationField: View {
 }
 
 struct PhrenDateField: View {
+    @Binding private var isValid: Bool
     @Binding private var date: Date
     @State private var dateText: String
     @State private var hourText: String
@@ -238,7 +240,8 @@ struct PhrenDateField: View {
 
     private enum Field: Hashable { case date, hour, minute }
 
-    init(date: Binding<Date>) {
+    init(date: Binding<Date>, isValid: Binding<Bool> = .constant(true)) {
+        _isValid = isValid
         _date = date
         var calendar = Calendar(identifier: .gregorian)
         calendar.locale = Locale(identifier: "en_US_POSIX")
@@ -246,8 +249,8 @@ struct PhrenDateField: View {
         self.calendar = calendar
         let components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: date.wrappedValue)
         _dateText = State(initialValue: Self.dateString(components))
-        _hourText = State(initialValue: Self.twoDigits(components.hour ?? 0))
-        _minuteText = State(initialValue: Self.twoDigits(components.minute ?? 0))
+        _hourText = State(initialValue: ScheduleFieldText.twoDigits(components.hour ?? 0))
+        _minuteText = State(initialValue: ScheduleFieldText.twoDigits(components.minute ?? 0))
     }
 
     var body: some View {
@@ -271,7 +274,7 @@ struct PhrenDateField: View {
                     .scheduleNumberField(label: "Hour")
                     .focused($focusedField, equals: .hour)
                     .onChange(of: hourText) { _, value in
-                        let filtered = Self.digits(value, limit: 2)
+                        let filtered = ScheduleFieldText.digits(value, limit: 2)
                         if filtered != value { hourText = filtered }
                     }
                 Text(":")
@@ -282,7 +285,7 @@ struct PhrenDateField: View {
                     .scheduleNumberField(label: "Minute")
                     .focused($focusedField, equals: .minute)
                     .onChange(of: minuteText) { _, value in
-                        let filtered = Self.digits(value, limit: 2)
+                        let filtered = ScheduleFieldText.digits(value, limit: 2)
                         if filtered != value { minuteText = filtered }
                     }
             }
@@ -302,7 +305,11 @@ struct PhrenDateField: View {
             guard focusedField == nil else { return }
             synchronize(with: value)
         }
-        .onDisappear { commit() }
+        .onChange(of: dateText + hourText + minuteText, initial: true) { _, _ in
+            let parsed = resolvedDate(clamping: false)
+            isValid = parsed != nil
+            if let parsed { date = parsed }
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Date and time")
     }
@@ -323,8 +330,8 @@ struct PhrenDateField: View {
     private func synchronize(with value: Date) {
         let components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: value)
         dateText = Self.dateString(components)
-        hourText = Self.twoDigits(components.hour ?? 0)
-        minuteText = Self.twoDigits(components.minute ?? 0)
+        hourText = ScheduleFieldText.twoDigits(components.hour ?? 0)
+        minuteText = ScheduleFieldText.twoDigits(components.minute ?? 0)
     }
 
     private func resolvedDate(clamping: Bool) -> Date? {
@@ -384,13 +391,6 @@ struct PhrenDateField: View {
         String(format: "%04d-%02d-%02d", components.year ?? 0, components.month ?? 0, components.day ?? 0)
     }
 
-    private static func twoDigits(_ value: Int) -> String {
-        String(format: "%02d", value)
-    }
-
-    private static func digits(_ value: String, limit: Int) -> String {
-        String(value.filter(\.isNumber).prefix(limit))
-    }
 }
 
 struct PhrenCodeField: View {
@@ -424,31 +424,20 @@ struct PhrenDayChips: View {
                         if selected { days.remove(day) } else { days.insert(day) }
                     }
                 } label: {
-                    Text(Self.label(for: day))
+                    Text(ScheduleWords.shortDay(day))
                         .font(PhrenTypography.caption.weight(.semibold))
-                        .foregroundStyle(selected ? .white : PhrenTheme.textSecondary)
+                        .foregroundStyle(selected ? PhrenTheme.onAccent : PhrenTheme.textSecondary)
                         .frame(minWidth: 40, minHeight: 40)
                         .background(selected ? PhrenTheme.accentSolid : PhrenTheme.surfaceRaised, in: Capsule())
+                        .frame(minWidth: 44, minHeight: 44)
                         .contentShape(Rectangle())
                 }
                 .frame(minWidth: 44, minHeight: 44)
                 .buttonStyle(.plain)
                 .accessibilityLabel(Self.accessibilityLabel(for: day))
-                .accessibilityIdentifier("schedule-day:\(Self.identifier(for: day))")
+                .accessibilityIdentifier("schedule-day:\(day.rawValue)")
                 .accessibilityAddTraits(selected ? .isSelected : [])
             }
-        }
-    }
-
-    private static func label(for day: Schedule.Weekday) -> String {
-        switch day {
-        case .mon: return "Mon"
-        case .tue: return "Tue"
-        case .wed: return "Wed"
-        case .thu: return "Thu"
-        case .fri: return "Fri"
-        case .sat: return "Sat"
-        case .sun: return "Sun"
         }
     }
 
@@ -464,20 +453,10 @@ struct PhrenDayChips: View {
         }
     }
 
-    private static func identifier(for day: Schedule.Weekday) -> String {
-        switch day {
-        case .mon: return "mon"
-        case .tue: return "tue"
-        case .wed: return "wed"
-        case .thu: return "thu"
-        case .fri: return "fri"
-        case .sat: return "sat"
-        case .sun: return "sun"
-        }
-    }
+
 }
 
-private struct ScheduleChipFlow: Layout {
+struct ScheduleChipFlow: Layout {
     let spacing: CGFloat
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
@@ -486,7 +465,7 @@ private struct ScheduleChipFlow: Layout {
         var y: CGFloat = 0
         var rowHeight: CGFloat = 0
         for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
+            let size = subview.sizeThatFits(ProposedViewSize(width: maximumWidth.isFinite ? maximumWidth : nil, height: nil))
             if x > 0, x + size.width > maximumWidth {
                 x = 0
                 y += rowHeight + spacing
@@ -504,7 +483,7 @@ private struct ScheduleChipFlow: Layout {
         var y = bounds.minY
         var rowHeight: CGFloat = 0
         for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
+            let size = subview.sizeThatFits(ProposedViewSize(width: bounds.width, height: nil))
             if x > bounds.minX, x + size.width > bounds.maxX {
                 x = bounds.minX
                 y += rowHeight + spacing
@@ -524,7 +503,7 @@ private extension View {
             .keyboardType(.numberPad)
             .multilineTextAlignment(.center)
             .textFieldStyle(.plain)
-            .frame(width: 30, height: 44)
+            .frame(width: 44, height: 44)
             .accessibilityLabel(label)
     }
 }
@@ -535,4 +514,9 @@ private func validationError(_ message: String) -> some View {
         .font(PhrenTypography.caption)
         .foregroundStyle(PhrenTheme.danger)
         .fixedSize(horizontal: false, vertical: true)
+}
+
+private enum ScheduleFieldText {
+    static func twoDigits(_ value: Int) -> String { String(format: "%02d", value) }
+    static func digits(_ value: String, limit: Int) -> String { String(value.filter(\.isNumber).prefix(limit)) }
 }

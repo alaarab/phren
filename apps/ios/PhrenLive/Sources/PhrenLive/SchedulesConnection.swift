@@ -39,14 +39,14 @@ public struct ScheduleRun: Decodable, Equatable, Identifiable, Sendable {
     public let id: String
     public let scheduleID: String
     public let project: String
-    public let startedAt: String
-    public let finishedAt: String?
+    public let startedAt: Date
+    public let finishedAt: Date?
     public let status: Status
     public let reason: String?
     public let launch: Launch
 
-    public init(id: String, scheduleID: String, project: String, startedAt: String,
-                finishedAt: String? = nil, status: Status, reason: String? = nil, launch: Launch) {
+    public init(id: String, scheduleID: String, project: String, startedAt: Date,
+                finishedAt: Date? = nil, status: Status, reason: String? = nil, launch: Launch) {
         self.id = id
         self.scheduleID = scheduleID
         self.project = project
@@ -55,6 +55,18 @@ public struct ScheduleRun: Decodable, Equatable, Identifiable, Sendable {
         self.status = status
         self.reason = reason
         self.launch = launch
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        scheduleID = try values.decode(String.self, forKey: .scheduleID)
+        project = try values.decode(String.self, forKey: .project)
+        startedAt = try scheduleTimestamp(values.decode(String.self, forKey: .startedAt))
+        finishedAt = try values.decodeIfPresent(String.self, forKey: .finishedAt).map(scheduleTimestamp)
+        status = try values.decode(Status.self, forKey: .status)
+        reason = try values.decodeIfPresent(String.self, forKey: .reason)
+        launch = try values.decode(Launch.self, forKey: .launch)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -67,7 +79,7 @@ public struct ScheduleRun: Decodable, Equatable, Identifiable, Sendable {
 public struct ScheduleStatus: Decodable, Equatable, Identifiable, Sendable {
     public let schedule: Schedule
     public let project: String
-    public let nextRun: String?
+    public let nextRun: Date?
     public let lastRun: ScheduleRun?
     public let running: Bool
 
@@ -79,10 +91,10 @@ public struct ScheduleStatus: Decodable, Equatable, Identifiable, Sendable {
     public var model: String? { schedule.model }
     public var every: Schedule.Every { schedule.every }
     public var prompt: String { schedule.prompt }
-    public var createdAt: String { schedule.createdAt }
-    public var updatedAt: String { schedule.updatedAt }
+    public var createdAt: Date { schedule.createdAt }
+    public var updatedAt: Date { schedule.updatedAt }
 
-    public init(schedule: Schedule, project: String, nextRun: String?,
+    public init(schedule: Schedule, project: String, nextRun: Date?,
                 lastRun: ScheduleRun?, running: Bool) {
         self.schedule = schedule
         self.project = project
@@ -97,7 +109,7 @@ public struct ScheduleStatus: Decodable, Equatable, Identifiable, Sendable {
         schedule = try Schedule(from: decoder)
         let values = try decoder.container(keyedBy: CodingKeys.self)
         project = try values.decode(String.self, forKey: .project)
-        nextRun = try values.decodeIfPresent(String.self, forKey: .nextRun)
+        nextRun = try values.decodeIfPresent(String.self, forKey: .nextRun).map(scheduleTimestamp)
         lastRun = try values.decodeIfPresent(ScheduleRun.self, forKey: .lastRun)
         running = try values.decode(Bool.self, forKey: .running)
     }
@@ -170,4 +182,11 @@ extension PhrenConnection {
             throw PhrenKitError.validation("Invalid schedule id.")
         }
     }
+}
+
+private func scheduleTimestamp(_ value: String) throws -> Date {
+    guard let date = ISO8601Dates.parse(value) else {
+        throw PhrenKitError.validation("Invalid schedule timestamp.")
+    }
+    return date
 }

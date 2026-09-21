@@ -18,9 +18,9 @@ final class SchedulesFileTests: XCTestCase {
     private func schedule(id: String = "7f3a2c1d", prompt: String = "Run the tests.\n") -> Schedule {
         Schedule(id: id, name: "Nightly test sweep", enabled: true, computer: "Desk",
                  harness: .codex, model: "gpt-5.6-sol",
-                 every: .weekly(at: "07:30", days: [.mon, .tue, .wed, .thu, .fri]),
-                 prompt: prompt, createdAt: "2026-09-20T21:00:00Z",
-                 updatedAt: "2026-09-20T21:00:00Z")
+                 every: .weekly(days: [.mon, .tue, .wed, .thu, .fri], hour: 7, minute: 30),
+                 prompt: prompt, createdAt: ISO8601Dates.parse("2026-09-20T21:00:00.123Z")!,
+                 updatedAt: ISO8601Dates.parse("2026-09-20T21:00:00.456Z")!)
     }
 
     func testParsesContractExample() throws {
@@ -47,7 +47,7 @@ final class SchedulesFileTests: XCTestCase {
         XCTAssertEqual(value.harness, .codex)
         XCTAssertEqual(value.model, "gpt-5.6-sol")
         XCTAssertEqual(value.prompt, "Run the full test suite, fix what is red, and leave a summary in tasks.\n")
-        XCTAssertEqual(value.every, .weekly(at: "07:30", days: [.mon, .tue, .wed, .thu, .fri]))
+        XCTAssertEqual(value.every, .weekly(days: [.mon, .tue, .wed, .thu, .fri], hour: 7, minute: 30))
     }
 
     func testCodableUsesTheFlatHookShape() throws {
@@ -55,9 +55,48 @@ final class SchedulesFileTests: XCTestCase {
         let data = try JSONEncoder().encode(expected)
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
         XCTAssertEqual(object["every"] as? String, "weekly")
+        XCTAssertEqual(object["createdAt"] as? String, "2026-09-20T21:00:00.123Z")
+        XCTAssertEqual(object["updatedAt"] as? String, "2026-09-20T21:00:00.456Z")
         XCTAssertEqual(object["at"] as? String, "07:30")
         XCTAssertEqual(object["days"] as? [String], ["mon", "tue", "wed", "thu", "fri"])
         XCTAssertEqual(try JSONDecoder().decode(Schedule.self, from: data), expected)
+    }
+
+    func testTypedFrequenciesRoundTripThroughYAMLAndHookJSON() throws {
+        let once = try XCTUnwrap(Calendar.current.date(from: DateComponents(
+            year: 2026, month: 9, day: 21, hour: 9, minute: 30)))
+        let frequencies: [Schedule.Every] = [
+            .interval(minutes: 5), .interval(minutes: 360), .interval(minutes: 2_880),
+            .daily(hour: 7, minute: 30), .weekly(days: [.fri, .mon], hour: 18, minute: 5),
+            .once(once), .cron("0 7 * * 1-5"),
+        ]
+        for frequency in frequencies {
+            var value = schedule()
+            value.every = frequency
+            XCTAssertEqual(SchedulesFile.parse(SchedulesFile.render([value])), [value])
+            let data = try JSONEncoder().encode(value)
+            XCTAssertEqual(try JSONDecoder().decode(Schedule.self, from: data), value)
+        }
+    }
+
+    func testInvalidTimeDateAndOverflowingIntervalsAreRejected() throws {
+        var value = schedule()
+        value.every = .daily(hour: 7, minute: 30)
+        let yaml = SchedulesFile.render([value])
+        XCTAssertTrue(SchedulesFile.parse(yaml.replacingOccurrences(of: "07:30", with: "24:00")).isEmpty)
+        XCTAssertTrue(SchedulesFile.parse(yaml.replacingOccurrences(of: "07:30", with: "0٧:30")).isEmpty)
+        XCTAssertTrue(SchedulesFile.parse(yaml.replacingOccurrences(of: "7f3a2c1d", with: "'")).isEmpty)
+        for interval in ["4m", "0h", "999999999999999999999d"] {
+            let invalid = yaml.replacingOccurrences(of: "every: daily", with: "every: interval")
+                .replacingOccurrences(of: "at: \"07:30\"", with: "interval: \(interval)")
+            XCTAssertTrue(SchedulesFile.parse(invalid).isEmpty, interval)
+        }
+        let invalidDate = yaml.replacingOccurrences(of: "every: daily", with: "every: once")
+            .replacingOccurrences(of: "at: \"07:30\"", with: "once: 2026-02-30T09:00:00")
+        XCTAssertTrue(SchedulesFile.parse(invalidDate).isEmpty)
+        let invalidJSON = try XCTUnwrap(String(data: JSONEncoder().encode(value), encoding: .utf8))
+            .replacingOccurrences(of: "07:30", with: "24:00")
+        XCTAssertThrowsError(try JSONDecoder().decode(Schedule.self, from: Data(invalidJSON.utf8)))
     }
 
     func testRenderRoundTripsAndPreservesUnknownTopLevelContent() {
@@ -119,6 +158,13 @@ final class SchedulesFileTests: XCTestCase {
         XCTAssertEqual(SchedulesFile.parse(yaml).count, 64)
     }
 
+    func testDuplicateIDsKeepOnlyTheFirstSchedule() {
+        let first = schedule()
+        var duplicate = first
+        duplicate.name = "Repeated entry after a merge"
+        XCTAssertEqual(SchedulesFile.parse(SchedulesFile.render([first, duplicate])), [first])
+    }
+
     func testSnapshotReadsSchedulesAndRawContent() async throws {
         let content = SchedulesFile.render([schedule()], preserving: nil)
         let store = try LocalStore(rootDirectory: directory, owner: "o", repo: "r", branch: "main")
@@ -126,7 +172,7 @@ final class SchedulesFileTests: XCTestCase {
 
         let snapshot = await store.snapshot()
         XCTAssertEqual(snapshot.schedules["demo"], [schedule()])
-        XCTAssertEqual(snapshot.scheduleContents["demo"], content)
+        XCTAssertEqual(snapshot.schedulesContent["demo"], content)
         XCTAssertTrue(LocalStore.isWritablePath("demo/schedules.yaml"))
         XCTAssertFalse(LocalStore.isSchedulesPath("global/schedules.yaml"))
     }

@@ -56,6 +56,7 @@ enum PhrenTheme {
     static var stateDone: Color { Color(hex: palette.stateDone ?? 0x8AC8AC) }
     static var lavender: Color { accent }
 
+    static let onAccent = Color.white
     static let border = Color.white.opacity(0.07)
     static let borderStrong = Color.white.opacity(0.14)
     static var cardNeedsBorder: Bool { similarValue(palette.surface, palette.background) }
@@ -90,6 +91,7 @@ enum PhrenTheme {
     /// Semantic chip colors shared across screens.
     static func chipColor(_ role: ChipRole) -> Color {
         switch role {
+        case .host: return textSecondary
         case .project: return cyan
         case .store: return lavender
         case .type: return accent
@@ -102,7 +104,7 @@ enum PhrenTheme {
     }
 
     enum ChipRole {
-        case project, store, type, status, scope, good, warn, bad
+        case host, project, store, type, status, scope, good, warn, bad
     }
 }
 

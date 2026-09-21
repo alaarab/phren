@@ -15,10 +15,10 @@ public struct Schedule: Codable, Equatable, Identifiable, Sendable {
     }
 
     public enum Every: Equatable, Sendable {
-        case interval(String)
-        case daily(at: String)
-        case weekly(at: String, days: [Weekday])
-        case once(String)
+        case interval(minutes: Int)
+        case daily(hour: Int, minute: Int)
+        case weekly(days: Set<Weekday>, hour: Int, minute: Int)
+        case once(Date)
         case cron(String)
 
         public var kind: String {
@@ -40,12 +40,12 @@ public struct Schedule: Codable, Equatable, Identifiable, Sendable {
     public var model: String?
     public var every: Every
     public var prompt: String
-    public let createdAt: String
-    public var updatedAt: String
+    public let createdAt: Date
+    public var updatedAt: Date
 
     public init(id: String, name: String, enabled: Bool, computer: String,
                 harness: Harness, model: String? = nil, every: Every,
-                prompt: String, createdAt: String, updatedAt: String) {
+                prompt: String, createdAt: Date, updatedAt: Date) {
         self.id = id
         self.name = name
         self.enabled = enabled
@@ -77,20 +77,28 @@ public struct Schedule: Codable, Equatable, Identifiable, Sendable {
         harness = try values.decode(Harness.self, forKey: .harness)
         model = try values.decodeIfPresent(String.self, forKey: .model)
         prompt = try values.decode(String.self, forKey: .prompt)
-        createdAt = try values.decode(String.self, forKey: .createdAt)
-        updatedAt = try values.decode(String.self, forKey: .updatedAt)
-        switch try values.decode(String.self, forKey: .every) {
-        case "interval": every = .interval(try values.decode(String.self, forKey: .interval))
-        case "daily": every = .daily(at: try values.decode(String.self, forKey: .at))
-        case "weekly":
-            every = .weekly(at: try values.decode(String.self, forKey: .at),
-                            days: try values.decode([Weekday].self, forKey: .days))
-        case "once": every = .once(try values.decode(String.self, forKey: .once))
-        case "cron": every = .cron(try values.decode(String.self, forKey: .cron))
-        case let value:
-            throw DecodingError.dataCorruptedError(forKey: .every, in: values,
-                                                   debugDescription: "Unknown schedule frequency \(value).")
+        createdAt = try Self.timestamp(values.decode(String.self, forKey: .createdAt))
+        updatedAt = try Self.timestamp(values.decode(String.self, forKey: .updatedAt))
+        let kind = try values.decode(String.self, forKey: .every)
+        var fields = ["every": kind]
+        for key in [CodingKeys.interval, .at, .once, .cron] {
+            fields[key.rawValue] = try values.decodeIfPresent(String.self, forKey: key)
         }
+        if let days = try values.decodeIfPresent([Weekday].self, forKey: .days) {
+            fields["days"] = "[" + days.map(\.rawValue).joined(separator: ",") + "]"
+        }
+        guard let parsed = SchedulesFile.frequency(from: fields) else {
+            throw DecodingError.dataCorruptedError(forKey: .every, in: values,
+                                                   debugDescription: "Invalid schedule frequency.")
+        }
+        every = parsed
+    }
+
+    private static func timestamp(_ value: String) throws -> Date {
+        guard let date = ISO8601Dates.parse(value) else {
+            throw PhrenKitError.validation("Invalid schedule timestamp.")
+        }
+        return date
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -103,17 +111,18 @@ public struct Schedule: Codable, Equatable, Identifiable, Sendable {
         try values.encodeIfPresent(model, forKey: .model)
         try values.encode(every.kind, forKey: .every)
         switch every {
-        case .interval(let interval): try values.encode(interval, forKey: .interval)
-        case .daily(let at): try values.encode(at, forKey: .at)
-        case .weekly(let at, let days):
-            try values.encode(at, forKey: .at)
-            try values.encode(days, forKey: .days)
-        case .once(let once): try values.encode(once, forKey: .once)
+        case .interval(let minutes): try values.encode(SchedulesFile.intervalText(minutes), forKey: .interval)
+        case .daily(let hour, let minute):
+            try values.encode(SchedulesFile.timeText(hour, minute), forKey: .at)
+        case .weekly(let days, let hour, let minute):
+            try values.encode(SchedulesFile.timeText(hour, minute), forKey: .at)
+            try values.encode(Weekday.allCases.filter(days.contains), forKey: .days)
+        case .once(let date): try values.encode(SchedulesFile.onceText(date), forKey: .once)
         case .cron(let cron): try values.encode(cron, forKey: .cron)
         }
         try values.encode(prompt, forKey: .prompt)
-        try values.encode(createdAt, forKey: .createdAt)
-        try values.encode(updatedAt, forKey: .updatedAt)
+        try values.encode(SchedulesFile.timestampText(createdAt), forKey: .createdAt)
+        try values.encode(SchedulesFile.timestampText(updatedAt), forKey: .updatedAt)
     }
 }
 
@@ -175,9 +184,13 @@ public enum SchedulesFile {
         finishEntry()
 
         var schedules: [Schedule] = []
+        var identifiers: Set<String> = []
         for entry in entries {
             guard schedules.count < maximumSchedules else { break }
-            if let schedule = schedule(from: entry) { schedules.append(schedule) }
+            // Rows and runtime state use this ID as a key; a duplicate must not reach either.
+            if let schedule = schedule(from: entry), identifiers.insert(schedule.id).inserted {
+                schedules.append(schedule)
+            }
         }
         return schedules
     }
@@ -214,38 +227,81 @@ public enum SchedulesFile {
               let enabledText = fields["enabled"], let enabled = bool(enabledText),
               let computer = fields["computer"], !computer.isEmpty,
               let harnessText = fields["harness"], let harness = Schedule.Harness(rawValue: harnessText),
-              let frequency = fields["every"],
+              let every = frequency(from: fields),
               let prompt = fields["prompt"], !prompt.isEmpty, prompt.count <= 8_000,
-              let createdAt = fields["createdAt"], !createdAt.isEmpty,
-              let updatedAt = fields["updatedAt"], !updatedAt.isEmpty else { return nil }
+              let createdAt = ISO8601Dates.parse(fields["createdAt"]),
+              let updatedAt = ISO8601Dates.parse(fields["updatedAt"]) else { return nil }
 
-        let every: Schedule.Every
-        switch frequency {
-        case "interval":
-            guard let value = fields["interval"], JSRegex(#"^[1-9][0-9]*[mhd]$"#).test(value) else { return nil }
-            every = .interval(value)
-        case "daily":
-            guard let at = fields["at"], validTime(at) else { return nil }
-            every = .daily(at: at)
-        case "weekly":
-            guard let at = fields["at"], validTime(at), let rawDays = fields["days"] else { return nil }
-            let days = inlineList(rawDays).compactMap(Schedule.Weekday.init(rawValue:))
-            guard !days.isEmpty, days.count == inlineList(rawDays).count else { return nil }
-            every = .weekly(at: at, days: days)
-        case "once":
-            guard let value = fields["once"],
-                  JSRegex(#"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$"#).test(value) else { return nil }
-            every = .once(value)
-        case "cron":
-            guard let value = fields["cron"], value.split(whereSeparator: \.isWhitespace).count == 5 else { return nil }
-            every = .cron(value)
-        default:
-            return nil
-        }
         let model = fields["model"].flatMap { $0.isEmpty ? nil : $0 }
         return Schedule(id: id, name: name, enabled: enabled, computer: computer,
                         harness: harness, model: model, every: every, prompt: prompt,
                         createdAt: createdAt, updatedAt: updatedAt)
+    }
+
+    fileprivate static func frequency(from fields: [String: String]) -> Schedule.Every? {
+        switch fields["every"] {
+        case "interval":
+            guard let value = fields["interval"], JSRegex(#"^[1-9][0-9]*[mhd]$"#).test(value),
+                  let amount = Int(value.dropLast()) else { return nil }
+            let multiplier = value.last == "d" ? 1_440 : value.last == "h" ? 60 : 1
+            let minutes = amount.multipliedReportingOverflow(by: multiplier)
+            guard !minutes.overflow, minutes.partialValue >= 5 else { return nil }
+            return .interval(minutes: minutes.partialValue)
+        case "daily", "weekly":
+            guard let at = fields["at"], validTime(at) else { return nil }
+            let parts = at.split(separator: ":").compactMap { Int($0) }
+            guard parts.count == 2 else { return nil }
+            if fields["every"] == "daily" { return .daily(hour: parts[0], minute: parts[1]) }
+            guard let rawDays = fields["days"] else { return nil }
+            let days = inlineList(rawDays).compactMap(Schedule.Weekday.init(rawValue:))
+            guard !days.isEmpty, days.count == inlineList(rawDays).count else { return nil }
+            return .weekly(days: Set(days), hour: parts[0], minute: parts[1])
+        case "once":
+            guard let value = fields["once"] else { return nil }
+            for format in ["yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd'T'HH:mm"] {
+                let formatter = onceFormatter(format)
+                if let date = formatter.date(from: value), formatter.string(from: date) == value {
+                    return .once(date)
+                }
+            }
+            return ISO8601Dates.parse(value).map { .once($0) }
+        case "cron":
+            guard let value = fields["cron"], value.split(whereSeparator: \.isWhitespace).count == 5 else { return nil }
+            return .cron(value)
+        default: return nil
+        }
+    }
+
+    fileprivate static func timestampText(_ date: Date) -> String {
+        // ISO8601FormatStyle can truncate a parsed .456 second to .455; this formatter rounds it.
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
+    }
+
+    fileprivate static func intervalText(_ minutes: Int) -> String {
+        if minutes.isMultiple(of: 1_440) { return "\(minutes / 1_440)d" }
+        if minutes.isMultiple(of: 60) { return "\(minutes / 60)h" }
+        return "\(minutes)m"
+    }
+
+    fileprivate static func timeText(_ hour: Int, _ minute: Int) -> String {
+        String(format: "%02d:%02d", hour, minute)
+    }
+
+    // Once is a wall-clock time on the chosen computer, so keep the wire value zone-free.
+    fileprivate static func onceText(_ date: Date) -> String {
+        onceFormatter("yyyy-MM-dd'T'HH:mm:ss").string(from: date)
+    }
+
+    private static func onceFormatter(_ format: String) -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = .current
+        formatter.dateFormat = format
+        formatter.isLenient = false
+        return formatter
     }
 
     private static func renderBlock(_ schedules: [Schedule]) -> [String] {
@@ -260,17 +316,17 @@ public enum SchedulesFile {
             if let model = schedule.model { lines.append("    model: \(yamlScalar(model))") }
             lines.append("    every: \(schedule.every.kind)")
             switch schedule.every {
-            case .interval(let interval): lines.append("    interval: \(yamlScalar(interval))")
-            case .daily(let at): lines.append("    at: \(quoted(at))")
-            case .weekly(let at, let days):
-                lines.append("    at: \(quoted(at))")
-                lines.append("    days: [\(days.map(\.rawValue).joined(separator: ", "))]")
-            case .once(let once): lines.append("    once: \(yamlScalar(once))")
+            case .interval(let minutes): lines.append("    interval: \(intervalText(minutes))")
+            case .daily(let hour, let minute): lines.append("    at: \(quoted(timeText(hour, minute)))")
+            case .weekly(let days, let hour, let minute):
+                lines.append("    at: \(quoted(timeText(hour, minute)))")
+                lines.append("    days: [\(Schedule.Weekday.allCases.filter(days.contains).map(\.rawValue).joined(separator: ", "))]")
+            case .once(let once): lines.append("    once: \(yamlScalar(onceText(once)))")
             case .cron(let cron): lines.append("    cron: \(quoted(cron))")
             }
             appendPrompt(schedule.prompt, to: &lines)
-            lines.append("    createdAt: \(yamlScalar(schedule.createdAt))")
-            lines.append("    updatedAt: \(yamlScalar(schedule.updatedAt))")
+            lines.append("    createdAt: \(yamlScalar(timestampText(schedule.createdAt)))")
+            lines.append("    updatedAt: \(yamlScalar(timestampText(schedule.updatedAt)))")
         }
         return lines
     }
@@ -324,7 +380,7 @@ public enum SchedulesFile {
                 return decoded
             }
         }
-        if text.first == "'", let closing = text.lastIndex(of: "'") {
+        if text.first == "'", let closing = text.lastIndex(of: "'"), closing > text.startIndex {
             let remainder = text[text.index(after: closing)...].trimmingCharacters(in: .whitespaces)
             if remainder.isEmpty || remainder.hasPrefix("#") {
                 return String(text[text.index(after: text.startIndex)..<closing])

@@ -848,7 +848,10 @@ schedules:
     expect((await api("/v1/prompt", { target, text: "/permissions" })).status).toBe(200);
     expect((await api("/v1/keys", { target, keys: ["Down", "Down"] })).status).toBe(200);
     expect((await api("/v1/keys", { target, keys: ["Enter"] })).status).toBe(200);
-    // Enter closed the menu; the pane is an idle agent again.
+    // Enter keeps the window: a choice can open a second confirmation the
+    // phone still walks (Codex full access). Escape closes it.
+    expect((await api("/v1/keys", { target, keys: ["Enter"] })).status).toBe(200);
+    expect((await api("/v1/keys", { target, keys: ["Escape"] })).status).toBe(200);
     expect((await api("/v1/keys", { target, keys: ["Down"] })).status).toBe(409);
     // A prompt with words is a message, not a menu.
     expect((await api("/v1/prompt", { target, text: "/model gpt-5.6-terra" })).status).toBe(200);
@@ -857,7 +860,9 @@ schedules:
   it("lists the models a computer's agents offer", async () => {
     const claude = await api("/v1/models?source=claude");
     expect(claude.status).toBe(200);
-    expect(claude.data.models.map((m: any) => m.id)).toEqual(expect.arrayContaining(["fable", "opus", "sonnet", "haiku"]));
+    // Exact ids from this computer's transcripts, aliases only for the rest.
+    expect(claude.data.models.length).toBeGreaterThan(0);
+    expect(claude.data.models.every((m: any) => /^(fable|opus|sonnet|haiku|claude-)/.test(m.id))).toBe(true);
     // OpenCode's list comes from its own binary: every id names its provider,
     // and a computer without opencode simply offers nothing.
     const opencode = (await api("/v1/models?source=opencode")).data.models;

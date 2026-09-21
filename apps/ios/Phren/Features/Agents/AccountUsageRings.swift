@@ -1,9 +1,7 @@
 import PhrenKit
 import SwiftUI
 
-/// The plan usage rings on the Sessions tab, the way Moshi's home shows
-/// them: one ring per provider in use, each showing the primary window from
-/// the same merged report as Account usage. Tapping opens Account usage.
+/// Uses the same merged report as Account usage so both surfaces agree.
 struct AccountUsageRings: View {
     let hosts: [LiveHost]
     private let cache = AccountUsageCache.shared
@@ -16,8 +14,6 @@ struct AccountUsageRings: View {
     var body: some View {
         let quotas = quotas
         NavigationLink { AccountUsageView() } label: {
-            // Sized like the toolbar's SF symbols beside it, so the pill
-            // reads as one row of three.
             ZStack {
                 if quotas.isEmpty {
                     ring(nil, color: PhrenTheme.textMuted, size: 20)

@@ -21,7 +21,11 @@ const opencodeSession = z.string().regex(/^ses_[0-9A-Za-z]{1,64}$/);
 const manifestSchema = z.object({
   schemaVersion: z.literal(1),
   id: jobID,
-  parent: z.object({ provider: z.enum(["codex", "claude", "copilot", "phren", "opencode"]), session: sessionId }).optional(),
+  parent: z.object({
+    provider: z.enum(["codex", "claude", "copilot", "phren", "opencode"]),
+    session: sessionId,
+    computer: z.string().uuid().optional(),
+  }).strict().optional(),
   provider: z.enum(["opencode", "codex", "claude"]),
   session: sessionId.optional(),
   taskLabel: z.string().min(1).max(200),
@@ -107,7 +111,8 @@ async function regularContainedFile(root: string, candidate: string, maxBytes: n
 }
 
 /** Read only manifests explicitly bound to the already validated parent. */
-export async function fanoutChildren(parentProvider: Provider, parentSession: string, env: NodeJS.ProcessEnv = process.env): Promise<FanoutChild[]> {
+export async function fanoutChildren(parentProvider: Provider, parentSession: string, env: NodeJS.ProcessEnv = process.env,
+  parentComputer?: string): Promise<FanoutChild[]> {
   if (!sessionId.safeParse(parentSession).success) return [];
   const configured = fanoutRoot(env);
   let root: string;
@@ -120,7 +125,8 @@ export async function fanoutChildren(parentProvider: Provider, parentSession: st
     if (!manifestFile) continue;
     try {
       const manifest = manifestSchema.parse(JSON.parse(await readFile(manifestFile, "utf8")));
-      if (manifest.id !== name || manifest.parent?.provider !== parentProvider || manifest.parent.session !== parentSession) continue;
+      if (manifest.id !== name || manifest.parent?.provider !== parentProvider || manifest.parent.session !== parentSession
+          || (manifest.parent.computer !== undefined && parentComputer !== undefined && manifest.parent.computer !== parentComputer)) continue;
       const jobRoot = await realpath(directory);
       if (!jobRoot.startsWith(root + path.sep)) continue;
       const transcript = await regularContainedFile(jobRoot, path.join(jobRoot, manifest.eventLog), MAX_EVENT_LOG_BYTES);

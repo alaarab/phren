@@ -19,6 +19,7 @@ final class SchedulesListTests: XCTestCase {
         XCTAssertTrue(daily.label.contains("Daily at 07:30"), daily.label)
         XCTAssertTrue(weekly.label.contains("Weekdays at 07:30"), weekly.label)
 
+        capture(app, "Schedules project list")
         weekly.swipeLeft()
         let pause = app.buttons["schedule-pause:8a4b3c2d"]
         XCTAssertTrue(pause.waitForExistence(timeout: 3))
@@ -38,14 +39,9 @@ final class SchedulesListTests: XCTestCase {
 
     @MainActor
     func testAllSchedulesAreGroupedByProject() {
-        let app = launch(tab: "projects")
-        let instructions = app.buttons["Agent instructions"]
-        XCTAssertTrue(app.navigationBars["Projects"].waitForExistence(timeout: 15))
-        for _ in 0..<4 where !instructions.isHittable {
-            app.swipeUp()
-        }
-        XCTAssertTrue(instructions.waitForExistence(timeout: 5))
-        instructions.tap()
+        let app = launch(tab: "agents", extra: ["--automatic-sessions-fixture"])
+        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 15))
+        app.tabBars.buttons["Agents"].tap()
 
         let all = app.buttons["schedules-all"]
         XCTAssertTrue(all.waitForExistence(timeout: 5))
@@ -60,8 +56,18 @@ final class SchedulesListTests: XCTestCase {
         XCTAssertTrue(daily.label.contains("Daily at 07:30"), daily.label)
         XCTAssertTrue(weekly.label.contains("Weekdays at 07:30"), weekly.label)
         XCTAssertTrue(once.label.contains("Once, Sep 21 at 09:00"), once.label)
+        XCTAssertTrue(once.label.contains("done"), once.label)
+        capture(app, "Schedules all projects")
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label ==[c] %@", "demo")).firstMatch.exists)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label ==[c] %@", "other")).firstMatch.exists)
+    }
+
+    @MainActor
+    private func capture(_ app: XCUIApplication, _ name: String) {
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = name
+        shot.lifetime = .keepAlways
+        add(shot)
     }
 
     @MainActor

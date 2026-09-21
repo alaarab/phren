@@ -49,6 +49,7 @@ struct PhrenIconSegment<Value: Hashable>: View {
     let items: [Item]
     @Binding var selection: Value
     var tint: Color = PhrenTheme.accent
+    var identifier: ((Value) -> String)? = nil
 
     var body: some View {
         HStack(spacing: 4) {
@@ -58,12 +59,13 @@ struct PhrenIconSegment<Value: Hashable>: View {
                     Image(systemName: item.icon)
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(selected ? tint : PhrenTheme.textMuted)
-                        .frame(maxWidth: .infinity, minHeight: 38)
+                        .frame(maxWidth: .infinity, minHeight: 44)
                         .background(selected ? tint.opacity(0.16) : .clear, in: Capsule())
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(item.label)
+                .accessibilityIdentifier(identifier?(item.value) ?? item.label)
                 .accessibilityAddTraits(selected ? .isSelected : [])
             }
         }
@@ -73,20 +75,23 @@ struct PhrenIconSegment<Value: Hashable>: View {
 }
 
 struct PhrenChip: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let text: String
     var icon: String? = nil
     var role: PhrenTheme.ChipRole = .type
+    var monospaced = false
 
     var body: some View {
         HStack(spacing: 4) {
             if let icon { Image(systemName: icon).font(.system(size: 9, weight: .semibold)) }
             Text(text)
         }
-        .font(.caption2.weight(.medium))
+        .font(monospaced ? PhrenTypography.monoCaption2.weight(.medium) : PhrenTypography.caption2.weight(.medium))
         .foregroundStyle(PhrenTheme.chipColor(role))
         .padding(.horizontal, 7).padding(.vertical, 3)
         .background(PhrenTheme.chipColor(role).opacity(0.14), in: Capsule())
-        .lineLimit(1)
+        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -105,7 +110,7 @@ struct PhrenSwitch: View {
                     .fill(isOn ? PhrenTheme.accentSolid : PhrenTheme.surfaceRaised)
                     .frame(width: 44, height: 26)
                 Circle()
-                    .fill(.white)
+                    .fill(PhrenTheme.onAccent)
                     .frame(width: 22, height: 22)
                     .offset(x: isOn ? 9 : -9)
             }
@@ -281,5 +286,43 @@ struct PhrenScrollScreen<Content: View>: View {
             .padding(.vertical, PhrenTheme.Space.medium)
         }
         .phrenScreen()
+    }
+}
+
+struct PhrenSheetHeader: View {
+    let title: String
+    var trailingTitle = "Done"
+    var canSave = true
+    var identifierPrefix: String? = nil
+    let cancel: () -> Void
+    let save: () -> Void
+
+    var body: some View {
+        ZStack {
+            Text(title)
+                .font(PhrenTypography.subheadline.weight(.semibold))
+                .foregroundStyle(PhrenTheme.text)
+                .lineLimit(1)
+            HStack {
+                Button(action: cancel) {
+                    Text("Cancel").frame(minWidth: 44, minHeight: 44, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                    .accessibilityIdentifier(identifierPrefix.map { "\($0)-cancel" } ?? "sheet-cancel")
+                Spacer()
+                Button(action: save) {
+                    Text(trailingTitle)
+                        .foregroundStyle(canSave ? PhrenTheme.accentSolid : PhrenTheme.textDim)
+                        .frame(minWidth: 44, minHeight: 44, alignment: .trailing)
+                        .contentShape(Rectangle())
+                }
+                    .disabled(!canSave)
+                    .accessibilityIdentifier(identifierPrefix.map { "\($0)-save" } ?? "sheet-done")
+            }
+            .font(PhrenTypography.body)
+            .foregroundStyle(PhrenTheme.accentSolid)
+        }
+        .padding(.horizontal, PhrenTheme.Space.large)
+        .frame(height: 56)
     }
 }

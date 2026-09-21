@@ -168,7 +168,7 @@ enum UITestFixtures {
                             username: tour ? "ala" : "fixture", fingerprint: "SHA256:" + String(repeating: "A", count: 43))
     }
 
-    private static let demoSchedules = """
+    static let demoSchedules = """
     version: 1
     schedules:
       - id: 7f3a2c1d
@@ -197,7 +197,7 @@ enum UITestFixtures {
         updatedAt: 2026-09-20T21:05:00Z
     """
 
-    private static let otherSchedules = """
+    static let otherSchedules = """
     version: 1
     schedules:
       - id: 9b5c4d3e

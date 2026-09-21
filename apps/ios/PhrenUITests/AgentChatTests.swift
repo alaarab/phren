@@ -422,6 +422,20 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(cards.firstMatch.isHittable)
     }
 
+    /// Coming back from another app used to bring the stack's own bar back
+    /// above the chat's header; the floating header is the only top bar.
+    @MainActor
+    func testReturningFromBackgroundKeepsTheSystemBarHidden() {
+        let app = launch()
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        XCTAssertTrue(app.scrollViews["chat-transcript"].waitForExistence(timeout: 8))
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        XCTAssertTrue(app.scrollViews["chat-transcript"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "chat-header").firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.navigationBars["Agent chat"].waitForExistence(timeout: 2), "The system bar stays hidden after the app returns")
+    }
+
     @MainActor
     func testCompactionShowsAsOneSmallRow() {
         let app = launch(extra: ["--chat-compaction"])
