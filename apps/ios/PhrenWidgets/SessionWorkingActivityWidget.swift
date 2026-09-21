@@ -103,7 +103,7 @@ private struct AgentRow: View {
 
     private var row: some View {
         HStack(spacing: 6) {
-            ProviderActivityGlyph(provider: entry.provider, size: 14)
+            ProviderActivityGlyphStack(providers: [entry.provider] + entry.childProviders, size: 14)
             Text(entry.project).privacySensitive().font(WidgetTheme.Font.caption.weight(.semibold))
                 .lineLimit(1).truncationMode(.tail).layoutPriority(1)
             if let model = entry.model {
@@ -118,6 +118,14 @@ private struct AgentRow: View {
                 Text(step).privacySensitive().font(WidgetTheme.Font.caption2).foregroundStyle(color)
                     .lineLimit(1).truncationMode(.tail)
             }
+            if entry.subagents > 0 {
+                Text("\(entry.subagents) \(entry.subagents == 1 ? "agent" : "agents")")
+                    .font(WidgetTheme.Font.caption2.weight(.semibold)).monospacedDigit()
+                    .foregroundStyle(WidgetTheme.cyan)
+                    .padding(.horizontal, 5).padding(.vertical, 2)
+                    .background(WidgetTheme.cyan.opacity(0.15), in: Capsule())
+                    .fixedSize()
+            }
             if !isLuminanceReduced, !isIdle, let startedAt = entry.startedAt {
                 Text(startedAt, style: .timer).font(WidgetTheme.Font.caption2.monospacedDigit())
                     .multilineTextAlignment(.trailing).minimumScaleFactor(0.7)
@@ -126,6 +134,25 @@ private struct AgentRow: View {
             }
         }
         .frame(minHeight: 18)
+    }
+}
+
+private struct ProviderActivityGlyphStack: View {
+    let providers: [String]
+    let size: CGFloat
+    private var visible: [String] { Array(providers.prefix(4)) }
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            ForEach(visible.indices, id: \.self) { index in
+                ProviderActivityGlyph(provider: visible[index], size: size)
+                    .padding(1).background(WidgetTheme.activityBackground, in: Circle())
+                    .offset(x: CGFloat(index) * size * 0.55)
+            }
+        }
+        .frame(width: size + CGFloat(max(0, visible.count - 1)) * size * 0.55, height: size)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(visible.joined(separator: ", "))
     }
 }
 

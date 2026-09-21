@@ -64,9 +64,8 @@ struct VoiceCaptureView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
 
-    @State private var transcriber = SpeechTranscriber()
+    @State private var transcriber = DictationSession(recognizer: SpeechTranscriber(), transform: SpeechSettings.apply)
     @State private var text = ""
-    @State private var recordingBaseText = ""
     @State private var selectedTarget: VoiceCaptureTarget?
     @State private var permission: SpeechTranscriber.PermissionState = .notDetermined
     @State private var recognizerUnavailable = false
@@ -142,14 +141,10 @@ struct VoiceCaptureView: View {
             selectedTarget = preselected ?? Self.defaultTarget(in: targets)
             await preparePermissions()
         }
-        .onChange(of: transcriber.transcript) { _, newValue in
-            guard transcriber.isRecording else { return }
-            text = Self.join(recordingBaseText, newValue)
-        }
         .onReceive(ticker) { now = $0 }
         .onChange(of: scenePhase) { _, phase in
             switch phase {
-            case .background:
+            case .background, .inactive:
                 // Never leave the mic listening once we're not visible.
                 transcriber.stop()
             case .active:
@@ -214,6 +209,11 @@ struct VoiceCaptureView: View {
                     .font(.title3.monospacedDigit())
                     .foregroundStyle(PhrenTheme.textMuted)
                     .accessibilityLabel("Recording, \(elapsedText) elapsed")
+            } else if let reason = transcriber.failureReason {
+                Text(reason)
+                    .font(.footnote)
+                    .foregroundStyle(PhrenTheme.warning)
+                    .multilineTextAlignment(.center)
             } else if recognizerUnavailable {
                 Text("Dictation isn't available in this language on this device. You can still type below.")
                     .font(.footnote)
@@ -317,16 +317,13 @@ struct VoiceCaptureView: View {
     private func toggleRecording() {
         if transcriber.isRecording {
             transcriber.stop()
-            recordingStartedAt = nil
         } else {
-            recordingBaseText = text
-            do {
-                try transcriber.start()
-                recordingStartedAt = Date()
-                now = Date()
-            } catch {
-                recognizerUnavailable = true
-            }
+            let draft = $text
+            transcriber.readDraft = { draft.wrappedValue }
+            transcriber.onDraftChange = { draft.wrappedValue = $0 }
+            transcriber.start(draft: text)
+            recordingStartedAt = .now
+            now = .now
         }
     }
 
@@ -340,14 +337,6 @@ struct VoiceCaptureView: View {
         guard let start = recordingStartedAt else { return "0:00" }
         let seconds = max(0, Int(now.timeIntervalSince(start)))
         return String(format: "%d:%02d", seconds / 60, seconds % 60)
-    }
-
-    /// Appends a newly-recognized segment onto whatever text is already
-    /// there (which may have been hand-edited since the last take).
-    private static func join(_ base: String, _ addition: String) -> String {
-        guard !addition.isEmpty else { return base }
-        guard !base.isEmpty else { return addition }
-        return (base.hasSuffix(" ") || base.hasSuffix("\n")) ? base + addition : base + " " + addition
     }
 
     /// Same precedence the App Intents path uses, plus the one tier a visible

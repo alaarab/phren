@@ -159,11 +159,34 @@ import UIKit
     /// The agents the `--chat-agent-card` conversation spawned, matched to
     /// their cards by call id: the audit came back, the tester is still out.
     static let auditChild = "a" + String(repeating: "1", count: 31), testsChild = "b" + String(repeating: "2", count: 31)
+    static let remoteChild = String(repeating: "c", count: 32)
     static func childAgents(_ target: AgentChatTarget) throws -> AgentChildTree {
-        let agents: [[String: Any]] = flag("--chat-agent-card") ? [
+        var agents: [[String: Any]] = flag("--chat-agent-card") ? [
             ["id": auditChild, "provider": "claude", "model": "gpt-5-codex", "path": "Audit the chat timeline", "callId": "agent-audit", "state": "completed", "worktreeName": "phren-color-ui", "branch": "codex/device-color", "children": [] as [Any]],
             ["id": testsChild, "provider": "claude", "path": "Run the full test suite", "callId": "agent-tests", "state": "running", "children": [] as [Any]],
         ] : []
+        if flag("--agent-work-navigation") {
+            if target.hostID.uuidString.hasSuffix("000002") {
+                agents = [["id": remoteChild, "provider": "codex", "path": "Parser fixtures", "callId": "fanout:parser", "state": "running", "children": [] as [Any]]]
+            } else {
+                let computer: [String: Any] = ["id": "C1000000-0000-0000-0000-000000000002", "name": "Linuxbox"]
+                let remoteTarget: [String: Any] = ["server": "work", "workspace": "w9", "tab": "w9:t1", "pane": "w9:p1",
+                                                        "source": "codex", "session": "00000000-0000-0000-0000-000000000042"]
+                let nested: [String: Any] = ["id": "remote-parser-fixtures", "provider": "codex", "path": "Parser fixtures",
+                                                    "callId": "fanout:parser", "state": "running", "computer": computer,
+                                                    "remote": ["target": remoteTarget, "child": remoteChild], "children": [] as [Any]]
+                agents.insert(["id": "remote-parser-lead", "provider": "codex", "model": "configured-model", "path": "Parser checks",
+                               "callId": "dispatch:parser", "state": "running", "computer": computer,
+                               "remote": ["target": remoteTarget], "children": [nested]], at: 0)
+                if flag("--agent-work-unknown") {
+                    agents.append(["id": "remote-unknown-lead", "provider": "opencode", "path": "Compatibility checks",
+                                   "callId": "dispatch:compatibility", "state": "running",
+                                   "computer": ["id": "C1000000-0000-0000-0000-000000000099", "name": "Bench"],
+                                   "remote": ["target": ["server": "default", "workspace": "w4", "tab": "w4:t1", "pane": "w4:p1",
+                                                                 "source": "opencode", "session": "ses_fixture42"]], "children": [] as [Any]])
+                }
+            }
+        }
         let tree: [String: Any] = ["agents": agents]
         return try AgentChildTree.read(JSONSerialization.data(withJSONObject: tree))
     }
@@ -174,6 +197,9 @@ import UIKit
             ? [("user", "Read ChatTimelineModels.swift and report which calls fold into a run."),
                ("assistant", "Reading the timeline models now."),
                ("assistant", "Child audit marker: three reads in a row fold into one run.")]
+            : child == remoteChild
+            ? [("user", "Check the parser fixtures on Linuxbox."),
+               ("assistant", "Remote parser fixture marker: the nested route stayed on Linuxbox.")]
             : [("user", "Run swift test in PhrenKit and the simulator suite; report failures only."),
                ("assistant", "Child tests marker: PhrenKit suite is running.")]
         let entries: [[String: Any]] = turns.enumerated().map { index, turn in
@@ -190,9 +216,10 @@ import UIKit
         if flag("--chat-offline") && hasReadTranscript { throw LiveConnectionError.disconnected }
         // A session launched from a project runs the harness that was picked.
         let launchedKind = launches.last.map(\.kind).flatMap { session.workspaceID == "w9" ? $0 : nil }
-        let agent = launchedKind ?? (flag("--chat-copilot") ? "copilot" : (trailer || flag("--chat-claude-queue") || flag("--chat-claude-image") || flag("--chat-read-images") || flag("--chat-approval-question") || flag("--chat-agent-card") || flag("--chat-todos") || flag("--chat-plan-mode") || flag("--chat-web-tools") || flag("--chat-skill-chip") || flag("--chat-mcp-card") || flag("--chat-compaction") || (tour && flag("--chat-phren-tools"))) ? "claude" : "codex")
+        let remote = flag("--agent-work-navigation") && session.host.id.uuidString.hasSuffix("000002")
+        let agent = remote ? "codex" : launchedKind ?? (flag("--chat-copilot") ? "copilot" : (trailer || flag("--chat-claude-queue") || flag("--chat-claude-image") || flag("--chat-read-images") || flag("--chat-approval-question") || flag("--chat-agent-card") || flag("--chat-todos") || flag("--chat-plan-mode") || flag("--chat-web-tools") || flag("--chat-skill-chip") || flag("--chat-mcp-card") || flag("--chat-compaction") || (tour && flag("--chat-phren-tools"))) ? "claude" : "codex")
         var panes: [[String: Any]] = [["id": "\(session.workspaceID):p1", "label": "1", "title": tour ? "Ship the onboarding flow" : "Polish the phone app", "agent": agent,
-                                     "agentStatus": ((flag("--chat-blocked") || flag("--chat-approval") || flag("--chat-approval-question") || flag("--chat-plan-mode") || flag("--chat-question")) && !answered) ? "blocked" : (flag("--chat-queue-completion") || flag("--chat-history-stalled") || (flag("--chat-working") && !stopped) ? "working" : "idle"), "sessionId": agent == "copilot" ? "00000000-0000-0000-0000-000000000023" : "fixture-\(agent)-session", "cwd": root]]
+                                     "agentStatus": ((flag("--chat-blocked") || flag("--chat-approval") || flag("--chat-approval-question") || flag("--chat-plan-mode") || flag("--chat-question")) && !answered) ? "blocked" : (flag("--chat-queue-completion") || flag("--chat-history-stalled") || (flag("--chat-working") && !stopped) ? "working" : "idle"), "sessionId": remote ? "00000000-0000-0000-0000-000000000042" : agent == "copilot" ? "00000000-0000-0000-0000-000000000023" : "fixture-\(agent)-session", "cwd": root]]
         if flag("--starting-session-fixture") {
             panes[0]["startingToken"] = startingToken
             if startingAttachedAt == nil || Date.now < startingAttachedAt! {

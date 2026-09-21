@@ -100,6 +100,14 @@ async function main() {
   ]);
 
   const profile = resolveRuntimeProfile(phrenPath);
+  const { activateModules: moduleSnapshot } = await import("./modules/runtime.js");
+  const { BUILTIN_MODULES, toolOwner, disabledHint } = await import("./modules/registry.js");
+  const { resolveAllStores } = await import("./store-registry.js");
+  const { resolveStoreForProject } = await import("./tools/types.js");
+  const snapshots = new Map(resolveAllStores(phrenPath).filter(store => store.available !== false)
+    .map(store => [store.path, moduleSnapshot(store.path, profile)]));
+  const enabledModules = BUILTIN_MODULES.filter(module => [...snapshots.values()].some(snapshot => snapshot.has(module.name)));
+  const hasModule = (name: string) => enabledModules.some(module => module.name === name);
   cleanStaleLocks(phrenPath);
   // Before buildIndex() writes the first snapshot: the FTS cache is a full
   // SQLite export of the store, and on Linux it lands in a world-readable
@@ -204,6 +212,7 @@ async function main() {
   const mcpProfile = resolveMcpProfile(phrenPath);
   const gate = createToolGate({
     profile: mcpProfile,
+    modules: enabledModules,
     alwaysLoad: ALWAYS_LOAD_TOOLS,
     register: (name, config, handler) => origRegisterTool(name as RegisterToolArgs[0], config as RegisterToolArgs[1], handler as unknown as RegisterToolArgs[2]),
     wrap: (registeredName, handler) => async (...args: unknown[]) => {
@@ -228,6 +237,12 @@ async function main() {
             }, null, 2),
           }],
         };
+      }
+      const owner = toolOwner(registeredName);
+      if (owner && owner.name !== "memory") {
+        const input = args[0] as Record<string, unknown>;
+        const store = typeof input?.project === "string" ? resolveStoreForProject(ctx, input.project).phrenPath : phrenPath;
+        if (!snapshots.get(store)?.has(owner.name)) return mcpResponse({ ok: false, error: disabledHint(owner.name), errorCode: "UNAVAILABLE" });
       }
       try { trackToolCall(phrenPath, registeredName); } catch (err: unknown) {
         logger.warn("trackToolCall", errorMessage(err));
@@ -257,7 +272,7 @@ async function main() {
   // order is irrelevant (each module registers a disjoint set of tools).
   const toolModules = await Promise.all([
     import("./tools/search.js"),
-    import("./tools/tasks.js"),
+    ...(hasModule("tasks") ? [import("./tools/tasks.js")] : []),
     import("./tools/finding.js"),
     import("./tools/memory.js"),
     import("./tools/data.js"),
@@ -266,11 +281,11 @@ async function main() {
     import("./tools/ops.js"),
     import("./tools/skills.js"),
     import("./tools/hooks.js"),
-    import("./tools/extract.js"),
+    ...(hasModule("git") ? [import("./tools/extract.js")] : []),
     import("./tools/config.js"),
     import("./tools/notes.js"),
     import("./tools/summaries.js"),
-    import("./tools/dispatch.js"),
+    ...(hasModule("conductor") ? [import("./tools/dispatch.js")] : []),
   ]);
   for (const mod of toolModules) mod.register(server, ctx);
   gate.finish();

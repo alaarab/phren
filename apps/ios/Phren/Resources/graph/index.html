@@ -61,11 +61,19 @@
     pointer-events: auto;
   }
   #graph-dossier[hidden] { display: none; }
-  .dossier-close {
-    position: absolute;
-    top: 8px;
-    right: 8px;
-    z-index: 1;
+  .dossier-header {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .dossier-header-actions {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 8px;
+  }
+  .dossier-icon-button, .dossier-step-button {
     display: grid;
     place-items: center;
     box-sizing: border-box;
@@ -75,16 +83,26 @@
     border: 1px solid rgba(103, 232, 249, 0.22);
     border-radius: 999px;
     background: rgba(22, 27, 52, 0.9);
-    color: #dbe4ff;
-    font: 18px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: #8b96c9;
   }
+  .dossier-icon-button[hidden], .dossier-step[hidden] { display: none; }
+  .dossier-icon-button svg, .dossier-step-button svg {
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .dossier-delete { color: #ef9898; }
+  .dossier-close { color: #dbe4ff; }
   .dossier-eyebrow {
     display: flex;
-    flex: 0 0 auto;
+    flex: 1 1 auto;
     align-items: baseline;
     gap: 9px;
     min-width: 0;
-    padding-right: 36px;
     font: 700 9.5px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     letter-spacing: 0.14em;
     text-transform: uppercase;
@@ -110,6 +128,21 @@
     -webkit-user-select: text;
     user-select: text;
   }
+  .dossier-step {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding-top: 10px;
+  }
+  #dossier-step-counter {
+    min-width: 72px;
+    color: #8b96c9;
+    font: 600 10px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    letter-spacing: 0.06em;
+    text-align: center;
+  }
   .dossier-actions {
     display: grid;
     flex: 0 0 auto;
@@ -130,7 +163,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .dossier-actions button:active, .dossier-close:active {
+  .dossier-actions button:active, .dossier-icon-button:active, .dossier-step-button:active {
     border-color: rgba(103, 232, 249, 0.55);
     color: #e6f6ff;
     background: rgba(22, 27, 52, 0.96);
@@ -142,18 +175,44 @@
   <div id="graph-canvas" data-fx="off"></div>
   <div id="graph-status">Loading graph…</div>
   <aside id="graph-dossier" role="dialog" aria-label="Node details" aria-hidden="true" hidden>
-    <button class="dossier-close" type="button" aria-label="Close" data-action="close">×</button>
-    <div class="dossier-eyebrow">
-      <span id="dossier-kind"></span>
-      <span id="dossier-project"></span>
+    <div class="dossier-header">
+      <div class="dossier-eyebrow">
+        <span id="dossier-kind"></span>
+        <span id="dossier-project"></span>
+      </div>
+      <div class="dossier-header-actions">
+        <button class="dossier-icon-button" type="button" aria-label="Edit" data-action="edit" hidden>
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="M4 16l3.4-.8L16 6.6a1.8 1.8 0 0 0-2.6-2.6l-8.6 8.6L4 16Z"></path>
+            <path d="m12.3 5.1 2.6 2.6M4.8 12.6l2.6 2.6"></path>
+          </svg>
+        </button>
+        <button class="dossier-icon-button dossier-delete" type="button" aria-label="Delete" data-action="delete" hidden>
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="M3.5 5.5h13M8 5.5V3.8h4v1.7M5.5 5.5l.7 10.7h7.6l.7-10.7M8 8.5v4.8M12 8.5v4.8"></path>
+          </svg>
+        </button>
+        <button class="dossier-icon-button dossier-close" type="button" aria-label="Close" data-action="close">
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="m5 5 10 10M15 5 5 15"></path>
+          </svg>
+        </button>
+      </div>
     </div>
     <div id="dossier-text"></div>
+    <div class="dossier-step" hidden>
+      <button class="dossier-step-button" type="button" aria-label="Previous" data-action="previous">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12.5 5-5 5 5 5"></path></svg>
+      </button>
+      <span id="dossier-step-counter"></span>
+      <button class="dossier-step-button" type="button" aria-label="Next" data-action="next">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m7.5 5 5 5-5 5"></path></svg>
+      </button>
+    </div>
     <div class="dossier-actions">
       <button type="button" data-action="focus">Focus</button>
       <button type="button" data-action="openProject">Open project</button>
       <button type="button" data-action="share">Share</button>
-      <button type="button" data-action="edit" aria-label="Edit" hidden>Edit</button>
-      <button type="button" data-action="delete" aria-label="Delete" hidden>Delete</button>
     </div>
   </aside>
 
@@ -167,6 +226,9 @@
     var dossierText = document.getElementById("dossier-text");
     var dossierEdit = dossier.querySelector('[data-action="edit"]');
     var dossierDelete = dossier.querySelector('[data-action="delete"]');
+    var dossierStep = dossier.querySelector(".dossier-step");
+    var dossierStepCounter = document.getElementById("dossier-step-counter");
+    var payloadNodes = [];
     var selectedNode = null;
     function setStatus(text) {
       if (!text) { status.hidden = true; return; }
@@ -198,6 +260,7 @@
         }
         try {
           wire();
+          payloadNodes = payload && Array.isArray(payload.nodes) ? payload.nodes : [];
           window.phrenGraph.mount(payload);
           setStatus(payload && payload.nodes && payload.nodes.length ? "" : "Nothing to show yet");
           wire();
@@ -232,6 +295,7 @@
       dossierKind.textContent = kindTitle(node);
       dossierProject.textContent = node.project || node.projectName || node.label || node.id;
       dossierText.textContent = node.fullLabel || node.label || node.text || node.id;
+      updateStepControls(node);
       document.body.classList.add("dossier-open");
     }
 
@@ -239,10 +303,12 @@
       selectedNode = null;
       dossierEdit.hidden = true;
       dossierDelete.hidden = true;
+      dossierStep.hidden = true;
       dossier.hidden = true;
       dossier.setAttribute("aria-hidden", "true");
       dossier.style.display = "none";
       dossierText.textContent = "";
+      dossierStepCounter.textContent = "";
       document.body.classList.remove("dossier-open");
     }
 
@@ -252,13 +318,63 @@
       return "Project";
     }
 
+    function siblingNodes(node) {
+      var id = String(node.id || "");
+      var group = String(node.group || "");
+      var project = node.project || node.projectName || "";
+      var task = node.kind === "task" || id.indexOf(":task:") !== -1;
+      if (task) {
+        var active = [];
+        var queue = [];
+        payloadNodes.forEach(function (candidate) {
+          if (candidate.project !== project) return;
+          if (candidate.group === "task-active") active.push(candidate);
+          if (candidate.group === "task-queue") queue.push(candidate);
+        });
+        return active.concat(queue);
+      }
+      var finding = node.kind === "finding" || id.indexOf("finding:") === 0
+        || id.indexOf("journal:") === 0;
+      if (!finding || group.indexOf("topic:") !== 0) return [];
+      return payloadNodes.filter(function (candidate) {
+        return candidate.project === project && candidate.group === group;
+      });
+    }
+
+    function updateStepControls(node) {
+      var siblings = siblingNodes(node);
+      var index = siblings.findIndex(function (candidate) { return candidate.id === node.id; });
+      dossierStep.hidden = index < 0;
+      dossierStepCounter.textContent = index < 0 ? "" : (index + 1) + " of " + siblings.length;
+    }
+
+    function stepSelection(delta) {
+      if (!selectedNode) return;
+      var siblings = siblingNodes(selectedNode);
+      var index = siblings.findIndex(function (candidate) { return candidate.id === selectedNode.id; });
+      if (index < 0 || siblings.length === 0) return;
+      var target = siblings[(index + delta + siblings.length) % siblings.length];
+      post("graphAction", { action: "select", id: target.id });
+    }
+
     dossier.addEventListener("click", function (event) {
       var button = event.target.closest("button[data-action]");
       if (!button || !selectedNode) return;
       var action = button.getAttribute("data-action");
       var id = selectedNode.id;
+      if (action === "previous" || action === "next") {
+        stepSelection(action === "previous" ? -1 : 1);
+        return;
+      }
       if (action === "close") hideDossier();
       post("graphAction", { action: action, id: id });
+    });
+
+    document.addEventListener("keydown", function (event) {
+      if (dossier.hidden || !selectedNode) return;
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      event.preventDefault();
+      stepSelection(event.key === "ArrowLeft" ? -1 : 1);
     });
 
     var wired = false;

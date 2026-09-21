@@ -76,6 +76,7 @@ public struct AgentInteractionStatus: Equatable, Sendable {
     public var modelName: String? = nil
     public var questionsSupported = true
     public var asyncQuestionsSupported = false
+    public var capabilities: LiveCapabilities? = nil
     public var pendingQuestions: [AgentQuestionPrompt]? = nil
     /// The pane's current git branch, read by Phren Hook on the computer.
     public var branch: String? = nil
@@ -104,11 +105,15 @@ public struct AgentInteractionStatus: Equatable, Sendable {
             terminalPrompt = try? JSONDecoder().decode(AgentTerminalPrompt.self, from: JSONSerialization.data(withJSONObject: raw))
             if let message = terminalPrompt?.message, message.utf8.count > 32_768 { terminalPrompt = AgentTerminalPrompt(toolName: terminalPrompt?.toolName, message: String(message.prefix(32_768))) }
         }
+        let capabilities = (status["capabilities"] as? [String: Any]).flatMap { raw in
+            (try? JSONSerialization.data(withJSONObject: raw)).flatMap { try? JSONDecoder().decode(LiveCapabilities.self, from: $0) }
+        }
         let activity = status["status"] as? String
         return .init(approval: approval, terminalPrompt: terminalPrompt, activity: ["working", "idle", "done", "waiting", "blocked", "error"].contains(activity ?? "") ? activity : nil,
                      modelName: (status["modelName"] as? String).map { String($0.prefix(100)) },
                      questionsSupported: (status["capabilities"] as? [String: Any])?["questions"] as? Bool ?? true,
                      asyncQuestionsSupported: (status["capabilities"] as? [String: Any])?["asyncQuestions"] as? Bool ?? false,
+                     capabilities: capabilities,
                      pendingQuestions: (status["pendingQuestions"] as? [[String: Any]]).map { values in values.prefix(64).compactMap { raw in
                          guard let id = raw["toolUseId"] as? String else { return nil }
                          // Status already uses the normalized question shape.

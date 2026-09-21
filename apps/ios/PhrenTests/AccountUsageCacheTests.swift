@@ -39,4 +39,11 @@ final class AccountUsageCacheTests: XCTestCase {
         XCTAssertEqual(quotas.first?.window.usedPercent, 40)
         XCTAssertEqual(AccountUsageRingSelection.accessibilityValue(quotas), "Claude 40%")
     }
+
+    func testHeaderRingsIgnoreOpenCodeGoWithoutAReportedLimit() throws {
+        let snapshot = try AccountUsageSnapshot.read(Data(#"{"accounts":[{"source":"opencode-go","updatedAt":"2026-09-20T17:59:30Z","windows":[{"id":"opencode-go:kimi_k3:5h","name":"opencode-go/kimi-k3 · 5h","usedUSD":1.2}]}]}"#.utf8))
+        let accounts = MergedAccountUsage.merge([("Desk", snapshot)], at: .now)
+
+        XCTAssertTrue(AccountUsageRingSelection.primaryWindows(in: accounts).isEmpty)
+    }
 }

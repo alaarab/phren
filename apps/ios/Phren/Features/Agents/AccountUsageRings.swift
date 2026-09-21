@@ -65,7 +65,8 @@ enum AccountUsageRingSelection {
     static func primaryWindows(in accounts: [MergedAccountUsage]) -> [AccountUsageRingQuota] {
         let order = ["claude", "codex", "copilot"]
         return accounts.compactMap { account in
-            account.primaryWindow.map { AccountUsageRingQuota(source: account.source, accountName: account.name, window: $0) }
+            guard let window = account.primaryWindow, window.usedPercent != nil else { return nil }
+            return AccountUsageRingQuota(source: account.source, accountName: account.name, window: window)
         }.sorted {
             (order.firstIndex(of: $0.source) ?? 9, $0.source) < (order.firstIndex(of: $1.source) ?? 9, $1.source)
         }
@@ -73,7 +74,7 @@ enum AccountUsageRingSelection {
 
     static func accessibilityValue(_ quotas: [AccountUsageRingQuota]) -> String {
         guard let primary = quotas.first else { return "unavailable" }
-        return "\(primary.accountName) \(AccountUsagePresentation.percent(primary.window.usedPercent))"
+        return "\(primary.accountName) \(AccountUsagePresentation.percent(primary.window.usedPercent ?? 0))"
     }
 }
 

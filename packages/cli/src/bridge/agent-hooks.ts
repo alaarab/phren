@@ -1,3 +1,6 @@
+import { defaultPhrenPath } from "../shared.js";
+import { disabledHint } from "../modules/registry.js";
+import { activateModules as moduleSnapshot, type ModuleSnapshot } from "../modules/runtime.js";
 import { request, createServer, type Server, type ServerResponse } from "node:http";
 import { mkdir, writeFile, readFile, rename, chmod, unlink, lstat } from "node:fs/promises";
 import { readFileSync } from "node:fs";
@@ -128,7 +131,7 @@ export class AgentHooks {
   readonly overview = new ApprovalWatchLeases();
   private server?: Server;
   private pushBindings = new PushBindingStore();
-  constructor(readonly push = new ApprovalPushService()) {}
+  constructor(readonly push = new ApprovalPushService(), private modules?: ModuleSnapshot) {}
   watch(target: Target): () => void {
     const key = JSON.stringify(target);
     this.watching.set(key, (this.watching.get(key) || 0) + 1);
@@ -277,6 +280,9 @@ export class AgentHooks {
         let size = 0; const chunks: Buffer[] = [];
         for await (const bytes of req) { size += bytes.length; if (size > 1_048_576) throw new Error("Oversized hook"); chunks.push(bytes); }
         const body = object(JSON.parse(Buffer.concat(chunks).toString())), target = targetSchema.parse(body.target);
+        if (this.modules?.has("git") === false && ["PreToolUse", "PostToolUse"].includes(String(body.event))) {
+          res.statusCode = 404; res.end(JSON.stringify({ error: disabledHint("git") })); return;
+        }
         const s = await snapshot(target.server);
         const pane = objects(s.panes).find(p => p.pane_id === target.pane && p.tab_id === target.tab && p.workspace_id === target.workspace);
         if (!pane || (pane.agent && pane.agent !== target.source)) throw new Error("The pane changed");
@@ -296,7 +302,7 @@ export class AgentHooks {
         if (body.event === "UserPromptSubmit") {
           res.end(JSON.stringify(typeof body.prompt === "string" ? this.submitted(target, body.prompt.slice(0, 65_536)) : {})); return;
         }
-        if (["PreToolUse", "PostToolUse"].includes(String(body.event)) && capturesChanges(String(body.tool), input)) {
+        if ((this.modules?.has("git") ?? true) && ["PreToolUse", "PostToolUse"].includes(String(body.event)) && capturesChanges(String(body.tool), input)) {
           const conversation = `${target.source}:${target.session}`, id = String(body.toolUseId || "").slice(0, 200);
           if (body.event === "PreToolUse") await this.changes.before(conversation, id, typeof body.cwd === "string" && path.isAbsolute(body.cwd) ? body.cwd : await trustedDirectory(pane), command ?? "", input);
           else await this.changes.after(conversation, id);
@@ -358,6 +364,8 @@ export async function agentHook(source: Provider) {
   const target = targetSchema.parse({ server, workspace: process.env.HERDR_WORKSPACE_ID, tab: process.env.HERDR_TAB_ID,
     pane: process.env.HERDR_PANE_ID, source, session: value.session_id || value.sessionId });
   const event = String(value.hook_event_name || "SessionStart");
+  const modules = moduleSnapshot(defaultPhrenPath(), undefined, true);
+  if (!modules.has("hook") || (event.endsWith("ToolUse") && !modules.has("git"))) return;
   const data = JSON.stringify({ target, event, tool: value.tool_name, input: value.tool_input, toolUseId: value.tool_use_id, cwd: value.cwd,
     ...(event === "UserPromptSubmit" && typeof value.prompt === "string" ? { prompt: value.prompt.slice(0, 65_536) } : {}) });
   await new Promise<void>(resolve => {

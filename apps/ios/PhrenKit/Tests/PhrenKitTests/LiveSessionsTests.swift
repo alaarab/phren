@@ -105,3 +105,31 @@ final class LiveSessionsTests: XCTestCase {
         XCTAssertTrue(LiveHost.colorPalette.contains(first))
     }
 }
+
+extension LiveSessionsTests {
+    func testModuleCapabilitiesKeepTypesAndTravelWithSessions() throws {
+        let data = Data(#"{"kind":"herdr","groups":[{"id":"w1","label":"Work","children":[{"id":"t1","label":"Chat"}]}],"phren":{"capabilities":{"git":false,"schedules":true,"dispatch":false,"terminal":"ssh-pty","webPreview":"ssh-exec","providers":["codex"],"future":true},"modules":{"memory":"0.2.14","hook":"0.2.14","schedules":"0.2.14"},"profile":"work","generation":"one"}}"#.utf8)
+        let workspaces = try LiveWorkspaces.read(data)
+        let caps = try XCTUnwrap(workspaces.capabilities)
+        XCTAssertFalse(caps.allows(.changes))
+        XCTAssertTrue(caps.allows(.schedules))
+        XCTAssertFalse(caps.allows(.dispatch))
+        XCTAssertFalse(caps.allows(.codeMap))
+        XCTAssertEqual(caps.terminal, "ssh-pty")
+        XCTAssertEqual(caps.webPreview, "ssh-exec")
+        XCTAssertEqual(caps.providers, ["codex"])
+        let host = try LiveHost(name: "Desk", address: "desk.example", username: "sam")
+        XCTAssertEqual(workspaces.sessions(on: host).first?.capabilities, caps)
+        XCTAssertEqual(workspaces.closing(workspace: "w1", tab: "t1").capabilities, caps)
+        XCTAssertEqual(try JSONDecoder().decode(LiveWorkspaces.self, from: JSONEncoder().encode(workspaces)), workspaces)
+    }
+
+    func testMissingCapabilitiesUseLegacyCompatibilityAndEmptyCapabilitiesHideFeatures() throws {
+        let legacy = try LiveWorkspaces.read(Data(#"{"kind":"herdr","groups":[],"phren":{"protocol":1}}"#.utf8))
+        XCTAssertNil(legacy.capabilities)
+        XCTAssertTrue(legacy.capabilities?.allows(.schedules) ?? true)
+        let current = try LiveWorkspaces.read(Data(#"{"kind":"herdr","groups":[],"phren":{"capabilities":{}}}"#.utf8))
+        XCTAssertFalse(current.capabilities?.allows(.schedules) ?? true)
+        XCTAssertFalse(current.capabilities?.allows(.changes) ?? true)
+    }
+}

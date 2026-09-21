@@ -7,7 +7,10 @@ struct ChatSubagentsView: View {
     let target: AgentChatTarget
     let agents: [AgentChild]
     @Environment(\.dismiss) private var dismiss
-    @State private var diffChild: String?
+    @AppStorage("sessions.live.preferences.v1") private var hostData = Data()
+    @State private var selected: AgentWorkNavigation?
+    @State private var changes: AgentWorkNavigation?
+    private var overview: SessionOverviewMonitor { .shared }
 
     /// Finished agents are out of scope here: the sheet is about work in
     /// progress, and a finished worker's result lives in the transcript.
@@ -28,48 +31,60 @@ struct ChatSubagentsView: View {
                     .contentMargins(.horizontal, 16, for: .scrollContent)
                     .padding(.bottom, 6)
                 }
-                List {
+                ScrollView {
+                    LazyVStack(spacing: 6) {
                     if rows.isEmpty {
                         Text("No agents running")
                             .font(.caption)
                             .foregroundStyle(PhrenTheme.textMuted)
                             .accessibilityIdentifier("chat-subagents-empty")
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
-                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                     } else {
                         ForEach(rows) { row in
-                            // The link sits behind the card so the list adds
-                            // no disclosure chevron; the whole card is the tap.
-                            AgentTreeRowView(row: row)
-                                .background {
-                                    NavigationLink {
-                                        ChildAgentTranscriptView(session: session, target: target, agent: row.agent)
-                                    } label: { EmptyView() }
-                                    .opacity(0)
-                                    .accessibilityHidden(true)
+                            let navigation = navigation(for: row.agent)
+                            HStack(spacing: 6) {
+                                Button { selected = navigation } label: {
+                                    AgentTreeRowView(row: row, resolution: navigation?.resolution)
                                 }
-                            .accessibilityElement(children: .combine)
-                            .accessibilityAddTraits(.isButton)
-                            .accessibilityIdentifier("child-agent:\(row.agent.id)")
-                            .contextMenu {
-                                Button("Changes", systemImage: "plus.forwardslash.minus") { diffChild = row.agent.id }
+                                .buttonStyle(.plain)
+                                .accessibilityIdentifier("child-agent:\(row.agent.computer == nil ? row.agent.id : row.agent.navigationID)")
+                                if navigation?.resolution.destination != nil {
+                                    Button { changes = navigation } label: {
+                                        Image(systemName: "plus.forwardslash.minus")
+                                            .frame(width: 44, height: 44)
+                                            .foregroundStyle(PhrenTheme.textMuted)
+                                            .background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.small))
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel("Changes for \(row.agent.name)")
+                                    .accessibilityIdentifier("child-agent-changes:\(row.agent.navigationID)")
+                                }
                             }
-                            .listRowSeparator(.hidden)
-                            .listRowBackground(Color.clear)
-                            .listRowInsets(EdgeInsets(top: 3, leading: 16, bottom: 3, trailing: 16))
                         }
                     }
+                    }.padding(.horizontal, 16).padding(.vertical, 8)
                 }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
             }
             .background(PhrenTheme.chatCanvas)
-            .navigationDestination(item: $diffChild) { child in
-                AgentChangesView(session: session, target: target, child: child)
+            .navigationDestination(item: $selected) { AgentWorkDestinationView(navigation: $0) }
+            .navigationDestination(item: $changes) { navigation in
+                if let destination = navigation.resolution.destination {
+                    AgentChangesView(session: destination.session(for: navigation.agent),
+                                     target: destination.target, child: destination.child)
+                }
             }
             .toolbar(.hidden, for: .navigationBar)
         }
+    }
+
+    private func navigation(for agent: AgentChild) -> AgentWorkNavigation? {
+        let hosts = (try? LiveSessionPreferences.read(hostData))?.hosts ?? []
+        let offline = Set(overview.computers.compactMap { computer in
+            computer.monitor.message != nil || (computer.monitor.snapshot != nil && !computer.monitor.isFresh(at: .now))
+                ? computer.host.id : nil
+        })
+        return AgentWorkNavigation.resolve(agent: agent, session: session, target: target,
+                                           hosts: hosts, offlineHostIDs: offline)
     }
 
     private var header: some View {
@@ -101,7 +116,7 @@ struct AgentTreeRow: Identifiable, Equatable {
     let agent: AgentChild
     let depth: Int
     let isLastSibling: Bool
-    var id: String { agent.id }
+    var id: String { agent.navigationID }
 
     static func flatten(_ agents: [AgentChild], depth: Int = 0) -> [Self] {
         rows(agents, includeCompleted: true).map { row in
@@ -148,7 +163,20 @@ private extension AgentChild {
 
 private struct AgentTreeRowView: View {
     let row: AgentTreeRow
+    let resolution: AgentDestinationResolution?
     private var stateName: String { row.agent.state == .running ? "Running" : "Completed" }
+    private var unavailable: Bool {
+        if case .offline? = resolution { return true }
+        return false
+    }
+    private var unknown: Bool {
+        if case .unknown? = resolution { return true }
+        return false
+    }
+    private var starting: Bool {
+        if case .starting? = resolution { return true }
+        return false
+    }
 
     var body: some View {
         HStack(alignment: .center, spacing: 0) {
@@ -170,13 +198,29 @@ private struct AgentTreeRowView: View {
                     .foregroundStyle(PhrenTheme.sessionMeta)
                     .lineLimit(1).truncationMode(.tail)
                     Text(row.agent.name).font(.body.weight(.medium)).foregroundStyle(PhrenTheme.text).lineLimit(2)
+                    if let computer = row.agent.computer {
+                        AgentComputerChip(computer: computer, unavailable: unavailable, unknown: unknown, starting: starting)
+                    }
                 }
                 Spacer(minLength: 8)
             }
             .padding(12).sessionCard()
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(row.agent.name), \(row.agent.providerName)" + (row.agent.model.map { ", \($0)" } ?? "") + ", \(stateName)" + (row.agent.descendantLabel.map { ", \($0)" } ?? "") + (row.agent.branch.map { ", \($0)" } ?? ""))
+        .accessibilityLabel(rowLabel)
+    }
+
+    private var rowLabel: String {
+        var parts: [String] = [row.agent.name, row.agent.providerName]
+        if let model = row.agent.model { parts.append(model) }
+        parts.append(stateName)
+        if let computer = row.agent.computer { parts.append(computer.name) }
+        if unavailable { parts.append("unavailable") }
+        if unknown { parts.append("add computer") }
+        if starting { parts.append("starting") }
+        if let descendants = row.agent.descendantLabel { parts.append(descendants) }
+        if let branch = row.agent.branch { parts.append(branch) }
+        return parts.joined(separator: ", ")
     }
 
     private var treeGuide: some View {
@@ -293,6 +337,8 @@ struct ChildAgentTranscriptView: View {
     let session: LiveAgentSession
     let target: AgentChatTarget
     let agent: AgentChild
+    let child: String
+    let computer: AgentComputer?
     @Environment(\.dismiss) private var dismiss
     @State private var history = AgentChatHistory()
     @State private var loaded = false
@@ -301,6 +347,20 @@ struct ChildAgentTranscriptView: View {
     @State private var error: String?
     @State private var fullToolOutput: FullToolOutput?
     @State private var textSelection = ChatTextSelection()
+    @State private var refresh = UUID()
+
+    init(destination: AgentDestination, agent: AgentChild) {
+        session = destination.session(for: agent)
+        target = destination.target
+        self.agent = agent
+        child = destination.child ?? agent.id
+        computer = destination.computer
+    }
+
+    init(session: LiveAgentSession, target: AgentChatTarget, agent: AgentChild) {
+        self.session = session; self.target = target; self.agent = agent
+        child = agent.id; computer = nil
+    }
 
     private var entries: [ChatTimelineEntry] { ChatTimelineEntry.group(history.messages) }
 
@@ -310,9 +370,15 @@ struct ChildAgentTranscriptView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
                     if let error {
-                        ContentUnavailableView("Transcript unavailable", systemImage: "bubble.left.and.exclamationmark.bubble.right",
-                                               description: Text(error))
-                            .frame(maxWidth: .infinity).padding(.vertical, 40)
+                        VStack(spacing: 12) {
+                            ContentUnavailableView("Transcript unavailable", systemImage: "bubble.left.and.exclamationmark.bubble.right",
+                                                   description: Text(error))
+                            Button("Try again") {
+                                self.error = nil; loaded = false; refresh = UUID()
+                            }
+                            .buttonStyle(.bordered).frame(minHeight: 44)
+                            .accessibilityIdentifier("child-agent-retry")
+                        }.frame(maxWidth: .infinity).padding(.vertical, 40)
                     } else if loaded {
                         if history.hasMore {
                             Button {
@@ -346,7 +412,7 @@ struct ChildAgentTranscriptView: View {
             FullToolOutputView(output: $0).toolbar(.visible, for: .navigationBar)
         }
         .toolbar(.hidden, for: .navigationBar)
-        .task(id: agent.id) { await follow() }
+        .task(id: "\(agent.navigationID)/\(target.id)/\(child)/\(refresh)") { await follow() }
     }
 
     private var stateLine: String {
@@ -375,13 +441,14 @@ struct ChildAgentTranscriptView: View {
                 Text(agent.name).font(.subheadline.weight(.medium)).foregroundStyle(PhrenTheme.text).lineLimit(1)
                 Text(transcriptMeta)
                     .font(.caption2).foregroundStyle(PhrenTheme.textMuted).lineLimit(1)
+                if let computer { AgentComputerChip(computer: computer) }
             }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(agent.name), \(agent.providerName)" + (agent.model.map { ", \($0)" } ?? "") + ", \(stateLine)")
+            .accessibilityLabel("\(agent.name), \(agent.providerName)" + (agent.model.map { ", \($0)" } ?? "") + (computer.map { ", \($0.name)" } ?? "") + ", \(stateLine)")
             .accessibilityIdentifier("child-agent-header")
             Spacer(minLength: 0)
             NavigationLink {
-                AgentChangesView(session: session, target: target, child: agent.id)
+                AgentChangesView(session: session, target: target, child: child)
             } label: {
                 Image(systemName: "plus.forwardslash.minus").font(.system(size: 17))
                     .frame(width: 44, height: 44)
@@ -399,14 +466,14 @@ struct ChildAgentTranscriptView: View {
     @MainActor private func follow() async {
         #if DEBUG && targetEnvironment(simulator)
         if AgentChatFixture.enabled {
-            if let frame = try? AgentChatFixture.childTranscript(child: agent.id) { history.receive(frame); loaded = true }
+            if let frame = try? AgentChatFixture.childTranscript(child: child) { history.receive(frame); loaded = true }
             else { error = "This agent's activity is not available yet." }
             return
         }
         #endif
         do {
             let key = try DeviceSSHKey.load(session.host.id)
-            let updates = PhrenConnection.childAgentUpdates(host: session.host, privateKey: key, target: target, child: agent.id, provider: agent.provider)
+            let updates = PhrenConnection.childAgentUpdates(host: session.host, privateKey: key, target: target, child: child, provider: agent.provider)
             for try await frame in updates {
                 if frame.kind != .append || !frame.messages.isEmpty { history.receive(frame) }
                 loaded = true; live = true; error = nil
@@ -424,11 +491,11 @@ struct ChildAgentTranscriptView: View {
     @MainActor private func loadSnapshot() async {
         do {
             let frame = try await PhrenConnection.childAgentTranscript(host: session.host,
-                privateKey: DeviceSSHKey.load(session.host.id), target: target, child: agent.id, provider: agent.provider)
+                privateKey: DeviceSSHKey.load(session.host.id), target: target, child: child, provider: agent.provider)
             history.receive(frame); loaded = true; error = nil
         } catch is CancellationError {
         } catch {
-            self.error = "This agent's activity is not available yet."
+            self.error = error.localizedDescription
         }
     }
 
@@ -437,7 +504,7 @@ struct ChildAgentTranscriptView: View {
         loadingOlder = true; defer { loadingOlder = false }
         do {
             let page = try await PhrenConnection.childAgentHistory(host: session.host, privateKey: DeviceSSHKey.load(session.host.id),
-                target: target, child: agent.id, provider: agent.provider, beforeLine: before)
+                target: target, child: child, provider: agent.provider, beforeLine: before)
             history.receive(page)
         } catch { /* The earlier rows stay one tap away; the live tail keeps flowing. */ }
     }

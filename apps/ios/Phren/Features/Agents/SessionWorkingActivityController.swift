@@ -21,6 +21,7 @@ final class SessionWorkingActivityController {
     /// The model the Hook names for each agent pane, from the same overview.
     private var overviewModels: [String: String] = [:]
     private var subagents: [String: Int] = [:]
+    private var childProviders: [String: [String]] = [:]
     private var chat: (session: SessionWorkingActivityBuilder.Session, at: Date)?
     private var pinnedID: String?
     private var updateTask: Task<Void, Never>?
@@ -46,6 +47,8 @@ final class SessionWorkingActivityController {
                  activity state: String?, toolName: String?, toolDetail: String? = nil, now: Date = .now) async {
         SessionOverviewMonitor.shared.ensureRunning(hosts: AgentSessions.hosts)
         var entity = AgentSessionEntity(session); entity.project = project
+        subagents[entity.id] = session.tab.runningChildren
+        childProviders[entity.id] = session.tab.childProviders
         let state = normalized(state)
         tools[entity.id] = state == "working" ? toolName : nil
         details[entity.id] = state == "working" ? toolDetail : nil
@@ -79,6 +82,8 @@ final class SessionWorkingActivityController {
             let id = AgentSessionEntity(session).id
             if let step = session.tab.currentStep, !step.isEmpty { overviewSteps[id] = step } else { overviewSteps[id] = nil }
             if let model = session.tab.model, !model.isEmpty { overviewModels[id] = model } else { overviewModels[id] = nil }
+            subagents[id] = session.tab.runningChildren
+            childProviders[id] = session.tab.childProviders
         }
         sessionsByHost[host.id] = reports.map { input($0.entity, state: lockState($0.state), now: now) }
         let retained = Set(sessionsByHost.values.flatMap { $0.map(\.entry.id) })
@@ -90,6 +95,7 @@ final class SessionWorkingActivityController {
         overviewSteps = overviewSteps.filter { retained.contains($0.key) }
         overviewModels = overviewModels.filter { retained.contains($0.key) }
         subagents = subagents.filter { retained.contains($0.key) || chat?.session.entry.id == $0.key }
+        childProviders = childProviders.filter { retained.contains($0.key) || chat?.session.entry.id == $0.key }
         scheduleUpdate()
     }
 
@@ -102,6 +108,7 @@ final class SessionWorkingActivityController {
         overviewSteps = overviewSteps.filter { entities[$0.key] != nil || chat?.session.entry.id == $0.key }
         overviewModels = overviewModels.filter { entities[$0.key] != nil || chat?.session.entry.id == $0.key }
         subagents = subagents.filter { entities[$0.key] != nil || chat?.session.entry.id == $0.key }
+        childProviders = childProviders.filter { entities[$0.key] != nil || chat?.session.entry.id == $0.key }
         starts = starts.filter { entities[$0.key] != nil }
         states = states.filter { entities[$0.key] != nil }
         scheduleUpdate()
@@ -149,22 +156,27 @@ final class SessionWorkingActivityController {
     }
     private func input(_ entity: AgentSessionEntity, state: String, provider: String? = nil, now: Date) -> SessionWorkingActivityBuilder.Session {
         entities[entity.id] = entity
+        let reportedState = state
+        let workers = subagents[entity.id] ?? 0
+        if reportedState != "working" { tools[entity.id] = nil; details[entity.id] = nil }
+        let tool = tools[entity.id]
+        let ownStep = SessionActivityStep.format(tool: tool, detail: details[entity.id] ?? (tool == nil ? overviewSteps[entity.id] : nil), status: statusText(reportedState))
+        let presentation = SessionWorkingActivityBuilder.presentation(state: reportedState, step: ownStep, runningChildren: workers)
+        let state = presentation.state
         if states[entity.id] != state {
             // Title/tool updates must not restart a turn's timer. An idle pane
             // with no history is not evidence that an agent just finished.
             let fallback: Date = state == "idle" && states[entity.id] == nil ? .distantPast : now
-            starts[entity.id] = min(entity.lastChangedAt ?? fallback, now)
+            starts[entity.id] = reportedState == "idle" && workers > 0 ? now : min(entity.lastChangedAt ?? fallback, now)
             states[entity.id] = state
         }
-        if state != "working" { tools[entity.id] = nil; details[entity.id] = nil }
         let began = starts[entity.id] ?? now
-        let tool = tools[entity.id]
         return .init(entry: .init(id: entity.id, project: String((entity.project ?? entity.workspace).prefix(80)),
                                  provider: provider ?? entity.agent ?? "agent", tool: tool.map { String($0.prefix(60)) },
                                  computer: String(entity.computer.prefix(60)),
                                  model: overviewModels[entity.id].map { String($0.prefix(40)) },
-                                 step: SessionActivityStep.format(tool: tool, detail: details[entity.id] ?? (tool == nil ? overviewSteps[entity.id] : nil), status: statusText(state)),
-                                 subagents: subagents[entity.id] ?? 0, state: state, startedAt: began),
+                                 step: presentation.step, subagents: workers,
+                                 childProviders: childProviders[entity.id] ?? [], state: state, startedAt: began),
                      state: state, startedAt: began)
     }
 

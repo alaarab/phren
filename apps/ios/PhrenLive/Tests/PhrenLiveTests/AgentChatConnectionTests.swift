@@ -146,7 +146,8 @@ final class ChatRelaySSH: @unchecked Sendable {
         try LiveHost(name: "Chat fixture", address: "127.0.0.1", port: listener.localAddress!.port!, username: "fixture",
                      fingerprint: PhrenConnection.fingerprint(publicKey: String(openSSHPublicKey: NIOSSHPrivateKey(ed25519Key: hostKey).publicKey)))
     }
-    static func start(forwardPorts: [Int: Int] = [:], webPreviewHealth: String? = nil) async throws -> ChatRelaySSH {
+    static func start(forwardPorts: [Int: Int] = [:], webPreviewHealth: String? = nil,
+                      hookFixture: ChatRelayHookFixture? = nil) async throws -> ChatRelaySSH {
         let loop = MultiThreadedEventLoopGroup.singleton.next()
         let device = Curve25519.Signing.PrivateKey(), host = Curve25519.Signing.PrivateKey()
         let listener = try await ServerBootstrap(group: loop).childChannelInitializer { parent in
@@ -154,7 +155,8 @@ final class ChatRelaySSH: @unchecked Sendable {
                 try parent.pipeline.syncOperations.addHandler(NIOSSHHandler(role: .server(.init(hostKeys: [.init(ed25519Key: host)], userAuthDelegate: ChatRelayAuth(key: device))),
                 allocator: parent.allocator, inboundChildChannelInitializer: { child, type in
                     if case .session = type {
-                        return child.pipeline.addHandler(ChatRelayExec(ports: forwardPorts, webPreviewHealth: webPreviewHealth))
+                        return child.pipeline.addHandler(ChatRelayExec(ports: forwardPorts, webPreviewHealth: webPreviewHealth,
+                                                                        hookFixture: hookFixture))
                     }
                     // Match restrict keys: SSH forwarding never reaches private sockets or TCP.
                     return child.eventLoop.makeFailedFuture(LiveConnectionError.disconnected)
@@ -196,7 +198,10 @@ private final class ChatRelayExec: ChannelInboundHandler {
     typealias InboundIn = SSHChannelData
     let ports: [Int: Int]
     let webPreviewHealth: String?
-    init(ports: [Int: Int], webPreviewHealth: String?) { self.ports = ports; self.webPreviewHealth = webPreviewHealth }
+    let hookFixture: ChatRelayHookFixture?
+    init(ports: [Int: Int], webPreviewHealth: String?, hookFixture: ChatRelayHookFixture?) {
+        self.ports = ports; self.webPreviewHealth = webPreviewHealth; self.hookFixture = hookFixture
+    }
     func userInboundEventTriggered(context: ChannelHandlerContext, event: Any) {
         guard let command = event as? SSHChannelRequestEvent.ExecRequest else {
             context.triggerUserOutboundEvent(ChannelFailureEvent(), promise: nil); return
@@ -204,6 +209,12 @@ private final class ChatRelayExec: ChannelInboundHandler {
         let child = context.channel
         let port: Int?
         if command.command == "phren-hook v1 pipe" {
+            if let hookFixture {
+                child.pipeline.addHandler(ChatRelayHook(fixture: hookFixture)).whenSuccess {
+                    child.triggerUserOutboundEvent(ChannelSuccessEvent(), promise: nil)
+                }
+                return
+            }
             if let webPreviewHealth {
                 child.pipeline.addHandler(ChatRelayHealth(capability: webPreviewHealth)).whenSuccess {
                     child.triggerUserOutboundEvent(ChannelSuccessEvent(), promise: nil)
@@ -231,6 +242,64 @@ private final class ChatRelayExec: ChannelInboundHandler {
             case .failure: child.close(promise: nil)
             }
         }
+    }
+}
+
+final class ChatRelayHookFixture: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recorded: [String] = []
+    let computerID: UUID
+    let computerName: String
+    var requests: [String] { lock.withLock { recorded } }
+
+    init(computerID: UUID = UUID(uuidString: "c1000000-0000-0000-0000-000000000003")!,
+         computerName: String = "Desk") {
+        self.computerID = computerID; self.computerName = computerName
+    }
+
+    fileprivate func response(to request: String) -> String {
+        lock.withLock { recorded.append(request) }
+        let line = request.components(separatedBy: "\r\n").first ?? ""
+        if line.hasPrefix("GET /v1/health") {
+            return #"{"product":"phren-hook","protocol":1,"computer":{"id":"\#(computerID.uuidString)","name":"\#(computerName)"}}"#
+        }
+        if line.hasPrefix("GET /v1/workspaces/panes") {
+            return #"{"kind":"herdr","groupId":"w9","childId":"w9:t1","panes":[{"id":"w9:p1","label":"1","agent":"codex","agentStatus":"working","sessionId":"00000000-0000-0000-0000-000000000042","cwd":"/work/project"}]}"#
+        }
+        if line.hasPrefix("GET /v1/subagents/transcript") {
+            return #"{"type":"backlog","source":"codex","session":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","entries":[],"startLine":0,"totalLines":0,"hasMore":false}"#
+        }
+        if line.hasPrefix("GET /v1/transcripts/history") {
+            return #"{"type":"older","source":"codex","session":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","entries":[],"startLine":0,"totalLines":0,"hasMore":false}"#
+        }
+        if line.hasPrefix("POST /v1/diff") {
+            return #"{"root":"/work/project","launchPath":"/work/project","branch":"main","files":[]}"#
+        }
+        return #"{"error":"unexpected fixture route"}"#
+    }
+}
+
+private final class ChatRelayHook: ChannelInboundHandler {
+    typealias InboundIn = SSHChannelData
+    let fixture: ChatRelayHookFixture
+    var received = ""
+    var answered = false
+    init(fixture: ChatRelayHookFixture) { self.fixture = fixture }
+    func channelRead(context: ChannelHandlerContext, data: NIOAny) {
+        guard !answered, case .byteBuffer(let bytes) = unwrapInboundIn(data).data else { return }
+        received += String(decoding: bytes.readableBytesView, as: UTF8.self)
+        guard let boundary = received.range(of: "\r\n\r\n") else { return }
+        let headers = String(received[..<boundary.lowerBound])
+        let length = headers.components(separatedBy: "\r\n").compactMap { line -> Int? in
+            let fields = line.split(separator: ":", maxSplits: 1)
+            return fields.count == 2 && fields[0].lowercased() == "content-length"
+                ? Int(String(fields[1]).trimmingCharacters(in: .whitespaces)) : nil
+        }.first ?? 0
+        guard received[boundary.upperBound...].utf8.count >= length else { return }
+        answered = true
+        let body = fixture.response(to: received)
+        let response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n" + body
+        context.writeAndFlush(NIOAny(SSHChannelData(type: .channel, data: .byteBuffer(ByteBuffer(string: response)))), promise: nil)
     }
 }
 

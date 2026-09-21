@@ -21,6 +21,10 @@ enum UITestFixtures {
         UUID(uuidString: "A1000000-0000-0000-0000-000000000001")!,
         UUID(uuidString: "A1000000-0000-0000-0000-000000000002")!,
     ]
+    private static let hookIDs = [
+        UUID(uuidString: "C1000000-0000-0000-0000-000000000001")!,
+        UUID(uuidString: "C1000000-0000-0000-0000-000000000002")!,
+    ]
     private static let preferencesKey = "sessions.live.preferences.v1"
 
     static func bootstrap() async throws -> Bootstrap {
@@ -79,7 +83,7 @@ enum UITestFixtures {
             } else if tour {
                 try await populateTour(store)
             } else {
-            try await store.write("demo/FINDINGS.md", content: "# Findings\n\n- [pattern] Cache repeated requests for offline use\n- [decision] Connect the phone graph to desktop memory\n", blobSha: nil)
+            try await store.write("demo/FINDINGS.md", content: "# Findings\n\n- [pattern] Cache repeated requests for offline use\n- [pattern] Retry sync after reconnecting\n- [decision] Connect the phone graph to desktop memory\n", blobSha: nil)
             try await store.write("demo/skills/audit.md", content: SkillFile.template(name: "audit", description: "Review the project", instructions: "Run the checks."), blobSha: nil)
             }
             if arguments.contains("--project-skills-fixture") {
@@ -117,6 +121,7 @@ enum UITestFixtures {
                 if arguments.contains("--all-sessions-fixture") {
                     let remote = try LiveHost(id: hostIDs[1], name: trailer ? "laptop" : tour ? "linuxbox" : "Test Linux",
                                              address: trailer ? "laptop" : tour ? "linuxbox" : "remote.fixture.invalid", username: tour ? "sam" : "fixture",
+                                             hookComputerID: hookIDs[1],
                                              fingerprint: "SHA256:" + String(repeating: "B", count: 43))
                     defaults.set(try LiveSessionPreferences.saving(remote, in: defaults.data(forKey: preferencesKey)!),
                                  forKey: preferencesKey)
@@ -162,10 +167,12 @@ enum UITestFixtures {
         let tour = arguments.contains("--store-tour-fixture") || trailer
         if arguments.contains("--schedules-fixture") {
             return try LiveHost(id: hostIDs[0], name: "Desk", address: "desk.example", username: "sam",
+                                hookComputerID: hookIDs[0],
                                 fingerprint: "SHA256:" + String(repeating: "A", count: 43))
         }
         return try LiveHost(id: hostIDs[0], name: trailer ? "studio" : tour ? "Mac mini" : "Test Mac", address: trailer ? "studio" : tour ? "mini" : "fixture.invalid",
-                            username: tour ? "ala" : "fixture", fingerprint: "SHA256:" + String(repeating: "A", count: 43))
+                            username: tour ? "sam" : "fixture", hookComputerID: hookIDs[0],
+                            fingerprint: "SHA256:" + String(repeating: "A", count: 43))
     }
 
     static let demoSchedules = """

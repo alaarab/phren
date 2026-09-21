@@ -1,3 +1,5 @@
+import { moduleEnabled, moduleSnapshot } from "../modules/runtime.js";
+import { skillEnabled, reconcileStarterSkills, starterInstructions } from "../modules/provision.js";
 /**
  * Governance files, root file migration, verification, starter templates, bootstrap.
  */
@@ -257,6 +259,7 @@ function ensureGlobalStarterAssets(phrenPath: string): string[] {
   fs.mkdirSync(targetSkillsDir, { recursive: true });
   if (fs.existsSync(starterSkillsDir)) {
     for (const entry of fs.readdirSync(starterSkillsDir, { withFileTypes: true })) {
+      if (!skillEnabled(phrenPath, entry.name)) continue;
       const source = path.join(starterSkillsDir, entry.name);
       const target = path.join(targetSkillsDir, entry.name);
       if (entry.isFile() && entry.name.endsWith(".md")) {
@@ -356,13 +359,12 @@ function ensureGeneratedSkillArtifacts(phrenPath: string, preferredHome: string)
   }
 
   const skillMdPath = path.join(phrenPath, "phren.SKILL.md");
-  if (!fs.existsSync(skillMdPath)) {
-    try {
-      writeSkillMd(phrenPath);
-      if (fs.existsSync(skillMdPath)) created.push("phren.SKILL.md");
-    } catch (err: unknown) {
-      debugLog(`ensureGeneratedSkillArtifacts: writeSkillMd failed: ${errorMessage(err)}`);
-    }
+  const hadSkillMd = fs.existsSync(skillMdPath);
+  try {
+    writeSkillMd(phrenPath);
+    if (!hadSkillMd && fs.existsSync(skillMdPath)) created.push("phren.SKILL.md");
+  } catch (err: unknown) {
+    debugLog(`ensureGeneratedSkillArtifacts: writeSkillMd failed: ${errorMessage(err)}`);
   }
 
   return created;
@@ -413,6 +415,8 @@ export function repairPreexistingInstall(
   // self-heal path resolves from stored preferences.
   const caps = opts?.caps ?? resolveManagementCapabilities(phrenPath);
   const preset = opts?.preset ?? getManagementPreset(phrenPath);
+  moduleSnapshot(phrenPath);
+  reconcileStarterSkills(phrenPath, STARTER_DIR);
   const createdGovernanceAssets = ensureGovernanceFiles(phrenPath);
   const migratedInstructions = migrateStoreAgentInstructions(phrenPath);
   const createdGlobalAssets = [...migratedInstructions, ...ensureGlobalStarterAssets(phrenPath)];
@@ -613,6 +617,7 @@ export function applyStarterTemplateUpdates(phrenPath: string): string[] {
   if (fs.existsSync(starterSkillsDir)) {
     fs.mkdirSync(targetSkillsDir, { recursive: true });
     for (const f of fs.readdirSync(starterSkillsDir, { withFileTypes: true })) {
+      if (!skillEnabled(phrenPath, f.name)) continue;
       const src = path.join(starterSkillsDir, f.name);
       const dest = path.join(targetSkillsDir, f.name);
       if (f.isFile() && f.name.endsWith(".md")) {
@@ -726,12 +731,14 @@ export function applyTemplate(projectDir: string, templateName: string, projectN
   function copyTemplateDir(srcDir: string, destDir: string) {
     fs.mkdirSync(destDir, { recursive: true });
     for (const entry of fs.readdirSync(srcDir, { withFileTypes: true })) {
+      if (entry.name === TASKS_FILENAME && !moduleEnabled(path.dirname(projectDir), "tasks")) continue;
       const src = path.join(srcDir, entry.name);
       const dest = path.join(destDir, entry.name);
       if (entry.isDirectory()) {
         copyTemplateDir(src, dest);
       } else {
         let content = fs.readFileSync(src, "utf8");
+        if (entry.name === "AGENTS.md") content = starterInstructions(path.dirname(projectDir), content);
         content = content.replace(/\{\{project\}\}/g, projectName);
         content = content.replace(/\{\{date\}\}/g, new Date().toISOString().slice(0, 10));
         atomicWriteText(dest, content);
@@ -1179,7 +1186,7 @@ export function ensureProjectScaffold(
     );
   }
 
-  if (!fs.existsSync(path.join(projectDir, TASKS_FILENAME))) {
+  if (moduleEnabled(path.dirname(projectDir), "tasks") && !fs.existsSync(path.join(projectDir, TASKS_FILENAME))) {
     atomicWriteText(
       path.join(projectDir, TASKS_FILENAME),
       `# ${projectName} tasks\n\n## Active\n\n## Queue\n\n## Done\n`
@@ -1417,7 +1424,7 @@ export function bootstrapFromExisting(
       `# ${projectName} FINDINGS\n\n<!-- Bootstrapped from ${sourceRoot} -->\n`
     );
   }
-  if (!fs.existsSync(path.join(projDir, TASKS_FILENAME))) {
+  if (moduleEnabled(phrenPath, "tasks") && !fs.existsSync(path.join(projDir, TASKS_FILENAME))) {
     atomicWriteText(
       path.join(projDir, TASKS_FILENAME),
       `# ${projectName} tasks\n\n## Active\n\n## Queue\n\n## Done\n`

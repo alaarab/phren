@@ -60,6 +60,11 @@ final class AccountUsageCache {
             ]
             accounts.append(["source": "opencode", "updatedAt": now.ISO8601Format(), "windows": [],
                              "spend": ["amountUSD": 4.39, "period": "rolling_7_days"]])
+            accounts.append(["source": "opencode-go", "updatedAt": now.ISO8601Format(), "windows": [
+                ["id": "opencode-go:kimi_k3:5h", "name": "opencode-go/kimi-k3 · 5h", "usedUSD": 1.2, "limitUSD": 2.0, "usedPercent": 60.0],
+                ["id": "opencode-go:kimi_k3:7d", "name": "opencode-go/kimi-k3 · 7d", "usedUSD": 4.8, "limitUSD": 5.0, "usedPercent": 96.0],
+                ["id": "opencode-go:kimi_k3:30d", "name": "opencode-go/kimi-k3 · 30d", "usedUSD": 9.1, "limitUSD": 10.0, "usedPercent": 91.0]
+            ], "spend": ["amountUSD": 9.1, "period": "rolling_30_days"]])
             accounts.append(["source": "openrouter", "accountId": String(repeating: "a", count: 64),
                              "updatedAt": now.ISO8601Format(), "windows": [],
                              "spend": ["amountUSD": 5.08, "period": "calendar_week"]])

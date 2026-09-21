@@ -4,9 +4,8 @@ struct ChatDictationView: View {
     let insert: (String) -> Void
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var phase
-    @State private var transcriber = SpeechTranscriber()
+    @State private var transcriber = DictationSession(recognizer: SpeechTranscriber(), transform: SpeechSettings.apply)
     @State private var text = ""
-    @State private var prefix = ""
     @State private var error: String?
     @State private var starting = false
     @State private var permissionTask: Task<Void, Never>?
@@ -26,8 +25,13 @@ struct ChatDictationView: View {
                                     error = "Allow microphone and speech recognition in iPhone Settings to dictate."; return
                                 }
                                 guard !Task.isCancelled, phase == .active else { return }
-                                prefix = text + (text.isEmpty ? "" : " ")
-                                do { try transcriber.start(); error = nil } catch { self.error = error.localizedDescription }
+                                let draft = $text
+                                let failure = $error
+                                transcriber.readDraft = { draft.wrappedValue }
+                                transcriber.onDraftChange = { draft.wrappedValue = $0 }
+                                transcriber.onFailure = { failure.wrappedValue = $0 }
+                                error = nil
+                                transcriber.start(draft: text)
                             }
                         }
                     }.disabled(starting)
@@ -38,12 +42,11 @@ struct ChatDictationView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Add to draft") { transcriber.stop(); insert(SpeechSettings.apply(text)); dismiss() }
+                    Button("Add to draft") { transcriber.stop(); insert(text); dismiss() }
                         .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
         }
-        .onChange(of: transcriber.transcript) { _, value in if !value.isEmpty { text = prefix + value } }
         .onChange(of: phase) { _, phase in if phase != .active { transcriber.stop() } }
         .onDisappear { permissionTask?.cancel(); transcriber.stop() }
     }

@@ -1,3 +1,5 @@
+import { moduleEnabled } from "../modules/runtime.js";
+import { disabledHint } from "../modules/registry.js";
 import * as fs from "fs";
 import * as path from "path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -281,6 +283,9 @@ async function handleSetConfig(
   },
 ) {
   const { phrenPath } = ctx;
+  if (!moduleEnabled(phrenPath, "tasks", ctx.profile) && (domain === "taskMode" || settings.scope === "tasks" || "taskMode" in settings || "proactivityTask" in settings)) {
+    return mcpResponse({ ok: false, error: disabledHint("tasks"), errorCode: "UNAVAILABLE" });
+  }
   switch (domain) {
 
     // ── proactivity ───────────────────────────────────────────────

@@ -86,6 +86,15 @@ final class SessionOverviewMonitor {
         ownedHosts = hosts
         ownedRun = Task { [weak self] in await self?.run(hosts: hosts) }
     }
+    func allows(_ feature: LiveCapabilities.Feature, on host: LiveHost, fallback: LiveCapabilities? = nil) -> Bool {
+        let current = computers.first { $0.host.id == host.id }?.monitor.snapshot
+        return (current?.capabilities ?? fallback)?.allows(feature) ?? true
+    }
+
+    func allowsSchedules() -> Bool {
+        computers.isEmpty || computers.contains { ($0.monitor.snapshot?.capabilities?.allows(.schedules)) ?? true }
+    }
+
     func stopRunning() {
         ownedRun?.cancel(); ownedRun = nil; ownedHosts = []
     }

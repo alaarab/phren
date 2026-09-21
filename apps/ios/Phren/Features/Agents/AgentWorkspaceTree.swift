@@ -167,7 +167,7 @@ private struct DrawerAgentTreeRow: Identifiable {
     let agent: AgentChild
     let depth: Int
     let isLastSibling: Bool
-    var id: String { agent.id }
+    var id: String { agent.navigationID }
 
     static func flatten(_ agents: [AgentChild]) -> [Self] {
         let childRows = AgentChild.runningRows(agents)
@@ -197,6 +197,7 @@ private struct AgentWorkspaceSessionRow: View {
     let openSessionChild: (LiveAgentSession, AgentChatTarget, AgentChild) -> Void
     @State private var snapshotChildren: [AgentChild] = []
     @State private var snapshotTarget: AgentChatTarget?
+    @AppStorage("sessions.live.preferences.v1") private var hostData = Data()
 
     private var children: [AgentChild] { currentChildren ?? snapshotChildren }
 
@@ -217,10 +218,11 @@ private struct AgentWorkspaceSessionRow: View {
                         openSessionChild(item, snapshotTarget, row.agent)
                     }
                 } label: {
-                    DrawerChildAgentLabel(row: row)
+                    DrawerChildAgentLabel(row: row, unavailable: unavailable(row.agent), unknown: unknown(row.agent),
+                                          starting: row.agent.computer != nil && row.agent.remote == nil)
                 }
                 .buttonStyle(.plain)
-                .accessibilityIdentifier("drawer-child-agent:\(row.agent.id)")
+                .accessibilityIdentifier("drawer-child-agent:\(row.agent.computer == nil ? row.agent.id : row.agent.navigationID)")
             }
         }
         .task(id: RefreshID(session: item.id, isCurrent: currentChildren != nil)) {
@@ -235,10 +237,28 @@ private struct AgentWorkspaceSessionRow: View {
             }
         }
     }
+
+    private func unknown(_ agent: AgentChild) -> Bool {
+        guard let computer = agent.computer else { return false }
+        return !((try? LiveSessionPreferences.read(hostData))?.hosts.contains {
+            $0.hookComputerID == computer.id && $0.fingerprint != nil
+        } ?? false)
+    }
+
+    private func unavailable(_ agent: AgentChild) -> Bool {
+        guard let computer = agent.computer,
+              let host = (try? LiveSessionPreferences.read(hostData))?.hosts.first(where: { $0.hookComputerID == computer.id }) else { return false }
+        return SessionOverviewMonitor.shared.computers.first(where: { $0.host.id == host.id }).map {
+            $0.monitor.message != nil || ($0.monitor.snapshot != nil && !$0.monitor.isFresh(at: .now))
+        } ?? false
+    }
 }
 
 private struct DrawerChildAgentLabel: View {
     let row: DrawerAgentTreeRow
+    let unavailable: Bool
+    let unknown: Bool
+    let starting: Bool
 
     private var providerName: String {
         switch row.agent.provider.lowercased() {
@@ -263,6 +283,9 @@ private struct DrawerChildAgentLabel: View {
                     Text(row.agent.name).font(.subheadline).lineLimit(1)
                     Text(metadata).font(.system(.caption, design: .monospaced))
                         .foregroundStyle(PhrenTheme.sessionMeta).lineLimit(1).truncationMode(.middle)
+                    if let computer = row.agent.computer {
+                        AgentComputerChip(computer: computer, unavailable: unavailable, unknown: unknown, starting: starting)
+                    }
                 }
                 Spacer(minLength: 8)
             }
@@ -272,7 +295,16 @@ private struct DrawerChildAgentLabel: View {
         .padding(.horizontal, 12)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(row.agent.name), \(metadata)")
+        .accessibilityLabel(rowLabel)
+    }
+
+    private var rowLabel: String {
+        var parts: [String] = [row.agent.name, metadata]
+        if let computer = row.agent.computer { parts.append(computer.name) }
+        if unavailable { parts.append("unavailable") }
+        if unknown { parts.append("add computer") }
+        if starting { parts.append("starting") }
+        return parts.joined(separator: ", ")
     }
 
     private var treeGuide: some View {

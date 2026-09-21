@@ -11,6 +11,7 @@ struct ChatAgentCard: View {
     @Environment(\.openToolOutput) private var openOutput
     @Environment(\.chatChildAgents) private var childAgents
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage("sessions.live.preferences.v1") private var hostData = Data()
     @State private var showPrompt = false
 
     /// The child conversation this card launched, once the computer has
@@ -75,9 +76,10 @@ struct ChatAgentCard: View {
                 Text(agent.background ? "Working in the background…" : "Working…")
                     .font(.caption).foregroundStyle(PhrenTheme.textMuted)
             }
-            if let child, let session = childAgents?.session {
+            if let child, let session = childAgents?.session,
+               let navigation = navigation(agent: child.agent, session: session, target: child.target) {
                 NavigationLink {
-                    ChildAgentTranscriptView(session: session, target: child.target, agent: child.agent)
+                    AgentWorkDestinationView(navigation: navigation)
                 } label: {
                     Label(child.agent.state == .running ? "Follow transcript" : "Open transcript", systemImage: "text.bubble")
                         .font(.caption.weight(.semibold)).foregroundStyle(PhrenTheme.accent)
@@ -107,5 +109,16 @@ struct ChatAgentCard: View {
         }
         .toolCard()
         .toolCardMarker("chat-agent-card:\(entry.callID)", label: "\(agent.name), \(agent.description), \(stateLabel)")
+    }
+
+    private func navigation(agent: AgentChild, session: LiveAgentSession,
+                            target: AgentChatTarget) -> AgentWorkNavigation? {
+        let hosts = (try? LiveSessionPreferences.read(hostData))?.hosts ?? []
+        let offline = Set(SessionOverviewMonitor.shared.computers.compactMap { computer in
+            computer.monitor.message != nil || (computer.monitor.snapshot != nil && !computer.monitor.isFresh(at: .now))
+                ? computer.host.id : nil
+        })
+        return AgentWorkNavigation.resolve(agent: agent, session: session, target: target,
+                                           hosts: hosts, offlineHostIDs: offline)
     }
 }

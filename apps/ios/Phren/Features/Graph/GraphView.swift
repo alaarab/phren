@@ -322,8 +322,7 @@ struct GraphView: View {
                 Button {
                     query = ""
                     searchFocused = false
-                    command = GraphCommand(action: .focus(node.id))
-                    selection = GraphNodeRef(node: node)
+                    select(node)
                 } label: {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(node.fullLabel).lineLimit(3).foregroundStyle(.primary)
@@ -344,6 +343,9 @@ struct GraphView: View {
 
     private func handleGraphAction(_ action: GraphAction) {
         switch action {
+        case .select(let id):
+            guard let node = visible?.nodes.first(where: { $0.id == id }) else { return }
+            select(node)
         case .focus(let id):
             focus(on: id)
         case .openProject(let id):
@@ -364,6 +366,11 @@ struct GraphView: View {
         case .close:
             selection = nil
         }
+    }
+
+    private func select(_ node: GraphPayload.Node) {
+        selection = GraphNodeRef(node: node)
+        command = GraphCommand(action: .focus(node.id))
     }
 
     /// Findings and tasks carry their markdown line back to the store: findings

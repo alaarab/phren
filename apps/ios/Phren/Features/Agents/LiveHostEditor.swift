@@ -174,7 +174,8 @@ struct LiveHostEditor: View {
     private func save() {
         do {
             let host = try LiveHost(id: id, name: name, address: address, port: Int(port) ?? 0,
-                                   username: username, fingerprint: existing?.fingerprint,
+                                   username: username, hookComputerID: existing?.hookComputerID,
+                                   fingerprint: existing?.fingerprint,
                                    herdrSession: herdrSession.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : herdrSession.trimmingCharacters(in: .whitespacesAndNewlines),
                                    color: selectedColor ?? existing?.color)
             data = try LiveSessionPreferences.saving(host, in: data)

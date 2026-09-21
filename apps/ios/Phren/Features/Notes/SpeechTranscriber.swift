@@ -28,14 +28,11 @@ private enum AudioLevelMeter {
 /// so a captured thought never depends on connectivity when the device
 /// supports it; falls back to Apple's server-based recognition otherwise.
 ///
-/// One instance == one recording *session* (a VoiceCaptureView owns it for
-/// its lifetime), but `start()`/`stop()` can toggle multiple times within
-/// that session — each `start()` begins a fresh segment and resets
-/// `transcript`; the view is responsible for stitching segments together so
-/// edits made between takes survive.
+/// `DictationSession` owns text and segment transitions. This adapter owns
+/// the audio resources and fences callbacks before cancellation can reenter.
 @MainActor
 @Observable
-final class SpeechTranscriber {
+final class SpeechTranscriber: DictationRecognizing {
     enum PermissionState {
         case notDetermined
         case authorized
@@ -53,17 +50,6 @@ final class SpeechTranscriber {
         }
     }
 
-    /// Live partial (or final) transcript of the *current* segment only.
-    /// A final result can come back shorter than the last partial (or empty
-    /// after a pause); `bestTranscript` keeps the longest non-empty text the
-    /// segment produced so nothing the person heard on screen is lost.
-    private(set) var transcript = ""
-    private(set) var bestTranscript = ""
-    /// Continuous dictation restarts a segment right after each pause; leave
-    /// the audio session active between them so the restart cannot fail on
-    /// re-activation. One-shot capture keeps the default and releases it.
-    var keepsSessionBetweenSegments = false
-    private(set) var isRecording = false
     /// Normalized 0...1 input level for the mic button's pulse.
     private(set) var audioLevel: Float = 0
 
@@ -71,6 +57,11 @@ final class SpeechTranscriber {
     private let audioEngine = AVAudioEngine()
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
+    private var segmentID: UUID?
+    private var tapInstalled = false
+    private var audioSessionActive = false
+    private var segmentTimer: Task<Void, Never>?
+    private var interruptionObserver: NSObjectProtocol?
 
     init(locale: Locale = SpeechSettings.locale) {
         recognizer = SFSpeechRecognizer(locale: locale) ?? SFSpeechRecognizer()
@@ -112,85 +103,103 @@ final class SpeechTranscriber {
         return micGranted ? .authorized : .denied
     }
 
-    /// Starts (or restarts) a recording segment. Throws `.recognizerUnavailable`
-    /// when the locale isn't supported or recognition is momentarily down —
-    /// callers should render that as guidance, not a silent no-op.
-    func start() throws {
+    func startSegment(id: UUID, receive: @escaping @MainActor (DictationRecognitionEvent) -> Void) throws {
+        stopSegment(keepingAudioSession: true)
         guard let recognizer, recognizer.isAvailable else {
             throw TranscriberError.recognizerUnavailable
         }
+        segmentID = id
 
-        stopEngine(deactivateSession: false)
-
-        let recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
-        recognitionRequest.shouldReportPartialResults = true
-        if recognizer.supportsOnDeviceRecognition {
-            recognitionRequest.requiresOnDeviceRecognition = true
-        }
-        request = recognitionRequest
-
-        let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.record, mode: .measurement, options: [.duckOthers])
-        try session.setActive(true, options: .notifyOthersOnDeactivation)
-
-        let inputNode = audioEngine.inputNode
-        let format = inputNode.outputFormat(forBus: 0)
-        inputNode.removeTap(onBus: 0)
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-            recognitionRequest.append(buffer)
-            let level = AudioLevelMeter.level(from: buffer)
-            Task { @MainActor in
-                self?.audioLevel = level
+        do {
+            let recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
+            recognitionRequest.shouldReportPartialResults = true
+            if recognizer.supportsOnDeviceRecognition {
+                recognitionRequest.requiresOnDeviceRecognition = true
             }
-        }
+            request = recognitionRequest
 
-        audioEngine.prepare()
-        try audioEngine.start()
+            let session = AVAudioSession.sharedInstance()
+            if !audioSessionActive {
+                try session.setCategory(.record, mode: .measurement, options: [.duckOthers])
+                try session.setActive(true, options: .notifyOthersOnDeactivation)
+                audioSessionActive = true
+            }
 
-        transcript = ""
-        bestTranscript = ""
-        isRecording = true
+            let inputNode = audioEngine.inputNode
+            let format = inputNode.outputFormat(forBus: 0)
+            guard format.sampleRate > 0, format.channelCount > 0 else {
+                throw TranscriberError.recognizerUnavailable
+            }
+            inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
+                recognitionRequest.append(buffer)
+                let level = AudioLevelMeter.level(from: buffer)
+                Task { @MainActor in
+                    guard let self, self.segmentID == id else { return }
+                    self.audioLevel = level
+                }
+            }
+            tapInstalled = true
+            audioEngine.prepare()
+            try audioEngine.start()
 
-        task = recognizer.recognitionTask(with: recognitionRequest) { [weak self] result, error in
-            Task { @MainActor in
-                guard let self else { return }
-                if let result {
-                    self.transcript = result.bestTranscription.formattedString
-                    if self.transcript.count >= self.bestTranscript.count || result.isFinal && !self.transcript.isEmpty {
-                        self.bestTranscript = self.transcript
+            task = recognizer.recognitionTask(with: recognitionRequest) { [weak self] result, error in
+                Task { @MainActor in
+                    guard let self, self.segmentID == id else { return }
+                    if let result {
+                        receive(.partial(result.bestTranscription.formattedString))
+                    }
+                    guard self.segmentID == id else { return }
+                    if let error {
+                        receive(.failed(error.localizedDescription))
+                    } else if let result, result.isFinal {
+                        receive(.finished(result.bestTranscription.formattedString))
                     }
                 }
-                // A final result or an error both end this segment. Keep the
-                // audio session active: the owner restarts a segment straight
-                // away after a pause, and re-activating the session between
-                // segments is what made restarts fail. `stop()` deactivates.
-                if error != nil || (result?.isFinal ?? false) {
-                    self.stopEngine(deactivateSession: !self.keepsSessionBetweenSegments)
+            }
+            // Roll over before the server's one-minute request limit, even
+            // when it produces neither a final result nor an error.
+            segmentTimer = Task { [weak self] in
+                do { try await Task.sleep(for: .seconds(55)) } catch { return }
+                guard let self, self.segmentID == id else { return }
+                receive(.finished(""))
+            }
+            interruptionObserver = NotificationCenter.default.addObserver(
+                forName: AVAudioSession.interruptionNotification, object: session, queue: .main
+            ) { [weak self] notification in
+                guard let type = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+                      type == AVAudioSession.InterruptionType.began.rawValue else { return }
+                Task { @MainActor in
+                    guard let self, self.segmentID == id else { return }
+                    self.audioSessionActive = false
+                    receive(.failed("The microphone was interrupted."))
                 }
             }
+        } catch {
+            stopSegment(keepingAudioSession: false)
+            throw error
         }
     }
 
-    /// Stops the current segment. Safe to call repeatedly (e.g. from
-    /// `onDisappear`, which must never leave the mic session active once the
-    /// sheet is gone — including when backgrounded mid-recording).
-    func stop() {
-        stopEngine(deactivateSession: true)
-    }
-
-    private func stopEngine(deactivateSession: Bool) {
-        if audioEngine.isRunning {
-            audioEngine.stop()
+    func stopSegment(keepingAudioSession: Bool) {
+        // Cancelled requests can still call back after the next one starts.
+        segmentID = nil
+        segmentTimer?.cancel()
+        segmentTimer = nil
+        if let interruptionObserver { NotificationCenter.default.removeObserver(interruptionObserver) }
+        interruptionObserver = nil
+        if audioEngine.isRunning { audioEngine.stop() }
+        if tapInstalled {
             audioEngine.inputNode.removeTap(onBus: 0)
+            tapInstalled = false
         }
         request?.endAudio()
         request = nil
         task?.cancel()
         task = nil
-        isRecording = false
         audioLevel = 0
-        if deactivateSession {
+        if !keepingAudioSession, audioSessionActive {
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            audioSessionActive = false
         }
     }
 }

@@ -96,6 +96,8 @@ struct SessionWorkingActivityAttributes: ActivityAttributes {
         let step: String?
         /// Running subagents in this session; 0 when none.
         let subagents: Int
+        /// Distinct providers among the running children, for the leading glyph stack.
+        let childProviders: [String]
         /// "working", "waiting" or "idle"; the lock screen colours the step by it.
         let state: String?
         /// When the agent's current turn or session began, so each row has its
@@ -103,13 +105,13 @@ struct SessionWorkingActivityAttributes: ActivityAttributes {
         let startedAt: Date?
 
         init(id: String, project: String, provider: String, tool: String? = nil, computer: String,
-             model: String? = nil, step: String? = nil, subagents: Int = 0, state: String? = nil,
+             model: String? = nil, step: String? = nil, subagents: Int = 0, childProviders: [String] = [], state: String? = nil,
              startedAt: Date? = nil) {
             self.id = id; self.project = project; self.provider = provider; self.tool = tool
             self.computer = computer; self.model = model; self.step = step; self.subagents = subagents
-            self.state = state; self.startedAt = startedAt
+            self.childProviders = childProviders; self.state = state; self.startedAt = startedAt
         }
-        private enum CodingKeys: String, CodingKey { case id, project, provider, tool, computer, model, step, subagents, state, startedAt }
+        private enum CodingKeys: String, CodingKey { case id, project, provider, tool, computer, model, step, subagents, childProviders, state, startedAt }
         /// Decode activities created before the step/subagent/model fields too,
         /// so an upgrade does not make an already-live activity undecodable.
         init(from decoder: Decoder) throws {
@@ -122,6 +124,7 @@ struct SessionWorkingActivityAttributes: ActivityAttributes {
             model = try values.decodeIfPresent(String.self, forKey: .model)
             step = try values.decodeIfPresent(String.self, forKey: .step)
             subagents = try values.decodeIfPresent(Int.self, forKey: .subagents) ?? 0
+            childProviders = try values.decodeIfPresent([String].self, forKey: .childProviders) ?? []
             state = try values.decodeIfPresent(String.self, forKey: .state)
             startedAt = try values.decodeIfPresent(Date.self, forKey: .startedAt)
         }
@@ -178,6 +181,16 @@ enum SessionWorkingActivityBuilder {
         let entry: SessionWorkingActivityAttributes.Entry
         let state: String
         let startedAt: Date
+    }
+    struct Presentation: Equatable {
+        let state: String
+        let step: String?
+    }
+    /// A session remains active while its workers run. The parent's own step
+    /// wins when it is working too.
+    static func presentation(state: String, step: String?, runningChildren: Int) -> Presentation {
+        guard state == "idle", runningChildren > 0 else { return .init(state: state, step: step) }
+        return .init(state: "working", step: "\(runningChildren) \(runningChildren == 1 ? "worker" : "workers")")
     }
     static func build(_ sessions: [Session], pinnedID: String? = nil, now: Date) -> SessionWorkingActivityAttributes.ContentState {
         let unique = Dictionary(sessions.map { ($0.entry.id, $0) }, uniquingKeysWith: { _, latest in latest }).values

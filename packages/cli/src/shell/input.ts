@@ -37,7 +37,7 @@ import { handleGovernMemories } from "../cli/govern.js";
 import { runSearch } from "../cli/search.js";
 import { consolidateProjectFindings } from "../governance/policy.js";
 import { style } from "./render.js";
-import { SUB_VIEWS, TAB_ICONS, type DoctorResultLike, type ShellDeps, type ShellView } from "./types.js";
+import { SUB_VIEWS, enabledSubViews, TAB_ICONS, type DoctorResultLike, type ShellDeps, type ShellView } from "./types.js";
 import { getProjectSkills, getHookEntries, writeInstallPreferences } from "./view.js";
 import { resolveProjectStorePath } from "../cli/namespaces-utils.js";
 import { openInEditor } from "../editor/launch.js";
@@ -852,14 +852,16 @@ export async function handleNavigateKey(host: NavigationHost, rawKey: string): P
 
 function nextTab(host: NavigationHost): void {
   if (host.state.view === "Projects" || host.state.view === "Health" || host.state.view === "Graph") return;
-  const idx = SUB_VIEWS.indexOf(host.state.view as typeof SUB_VIEWS[number]);
-  const next = SUB_VIEWS[(idx + 1) % SUB_VIEWS.length];
+  const views = enabledSubViews(host.phrenPath, host.profile);
+  const idx = views.indexOf(host.state.view as typeof SUB_VIEWS[number]);
+  const next = views[(idx + 1) % views.length];
   if (next) { host.setView(next); host.setMessage(`  ${TAB_ICONS[next]} ${next}`); }
 }
 
 function prevTab(host: NavigationHost): void {
   if (host.state.view === "Projects" || host.state.view === "Health" || host.state.view === "Graph") return;
-  const idx = SUB_VIEWS.indexOf(host.state.view as typeof SUB_VIEWS[number]);
-  const prev = SUB_VIEWS[(idx - 1 + SUB_VIEWS.length) % SUB_VIEWS.length];
+  const views = enabledSubViews(host.phrenPath, host.profile);
+  const idx = views.indexOf(host.state.view as typeof SUB_VIEWS[number]);
+  const prev = views[(idx - 1 + views.length) % views.length];
   if (prev) { host.setView(prev); host.setMessage(`  ${TAB_ICONS[prev]} ${prev}`); }
 }

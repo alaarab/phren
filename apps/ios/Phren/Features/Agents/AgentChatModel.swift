@@ -154,6 +154,7 @@ final class AgentChatModel {
     private var transcriptContext = AgentSessionContext()
     private var statusBranch: String?
     var branch: String? { statusBranch ?? transcriptContext.branch }
+    var capabilities: LiveCapabilities?
     var questionsSupported = true
     var asyncQuestionsSupported = false
     var canAnswerQuestion: Bool { question?.isAsync == true ? asyncQuestionsSupported : questionsSupported }
@@ -212,37 +213,50 @@ final class AgentChatModel {
     func choose(_ pane: AgentChatPanes.Pane, session: LiveAgentSession) {
         do {
             let chosen = try pane.target(hostID: session.host.id, workspaceID: session.workspaceID, tabID: session.tab.id, muxID: session.host.muxID)
-            persistDraft(immediately: true)
-            draftLoadTask?.cancel()
-            let draftRun = UUID(); draftGeneration = draftRun
-            target = chosen
-            rejectedStreamTarget = nil
-            restoringDraft = true
-            draft = ""; attachments = []
-            draftStorageError = nil
-            AgentChatDrafts.beginRead(chosen.id)
-            draftLoadTask = Task {
-                defer { AgentChatDrafts.endRead(chosen.id) }
-                let saved: AgentDraftStore.Draft
-                do { saved = try await AgentChatDrafts.store?.load(target: chosen.id) ?? .init() }
-                catch {
-                    guard !Task.isCancelled, draftGeneration == draftRun else { return }
-                    draftStorageError = error.localizedDescription; saved = .init()
-                }
-                guard !Task.isCancelled, draftGeneration == draftRun else { return }
-                draft = AgentChatDrafts.text[chosen.id] ?? saved.text
-                attachments = AgentChatDrafts.attachments[chosen.id] ?? saved.attachments.map { .init(attachment: $0) }
-                restoringDraft = false
-            }
-            history = .init(); progress = .init(); reveal.finish(); hasTranscript = false
-            awaitingReply = false; sentAt = nil; liveActivity = nil; isCompacting = false; historyStalled = false; historyStalledSince = nil
-            modelName = nil; preferProgressActivity = false
-            transcriptContext = .init(); statusBranch = nil
-            connected = false; error = nil; deliveryError = nil
-            sentImages = []; needsAnswer = false; approval = nil; questionState = AgentQuestionState()
-            reconciledQueueRows = AgentChatQueues.reconciledRows[chosen.id] ?? []
-            queue = AgentChatQueues.items[chosen.id] ?? []
+            select(chosen)
         } catch { self.error = error.localizedDescription }
+    }
+
+    func choose(_ chosen: AgentChatTarget, session: LiveAgentSession) {
+        guard chosen.hostID == session.host.id, chosen.muxID == session.host.muxID,
+              chosen.workspaceID == session.workspaceID, chosen.tabID == session.tab.id else {
+            error = "The remote conversation belongs to another computer or workspace."
+            return
+        }
+        select(chosen)
+    }
+
+    private func select(_ chosen: AgentChatTarget) {
+        persistDraft(immediately: true)
+        draftLoadTask?.cancel()
+        let draftRun = UUID(); draftGeneration = draftRun
+        target = chosen
+        rejectedStreamTarget = nil
+        restoringDraft = true
+        draft = ""; attachments = []
+        draftStorageError = nil
+        AgentChatDrafts.beginRead(chosen.id)
+        draftLoadTask = Task {
+            defer { AgentChatDrafts.endRead(chosen.id) }
+            let saved: AgentDraftStore.Draft
+            do { saved = try await AgentChatDrafts.store?.load(target: chosen.id) ?? .init() }
+            catch {
+                guard !Task.isCancelled, draftGeneration == draftRun else { return }
+                draftStorageError = error.localizedDescription; saved = .init()
+            }
+            guard !Task.isCancelled, draftGeneration == draftRun else { return }
+            draft = AgentChatDrafts.text[chosen.id] ?? saved.text
+            attachments = AgentChatDrafts.attachments[chosen.id] ?? saved.attachments.map { .init(attachment: $0) }
+            restoringDraft = false
+        }
+        history = .init(); progress = .init(); reveal.finish(); hasTranscript = false
+        awaitingReply = false; sentAt = nil; liveActivity = nil; isCompacting = false; historyStalled = false; historyStalledSince = nil
+        modelName = nil; preferProgressActivity = false
+        transcriptContext = .init(); statusBranch = nil
+        connected = false; error = nil; deliveryError = nil
+        sentImages = []; needsAnswer = false; approval = nil; questionState = AgentQuestionState()
+        reconciledQueueRows = AgentChatQueues.reconciledRows[chosen.id] ?? []
+        queue = AgentChatQueues.items[chosen.id] ?? []
     }
     private func persistDraft(immediately: Bool = false) {
         guard !restoringDraft, let target else { return }
@@ -526,6 +540,7 @@ final class AgentChatModel {
                         approval = status.approval.flatMap { ApprovalActivityController.shared.wasHandled($0, target: target) ? nil : $0 }
                         if terminalPrompt != status.terminalPrompt { terminalPrompt = status.terminalPrompt }
                         if let prompts = status.pendingQuestions { questionState.replaceAsync(prompts) }
+                        capabilities = status.capabilities
                         questionsSupported = status.questionsSupported; asyncQuestionsSupported = status.asyncQuestionsSupported
                         acceptActivity(status.activity); interactionConnected = true
                         isCompacting = status.compacting
@@ -735,7 +750,7 @@ final class AgentChatModel {
     }
 
     /// Uploads can be reused after failure; prompt delivery is never replayed.
-    func send(_ session: LiveAgentSession) async {
+    func send(_ session: LiveAgentSession, consumeDraft: (() -> Void)? = nil) async {
         guard !sending, connected, approval == nil, question == nil, target != nil,
               !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty else { return }
         guard !AgentSlashCommand.isCommand(draft) || attachments.isEmpty else {
@@ -747,13 +762,15 @@ final class AgentChatModel {
         // Other harnesses keep an unsent local draft until they finish.
         if isBusy, target?.source != "claude", !AgentSlashCommand.isCommand(submitted) {
             queue.append(QueuedMessage(text: submitted, attachments: items))
-            draft = ""; attachments = []; deliveryError = nil
+            deliveryError = nil
+            if let consumeDraft { consumeDraft() } else { draft = "" }
+            attachments = []
             persistDraft(immediately: true)
             return
         }
         let optimistic = QueuedMessage(text: submitted, attachments: items)
         let sendingTarget = target
-        let result = await deliver(submitted, attachments: items, session: session) { text in
+        let result = await deliver(submitted, attachments: items, session: session, consumeDraft: consumeDraft) { text in
             guard self.target == sendingTarget, !AgentSlashCommand.isCommand(submitted) else { return }
             var pending = optimistic
             pending.submittedAfterLine = self.history.totalLines - 1
@@ -767,8 +784,13 @@ final class AgentChatModel {
         for uploaded in result.attachments {
             if let index = attachments.firstIndex(where: { $0.id == uploaded.id }) { attachments[index].path = uploaded.path }
         }
-        guard result.delivered else { return }
-        if draft == submitted { draft = "" }
+        guard result.delivered else {
+            if consumeDraft != nil { draft = DictationSession.join(submitted, draft) }
+            return
+        }
+        // A dictation send already cleared its draft before delivery. Even
+        // identical words spoken afterwards belong to the next message.
+        if consumeDraft == nil, draft == submitted { draft = "" }
         attachments.removeAll { item in items.contains { $0.id == item.id } }
         persistDraft(immediately: true)
     }
@@ -777,10 +799,12 @@ final class AgentChatModel {
     /// prompt. Returns the attachments with the paths that did upload, so a
     /// retry never re-uploads; prompt delivery itself is never replayed.
     private func deliver(_ submitted: String, attachments items: [ChatAttachmentDraft], session: LiveAgentSession,
+                         consumeDraft: (() -> Void)? = nil,
                          submittedToAgent: (String) -> Void = { _ in }) async -> (delivered: Bool, attachments: [ChatAttachmentDraft], rejected: Bool) {
         guard let target else { return (false, items, true) }
         var sent = items
         sending = true; deliveryError = nil
+        consumeDraft?()
         defer { sending = false; deliveryStatus = nil }
         do {
             for index in sent.indices where sent[index].path == nil {

@@ -260,6 +260,59 @@ final class AgentChatTests: XCTestCase {
     }
 
     @MainActor
+    func testRemoteAgentWorkKeepsComputerIdentityAndBackgroundReturnVisible() {
+        let app = launch(extra: ["--chat-agent-card", "--all-sessions-fixture", "--all-sessions-offline",
+                                 "--agent-work-navigation", "--agent-work-unknown", "--chat-question"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        XCTAssertTrue(app.buttons["chat-background-job:background-tests"].waitForExistence(timeout: 8),
+                      "Background work remains a Background row in the conductor chat")
+
+        app.buttons["chat-switch-agent"].tap()
+        let drawerLead = app.buttons["drawer-child-agent:c1000000-0000-0000-0000-000000000002/remote-parser-lead/lead"]
+        XCTAssertTrue(drawerLead.waitForExistence(timeout: 8))
+        XCTAssertTrue(drawerLead.label.contains("Linuxbox"), drawerLead.label)
+        drawerLead.tap()
+        let remoteLocation = app.staticTexts["chat-location"]
+        XCTAssertTrue(remoteLocation.waitForExistence(timeout: 8))
+        XCTAssertTrue(remoteLocation.label.contains("Test Linux"), remoteLocation.label)
+        XCTAssertTrue(app.buttons["Send answer"].waitForExistence(timeout: 8),
+                      "A remote lead reuses the ordinary chat answer UI")
+        app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Keep the Phren accent")).firstMatch.tap()
+        app.buttons["Send answer"].tap()
+        XCTAssertTrue(app.staticTexts["Answer received in this conversation."].waitForExistence(timeout: 8))
+        app.buttons["chat-close"].tap()
+
+        app.buttons["chat-agent-tree"].tap()
+        XCTAssertTrue(app.buttons["chat-subagents-done"].waitForExistence(timeout: 5))
+        let remoteLead = app.buttons["child-agent:c1000000-0000-0000-0000-000000000002/remote-parser-lead/lead"]
+        XCTAssertTrue(remoteLead.waitForExistence(timeout: 5))
+        XCTAssertTrue(remoteLead.label.contains("Linuxbox"), remoteLead.label)
+        let unavailable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "unavailable"),
+                                                     object: remoteLead)
+        XCTAssertEqual(XCTWaiter.wait(for: [unavailable], timeout: 15), .completed,
+                       "The row stays visible when its enrolled computer goes offline")
+        let unknown = app.buttons["child-agent:c1000000-0000-0000-0000-000000000099/remote-unknown-lead/lead"]
+        XCTAssertTrue(unknown.waitForExistence(timeout: 5))
+        XCTAssertTrue(unknown.label.contains("Bench")); XCTAssertTrue(unknown.label.contains("add computer"))
+        let nested = app.buttons["child-agent:c1000000-0000-0000-0000-000000000002/remote-parser-fixtures/cccccccccccccccccccccccccccccccc"]
+        unknown.tap()
+        let addComputer = app.buttons["agent-computer-add"]
+        XCTAssertTrue(addComputer.waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(addComputer.frame.height, 44)
+        app.buttons["agent-work-back"].tap()
+        XCTAssertTrue(remoteLead.waitForExistence(timeout: 5))
+
+        XCTAssertTrue(nested.waitForExistence(timeout: 5))
+        nested.tap()
+        let header = app.descendants(matching: .any).matching(identifier: "child-agent-header").firstMatch
+        XCTAssertTrue(header.waitForExistence(timeout: 5))
+        XCTAssertTrue(header.label.contains("Linuxbox"), "VoiceOver names the remote computer")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Remote parser fixture marker")).firstMatch.waitForExistence(timeout: 5))
+        app.buttons["chat-subagent-diff"].tap()
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "agent-diff-header").firstMatch.waitForExistence(timeout: 5))
+    }
+
+    @MainActor
     func testTodoCardsFoldTheEarlierListAndShowTheLatest() {
         let app = launch(extra: ["--chat-todos"])
         app.buttons["live-chat:w7:w7:t9"].tap()

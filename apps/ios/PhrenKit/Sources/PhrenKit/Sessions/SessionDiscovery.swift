@@ -61,6 +61,7 @@ public struct LiveAgentSession: Codable, Equatable, Hashable, Identifiable, Send
     public let host: LiveHost
     public let workspaceID: String
     public let workspaceName: String
+    public let capabilities: LiveCapabilities?
     public let workspaceTabCount: Int?
     public let tab: LiveWorkspaces.Tab
     public var id: ID { ID(hostID: host.id, workspace: workspaceID, tab: tab.id, muxID: host.muxID) }
@@ -94,9 +95,22 @@ public struct LiveAgentSession: Codable, Equatable, Hashable, Identifiable, Send
     }
 
     public init(host: LiveHost, workspaceID: String, workspaceName: String, tab: LiveWorkspaces.Tab,
-                workspaceTabCount: Int? = nil) {
+                workspaceTabCount: Int? = nil, capabilities: LiveCapabilities? = nil) {
         self.host = host; self.workspaceID = workspaceID; self.workspaceName = workspaceName; self.tab = tab
         self.workspaceTabCount = workspaceTabCount
+        self.capabilities = capabilities
+    }
+
+    public init(remoteHost host: LiveHost, target: AgentChatTarget, title: String,
+                status: String?, model: String?) {
+        self.host = host
+        workspaceID = target.workspaceID
+        workspaceName = title
+        workspaceTabCount = 1
+        tab = LiveWorkspaces.Tab(id: target.tabID, label: title, title: title,
+                                 agentStatus: status, agent: target.source,
+                                 agentPaneCount: 1, paneCount: 1, model: model)
+        capabilities = nil
     }
 
 
@@ -106,7 +120,7 @@ extension LiveWorkspaces {
     public func sessions(on host: LiveHost) -> [LiveAgentSession] {
         groups.flatMap { group in
             group.children.map { LiveAgentSession(host: host, workspaceID: group.id, workspaceName: group.label,
-                                                       tab: $0, workspaceTabCount: group.children.count) }
+                                                       tab: $0, workspaceTabCount: group.children.count, capabilities: capabilities) }
         }
     }
 }

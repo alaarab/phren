@@ -49,6 +49,27 @@ final class AccountUsageTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(openRouter.spend).amountUSD, 6.2, accuracy: 0.000_001)
         XCTAssertEqual(openRouter.spend?.periodLabel, "This week · UTC")
     }
+    func testOpenCodeGoWindowsDecodeDollarUsageWithoutInventingAPercentage() throws {
+        let data = Data(#"{"accounts":[{"source":"opencode-go","updatedAt":"2026-09-20T07:41:45.218Z","windows":[{"id":"opencode-go:kimi_k3:5h","name":"opencode-go/kimi-k3 · 5h","usedUSD":1.2},{"id":"opencode-go:kimi_k3:7d","name":"opencode-go/kimi-k3 · 7d","usedUSD":4.8,"limitUSD":5,"usedPercent":96},{"id":"opencode-go:kimi_k3:30d","name":"opencode-go/kimi-k3 · 30d","usedUSD":9.1,"limitUSD":10,"usedPercent":91}],"spend":{"amountUSD":9.1,"period":"rolling_30_days"}}]}"#.utf8)
+        let account = try XCTUnwrap(AccountUsageSnapshot.read(data).accounts.first)
+        XCTAssertEqual(account.name, "OpenCode Go")
+        XCTAssertEqual(account.spend?.periodLabel, "Past 30 days")
+        XCTAssertEqual(account.windows.map(\.usedUSD), [1.2, 4.8, 9.1])
+        XCTAssertNil(account.windows[0].limitUSD)
+        XCTAssertNil(account.windows[0].usedPercent)
+        XCTAssertEqual(account.windows[2].limitUSD, 10)
+        XCTAssertEqual(account.windows[2].usedPercent, 91)
+    }
+    func testOpenCodeGoLocalModelAmountsMergeAcrossComputers() throws {
+        let first = try AccountUsageSnapshot.read(Data(#"{"accounts":[{"source":"opencode-go","updatedAt":"2026-09-20T07:41:45.218Z","windows":[{"id":"opencode-go:kimi_k3:5h","name":"opencode-go/kimi-k3 · 5h","usedUSD":1.2,"limitUSD":2,"usedPercent":60}],"spend":{"amountUSD":1.2,"period":"rolling_30_days"}}]}"#.utf8))
+        let second = try AccountUsageSnapshot.read(Data(#"{"accounts":[{"source":"opencode-go","updatedAt":"2026-09-20T07:42:45.218Z","windows":[{"id":"opencode-go:kimi_k3:5h","name":"opencode-go/kimi-k3 · 5h","usedUSD":0.8}],"spend":{"amountUSD":0.8,"period":"rolling_30_days"}}]}"#.utf8))
+        let go = try XCTUnwrap(MergedAccountUsage.merge([("Desk", first), ("Desk 2", second)], at: Date.now).first)
+
+        XCTAssertEqual(go.windows[0].usedUSD, 2)
+        XCTAssertEqual(go.windows[0].limitUSD, 2)
+        XCTAssertEqual(go.windows[0].usedPercent, 100)
+        XCTAssertEqual(go.spend?.amountUSD, 2)
+    }
     func testHookPayloadWithAllFourProvidersParses() throws {
         let now = try XCTUnwrap(ISO8601Dates.parse("2026-09-20T07:41:48.502Z"))
         let key = String(repeating: "a", count: 64)

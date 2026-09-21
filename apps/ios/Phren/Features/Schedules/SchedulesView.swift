@@ -16,7 +16,7 @@ struct SchedulesView: View {
     @State private var editing: ScheduleEditorSelection?
 
     private var hosts: [LiveHost] {
-        (try? LiveSessionPreferences.read(hostData))?.hosts ?? []
+        ((try? LiveSessionPreferences.read(hostData))?.hosts ?? []).filter { SessionOverviewMonitor.shared.allows(.schedules, on: $0) }
     }
 
     private var snapshot: LocalStore.Snapshot { model.snapshot(for: storeId) }
@@ -68,7 +68,7 @@ struct SchedulesView: View {
         }
         .safeAreaInset(edge: .top, spacing: 0) { ActionErrorBanner() }
         .refreshable { await refresh() }
-        .task(id: hostData) { await refreshLiveState() }
+        .task(id: hosts) { await refreshLiveState() }
         .sheet(isPresented: $adding, onDismiss: { Task { await refresh() } }) {
             ScheduleEditorView(storeId: storeId, project: project, schedule: nil)
                 .presentationDetents([.large])

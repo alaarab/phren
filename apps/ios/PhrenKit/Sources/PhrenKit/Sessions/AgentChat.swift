@@ -62,6 +62,81 @@ public struct AgentChatTarget: Codable, Equatable, Hashable, Sendable, Identifia
     }
 }
 
+public struct AgentComputer: Codable, Equatable, Hashable, Sendable {
+    public let id: UUID
+    public let name: String
+
+    public init(id: UUID, name: String) throws {
+        guard name.range(of: #"^(?!\.\.?$)[A-Za-z0-9_][A-Za-z0-9_.-]{0,99}$"#,
+                         options: .regularExpression) != nil else {
+            throw PhrenKitError.validation("The agent names an invalid computer.")
+        }
+        self.id = id; self.name = name
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, name }
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        try self.init(id: values.decode(UUID.self, forKey: .id),
+                      name: values.decode(String.self, forKey: .name))
+    }
+}
+
+/// A Hook target has no phone-local host id. PhrenLive adds that only after
+/// matching the immutable computer id to an enrolled connection.
+public struct AgentRemoteTarget: Codable, Equatable, Hashable, Sendable {
+    public let server: String
+    public let workspace: String
+    public let tab: String
+    public let pane: String
+    public let source: String
+    public let session: String
+
+    public init(server: String, workspace: String, tab: String, pane: String,
+                source: String, session: String) throws {
+        guard server.range(of: #"^(?!\.\.?$)[A-Za-z0-9_][A-Za-z0-9_.-]{0,99}$"#,
+                           options: .regularExpression) != nil,
+              [workspace, tab, pane].allSatisfy(AgentChatTarget.validID),
+              AgentChatTarget.sources.contains(source), AgentChatTarget.validSessionID(session) else {
+            throw PhrenKitError.validation("The agent names an invalid remote conversation.")
+        }
+        self.server = server; self.workspace = workspace; self.tab = tab
+        self.pane = pane; self.source = source; self.session = session
+    }
+
+    private enum CodingKeys: String, CodingKey { case server, workspace, tab, pane, source, session }
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        try self.init(server: values.decode(String.self, forKey: .server),
+                      workspace: values.decode(String.self, forKey: .workspace),
+                      tab: values.decode(String.self, forKey: .tab),
+                      pane: values.decode(String.self, forKey: .pane),
+                      source: values.decode(String.self, forKey: .source),
+                      session: values.decode(String.self, forKey: .session))
+    }
+}
+
+public struct AgentRemote: Codable, Equatable, Hashable, Sendable {
+    public let target: AgentRemoteTarget
+    /// Parent-scoped on the remote Hook. The conductor row's public id is not
+    /// a valid substitute for this value.
+    public let child: String?
+
+    public init(target: AgentRemoteTarget, child: String? = nil) throws {
+        guard child.map({ $0.range(of: #"^[a-f0-9]{32}$"#, options: .regularExpression) != nil }) ?? true else {
+            throw PhrenKitError.validation("The agent names an invalid remote child.")
+        }
+        self.target = target; self.child = child
+    }
+
+    private enum CodingKeys: String, CodingKey { case target, child }
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        try self.init(target: values.decode(AgentRemoteTarget.self, forKey: .target),
+                      child: values.decodeIfPresent(String.self, forKey: .child))
+    }
+}
+
 public struct AgentChild: Codable, Equatable, Sendable, Identifiable {
     public enum State: String, Codable, Sendable { case running, completed }
     public let id: String
@@ -72,7 +147,15 @@ public struct AgentChild: Codable, Equatable, Sendable, Identifiable {
     public let state: State
     public let worktreeName: String?
     public let branch: String?
+    public let computer: AgentComputer?
+    public let remote: AgentRemote?
     public let children: [AgentChild]
+    /// SwiftUI selection must remain distinct when two computers reuse a
+    /// session, public row id, or parent-scoped child id.
+    public var navigationID: String {
+        [computer?.id.uuidString.lowercased() ?? "local", id, remote?.child ?? "lead"]
+            .joined(separator: "/")
+    }
     public var checkoutLabel: String? { branch ?? worktreeName }
     public var name: String {
         let leaf = path.split(separator: "/").last.map(String.init) ?? "Agent"
@@ -80,6 +163,29 @@ public struct AgentChild: Codable, Equatable, Sendable, Identifiable {
     }
     public var agentCount: Int { 1 + children.reduce(0) { $0 + $1.agentCount } }
     public var runningCount: Int { (state == .running ? 1 : 0) + children.reduce(0) { $0 + $1.runningCount } }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, provider, model, path, callId, state, worktreeName, branch, computer, remote, children
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        provider = try values.decode(String.self, forKey: .provider)
+        model = try values.decodeIfPresent(String.self, forKey: .model)
+        path = try values.decode(String.self, forKey: .path)
+        callId = try values.decode(String.self, forKey: .callId)
+        state = try values.decode(State.self, forKey: .state)
+        worktreeName = try values.decodeIfPresent(String.self, forKey: .worktreeName)
+        branch = try values.decodeIfPresent(String.self, forKey: .branch)
+        computer = try values.decodeIfPresent(AgentComputer.self, forKey: .computer)
+        remote = try values.decodeIfPresent(AgentRemote.self, forKey: .remote)
+        children = try values.decode([AgentChild].self, forKey: .children)
+        guard AgentChatTarget.validID(id), AgentChatTarget.sources.contains(provider),
+              remote == nil || computer != nil else {
+            throw PhrenKitError.validation("The computer returned an invalid agent relation.")
+        }
+    }
 }
 
 public struct AgentChildTreeRow: Equatable, Sendable {

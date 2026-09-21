@@ -1,3 +1,4 @@
+import { moduleEnabled } from "../modules/runtime.js";
 /**
  * Session start hook handler and onboarding notices.
  * Extracted from hooks-session.ts for modularity.
@@ -54,7 +55,7 @@ function projectHasBootstrapSignals(phrenPath: string, project: string): boolean
   }
 
   const tasksPath = path.join(projectDir, TASKS_FILENAME);
-  if (fs.existsSync(tasksPath)) {
+  if (moduleEnabled(path.dirname(projectDir), "tasks") && fs.existsSync(tasksPath)) {
     const tasks = fs.readFileSync(tasksPath, "utf8");
     if (/^-\s+\[(?: |x|X)\]/m.test(tasks)) return true;
   }

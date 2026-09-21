@@ -7,6 +7,7 @@ struct AgentChangesView: View {
     let target: AgentChatTarget
     var child: String? = nil
 
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("sessions.live.preferences.v1") private var hostData = Data()
@@ -23,9 +24,14 @@ struct AgentChangesView: View {
         _model = State(initialValue: ChangesModel(session: session, target: target, child: child))
     }
 
+    private var changesEnabled: Bool {
+        SessionOverviewMonitor.shared.allows(.changes, on: session.host, fallback: session.capabilities)
+    }
+
     private var active: Bool {
-        visible && scenePhase == .active
-            && (try? LiveSessionPreferences.read(hostData))?.hosts.first(where: { $0.id == session.host.id }) == session.host
+        changesEnabled && visible && scenePhase == .active
+            && (try? LiveSessionPreferences.read(hostData))?.hosts
+                .first(where: { $0.id == session.host.id })?.hasSameConnection(as: session.host) == true
     }
 
     var body: some View {
@@ -58,9 +64,10 @@ struct AgentChangesView: View {
         // Full height inside a tab: the tab bar would otherwise sit under the
         // last rows each section scrolls.
         .toolbar(.hidden, for: .tabBar)
-        .onAppear { visible = true; scheduleLoad() }
+        .onAppear { visible = true; if !changesEnabled { dismiss() }; scheduleLoad() }
         .onDisappear { visible = false; loadTask?.cancel() }
         .onChange(of: scenePhase) { _, _ in scheduleLoad() }
+        .onChange(of: changesEnabled) { _, enabled in if !enabled { loadTask?.cancel(); dismiss() } }
         .onChange(of: model.revision) { _, _ in scheduleLoad() }
     }
 

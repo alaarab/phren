@@ -1,3 +1,4 @@
+import { moduleEnabled } from "../modules/runtime.js";
 /**
  * View rendering functions for the phren interactive shell.
  * Extracted from shell.ts to keep the orchestrator under 300 lines.
@@ -35,6 +36,7 @@ import {
 } from "./view-list.js";
 import {
   SUB_VIEWS,
+  enabledSubViews,
   TAB_ICONS,
   type DoctorResultLike,
 } from "./types.js";
@@ -84,7 +86,7 @@ function resolveProjectStorePath(phrenPath: string, project: string): string {
  * project and filter on one line, then a rule. On a 24-row terminal the old
  * three-row header cost more than a tenth of the screen.
  */
-function renderTopBar(state: ShellState, summary = ""): string {
+function renderTopBar(state: ShellState, summary = "", views: readonly typeof SUB_VIEWS[number][] = SUB_VIEWS): string {
   const cols = renderWidth();
   const brand = gradient("◆ phren");
   const dot = style.dim("·");
@@ -101,8 +103,8 @@ function renderTopBar(state: ShellState, summary = ""): string {
   // Sub-views carry a tab strip. Try full labels, then icons for the inactive
   // tabs, before giving up and taking a second row.
   const head = `  ${brand}${project ? `  ${project}` : ""}${filter ? `  ${filter}` : ""}`;
-  const full = SUB_VIEWS.map((v) => (v === state.view ? style.boldMagenta(`${TAB_ICONS[v]} ${v}`) : style.dim(`${TAB_ICONS[v]} ${v}`)));
-  const terse = SUB_VIEWS.map((v) => (v === state.view ? style.boldMagenta(`${TAB_ICONS[v]} ${v}`) : style.dim(TAB_ICONS[v] ?? "")));
+  const full = views.map((v) => (v === state.view ? style.boldMagenta(`${TAB_ICONS[v]} ${v}`) : style.dim(`${TAB_ICONS[v]} ${v}`)));
+  const terse = views.map((v) => (v === state.view ? style.boldMagenta(`${TAB_ICONS[v]} ${v}`) : style.dim(TAB_ICONS[v] ?? "")));
   for (const tabs of [full, terse]) {
     const merged = `${head}  ${style.dim("│")} ${tabs.join(style.dim(" │ "))}`;
     if (displayWidth(merged) <= cols) return `${merged}\n${separator(cols)}`;
@@ -212,6 +214,7 @@ function collectProjectDashboardEntries(ctx: ViewContext): ProjectDashboardEntry
 }
 
 function renderProjectsDashboard(ctx: ViewContext, entries: ProjectDashboardEntry[], height: number): string[] {
+  const tasksEnabled = moduleEnabled(ctx.phrenPath, "tasks", ctx.profile);
   const runtime = readRuntimeHealth(ctx.phrenPath);
   const scoped = entries.filter((entry) => entry.name !== "global");
   const totals = scoped.reduce((acc, entry) => {
@@ -232,16 +235,16 @@ function renderProjectsDashboard(ctx: ViewContext, entries: ProjectDashboardEntr
     .map((entry) => `${style.bold(entry.name)} ${style.dim(`${entry.findingCount} findings`)}`);
 
   const lines = [
-    `  ${badge(ctx.profile || "default", style.boldBlue)}  ${style.bold(String(scoped.length))} projects  ${style.dim("·")}  ${style.boldGreen(String(totals.active))} active  ${style.dim("·")}  ${style.boldYellow(String(totals.queue))} queued  ${style.dim("·")}  ${style.boldCyan(String(totals.findings))} findings  ${style.dim("·")}  ${style.boldMagenta(String(totals.review))} review`,
+    `  ${badge(ctx.profile || "default", style.boldBlue)}  ${style.bold(String(scoped.length))} projects  ${style.dim("·")}  ${tasksEnabled ? `${style.boldGreen(String(totals.active))} active  ${style.dim("·")}  ${style.boldYellow(String(totals.queue))} queued  ${style.dim("·")}  ` : ""}${style.boldCyan(String(totals.findings))} findings  ${style.dim("·")}  ${style.boldMagenta(String(totals.review))} review`,
     ctx.state.project
-      ? `  ${style.green("●")} active context ${style.boldCyan(ctx.state.project)}  ${style.dim("· ↵ opens selected project tasks")}`
-      : `  ${style.dim("No project selected yet")}  ${style.dim("· ↵ sets context and opens tasks")}`,
+      ? `  ${style.green("●")} active context ${style.boldCyan(ctx.state.project)}  ${style.dim(tasksEnabled ? "· ↵ opens selected project tasks" : "· ↵ opens selected project findings")}`
+      : `  ${style.dim("No project selected yet")}  ${style.dim(tasksEnabled ? "· ↵ sets context and opens tasks" : "· ↵ sets context and opens findings")}`,
     `  ${style.dim("Sync")} ${style.dim(runtime.lastSync?.lastPushStatus || runtime.lastAutoSave?.status || "unknown")}  ${style.dim("·")}  ${style.dim("unsynced")} ${style.bold(String(runtime.lastSync?.unsyncedCommits ?? 0))}  ${style.dim("·")}  ${style.dim("intro")} ${style.cyan(ctx.state.introMode || "once-per-version")}`,
   ];
 
   if (height >= 12) {
     lines.push("");
-    lines.push(`  ${style.bold("Task pulse")}  ${activePreview.length ? activePreview.join(style.dim("  ·  ")) : style.dim("No active tasks across this profile.")}`);
+    if (tasksEnabled) lines.push(`  ${style.bold("Task pulse")}  ${activePreview.length ? activePreview.join(style.dim("  ·  ")) : style.dim("No active tasks across this profile.")}`);
     lines.push(`  ${style.bold("Recent fragments")}  ${findingsPreview.length ? findingsPreview.join(style.dim("  ·  ")) : style.dim("Nothing yet.")}`);
   }
 
@@ -279,7 +282,7 @@ function renderProjectsView(ctx: ViewContext, cursor: number, height: number): s
     const cursorChar = isSelected ? style.cyan("▶") : " ";
     const bullet = isActive ? style.green("●") : style.dim("○");
     const nameStr = isActive ? style.boldGreen(card.name) : style.bold(card.name);
-    const docsStr = style.dim(`[A${card.activeCount} · Q${card.queueCount} · F${card.findingCount} · R${card.reviewCount}]`);
+    const docsStr = style.dim(`[${moduleEnabled(ctx.phrenPath, "tasks", ctx.profile) ? `A${card.activeCount} · Q${card.queueCount} · ` : ""}F${card.findingCount} · R${card.reviewCount}]`);
     const storeStr = card.store ? `  ${style.dim("·")} ${style.cyan(card.store)}` : "";
 
     let nameRow = `  ${cursorChar} ${bullet} ${nameStr}  ${docsStr}${storeStr}`;
@@ -902,7 +905,7 @@ export async function renderShell(
   setSubsectionsCache: (c: SubsectionsCache | null) => void,
 ): Promise<string> {
   const graphSummaryLine = ctx.state.view === "Graph" && ctx.graph ? graphSummary(ctx.graph()) : "";
-  const topBar = renderTopBar(ctx.state, graphSummaryLine);
+  const topBar = renderTopBar(ctx.state, graphSummaryLine, enabledSubViews(ctx.phrenPath, ctx.profile));
   const bottomBar = renderBottomBar(ctx.state, navMode, inputCtx, inputBuf);
   const cursor = ctx.currentCursor();
   // An empty message line used to hold a row open on every frame.
@@ -913,7 +916,7 @@ export async function renderShell(
   if (showHelp) {
     // The help is longer than a small terminal, and used to be clipped in
     // silence — on 24 rows more than half of it simply was not there.
-    const all = shellHelpText().split("\n");
+    const all = shellHelpText().split("\n").filter(line => moduleEnabled(ctx.phrenPath, "tasks", ctx.profile) || !/task/i.test(stripAnsi(line)));
     if (all.length <= height) {
       contentLines = all;
     } else {

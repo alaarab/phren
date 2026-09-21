@@ -36,6 +36,17 @@ struct LiveSessionsView: View {
         func hash(into hasher: inout Hasher) { hasher.combine(id) }
     }
     private struct PollID: Equatable { let hosts: [LiveHost]; let active: Bool; let refresh: UUID }
+    private struct HookAssociation: Equatable {
+        let hostID: UUID
+        let computerID: UUID
+    }
+    private var hookAssociations: [HookAssociation] {
+        overview.computers.compactMap { computer in
+            computer.monitor.snapshot?.computer.map {
+                HookAssociation(hostID: computer.host.id, computerID: $0.id)
+            }
+        }.sorted { $0.hostID.uuidString < $1.hostID.uuidString }
+    }
     private var configuration: SessionOverviewMonitor.Configuration {
         .init(query: query, preferences: preferences, projects: model.sessionProjects, focusFilter: focusFilter,
               metadataReady: model.phase != .loading && model.phase != .initialSync, memoryConnected: model.phase == .ready)
@@ -124,7 +135,8 @@ struct LiveSessionsView: View {
                     .accessibilityIdentifier("all-files")
             }
             Button("Refresh all sessions", systemImage: "arrow.clockwise") { refreshID = UUID() }
-            if let storeId = model.storeDescriptors.first(where: { model.storeFilter == nil || $0.id == model.storeFilter })?.id {
+            if SessionOverviewMonitor.shared.allowsSchedules(),
+               let storeId = model.storeDescriptors.first(where: { model.storeFilter == nil || $0.id == model.storeFilter })?.id {
                 NavigationLink { SchedulesView(storeId: storeId, project: nil) } label: {
                     Label("Schedules", systemImage: "clock.badge.checkmark")
                 }
@@ -183,6 +195,15 @@ struct LiveSessionsView: View {
         .onChange(of: overview.ready, initial: true) { _, ready in
             guard ready else { return }
             PhrenAppShortcuts.donateSessions(overview.computers.flatMap { computer in computer.monitor.snapshot?.sessions(on: computer.host) ?? [] })
+        }
+        .onChange(of: hookAssociations, initial: true) { _, associations in
+            for association in associations where preferences?.hosts.first(where: { $0.id == association.hostID })?.hookComputerID != association.computerID {
+                do {
+                    data = try LiveSessionPreferences.associating(hostID: association.hostID,
+                                                                  hookComputerID: association.computerID,
+                                                                  in: data)
+                } catch { /* Keep the verified connection unchanged when an identity conflicts. */ }
+            }
         }
     }
 
@@ -656,6 +677,20 @@ private struct LiveHostView: View {
             host.fingerprint = fingerprint
             data = try LiveSessionPreferences.saving(host, in: data)
             monitor.fingerprint = nil
+            let verifiedHost = host
+            Task { await associateVerifiedIdentity(for: verifiedHost) }
+        } catch { localError = error.localizedDescription }
+    }
+
+    @MainActor private func associateVerifiedIdentity(for host: LiveHost) async {
+        do {
+            guard let identity = try await PhrenConnection.computerIdentity(
+                host: host, privateKey: DeviceSSHKey.load(host.id)
+            ), let saved = (try? LiveSessionPreferences.read(data))?.hosts.first(where: { $0.id == host.id }),
+               saved.hasSameConnection(as: host) else { return }
+            data = try LiveSessionPreferences.associating(hostID: host.id,
+                                                          hookComputerID: identity.id,
+                                                          in: data)
         } catch { localError = error.localizedDescription }
     }
 
@@ -1107,17 +1142,19 @@ private struct SessionUsageCard: View {
                 VStack(spacing: 10) {
                     HStack { Text("Account").foregroundStyle(PhrenTheme.textMuted); Spacer(); Text(account.source.capitalized).foregroundStyle(PhrenTheme.text) }
                     ForEach(account.windows) { window in
-                        HStack(spacing: 12) {
-                            Text(Self.short(window.name)).font(.system(.caption, design: .monospaced)).foregroundStyle(PhrenTheme.textMuted).frame(width: 40, alignment: .leading)
-                            GeometryReader { geometry in
-                                ZStack(alignment: .leading) {
-                                    Capsule().fill(PhrenTheme.surfaceRaised)
-                                    Capsule().fill(window.usedPercent >= 90 ? PhrenTheme.warning : PhrenTheme.success)
-                                        .frame(width: max(8, geometry.size.width * min(1, window.usedPercent / 100)))
-                                }
-                            }.frame(height: 8)
-                            Text("\(Int(window.usedPercent.rounded()))%").font(.caption).monospacedDigit().foregroundStyle(PhrenTheme.textSecondary).frame(width: 36, alignment: .trailing)
-                            Text(window.resetDate.map { Self.until($0) } ?? "").font(.caption).monospacedDigit().foregroundStyle(PhrenTheme.textMuted).frame(width: 60, alignment: .trailing)
+                        if let usedPercent = window.usedPercent {
+                            HStack(spacing: 12) {
+                                Text(Self.short(window.name)).font(.system(.caption, design: .monospaced)).foregroundStyle(PhrenTheme.textMuted).frame(width: 40, alignment: .leading)
+                                GeometryReader { geometry in
+                                    ZStack(alignment: .leading) {
+                                        Capsule().fill(PhrenTheme.surfaceRaised)
+                                        Capsule().fill(usedPercent >= 90 ? PhrenTheme.warning : PhrenTheme.success)
+                                            .frame(width: max(8, geometry.size.width * min(1, usedPercent / 100)))
+                                    }
+                                }.frame(height: 8)
+                                Text("\(Int(usedPercent.rounded()))%").font(.caption).monospacedDigit().foregroundStyle(PhrenTheme.textSecondary).frame(width: 36, alignment: .trailing)
+                                Text(window.resetDate.map { Self.until($0) } ?? "").font(.caption).monospacedDigit().foregroundStyle(PhrenTheme.textMuted).frame(width: 60, alignment: .trailing)
+                            }
                         }
                     }
                 }

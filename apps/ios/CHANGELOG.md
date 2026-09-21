@@ -13,6 +13,15 @@ lock screen and Changes screen done properly.
 
 ### New
 
+- Agent work follows a conductor's remote leads and their nested workers
+  through the computer that owns them: computer chips, remote questions and
+  changes, and clear offline or enrollment states.
+- Usage shows OpenCode Go spend per model over 5 hours, 7 days and 30 days,
+  with limits when the plan reports them.
+- Memory graph: Edit and Delete are icons in the node panel, and Previous and
+  Next step through a project's tasks or a topic's findings.
+- The phone hides Schedules and Conductor on a computer whose Hook does not
+  run those modules.
 - Schedules: scheduled prompts per project and computer with a chosen harness
   and model, maintained from the phone.
 - Changes is a new screen laid out like a source-control sheet: the branch
@@ -77,6 +86,12 @@ lock screen and Changes screen done properly.
   chevron; back is the way out.
 - What's new appears once after every update again; it used to count the
   marketing version alone, which every TestFlight build shares.
+
+### Fixed
+
+- Dictation keeps what you said across pauses and keeps listening after a send.
+- The lock screen counts a session as running while its fan-out workers run,
+  and says how many.
 
 ## 1.0.0
 

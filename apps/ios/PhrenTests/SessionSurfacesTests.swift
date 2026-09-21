@@ -98,6 +98,60 @@ final class SessionSurfacesTests: XCTestCase {
         XCTAssertEqual(SessionWorkingActivityPolicy.updateInterval, 2)
     }
 
+    func testIdleSessionWithWorkersIsWorkingAndNamesTheWorkers() throws {
+        let now = Date(timeIntervalSince1970: 1000)
+        let tab = try sessions([["id": "workers", "label": "Workers", "agent": "claude", "agentStatus": "idle",
+                                 "runningChildren": 9, "childProviders": ["codex", "opencode"]]])[0].tab
+        let presentation = SessionWorkingActivityBuilder.presentation(
+            state: "idle", step: "Idle", runningChildren: tab.runningChildren)
+        let session = SessionWorkingActivityBuilder.Session(
+            entry: .init(id: "workers", project: "App", provider: "claude", computer: "Desk",
+                         step: presentation.step, subagents: tab.runningChildren,
+                         childProviders: tab.childProviders, state: presentation.state, startedAt: now),
+            state: presentation.state, startedAt: now)
+        let state = SessionWorkingActivityBuilder.build([session], now: now)
+        XCTAssertEqual(state.working, 1)
+        XCTAssertEqual(state.entries.first?.step, "9 workers")
+        XCTAssertEqual(state.entries.first?.subagents, 9)
+        XCTAssertEqual(state.entries.first?.childProviders, ["codex", "opencode"])
+        XCTAssertEqual(SessionWorkingActivityBuilder.presentation(
+            state: "idle", step: "Idle", runningChildren: 1).step, "1 worker")
+    }
+
+    func testIdleSessionWithoutWorkersIsNotInTheActivity() throws {
+        let now = Date(timeIntervalSince1970: 1000)
+        let tab = try sessions([["id": "idle", "label": "Idle", "agent": "codex", "agentStatus": "idle"]])[0].tab
+        let presentation = SessionWorkingActivityBuilder.presentation(
+            state: "idle", step: "Idle", runningChildren: tab.runningChildren)
+        XCTAssertEqual(tab.runningChildren, 0)
+        XCTAssertEqual(tab.childProviders, [])
+        let session = SessionWorkingActivityBuilder.Session(
+            entry: .init(id: "idle", project: "App", provider: "codex", computer: "Desk",
+                         step: presentation.step, subagents: tab.runningChildren, state: presentation.state,
+                         startedAt: .distantPast),
+            state: presentation.state, startedAt: .distantPast)
+        let state = SessionWorkingActivityBuilder.build([session], now: now)
+        XCTAssertEqual(state.working, 0)
+        XCTAssertTrue(state.entries.isEmpty)
+    }
+
+    func testWorkingSessionWithWorkersKeepsItsMainStepAndPill() throws {
+        let now = Date(timeIntervalSince1970: 1000)
+        let tab = try sessions([["id": "both", "label": "Both", "agent": "codex", "agentStatus": "working",
+                                 "runningChildren": 3, "childProviders": ["opencode"]]])[0].tab
+        let presentation = SessionWorkingActivityBuilder.presentation(
+            state: "working", step: "Editing View.swift", runningChildren: tab.runningChildren)
+        let session = SessionWorkingActivityBuilder.Session(
+            entry: .init(id: "both", project: "App", provider: "codex", computer: "Desk",
+                         step: presentation.step, subagents: tab.runningChildren,
+                         childProviders: tab.childProviders, state: presentation.state, startedAt: now),
+            state: presentation.state, startedAt: now)
+        let state = SessionWorkingActivityBuilder.build([session], now: now)
+        XCTAssertEqual(state.working, 1)
+        XCTAssertEqual(state.entries.first?.step, "Editing View.swift")
+        XCTAssertEqual(state.entries.first?.subagents, 3)
+    }
+
     func testLegacyActivityCanBeReconciledAfterUpgrade() throws {
         let content = try JSONDecoder().decode(SessionWorkingActivityAttributes.ContentState.self,
             from: Data(#"{"provider":"codex","project":"old","state":"Working","startedAt":1000,"expiresAt":8200}"#.utf8))
@@ -110,6 +164,7 @@ final class SessionSurfacesTests: XCTestCase {
             from: Data(#"{"working":1,"waiting":0,"startedAt":1000,"entries":[{"id":"s1","project":"App","provider":"codex","computer":"Desk"}]}"#.utf8))
         XCTAssertNil(content.entries.first?.step)
         XCTAssertEqual(content.entries.first?.subagents, 0)
+        XCTAssertEqual(content.entries.first?.childProviders, [])
         XCTAssertNil(content.entries.first?.state)
         XCTAssertEqual(content.primary?.project, "App")
     }

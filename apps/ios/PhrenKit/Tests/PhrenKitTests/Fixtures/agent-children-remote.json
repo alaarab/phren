@@ -1,0 +1,59 @@
+{
+  "agents": [
+    {
+      "id": "remote-lead",
+      "provider": "codex",
+      "model": "configured-model",
+      "path": "Parser checks",
+      "callId": "dispatch:parser-checks",
+      "state": "running",
+      "computer": {
+        "id": "c1000000-0000-0000-0000-000000000002",
+        "name": "Linuxbox"
+      },
+      "remote": {
+        "target": {
+          "server": "work",
+          "workspace": "w9",
+          "tab": "w9:t1",
+          "pane": "w9:p1",
+          "source": "codex",
+          "session": "00000000-0000-0000-0000-000000000042"
+        }
+      },
+      "children": [
+        {
+          "id": "remote-parser-fixtures",
+          "provider": "codex",
+          "path": "Parser fixtures",
+          "callId": "fanout:parser-fixtures",
+          "state": "running",
+          "computer": {
+            "id": "c1000000-0000-0000-0000-000000000002",
+            "name": "Linuxbox"
+          },
+          "remote": {
+            "target": {
+              "server": "work",
+              "workspace": "w9",
+              "tab": "w9:t1",
+              "pane": "w9:p1",
+              "source": "codex",
+              "session": "00000000-0000-0000-0000-000000000042"
+            },
+            "child": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "local-navigation",
+      "provider": "claude",
+      "path": "Navigation checks",
+      "callId": "agent:navigation",
+      "state": "completed",
+      "children": []
+    }
+  ]
+}

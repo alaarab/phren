@@ -17,7 +17,7 @@ struct AccountUsageView: View {
     var body: some View {
         PhrenList {
             if hosts.isEmpty {
-                Text("Connect a computer in Agents to see Claude, Codex, OpenCode, and OpenRouter usage.")
+                Text("Connect a computer in Agents to see Claude, Codex, OpenCode, OpenCode Go, and OpenRouter usage.")
             } else {
                 TimelineView(.periodic(from: .now, by: 30)) { context in
                     let accounts = cache.mergedAccounts(for: hosts, at: context.date)
@@ -30,7 +30,7 @@ struct AccountUsageView: View {
                     Text("\(host.name): \(errors[host.id] ?? "")").font(.footnote).foregroundStyle(PhrenTheme.warning)
                 }
                 Section {
-                    Text("OpenCode is the rolling seven-day cost recorded in local sessions. OpenRouter is live charged usage for the current UTC week. Account limits are merged across computers.")
+                    Text("OpenCode is the rolling seven-day cost recorded in local sessions. OpenCode Go is recorded from local fan-outs. OpenRouter is live charged usage for the current UTC week. Account limits are merged across computers.")
                         .font(.footnote).foregroundStyle(PhrenTheme.textMuted)
                 }
             }
@@ -64,7 +64,22 @@ private struct AccountUsageCard: View {
                     Text(account.computers.joined(separator: " · ")).font(.caption).foregroundStyle(PhrenTheme.textMuted).lineLimit(1)
                 }
             }
-            if let spend = account.spend {
+            if account.source == "opencode-go" {
+                if let spend = account.spend {
+                    HStack(alignment: .firstTextBaseline) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Go spend total").font(.subheadline)
+                            Text(spend.periodLabel).font(.caption).foregroundStyle(PhrenTheme.textMuted)
+                        }
+                        Spacer()
+                        Text(spend.amountUSD, format: .currency(code: "USD").precision(.fractionLength(2)))
+                            .font(.title2.monospacedDigit().weight(.semibold))
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("usage-spend:\(account.source)")
+                }
+                OpenCodeGoUsageRows(account: account, stale: account.stale)
+            } else if let spend = account.spend {
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(spend.periodLabel).font(.subheadline)
@@ -78,26 +93,29 @@ private struct AccountUsageCard: View {
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("usage-spend:\(account.source)")
             }
-            ForEach(account.windows) { window in
-                let name = AccountUsagePresentation.windowName(window, source: account.source)
-                let percent = AccountUsagePresentation.percent(window.usedPercent)
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(name).font(.subheadline)
-                        Spacer()
-                        Text(percent).font(.subheadline.monospacedDigit().weight(.semibold))
+            if account.source != "opencode-go" {
+                ForEach(account.windows) { window in
+                    let name = AccountUsagePresentation.windowName(window, source: account.source)
+                    let usedPercent = window.usedPercent ?? 0
+                    let percent = AccountUsagePresentation.percent(usedPercent)
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(name).font(.subheadline)
+                            Spacer()
+                            Text(percent).font(.subheadline.monospacedDigit().weight(.semibold))
+                        }
+                        ProgressView(value: usedPercent, total: 100)
+                            .tint(account.stale ? PhrenTheme.textMuted : usedPercent >= 90 ? PhrenTheme.warning : PhrenTheme.accent)
+                            .accessibilityLabel("\(name): \(usedPercent.formatted()) percent used")
+                        caption(window)
                     }
-                    ProgressView(value: window.usedPercent, total: 100)
-                        .tint(account.stale ? PhrenTheme.textMuted : window.usedPercent >= 90 ? PhrenTheme.warning : PhrenTheme.accent)
-                        .accessibilityLabel("\(name): \(window.usedPercent.formatted()) percent used")
-                    caption(window)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel(name)
+                    .accessibilityValue("\(account.name) \(percent)")
+                    .accessibilityIdentifier(window.id == account.primaryWindow?.id
+                                             ? "usage-primary-window:\(account.source)"
+                                             : "usage-window:\(account.source):\(window.id)")
                 }
-                .accessibilityElement(children: .contain)
-                .accessibilityLabel(name)
-                .accessibilityValue("\(account.name) \(percent)")
-                .accessibilityIdentifier(window.id == account.primaryWindow?.id
-                                         ? "usage-primary-window:\(account.source)"
-                                         : "usage-window:\(account.source):\(window.id)")
             }
             if let message = account.message {
                 Text(message).font(.footnote).foregroundStyle(PhrenTheme.textMuted)
@@ -122,6 +140,72 @@ private struct AccountUsageCard: View {
                 .foregroundStyle(window.resetDate.map { $0 <= now } == true ? PhrenTheme.warning : PhrenTheme.textMuted)
                 .accessibilityIdentifier("usage-window-caption:\(window.id)")
         }
+    }
+}
+
+private struct OpenCodeGoUsageRows: View {
+    let account: MergedAccountUsage
+    let stale: Bool
+
+    private struct ModelUsage: Identifiable {
+        let name: String
+        let windows: [String: AccountUsageSnapshot.Window]
+        var id: String { name }
+        var ringPercent: Double? {
+            windows["30d"]?.usedPercent ?? windows["7d"]?.usedPercent ?? windows["5h"]?.usedPercent
+        }
+    }
+
+    private var models: [ModelUsage] {
+        Dictionary(grouping: account.windows) { window in
+            let pieces = window.name.components(separatedBy: " · ")
+            return pieces.count == 2 ? pieces[0] : window.name
+        }.map { name, windows in
+            let periods = windows.reduce(into: [String: AccountUsageSnapshot.Window]()) { result, window in
+                let period = window.name.components(separatedBy: " · ").last
+                if let period, result[period] == nil { result[period] = window }
+            }
+            return ModelUsage(name: name, windows: periods)
+        }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    var body: some View {
+        ForEach(models) { model in
+            HStack(spacing: 10) {
+                Text(model.name).font(.subheadline).lineLimit(1).truncationMode(.middle)
+                Spacer(minLength: 8)
+                Text(["5h", "7d", "30d"].map { period in
+                    model.windows[period]?.usedUSD.map { $0.formatted(.currency(code: "USD").precision(.fractionLength(2))) } ?? "—"
+                }.joined(separator: " · "))
+                .font(.subheadline.monospacedDigit().weight(.semibold))
+                if let percent = model.ringPercent {
+                    GoUsageRing(percent: percent, stale: stale)
+                }
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(model.name), 5 hours, 7 days, 30 days")
+            .accessibilityValue(["5h", "7d", "30d"].map { period in
+                model.windows[period]?.usedUSD.map { $0.formatted(.currency(code: "USD").precision(.fractionLength(2))) } ?? "unavailable"
+            }.joined(separator: ", "))
+            .accessibilityIdentifier("usage-go-model:\(model.name)")
+        }
+    }
+}
+
+private struct GoUsageRing: View {
+    let percent: Double
+    let stale: Bool
+
+    var body: some View {
+        Circle().stroke(PhrenTheme.borderStrong, lineWidth: 2)
+            .overlay {
+                Circle().trim(from: 0, to: min(1, max(0, percent / 100)))
+                    .stroke(stale ? PhrenTheme.textMuted : percent >= 90 ? PhrenTheme.warning : PhrenTheme.accent,
+                            style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+            }
+            .frame(width: 22, height: 22)
+            .accessibilityLabel(AccountUsagePresentation.percent(percent) + " used")
     }
 }
 

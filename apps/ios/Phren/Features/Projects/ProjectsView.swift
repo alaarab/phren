@@ -295,21 +295,23 @@ struct ProjectDetailView: View {
             .accessibilityLabel("Project knobs")
             .accessibilityIdentifier("project-knobs-row")
             .padding(.horizontal, 16).padding(.bottom, 8)
-            NavigationLink { SchedulesView(storeId: storeId, project: project) } label: {
-                HStack(spacing: 10) {
-                    Label("Schedules", systemImage: "clock.badge.checkmark")
-                    Spacer()
-                    Text(schedulesSummary).foregroundStyle(PhrenTheme.textMuted)
-                    Image(systemName: "chevron.right").font(.caption.weight(.semibold))
+            if SessionOverviewMonitor.shared.allowsSchedules() {
+                NavigationLink { SchedulesView(storeId: storeId, project: project) } label: {
+                    HStack(spacing: 10) {
+                        Label("Schedules", systemImage: "clock.badge.checkmark")
+                        Spacer()
+                        Text(schedulesSummary).foregroundStyle(PhrenTheme.textMuted)
+                        Image(systemName: "chevron.right").font(.caption.weight(.semibold))
+                    }
+                    .font(.subheadline)
+                    .padding(.horizontal, 14).frame(minHeight: 44)
+                    .background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: 12))
                 }
-                .font(.subheadline)
-                .padding(.horizontal, 14).frame(minHeight: 44)
-                .background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+                .buttonStyle(.plain)
+                .accessibilityLabel("Project schedules")
+                .accessibilityIdentifier("project-schedules-row")
+                .padding(.horizontal, 16).padding(.bottom, 8)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Project schedules")
-            .accessibilityIdentifier("project-schedules-row")
-            .padding(.horizontal, 16).padding(.bottom, 8)
             Picker("Section", selection: $tab) {
                 ForEach(Tab.allCases, id: \.self) { Text($0.rawValue) }
             }

@@ -10,6 +10,7 @@ struct GraphCommand: Equatable {
 }
 
 enum GraphAction: Equatable {
+    case select(String)
     case focus(String)
     case openProject(String)
     case share(String)
@@ -164,6 +165,7 @@ struct GraphWebView: UIViewRepresentable {
                       let data = try? JSONSerialization.data(withJSONObject: message.body),
                       let action = try? JSONDecoder().decode(GraphActionMessage.self, from: data) else { return }
                 switch action.action {
+                case "select": onAction(.select(action.id))
                 case "focus": onAction(.focus(action.id))
                 case "openProject": onAction(.openProject(action.id))
                 case "share": onAction(.share(action.id))

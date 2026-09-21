@@ -1,3 +1,5 @@
+import { commandOwner, disabledHint } from "./modules/registry.js";
+import type { ModuleSnapshot } from "./modules/runtime.js";
 /**
  * Command registry - single source of truth for help generation and dispatch.
  *
@@ -517,23 +519,14 @@ export const REGISTRY: Command[] = [
   {
     name: "modules",
     topic: "config",
-    usage: "phren modules list [--profile <name>]",
-    summary: "List configured modules (registration is unchanged)",
-    subcommands: [{ name: "list", usage: "phren modules list [--profile <name>]", summary: "Show built-in modules and configured enablement" }],
-    run: async (args, ctx) => {
-      if (args[0] !== "list" || (args.length !== 1 && (args.length !== 3 || args[1] !== "--profile" || !args[2] || args[2].startsWith("-")))) {
-        console.error("Usage: phren modules list [--profile <name>]");
-        return 1;
-      }
-      const { BUILTIN_MODULES, enabled } = await import("./modules/registry.js");
-      const profile = args[2] ?? ctx.profile();
-      const selected = new Set(enabled(ctx.phrenPath(), profile).map(module => module.name));
-      console.log(`Configured modules for profile ${profile}. Registration is unchanged in this release.`);
-      console.log("Module\tVersion\tConfigured");
-      for (const module of BUILTIN_MODULES) {
-        console.log(`${module.name}\t${module.version}\t${selected.has(module.name) ? "enabled" : "disabled"}`);
-      }
-    },
+    usage: "phren modules <list|enable|disable> [name] [--profile <name>]",
+    summary: "List or configure enabled modules",
+    subcommands: [
+      { name: "list", usage: "phren modules list [--profile <name>]", summary: "Show effective enablement and source" },
+      { name: "enable", usage: "phren modules enable <name> [--profile <name>]", summary: "Enable a module" },
+      { name: "disable", usage: "phren modules disable <name> [--profile <name>]", summary: "Disable a module, preserving its data" },
+    ],
+    run: async (args, ctx) => (await import("./modules/command.js")).runModules(args, ctx),
   },
   {
     name: "config",
@@ -878,7 +871,7 @@ export const REGISTRY: Command[] = [
     name: "link",
     topic: "setup",
     usage: "phren link",
-    summary: "Removed - use `phren init`",
+    summary: "Reconcile the existing installation",
     hidden: true,
     run: native("runLinkRemovedNotice"),
   },
@@ -886,8 +879,8 @@ export const REGISTRY: Command[] = [
 
 // ── Lookup ───────────────────────────────────────────────────────────────────
 
-export function lookupCommand(name: string): Command | undefined {
-  for (const cmd of REGISTRY) {
+export function lookupCommand(name: string, snapshot?: ModuleSnapshot): Command | undefined {
+  for (const cmd of commandsForModules(snapshot)) {
     if (cmd.name === name) return cmd;
     if (cmd.aliases?.includes(name)) return cmd;
   }
@@ -902,4 +895,27 @@ export function helpTopicNames(): string[] {
 /** Topic IDs that are command groups (excludes doc topics and `all`). */
 export function commandTopics(): readonly Topic[] {
   return TOPIC_ORDER;
+}
+
+export function disabledCommand(command: string, snapshot: ModuleSnapshot): string | undefined {
+  if (!snapshot.has("tasks") && /^config proactivity .*--scope(?:=|\s+)(?:tasks|task)(?:\s|$)/.test(command)) return disabledHint("tasks");
+  const owner = commandOwner(command);
+  return owner && !snapshot.has(owner.name) ? disabledHint(owner.name) : undefined;
+}
+
+export function commandsForModules(snapshot?: ModuleSnapshot): Command[] {
+  if (!snapshot) return REGISTRY;
+  return REGISTRY.filter(command => !disabledCommand(command.name, snapshot)).map(command => ({
+    ...command,
+    usage: command.usage.replace(/<([^<>]*\|[^<>]*)>/g, (_match, choices: string) =>
+      `<${choices.split("|").filter(choice => !disabledCommand(`${command.name} ${choice}`, snapshot)).join("|")}>`),
+    aliases: command.aliases?.filter(alias => !disabledCommand(alias, snapshot)),
+    subcommands: command.subcommands?.filter(sub => !disabledCommand(`${command.name} ${sub.name}`, snapshot))
+      .map(sub => snapshot.has("tasks") ? sub : { ...sub, usage: sub.usage.replace("base|findings|tasks", "base|findings"), summary: sub.summary?.replace("findings or tasks", "findings") }),
+    run: async (args, ctx) => {
+      const unavailable = disabledCommand([command.name, ...args].join(" "), snapshot);
+      if (unavailable) { console.error(unavailable); return 1; }
+      return command.run(args, ctx);
+    },
+  }));
 }

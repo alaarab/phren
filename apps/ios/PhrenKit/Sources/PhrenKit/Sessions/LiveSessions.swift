@@ -1,8 +1,49 @@
 import Foundation
 
+/// Transport values remain typed; an absent dictionary is the legacy Hook contract.
+public struct LiveCapabilities: Codable, Equatable, Sendable {
+    public let memory: Bool?
+    public let tasks: Bool?
+    public let hook: Bool?
+    public let git: Bool?
+    public let diff: Bool?
+    public let schedules: Bool?
+    public let dispatch: Bool?
+    public let codeMap: Bool?
+    public let terminal: String?
+    public let shell: String?
+    public let webPreview: String?
+    public let approvalPush: String?
+    public let providers: [String]?
+
+    public enum Feature: String, Sendable { case tasks, schedules, changes, dispatch, codeMap }
+    public func allows(_ feature: Feature) -> Bool {
+        switch feature {
+        case .tasks: tasks == true
+        case .schedules: schedules == true
+        case .changes: git == true || (git == nil && diff == true)
+        case .dispatch: dispatch == true
+        case .codeMap: codeMap == true
+        }
+    }
+}
+
+public struct LiveHookInfo: Codable, Equatable, Sendable {
+    public let capabilities: LiveCapabilities?
+    public let modules: [String: String]?
+    public let store: String?
+    public let profile: String?
+    public let generation: String?
+}
+
 /// The Phren Hook v1 workspace contract. A child is a tab;
 /// it can aggregate several agent panes and is never claimed to be one agent.
 public struct LiveWorkspaces: Codable, Equatable, Sendable {
+    public struct Computer: Codable, Equatable, Sendable {
+        public let id: UUID
+        public let name: String
+        public init(id: UUID, name: String) { self.id = id; self.name = name }
+    }
     public struct Tab: Codable, Equatable, Sendable, Identifiable {
         public let id: String
         public let label: String
@@ -22,6 +63,11 @@ public struct LiveWorkspaces: Codable, Equatable, Sendable {
         /// The model the pane's agent runs, as the Hook read it from the
         /// transcript; nil for a pane with more than one agent or no answer yet.
         public let model: String?
+        /// Running children attached to this pane's conversation. Older Hooks
+        /// omit the field and therefore report no workers.
+        public var runningChildren: Int { max(0, reportedRunningChildren ?? 0) }
+        /// The distinct providers among the running children.
+        public var childProviders: [String] { reportedChildProviders ?? [] }
         /// Herdr's state-change counter for the tab's panes: higher means the
         /// agent's status moved more recently. Not a timestamp; only an order.
         public let changedSeq: Int?
@@ -30,6 +76,24 @@ public struct LiveWorkspaces: Codable, Equatable, Sendable {
         public var lastChangedAt: Date? { reportedLastChangedAt?.value }
         private let reportedLastChangedAt: ActivityDate?
         private let reportedContextUsedPercent: ContextUsedPercent?
+        private let reportedRunningChildren: Int?
+        private let reportedChildProviders: [String]?
+
+        public init(id: String, label: String, title: String? = nil,
+                    agentStatus: String? = nil, approvalPending: Bool? = nil,
+                    agent: String? = nil, starting: Bool? = nil, cwd: String? = nil,
+                    branch: String? = nil, agentPaneCount: Int? = nil,
+                    paneCount: Int? = nil, currentStep: String? = nil,
+                    model: String? = nil, changedSeq: Int? = nil) {
+            self.id = id; self.label = label; self.title = title
+            self.agentStatus = agentStatus; self.approvalPending = approvalPending
+            self.agent = agent; self.starting = starting; self.cwd = cwd
+            self.branch = branch; self.agentPaneCount = agentPaneCount
+            self.paneCount = paneCount; self.currentStep = currentStep
+            self.model = model; self.changedSeq = changedSeq
+            reportedLastChangedAt = nil; reportedContextUsedPercent = nil
+            reportedRunningChildren = nil; reportedChildProviders = nil
+        }
 
         /// Provider-reported percentage, when available. Missing or malformed
         /// metrics stay unknown; token counts alone cannot establish a limit.
@@ -42,6 +106,8 @@ public struct LiveWorkspaces: Codable, Equatable, Sendable {
             case id, label, title, agentStatus, approvalPending, agent, starting, cwd, branch, agentPaneCount, paneCount, changedSeq, currentStep, model
             case reportedContextUsedPercent = "contextUsedPercent"
             case reportedLastChangedAt = "lastChangedAt"
+            case reportedRunningChildren = "runningChildren"
+            case reportedChildProviders = "childProviders"
         }
 
         private struct ActivityDate: Codable, Equatable, Sendable {
@@ -110,6 +176,12 @@ public struct LiveWorkspaces: Codable, Equatable, Sendable {
     public let kind: String
     public let groups: [Group]
     public let focus: Focus?
+    /// The Hook's durable identity, distinct from `LiveHost.id`, which exists
+    /// only on this phone.
+    public let computer: Computer?
+    /// What the Hook reports about itself: capabilities and the modules it runs.
+    public let phren: LiveHookInfo?
+    public var capabilities: LiveCapabilities? { phren?.capabilities }
 
     /// The snapshot as it will read once Herdr has closed a tab (or a whole
     /// workspace when `tab` is nil): the card leaves the list the moment the
@@ -124,10 +196,43 @@ public struct LiveWorkspaces: Codable, Equatable, Sendable {
         let focus = focus.flatMap { focus -> Focus? in
             focus.workspaceID == workspace && (tab == nil || focus.tabID == tab) ? nil : focus
         }
-        return Self(kind: kind, groups: groups, focus: focus)
+        return Self(kind: kind, groups: groups, focus: focus, computer: computer, phren: phren)
     }
 
-    init(kind: String, groups: [Group], focus: Focus?) { self.kind = kind; self.groups = groups; self.focus = focus }
+    private enum CodingKeys: String, CodingKey { case kind, groups, focus, phren }
+    private struct PhrenInfo: Codable {
+        let computer: Computer?
+        let capabilities: LiveCapabilities?
+        let modules: [String: String]?
+        let store: String?
+        let profile: String?
+        let generation: String?
+    }
+
+    init(kind: String, groups: [Group], focus: Focus?, computer: Computer? = nil, phren: LiveHookInfo? = nil) {
+        self.kind = kind; self.groups = groups; self.focus = focus; self.computer = computer; self.phren = phren
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try values.decode(String.self, forKey: .kind)
+        groups = try values.decode([Group].self, forKey: .groups)
+        focus = try values.decodeIfPresent(Focus.self, forKey: .focus)
+        let info = try values.decodeIfPresent(PhrenInfo.self, forKey: .phren)
+        computer = info?.computer
+        phren = info.map { LiveHookInfo(capabilities: $0.capabilities, modules: $0.modules, store: $0.store, profile: $0.profile, generation: $0.generation) }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(kind, forKey: .kind)
+        try values.encode(groups, forKey: .groups)
+        try values.encodeIfPresent(focus, forKey: .focus)
+        if computer != nil || phren != nil {
+            try values.encode(PhrenInfo(computer: computer, capabilities: phren?.capabilities, modules: phren?.modules,
+                                        store: phren?.store, profile: phren?.profile, generation: phren?.generation), forKey: .phren)
+        }
+    }
 
     public static func read(_ data: Data) throws -> Self {
         guard data.count <= 1_048_576 else { throw PhrenKitError.validation("The session response is too large.") }
@@ -153,6 +258,12 @@ public struct LiveWorkspaces: Codable, Equatable, Sendable {
                 throw PhrenKitError.validation("The focused Herdr tab changed. Refresh the computer.")
             }
         }
+        if let computer = result.computer {
+            guard !computer.name.isEmpty, computer.name.utf8.count <= 253,
+                  computer.name.rangeOfCharacter(from: .controlCharacters) == nil else {
+                throw PhrenKitError.validation("Phren Hook returned an invalid computer identity.")
+            }
+        }
         return result
     }
 }
@@ -168,19 +279,24 @@ public struct LiveHost: Codable, Equatable, Sendable, Identifiable {
     public let address: String
     public let port: Int
     public let username: String
+    /// The immutable id reported by this enrolled Hook. The phone-local `id`
+    /// continues to own its keychain key and saved connection.
+    public var hookComputerID: UUID?
     public var fingerprint: String?
     public var herdrSession: String?
     public var color: String?
     public var muxID: String { "herdr:" + (herdrSession ?? "default") }
 
     public init(id: UUID = UUID(), name: String, address: String, port: Int = 22,
-                username: String, fingerprint: String? = nil, herdrSession: String? = nil,
+                username: String, hookComputerID: UUID? = nil,
+                fingerprint: String? = nil, herdrSession: String? = nil,
                 color: String? = nil) throws {
         self.id = id
         self.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         self.address = address.trimmingCharacters(in: .whitespacesAndNewlines)
         self.port = port
         self.username = username.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.hookComputerID = hookComputerID
         self.fingerprint = fingerprint
         self.herdrSession = herdrSession
         self.color = color
@@ -211,6 +327,14 @@ public struct LiveHost: Codable, Equatable, Sendable, Identifiable {
         if let color, color.range(of: #"^#[0-9A-F]{6}$"#, options: .regularExpression) == nil {
             throw PhrenKitError.validation("Choose a color as #RRGGBB.")
         }
+    }
+
+    /// Remote targets may select another Herdr server without changing the
+    /// enrolled address, pin, phone key, or Hook identity.
+    public func hasSameConnection(as other: Self) -> Bool {
+        id == other.id && address == other.address && port == other.port
+            && username == other.username && fingerprint == other.fingerprint
+            && (hookComputerID == nil || other.hookComputerID == nil || hookComputerID == other.hookComputerID)
     }
 }
 
@@ -263,9 +387,13 @@ public struct LiveSessionPreferences: Codable, Equatable, Sendable {
         let value = try JSONDecoder().decode(Self.self, from: data)
         guard value.schemaVersion == 1 else { throw PhrenKitError.validation("Update phren to read these live connections.") }
         var ids: Set<UUID> = []
+        var computerIDs: Set<UUID> = []
         for host in value.hosts {
             try host.validate()
-            guard ids.insert(host.id).inserted else { throw PhrenKitError.validation("Repeated live connection.") }
+            guard ids.insert(host.id).inserted,
+                  host.hookComputerID.map({ computerIDs.insert($0).inserted }) ?? true else {
+                throw PhrenKitError.validation("Repeated live connection.")
+            }
         }
         var paths: Set<String> = []
         for mapping in value.mappings {
@@ -288,6 +416,9 @@ public struct LiveSessionPreferences: Codable, Equatable, Sendable {
         var value = try read(data)
         try host.validate()
         value.hosts.removeAll { $0.id == host.id }
+        guard !value.hosts.contains(where: { host.hookComputerID != nil && $0.hookComputerID == host.hookComputerID }) else {
+            throw PhrenKitError.validation("This Hook is already associated with another connection.")
+        }
         value.hosts.append(host)
         return try JSONEncoder().encode(value)
     }
@@ -307,6 +438,18 @@ public struct LiveSessionPreferences: Codable, Equatable, Sendable {
             normalizedColor = nil
         }
         value.hosts[index].color = normalizedColor
+        return try JSONEncoder().encode(value)
+    }
+
+    public static func associating(hostID: UUID, hookComputerID: UUID, in data: Data) throws -> Data {
+        var value = try read(data)
+        guard let index = value.hosts.firstIndex(where: { $0.id == hostID }) else {
+            throw PhrenKitError.validation("Connection no longer exists.")
+        }
+        guard !value.hosts.contains(where: { $0.id != hostID && $0.hookComputerID == hookComputerID }) else {
+            throw PhrenKitError.validation("This Hook is already associated with another connection.")
+        }
+        value.hosts[index].hookComputerID = hookComputerID
         return try JSONEncoder().encode(value)
     }
 

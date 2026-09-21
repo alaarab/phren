@@ -47,15 +47,26 @@ final class GraphInteractionTests: XCTestCase {
     }
 
     @MainActor
-    func testFindingDossierOffersEdit() {
+    func testFindingDossierOffersControlsAndSteps() {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing"]
         app.launch()
         _ = openDossier(in: app)
 
-        let edit = app.webViews.buttons["Edit"]
-        XCTAssertTrue(edit.waitForExistence(timeout: 5), "finding offers Edit")
-        edit.tap()
+        let webView = app.webViews.firstMatch
+        for label in ["Edit", "Delete", "Close", "Next", "Previous"] {
+            XCTAssertTrue(webView.buttons[label].waitForExistence(timeout: 5), "finding offers \(label)")
+        }
+        XCTAssertTrue(webView.staticTexts["1 of 2"].waitForExistence(timeout: 5), "finding shows its sibling position")
+
+        webView.buttons["Next"].tap()
+        XCTAssertTrue(
+            webView.staticTexts["Retry sync after reconnecting"].waitForExistence(timeout: 5),
+            "Next selects the following finding"
+        )
+        XCTAssertTrue(webView.staticTexts["2 of 2"].waitForExistence(timeout: 5), "counter follows the selection")
+
+        webView.buttons["Edit"].tap()
         XCTAssertTrue(app.navigationBars["Edit finding"].waitForExistence(timeout: 5),
                       "Edit finding sheet appears")
     }
@@ -72,6 +83,19 @@ final class GraphInteractionTests: XCTestCase {
         delete.tap()
         XCTAssertTrue(app.sheets.buttons["Delete"].waitForExistence(timeout: 5),
                       "delete confirmation appears")
+    }
+
+    @MainActor
+    func testProjectDossierOmitsLeafControls() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing"]
+        app.launch()
+        let dossier = openProjectDossier(in: app)
+
+        XCTAssertTrue(dossier.waitForExistence(timeout: 5), "project dossier appears")
+        XCTAssertFalse(app.webViews.buttons["Edit"].exists, "project omits Edit")
+        XCTAssertFalse(app.webViews.buttons["Delete"].exists, "project omits Delete")
+        XCTAssertFalse(app.webViews.buttons["Next"].exists, "project omits stepping")
     }
 
     @MainActor
@@ -142,6 +166,21 @@ final class GraphInteractionTests: XCTestCase {
         return app.webViews.staticTexts.matching(
             NSPredicate(format: "label CONTAINS %@", "Cache repeated requests for offline use")
         ).firstMatch
+    }
+
+    @MainActor
+    private func openProjectDossier(in app: XCUIApplication) -> XCUIElement {
+        _ = app.buttons["Memory graph"].waitForExistence(timeout: 15)
+        app.buttons["Memory graph"].tap()
+        _ = app.webViews.staticTexts["DEMO"].firstMatch.waitForExistence(timeout: 20)
+        app.buttons["Search graph"].tap()
+        let field = app.textFields["Search findings, tasks, projects"]
+        field.tap()
+        field.typeText("demo")
+        let result = app.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] %@", "demo")).firstMatch
+        _ = result.waitForExistence(timeout: 5)
+        result.tap()
+        return app.webViews.otherElements["Node details"]
     }
 
     @MainActor

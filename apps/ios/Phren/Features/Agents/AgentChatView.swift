@@ -46,8 +46,10 @@ struct AgentChatSheet: View {
     @State private var requestedChild: AgentChildRequest?
     private let initialSessionID: LiveAgentSession.ID
     private let initialPane: AgentChatPanes.Pane?
+    private let initialTarget: AgentChatTarget?
     private let startsDictation: Bool
     init(session: LiveAgentSession, initialPane: AgentChatPanes.Pane? = nil,
+         initialTarget: AgentChatTarget? = nil,
          attachments: [AgentAttachment] = [], draft: String = "", startsDictation: Bool = false,
          initialChild: AgentChildRequest? = nil) {
         _session = State(initialValue: session)
@@ -56,11 +58,13 @@ struct AgentChatSheet: View {
         _requestedChild = State(initialValue: initialChild)
         initialSessionID = session.id
         self.initialPane = initialPane
+        self.initialTarget = initialTarget
         self.startsDictation = startsDictation
     }
     var body: some View {
         AgentChatView(session: session, switchSession: { session = $0 },
                       initialPane: session.id == initialSessionID ? initialPane : nil,
+                      initialTarget: session.id == initialSessionID ? initialTarget : nil,
                       incomingAttachments: $incomingAttachments, incomingDraft: $incomingDraft,
                       requestedChild: $requestedChild,
                       startsDictation: startsDictation && session.id == initialSessionID).id(session.id)
@@ -96,6 +100,7 @@ struct AgentChatView: View {
     let session: LiveAgentSession
     let switchSession: (LiveAgentSession) -> Void
     let initialPane: AgentChatPanes.Pane?
+    let initialTarget: AgentChatTarget?
     @Binding var incomingAttachments: [AgentAttachment]
     @Binding var incomingDraft: String
     /// Kept by the sheet so selecting a child under another tab survives the
@@ -124,16 +129,12 @@ struct AgentChatView: View {
     @State private var pasteAvailable = false
     /// Dictation writes straight into the composer: the words land in the
     /// message as they are recognised, no separate box to review.
-    @State private var dictation = { let t = SpeechTranscriber(); t.keepsSessionBetweenSegments = true; return t }()
-    @State private var dictationPrefix = ""
+    @State private var dictation = DictationSession(recognizer: SpeechTranscriber(), transform: SpeechSettings.apply)
     @State private var dictationBase = ""
     @State private var dictationTask: Task<Void, Never>?
     @State private var cleanupTask: Task<Void, Never>?
     @State private var dictationPreview: DictationCleanupPreview?
-    /// The mic is on as far as the person is concerned. The recogniser ends
-    /// a segment on its own after a pause; while this is set, each finished
-    /// segment is folded into the message and a new one starts.
-    @State private var dictating = false
+    private var dictating: Bool { dictation.isRecording }
     @State private var showingAgentSwitcher = false
     @State private var launchingNewThread = false
     @State private var showingUsage = false
@@ -143,15 +144,7 @@ struct AgentChatView: View {
     @State private var menuCommand: ChatMenuCommand?
     @State private var showingChildAgents = false
     @State private var childAgents: [AgentChild] = []
-    private struct OpenedChild: Identifiable, Hashable {
-        let session: LiveAgentSession
-        let target: AgentChatTarget
-        let agent: AgentChild
-        var id: String { target.id + "/" + agent.id }
-        static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
-        func hash(into hasher: inout Hasher) { hasher.combine(id) }
-    }
-    @State private var openedChild: OpenedChild?
+    @State private var openedChild: AgentWorkNavigation?
     @State private var previewImage: ChatAttachmentDraft?
     @State private var assigningProject = false
     @State private var fullDiff: ChatFullDiff?
@@ -186,34 +179,28 @@ struct AgentChatView: View {
             }
             guard !Task.isCancelled, scenePhase == .active else { return }
             dictationBase = model.draft + (model.draft.isEmpty || model.draft.hasSuffix(" ") || model.draft.hasSuffix("\n") ? "" : " ")
-            dictationPrefix = dictationBase
-            do { dictating = true; try dictation.start(); model.deliveryError = nil } catch { dictating = false; model.deliveryError = error.localizedDescription }
+            dictation.readDraft = { [model] in model.draft }
+            dictation.onDraftChange = { [model] in model.draft = $0 }
+            dictation.onFailure = { [model] in model.deliveryError = $0 }
+            model.deliveryError = nil
+            dictation.start(draft: model.draft)
         }
     }
-    /// The draft is leaving as a message while the mic stays on. The
-    /// recogniser's segment still holds every word said so far and would put
-    /// them straight back into the empty composer on its next partial
-    /// result; start a fresh segment with nothing banked instead, so what
-    /// follows is a new message.
     private func restartDictationSegment() {
-        guard dictating else { return }
-        dictating = false
-        dictation.stop()
-        dictationBase = ""; dictationPrefix = ""; dictationPreview = nil
-        do { try dictation.start(); dictating = true } catch { model.deliveryError = error.localizedDescription }
+        dictationBase = ""
+        dictationPreview = nil
+        dictation.send()
     }
     /// Stops and preserves the raw words in the draft. When opted in, Apple
     /// Intelligence prepares a candidate that remains separate until chosen.
     private func stopDictation() {
         guard dictating else { return }
-        dictating = false
-        let spoken = SpeechSettings.apply(dictation.bestTranscript)
         dictation.stop()
-        if !spoken.isEmpty { model.draft = dictationPrefix + spoken }
         model.draft = model.draft.trimmingCharacters(in: .whitespaces)
         let rawDraft = model.draft
-        let rawInstruction = rawDraft.hasPrefix(dictationBase)
-            ? String(rawDraft.dropFirst(dictationBase.count)) : rawDraft
+        let base = dictationBase
+        let rawInstruction = rawDraft.hasPrefix(base)
+            ? String(rawDraft.dropFirst(base.count)) : rawDraft
         guard SpeechSettings.cleanupEnabled(in: AppRuntime.defaults), !rawInstruction.isEmpty else {
             sendDictationIfRequested()
             return
@@ -226,8 +213,8 @@ struct AgentChatView: View {
                 guard let tightened else { sendDictationIfRequested(); return }
                 dictationPreview = DictationCleanupPreview(
                     rawDraft: rawDraft, rawInstruction: rawInstruction,
-                    tightenedDraft: dictationBase.trimmingCharacters(in: .whitespaces).isEmpty
-                        ? tightened : dictationBase + tightened,
+                    tightenedDraft: base.trimmingCharacters(in: .whitespaces).isEmpty
+                        ? tightened : base + tightened,
                     tightenedInstruction: tightened
                 )
             } catch {
@@ -249,7 +236,7 @@ struct AgentChatView: View {
     private func sendDictationIfRequested() {
         if ChatSettings.autoSendsDictation,
            !model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            Task { await model.send(session) }
+            sendDraft(handoffCommands: false)
         }
     }
 
@@ -296,7 +283,9 @@ struct AgentChatView: View {
         let cwd = pane?.cwd ?? (model.panes.count == 1 ? session.tab.cwd : nil)
         return (try? LiveSessionPreferences.read(hostData))?.projectMatch(hostID: session.host.id, cwd: cwd, projects: appModel.sessionProjects)?.project
     }
-    private var active: Bool { visible && scenePhase == .active && currentHost == session.host }
+    private var active: Bool {
+        visible && scenePhase == .active && currentHost?.hasSameConnection(as: session.host) == true
+    }
     private var selectedPane: AgentChatPanes.Pane? { model.panes.first { $0.id == model.target?.paneID } }
     private struct WorkingActivityObservation: Equatable {
         let project: String?
@@ -328,7 +317,9 @@ struct AgentChatView: View {
                         VStack(alignment: .leading, spacing: 12) {
                             if model.target == nil && !model.loading { panePicker }
                             if let error = model.error { connectionIssue(error, retry: !model.connected && model.target != nil) }
-                            if currentHost != session.host { connectionIssue("This computer's connection changed. Reopen chat from the current session list.") }
+                            if currentHost?.hasSameConnection(as: session.host) != true {
+                                connectionIssue("This computer's connection changed. Reopen chat from the current session list.")
+                            }
                             if model.hasMore {
                                 VStack(spacing: 8) {
                                     if model.loadingHistory { ProgressView().accessibilityLabel("Loading earlier messages") }
@@ -583,15 +574,14 @@ struct AgentChatView: View {
         // would otherwise sit under the composer.
         .toolbar(.hidden, for: .tabBar)
         .keepsInteractivePop(hidesNavigationBar: true, screenTag: Self.screenTag)
-        .navigationDestination(item: $openedChild) { destination in
-            ChildAgentTranscriptView(session: destination.session, target: destination.target, agent: destination.agent)
-        }
+        .navigationDestination(item: $openedChild) { AgentWorkDestinationView(navigation: $0) }
         .navigationDestination(item: $fullDiff) { FileDiffView(file: $0.file, section: $0.section) }
         .navigationDestination(item: $fullToolOutput) { FullToolOutputView(output: $0) }
         .onAppear {
             if !initialized {
                 initialized = true
-                if let initialPane { model.choose(initialPane, session: session) }
+                if let initialTarget { model.choose(initialTarget, session: session) }
+                else if let initialPane { model.choose(initialPane, session: session) }
                 if startsDictation {
                     // Let the push finish first; the microphone prompt and the
                     // keyboard both fight a screen that is still sliding in.
@@ -655,27 +645,11 @@ struct AgentChatView: View {
         }
         .onAppear { pasteAvailable = UIPasteboard.general.hasImages }
         .onChange(of: composing) { _, focused in if focused { pasteAvailable = UIPasteboard.general.hasImages } }
-        .onChange(of: dictation.transcript) { _, value in
-            if dictating, !value.isEmpty { model.draft = dictationPrefix + value }
-        }
-        .onChange(of: dictation.isRecording) { _, recording in
-            // A segment ended by itself (a pause, the recognizer's own limit):
-            // bank the best text it produced — never the possibly empty final
-            // result — and listen on. A restart that fails ends dictation
-            // visibly instead of leaving a live mic button over a dead engine.
-            guard dictating, !recording else { return }
-            let spoken = SpeechSettings.apply(dictation.bestTranscript)
-            if !spoken.isEmpty { dictationPrefix += spoken + " " }
-            model.draft = dictationPrefix
-            guard scenePhase == .active else { dictating = false; dictation.stop(); return }
-            do { try dictation.start() } catch {
-                dictating = false; dictation.stop()
-                model.draft = dictationPrefix.trimmingCharacters(in: .whitespaces)
-                model.deliveryError = error.localizedDescription
-            }
-        }
         .onChange(of: scenePhase) { _, phase in if phase != .active { stopDictation() } }
-        .onDisappear { dictationTask?.cancel(); cleanupTask?.cancel(); dictating = false; if dictation.isRecording { dictation.stop() } }
+        .onDisappear {
+            dictationTask?.cancel(); cleanupTask?.cancel()
+            dictation.stop()
+        }
         .sheet(isPresented: $showingOptions) { chatOptionsSheet }
         .sheet(isPresented: $launchingNewThread) {
             if let project { LaunchSessionView(storeID: project.storeID, project: project.name, preferredHostID: session.host.id) }
@@ -747,7 +721,7 @@ struct AgentChatView: View {
     private func openChildFromDrawer(_ child: AgentChild) {
         closeAgentDrawer()
         guard let target = model.target else { return }
-        openedChild = OpenedChild(session: session, target: target, agent: child)
+        openedChild = workNavigation(child, session: session, target: target)
     }
 
     private func openSessionChildFromDrawer(_ childSession: LiveAgentSession, target: AgentChatTarget, child: AgentChild) {
@@ -758,7 +732,18 @@ struct AgentChatView: View {
     private func openRequestedChildIfReady() {
         guard let request = requestedChild, request.session.id == session.id else { return }
         requestedChild = nil
-        openedChild = OpenedChild(session: request.session, target: request.target, agent: request.agent)
+        openedChild = workNavigation(request.agent, session: request.session, target: request.target)
+    }
+
+    private func workNavigation(_ agent: AgentChild, session: LiveAgentSession,
+                                target: AgentChatTarget) -> AgentWorkNavigation? {
+        let hosts = (try? LiveSessionPreferences.read(hostData))?.hosts ?? []
+        let offline = Set(SessionOverviewMonitor.shared.computers.compactMap { computer in
+            computer.monitor.message != nil || (computer.monitor.snapshot != nil && !computer.monitor.isFresh(at: .now))
+                ? computer.host.id : nil
+        })
+        return AgentWorkNavigation.resolve(agent: agent, session: session, target: target,
+                                           hosts: hosts, offlineHostIDs: offline)
     }
 
     /// The tab's panes when no conversation is open yet: agents to chat with,
@@ -946,7 +931,8 @@ struct AgentChatView: View {
                     .font(PhrenTypography.caption2).foregroundStyle(PhrenTheme.chatNeutral)
                     .accessibilityLabel(chatLocationSpoken).accessibilityIdentifier("chat-location")
             }.frame(maxWidth: .infinity, alignment: .leading)
-            if let target = model.target {
+            if let target = model.target,
+               (model.capabilities ?? session.capabilities)?.allows(.changes) ?? true {
                 NavigationLink {
                     // Besides the pane's tree: whatever the session's commands
                     // wrote elsewhere — the phren store, a sibling checkout.
@@ -1275,17 +1261,12 @@ struct AgentChatView: View {
     /// where the agent draws its menu; a command with its answer already in
     /// it (`/model sonnet`) is answered in the transcript and stays here.
     private func sendDraft(handoffCommands: Bool = true) {
-        let isCommand = AgentSlashCommand.isCommand(model.draft), pane = model.target?.paneID
-        if dictating {
-            // Bank the words the recogniser has not committed yet, then let
-            // the message go.
-            let spoken = SpeechSettings.apply(dictation.bestTranscript)
-            if !spoken.isEmpty { model.draft = dictationPrefix + spoken }
-            model.draft = model.draft.trimmingCharacters(in: .whitespaces)
-            restartDictationSegment()
-        }
+        cleanupTask?.cancel()
+        dictationPreview = nil
         sendTask = Task {
-            await model.send(session)
+            if dictating { dictation.updateDraft(model.draft) }
+            let isCommand = AgentSlashCommand.isCommand(model.draft), pane = model.target?.paneID
+            await model.send(session, consumeDraft: dictating ? { restartDictationSegment() } : nil)
             if model.deliveryError == nil, !isCommand { PhrenAppShortcuts.donateMessage(to: session) }
             if isCommand, handoffCommands, model.deliveryError == nil, let pane {
                 commandDestination = .init(paneID: pane, menu: false)
