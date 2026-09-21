@@ -96,7 +96,7 @@ final class ShortcutPanelTests: XCTestCase {
     }
 
     @MainActor private func openSettings(_ app: XCUIApplication) {
-        XCTAssertTrue(app.tabBars.buttons["Settings"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.tabBars.buttons["Settings"].waitForExistence(timeout: 8))
         app.tabBars.buttons["Settings"].tap()
         let row = app.buttons["settings-terminal-shortcuts"]
         XCTAssertTrue(row.waitForExistence(timeout: 5)); row.tap()
@@ -112,7 +112,6 @@ final class ShortcutPanelTests: XCTestCase {
         XCTAssertTrue(element.isHittable)
     }
     @MainActor private func capture(_ app: XCUIApplication, _ name: String) {
-        let attachment = XCTAttachment(screenshot: app.screenshot())
-        attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
+        attachUIScreenshot(app, name)
     }
 }

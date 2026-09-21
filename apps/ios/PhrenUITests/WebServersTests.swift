@@ -29,16 +29,14 @@ final class WebServersTests: XCTestCase {
         XCTAssertTrue(other.waitForExistence(timeout: 5))
         other.tap()
         XCTAssertTrue(app.webViews.staticTexts["Dashboard app loaded"].waitForExistence(timeout: 10))
-        let browserShot = XCTAttachment(screenshot: app.screenshot())
-        browserShot.name = "Web app browser"; browserShot.lifetime = .keepAlways; add(browserShot)
+        attachUIScreenshot(app, "Web app browser")
         app.buttons["Done"].tap()
         app.navigationBars["Web servers"].buttons.firstMatch.tap()
         app.buttons["live-host:A1000000-0000-0000-0000-000000000001"].tap()
         XCTAssertTrue(app.buttons["host-web-servers"].waitForExistence(timeout: 5))
         app.buttons["host-web-servers"].tap()
         XCTAssertTrue(row.waitForExistence(timeout: 5))
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "Compact web servers on a computer"; shot.lifetime = .keepAlways; add(shot)
+        attachUIScreenshot(app, "Compact web servers on a computer")
     }
 
     @MainActor
@@ -59,7 +57,7 @@ final class WebServersTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--web-servers-fixture"] + (extra.map { [$0] } ?? [])
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 8))
         app.tabBars.buttons["Agents"].tap()
         XCTAssertTrue(app.buttons["all-web-servers"].waitForExistence(timeout: 5))
         return app

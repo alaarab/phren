@@ -267,7 +267,7 @@ final class AllSessionsTests: XCTestCase {
         app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--all-sessions-fixture", "--native-chat-fixture"]
             + (resetPins ? ["--session-pins-reset"] : []) + extra
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 8))
         app.tabBars.buttons["Agents"].tap()
         return app
     }
@@ -291,7 +291,6 @@ final class AllSessionsTests: XCTestCase {
     }
     @MainActor
     private func capture(_ app: XCUIApplication, _ name: String) {
-        let screenshot = XCTAttachment(screenshot: app.screenshot())
-        screenshot.name = name; screenshot.lifetime = .keepAlways; add(screenshot)
+        attachUIScreenshot(app, name)
     }
 }

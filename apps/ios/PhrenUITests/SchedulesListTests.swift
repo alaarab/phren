@@ -5,7 +5,7 @@ final class SchedulesListTests: XCTestCase {
     func testProjectSchedulesCanPauseRunAndDelete() {
         let app = launch(tab: "projects")
         let project = app.buttons["project:sample/brain:demo"]
-        XCTAssertTrue(project.waitForExistence(timeout: 15))
+        XCTAssertTrue(project.waitForExistence(timeout: 8))
         project.tap()
 
         let entry = app.buttons["project-schedules-row"]
@@ -40,7 +40,7 @@ final class SchedulesListTests: XCTestCase {
     @MainActor
     func testAllSchedulesAreGroupedByProject() {
         let app = launch(tab: "agents", extra: ["--automatic-sessions-fixture"])
-        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 8))
         app.tabBars.buttons["Agents"].tap()
 
         let all = app.buttons["schedules-all"]
@@ -64,10 +64,7 @@ final class SchedulesListTests: XCTestCase {
 
     @MainActor
     private func capture(_ app: XCUIApplication, _ name: String) {
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
+        attachUIScreenshot(app, name)
     }
 
     @MainActor

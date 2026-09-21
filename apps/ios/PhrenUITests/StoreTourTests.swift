@@ -244,7 +244,7 @@ final class StoreTourTests: XCTestCase {
         // bootstrap finishes (no computers, no memory); a relaunch always lands.
         for attempt in 0..<2 {
             app.launch()
-            XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 15))
+            XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 8))
             app.tabBars.buttons["Agents"].tap()
             let revealed = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "live-host:")).firstMatch
             if revealed.waitForExistence(timeout: attempt == 0 ? 12 : 25) { break }
@@ -284,6 +284,6 @@ final class StoreTourTests: XCTestCase {
     private func settle(_ seconds: TimeInterval) { Thread.sleep(forTimeInterval: seconds) }
 
     @MainActor private func capture(_ app: XCUIApplication, _ name: String) {
-        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = name; shot.lifetime = .keepAlways; add(shot)
+        attachUIScreenshot(app, name)
     }
 }

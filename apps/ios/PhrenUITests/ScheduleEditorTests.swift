@@ -92,10 +92,7 @@ final class ScheduleEditorTests: XCTestCase {
     }
 
     private func capture(_ app: XCUIApplication, _ name: String) {
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
+        attachUIScreenshot(app, name)
     }
 
     @MainActor
@@ -106,7 +103,7 @@ final class ScheduleEditorTests: XCTestCase {
             "--schedules-fixture", "-phren-tab", "agents",
         ]
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 8))
         app.tabBars.buttons["Agents"].tap()
         let schedules = app.buttons["schedules-all"]
         XCTAssertTrue(schedules.waitForExistence(timeout: 10))

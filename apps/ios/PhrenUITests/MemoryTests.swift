@@ -151,7 +151,7 @@ final class MemoryTests: XCTestCase {
         app.launchArguments = ["--ui-testing", "--memory-fixture"] + extra
         for _ in 0..<2 {
             app.launch()
-            if app.tabBars.buttons["Memory"].waitForExistence(timeout: 15) { break }
+            if app.tabBars.buttons["Memory"].waitForExistence(timeout: 8) { break }
             app.terminate()
         }
         app.tabBars.buttons["Memory"].tap()
@@ -167,9 +167,6 @@ final class MemoryTests: XCTestCase {
 
     @MainActor
     private func capture(_ app: XCUIApplication, _ name: String) {
-        let attachment = XCTAttachment(screenshot: app.screenshot())
-        attachment.name = name
-        attachment.lifetime = .keepAlways
-        add(attachment)
+        attachUIScreenshot(app, name)
     }
 }

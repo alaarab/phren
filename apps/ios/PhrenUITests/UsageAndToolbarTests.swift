@@ -7,7 +7,7 @@ final class UsageAndToolbarTests: XCTestCase {
         app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--account-usage-fixture", "--usage-delayed"]
         app.launchEnvironment["PHREN_PERFORMANCE_LOG"] = "1"
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 8))
         app.tabBars.buttons["Agents"].tap()
         let usage = app.buttons["all-account-usage"]
         XCTAssertTrue(usage.waitForExistence(timeout: 10)); usage.tap()
@@ -44,7 +44,7 @@ final class UsageAndToolbarTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--all-sessions-fixture", "--native-chat-fixture", "--account-usage-fixture"]
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 15)); app.tabBars.buttons["Agents"].tap()
+        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 8)); app.tabBars.buttons["Agents"].tap()
         let rings = app.buttons["all-account-usage"]
         XCTAssertTrue(rings.waitForExistence(timeout: 10))
         let reported = NSPredicate(format: "value CONTAINS %@", "%")
@@ -89,7 +89,7 @@ final class UsageAndToolbarTests: XCTestCase {
     }
 
     @MainActor private func openToolbar(_ app: XCUIApplication) {
-        XCTAssertTrue(app.tabBars.buttons["Settings"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.tabBars.buttons["Settings"].waitForExistence(timeout: 8))
         app.tabBars.buttons["Settings"].tap()
         let row = app.buttons["settings-terminal-toolbar"]
         XCTAssertTrue(row.waitForExistence(timeout: 5)); row.tap()
@@ -105,7 +105,6 @@ final class UsageAndToolbarTests: XCTestCase {
         XCTAssertTrue(element.isHittable)
     }
     @MainActor private func capture(_ app: XCUIApplication, _ name: String) {
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = name; shot.lifetime = .keepAlways; add(shot)
+        attachUIScreenshot(app, name)
     }
 }

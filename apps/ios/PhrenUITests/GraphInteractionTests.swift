@@ -103,7 +103,7 @@ final class GraphInteractionTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing"]
         app.launch()
-        XCTAssertTrue(app.buttons["Memory graph"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["Memory graph"].waitForExistence(timeout: 8))
         capture(app, name: "Projects design")
         app.buttons["Memory graph"].tap()
         XCTAssertTrue(app.webViews.staticTexts["DEMO"].firstMatch.waitForExistence(timeout: 20))
@@ -145,15 +145,12 @@ final class GraphInteractionTests: XCTestCase {
 
     @MainActor
     private func capture(_ app: XCUIApplication, name: String) {
-        let screenshot = XCTAttachment(screenshot: app.screenshot())
-        screenshot.name = name
-        screenshot.lifetime = .keepAlways
-        add(screenshot)
+        attachUIScreenshot(app, name)
     }
 
     @MainActor
     private func openDossier(in app: XCUIApplication) -> XCUIElement {
-        _ = app.buttons["Memory graph"].waitForExistence(timeout: 15)
+        _ = app.buttons["Memory graph"].waitForExistence(timeout: 8)
         app.buttons["Memory graph"].tap()
         _ = app.webViews.staticTexts["DEMO"].firstMatch.waitForExistence(timeout: 20)
         app.buttons["Search graph"].tap()
@@ -170,7 +167,7 @@ final class GraphInteractionTests: XCTestCase {
 
     @MainActor
     private func openProjectDossier(in app: XCUIApplication) -> XCUIElement {
-        _ = app.buttons["Memory graph"].waitForExistence(timeout: 15)
+        _ = app.buttons["Memory graph"].waitForExistence(timeout: 8)
         app.buttons["Memory graph"].tap()
         _ = app.webViews.staticTexts["DEMO"].firstMatch.waitForExistence(timeout: 20)
         app.buttons["Search graph"].tap()
@@ -194,7 +191,7 @@ final class GraphInteractionTests: XCTestCase {
         app.launchArguments = ["--ui-testing"]
         app.launch()
         let graph = app.buttons["Memory graph"]
-        XCTAssertTrue(graph.waitForExistence(timeout: 15))
+        XCTAssertTrue(graph.waitForExistence(timeout: 8))
         graph.tap()
         // The native search is available before WKWebView has mounted its
         // graph. Wait for rendered content before issuing camera commands.
@@ -221,7 +218,7 @@ final class GraphInteractionTests: XCTestCase {
         app.buttons["Show full view"].tap()
         app.terminate()
         app.launch()
-        XCTAssertTrue(graph.waitForExistence(timeout: 15))
+        XCTAssertTrue(graph.waitForExistence(timeout: 8))
         graph.tap()
         app.buttons["Store: sample/brain"].tap()
         app.buttons["team/brain"].tap()
@@ -231,10 +228,7 @@ final class GraphInteractionTests: XCTestCase {
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch.tap()
         XCTAssertTrue(app.buttons["Show full view"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["Store: sample/brain"].exists)
-        let screenshot = XCTAttachment(screenshot: app.screenshot())
-        screenshot.name = "Saved graph connections"
-        screenshot.lifetime = .keepAlways
-        add(screenshot)
+        attachUIScreenshot(app, "Saved graph connections")
     }
 
     @MainActor
@@ -242,7 +236,7 @@ final class GraphInteractionTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing"]
         app.launch()
-        XCTAssertTrue(app.buttons["More"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["More"].waitForExistence(timeout: 8))
         app.buttons["More"].tap()
         tapVisibleSkillsItem(app)
         app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "audit")).firstMatch.tap()

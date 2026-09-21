@@ -8,7 +8,7 @@ final class SettingsScreensTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture"]
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["Settings"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.tabBars.buttons["Settings"].waitForExistence(timeout: 8))
         app.tabBars.buttons["Settings"].tap()
         func open(_ id: String, title: String) {
             let row = app.descendants(matching: .any).matching(identifier: id).firstMatch
@@ -94,7 +94,7 @@ final class SettingsScreensTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--native-chat-fixture"]
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 8))
         app.tabBars.buttons["Agents"].tap()
         let simulators = app.buttons["all-simulators"]
         XCTAssertTrue(simulators.waitForExistence(timeout: 10)); simulators.tap()

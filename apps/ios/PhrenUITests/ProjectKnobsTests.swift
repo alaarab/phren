@@ -7,7 +7,7 @@ final class ProjectKnobsTests: XCTestCase {
         app.launchArguments = ["--ui-testing", "--project-skills-fixture", "-phren-tab", "projects"]
         app.launch()
         let project = app.buttons["project:sample/brain:demo"]
-        XCTAssertTrue(project.waitForExistence(timeout: 15))
+        XCTAssertTrue(project.waitForExistence(timeout: 8))
         project.tap()
 
         let row = app.buttons["project-knobs-row"]
@@ -50,9 +50,6 @@ final class ProjectKnobsTests: XCTestCase {
             XCTAssertTrue(option.isSelected, "\(key) did not round-trip")
         }
 
-        let attachment = XCTAttachment(screenshot: app.screenshot())
-        attachment.name = "Project knobs"
-        attachment.lifetime = .keepAlways
-        add(attachment)
+        attachUIScreenshot(app, "Project knobs")
     }
 }

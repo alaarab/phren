@@ -99,7 +99,7 @@ final class ProjectSkillsTests: XCTestCase {
         app.launchArguments = ["--ui-testing", "--project-skills-fixture", "-phren-tab", "projects"]
         app.launch()
         let project = app.buttons["project:sample/brain:demo"]
-        XCTAssertTrue(project.waitForExistence(timeout: 15))
+        XCTAssertTrue(project.waitForExistence(timeout: 8))
         project.tap()
         XCTAssertTrue(app.buttons["project-skills"].waitForExistence(timeout: 5))
         return app
@@ -107,9 +107,6 @@ final class ProjectSkillsTests: XCTestCase {
 
     @MainActor
     private func capture(_ app: XCUIApplication, _ name: String) {
-        let attachment = XCTAttachment(screenshot: app.screenshot())
-        attachment.name = name
-        attachment.lifetime = .keepAlways
-        add(attachment)
+        attachUIScreenshot(app, name)
     }
 }

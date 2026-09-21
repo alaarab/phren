@@ -6,7 +6,7 @@ final class LiveSessionsTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--live-sessions-fixture", "--live-sessions-offline"]
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 8))
         app.tabBars.buttons["Agents"].tap()
         let computer = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Test Mac,")).firstMatch
         if !computer.exists {
@@ -57,13 +57,10 @@ final class LiveSessionsTests: XCTestCase {
         XCTAssertTrue(stale.waitForExistence(timeout: 100))
         // The card's last line only says what the section can't: Stale.
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Stale")).firstMatch.exists)
-        let screenshot = XCTAttachment(screenshot: app.screenshot())
-        screenshot.name = "Live sessions retain clearly stale status"
-        screenshot.lifetime = .keepAlways
-        add(screenshot)
+        attachUIScreenshot(app, "Live sessions retain clearly stale status")
 
         app.terminate(); app.launch()
-        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 8))
         app.tabBars.buttons["Agents"].tap()
         computer.tap()
         XCTAssertTrue(app.buttons["live-detail:w1:w1:t1"].waitForExistence(timeout: 10))

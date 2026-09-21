@@ -8,7 +8,7 @@ final class LaunchSessionTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--session-details-fixture", "--native-chat-fixture"]
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["Projects"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.tabBars.buttons["Projects"].waitForExistence(timeout: 8))
         app.tabBars.buttons["Projects"].tap()
         let project = app.buttons["project:sample/brain:phone"]
         XCTAssertTrue(project.waitForExistence(timeout: 10)); project.tap()
@@ -35,7 +35,7 @@ final class LaunchSessionTests: XCTestCase {
         XCTAssertTrue(app.buttons["chat-close"].waitForExistence(timeout: 10), "The new session opens straight into chat")
         XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "chat-provider").firstMatch.label, "Claude")
         XCTAssertTrue(app.staticTexts["chat-location"].label.contains("phone"))
-        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Chat opened on the launched session"; shot.lifetime = .keepAlways; add(shot)
+        attachUIScreenshot(app, "Chat opened on the launched session")
     }
 
     @MainActor
@@ -43,7 +43,7 @@ final class LaunchSessionTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--session-details-fixture", "--native-chat-fixture", "--launch-fails"]
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["Projects"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.tabBars.buttons["Projects"].waitForExistence(timeout: 8))
         app.tabBars.buttons["Projects"].tap()
         let project = app.buttons["project:sample/brain:phone"]
         XCTAssertTrue(project.waitForExistence(timeout: 10)); project.tap()

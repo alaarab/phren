@@ -21,8 +21,7 @@ final class ChangesTabTests: XCTestCase {
         XCTAssertEqual(title.label, "Uncommitted changes")
         let wrap = app.navigationBars.buttons["changes-wrap-toggle"]
         XCTAssertTrue(wrap.exists, "Wrapping belongs in the navigation bar")
-        let listShot = XCTAttachment(screenshot: app.screenshot())
-        listShot.name = "Changes list"; listShot.lifetime = .keepAlways; add(listShot)
+        attachUIScreenshot(app, "Changes list")
         diffMode.tap()
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "changes-fold").firstMatch.waitForExistence(timeout: 10))
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "diff-gutter-number").firstMatch.waitForExistence(timeout: 5))
@@ -32,8 +31,7 @@ final class ChangesTabTests: XCTestCase {
         XCTAssertEqual(header.frame.width, app.frame.width, accuracy: 2)
         if wrap.label == "Wrap long lines" { wrap.tap() }
         for name in ["Changes diff wrapped", "Changes diff scrolling"] {
-            let shot = XCTAttachment(screenshot: app.screenshot())
-            shot.name = name; shot.lifetime = .keepAlways; add(shot)
+            attachUIScreenshot(app, name)
             wrap.tap()
             XCTAssertEqual(header.frame.width, app.frame.width, accuracy: 2)
         }
@@ -69,7 +67,7 @@ final class ChangesTabTests: XCTestCase {
         app.launchArguments = extra + ["--ui-testing", "--automatic-sessions-fixture", "--session-details-fixture",
                                "--native-chat-fixture", "--chat-diffs"]
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 8))
         app.tabBars.buttons["Agents"].tap()
         let host = app.buttons["live-host:A1000000-0000-0000-0000-000000000001"]
         for _ in 0..<14 {

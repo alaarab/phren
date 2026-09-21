@@ -28,6 +28,6 @@ final class MemoryConnectionTests: XCTestCase {
         XCTAssertTrue(chat.waitForExistence(timeout: 5))
         chat.tap()
         XCTAssertTrue(app.staticTexts["Received in codex on w7:p1: Agent without GitHub"].waitForExistence(timeout: 5))
-        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Native agent chat without GitHub"; shot.lifetime = .keepAlways; add(shot)
+        attachUIScreenshot(app, "Native agent chat without GitHub")
     }
 }

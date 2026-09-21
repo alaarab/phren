@@ -41,7 +41,7 @@ final class AutomaticSessionTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--native-chat-fixture"] + extra
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["Projects"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.tabBars.buttons["Projects"].waitForExistence(timeout: 8))
         return app
     }
 

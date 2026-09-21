@@ -48,6 +48,8 @@ lock screen and Changes screen done properly.
 
 ### Changed
 
+- The UI test suite runs its classes on two simulator clones, skips screenshots
+  unless asked, and launches with animations off, about 2.5 times faster.
 - Denser chat and Changes screens: the header sits under the status bar, the
   composer sits on the home indicator, tool cards are 44pt, and the Changes
   tabs, rows and tree are slimmer.

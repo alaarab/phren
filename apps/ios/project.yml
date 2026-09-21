@@ -29,8 +29,10 @@ schemes:
         Phren: all
     test:
       targets:
-        - PhrenTests
-        - PhrenUITests
+        - name: PhrenTests
+          parallelizable: true
+        - name: PhrenUITests
+          parallelizable: true
 
 targets:
   PhrenTests:

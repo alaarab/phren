@@ -2,30 +2,11 @@ import XCTest
 
 final class WorkflowTests: XCTestCase {
     @MainActor
-    func testProjectsAndExploreRowsKeepACompactGroupedLayout() {
+    func testProjectsLayoutAndMemorySearch() {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing"]
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["Projects"].waitForExistence(timeout: 15))
-        app.tabBars.buttons["Projects"].tap()
-        let project = app.buttons["project:sample/brain:demo"]
-        XCTAssertTrue(project.waitForExistence(timeout: 8))
-        XCTAssertLessThanOrEqual(project.frame.height, 60)
-        let graph = app.buttons["Memory graph"].firstMatch
-        XCTAssertTrue(graph.exists)
-        XCTAssertLessThanOrEqual(graph.frame.height, 60)
-        let screenshot = XCTAttachment(screenshot: app.screenshot())
-        screenshot.name = "Compact grouped projects and Explore rows"
-        screenshot.lifetime = .keepAlways
-        add(screenshot)
-    }
-
-    @MainActor
-    func testGlobalSearchPublishesLatestQueryAndClearsOldResults() {
-        let app = XCUIApplication()
-        app.launchArguments = ["--ui-testing"]
-        app.launch()
-        XCTAssertTrue(app.tabBars.buttons["Memory"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.tabBars.buttons["Memory"].waitForExistence(timeout: 8))
         app.tabBars.buttons["Memory"].tap()
         let field = app.textFields["memory-search"]
         XCTAssertTrue(field.waitForExistence(timeout: 5))
@@ -38,6 +19,16 @@ final class WorkflowTests: XCTestCase {
         XCTAssertFalse(finding.exists)
         app.buttons["memory-search:clear"].tap()
         XCTAssertTrue(app.staticTexts["memory-panel-counts"].waitForExistence(timeout: 5))
+
+        // The same launch also covers the compact Projects and Explore rows.
+        app.tabBars.buttons["Projects"].tap()
+        let project = app.buttons["project:sample/brain:demo"]
+        XCTAssertTrue(project.waitForExistence(timeout: 8))
+        XCTAssertLessThanOrEqual(project.frame.height, 60)
+        let graph = app.buttons["Memory graph"].firstMatch
+        XCTAssertTrue(graph.exists)
+        XCTAssertLessThanOrEqual(graph.frame.height, 60)
+        attachUIScreenshot(app, "Compact grouped projects and Explore rows")
     }
 
     @MainActor
@@ -45,17 +36,14 @@ final class WorkflowTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--workflow-fixture"]
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 8))
         XCTAssertFalse(app.tabBars.buttons["Review"].exists)
         app.tabBars.buttons["Tasks"].tap()
         app.buttons["task-status"].tap()
         app.buttons["Active"].tap()
         XCTAssertTrue(app.staticTexts["No active tasks"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["task-detail:sample/brain/demo/dead0001"].exists)
-        let activeScreenshot = XCTAttachment(screenshot: app.screenshot())
-        activeScreenshot.name = "Calm active tasks state"
-        activeScreenshot.lifetime = .keepAlways
-        add(activeScreenshot)
+        attachUIScreenshot(app, "Calm active tasks state")
         app.buttons["View backlog (6)"].tap()
         let long = app.buttons["task-detail:sample/brain/demo/dead0001"]
         XCTAssertTrue(long.waitForExistence(timeout: 5))
@@ -64,10 +52,7 @@ final class WorkflowTests: XCTestCase {
         XCTAssertTrue(group.exists)
         XCTAssertLessThan(group.frame.minY - app.buttons["task-status"].frame.maxY, 32)
         XCTAssertLessThan(long.frame.minY - group.frame.maxY, 32)
-        let screenshot = XCTAttachment(screenshot: app.screenshot())
-        screenshot.name = "Scannable backlog with full task details on demand"
-        screenshot.lifetime = .keepAlways
-        add(screenshot)
+        attachUIScreenshot(app, "Scannable backlog with full task details on demand")
         long.tap()
         XCTAssertTrue(app.navigationBars["Task details"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "END OF PLAN")).firstMatch.exists)
@@ -85,7 +70,7 @@ final class WorkflowTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--workflow-fixture", "--automatic-sessions-fixture", "--native-chat-fixture"]
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["Tasks"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.tabBars.buttons["Tasks"].waitForExistence(timeout: 8))
         app.tabBars.buttons["Tasks"].tap()
         let task = app.buttons["task-detail:sample/brain/demo/dead0001"]
         XCTAssertTrue(task.waitForExistence(timeout: 8)); task.tap()
@@ -115,7 +100,7 @@ final class WorkflowTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--workflow-fixture", "--automatic-sessions-fixture", "--native-chat-fixture", "--chat-send-fails"]
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["Tasks"].waitForExistence(timeout: 15)); app.tabBars.buttons["Tasks"].tap()
+        XCTAssertTrue(app.tabBars.buttons["Tasks"].waitForExistence(timeout: 8)); app.tabBars.buttons["Tasks"].tap()
         let task = app.buttons["task-detail:sample/brain/demo/dead0001"]
         XCTAssertTrue(task.waitForExistence(timeout: 8)); task.tap()
         XCTAssertTrue(app.navigationBars["Task details"].waitForExistence(timeout: 5))
@@ -136,7 +121,7 @@ final class WorkflowTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--workflow-fixture"]
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["Tasks"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.tabBars.buttons["Tasks"].waitForExistence(timeout: 8))
         app.tabBars.buttons["Tasks"].tap()
         XCTAssertFalse(app.segmentedControls.buttons["Backlog"].exists)
         XCTAssertFalse(app.textFields["task-search-field"].exists)
@@ -180,10 +165,7 @@ final class WorkflowTests: XCTestCase {
         app.buttons["High"].tap()
         XCTAssertTrue(old.waitForExistence(timeout: 5))
         XCTAssertFalse(recent.exists)
-        let screenshot = XCTAttachment(screenshot: app.screenshot())
-        screenshot.name = "Compact task controls, creation dates and priority filtering"
-        screenshot.lifetime = .keepAlways
-        add(screenshot)
+        attachUIScreenshot(app, "Compact task controls, creation dates and priority filtering")
         app.buttons["task-filters"].tap()
         app.buttons["Clear filters"].tap()
         app.buttons["task-sort"].tap()
@@ -195,7 +177,7 @@ final class WorkflowTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--workflow-fixture"]
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["Tasks"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.tabBars.buttons["Tasks"].waitForExistence(timeout: 8))
         app.tabBars.buttons["Tasks"].tap()
         let first = app.buttons["task-detail:sample/brain/demo/dead0001"]
         let second = app.buttons["task-detail:team/brain/demo/dead0001"]
@@ -224,10 +206,7 @@ final class WorkflowTests: XCTestCase {
         XCTAssertTrue(first.waitForExistence(timeout: 5))
         XCTAssertFalse(second.exists)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Created Jan 1, 2026")).firstMatch.exists)
-        let screenshot = XCTAttachment(screenshot: app.screenshot())
-        screenshot.name = "Compact active workload after bulk moves and quick Start"
-        screenshot.lifetime = .keepAlways
-        add(screenshot)
+        attachUIScreenshot(app, "Compact active workload after bulk moves and quick Start")
     }
 
     @MainActor
@@ -235,7 +214,7 @@ final class WorkflowTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--workflow-fixture"]
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["Settings"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.tabBars.buttons["Settings"].waitForExistence(timeout: 8))
         app.tabBars.buttons["Settings"].tap()
         let maintenance = app.buttons["Memory maintenance"]
         if !maintenance.isHittable { app.swipeUp() }
@@ -246,10 +225,7 @@ final class WorkflowTests: XCTestCase {
         XCTAssertTrue(personal.waitForExistence(timeout: 5))
         XCTAssertTrue(team.exists)
         XCTAssertFalse(app.staticTexts["Candidate for team memory"].exists)
-        let screenshot = XCTAttachment(screenshot: app.screenshot())
-        screenshot.name = "Optional maintenance grouped by project and store"
-        screenshot.lifetime = .keepAlways
-        add(screenshot)
+        attachUIScreenshot(app, "Optional maintenance grouped by project and store")
         team.tap()
         XCTAssertTrue(app.staticTexts["Candidate for team memory"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["Candidate for sample memory"].exists)

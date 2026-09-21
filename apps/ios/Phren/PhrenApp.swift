@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import PhrenKit
 
 @main
@@ -10,7 +11,12 @@ struct PhrenApp: App {
     @Environment(\.scenePhase) private var scenePhase
     private let launchedAt = CFAbsoluteTimeGetCurrent()
 
-    init() { Self.applyPhrenChrome() }
+    init() {
+        Self.applyPhrenChrome()
+        // UI tests wait on elements appearing; UIKit's own animations only add
+        // latency. SwiftUI animations are dropped by the root transaction below.
+        if AppRuntime.isUITesting { UIView.setAnimationsEnabled(false) }
+    }
 
     var body: some Scene {
         WindowGroup {
@@ -21,6 +27,11 @@ struct PhrenApp: App {
                 .foregroundStyle(PhrenTheme.text)
                 // All current palettes use dark system controls and keyboards.
                 .preferredColorScheme(.dark)
+                // UI tests run without animation, the same way the
+                // reduce-motion controls fixture does.
+                .transaction { transaction in
+                    if AppRuntime.isUITesting { transaction.animation = nil }
+                }
                 .onChange(of: appearance.palette) { _, _ in Self.applyPhrenChrome() }
                 .modifier(ExternalURLTestCapture())
                 .task {

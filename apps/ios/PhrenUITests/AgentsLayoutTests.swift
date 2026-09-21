@@ -7,7 +7,7 @@ final class AgentsLayoutTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture"]
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 8))
         app.tabBars.buttons["Agents"].tap()
         let title = app.navigationBars.staticTexts["Live sessions"]
         XCTAssertTrue(title.waitForExistence(timeout: 5))
@@ -49,7 +49,7 @@ final class AgentsLayoutTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing"]
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["Settings"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.tabBars.buttons["Settings"].waitForExistence(timeout: 8))
         app.tabBars.buttons["Settings"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
         assertRenderedTitle(app, title: "Settings")
@@ -58,10 +58,7 @@ final class AgentsLayoutTests: XCTestCase {
 
     @MainActor
     private func capture(_ app: XCUIApplication, name: String) {
-        let attachment = XCTAttachment(screenshot: app.screenshot())
-        attachment.name = name
-        attachment.lifetime = .keepAlways
-        add(attachment)
+        attachUIScreenshot(app, name)
     }
 
     /// Accessibility still exposes a title when the list has painted over it.

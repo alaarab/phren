@@ -39,7 +39,7 @@ final class ChangesHistoryBranchesTests: XCTestCase {
         let host = app.buttons["live-host:A1000000-0000-0000-0000-000000000001"]
         for attempt in 0..<2 {
             app.launch()
-            XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 15))
+            XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 8))
             app.tabBars.buttons["Agents"].tap()
             let revealed = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "live-host:")).firstMatch
             if revealed.waitForExistence(timeout: attempt == 0 ? 12 : 25) || app.staticTexts["agents-introduction"].exists == false { break }
@@ -57,6 +57,6 @@ final class ChangesHistoryBranchesTests: XCTestCase {
 
     @MainActor
     private func capture(_ app: XCUIApplication, _ name: String) {
-        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = name; shot.lifetime = .keepAlways; add(shot)
+        attachUIScreenshot(app, name)
     }
 }

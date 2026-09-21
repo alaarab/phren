@@ -421,7 +421,7 @@ final class AgentChatTests: XCTestCase {
     }
 
     @MainActor
-    func testHeavyTranscriptScrollingPerformance() {
+    func testHeavyTranscriptScrollingAndComposerFocus() {
         let app = launch(extra: ["--chat-heavy"])
         app.buttons["live-chat:w7:w7:t9"].tap()
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "chat-message:59:0").firstMatch.waitForExistence(timeout: 15))
@@ -433,6 +433,20 @@ final class AgentChatTests: XCTestCase {
         transcript.swipeUp(velocity: .fast)
         XCTAssertLessThan(Date().timeIntervalSince(started), 30, "a swipe each way over the heavy transcript stays quick")
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "chat-message:59:0").firstMatch.waitForExistence(timeout: 10))
+        // The same launch also checks focusing the composer keeps the end on screen.
+        let tail = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Heavy fixture reply 19.")).firstMatch
+        XCTAssertTrue(tail.waitForExistence(timeout: 15))
+        let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
+        XCTAssertTrue(composer.waitForExistence(timeout: 8))
+        composer.tap()
+        Thread.sleep(forTimeInterval: 1.5)
+        capture(app, "Composer focused on a long transcript")
+        XCTAssertTrue(tail.isHittable, "Focusing the composer must keep the transcript's end above the keyboard, not scroll past it")
+        XCTAssertFalse(app.buttons["Latest messages"].exists, "Follow should stay engaged when the keyboard appears")
+        app.buttons["Return"].exists ? app.buttons["Return"].tap() : app.swipeDown()
+        Thread.sleep(forTimeInterval: 1.0)
+        capture(app, "Composer released on a long transcript")
+        XCTAssertTrue(tail.isHittable, "Dismissing the keyboard must leave the transcript's end on screen")
     }
 
     @MainActor
@@ -1015,12 +1029,14 @@ final class AgentChatTests: XCTestCase {
         capture(app, "Native Herdr terminal")
     }
 
-    /// The source-control sheet: the branch stat line from /v1/git/status and
-    /// the five segment bar the tabs hang from.
+    /// The source-control sheet: the branch stat line from /v1/git/status, the
+    /// five segment tabs, the GitHub pull list, and a working-tree folder that
+    /// expands to its changed file. One launch covers both tabs' assertions.
     @MainActor
-    func testChangesScreenShowsGitStatusAndTabs() {
+    func testChangesScreenTabsPullRequestsAndWorkingTree() {
         let app = launch(extra: ["--chat-diffs"])
         app.buttons["live-chat:w7:w7:t9"].tap()
+        XCTAssertTrue(app.scrollViews["chat-transcript"].waitForExistence(timeout: 8))
         app.buttons["chat-diff"].tap()
         let status = app.descendants(matching: .any).matching(identifier: "changes-status-line").firstMatch
         XCTAssertTrue(status.waitForExistence(timeout: 8))
@@ -1029,6 +1045,17 @@ final class AgentChatTests: XCTestCase {
             XCTAssertTrue(app.buttons[identifier].waitForExistence(timeout: 5), "Missing \(identifier)")
         }
         capture(app, "Changes screen")
+        app.buttons["changes-tab-pulls"].tap()
+        let pull = app.buttons["changes-pull:42"]
+        XCTAssertTrue(pull.waitForExistence(timeout: 8))
+        XCTAssertTrue(pull.label.contains("Changes: pull requests and a working tree"))
+        capture(app, "Pull requests in the changes screen")
+        app.buttons["changes-tab-tree"].tap()
+        let folder = app.buttons["changes-tree-entry:Sources"]
+        XCTAssertTrue(folder.waitForExistence(timeout: 8))
+        folder.tap()
+        XCTAssertTrue(app.buttons["changes-tree-entry:Sources/App.swift"].waitForExistence(timeout: 8))
+        capture(app, "Working tree with change badges")
     }
 
     @MainActor
@@ -1261,29 +1288,6 @@ final class AgentChatTests: XCTestCase {
         capture(app, "Repository changes from a shell edit, syntax coloured")
     }
 
-    /// The Changes screen's pull requests and working tree tabs: the fixture's
-    /// GitHub CLI list draws a row, and a folder expands to its changed file.
-    @MainActor
-    func testChangesPullsAndWorkingTreeTabs() {
-        let app = launch(extra: ["--chat-diffs"])
-        app.buttons["live-chat:w7:w7:t9"].tap()
-        XCTAssertTrue(app.scrollViews["chat-transcript"].waitForExistence(timeout: 8))
-        app.buttons["chat-diff"].tap()
-        XCTAssertTrue(app.buttons["changes-tab-pulls"].waitForExistence(timeout: 8))
-        app.buttons["changes-tab-pulls"].tap()
-        let pull = app.buttons["changes-pull:42"]
-        XCTAssertTrue(pull.waitForExistence(timeout: 8))
-        XCTAssertTrue(pull.label.contains("Changes: pull requests and a working tree"))
-        capture(app, "Pull requests in the changes screen")
-        app.buttons["changes-tab-tree"].tap()
-        let folder = app.buttons["changes-tree-entry:Sources"]
-        XCTAssertTrue(folder.waitForExistence(timeout: 8))
-        folder.tap()
-        XCTAssertTrue(app.buttons["changes-tree-entry:Sources/App.swift"].waitForExistence(timeout: 8))
-        capture(app, "Working tree with change badges")
-    }
-
-    /// Seed this simulator with `xcrun simctl addmedia <device> <test-image>`.
     @MainActor
     func testSystemPhotoPickerPreparesAnAttachment() throws {
         let app = launch()
@@ -1571,25 +1575,6 @@ final class AgentChatTests: XCTestCase {
     }
 
     @MainActor
-    func testFocusingTheComposerKeepsTheLastMessageOnScreen() {
-        let app = launch(extra: ["--chat-heavy"])
-        app.buttons["live-chat:w7:w7:t9"].tap()
-        let tail = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Heavy fixture reply 19.")).firstMatch
-        XCTAssertTrue(tail.waitForExistence(timeout: 15))
-        let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
-        XCTAssertTrue(composer.waitForExistence(timeout: 8))
-        composer.tap()
-        Thread.sleep(forTimeInterval: 1.5)
-        capture(app, "Composer focused on a long transcript")
-        XCTAssertTrue(tail.isHittable, "Focusing the composer must keep the transcript's end above the keyboard, not scroll past it")
-        XCTAssertFalse(app.buttons["Latest messages"].exists, "Follow should stay engaged when the keyboard appears")
-        app.buttons["Return"].exists ? app.buttons["Return"].tap() : app.swipeDown()
-        Thread.sleep(forTimeInterval: 1.0)
-        capture(app, "Composer released on a long transcript")
-        XCTAssertTrue(tail.isHittable, "Dismissing the keyboard must leave the transcript's end on screen")
-    }
-
-    @MainActor
     func testStreamingReplyStaysPinnedToTheBottom() {
         let app = launch(extra: ["--chat-streaming"])
         app.buttons["live-chat:w7:w7:t9"].tap()
@@ -1623,7 +1608,7 @@ final class AgentChatTests: XCTestCase {
         app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--all-sessions-fixture", "--session-relative-time-fixture", "--native-chat-fixture", "--chat-persistent-draft", "--chat-clear-drafts"]
         app.launchEnvironment["PHREN_PERFORMANCE_LOG"] = "1"
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 8))
         app.tabBars.buttons["Agents"].tap()
         let macID = "A1000000-0000-0000-0000-000000000001:herdr:default:w1:w1:t1"
         let linuxID = "A1000000-0000-0000-0000-000000000002:herdr:default:w1:w1:t1"
@@ -1996,7 +1981,7 @@ final class AgentChatTests: XCTestCase {
         // relaunch always lands. Real launches are unaffected.
         for attempt in 0..<2 {
             app.launch()
-            XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 15))
+            XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 8))
             app.tabBars.buttons["Agents"].tap()
             // The list's rows are lazy: the Computers section is only in the
             // tree once scrolled to, which at accessibility text sizes takes
@@ -2020,6 +2005,6 @@ final class AgentChatTests: XCTestCase {
         app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ AND identifier != %@", "{", "chat-fixture-copied"))
     }
     @MainActor private func capture(_ app: XCUIApplication, _ name: String) {
-        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = name; shot.lifetime = .keepAlways; add(shot)
+        attachUIScreenshot(app, name)
     }
 }

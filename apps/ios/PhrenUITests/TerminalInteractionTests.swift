@@ -404,7 +404,7 @@ final class TerminalInteractionTests: XCTestCase {
         // fixture bootstrap finishes; a relaunch always lands.
         for attempt in 0..<2 {
             app.launch()
-            XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 15))
+            XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 8))
             app.tabBars.buttons["Agents"].tap()
             if host.waitForExistence(timeout: attempt == 0 ? 12 : 25) { break }
             if attempt == 0 { app.terminate() }
@@ -456,8 +456,6 @@ final class TerminalInteractionTests: XCTestCase {
 
     @MainActor
     private func capture(_ app: XCUIApplication, _ name: String) {
-        let attachment = XCTAttachment(screenshot: app.screenshot())
-        attachment.name = name; attachment.lifetime = .keepAlways
-        add(attachment)
+        attachUIScreenshot(app, name)
     }
 }

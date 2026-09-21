@@ -139,7 +139,7 @@ final class TrailerTour: XCTestCase {
         // bootstrap finishes (no computers, no memory); a relaunch always lands.
         for attempt in 0..<2 {
             app.launch()
-            XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 15))
+            XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 8))
             app.tabBars.buttons["Agents"].tap()
             let revealed = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "live-host:")).firstMatch
             if revealed.waitForExistence(timeout: attempt == 0 ? 12 : 25) { break }
