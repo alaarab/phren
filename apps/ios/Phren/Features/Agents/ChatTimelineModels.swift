@@ -122,6 +122,9 @@ enum ReadOnlyToolCall {
         let presentation = ToolPresentationCache.value(call)
         switch presentation.title {
         case "Read", "Browse", "List": return true
+        // Codex's orchestration calls are looking around too: they carry an
+        // opaque agent id or a timeout, and three in a row fold into one row.
+        case "Wait Agent", "List Agents", "Send Message": return true
         // Phren Hook attaches what a call wrote, so a result carrying no
         // change is the agent finding something out — a build, a test run, a
         // grep — however long the command. Commands that read as writes keep

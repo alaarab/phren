@@ -71,6 +71,11 @@ struct PhrenApp: App {
                     case .background, .inactive: Task { await model.enterBackground() }
                     @unknown default: break
                     }
+                    // Returning to the foreground reaches every computer again
+                    // at once: the overview keeps its cached rows shown as
+                    // refreshing, never stale or disconnected, until a first
+                    // answer lands or the request fails outright.
+                    if phase == .active { SessionOverviewMonitor.shared.returnToForeground() }
                 }
                 // Widget taps (`widgetURL`/`Link` on `phren://…`) land here
                 // directly — no CFBundleURLTypes registration needed, that's

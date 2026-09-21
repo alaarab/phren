@@ -115,7 +115,7 @@ struct ChatAgentCard: View {
                             target: AgentChatTarget) -> AgentWorkNavigation? {
         let hosts = (try? LiveSessionPreferences.read(hostData))?.hosts ?? []
         let offline = Set(SessionOverviewMonitor.shared.computers.compactMap { computer in
-            computer.monitor.message != nil || (computer.monitor.snapshot != nil && !computer.monitor.isFresh(at: .now))
+            computer.monitor.message != nil || computer.monitor.isStale(at: .now)
                 ? computer.host.id : nil
         })
         return AgentWorkNavigation.resolve(agent: agent, session: session, target: target,

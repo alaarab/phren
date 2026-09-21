@@ -175,6 +175,13 @@ final class SessionOverviewMonitor {
         if ready && !refreshingCachedScreen { publish() } else { revealIfPossible() }
     }
 
+    /// The app came back to the foreground: reach every computer again now and
+    /// keep the cached overview shown as refreshing, not disconnected, until
+    /// each first answer lands or its request fails outright.
+    func returnToForeground() {
+        for computer in computers { computer.monitor.reconnecting() }
+    }
+
     private func revealIfPossible(deadlineReached: Bool = false) {
         guard initialDeadline != nil, !ready || refreshingCachedScreen else { return }
         guard deadlineReached || (pending.isEmpty && configuration.metadataReady) else { return }
@@ -199,7 +206,7 @@ final class SessionOverviewMonitor {
         let groups = groups(at: date, query: configuration.query, preferences: configuration.preferences,
                             projects: configuration.projects, focusFilter: configuration.focusFilter)
         var value = Screen(groups: groups, computers: computers.map {
-            ComputerRow(host: $0.host, connecting: $0.monitor.snapshot == nil && $0.monitor.message == nil,
+            ComputerRow(host: $0.host, connecting: $0.monitor.isConnecting,
                         fresh: $0.monitor.isFresh(at: date), message: $0.monitor.message,
                         needsVerification: $0.monitor.fingerprint != nil)
         }, focusFilter: configuration.focusFilter, query: configuration.query, memoryReady: configuration.metadataReady,
@@ -235,7 +242,7 @@ final class SessionOverviewMonitor {
         // once per tick.
         let key = GroupCacheKey(revisions: computers.map {
             .init(id: $0.id, message: $0.monitor.message,
-                  snapshot: $0.monitor.snapshot, fresh: $0.monitor.isFresh(at: date))
+                  snapshot: $0.monitor.snapshot, live: $0.monitor.isLive(at: date))
         }, query: query, preferences: preferences, projects: projects, focusFilter: focusFilter)
         if let cachedGroups, cachedGroups.key == key { return cachedGroups.value }
         let started = CFAbsoluteTimeGetCurrent()
@@ -246,7 +253,9 @@ final class SessionOverviewMonitor {
                 let project = preferences?.projectMatch(hostID: computer.id, cwd: session.tab.cwd, projects: projects)
                 return session.matches(query, projectName: project?.project.name)
             }
-            if computer.monitor.isFresh(at: date) { live += sessions } else { previous += sessions }
+            // While a computer is still being reached its cached sessions keep
+            // their activity groups instead of dropping to "Last seen".
+            if computer.monitor.isLive(at: date) { live += sessions } else { previous += sessions }
         }
         // What needs you first, then what just finished, then what is idle.
         let order: [(LiveWorkspaces.Tab.Activity, String)] = [
@@ -257,7 +266,7 @@ final class SessionOverviewMonitor {
         live.removeAll { preferences?.isPinned($0.id) == true }
         previous.removeAll { preferences?.isPinned($0.id) == true }
         var groups: [Group] = pinned.isEmpty ? [] : [
-            Group(id: "pinned", title: "Pinned", sessions: pinned, fresh: pinned.allSatisfy { isFresh($0, at: date) }),
+            Group(id: "pinned", title: "Pinned", sessions: pinned, fresh: pinned.allSatisfy { isLive($0, at: date) }),
         ]
         groups += order.compactMap { activity, title -> Group? in
             let matches = live.filter { $0.tab.activity == activity }.sorted(by: Self.ordered)
@@ -283,6 +292,12 @@ final class SessionOverviewMonitor {
         computers.first { $0.host == session.host }?.monitor.isFresh(at: date) == true
     }
 
+    /// Fresh, or still making first contact. The session list keeps a
+    /// computer's cached rows in their live groups until it answers or fails.
+    func isLive(_ session: LiveAgentSession, at date: Date) -> Bool {
+        computers.first { $0.host == session.host }?.monitor.isLive(at: date) == true
+    }
+
     /// Most recently changed first (Herdr's state counter, when the Hook
     /// reports it), then by computer and workspace so the rest stays stable.
     private static func ordered(_ lhs: LiveAgentSession, _ rhs: LiveAgentSession) -> Bool {
@@ -299,7 +314,7 @@ final class SessionOverviewMonitor {
         let id: UUID
         let message: String?
         let snapshot: LiveWorkspaces?
-        let fresh: Bool
+        let live: Bool
     }
     private struct GroupCacheKey: Equatable {
         let revisions: [Revision]

@@ -1465,24 +1465,27 @@ final class AgentChatTests: XCTestCase {
 
     @MainActor
     func testTerminalOnlyPromptIsAnsweredWithKeysFromTheChat() {
-        let app = launch(extra: ["--chat-blocked"])
+        let app = launch(extra: ["--chat-blocked", "--chat-terminal-choices"])
         app.buttons["live-chat:w7:w7:t9"].tap()
-        let keys = app.otherElements["chat-answer-keys"]
-        XCTAssertTrue(keys.waitForExistence(timeout: 10), "A prompt the Hook cannot structure still gets an answer row")
-        let yes = app.buttons["chat-answer-key:y"]
-        XCTAssertTrue(yes.exists)
-        XCTAssertGreaterThanOrEqual(yes.frame.height, 44, "The prompt's answer rows stay comfortable to tap")
-        XCTAssertTrue(app.buttons["chat-answer-key:Escape"].exists)
+        // A Codex dialog whose command and options the Hook read is asked as
+        // the question card, not the bare waiting line and its key strip.
+        let card = app.descendants(matching: .any).matching(identifier: "chat-question").firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 10), "The terminal dialog's question is shown as a card")
+        XCTAssertTrue(app.staticTexts["Codex asks"].exists)
+        XCTAssertFalse(app.otherElements["chat-answer-keys"].exists, "The raw key strip is gone while the card is up")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "xcrun simctl list runtimes")).firstMatch.exists)
+        let proceed = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Yes, proceed")).firstMatch
+        XCTAssertTrue(proceed.exists)
+        XCTAssertGreaterThanOrEqual(proceed.frame.height, 44, "The card's option rows stay comfortable to tap")
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "don't ask again")).firstMatch.exists)
         XCTAssertTrue(app.buttons["chat-answer-terminal"].exists, "The terminal stays one tap away")
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Agent is waiting")).firstMatch.exists)
-        // Combined into one element, which XCUITest reports as static text.
-        let prompt = app.descendants(matching: .any).matching(identifier: "chat-terminal-prompt").firstMatch
-        XCTAssertTrue(prompt.waitForExistence(timeout: 8), "The question the keys answer is shown, not just the keys")
-        XCTAssertTrue(prompt.label.contains("May I inspect the installed simulator runtimes"), "The reason comes first: \(prompt.label)")
-        XCTAssertTrue(prompt.label.contains("xcrun simctl list runtimes"))
         capture(app, "Terminal question card")
-        yes.tap()
-        XCTAssertTrue(keys.waitForNonExistence(timeout: 10), "Once the agent stops waiting the row goes")
+        proceed.tap()
+        let send = app.buttons["Send answer"]
+        XCTAssertTrue(send.waitForExistence(timeout: 5))
+        send.tap()
+        XCTAssertTrue(card.waitForNonExistence(timeout: 10), "Once the agent stops waiting the card goes")
         XCTAssertFalse(app.staticTexts["chat-delivery-error"].exists)
     }
 

@@ -5,6 +5,8 @@ import Foundation
 public enum AgentAnswerKey: String, CaseIterable, Sendable, Identifiable {
     case enter = "Enter", up = "Up", down = "Down", tab = "Tab", yes = "y", no = "n"
     case one = "1", two = "2", three = "3", escape = "Escape"
+    /// Codex's "yes, and don't ask again for commands that start with …".
+    case proceedAlways = "p"
 
     public var id: String { rawValue }
 

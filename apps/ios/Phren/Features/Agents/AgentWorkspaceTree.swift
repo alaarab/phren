@@ -249,7 +249,7 @@ private struct AgentWorkspaceSessionRow: View {
         guard let computer = agent.computer,
               let host = (try? LiveSessionPreferences.read(hostData))?.hosts.first(where: { $0.hookComputerID == computer.id }) else { return false }
         return SessionOverviewMonitor.shared.computers.first(where: { $0.host.id == host.id }).map {
-            $0.monitor.message != nil || ($0.monitor.snapshot != nil && !$0.monitor.isFresh(at: .now))
+            $0.monitor.message != nil || $0.monitor.isStale(at: .now)
         } ?? false
     }
 }

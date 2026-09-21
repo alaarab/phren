@@ -157,7 +157,7 @@ struct ProjectSessionsView: View {
             let fresh = discovery.updated.map { context.date.timeIntervalSince($0) < 25 } == true
             HStack(spacing: 0) {
                 Button { open(session, assign: assign) } label: {
-                    SessionCardContent(session: session, fresh: fresh, project: assign ? nil : project,
+                    SessionCardContent(session: session, fresh: fresh, stale: !fresh, project: assign ? nil : project,
                                        projectStoreId: assign ? nil : storeID,
                                        computer: session.host, identifierPrefix: "discovered")
                 }

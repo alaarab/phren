@@ -11,6 +11,9 @@ struct ToolPresentation {
     let path: String?
     /// A short qualifier after the path — "lines 10–50", "in src/".
     var note: String? = nil
+    /// A short human phrase for a call whose generic first line would read as
+    /// raw JSON: Codex's orchestration calls carry an opaque id or a timeout.
+    var previewOverride: String? = nil
     let raw: String
     /// Whether this call looks like it wrote to files — a heredoc, `sed -i`,
     /// a redirect, `tee`, a Python `open(..., "w")`, `git apply` — so the
@@ -41,6 +44,7 @@ struct ToolPresentation {
     private static let pathLiteral = try! NSRegularExpression(pattern: #"(?<![\w@:/])(?:~/|\./|/)[\w.@+~-]+(?:/[\w.@+~-]+)*"#)
 
     var preview: String {
+        if let previewOverride { return previewOverride }
         // The file, not its whole absolute path: the last two components
         // read like VS Code's "folder/file" and leave room for the counts.
         if let path { return Self.short(path) + (note.map { " · " + $0 } ?? "") }
@@ -122,6 +126,23 @@ struct ToolPresentation {
         self.title = title; self.body = body
         description = described.flatMap { $0.isEmpty ? nil : String($0.prefix(500)) }
         self.path = path; patch = hasPatch ? body : nil
+        previewOverride = Self.orchestrationPhrase(name: name, fields: fields)
+    }
+
+    /// Codex's orchestration calls carry an opaque agent id or a timeout, not
+    /// a path or a command. Say what the agent did instead of showing it raw.
+    private static func orchestrationPhrase(name: String, fields: [String: Any]?) -> String? {
+        switch name {
+        case "wait", "wait_agent":
+            let milliseconds = (fields?["timeout_ms"] as? NSNumber)?.doubleValue
+                ?? (fields?["timeout_ms"] as? String).flatMap(Double.init)
+            guard let milliseconds, milliseconds > 0 else { return "waited" }
+            let seconds = Int((milliseconds / 1_000).rounded())
+            return seconds >= 60 ? "waited \(seconds / 60) min" : "waited \(seconds)s"
+        case "list_agents", "list_agent": return "listed agents"
+        case "send_message", "send_message_to_agent": return "sent a message"
+        default: return nil
+        }
     }
 
     /// The last two path components — enough to tell files apart on a phone.
@@ -148,6 +169,9 @@ struct ToolPresentation {
         if ["exec_command", "bash", "shell", "Bash", "Shell", "write_stdin"].contains(name) { return "Shell" }
         if ["apply_patch", "Edit", "MultiEdit", "str_replace_editor"].contains(name) { return "Patch" }
         if ["exec", "parallel"].contains(name) { return "Tools" }
+        if ["wait", "wait_agent"].contains(name) { return "Wait Agent" }
+        if ["list_agents", "list_agent"].contains(name) { return "List Agents" }
+        if ["send_message", "send_message_to_agent"].contains(name) { return "Send Message" }
         if name == "LS" { return "List" }
         if name == "WebFetch" { return "Fetch" }
         if name == "WebSearch" { return "Search" }

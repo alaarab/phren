@@ -132,16 +132,27 @@ struct SchedulesView: View {
     }
 
     private func sortKey(_ entry: ScheduleListEntry) -> (category: Int, date: Date) {
-        let state = liveState[Self.key(project: entry.project, id: entry.schedule.id)]
+        let next = effectiveNextRun(entry)
         let spentOnce: Bool
         if case .once = entry.schedule.every {
-            spentOnce = state?.lastRun != nil && state?.nextRun == nil
+            let state = liveState[Self.key(project: entry.project, id: entry.schedule.id)]
+            spentOnce = state?.lastRun != nil && next == nil
         } else {
             spentOnce = false
         }
         if spentOnce { return (2, .distantFuture) }
         if !entry.schedule.enabled { return (1, .distantFuture) }
-        return (0, state?.nextRun ?? ScheduleWords.nextRun(entry.schedule, after: .now, calendar: .current) ?? .distantFuture)
+        return (0, next ?? .distantFuture)
+    }
+
+    /// The Hook's next run once it has seen this exact schedule revision;
+    /// otherwise a value recomputed on the phone so an edit shows at once.
+    /// The store reaches the owning computer asynchronously, so its Hook can
+    /// keep reporting the pre-edit schedule for a while after a save.
+    private func effectiveNextRun(_ entry: ScheduleListEntry) -> Date? {
+        let state = liveState[Self.key(project: entry.project, id: entry.schedule.id)]
+        if let state { return state.effectiveNextRun(for: entry.schedule, after: .now, calendar: .current) }
+        return ScheduleWords.nextRun(entry.schedule, after: .now, calendar: .current)
     }
 
     private func connectedHost(for computer: String) -> LiveHost? {
@@ -239,7 +250,8 @@ struct SchedulesView: View {
             run = try await PhrenConnection.runSchedule(host: host, privateKey: DeviceSSHKey.load(host.id), project: entry.project, id: entry.schedule.id)
             #endif
             await delay.value
-            liveState[key] = ScheduleRuntimeState(run: run, nextRun: liveState[key]?.nextRun, running: true)
+            liveState[key] = ScheduleRuntimeState(run: run, nextRun: liveState[key]?.nextRun, running: true,
+                                                  scheduleUpdatedAt: entry.schedule.updatedAt)
             Task {
                 try? await Task.sleep(for: .seconds(2))
                 await refreshLiveState()
@@ -458,12 +470,19 @@ struct ScheduleRow: View {
         if !computerKnown { return "unknown computer" }
         if host == nil { return "\(schedule.computer) offline" }
         if !schedule.enabled { return "paused" }
-        if case .once = schedule.every, state?.lastRun != nil, state?.nextRun == nil { return "done" }
-        if let next = state?.nextRun ?? ScheduleWords.nextRun(schedule, after: .now, calendar: .current) {
+        if case .once = schedule.every, state?.lastRun != nil, nextRun == nil { return "done" }
+        if let next = nextRun {
             return ScheduleWords.relative(next, now: .now)
         }
         if case .once = schedule.every { return "done" }
         return "paused"
+    }
+
+    /// The Hook's value once it has confirmed the schedule revision, the
+    /// phone's own computation otherwise (and when there is no Hook state).
+    private var nextRun: Date? {
+        if let state { return state.effectiveNextRun(for: schedule, after: .now, calendar: .current) }
+        return ScheduleWords.nextRun(schedule, after: .now, calendar: .current)
     }
 
     private var harnessName: String { ScheduleWords.harnessName(schedule.harness) }
@@ -520,17 +539,32 @@ struct ScheduleRuntimeState: Sendable {
     let nextRun: Date?
     let lastRun: ScheduleRun?
     let running: Bool
+    /// The revision of the schedule the Hook computed `nextRun` from, so a
+    /// stale Hook value is not shown over a newer edit made on the phone.
+    let scheduleUpdatedAt: Date?
 
     init(_ status: ScheduleStatus) {
         nextRun = status.nextRun
         lastRun = status.lastRun
         running = status.running
+        scheduleUpdatedAt = status.schedule.updatedAt
     }
 
-    init(run: ScheduleRun, nextRun: Date?, running: Bool) {
+    init(run: ScheduleRun, nextRun: Date?, running: Bool, scheduleUpdatedAt: Date? = nil) {
         self.nextRun = nextRun
         lastRun = run
         self.running = running
+        self.scheduleUpdatedAt = scheduleUpdatedAt
+    }
+
+    /// The Hook's next run once it has seen this exact revision of the
+    /// schedule; until then the phone recomputes from the saved schedule so
+    /// an edit takes effect before the store reaches the owning computer.
+    func effectiveNextRun(for schedule: Schedule, after now: Date, calendar: Calendar) -> Date? {
+        if let scheduleUpdatedAt, scheduleUpdatedAt >= schedule.updatedAt {
+            return nextRun
+        }
+        return ScheduleWords.nextRun(schedule, after: now, calendar: calendar)
     }
 }
 

@@ -76,6 +76,7 @@ public enum PhrenConnection {
                           receive: (@Sendable (Data) throws -> Void)? = nil) async throws -> Data {
         try host.validate()
         let request = request.scoped(to: host)
+        GatewayTiming.mark("request \(request.path) start")
         // The connection is shared; this request is one session channel on it.
         // Nothing has been sent before the channel opens, so a connection that
         // died in the pool is simply replaced.
@@ -108,7 +109,9 @@ public enum PhrenConnection {
         return try await withTaskCancellationHandler {
             guard !Task.isCancelled else { loop.execute { exchange.finish(.failure(CancellationError())) }; throw CancellationError() }
             loop.execute { openGatewayChannel(on: connection, exchange: exchange, request: request) }
-            return try await result.futureResult.get()
+            let data = try await result.futureResult.get()
+            GatewayTiming.mark("request \(request.path) done \(data.count) bytes")
+            return data
         } onCancel: {
             loop.execute { exchange.finish(.failure(CancellationError())) }
         }

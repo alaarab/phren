@@ -287,7 +287,8 @@ struct LiveSessionsView: View {
         ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
             Section {
                 ForEach(group.sessions) { session in
-                        LiveSessionCard(session: session, fresh: screen.computers.first { $0.id == session.host.id }?.fresh == true,
+                        LiveSessionCard(session: session, fresh: overview.computers.first { $0.id == session.host.id }?.monitor.isLive(at: .now) == true,
+                                        stale: overview.computers.first { $0.id == session.host.id }?.monitor.isStale(at: .now) == true,
                                         showHost: true, resolvedProject: screen.projects[session.id], resolvedPin: screen.pinned.contains(session.id),
                                         onChat: { sessionOpen = SessionOpen(session: session, destination: .chat) }, onDetails: {
                             if let computer = overview.computers.first(where: { $0.id == session.host.id }) {
@@ -340,6 +341,11 @@ final class LiveHostMonitor {
     var fingerprint: String?
     var refreshing = false
     var polling = false
+    /// True until this contact period's first request resolves. While the
+    /// phone is reaching a computer its cached rows stay in the live groups
+    /// and are never labelled stale; only an answer that ages out, or an
+    /// outright failure, makes it not live.
+    @ObservationIgnored private(set) var awaitingAnswer = true
     private var generation = UUID()
     @ObservationIgnored private var refreshRequested = false
     @ObservationIgnored private let fetchSnapshot: (LiveHost, Date?) async throws -> LiveWorkspaces
@@ -352,6 +358,15 @@ final class LiveHostMonitor {
     /// Fetch again now rather than at the end of the poll interval — after a
     /// close, a launch, anything the person just did to the computer.
     func refreshNow() { refreshRequested = true }
+
+    /// The app came back to the foreground: reach this computer again now and
+    /// keep its cached rows shown as refreshing, not stale, until the answer
+    /// lands or the request fails outright.
+    func reconnecting() {
+        awaitingAnswer = true
+        refreshRequested = true
+        onSnapshotChanged?()
+    }
 
     /// For a screen pushed over the list: take over polling as soon as the
     /// list's own task is cancelled (that happens after this screen appears),
@@ -382,10 +397,12 @@ final class LiveHostMonitor {
         let run = UUID()
         generation = run
         polling = true
+        awaitingAnswer = true
         var first = true
         defer { if generation == run { polling = false; refreshing = false; approvalRefresh?.cancel() } }
         while !Task.isCancelled {
             refreshing = true
+            let fetchStarted = CFAbsoluteTimeGetCurrent()
             do {
                 let value = try await fetchSnapshot(host, lastUpdated)
                 try Task.checkCancellation()
@@ -423,8 +440,18 @@ final class LiveHostMonitor {
                 #endif
             }
             refreshing = false
+            let resolvedFirst = first
+            awaitingAnswer = false
             if first { first = false; onFirstRefresh?() }
             onSnapshotChanged?()
+            #if DEBUG
+            if resolvedFirst, ProcessInfo.processInfo.environment["PHREN_PERFORMANCE_LOG"] == "1" {
+                // First answer for this host in this run: the number the phone
+                // feels before the overview turns live.
+                let elapsed = (CFAbsoluteTimeGetCurrent() - fetchStarted) * 1_000
+                print("[PhrenPerformance] host \(host.name) first read: \(String(format: "%.1f", elapsed)) ms")
+            }
+            #endif
             if fingerprint != nil { return }
             // Sleep in slices so refreshNow() cuts the wait short.
             refreshRequested = false
@@ -657,7 +684,7 @@ private struct LiveHostView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 6) {
                             Circle().fill(fresh ? PhrenTheme.cyan : PhrenTheme.textDim).frame(width: 5, height: 5)
-                            Text(fresh ? "Live" : monitor.refreshing ? "Connecting…" : "Disconnected")
+                            Text(fresh ? "Live" : monitor.isConnecting ? "Connecting…" : "Disconnected")
                             if let date = monitor.lastUpdated {
                                 Text("· updated \(date, style: .relative) ago").lineLimit(1)
                             }
@@ -665,7 +692,7 @@ private struct LiveHostView: View {
                         if monitor.snapshot != nil {
                             Text(fresh
                                  ? "\(sessions.count) tabs · \(sessions.filter { $0.tab.activity == .working }.count) working · \(sessions.filter { $0.tab.activity == .waiting }.count) waiting"
-                                 : "Showing previous status")
+                                 : monitor.isConnecting ? "Refreshing…" : "Showing previous status")
                         }
                     }.font(.caption).foregroundStyle(PhrenTheme.textMuted)
                 }
@@ -702,7 +729,7 @@ private struct LiveHostView: View {
     private func sessionCards(_ entries: [LiveAgentSession]) -> some View {
         ForEach(entries) { session in
             TimelineView(.periodic(from: .now, by: 1)) { context in
-                LiveSessionCard(session: session, fresh: monitor.isFresh(at: context.date), onDetails: { selected = session }, onClose: { request, confirm in
+                LiveSessionCard(session: session, fresh: monitor.isLive(at: context.date), stale: monitor.isStale(at: context.date), onDetails: { selected = session }, onClose: { request, confirm in
                     if confirm { closeRequest = request } else { SessionCloseDialogs.perform(request, monitor: monitor) { closeError = $0 } }
                 })
                 .equatable().separatedSessionRow()
@@ -744,6 +771,23 @@ extension LiveHostMonitor {
     func isFresh(at date: Date) -> Bool {
         lastUpdated.map { date.timeIntervalSince($0) < 90 } == true
     }
+
+    /// Fresh, or still making first contact since the app became active.
+    /// Cached content keeps its place in the live groups while the phone is
+    /// reaching a computer instead of dropping to "Last seen" at once.
+    func isLive(at date: Date) -> Bool {
+        isFresh(at: date) || (awaitingAnswer && message == nil)
+    }
+
+    /// Stale is a computer that answered and whose answer has aged out. A
+    /// computer the phone has not heard from yet is connecting, not stale.
+    func isStale(at date: Date) -> Bool {
+        !isLive(at: date) && lastUpdated != nil
+    }
+
+    /// The phone is reaching this computer, or has not heard from it yet.
+    /// A fresh computer is live even while a poll is in flight.
+    var isConnecting: Bool { !isFresh(at: .now) && message == nil && (refreshing || awaitingAnswer) }
 }
 
 private struct SessionStatusIcon: View {
@@ -820,6 +864,9 @@ private struct LiveSessionCard: View, Equatable {
     @AppStorage("sessions.live.preferences.v1") private var data = Data()
     let session: LiveAgentSession
     let fresh: Bool
+    /// The computer answered before and its answer aged out, so the card says
+    /// Stale. A computer still being reached never sets this.
+    var stale = false
     var showHost = false
     var resolvedProject: String? = nil
     var resolvedPin: Bool? = nil
@@ -841,7 +888,7 @@ private struct LiveSessionCard: View, Equatable {
     @State private var showingChildAgents = false
 
     static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.session == rhs.session && lhs.fresh == rhs.fresh && lhs.showHost == rhs.showHost
+        lhs.session == rhs.session && lhs.fresh == rhs.fresh && lhs.stale == rhs.stale && lhs.showHost == rhs.showHost
             && lhs.resolvedProject == rhs.resolvedProject && lhs.resolvedPin == rhs.resolvedPin
     }
 
@@ -854,7 +901,7 @@ private struct LiveSessionCard: View, Equatable {
         let prefix = showHost ? "overview" : "live"
         HStack(spacing: 0) {
             AgentConversationLink(session: session, onOpenInPhren: onChat) {
-                SessionCardContent(session: session, fresh: fresh, project: project, projectStoreId: projectStoreId,
+                SessionCardContent(session: session, fresh: fresh, stale: stale, project: project, projectStoreId: projectStoreId,
                                    computer: showHost ? session.host : nil, identifierPrefix: prefix, onDetails: onDetails)
                     .equatable()
             }
@@ -964,7 +1011,8 @@ private struct LiveSessionDetailView: View {
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
-                let fresh = monitor.isFresh(at: context.date)
+                let fresh = monitor.isLive(at: context.date)
+                let stale = monitor.isStale(at: context.date)
                 if let session {
                     let project = match?.project
                     ScrollView {
@@ -991,7 +1039,7 @@ private struct LiveSessionDetailView: View {
                                         SessionRelativeTimeLabel(changedAt: date)
                                     }
                                 }.lineLimit(1).minimumScaleFactor(0.8)
-                                Text((session.tab.status + (fresh ? "" : " · stale")).uppercased())
+                                Text((session.tab.status + (stale ? " · stale" : "")).uppercased())
                                     .font(.caption.weight(.bold)).tracking(1.2)
                                     .foregroundStyle(fresh ? session.tab.activity.color : PhrenTheme.textMuted)
                                     .padding(.horizontal, 14).padding(.vertical, 6)
@@ -1019,7 +1067,7 @@ private struct LiveSessionDetailView: View {
                                 .accessibilityLabel("Open terminal")
                                 .accessibilityIdentifier("session-detail-terminal")
                             }
-                            if !fresh { Text("Reconnect this computer to resume its session.").font(.caption).foregroundStyle(PhrenTheme.textMuted) }
+                            if stale { Text("Reconnect this computer to resume its session.").font(.caption).foregroundStyle(PhrenTheme.textMuted) }
 
                             SessionAwaySummaryCard(
                                 session: session,

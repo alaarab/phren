@@ -6,6 +6,9 @@ public struct AgentApproval: Decodable, Equatable, Sendable, Identifiable {
     public let toolName: String?
     public let message: String?
     public let expiresAt: String?
+    /// A Codex approval that is really a terminal dialog: the Hook read the
+    /// command and its option list, so the phone can ask it as a question.
+    public let choice: AgentPromptChoice?
     public var id: String { actionId }
 
     public var expiration: Date? {
@@ -40,16 +43,74 @@ public struct AgentApproval: Decodable, Equatable, Sendable, Identifiable {
     }
 }
 
+/// A prompt the agent is drawing in its own terminal whose command and option
+/// list the Hook could read. Each option names the key that answers it, so the
+/// phone draws the same question card it uses for Claude and answers with
+/// `/v1/keys` instead of typing.
+public struct AgentPromptChoice: Decodable, Equatable, Sendable {
+    public struct Option: Decodable, Equatable, Sendable {
+        public let label: String
+        public let key: String
+
+        public init(label: String, key: String) {
+            self.label = label
+            self.key = key
+        }
+
+        /// The answer key this option names: `y`, `p`, `esc`, and so on.
+        public var answerKey: AgentAnswerKey? {
+            switch key.lowercased() {
+            case "esc", "escape": return .escape
+            case "enter", "return": return .enter
+            case "up": return .up
+            case "down": return .down
+            case "tab": return .tab
+            default: return AgentAnswerKey(rawValue: key.lowercased())
+            }
+        }
+    }
+
+    /// The asking sentence, e.g. "Would you like to run the following command?"
+    public let title: String?
+    /// The command or text the question is about.
+    public let body: String?
+    public let options: [Option]
+
+    public init(title: String? = nil, body: String? = nil, options: [Option]) {
+        self.title = title; self.body = body; self.options = options
+    }
+
+    /// The question card prompt: the asking sentence and the command as its
+    /// text, one row per option. Nil when there is nothing answerable.
+    public func prompt(id: String) -> AgentQuestionPrompt? {
+        let text = [title, body].compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }.joined(separator: "\n\n")
+        guard options.count >= 2, !text.isEmpty else { return nil }
+        return AgentQuestionPrompt(toolUseId: id, questions: [
+            .init(question: text, options: options.map { .init(label: $0.label) }),
+        ])
+    }
+
+    /// The key the chosen option names; nil when nothing was selected.
+    public func answerKey(selections: [Int]) -> AgentAnswerKey? {
+        guard let index = selections.first, options.indices.contains(index) else { return nil }
+        return options[index].answerKey
+    }
+}
+
 /// A permission request the agent is drawing in its own terminal because the
 /// Hook had no one to hold it for. Read-only on the phone: the answer goes
-/// in as keys, not as an approval.
+/// in as keys, not as an approval. `choice` is present when the Hook could
+/// read the command and options, so the phone shows them as a question.
 public struct AgentTerminalPrompt: Decodable, Equatable, Sendable {
     public let toolName: String?
     public let message: String?
+    public let choice: AgentPromptChoice?
 
-    public init(toolName: String?, message: String?) {
+    public init(toolName: String?, message: String?, choice: AgentPromptChoice? = nil) {
         self.toolName = toolName
         self.message = message
+        self.choice = choice
     }
 
     /// The same first-line rule as an approval card: the human reason or
@@ -103,7 +164,7 @@ public struct AgentInteractionStatus: Equatable, Sendable {
         var terminalPrompt: AgentTerminalPrompt?
         if approval == nil, let raw = status["terminalPrompt"] as? [String: Any], JSONSerialization.isValidJSONObject(raw) {
             terminalPrompt = try? JSONDecoder().decode(AgentTerminalPrompt.self, from: JSONSerialization.data(withJSONObject: raw))
-            if let message = terminalPrompt?.message, message.utf8.count > 32_768 { terminalPrompt = AgentTerminalPrompt(toolName: terminalPrompt?.toolName, message: String(message.prefix(32_768))) }
+            if let message = terminalPrompt?.message, message.utf8.count > 32_768 { terminalPrompt = AgentTerminalPrompt(toolName: terminalPrompt?.toolName, message: String(message.prefix(32_768)), choice: terminalPrompt?.choice) }
         }
         let capabilities = (status["capabilities"] as? [String: Any]).flatMap { raw in
             (try? JSONSerialization.data(withJSONObject: raw)).flatMap { try? JSONDecoder().decode(LiveCapabilities.self, from: $0) }
@@ -151,12 +212,24 @@ public struct AgentQuestionPrompt: Decodable, Equatable, Sendable, Identifiable 
         /// typed answer with no options.
         public let kind: String?
         public var isFreeText: Bool { kind == "text" || kind == "number" }
+
+        public init(id: String? = nil, header: String? = nil, question: String, multiSelect: Bool? = nil,
+                    options: [Option], kind: String? = nil) {
+            self.id = id; self.header = header; self.question = question
+            self.multiSelect = multiSelect; self.options = options; self.kind = kind
+        }
     }
     public let toolUseId: String
     /// Async Codex questions remain pending after the tool acknowledges receipt.
     public var isAsync: Bool? = nil
     public let questions: [Question]
     public var id: String { toolUseId }
+
+    /// Build a prompt the Hook did not decode from a provider shape: a
+    /// terminal dialog's question and its choices, rendered by the same card.
+    public init(toolUseId: String, questions: [Question], isAsync: Bool? = nil) {
+        self.toolUseId = toolUseId; self.questions = questions; self.isAsync = isAsync
+    }
 
     /// A bounded, well-formed question set from a transcript block or a
     /// permission request, or nothing.

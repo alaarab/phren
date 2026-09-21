@@ -144,6 +144,8 @@ struct ChatQuestionCard: View {
     /// Decline to answer (Claude: the permission is denied and the agent
     /// carries on without an answer).
     var skip: (() -> Void)? = nil
+    /// Where the terminal can still be opened while the card is up.
+    var headerAccessory: AnyView? = nil
     let answer: ([AgentQuestionAnswer]) -> Void
     @State private var answers: [Int: AgentQuestionAnswer] = [:]
     @State private var questionsHeight: CGFloat = 0
@@ -164,6 +166,7 @@ struct ChatQuestionCard: View {
                     Text("\(answeredCount) of \(prompt.questions.count)").font(.caption2.monospacedDigit()).foregroundStyle(PhrenTheme.textMuted)
                         .accessibilityLabel("\(answeredCount) of \(prompt.questions.count) answered")
                 }
+                if let headerAccessory { headerAccessory }
                 ChatQuestionExpandButton { expanded = true }
             }
             let questions = questionList(inline: true).background(GeometryReader { geometry in
@@ -407,6 +410,27 @@ struct ChatTerminalQuestionCard<Terminal: View, Secret: View>: View {
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
+    }
+}
+
+/// A Codex terminal dialog whose command and options the Hook could read:
+/// asked with the same card as Claude's AskUserQuestion, answered by sending
+/// the option's own key (`y`, `p`, `Esc`) through `/v1/keys`.
+struct ChatChoiceQuestionCard: View {
+    let choice: AgentPromptChoice
+    let id: String
+    let title: String
+    let busy: Bool
+    var terminal: AnyView? = nil
+    let answer: (AgentAnswerKey) -> Void
+
+    var body: some View {
+        if let prompt = choice.prompt(id: id) {
+            ChatQuestionCard(prompt: prompt, busy: busy, title: title, headerAccessory: terminal) { answers in
+                guard let key = choice.answerKey(selections: answers.first?.selections ?? []) else { return }
+                answer(key)
+            }
+        }
     }
 }
 

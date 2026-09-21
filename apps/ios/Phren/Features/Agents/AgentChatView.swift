@@ -492,6 +492,16 @@ struct AgentChatView: View {
                 }
                 .id(approval.id)
                 .padding(.horizontal, 12).padding(.vertical, 6)
+            } else if let approval = model.approval, let choice = approval.choice, choice.prompt(id: approval.id) != nil {
+                // A Codex approval whose command and options the Hook read:
+                // the question card's rows answer with their own keys.
+                ChatChoiceQuestionCard(choice: choice, id: approval.id, title: "\(model.target?.providerName ?? "Agent") asks",
+                                       busy: model.answering || !active || !model.interactionConnected,
+                                       terminal: AnyView(answerTerminalLink)) { key in
+                    sendTask = Task { await model.answer(session, key: key) }
+                }
+                .id(approval.id)
+                .padding(.horizontal, 12).padding(.vertical, 6)
             } else if let approval = model.approval {
                 ChatApprovalCard(approval: approval, busy: model.answering || !active || !model.interactionConnected) {
                     NavigationLink { HerdrTerminalView(host: session.host, session: session, target: model.target) } label: {
@@ -753,7 +763,7 @@ struct AgentChatView: View {
                                 target: AgentChatTarget) -> AgentWorkNavigation? {
         let hosts = (try? LiveSessionPreferences.read(hostData))?.hosts ?? []
         let offline = Set(SessionOverviewMonitor.shared.computers.compactMap { computer in
-            computer.monitor.message != nil || (computer.monitor.snapshot != nil && !computer.monitor.isFresh(at: .now))
+            computer.monitor.message != nil || computer.monitor.isStale(at: .now)
                 ? computer.host.id : nil
         })
         return AgentWorkNavigation.resolve(agent: agent, session: session, target: target,
@@ -1122,11 +1132,23 @@ struct AgentChatView: View {
             }
             if model.needsAnswer && model.approval == nil && model.question == nil {
                 if let prompt = model.terminalPrompt {
-                    ChatTerminalQuestionCard(providerName: model.target?.providerName ?? "Agent", prompt: prompt,
-                                             answering: model.answering,
-                                             disabled: model.answering || !active || !model.connected,
-                                             terminal: { answerTerminalLink }, secret: { answerSecretButton }) { key in
-                        sendTask = Task { await model.answer(session, key: key) }
+                    if let choice = prompt.choice, choice.prompt(id: "terminal-choice") != nil {
+                        // The terminal dialog the Hook read: the actual question
+                        // and its options, answered by their own keys. No key
+                        // strip and no waiting line behind it.
+                        ChatChoiceQuestionCard(choice: choice, id: "terminal-choice", title: "\(model.target?.providerName ?? "Agent") asks",
+                                               busy: model.answering || !active || !model.connected,
+                                               terminal: AnyView(answerTerminalLink)) { key in
+                            sendTask = Task { await model.answer(session, key: key) }
+                        }
+                        .id(prompt.message ?? "terminal-choice")
+                    } else {
+                        ChatTerminalQuestionCard(providerName: model.target?.providerName ?? "Agent", prompt: prompt,
+                                                 answering: model.answering,
+                                                 disabled: model.answering || !active || !model.connected,
+                                                 terminal: { answerTerminalLink }, secret: { answerSecretButton }) { key in
+                            sendTask = Task { await model.answer(session, key: key) }
+                        }
                     }
                 } else {
                     VStack(alignment: .leading, spacing: 6) {

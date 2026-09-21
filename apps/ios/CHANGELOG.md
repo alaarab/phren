@@ -120,6 +120,15 @@ lock screen and Changes screen done properly.
 
 ### Fixed
 
+- A Codex approval in the terminal shows its actual question and options as the
+  question card, answered by their own keys (`y`, `p`, `Esc`), instead of a bare
+  "Waiting for your answer" line and a key strip; the terminal stays in the
+  card's header. Codex's Wait Agent, List Agents and Send Message calls fold into
+  one row with a plain-language preview rather than a raw id or timeout.
+- Opening the app no longer shows a computer as disconnected or its sessions
+  as Stale while the first SSH connection is still being made: cached sessions
+  keep their live groups and read as refreshing until the computer answers,
+  and Stale now means a computer that answered and then went quiet.
 - The Memory list scrolls again: a vertical drag on a row moves the list, and the row
   actions stay on the ellipsis glyph.
 - Sending no longer throws the transcript past its end: the scroll waits for the new
@@ -135,6 +144,9 @@ lock screen and Changes screen done properly.
   longer peek through the card's corners, and the all-projects list resolves
   the computer and next run like the per-project list.
 - The schedule editor puts the keyboard away as soon as you scroll.
+- A schedule's next-run on the list follows an edit at once: the card recomputes
+  on the phone until the owning computer's Hook reports the new revision, instead
+  of showing the pre-edit time from the computer's older copy of the store.
 - Chat options lists the conversation's token usage above the project rows, and
   the token sheet starts at the top instead of floating mid-sheet.
 - Account usage: each provider's windows keep their own accessibility ids.

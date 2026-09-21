@@ -5,6 +5,20 @@ import NIOPosix
 import NIOSSH
 import PhrenKit
 
+/// Timing marks for the connection path, off unless the phone is launched with
+/// PHREN_PERFORMANCE_LOG=1, the same switch the app's other debug logging uses.
+/// The marks exist to separate a cold SSH handshake from time spent in the
+/// pooled channel or on the Hook so a slow first read can be attributed.
+enum GatewayTiming {
+    static let enabled = ProcessInfo.processInfo.environment["PHREN_PERFORMANCE_LOG"] == "1"
+    private static let start = CFAbsoluteTimeGetCurrent()
+    static func mark(_ label: String) {
+        guard enabled else { return }
+        let ms = (CFAbsoluteTimeGetCurrent() - start) * 1_000
+        print("[PhrenPerformance] ssh \(label): \(String(format: "%.1f", ms)) ms")
+    }
+}
+
 /// One authenticated SSH connection per computer, shared by every gateway
 /// request. A fresh connection costs a TCP handshake, a key exchange and an
 /// authentication round trip; each request is then one session channel on
@@ -47,7 +61,10 @@ final class GatewayConnections: @unchecked Sendable {
     /// caller owns one child slot on the result until it calls `release`.
     func connection(for host: LiveHost, key: Curve25519.Signing.PrivateKey) async throws -> Connection {
         let poolKey = Self.key(host: host, key: key)
-        if let existing = pooled(poolKey), try await existing.reserve() { return existing }
+        if let existing = pooled(poolKey), try await existing.reserve() {
+            GatewayTiming.mark("reuse pooled \(host.name)")
+            return existing
+        }
         let task: Task<Connection, Error> = lock.withLock {
             if let inFlight = connecting[poolKey] { return inFlight }
             let task = Task { try await self.connect(host: host, key: key, pooled: true) }
@@ -55,6 +72,7 @@ final class GatewayConnections: @unchecked Sendable {
             return task
         }
         do {
+            GatewayTiming.mark("await connect \(host.name)")
             let connection = try await task.value
             lock.withLock { if connecting[poolKey] == task { connecting[poolKey] = nil } }
             if try await connection.reserve() { register(connection, poolKey: poolKey); return connection }
@@ -117,6 +135,7 @@ final class GatewayConnections: @unchecked Sendable {
 
     private func connect(host: LiveHost, key: Curve25519.Signing.PrivateKey, pooled: Bool) async throws -> Connection {
         try host.validate()
+        GatewayTiming.mark("dial \(host.name)")
         let loop = MultiThreadedEventLoopGroup.singleton.next()
         let ready = Exchange(result: loop.makePromise(of: Data.self))
         let deadline = loop.scheduleTask(in: .seconds(15)) { ready.finish(.failure(LiveConnectionError.timeout)) }
@@ -146,6 +165,7 @@ final class GatewayConnections: @unchecked Sendable {
             opened.channel?.close(promise: nil)
             throw error
         }
+        GatewayTiming.mark("authenticated \(host.name) pooled=\(pooled)")
         guard let channel = opened.channel, let ssh = opened.ssh, channel.isActive else { throw LiveConnectionError.disconnected }
         let connection = Connection(loop: loop, channel: channel, ssh: ssh, pooled: pooled)
         opened.connection = connection

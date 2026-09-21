@@ -60,7 +60,7 @@ struct ChatSubagentsView: View {
     private func navigation(for agent: AgentChild) -> AgentWorkNavigation? {
         let hosts = (try? LiveSessionPreferences.read(hostData))?.hosts ?? []
         let offline = Set(overview.computers.compactMap { computer in
-            computer.monitor.message != nil || (computer.monitor.snapshot != nil && !computer.monitor.isFresh(at: .now))
+            computer.monitor.message != nil || computer.monitor.isStale(at: .now)
                 ? computer.host.id : nil
         })
         return AgentWorkNavigation.resolve(agent: agent, session: session, target: target,

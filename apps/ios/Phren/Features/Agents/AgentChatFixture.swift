@@ -70,10 +70,16 @@ import UIKit
     static let planMarkdown = "# Plan: subagent and todo cards\n\n## Steps\n\n1. Parse the Task tool in PhrenKit\n2. Draw the agent card\n3. Fold superseded todo lists\n4. Add fixture flags\n5. Write the UI tests\n6. Run the suite on the simulator\n7. Check the cards at accessibility sizes\n8. Verify the plan approval path\n9. Update the changelog\n10. Ask for review\n\n## Notes\n\n- Keep every card in the phren card family\n- No raw JSON on any card\n- Final step marker: run the full suite once more"
     /// A Codex approval that fell through to the terminal: the Hook saw it
     /// but nobody was watching, so the chat shows the question above its keys.
+    /// With `--chat-terminal-choices` the Hook read the command and option
+    /// list, so the same prompt is asked as the question card.
     static func terminalPrompt(_ target: AgentChatTarget) -> AgentTerminalPrompt? {
         guard flag("--chat-blocked"), !answered else { return nil }
         let input: [String: Any] = ["command": "xcrun simctl list runtimes", "justification": "May I inspect the installed simulator runtimes to resolve the Watch target test failure?"]
-        return AgentTerminalPrompt(toolName: "Shell", message: String(decoding: (try? JSONSerialization.data(withJSONObject: input, options: [.prettyPrinted, .sortedKeys])) ?? Data(), as: UTF8.self))
+        let choice = flag("--chat-terminal-choices") ? AgentPromptChoice(title: "Would you like to run the following command?", body: "xcrun simctl list runtimes",
+            options: [.init(label: "Yes, proceed (y)", key: "y"),
+                      .init(label: "Yes, and don't ask again for commands that start with xcrun simctl (p)", key: "p"),
+                      .init(label: "No, and tell Codex what to do differently (esc)", key: "Escape")]) : nil
+        return AgentTerminalPrompt(toolName: "Shell", message: String(decoding: (try? JSONSerialization.data(withJSONObject: input, options: [.prettyPrinted, .sortedKeys])) ?? Data(), as: UTF8.self), choice: choice)
     }
     static func status(_ target: AgentChatTarget) throws -> AgentInteractionStatus {
         var value: [String: Any] = ["source": target.source, "session": target.sessionID]

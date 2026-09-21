@@ -35,6 +35,9 @@ struct SessionCardContent: View, Equatable {
     @Environment(\.dynamicTypeSize) private var textSize
     let session: LiveAgentSession
     let fresh: Bool
+    /// The computer answered before and its answer aged out. A computer still
+    /// being reached shows its cached card without the Stale word.
+    var stale = false
     /// The project name the store matched to this session, when it has one.
     var project: String? = nil
     /// The store the matched project lives in, so its name can take the
@@ -49,7 +52,7 @@ struct SessionCardContent: View, Equatable {
     var onDetails: (() -> Void)? = nil
 
     static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.session == rhs.session && lhs.fresh == rhs.fresh && lhs.project == rhs.project
+        lhs.session == rhs.session && lhs.fresh == rhs.fresh && lhs.stale == rhs.stale && lhs.project == rhs.project
             && lhs.projectStoreId == rhs.projectStoreId
             && lhs.computer == rhs.computer && lhs.subtitle == rhs.subtitle
             && lhs.identifierPrefix == rhs.identifierPrefix && (lhs.onDetails == nil) == (rhs.onDetails == nil)
@@ -69,7 +72,7 @@ struct SessionCardContent: View, Equatable {
     private var state: String {
         var parts: [String] = []
         if session.tab.approvalPending == true { parts.append("Permission needed") }
-        if !fresh { parts.append("Stale") }
+        if stale { parts.append("Stale") }
         return parts.joined(separator: " · ")
     }
     private var stateColor: Color { fresh ? session.tab.activity.color : PhrenTheme.textMuted }
@@ -129,7 +132,7 @@ struct SessionCardContent: View, Equatable {
                             .accessibilityLabel(session.tab.status)
                         if !state.isEmpty {
                             Text(state).font(.caption2.weight(.medium))
-                                .foregroundStyle(session.tab.approvalPending == true || !fresh ? stateColor : PhrenTheme.sessionMeta)
+                                .foregroundStyle(session.tab.approvalPending == true || stale ? stateColor : PhrenTheme.sessionMeta)
                         }
                         if !subtitle.isEmpty, project == nil { Text("· " + subtitle).font(.caption2).foregroundStyle(PhrenTheme.sessionMeta).lineLimit(1) }
                     }

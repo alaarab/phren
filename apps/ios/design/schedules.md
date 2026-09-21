@@ -207,6 +207,9 @@ button that opens that session's chat through the existing session route
 - Concurrent edits: the editor keeps the file content it read and saves
   with it as expected content; on conflict the banner says "Schedules changed
   on another device. Reopen to edit." and the sheet stays open.
+- An edit shows its new next run before the owning computer's Hook has the
+  new store: the row keeps the phone's own computation until the Hook reports
+  the same schedule revision (`updatedAt`), then follows the Hook's value.
 - Accessibility: every control has a label; the row combines its text into
   one element with the run-now button separate; VoiceOver reads "Nightly test
   sweep, in 4 hours, Desk, Codex, daily at 7:30, last run finished 2 hours
