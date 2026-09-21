@@ -155,6 +155,9 @@ interface CachedChanges { files: Map<string, ChangedFile[]>; loaded?: Promise<vo
 /** Snapshots live only around a shell call. Persisted results are validated
  * when loaded; the LRU retains at most 16 conversations, including loads. */
 export class ToolChanges {
+  /** Called after a non-empty change event is recorded, so modules that follow
+   * file changes (the code index) can react without polling. */
+  onRecord?: (files: ChangedFile[]) => void;
   private snapshots = new Map<string, Snapshot>();
   private results = new Map<string, CachedChanges>();
   private controllers = new Set<AbortController>();
@@ -259,6 +262,7 @@ export class ToolChanges {
     const size = (await stat(file).catch(() => undefined))?.size ?? 0;
     const line = JSON.stringify({ toolUseId, files }) + "\n";
     if (size + Buffer.byteLength(line) <= 16_777_216) await appendFile(file, line, { mode: 0o600 });
+    this.onRecord?.(files);
   }
   async recordedPaths(conversation: string): Promise<string[]> {
     return [...new Set([...(await this.load(conversation)).files.values()].flatMap(files => files.flatMap(file => [file.root, path.resolve(file.root, file.path)])))];

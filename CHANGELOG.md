@@ -5,6 +5,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- The `code` module now serves its symbol index to the phone. Phren Hook adds
+  `GET /v1/code/status`, `/v1/code/search`, `/v1/code/outline`,
+  `/v1/code/definition`, `/v1/code/references` and `/v1/code/usage`, gated by the
+  module like the other routes and advertised as the `code` capability. The Hook
+  re-indexes a project after the git module records a file change, debounced 500
+  ms, and runs a full re-index when the repository's HEAD moves. The iPhone adds
+  a Code cell to the project page, symbol search and a symbol dossier. See
+  `docs/code-index.md`.
+
 ### Fixed
 
 - An opencode permission ask reaches the phone as a push. The Hook watches the

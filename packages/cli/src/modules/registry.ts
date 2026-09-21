@@ -131,14 +131,17 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
     localFiles: ["<bridge>/hooks.yaml", "<bridge>/dispatches/*.json"], phoneScreens: [], skills: ["conductor"],
   },
   {
-    // Stage 1 shipped the local indexer and store; stage 2 adds the five read
-    // tools, the matching CLI subcommands and the code skill. Hook routes and
-    // the phone screen arrive in stage 3, which is why those stay empty.
+    // Stage 1 shipped the local indexer and store; stage 2 the five read tools,
+    // the matching CLI subcommands and the code skill; stage 3 the Hook routes,
+    // the change-driven re-index and the phone's Code screen.
     schemaVersion: 1, name: "code", version: VERSION, defaultEnabled: false, requires: ["memory"],
     tools: full(["code_search", "code_definition", "code_references", "code_outline", "code_usage"]),
     cliCommands: ["code index", "code status", "code search", "code outline", "code refs", "code def", "code usage"],
-    agentHooks: [], hookRoutes: [], capabilities: [],
-    storeFiles: [], localFiles: ["<store>/.runtime/code/*.sqlite"], phoneScreens: [], skills: ["code"],
+    agentHooks: [],
+    hookRoutes: routes("GET", ["/v1/code/status", "/v1/code/search", "/v1/code/outline", "/v1/code/definition", "/v1/code/references", "/v1/code/usage"]),
+    capabilities: ["code"],
+    storeFiles: [], localFiles: ["<store>/.runtime/code/*.sqlite"],
+    phoneScreens: [{ screen: "CodeView", capability: "code" }], skills: ["code"],
   },
 ];
 

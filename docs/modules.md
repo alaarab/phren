@@ -87,7 +87,7 @@ descendants appear in help or dispatch.
 | `git` | Off | `auto_extract_findings`, `maintain extract`/`extract-memories`, repository diffs and `/v1/git/*`, change capture and Changes UI |
 | `schedules` | Off | `schedule`, project `schedules.yaml`, scheduler, run history and Schedules UI |
 | `conductor` | Off | `dispatch` and `hand_off` MCP tools, dispatch and hand-off CLI commands, `bridge enroll-computer`, dispatch routes, receipts, peer configuration and the `conductor` skill |
-| `code` | Off | Code index for a project: `code_search`, `code_definition`, `code_references`, `code_outline` and `code_usage`; `phren code index`/`status`/`search`/`outline`/`refs`/`def`/`usage`; a grammar-backed symbol/reference/usage index under `<store>/.runtime/code/*.sqlite`; and the `code` skill. Stage 2 ships the tools, CLI and skill; Hook routes and the phone screen arrive in stage 3 |
+| `code` | Off | Code index for a project: `code_search`, `code_definition`, `code_references`, `code_outline` and `code_usage`; `phren code index`/`status`/`search`/`outline`/`refs`/`def`/`usage`; a grammar-backed symbol/reference/usage index under `<store>/.runtime/code/*.sqlite`; `GET /v1/code/*` read routes; a change-driven re-index; the Code phone screen; and the `code` skill |
 
 All optional modules require memory; conductor also requires Hook. Git and
 schedules can manage their local/store data without Hook. Their phone routes
@@ -101,9 +101,10 @@ pull polling and the `phren-sync` skill keep working without the Git module.
 The optional Git module owns operations on a project's source repository,
 including mining its history. Move automatic extraction and Git context ranking
 behind Git enablement; a memory-only search must not inspect the source checkout.
-The existing memory fragment graph is not a code map. A future `code-map` module
-defaults off and owns its own index, tools, workers and `codeMap` capability;
-it is not a built-in in this seam and its config name is currently rejected.
+The existing memory fragment graph is not a code map. The built-in `code`
+module owns its own index, tools, routes and `code` capability; it is off by
+default and only reads a project once `phren code index` has built that
+project's database.
 
 Hook means the phone service. It does not mean all agent lifecycle callbacks.
 Memory retains its managed `SessionStart` -> `phren hook-session-start`,
@@ -291,6 +292,7 @@ to booleans or claim every declaration is operational.
 | tasks | New `tasks`, from the selected store/profile | Tasks tab, project task section and task actions |
 | hook | New `hook`; existing `transcript`, `progress`, `images`, `prompt`, `stop`, `terminal`, `shell`, `herdr`, `webServers`, `webPreview`, `activity`, `approvals`, `accountUsage`, `providers`, `files`, `repositoryFiles`, `subagents`, `approvalPush`; `simulators` only where supported | Agents, chat, terminal, files, previews and supported host extras |
 | git | New `git`, existing `diff`, when Git and Hook routes are active | Changes, History, Branches, PRs, Working tree and transcript diff actions |
+| code | New `code`, when Code and Hook routes are active; each project needs its own index | Code cell on the project page, symbol search and symbol dossier |
 | schedules | New `schedules`; host execution additionally needs Hook | Project and all-project Schedules; run/history actions require the selected host's capability |
 | conductor | Existing `dispatch`, only with active conductor and Hook | Future conductor/worker UI; no dedicated screen exists yet |
 
