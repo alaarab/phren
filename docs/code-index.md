@@ -112,10 +112,18 @@ blame) and `status.ts`. Deviations from this document, and the reasons:
 - **File rows.** `files.mtime` is recorded but the content hash decides
   re-parsing, so a same-mtime edit cannot hide a change. `--full` re-parses
   every tracked file.
-- **Repository selection.** `phren code index <project>` uses the project's
-  registered source path. A `--repo <path>` (`--path` alias) flag overrides
-  it, which is how the index is run against a worktree whose project points at
-  a different checkout. `phren code status` accepts `--top <n>`.
+- **Repository selection.** `phren code index <project>` resolves the checkout
+  the way `locateProject` does: the project's registered source path when it
+  exists on this machine, then a folder named for the project under
+  `$PROJECTS_DIR` and the usual project roots, then the store's recorded
+  `sourcePath` (whose absence here used to be the whole "repository path does
+  not exist" failure when the store was registered on another computer), then
+  the working directory. A `--repo <path>` (`--path` alias) flag overrides all
+  of it, which is how the index is run against a worktree whose project points
+  at a different checkout. The Hook's `CodeReindexer` and `phren code index`
+  share the resolution through `resolveRepoRoot`, and each index run records
+  the checkout it used in `meta.repo_root` when it differs, so definition
+  snippets read from this machine. `phren code status` accepts `--top <n>`.
 - **Storage.** The database lives in `.runtime/code/`, never in the synced
   store. `openCodeDatabase` caches the sql.js module per process so the
   incremental path stays inside its budget. The FTS5 table is `symbols_fts`,
@@ -203,11 +211,12 @@ choice, the implementation took these:
   git module captures changes through `ToolChanges` around the agent's
   PreToolUse/PostToolUse callbacks. `ToolChanges` gained an `onRecord` callback,
   and `CodeReindexer` maps a changed repository root to an indexed project
-  (registered source path, matching the checkout's real path), debounces 500 ms
-  and re-indexes incrementally. A repository whose `.git/HEAD` changed since the
-  last event runs a full re-index. The re-indexer is only constructed while the
-  `code` module is on, and only projects that already have a database are
-  followed; each run logs one line.
+  through the same `resolveRepoRoot` the indexer uses (this machine's checkout
+  first, then the store's sourcePath, matching the checkout's real path),
+  debounces 500 ms and re-indexes incrementally. A repository whose `.git/HEAD`
+  changed since the last event runs a full re-index. The re-indexer is only
+  constructed while the `code` module is on, and only projects that already
+  have a database are followed; each run logs one line.
 - **Phone.** `CodeView` (capability `code`) is reached from a fourth cell on the
   project page band. A search field (id `code-search`) lists symbols as
   `sessionCard()` rows (id `code-row:<id>`); with no query it shows the usage

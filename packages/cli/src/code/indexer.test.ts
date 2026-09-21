@@ -4,9 +4,9 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeTempDir } from "../test-helpers.js";
-import { indexProject } from "./indexer.js";
+import { indexProject, resolveRepoRoot } from "./indexer.js";
 import { codeIndexStatus } from "./status.js";
-import { codeDatabasePath, openCodeDatabase, topSymbolsByUsage } from "./store.js";
+import { codeDatabasePath, getMeta, openCodeDatabase, topSymbolsByUsage } from "./store.js";
 
 const FIXTURES = path.join(__dirname, "__fixtures__");
 const AUTHOR = "Fixture Author <fixture@example.com>";
@@ -116,5 +116,29 @@ describe("code indexer", () => {
     const missing = await codeIndexStatus(store, "absent");
     expect(missing.available).toBe(false);
     expect(missing.files).toBe(0);
+  });
+
+  it("resolves this machine's checkout when the store's sourcePath is absent", async () => {
+    // The store was registered on another computer: its sourcePath names a
+    // folder this machine does not have, while the checkout lives under this
+    // machine's own project root (PROJECTS_DIR, the way locateProject searches).
+    const machineRoot = path.join(tmp.path, "machine-root");
+    const checkout = path.join(machineRoot, "fixture");
+    fs.mkdirSync(machineRoot, { recursive: true });
+    fs.cpSync(repo, checkout, { recursive: true });
+    fs.mkdirSync(path.join(store, "fixture"), { recursive: true });
+    fs.writeFileSync(path.join(store, "fixture", "phren.project.yaml"), `sourcePath: ${path.join(tmp.path, "absent", "fixture")}\n`);
+
+    const result = await indexProject(store, "fixture", { env: { ...process.env, PROJECTS_DIR: machineRoot } });
+    expect(result.repoRoot).toBe(checkout);
+    expect(result.files).toBe(7);
+    // The index records the checkout it actually used, so definition snippets
+    // read from this machine rather than the store's foreign sourcePath.
+    const database = await openCodeDatabase(store, "fixture", false);
+    expect(getMeta(database!.db, "repo_root")).toBe(checkout);
+    database!.close();
+
+    // --repo still overrides the machine resolution.
+    expect(resolveRepoRoot(store, "fixture", repo)).toBe(path.resolve(repo));
   });
 });

@@ -73,6 +73,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   is merged instead of deferred, and conflicting `tasks.md` and `FINDINGS.md`
   keep both sides' bullets. Each pull records what it did in
   `background-sync.log`.
+- `phren code index` no longer fails with "repository path does not exist" on a
+  computer whose checkout sits at a different path than the store records. The
+  indexer, the Hook's re-indexer and the CLI resolve the repository the way the
+  Hook locates a project's checkout: this machine's registered path first, then
+  the store's sourcePath, with `--repo` still overriding, and the index records
+  the checkout it used in `repo_root` when it differs.
 
 ### Added
 

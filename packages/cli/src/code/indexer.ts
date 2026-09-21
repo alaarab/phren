@@ -1,6 +1,7 @@
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { homedir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { getProjectSourcePath, readProjectConfig } from "../project-config.js";
 import { projectSlugFromPath } from "../phren-paths.js";
@@ -57,10 +58,12 @@ export interface IndexProgress {
 }
 
 export interface IndexOptions {
-  /** Override the repository root; otherwise the project's registered source path is used. */
+  /** Override the repository root; otherwise this machine's checkout is resolved the way locateProject resolves it. */
   repoRoot?: string;
   /** Re-parse every tracked file even when its hash is unchanged. */
   full?: boolean;
+  /** Environment consulted while locating this machine's checkout ($PROJECTS_DIR); injectable for tests. */
+  env?: NodeJS.ProcessEnv;
   onProgress?: (progress: IndexProgress) => void;
 }
 
@@ -192,9 +195,52 @@ function normalizeNameOnlyPath(line: string): string {
   return trimmed;
 }
 
-export function resolveRepoRoot(store: string, project: string, override?: string): string {
-  const candidate = override ?? getProjectSourcePath(store, project, readProjectConfig(store, project));
-  const repoRoot = candidate ? path.resolve(candidate) : path.resolve(process.cwd());
+// The roots locateProject offers for a project's checkout on this computer
+// (bridge/locate.ts), minus its Hook-only activity journal and Herdr session.
+const SEARCH_ROOTS = ["", "Sites", "Projects", "projects", "Code", "code", "dev", "src", "repos", "workspace"];
+
+/**
+ * This machine's candidates for a project's checkout, in locateProject's
+ * order: the store's registered source path when it points at a folder that
+ * exists here, then a folder named for the project under $PROJECTS_DIR and
+ * the usual project roots. A sourcePath written on another computer (the
+ * Linux box a shared store was registered on) fails the existence check and
+ * the machine's own checkout is offered instead.
+ */
+function machineCheckoutCandidates(project: string, sourcePath: string | undefined, env: NodeJS.ProcessEnv): string[] {
+  const candidates: string[] = [];
+  const offer = (directory: string) => {
+    const resolved = path.resolve(directory);
+    if (!candidates.includes(resolved) && fs.existsSync(resolved)) candidates.push(resolved);
+  };
+  if (sourcePath) offer(sourcePath);
+  const home = homedir();
+  for (const root of [...(env.PROJECTS_DIR ? [env.PROJECTS_DIR] : []), ...SEARCH_ROOTS.map(entry => path.join(home, entry))]) {
+    offer(path.join(root, project));
+  }
+  return candidates;
+}
+
+/**
+ * The repository an index runs against: the --repo override when given,
+ * otherwise this machine's checkout (registered source path if it exists
+ * here, then the usual project roots), otherwise the store's recorded
+ * sourcePath so the error still names what the store knows, otherwise the
+ * working directory. Among the machine candidates the first git repository
+ * wins, since the index can only walk a repository.
+ */
+export function resolveRepoRoot(store: string, project: string, override?: string, env: NodeJS.ProcessEnv = process.env): string {
+  let repoRoot: string;
+  if (override) {
+    repoRoot = path.resolve(override);
+  } else {
+    const sourcePath = getProjectSourcePath(store, project, readProjectConfig(store, project));
+    const candidates = machineCheckoutCandidates(project, sourcePath, env);
+    repoRoot = candidates.find(candidate => isGitRepository(candidate))
+      ?? candidates[0]
+      ?? sourcePath
+      ?? path.resolve(process.cwd());
+  }
   if (!fs.existsSync(repoRoot)) throw new Error(`Code index: repository path does not exist: ${repoRoot}`);
   if (!isGitRepository(repoRoot)) throw new Error(`Code index: not a git repository: ${repoRoot}`);
   return repoRoot;
@@ -216,7 +262,7 @@ function blameForFile(repoRoot: string, file: string, symbols: SymbolInput[], ca
  */
 export async function indexProject(store: string, project: string, options: IndexOptions = {}): Promise<IndexResult> {
   const started = Date.now();
-  const repoRoot = resolveRepoRoot(store, project, options.repoRoot);
+  const repoRoot = resolveRepoRoot(store, project, options.repoRoot, options.env);
   const database = await openCodeDatabase(store, project, true);
   if (!database) throw new Error(`Code index: could not open the index for ${project}.`);
   const { db } = database;
