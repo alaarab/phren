@@ -1,6 +1,7 @@
 import { defaultPhrenPath } from "../shared.js";
 import { disabledHint } from "../modules/registry.js";
 import { activateModules as moduleSnapshot, type ModuleSnapshot } from "../modules/runtime.js";
+import { logger } from "../logger.js";
 import { request, createServer, type Server, type ServerResponse } from "node:http";
 import { mkdir, writeFile, readFile, readdir, rename, chmod, unlink, lstat } from "node:fs/promises";
 import { readFileSync, watch, type FSWatcher } from "node:fs";
@@ -11,12 +12,13 @@ import { BridgeError, bridgeRoot, object, objects, provider, serverName, session
 import { herdrRoot, rpc, servers, snapshot, trustedDirectory, validateTarget } from "./herdr.js";
 import { capturesChanges, ToolChanges } from "./changes.js";
 import { phrenStoreRoot, unwrapPastedContent } from "./transcripts.js";
-import { blockedFanouts } from "./fanouts.js";
+import { archiveFinishedFanouts, blockedFanouts } from "./fanouts.js";
 import { ApprovalPushService } from "./push.js";
 
 const APPROVAL_SWEEP_MS = 2_000;
 const APPROVAL_DEBOUNCE_MS = 100;
 const FANOUT_SWEEP_MS = 5_000;
+const FANOUT_ARCHIVE_MS = 60 * 60 * 1000;
 
 const opencodeSession = /^ses_[0-9A-Za-z]{1,64}$/;
 function opencodeApprovalFile(session: string, kind: "request" | "answer"): string | undefined {
@@ -224,6 +226,7 @@ export class AgentHooks {
   /** Fan-out jobs already pushed as blocked, by job id and blocked timestamp. */
   private fanoutSeen = new Map<string, number>();
   private fanoutTimer?: NodeJS.Timeout;
+  private fanoutArchiveTimer?: NodeJS.Timeout;
   constructor(readonly push = new ApprovalPushService(), private modules?: ModuleSnapshot) {}
   private approvalsDirectory(): string { return path.join(phrenStoreRoot(), ".runtime", "approvals"); }
   private scheduleOpencodeSweep() {
@@ -316,6 +319,16 @@ export class AgentHooks {
       void this.push.notifyFanoutBlocked({ job: job.id, label: job.label, provider: job.provider, reason: job.reason }).catch(() => {});
     }
     for (const id of this.fanoutSeen.keys()) if (!live.has(id)) this.fanoutSeen.delete(id);
+  }
+  /** Move finished fan-out folders older than a day into the archive; one log
+   * line records a sweep that moved or deleted anything, and a sweep that
+   * fails never takes the Hook down. */
+  private async sweepFanoutArchive(): Promise<void> {
+    try {
+      const { moved, deleted } = await archiveFinishedFanouts();
+      if (!moved.length && !deleted) return;
+      logger.info("fanouts", `Archived ${moved.length} finished fan-out job(s); deleted ${deleted} past the archive cap.`);
+    } catch { /* The archive sweep must never break the Hook. */ }
   }
   watch(target: Target): () => void {
     const key = JSON.stringify(target);
@@ -556,6 +569,11 @@ export class AgentHooks {
     this.opencodePoll.unref?.();
     this.fanoutTimer = setInterval(() => { void this.sweepBlockedFanouts(); }, FANOUT_SWEEP_MS);
     this.fanoutTimer.unref?.();
+    // The archive sweep runs once at start so a long-dormant store clears
+    // immediately, then hourly.
+    void this.sweepFanoutArchive();
+    this.fanoutArchiveTimer = setInterval(() => { void this.sweepFanoutArchive(); }, FANOUT_ARCHIVE_MS);
+    this.fanoutArchiveTimer.unref?.();
     this.scheduleOpencodeSweep();
     void this.sweepBlockedFanouts();
   }
@@ -569,6 +587,7 @@ export class AgentHooks {
     if (this.opencodePoll) clearInterval(this.opencodePoll);
     this.opencodeWatcher?.close(); this.opencodeWatcher = undefined;
     if (this.fanoutTimer) clearInterval(this.fanoutTimer);
+    if (this.fanoutArchiveTimer) clearInterval(this.fanoutArchiveTimer);
     this.fanoutSeen.clear();
   }
 }
