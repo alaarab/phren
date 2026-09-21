@@ -12,6 +12,7 @@ import {
   readTeamBootstrap,
   type StoreEntry,
 } from "../store-registry.js";
+import { mergeStoreUpstream, type RunStoreGit } from "../sync/store-merge.js";
 
 function printStoreUsage() {
   console.log("Usage:");
@@ -237,6 +238,20 @@ export async function handleStoreNamespace(args: string[]) {
   if (subcommand === "sync") {
     const stores = resolveAllStores(phrenPath);
     let hasErrors = false;
+    const git: RunStoreGit = async (cwd, gitArgs) => {
+      try {
+        const output = execFileSync("git", gitArgs, {
+          cwd,
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+          timeout: 30_000,
+          env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never" },
+        }).trim();
+        return { ok: true, output };
+      } catch (err: unknown) {
+        return { ok: false, output: "", error: errorMessage(err) };
+      }
+    };
 
     for (const store of stores) {
       if (!fs.existsSync(store.path)) {
@@ -250,13 +265,24 @@ export async function handleStoreNamespace(args: string[]) {
         continue;
       }
 
-      try {
-        execFileSync("git", ["pull", "--rebase", "--quiet"], {
-          cwd: store.path,
-          stdio: "pipe",
-          timeout: 30_000,
-        });
+      const result = await mergeStoreUpstream(store.path, { git });
+      if (result.status === "busy") {
+        console.log(`  ${store.name}: SKIP (${result.detail})`);
+        hasErrors = true;
+        continue;
+      }
+      if (result.status === "conflict") {
+        console.log(`  ${store.name}: NEEDS MANUAL RESOLUTION (${result.detail})`);
+        hasErrors = true;
+        continue;
+      }
+      if (result.status === "error") {
+        console.log(`  ${store.name}: FAILED (${result.detail})`);
+        hasErrors = true;
+        continue;
+      }
 
+      try {
         // Re-apply sparse-checkout after pull on primary store to avoid materializing all files
         if (store.role === "primary") {
           try {
@@ -277,7 +303,7 @@ export async function handleStoreNamespace(args: string[]) {
           }
         }
 
-        console.log(`  ${store.name}: ok`);
+        console.log(`  ${store.name}: ok (${result.detail})`);
       } catch (err: unknown) {
         console.log(`  ${store.name}: FAILED (${errorMessage(err).split("\n")[0]})`);
         hasErrors = true;

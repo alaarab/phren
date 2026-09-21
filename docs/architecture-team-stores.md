@@ -253,9 +253,9 @@ Stop Hook
 ├─ For each store where role == team:
 │   ├─ git add journal/ only (append-only files)
 │   ├─ git commit -m "phren: $PHREN_ACTOR findings"
-│   └─ git pull --rebase && git push
+│   └─ fetch, merge with union-safe store files, then push
 ├─ For each store where role == readonly:
-│   └─ git pull only
+│   └─ fetch and fast-forward or merge
 └─ Update health.json per store
 ```
 

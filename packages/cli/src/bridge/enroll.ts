@@ -11,6 +11,7 @@ import { addProjectFromPath } from "../core/project.js";
 import { getProjectOwnershipDefault, readProjectConfig } from "../project-config.js";
 import { projectSlugFromPath } from "../phren-paths.js";
 import { runBestEffortGit } from "../cli/session-git.js";
+import { mergeStoreUpstream, type RunStoreGit } from "../sync/store-merge.js";
 
 /**
  * "Add project" from the phone: the repositories on this computer that phren
@@ -22,6 +23,10 @@ import { runBestEffortGit } from "../cli/session-git.js";
 export interface RepoCandidate { directory: string; name: string; source: "activity" | "herdr" | "search"; registered: boolean; lastSeen?: string }
 
 const exec = promisify(execFile);
+const runEnrollStoreGit: RunStoreGit = async (cwd, args) => {
+  const result = await runBestEffortGit(args, cwd);
+  return { ok: result.ok, output: result.output ?? "", error: result.error };
+};
 const SEARCH_ROOTS = ["Sites", "Projects", "projects", "Code", "code", "dev", "src", "repos", "workspace"];
 /** GitHub-style URLs only: https, or the ssh shorthand. No local paths, no
  * `ext::` or other transports git would happily run. */
@@ -132,8 +137,8 @@ async function publishStore(store: string, project: string): Promise<Pick<Enroll
   if (!commit.ok) return { store: "error", storeDetail: commit.error };
   const remotes = await runBestEffortGit(["remote"], store);
   if (!remotes.ok || !remotes.output) return { store: "committed", storeDetail: "no remote configured" };
-  const pull = await runBestEffortGit(["pull", "--rebase", "--autostash"], store);
-  if (!pull.ok) return { store: "committed", storeDetail: pull.error };
+  const pull = await mergeStoreUpstream(store, { git: runEnrollStoreGit, commitLocalWrites: false });
+  if (pull.status !== "updated" && pull.status !== "unchanged") return { store: "committed", storeDetail: pull.detail };
   const push = await runBestEffortGit(["push"], store);
   return push.ok ? { store: "pushed" } : { store: "committed", storeDetail: push.error };
 }

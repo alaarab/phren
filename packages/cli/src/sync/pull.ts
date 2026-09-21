@@ -3,7 +3,6 @@ import { execFile } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import { promisify } from "util";
-import { autoMergeConflicts } from "../content/validate.js";
 import { tryFileLock } from "../governance/locks.js";
 import { updateRuntimeHealth } from "../governance/policy.js";
 import { resolveManagementCapabilities } from "../init/management-preset.js";
@@ -12,6 +11,8 @@ import { atomicWriteText, readRootManifest, runtimeFile } from "../phren-paths.j
 import { debugLog } from "../shared.js";
 import { getNonPrimaryStores } from "../store-registry.js";
 import { errorMessage } from "../utils.js";
+import { inProgressGitOperation } from "./git-state.js";
+import { mergeStoreUpstream, type GitResult, type RunStoreGit } from "./store-merge.js";
 
 export const DEFAULT_PULL_INTERVAL_SECONDS = 0;
 export const MIN_PULL_INTERVAL_SECONDS = 30;
@@ -39,8 +40,8 @@ export function periodicPullEnabled(phrenPath: string): boolean {
     && resolveManagementCapabilities(phrenPath).lifecycleAutomations;
 }
 
-export interface GitResult { ok: boolean; output: string; error?: string }
-export type RunGit = (cwd: string, args: string[]) => Promise<GitResult>;
+export type RunGit = RunStoreGit;
+export type { GitResult };
 const execAsync = promisify(execFile);
 
 export const runPollGit: RunGit = async (cwd, args) => {
@@ -70,12 +71,8 @@ function readPollState(phrenPath: string): PollState {
 async function worktreeBusy(cwd: string, git: RunGit): Promise<boolean> {
   const dir = await git(cwd, ["rev-parse", "--absolute-git-dir"]);
   if (!dir.ok) return true;
-  return ["rebase-merge", "rebase-apply", "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "sequencer", "index.lock"]
-    .some((name) => fs.existsSync(path.join(dir.output, name)));
+  return inProgressGitOperation(cwd) !== undefined;
 }
-
-/** Credential-shaped files that must never be swept into an auto-save commit. */
-const SENSITIVE_STORE_PATHSPECS = [".env", "**/.env", "*.pem", "*.key", ".config/auth-profiles.json"];
 
 /** The periodic pull writes its decisions to the same log a background sync uses. */
 function logPeriodicSync(phrenPath: string, detail: string): void {
@@ -86,23 +83,6 @@ function logPeriodicSync(phrenPath: string, detail: string): void {
   } catch (err: unknown) { debugLog(`periodic pull log: ${errorMessage(err)}`); }
 }
 
-/**
- * Commit uncommitted store writes before any fetch or merge.
- *
- * A managed pull that runs first can discard or block on a write that arrived
- * moments ago (a task from the MCP tool, a finding). Committing it keeps the
- * write in history and lets the pull reconcile the two sides instead.
- */
-async function commitLocalStoreWrites(cwd: string, git: RunGit): Promise<{ committed: boolean; error?: string }> {
-  const add = await git(cwd, ["add", "--sparse", "-A"]);
-  if (!add.ok) return { committed: false, error: add.error || "git add failed" };
-  await git(cwd, ["reset", "HEAD", "--", ...SENSITIVE_STORE_PATHSPECS]);
-  const staged = await git(cwd, ["diff", "--cached", "--name-only"]);
-  if (!staged.ok) return { committed: false, error: staged.error || "git diff failed" };
-  if (!staged.output) return { committed: false };
-  const commit = await git(cwd, ["-c", "commit.gpgsign=false", "commit", "-m", "auto-save phren (periodic pull)"]);
-  return commit.ok ? { committed: true } : { committed: false, error: commit.error || "git commit failed" };
-}
 
 /** Shared timestamps + a process lock give all MCP clients one check per store/interval. */
 export async function pollStore(phrenPath: string, seconds: number, git: RunGit = runPollGit, now = Date.now()): Promise<PullResult> {
@@ -162,51 +142,20 @@ export async function pollStore(phrenPath: string, seconds: number, git: RunGit 
       if (!currentBranch.ok || currentBranch.output !== branch.output) {
         return deferred("Periodic pull deferred: the branch changed while checking.");
       }
-      // Commit any uncommitted store writes before a fetch or merge can run:
-      // the write is then in history and the pull reconciles the two sides.
-      const saved = await commitLocalStoreWrites(phrenPath, git);
-      if (saved.error) return failed(`Periodic pull deferred: cannot commit local store writes: ${saved.error}`);
-      if (saved.committed) logPeriodicSync(phrenPath, "committed uncommitted store writes before pull");
-      if (remoteUnchanged) {
-        return finish({
-          status: "unchanged",
-          detail: saved.committed ? "Committed local store writes; remote is unchanged." : "Remote is unchanged.",
-        }, true);
+      const merged = await mergeStoreUpstream(phrenPath, {
+        git,
+        advertisedHead: remoteHead,
+        commitMessage: "auto-save phren (periodic pull)",
+      });
+      if (merged.committedLocalWrites) logPeriodicSync(phrenPath, "committed uncommitted store writes before pull");
+      if (merged.status === "busy" || merged.status === "conflict") {
+        logPeriodicSync(phrenPath, merged.detail);
+        const reason = merged.status === "conflict" ? `local and remote history diverged. ${merged.detail}` : merged.detail;
+        return deferred(`Periodic pull deferred: ${reason}`);
       }
-      const tracking = await git(phrenPath, ["rev-parse", "--verify", trackingRef]);
-      if (!tracking.ok || tracking.output !== remoteHead) {
-        const fetched = await git(phrenPath, ["fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--", remote, `${remoteRef}:${trackingRef}`]);
-        if (!fetched.ok) return failed(`Periodic fetch failed: ${fetched.error}`);
-      }
-      const target = await git(phrenPath, ["rev-parse", "--verify", trackingRef]);
-      if (!target.ok) return failed("Cannot read the fetched tracking branch.");
-      if ((await git(phrenPath, ["merge-base", "--is-ancestor", target.output, "HEAD"])).ok) {
-        return finish({
-          status: "unchanged",
-          detail: saved.committed ? "Committed local store writes; the store already contains the remote changes." : "The store already contains the remote changes.",
-        }, true);
-      }
-      // Merge rather than ff-only: local writes are already committed, so a
-      // divergent remote is reconciled instead of deferred or discarded.
-      const merged = await git(phrenPath, ["merge", "--no-edit", target.output]);
-      if (merged.ok) {
-        logPeriodicSync(phrenPath, saved.committed ? "committed local writes, then merged remote updates" : "merged remote updates");
-        return finish({ status: "updated", detail: "Store updated by periodic pull." }, true);
-      }
-      // Only tasks.md and FINDINGS.md can be auto-merged; anything else is left
-      // exactly as it was so no local write is lost to an aborted merge.
-      if (!autoMergeConflicts(phrenPath)) {
-        await git(phrenPath, ["merge", "--abort"]);
-        logPeriodicSync(phrenPath, "merge conflicts require manual resolution; local writes left intact");
-        return deferred("Periodic pull deferred: local and remote history diverged. Resolve the store's sync conflict before pulling.");
-      }
-      const commit = await git(phrenPath, ["-c", "commit.gpgsign=false", "commit", "--no-edit"]);
-      if (!commit.ok) {
-        await git(phrenPath, ["merge", "--abort"]);
-        return deferred(`Periodic merge deferred: ${commit.error}`);
-      }
-      logPeriodicSync(phrenPath, "merged remote updates and kept both sides of tasks.md/FINDINGS.md");
-      return finish({ status: "updated", detail: "Store updated; auto-merged markdown conflicts." }, true);
+      if (merged.status === "error") return failed(`Periodic pull failed: ${merged.detail}`);
+      if (merged.status === "updated") logPeriodicSync(phrenPath, merged.detail);
+      return finish({ status: merged.status, detail: merged.detail }, true);
     } finally { releaseGit(); }
   } finally { releasePoll(); }
 }
