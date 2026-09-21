@@ -5,6 +5,7 @@ enum PhrenTypography {
     static func icon(_ size: CGFloat, weight: Font.Weight = .regular) -> Font { .system(size: size, weight: weight) }
     static let title = Font.title
     static let title2 = Font.title2
+    static let title3 = Font.title3
     static let body = Font.body
     static let subheadline = Font.subheadline
     static let footnote = Font.footnote

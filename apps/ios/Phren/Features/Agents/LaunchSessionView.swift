@@ -311,3 +311,12 @@ struct LaunchSessionView: View {
     }
 
 }
+
+struct SessionLaunchAlert: ViewModifier {
+    @Binding var error: String?
+    func body(content: Content) -> some View {
+        content.alert("Couldn't open session", isPresented: $error.isPresent()) {
+            Button("OK") { error = nil }
+        } message: { Text(error ?? "") }
+    }
+}

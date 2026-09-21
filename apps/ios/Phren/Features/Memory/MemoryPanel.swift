@@ -1,295 +1,82 @@
 import PhrenKit
 import SwiftUI
 
-/// The bottom panel of Memory: the scope's contents, search results, or one
-/// header line under the web dossier while a node is selected. Three heights,
-/// changed by dragging or tapping the header; the graph stays live above it.
+/// The list-mode body of Memory: the current filters' counts line, then one
+/// row per finding, note, task or topic. Grouped by project when the project
+/// filter is not a single project. Tapping a row switches to the map with the
+/// node selected; the row's action glyph opens the same sheet as before.
 struct MemoryPanel: View {
-    enum Mode: Equatable {
-        case loading
-        case contents
-        case results
-        case dossier(GraphNodeRef)
-    }
-
-    let mode: Mode
-    /// The height the owner shows now; collapsed while loading or selected.
-    let shown: MemoryPanelHeight
-    let available: CGFloat
-    @Binding var dragHeight: CGFloat?
-    let title: String
-    /// The focused node's label while the graph draws its neighbourhood.
-    let focus: String?
-    let counts: MemoryCounts
     let rows: [MemoryItem]
-    let showProject: Bool
+    let counts: MemoryCounts
+    let countKinds: Set<MemoryKind>
     let groupByProject: Bool
-    let searching: Bool
+    let showKind: Bool
     let emptyText: String
-    @Binding var content: MemoryContent
-    @Binding var topic: String?
-    let freshness: MemoryFreshness
     let highlightedID: String?
     @Binding var scrollTarget: String?
     let canWrite: (MemoryItem) -> Bool
-    let onHeight: (MemoryPanelHeight) -> Void
     let onSelect: (MemoryItem) -> Void
     let onMove: (MemoryItem, TaskMove) -> Void
     let onEdit: (MemoryItem) -> Void
     let onDelete: (MemoryItem) -> Void
     let onActions: (MemoryItem) -> Void
-    let onShowInList: () -> Void
-    let onClearFocus: () -> Void
-    let onPull: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @State private var dragBase: CGFloat?
-
-    static let collapsedHeight: CGFloat = 56
-
-    static func points(_ height: MemoryPanelHeight, available: CGFloat, collapsed: CGFloat = collapsedHeight) -> CGFloat {
-        switch height {
-        case .collapsed: return min(collapsed, available)
-        case .half: return min(available, max(collapsed, available * 0.45))
-        case .full: return available
-        }
-    }
-
-    private var interactive: Bool {
-        switch mode {
-        case .contents, .results: return true
-        case .loading, .dossier: return false
-        }
-    }
-
-    private var showsHandle: Bool {
-        if case .dossier = mode { return false }
-        return true
-    }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            switch mode {
-            case .contents, .results: list
-            case .loading, .dossier: Spacer(minLength: 0)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(PhrenTheme.surface, in: UnevenRoundedRectangle(
-            topLeadingRadius: PhrenTheme.Radius.large, topTrailingRadius: PhrenTheme.Radius.large, style: .continuous))
-        .clipShape(UnevenRoundedRectangle(
-            topLeadingRadius: PhrenTheme.Radius.large, topTrailingRadius: PhrenTheme.Radius.large, style: .continuous))
-        .phrenContainerMarker("memory-panel", label: "Memory panel", value: shown.rawValue)
-        .phrenContainerMarker("memory-panel-height", label: "Memory panel height", value: shown.rawValue)
-    }
-
-    // MARK: - Header
-
-    private var header: some View {
-        VStack(spacing: 0) {
-            Capsule().fill(interactive ? PhrenTheme.textDim : PhrenTheme.border)
-                .opacity(showsHandle ? 1 : 0)
-                .frame(width: 32, height: 4).padding(.top, 6)
-                .accessibilityHidden(true)
-            HStack(alignment: .center, spacing: PhrenTheme.Space.small) {
-                headerText
-                Spacer(minLength: PhrenTheme.Space.xs)
-                headerTrailing
-            }
-            .padding(.leading, PhrenTheme.Space.large).padding(.trailing, PhrenTheme.Space.small)
-            .frame(minHeight: Self.collapsedHeight - 10)
-        }
-        .frame(maxWidth: .infinity)
-        .contentShape(Rectangle())
-        .onTapGesture { if interactive { onHeight(nextOnTap) } }
-        .gesture(interactive ? dragGesture : nil)
-        .accessibilityElement(children: .contain)
-        .accessibilityAction(named: "Expand") { if interactive { onHeight(shown == .full ? .full : shown == .half ? .full : .half) } }
-        .accessibilityAction(named: "Collapse") { if interactive { onHeight(.collapsed) } }
-    }
-
-    @ViewBuilder private var headerText: some View {
-        switch mode {
-        case .loading:
-            Text("Loading…").font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
-        case .contents:
-            VStack(alignment: .leading, spacing: 1) {
-                Text(focus.map { "Focus: \($0)" } ?? title)
-                    .font(PhrenTypography.subheadline.weight(.semibold)).foregroundStyle(PhrenTheme.text)
-                    .lineLimit(1)
-                Text(counts.line).font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
-                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1).monospacedDigit()
-                    .phrenIdentifier("memory-panel-counts")
-            }
-            .fixedSize(horizontal: false, vertical: true)
-        case .results:
-            Text(resultsTitle).font(PhrenTypography.subheadline.weight(.semibold)).foregroundStyle(PhrenTheme.text)
-                .monospacedDigit().phrenIdentifier("memory-panel-results")
-        case .dossier(let node):
-            HStack(spacing: PhrenTheme.Space.small) {
-                PhrenChip(text: MemoryRowCard.kindTitle(for: node), color: MemoryRowCard.kindColor(for: node))
-                if let project = node.project, !node.isProject {
-                    Text(project).font(PhrenTypography.caption).foregroundStyle(PhrenTheme.sessionProject).lineLimit(1)
-                }
-            }
-            .phrenContainerMarker("memory-selected-row", label: selectedRowLabel(node), value: node.id)
-        }
-    }
-
-    private func selectedRowLabel(_ node: GraphNodeRef) -> String {
-        var parts = ["Selected", MemoryRowCard.kindTitle(for: node)]
-        if let label = node.fullLabel ?? node.label ?? node.text { parts.append(label) }
-        if let project = node.project { parts.append(project) }
-        return parts.joined(separator: ", ")
-    }
-
-    @ViewBuilder private var headerTrailing: some View {
-        switch mode {
-        case .dossier:
-            Button(action: onShowInList) {
-                HStack(spacing: PhrenTheme.Space.xs) {
-                    Image(systemName: "list.bullet").font(PhrenTypography.icon(12, weight: .semibold)).accessibilityHidden(true)
-                    Text("Show in list")
-                }
-                .font(PhrenTypography.subheadline.weight(.medium)).foregroundStyle(PhrenTheme.accent)
-                .padding(.horizontal, PhrenTheme.Space.medium).frame(minHeight: 44).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain).phrenIdentifier("memory-show-in-list")
-        case .contents, .results:
-            if focus != nil, mode == .contents {
-                Button(action: onClearFocus) {
-                    Image(systemName: "xmark").font(PhrenTypography.icon(12, weight: .semibold))
-                        .foregroundStyle(PhrenTheme.textSecondary).frame(width: 44, height: 44).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain).accessibilityLabel("Show full view").phrenIdentifier("memory-focus-clear")
-            }
-            TimelineView(.periodic(from: .now, by: 30)) { context in
-                if freshness.isStale(now: context.date) {
-                    Button(action: onPull) {
-                        HStack(spacing: PhrenTheme.Space.xs) {
-                            Circle().fill(freshness.hasError ? PhrenTheme.danger : PhrenTheme.warning)
-                                .frame(width: 6, height: 6).accessibilityHidden(true)
-                            Text(freshness.text(now: context.date)).font(PhrenTypography.caption)
-                                .foregroundStyle(PhrenTheme.textMuted).lineLimit(1)
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: PhrenTheme.Space.xs) {
+                    countsLine
+                    if rows.isEmpty {
+                        Text(emptyText)
+                            .font(PhrenTypography.body).foregroundStyle(PhrenTheme.textMuted)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            .phrenIdentifier("memory-empty")
+                    } else if groupByProject {
+                        ForEach(MemoryBrowsing.grouped(rows), id: \.project) { group in
+                            Text(group.project).plainListSectionLabel()
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .phrenIdentifier("memory-section:\(group.project)")
+                            cards(group.rows)
                         }
-                        .padding(.horizontal, PhrenTheme.Space.small).frame(minHeight: 44).contentShape(Rectangle())
+                    } else {
+                        cards(rows)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(["Store", freshness.text(now: context.date), "Pull now"].joined(separator: ", "))
-                    .phrenIdentifier("memory-stale")
                 }
+                .padding(.horizontal, PhrenTheme.Space.medium)
+                .padding(.top, PhrenTheme.Space.small)
+                .padding(.bottom, PhrenTheme.Space.medium)
             }
-        case .loading:
-            EmptyView()
-        }
-    }
-
-    private var resultsTitle: String {
-        if rows.isEmpty { return searching ? "Searching…" : "No matches" }
-        return "\(rows.count) result\(rows.count == 1 ? "" : "s")"
-    }
-
-    private var nextOnTap: MemoryPanelHeight {
-        switch shown {
-        case .collapsed: return .half
-        case .half: return .full
-        case .full: return .half
-        }
-    }
-
-    private var dragGesture: some Gesture {
-        DragGesture(minimumDistance: 6, coordinateSpace: .global)
-            .onChanged { value in
-                let base = dragBase ?? Self.points(shown, available: available)
-                dragBase = base
-                dragHeight = min(available, max(Self.collapsedHeight, base - value.translation.height))
-            }
-            .onEnded { value in
-                let base = dragBase ?? Self.points(shown, available: available)
-                let projected = min(available, max(Self.collapsedHeight, base - value.predictedEndTranslation.height))
-                let nearest = MemoryPanelHeight.allCases.min {
-                    abs(Self.points($0, available: available) - projected) < abs(Self.points($1, available: available) - projected)
-                } ?? .half
-                dragBase = nil
-                dragHeight = nil
-                onHeight(nearest)
-            }
-    }
-
-    // MARK: - List
-
-    private var list: some View {
-        VStack(spacing: 0) {
-            if mode == .contents {
-                // A chip tap chooses fresh; a topic row set both together.
-                PhrenChipRow(items: Self.contentOptions,
-                             selection: Binding(get: { content }, set: { content = $0; topic = nil }),
-                             identifier: "memory-filter", raised: true)
-                    .padding(.horizontal, PhrenTheme.Space.large).padding(.bottom, PhrenTheme.Space.xs)
-                if let topic {
-                    HStack(spacing: PhrenTheme.Space.small) {
-                        Text("Topic").font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
-                        PhrenChip(text: MemoryBrowsing.topicLabel(topic), color: PhrenTheme.lavender)
-                        Spacer(minLength: 0)
-                        Button { withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { self.topic = nil } } label: {
-                            Image(systemName: "xmark").font(PhrenTypography.icon(12, weight: .semibold))
-                                .foregroundStyle(PhrenTheme.textSecondary).frame(width: 44, height: 44).contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain).accessibilityLabel("Show every topic").phrenIdentifier("memory-topic-clear")
-                    }
-                    .padding(.leading, PhrenTheme.Space.large).padding(.trailing, PhrenTheme.Space.small)
-                }
-            }
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(spacing: PhrenTheme.Space.xs) {
-                        if rows.isEmpty {
-                            Text(mode == .results ? (searching ? "Searching…" : "No matches") : emptyText)
-                                .font(PhrenTypography.body).foregroundStyle(PhrenTheme.textMuted)
-                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                                .padding(.horizontal, PhrenTheme.Space.xs)
-                                .phrenIdentifier("memory-empty")
-                        } else if groupByProject {
-                            ForEach(MemoryBrowsing.grouped(rows), id: \.project) { group in
-                                Text(group.project).plainListSectionLabel()
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .phrenIdentifier("memory-section:\(group.project)")
-                                cards(group.rows, showProject: true)
-                            }
-                        } else {
-                            cards(rows, showProject: true)
-                        }
-                    }
-                    .padding(.horizontal, PhrenTheme.Space.medium).padding(.top, PhrenTheme.Space.xs).padding(.bottom, PhrenTheme.Space.medium)
-                }
-                .scrollDismissesKeyboard(.interactively)
-                .phrenIdentifier("memory-list")
-                .onChange(of: scrollTarget, initial: true) { _, target in
-                    guard let target else { return }
-                    // The list may have just replaced the dossier line; let it lay out first.
-                    Task { @MainActor in
-                        try? await Task.sleep(for: .milliseconds(60))
-                        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { proxy.scrollTo(target, anchor: .top) }
-                        scrollTarget = nil
-                    }
+            .scrollDismissesKeyboard(.interactively)
+            .phrenIdentifier("memory-list")
+            .onChange(of: scrollTarget, initial: true) { _, target in
+                guard let target else { return }
+                // The list may have just replaced the map; let it lay out first.
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(60))
+                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { proxy.scrollTo(target, anchor: .top) }
+                    scrollTarget = nil
                 }
             }
         }
     }
 
-    private func cards(_ items: [MemoryItem], showProject: Bool) -> some View {
+    private var countsLine: some View {
+        Text(counts.line(for: countKinds))
+            .font(PhrenTypography.subheadline.weight(.semibold)).foregroundStyle(PhrenTheme.text)
+            .monospacedDigit().lineLimit(2)
+            .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+            .phrenIdentifier("memory-counts")
+    }
+
+    private func cards(_ items: [MemoryItem]) -> some View {
         ForEach(items) { item in
-            MemoryRowCard(item: item, showKind: content == .all, showProject: self.showProject && showProject,
+            MemoryRowCard(item: item, showKind: showKind, showProject: false,
                           highlighted: highlightedID == item.id, canWrite: canWrite(item),
                           onSelect: { onSelect(item) }, onMove: { onMove(item, $0) },
                           onEdit: { onEdit(item) }, onDelete: { onDelete(item) }, onActions: { onActions(item) })
                 .id(item.id)
         }
-    }
-
-    static let contentOptions: [PhrenOption<MemoryContent>] = MemoryContent.allCases.map {
-        PhrenOption(id: $0.id, value: $0, title: $0.rawValue)
     }
 }
 

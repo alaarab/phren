@@ -83,6 +83,30 @@ enum AccountUsagePresentation {
         "\(value.formatted(.number.precision(.fractionLength(0...1))))%"
     }
 
+    /// "billed" for a plan that meters dollars, "estimate" for a local ledger,
+    /// nil when the source has neither.
+    static func billing(for source: String) -> String? {
+        switch source {
+        case "opencode-go", "openrouter": return "billed"
+        case "opencode": return "estimate"
+        default: return nil
+        }
+    }
+
+    /// "opencode-go/deepseek-v4.1-flash" -> "DeepSeek v4.1 flash". Known model
+    /// families keep their own casing; anything else is title-cased word by
+    /// word after the provider prefix is dropped.
+    static func modelTitle(_ id: String) -> String {
+        let base = id.split(separator: "/", maxSplits: 1).last.map(String.init) ?? id
+        let words = base.replacingOccurrences(of: "-", with: " ")
+            .replacingOccurrences(of: "_", with: " ")
+            .split(separator: " ").map(String.init)
+        guard let first = words.first else { return base }
+        let families = ["deepseek": "DeepSeek", "glm": "GLM"]
+        let family = families[first.lowercased()] ?? String(first.prefix(1)).uppercased() + String(first.dropFirst())
+        return ([family] + words.dropFirst()).joined(separator: " ")
+    }
+
     static func windowName(_ window: AccountUsageSnapshot.Window, source: String) -> String {
         guard source == "claude" else { return shortName(window.name) }
         if window.id == "seven_day" { return "7-day, all models" }

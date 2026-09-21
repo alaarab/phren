@@ -8,17 +8,24 @@ final class WorkflowTests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.tabBars.buttons["Memory"].waitForExistence(timeout: 8))
         app.tabBars.buttons["Memory"].tap()
+        app.buttons["memory-mode:list"].tap()
+        XCTAssertTrue(app.staticTexts["memory-counts"].waitForExistence(timeout: 8))
+        app.buttons["memory-search-toggle"].tap()
         let field = app.textFields["memory-search"]
         XCTAssertTrue(field.waitForExistence(timeout: 5))
         field.tap(); field.typeText("offline")
         let finding = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Cache repeated requests for offline use")).firstMatch
         XCTAssertTrue(finding.waitForExistence(timeout: 8))
         app.buttons["memory-search:clear"].tap()
-        field.tap(); field.typeText("nomatchabcdef")
+        XCTAssertFalse(field.waitForExistence(timeout: 3), "clearing the field slides it away")
+        app.buttons["memory-search-toggle"].tap()
+        let again = app.textFields["memory-search"]
+        XCTAssertTrue(again.waitForExistence(timeout: 5))
+        again.tap(); again.typeText("nomatchabcdef")
         XCTAssertTrue(app.staticTexts["No matches"].firstMatch.waitForExistence(timeout: 8))
         XCTAssertFalse(finding.exists)
         app.buttons["memory-search:clear"].tap()
-        XCTAssertTrue(app.staticTexts["memory-panel-counts"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["memory-counts"].waitForExistence(timeout: 5))
 
         // The same launch also covers the compact Projects and Explore rows.
         app.tabBars.buttons["Projects"].tap()

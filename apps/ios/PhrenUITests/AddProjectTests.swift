@@ -30,7 +30,7 @@ final class AddProjectTests: XCTestCase {
         // Two fixture stores, so the title carries the store name too.
         let title = app.navigationBars.matching(NSPredicate(format: "identifier BEGINSWITH 'nightjar'")).firstMatch
         XCTAssertTrue(title.waitForExistence(timeout: 15), "The sheet closes on the new project")
-        XCTAssertTrue(app.buttons["Project session"].exists, "Open on a computer is one tap away")
+        XCTAssertTrue(app.buttons["project-skills"].exists, "The new project opens on its own page")
         attachUIScreenshot(app, "New project after Add project")
     }
 

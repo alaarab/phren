@@ -19,7 +19,11 @@
     -webkit-user-select: none; user-select: none;
     -webkit-tap-highlight-color: transparent;
   }
-  #graph-canvas { position: absolute; inset: 0; }
+  /* The renderer switches this to position: relative at mount (scene.ts), and
+     a relative box with auto height collapses to its content. Explicit 100%
+     width and height keep the canvas tracking the web view's frame, which the
+     resize observer then reads for the force graph. */
+  #graph-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
   /* SwiftUI provides search, filters and camera controls. Desktop overlays
      would cover most of a phone's canvas and offer unsupported actions. */
   .phren-project-nav, .phren-project-panel, .phren-pp-reopen,

@@ -54,6 +54,13 @@ struct GraphWebView: UIViewRepresentable {
         return webView
     }
 
+    /// The web view must claim exactly the frame SwiftUI gives it: WKWebView's
+    /// own content size otherwise wins and the canvas draws short of the frame.
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: WKWebView, context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? uiView.frame.width,
+               height: proposal.height ?? uiView.frame.height)
+    }
+
     func updateUIView(_ webView: WKWebView, context: Context) {
         context.coordinator.onSelect = onSelect
         context.coordinator.onAction = onAction

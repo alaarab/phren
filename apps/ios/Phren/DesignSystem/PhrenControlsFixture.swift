@@ -19,6 +19,7 @@ struct PhrenControlsFixture: View {
     @State private var days: Set<Schedule.Weekday> = [.mon, .wed, .fri]
     @State private var sheet: Bool
     @State private var dialog: Bool
+    @State private var multiSelect = false
     @State private var result = "No action"
     private let longPresentation: Bool
 
@@ -75,6 +76,8 @@ struct PhrenControlsFixture: View {
                      message: longPresentation ? String(repeating: "This removes the scheduled prompt from the store. ", count: 20)
                         : "This removes the scheduled prompt from the store.",
                      actions: dialogActions, identifier: "controls-dialog")
+        .phrenMultiSelectSheet(isPresented: $multiSelect, title: "Options", options: options,
+                               selection: $choices, rowPrefix: "controls-multiselect")
     }
 
     @ViewBuilder private var pageContent: some View {
@@ -118,6 +121,13 @@ struct PhrenControlsFixture: View {
                 PhrenMultiOptionGroup(options: options, selection: $choices, identifier: "controls-multi")
                 PhrenOptionRow(title: "Disabled selected", selected: true, mark: .check, disabled: true) {}
                     .phrenIdentifier("controls-check:disabled-selected")
+            }
+            PhrenGroup("Drop-down", identifier: "controls-group:multiselect") {
+                PhrenMultiSelect(options: options, selection: $choices, allLabel: "All options",
+                                 identifier: "controls-multiselect", isPresented: $multiSelect)
+                PhrenMultiSelect(options: options, selection: .constant(["list"]), allLabel: "All options",
+                                 identifier: "controls-multiselect-disabled", isPresented: .constant(false))
+                    .disabled(true)
             }
             PhrenGroup("Glyph and detail", identifier: "controls-group:glyph") {
                 PhrenOptionRow(title: "A long option name that wraps without losing the provider or caption",

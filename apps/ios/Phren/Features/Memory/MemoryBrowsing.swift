@@ -27,23 +27,21 @@ struct MemoryItem: Identifiable, Equatable {
     var rowIdentifier: String { "memory-row:\(id)" }
 }
 
-enum MemoryContent: String, CaseIterable, Identifiable {
-    case all = "All", findings = "Findings", tasks = "Tasks", topics = "Topics"
+/// One content kind the Memory filters can show or hide. An empty set reads as
+/// every kind; `MemoryKind.allCases` is the same full set.
+enum MemoryKind: String, CaseIterable, Identifiable, Hashable {
+    case findings = "Findings", notes = "Notes", tasks = "Tasks", topics = "Topics"
 
     var id: String { rawValue.lowercased() }
 
-    /// What the graph draws for this choice; topics are the findings' groups.
-    var graphFilter: GraphPayload.ContentFilter {
+    var itemKind: MemoryItem.Kind {
         switch self {
-        case .all: return .all
-        case .findings, .topics: return .findings
-        case .tasks: return .tasks
+        case .findings: return .finding
+        case .notes: return .note
+        case .tasks: return .task
+        case .topics: return .topic
         }
     }
-}
-
-enum MemoryPanelHeight: String, CaseIterable {
-    case collapsed, half, full
 }
 
 struct MemoryCounts: Equatable {
@@ -62,6 +60,19 @@ struct MemoryCounts: Equatable {
             Self.count(tasks, "task"),
             Self.count(topics, "topic"),
         ]
+        return parts.joined(separator: " · ")
+    }
+
+    /// The counts line for the current kinds filter. An empty set (or all
+    /// four) reads as the full line; a notes-only scope names its notes
+    /// because no other kind would otherwise appear.
+    func line(for kinds: Set<MemoryKind>) -> String {
+        let effective = kinds.isEmpty ? Set(MemoryKind.allCases) : kinds
+        var parts: [String] = []
+        if effective.contains(.findings) { parts.append(Self.count(findings, "finding")) }
+        if effective.contains(.tasks) { parts.append(Self.count(tasks, "task")) }
+        if effective.contains(.topics) { parts.append(Self.count(topics, "topic")) }
+        if parts.isEmpty, effective.contains(.notes) { parts.append(Self.count(notes, "note")) }
         return parts.joined(separator: " · ")
     }
 
@@ -203,19 +214,25 @@ enum MemoryBrowsing {
         return counts
     }
 
-    /// The content chips: All lists findings, notes and tasks; Topics lists
-    /// the topics; a chosen topic narrows to its findings.
-    static func filter(_ items: [MemoryItem], content: MemoryContent, topic: String?) -> [MemoryItem] {
-        items.filter { item in
-            if let topic {
-                return item.kind == .finding && (item.typeTag ?? "general") == topic
-            }
-            switch content {
-            case .all: return item.kind != .topic
-            case .findings: return item.kind == .finding
-            case .tasks: return item.kind == .task
-            case .topics: return item.kind == .topic
-            }
+    /// The kinds filter: an empty set keeps every content row; a chosen set
+    /// keeps only those kinds. Project result rows are never filtered out.
+    static func filter(_ items: [MemoryItem], kinds: Set<MemoryKind>) -> [MemoryItem] {
+        guard !kinds.isEmpty, kinds != Set(MemoryKind.allCases) else { return items.filter { $0.kind != .project } }
+        let allowed = Set(kinds.map(\.itemKind))
+        return items.filter { $0.kind == .project || allowed.contains($0.kind) }
+    }
+
+    /// What the graph draws for the chosen kinds; notes are native-only, so a
+    /// notes-only scope still leaves the findings graph in place.
+    static func graphFilter(kinds: Set<MemoryKind>) -> GraphPayload.ContentFilter {
+        let effective = kinds.isEmpty ? Set(MemoryKind.allCases) : kinds
+        let findings = effective.contains(.findings) || effective.contains(.topics)
+        let tasks = effective.contains(.tasks)
+        switch (findings, tasks) {
+        case (true, true): return .all
+        case (true, false): return .findings
+        case (false, true): return .tasks
+        case (false, false): return .all
         }
     }
 

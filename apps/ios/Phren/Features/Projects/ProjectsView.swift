@@ -301,14 +301,6 @@ struct ProjectDetailView: View {
                     LiveStatusBar(compact: true)
                 }
             }
-            ToolbarItem(placement: .primaryAction) {
-                ProjectSessionActions(storeId: storeId, project: project)
-            }
-            ToolbarItem(placement: .primaryAction) {
-                NavigationLink { GraphView(focusProject: project, initialStoreId: storeId) } label: {
-                    Label("Project graph", systemImage: "circle.hexagongrid")
-                }
-            }
         }
         .navigationDestination(isPresented: $showingSkills) {
             SkillsView(project: project, storeId: storeId, returnToProject: { showingSkills = false })

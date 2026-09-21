@@ -1959,11 +1959,7 @@ final class AgentChatTests: XCTestCase {
     @MainActor
     func testProjectMenuOpensNativeChat() {
         let app = launch()
-        app.tabBars.buttons["Projects"].tap()
-        app.buttons["project:sample/brain:phone"].tap()
-        app.buttons["Project session"].tap()
-        app.buttons["Chat with agent"].tap()
-        let found = app.buttons["discovered-session:A1000000-0000-0000-0000-000000000001:w7:w7:t9"]
+        let found = app.buttons["live-chat:w7:w7:t9"]
         XCTAssertTrue(found.waitForExistence(timeout: 10))
         found.tap()
         XCTAssertTrue(app.buttons["chat-close"].waitForExistence(timeout: 5))

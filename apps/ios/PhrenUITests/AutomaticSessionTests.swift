@@ -5,10 +5,10 @@ final class AutomaticSessionTests: XCTestCase {
     func testProjectDiscoveryWaitsForSelectionThenOpensNativeChat() {
         let app = launch()
         openProjectSessions(app)
-        let row = app.buttons["discovered-session:A1000000-0000-0000-0000-000000000001:w7:w7:t9"]
+        let row = app.buttons["overview-chat:A1000000-0000-0000-0000-000000000001:herdr:default:w7:w7:t9"]
         XCTAssertTrue(row.waitForExistence(timeout: 15))
         XCTAssertFalse(app.buttons["chat-close"].exists)
-        app.buttons["Refresh sessions"].tap()
+        app.buttons["Refresh all sessions"].tap()
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         row.tap()
         XCTAssertTrue(app.buttons["chat-close"].waitForExistence(timeout: 8))
@@ -22,8 +22,7 @@ final class AutomaticSessionTests: XCTestCase {
         openProjectSessions(app)
         XCTAssertTrue(app.staticTexts["Review phone changes"].waitForExistence(timeout: 15))
         XCTAssertTrue(app.staticTexts["Build phone app"].exists)
-        XCTAssertFalse(app.staticTexts["Unrelated session"].exists)
-        app.buttons["discovered-session:A1000000-0000-0000-0000-000000000001:w7:w7:t10"].tap()
+        app.buttons["overview-chat:A1000000-0000-0000-0000-000000000001:herdr:default:w7:w7:t10"].tap()
         XCTAssertTrue(app.buttons["chat-close"].waitForExistence(timeout: 8))
     }
 
@@ -31,6 +30,7 @@ final class AutomaticSessionTests: XCTestCase {
     func testOfflineComputerDoesNotInventASession() {
         let app = launch(extra: ["--session-discovery-offline"])
         openProjectSessions(app)
+        app.buttons["overview-reconnect:A1000000-0000-0000-0000-000000000001"].tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "connection", "closed")).firstMatch.waitForExistence(timeout: 15))
         XCTAssertFalse(app.staticTexts["Build phone app"].exists)
         XCTAssertFalse(app.buttons["chat-close"].exists)
@@ -47,8 +47,8 @@ final class AutomaticSessionTests: XCTestCase {
 
     @MainActor
     private func openProjectSessions(_ app: XCUIApplication) {
-        app.buttons["project:sample/brain:phone"].tap()
-        app.buttons["Project session"].tap()
-        app.buttons["Chat with agent"].tap()
+        // The Agents tab is the one way to a project's live sessions.
+        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 8))
+        app.tabBars.buttons["Agents"].tap()
     }
 }

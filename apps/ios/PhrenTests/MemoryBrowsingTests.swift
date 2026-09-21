@@ -109,20 +109,27 @@ final class MemoryBrowsingTests: XCTestCase {
         XCTAssertTrue(ledger.allSatisfy { $0.project == "ledger" || $0.kind == .topic })
         XCTAssertTrue(MemoryBrowsing.counts([]).isEmpty)
         XCTAssertEqual(MemoryCounts(findings: 1, notes: 0, tasks: 1, topics: 1).line, "1 finding · 1 task · 1 topic")
+        XCTAssertEqual(MemoryCounts(findings: 4, notes: 2, tasks: 3, topics: 4).line(for: []), "4 findings · 3 tasks · 4 topics")
+        XCTAssertEqual(MemoryCounts(findings: 4, notes: 2, tasks: 3, topics: 4).line(for: [.findings]), "4 findings")
+        XCTAssertEqual(MemoryCounts(findings: 4, notes: 2, tasks: 3, topics: 4).line(for: [.notes]), "2 notes")
     }
 
-    func testContentChipsAndTopicNarrowTheRows() {
+    func testKindsFilterAndGraphFilterFollowTheSelection() {
         let items = contents()
-        XCTAssertEqual(MemoryBrowsing.filter(items, content: .all, topic: nil).map(\.kind).filter { $0 == .topic }.count, 0)
-        XCTAssertEqual(MemoryBrowsing.filter(items, content: .all, topic: nil).count, 9)
-        XCTAssertEqual(MemoryBrowsing.filter(items, content: .findings, topic: nil).count, 4)
-        XCTAssertEqual(MemoryBrowsing.filter(items, content: .tasks, topic: nil).count, 3)
-        XCTAssertEqual(MemoryBrowsing.filter(items, content: .topics, topic: nil).count, 4)
-        XCTAssertEqual(MemoryBrowsing.filter(items, content: .findings, topic: "pitfall").map(\.id), ["finding:1a2b3c4d"])
-        XCTAssertEqual(MemoryBrowsing.filter(items, content: .tasks, topic: "general").map(\.id), ["finding:3c4d5e6f"],
-                       "a topic wins over the content chip until it is cleared")
-        XCTAssertEqual(MemoryContent.topics.graphFilter, .findings)
-        XCTAssertEqual(MemoryContent.tasks.graphFilter, .tasks)
+        XCTAssertEqual(MemoryBrowsing.filter(items, kinds: []).count, 13, "every kind is in view")
+        XCTAssertEqual(MemoryBrowsing.filter(items, kinds: Set(MemoryKind.allCases)).count, 13)
+        XCTAssertEqual(MemoryBrowsing.filter(items, kinds: [.findings]).count, 4)
+        XCTAssertEqual(MemoryBrowsing.filter(items, kinds: [.notes]).count, 2)
+        XCTAssertEqual(MemoryBrowsing.filter(items, kinds: [.tasks]).count, 3)
+        XCTAssertEqual(MemoryBrowsing.filter(items, kinds: [.topics]).count, 4)
+        XCTAssertEqual(MemoryBrowsing.filter(items, kinds: [.findings, .tasks]).map(\.kind).filter { $0 == .note }.count, 0)
+
+        XCTAssertEqual(MemoryBrowsing.graphFilter(kinds: []), .all)
+        XCTAssertEqual(MemoryBrowsing.graphFilter(kinds: [.findings]), .findings)
+        XCTAssertEqual(MemoryBrowsing.graphFilter(kinds: [.topics]), .findings)
+        XCTAssertEqual(MemoryBrowsing.graphFilter(kinds: [.tasks]), .tasks)
+        XCTAssertEqual(MemoryBrowsing.graphFilter(kinds: [.findings, .tasks]), .all)
+        XCTAssertEqual(MemoryBrowsing.graphFilter(kinds: [.notes]), .all)
     }
 
     func testResultsMapIndexHitsOntoRowsAndAddProjectsFromTheGraph() {
@@ -157,11 +164,4 @@ final class MemoryBrowsingTests: XCTestCase {
         XCTAssertEqual(MemoryFreshness(hasError: true).text(now: now), "sync error")
     }
 
-    func testPanelHeightsSnapWithinTheAvailableSpace() {
-        XCTAssertEqual(MemoryPanel.points(.collapsed, available: 600), 56)
-        XCTAssertEqual(MemoryPanel.points(.half, available: 600), 270)
-        XCTAssertEqual(MemoryPanel.points(.full, available: 600), 600)
-        XCTAssertEqual(MemoryPanel.points(.half, available: 100), 56, "half never drops under the header")
-        XCTAssertEqual(MemoryPanel.points(.collapsed, available: 40), 40, "a tiny space clamps the header")
-    }
 }

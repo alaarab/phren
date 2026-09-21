@@ -84,6 +84,11 @@ enum UITestFixtures {
         // notes and tasks and syncs; the team store keeps the demo content
         // and never syncs, so the panel header shows one stale store.
         let memory = arguments.contains("--memory-fixture")
+        // Each UI test starts from the same map mode and unfiltered scope, so
+        // the remembered Memory settings never leak between tests.
+        defaults.removeObject(forKey: "memory.mode.v1")
+        defaults.removeObject(forKey: "memory.kinds.v1")
+        defaults.removeObject(forKey: "memory.projects.v1")
         let primary = trailer ? "alaarab" : "sample"
         for owner in tour ? [primary] : ["sample", "team"] {
             let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ui-tests-\(UUID().uuidString)")

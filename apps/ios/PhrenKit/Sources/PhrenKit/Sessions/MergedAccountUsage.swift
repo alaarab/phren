@@ -13,6 +13,8 @@ public struct MergedAccountUsage: Identifiable, Equatable, Sendable {
     public let updatedAt: Date?
     public let message: String?
     public let stale: Bool
+    /// The signed-in email or handle from the newest report, when one carries it.
+    public let accountName: String?
     public var id: String { source }
     public var name: String {
         switch source {
@@ -93,7 +95,7 @@ public struct MergedAccountUsage: Identifiable, Equatable, Sendable {
             let isStale = spend == nil ? (selected?.isStale(at: now) ?? false) : (stale[source] ?? false)
             return MergedAccountUsage(source: source, computers: computers[source] ?? [], windows: list, spend: spend,
                                       updatedAt: updated[source], message: source == "opencode-go" ? selected?.message : (list.isEmpty && spend == nil ? selected?.message : nil),
-                                      stale: isStale)
+                                      stale: isStale, accountName: selected?.accountName)
         }
     }
 }

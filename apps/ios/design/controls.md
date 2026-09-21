@@ -124,6 +124,39 @@ Identifier: `screen-multi:option.id`. Dynamic Type wraps and grows as above.
 Schedules keeps its specialised wrapping day chips for its compact weekday
 set; a general filter list uses this group.
 
+## PhrenMultiSelect<Value: Hashable>
+
+Purpose: a compact multi-select filter. The trigger is a 44-minimum pill that
+summarises the chosen values ("All kinds", "Findings, Tasks"); the card it opens
+is PhrenDialog-styled: a centred surface card with one check `PhrenOptionRow`
+per option and a Done row. Memory's Kinds and Projects filters are the two
+instances. The owner presents the card with
+`.phrenMultiSelectSheet(isPresented:title:options:selection:rowPrefix:requiresSelection:leading:)`
+at the same full-screen root as an action sheet or dialog, so the scrim covers
+navigation and tab controls. `leading` is an optional section above the options
+(Memory's store chooser when the phone carries several stores).
+
+Geometry: the trigger is a capsule, `surfaceRaised`, 12 horizontal padding,
+44 minimum height; label is subheadline medium, one line, middle-truncated;
+a 9-point chevron follows. The card is `surface`, radius 18, maximum width 360,
+16 padding, 12 between title, scroller and Done; rows are the standard check
+rows 8 apart. Done is a 44-minimum `surfaceRaised` row with radius 12 and accent
+text. The scrim is black at 0.5. Normal, selected and disabled states are the
+rows' own; the trigger dims to 0.45 when disabled.
+
+The trigger's label is `allLabel` when the selection is empty or every option;
+otherwise the chosen titles joined with ", ". Empty means all: the owner
+decides, and `requiresSelection` refuses the tap that would clear the last
+member. The card toggles its binding live; backdrop, Escape or Done dismiss
+without a separate commit. Reduce Motion drops the opacity animation.
+
+Accessibility: the trigger is one Button with `allLabel` as its label and the
+current summary as its value; the card is modal with focus on its title, rows
+are Buttons with the selected trait, and Escape dismisses. Identifiers: trigger
+`screen-multiselect`, rows `screen-multiselect:option.id`, Done
+`screen-multiselect-done`, card marker `screen-multiselect-sheet`. Dynamic Type
+wraps the pill label and the rows; the card scrolls when its options overflow.
+
 ## PhrenTextSegment<Value: Hashable>
 
 Purpose: a short mutually exclusive mode such as Changes' List/Diff or a

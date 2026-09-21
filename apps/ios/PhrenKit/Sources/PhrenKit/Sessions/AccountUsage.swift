@@ -39,6 +39,9 @@ public struct AccountUsageSnapshot: Decodable, Equatable, Sendable {
         /// A one-way key fingerprint. It lets reports from two computers
         /// avoid counting the same OpenRouter key twice.
         public let accountId: String?
+        /// The signed-in email or handle the Hook reports, when it sends one.
+        /// Never invented: a missing name stays nil.
+        public let accountName: String?
         public var id: String { source }
         public var name: String {
             switch source {
@@ -66,6 +69,7 @@ public struct AccountUsageSnapshot: Decodable, Equatable, Sendable {
                   && (account.message?.utf8.count ?? 0) <= 1_000
                   && (account.updatedAt == nil || account.updatedDate != nil)
                   && (account.accountId == nil || account.accountId?.range(of: #"^[0-9a-f]{64}$"#, options: .regularExpression) != nil)
+                  && (account.accountName == nil || account.accountName!.count <= 200)
                   && (account.spend == nil || (account.spend!.amountUSD.isFinite && (0...1_000_000_000).contains(account.spend!.amountUSD)
                       && ["rolling_7_days", "rolling_30_days", "calendar_week"].contains(account.spend!.period)))
                   && Set(account.windows.map(\.id)).count == account.windows.count

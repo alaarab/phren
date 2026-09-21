@@ -177,6 +177,159 @@ struct PhrenMultiOptionGroup<Value: Hashable>: View {
     }
 }
 
+/// A drop-down filter: a 44-point pill that summarises the chosen values and
+/// opens a PhrenDialog-styled card of check rows. The owner presents the card
+/// at the screen root with `.phrenMultiSelectSheet`, the same contract as
+/// `phrenActionSheet` and `phrenDialog`, so its scrim covers the screen.
+/// An empty selection reads as the `allLabel`; `requiresSelection` keeps the
+/// card from clearing its last member.
+struct PhrenMultiSelect<Value: Hashable>: View {
+    let options: [PhrenOption<Value>]
+    @Binding var selection: Set<Value>
+    /// The pill's label when nothing or everything is chosen.
+    let allLabel: String
+    let identifier: String
+    @Binding var isPresented: Bool
+    @Environment(\.isEnabled) private var isEnabled
+
+    private var chosen: [PhrenOption<Value>] { options.filter { selection.contains($0.value) } }
+
+    private var summary: String {
+        if chosen.isEmpty || chosen.count == options.count { return allLabel }
+        return chosen.map(\.title).joined(separator: ", ")
+    }
+
+    var body: some View {
+        Button { isPresented = true } label: {
+            HStack(spacing: PhrenTheme.Space.xs) {
+                Text(summary).font(PhrenTypography.subheadline.weight(.medium))
+                    .lineLimit(1).truncationMode(.middle)
+                Image(systemName: "chevron.down")
+                    .font(PhrenTypography.icon(9, weight: .semibold)).accessibilityHidden(true)
+            }
+            .foregroundStyle(isEnabled ? PhrenTheme.text : PhrenTheme.textMuted)
+            .padding(.horizontal, PhrenTheme.Space.medium)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .background(PhrenTheme.surfaceRaised, in: Capsule())
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .opacity(isEnabled ? 1 : 0.45)
+        .accessibilityLabel(allLabel)
+        .accessibilityValue(summary)
+        .phrenIdentifier(identifier)
+    }
+}
+
+/// The card `PhrenMultiSelect` opens: one check row per option and a Done row.
+/// `leading` carries a section the caller needs above the options (Memory's
+/// store chooser). Rows identify as `rowPrefix:option.id`; Done is
+/// `rowPrefix-done`.
+struct PhrenMultiSelectSheet<Value: Hashable>: View {
+    let title: String
+    let options: [PhrenOption<Value>]
+    @Binding var selection: Set<Value>
+    let rowPrefix: String
+    var requiresSelection = false
+    var leading: AnyView? = nil
+    let dismiss: () -> Void
+    @AccessibilityFocusState private var titleFocused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: PhrenTheme.Space.medium) {
+            Text(title).font(PhrenTypography.subheadline.weight(.semibold))
+                .accessibilityAddTraits(.isHeader).accessibilityFocused($titleFocused)
+            ScrollView {
+                VStack(spacing: PhrenTheme.Space.small) {
+                    if let leading { leading }
+                    ForEach(options) { option in
+                        PhrenOptionRow(title: option.title, caption: option.caption,
+                                       selected: selection.contains(option.value), mark: .check,
+                                       disabled: !option.isEnabled, icon: option.icon) {
+                            toggle(option)
+                        }
+                        .phrenIdentifier("\(rowPrefix):\(option.id)")
+                    }
+                }
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            Button(action: dismiss) {
+                Text("Done").font(PhrenTypography.body.weight(.medium))
+                    .foregroundStyle(PhrenTheme.accent)
+                    .padding(.horizontal, PhrenTheme.Space.medium)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .background(PhrenTheme.surfaceRaised,
+                                in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.questionOption))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).phrenIdentifier("\(rowPrefix)-done")
+        }
+        .padding(PhrenTheme.Space.large)
+        .frame(maxWidth: 360)
+        .background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.large))
+        .clipShape(RoundedRectangle(cornerRadius: PhrenTheme.Radius.large))
+        .accessibilityElement(children: .contain).accessibilityAddTraits(.isModal)
+        .accessibilityAction(.escape, dismiss)
+        .phrenContainerMarker("\(rowPrefix)-sheet", label: title)
+        .onAppear { titleFocused = true }
+    }
+
+    private func toggle(_ option: PhrenOption<Value>) {
+        guard option.isEnabled else { return }
+        var next = selection
+        if !next.insert(option.value).inserted { next.remove(option.value) }
+        if requiresSelection, next.isEmpty { return }
+        selection = next
+    }
+}
+
+private struct PhrenMultiSelectModifier<Value: Hashable>: ViewModifier {
+    @Binding var isPresented: Bool
+    let title: String
+    let options: [PhrenOption<Value>]
+    @Binding var selection: Set<Value>
+    let rowPrefix: String
+    let requiresSelection: Bool
+    let leading: AnyView?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content
+            .allowsHitTesting(!isPresented).accessibilityHidden(isPresented)
+            .overlay {
+                if isPresented {
+                    GeometryReader { geometry in
+                        ZStack {
+                            Color.black.opacity(0.5).ignoresSafeArea().contentShape(Rectangle())
+                                .onTapGesture { isPresented = false }
+                                .accessibilityHidden(true)
+                            PhrenMultiSelectSheet(title: title, options: options, selection: $selection,
+                                                  rowPrefix: rowPrefix, requiresSelection: requiresSelection,
+                                                  leading: leading, dismiss: { isPresented = false })
+                                .frame(maxWidth: 360, maxHeight: max(44, geometry.size.height - 32))
+                                .padding(PhrenTheme.Space.large)
+                                .transition(.opacity)
+                        }
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                    }
+                    .zIndex(1)
+                }
+            }
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: isPresented)
+    }
+}
+
+extension View {
+    func phrenMultiSelectSheet<Value: Hashable>(isPresented: Binding<Bool>, title: String,
+                                                options: [PhrenOption<Value>], selection: Binding<Set<Value>>,
+                                                rowPrefix: String, requiresSelection: Bool = false,
+                                                leading: AnyView? = nil) -> some View {
+        modifier(PhrenMultiSelectModifier(isPresented: isPresented, title: title, options: options,
+                                          selection: selection, rowPrefix: rowPrefix,
+                                          requiresSelection: requiresSelection, leading: leading))
+    }
+}
+
 struct PhrenTextSegment<Value: Hashable>: View {
     let items: [PhrenOption<Value>]
     @Binding var selection: Value

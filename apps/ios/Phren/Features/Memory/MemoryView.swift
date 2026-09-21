@@ -1,20 +1,18 @@
 import PhrenKit
 import SwiftUI
 
-/// The Memory tab: the graph page with search and browsing folded into it.
-/// The web renderer keeps its node dossier; the native panel below it owns
-/// the scope's contents and the search results. Selection travels both ways
-/// over the renderer's message bridge: a row tap issues `focus`, a canvas tap
-/// arrives as `graphSelect`.
+/// The Memory tab: map or list, one search, and two drop-down filters. The map
+/// is the shared graph renderer with its own node dossier; the list is the same
+/// rows the v1 panel drew. Selecting a node opens the dossier; a row in the
+/// list switches to the map with that node selected.
 struct MemoryView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var storeId = ""
-    /// Empty means every project of the store.
-    @State private var project = ""
-    @State private var content: MemoryContent = .all
-    @State private var topic: String?
+    @AppStorage(MemorySettings.modeKey) private var modeRaw = MemoryMode.map.rawValue
+    @AppStorage(MemorySettings.kindsKey) private var kindsRaw = ""
+    @AppStorage(MemorySettings.projectsKey) private var projectsRaw = ""
+    @State private var showingSearch = false
     @State private var query = ""
     @FocusState private var searchFocused: Bool
     @State private var payload: GraphPayload?
@@ -30,8 +28,6 @@ struct MemoryView: View {
     @State private var command: GraphCommand?
     @State private var rendererID = UUID()
     @State private var renderedScope: String?
-    @State private var height: MemoryPanelHeight = .half
-    @State private var dragHeight: CGFloat?
     @State private var results: [MemoryItem] = []
     @State private var searching = false
     @State private var scrollTarget: String?
@@ -40,7 +36,8 @@ struct MemoryView: View {
     @State private var deleting: MemoryDeletion?
     @State private var actionItem: MemoryItem?
     @State private var editingTask: TaskListRow?
-    @State private var choosingStore = false
+    @State private var kindsPresented = false
+    @State private var projectsPresented = false
     @State private var projectRoute: ProjectRoute?
     @State private var taskRoute: TaskListRow?
     @State private var shareText: String?
@@ -49,86 +46,103 @@ struct MemoryView: View {
     private var selectedStore: String {
         storeId.isEmpty ? (model.storeFilter ?? model.storeDescriptors.first?.id ?? "") : storeId
     }
-    private var selectedProject: String? { project.isEmpty ? nil : project }
+    private var projects: [String] { model.snapshot(for: selectedStore).projects.map(\.name).sorted() }
     private var snapshot: LocalStore.Snapshot { model.snapshot(for: selectedStore) }
-    private var projects: [String] { snapshot.projects.map(\.name).sorted() }
     private var trimmedQuery: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
 
+    private var mode: MemoryMode { MemoryMode(rawValue: modeRaw) ?? .map }
+    private var kinds: Set<MemoryKind> { MemorySettings.decodeKinds(kindsRaw) }
+    private var projectFilter: Set<String> { MemorySettings.decodeProjects(projectsRaw) }
+    private var showsKindChips: Bool { kinds == Set(MemoryKind.allCases) }
+    /// Grouped by project unless exactly one project is chosen.
+    private var groupByProject: Bool { projectFilter.count != 1 }
+
+    private var modeBinding: Binding<MemoryMode> {
+        Binding(get: { mode }, set: { newValue in
+            modeRaw = newValue.rawValue
+            if newValue == .list { selection = nil; command = GraphCommand(action: .clear) }
+        })
+    }
+    private var kindsBinding: Binding<Set<MemoryKind>> {
+        Binding(get: { kinds }, set: { kindsRaw = MemorySettings.encodeKinds($0) })
+    }
+    private var projectsBinding: Binding<Set<String>> {
+        Binding(get: { projectFilter }, set: { projectsRaw = MemorySettings.encodeProjects($0) })
+    }
+
+    private var refreshProject: String? { projectFilter.count == 1 ? projectFilter.first : nil }
     private var refreshKey: RefreshKey {
-        RefreshKey(store: selectedStore, project: selectedProject, revision: snapshot.revision)
+        RefreshKey(store: selectedStore, project: refreshProject, revision: snapshot.revision)
     }
     private var contentsKey: ContentsKey {
-        ContentsKey(store: selectedStore, project: selectedProject, revision: snapshot.revision, nodes: nodesRevision)
+        ContentsKey(store: selectedStore, revision: snapshot.revision, nodes: nodesRevision)
+    }
+    private var presentationKey: PresentationKey {
+        PresentationKey(revision: payloadRevision, filter: MemoryBrowsing.graphFilter(kinds: kinds),
+                        focus: focusedNodeID, projects: projectFilter)
     }
     private var searchRequest: SearchRequest {
-        SearchRequest(query: trimmedQuery, store: selectedStore, project: selectedProject,
+        SearchRequest(query: trimmedQuery, store: selectedStore, project: refreshProject,
                       revision: model.searchRevision, nodes: nodesRevision)
     }
 
-    private var mode: MemoryPanel.Mode {
-        if let selection { return .dossier(selection) }
-        if payload == nil, error == nil { return .loading }
-        if !trimmedQuery.isEmpty { return .results }
-        return .contents
-    }
-
-    private var shownHeight: MemoryPanelHeight {
-        switch mode {
-        case .loading, .dossier: return .collapsed
-        case .contents, .results: return height
-        }
-    }
-
-    /// While a node is focused the graph draws its neighbourhood, so the
-    /// list keeps to the rows that neighbourhood draws.
+    /// The scope's contents, narrowed to the chosen projects. Topic rows are a
+    /// derived grouping, so they stay in view whatever the project filter.
     private var scopedContents: [MemoryItem] {
-        focusedNodeID == nil ? contents : contents.filter { $0.nodeID != nil }
+        guard !projectFilter.isEmpty else { return contents }
+        return contents.filter { $0.kind == .topic || projectFilter.contains($0.project) }
     }
 
-    private var rows: [MemoryItem] {
-        mode == .results ? results : MemoryBrowsing.filter(scopedContents, content: content, topic: topic)
+    private var displayRows: [MemoryItem] {
+        if mode == .list, !trimmedQuery.isEmpty { return results }
+        return MemoryBrowsing.filter(scopedContents, kinds: kinds)
+    }
+
+    private var counts: MemoryCounts { MemoryBrowsing.counts(displayRows) }
+
+    private var selectedProjectLabel: String? {
+        projectFilter.count == 1 ? projectFilter.first : nil
     }
 
     private var emptyText: String {
+        if !trimmedQuery.isEmpty { return "No matches" }
         if scopedContents.isEmpty {
-            return selectedProject.map { "Nothing saved for \($0) yet" } ?? "Nothing saved in \(selectedStore) yet"
+            return selectedProjectLabel.map { "Nothing saved for \($0) yet" } ?? "Nothing saved in \(selectedStore) yet"
         }
-        return "No \(content == .all ? "rows" : content.rawValue.lowercased()) here"
-    }
-
-    private var freshness: MemoryFreshness {
-        let status = model.storeContexts.first { $0.id == selectedStore }?.status ?? SyncEngine.Status()
-        return MemoryFreshness(lastSyncedAt: status.lastSyncedAt, isSyncing: status.isSyncing, hasError: status.lastError != nil)
-    }
-
-    private var focusLabel: String? {
-        guard let focusedNodeID else { return nil }
-        return payload?.nodes.first { $0.id == focusedNodeID }?.label
+        return "No rows for these filters"
     }
 
     var body: some View {
         PhrenNavigationStack {
             VStack(spacing: 0) {
                 ActionErrorBanner()
-                PhrenSearchField(text: $query, placeholder: "Search memory", identifier: "memory-search",
-                                 focus: $searchFocused, onSubmit: submitSearch)
-                    .padding(.horizontal, PhrenTheme.Space.large).padding(.top, PhrenTheme.Space.small)
-                scopeRow
-                    .padding(.horizontal, PhrenTheme.Space.large).padding(.vertical, PhrenTheme.Space.xs)
-                GeometryReader { geometry in
-                    let available = geometry.size.height
-                    let panelPoints = dragHeight ?? MemoryPanel.points(shownHeight, available: available)
-                    VStack(spacing: 0) {
-                        graphArea.frame(height: max(0, available - panelPoints)).clipped()
-                        panel(available: available).frame(height: panelPoints)
-                    }
-                    .animation(dragHeight == nil && !reduceMotion ? .easeOut(duration: 0.18) : nil, value: panelPoints)
+                if showingSearch {
+                    PhrenSearchField(text: $query, placeholder: "Search memory", identifier: "memory-search",
+                                     focus: $searchFocused, onSubmit: submitSearch)
+                        .padding(.horizontal, PhrenTheme.Space.large)
+                        .padding(.bottom, PhrenTheme.Space.small)
+                        .transition(.move(edge: .top).combined(with: .opacity))
                 }
+                filterLine
+                content
             }
             .background(PhrenTheme.bg)
             .navigationTitle("Memory")
             .navigationBarTitleDisplayMode(.inline)
             .disablesPanToGoBack()
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showingSearch.toggle()
+                        if showingSearch { searchFocused = true } else { query = "" }
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                    }
+                    .accessibilityLabel(showingSearch ? "Close search" : "Search memory")
+                    .accessibilityIdentifier("memory-search-toggle")
+                }
+            }
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: showingSearch)
             .navigationDestination(item: $projectRoute) { route in
                 ProjectDetailView(storeId: route.storeId, project: route.project)
             }
@@ -136,20 +150,16 @@ struct MemoryView: View {
                 TaskDetailsSheet(row: row)
             }
             .task(id: refreshKey) { await rebuild() }
-            .task(id: PresentationKey(revision: payloadRevision, filter: content.graphFilter, focus: focusedNodeID)) { await present() }
+            .task(id: presentationKey) { await present() }
             .task(id: searchRequest) { await search() }
             .onChange(of: contentsKey, initial: true) { _, _ in refreshContents() }
-            .onChange(of: project) { _, _ in
+            .onChange(of: query) { _, value in
+                if value.isEmpty, showingSearch { showingSearch = false; searchFocused = false }
+            }
+            .onChange(of: projectsRaw) { _, _ in
                 selection = nil
                 focusedNodeID = nil
-                topic = nil
                 highlightedID = nil
-            }
-            .onChange(of: query) { _, value in
-                if !value.isEmpty, height == .collapsed { height = .half }
-            }
-            .onChange(of: searchFocused) { _, focused in
-                if focused, height == .collapsed { height = .half }
             }
             .onChange(of: selection?.id) { previous, current in
                 guard previous != nil, current == nil else { return }
@@ -166,51 +176,59 @@ struct MemoryView: View {
             .sheet(item: $editingTask) { row in TaskEditSheet(row: row) }
             .sheet(isPresented: $shareText.isPresent()) { ActivityView(activityItems: [shareText ?? ""]) }
         }
-        .phrenActionSheet(isPresented: $choosingStore, title: "Store", actions: storeActions, identifier: "memory-store-sheet")
-        .phrenActionSheet(isPresented: $actionItem.isPresent(), title: actionTitle, actions: rowActions, identifier: "memory-actions")
+        .phrenMultiSelectSheet(isPresented: $kindsPresented, title: "Kinds", options: kindOptions,
+                               selection: kindsBinding, rowPrefix: "memory-kind", requiresSelection: true)
+        .phrenMultiSelectSheet(isPresented: $projectsPresented, title: "Projects", options: projectOptions,
+                               selection: projectsBinding, rowPrefix: "memory-project", leading: storeChooser)
+        .phrenActionSheet(isPresented: $actionItem.isPresent(), title: actionTitle, actions: rowActions,
+                          identifier: "memory-actions")
         .phrenDialog(isPresented: $deleting.isPresent(),
                      title: deleting?.isTask == true ? "Delete this task?" : "Delete this finding?",
                      message: deleting?.text ?? "", actions: deleteActions, identifier: "memory-delete")
     }
 
-    // MARK: - Scope
+    // MARK: - Filter line
 
-    private var scopeRow: some View {
-        let layout = dynamicTypeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: PhrenTheme.Space.xs))
-            : AnyLayout(HStackLayout(spacing: PhrenTheme.Space.small))
-        return layout {
-            if model.hasMultipleStores {
-                Button { choosingStore = true } label: {
-                    HStack(spacing: PhrenTheme.Space.xs) {
-                        Image(systemName: "externaldrive").font(PhrenTypography.icon(11, weight: .semibold)).accessibilityHidden(true)
-                        Text(selectedStore).lineLimit(1)
-                        Image(systemName: "chevron.down").font(PhrenTypography.icon(9, weight: .semibold)).accessibilityHidden(true)
+    private var filterLine: some View {
+        HStack(spacing: PhrenTheme.Space.small) {
+            PhrenMultiSelect(options: kindOptions, selection: kindsBinding, allLabel: "All kinds",
+                             identifier: "memory-kinds", isPresented: $kindsPresented)
+            PhrenMultiSelect(options: projectOptions, selection: projectsBinding, allLabel: "All projects",
+                             identifier: "memory-projects", isPresented: $projectsPresented)
+            PhrenIconSegment(items: [.init(value: MemoryMode.map, icon: "point.3.connected.trianglepath.dotted", label: "Map"),
+                                     .init(value: MemoryMode.list, icon: "list.bullet", label: "List")],
+                             selection: modeBinding, identifier: { "memory-mode:\($0.rawValue)" })
+                .fixedSize()
+                .phrenContainerMarker("memory-mode", label: "Memory mode", value: mode.rawValue)
+        }
+        .padding(.horizontal, PhrenTheme.Space.large)
+        .frame(minHeight: 44)
+    }
+
+    private var kindOptions: [PhrenOption<MemoryKind>] {
+        MemoryKind.allCases.map { PhrenOption(id: $0.id, value: $0, title: $0.rawValue) }
+    }
+
+    private var projectOptions: [PhrenOption<String>] {
+        projects.map { PhrenOption(id: $0, value: $0, title: $0) }
+    }
+
+    /// The store chooser is the projects sheet's first section when this phone
+    /// carries more than one store.
+    private var storeChooser: AnyView? {
+        guard model.hasMultipleStores else { return nil }
+        return AnyView(
+            VStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
+                Text("Store").plainListSectionLabel()
+                ForEach(model.storeDescriptors) { store in
+                    PhrenOptionRow(title: store.id, selected: store.id == selectedStore, mark: .check) {
+                        switchStore(store.id)
                     }
-                    .font(PhrenTypography.subheadline.weight(.medium)).foregroundStyle(PhrenTheme.lavender)
-                    .padding(.horizontal, PhrenTheme.Space.medium).frame(minHeight: 32)
-                    .background(PhrenTheme.lavender.opacity(0.16), in: Capsule())
-                    .frame(minHeight: 44).contentShape(Rectangle())
+                    .phrenIdentifier("memory-store:\(store.id)")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(["Store", selectedStore].joined(separator: ", "))
-                .phrenIdentifier("memory-store")
+                Divider().overlay(PhrenTheme.border)
             }
-            PhrenChipRow(items: scopeOptions, selection: $project, identifier: "memory-scope",
-                         tint: { $0.isEmpty ? PhrenTheme.accent : PhrenTheme.projectColor(storeId: selectedStore, project: $0) })
-        }
-    }
-
-    private var scopeOptions: [PhrenOption<String>] {
-        [PhrenOption(id: "all", value: "", title: "All")] + projects.map { PhrenOption(id: $0, value: $0, title: $0) }
-    }
-
-    private var storeActions: [PhrenControlAction] {
-        model.storeDescriptors.map { store in
-            PhrenControlAction(id: store.id, title: store.id, icon: "externaldrive", isSelected: store.id == selectedStore) {
-                switchStore(store.id)
-            }
-        }
+        )
     }
 
     private func switchStore(_ id: String) {
@@ -218,18 +236,24 @@ struct MemoryView: View {
         selection = nil
         focusedNodeID = nil
         highlightedID = nil
-        topic = nil
         storeId = id
-        project = ""
+        projectsRaw = ""
         payload = nil
         visible = nil
         payloadJSON = nil
         error = nil
     }
 
-    // MARK: - Graph
+    // MARK: - Content
 
-    private var graphArea: some View {
+    @ViewBuilder private var content: some View {
+        switch mode {
+        case .map: map
+        case .list: list
+        }
+    }
+
+    private var map: some View {
         ZStack(alignment: .topTrailing) {
             PhrenTheme.bg
             if let visible, let json = payloadJSON, !visible.nodes.isEmpty {
@@ -237,8 +261,14 @@ struct MemoryView: View {
                              onSelect: receiveSelection, onAction: handleGraphAction,
                              onError: { error = $0 })
                     .id(rendererID)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .accessibilityLabel("Interactive memory graph")
                 cameraControls.padding(PhrenTheme.Space.medium)
+                if selection != nil {
+                    showInListButton
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .padding(PhrenTheme.Space.medium)
+                }
             } else if visible == nil, error == nil {
                 ProgressView().tint(PhrenTheme.textMuted).frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -265,6 +295,30 @@ struct MemoryView: View {
         }
     }
 
+    private var list: some View {
+        MemoryPanel(rows: displayRows, counts: counts, countKinds: kinds,
+                    groupByProject: groupByProject, showKind: showsKindChips, emptyText: emptyText,
+                    highlightedID: highlightedID, scrollTarget: $scrollTarget,
+                    canWrite: { model.canWrite(storeId: $0.storeId, project: $0.project) && !moving },
+                    onSelect: open, onMove: move, onEdit: edit, onDelete: confirmDelete,
+                    onActions: { actionItem = $0 })
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var showInListButton: some View {
+        Button(action: showInList) {
+            HStack(spacing: PhrenTheme.Space.xs) {
+                Image(systemName: "list.bullet").font(PhrenTypography.icon(12, weight: .semibold)).accessibilityHidden(true)
+                Text("Show in list")
+            }
+            .font(PhrenTypography.subheadline.weight(.medium)).foregroundStyle(PhrenTheme.accent)
+            .padding(.horizontal, PhrenTheme.Space.medium).frame(minHeight: 44)
+            .background(PhrenTheme.surface.opacity(0.92), in: Capsule())
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain).accessibilityLabel("Show in list").phrenIdentifier("memory-show-in-list")
+    }
+
     private var cameraControls: some View {
         VStack(spacing: 2) {
             cameraButton("Zoom in", icon: "plus", action: .zoomIn)
@@ -283,31 +337,14 @@ struct MemoryView: View {
         .buttonStyle(.plain).accessibilityLabel(title)
     }
 
-    // MARK: - Panel
-
-    private func panel(available: CGFloat) -> some View {
-        MemoryPanel(
-            mode: mode, shown: shownHeight, available: available, dragHeight: $dragHeight,
-            title: selectedProject ?? "All projects", focus: focusLabel,
-            counts: MemoryBrowsing.counts(scopedContents), rows: rows,
-            showProject: selectedProject == nil, groupByProject: mode == .results && selectedProject == nil,
-            searching: searching, emptyText: emptyText, content: $content, topic: $topic,
-            freshness: freshness, highlightedID: highlightedID, scrollTarget: $scrollTarget,
-            canWrite: { model.canWrite(storeId: $0.storeId, project: $0.project) && !moving },
-            onHeight: { height = $0 }, onSelect: open, onMove: move, onEdit: edit, onDelete: confirmDelete,
-            onActions: { actionItem = $0 }, onShowInList: showInList, onClearFocus: clearFocus,
-            onPull: { Task { await model.pullToRefresh() } }
-        )
-    }
-
     private func refreshContents() {
-        contents = MemoryBrowsing.contents(snapshot: snapshot, storeId: selectedStore, project: selectedProject, nodes: nodes)
-        if contents.isEmpty, payload != nil, height == .collapsed { height = .half }
+        contents = MemoryBrowsing.contents(snapshot: snapshot, storeId: selectedStore, project: nil, nodes: nodes)
     }
 
     private func submitSearch() {
         searchFocused = false
-        if !trimmedQuery.isEmpty { height = .full }
+        if trimmedQuery.isEmpty { showingSearch = false; return }
+        if mode == .map, let node = visible?.search(trimmedQuery).first { selectNode(node.id) }
     }
 
     // MARK: - Rows
@@ -316,21 +353,27 @@ struct MemoryView: View {
         highlightedID = nil
         switch item.kind {
         case .topic:
-            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
-                content = .findings
-                topic = item.key
+            if let finding = contents.first(where: {
+                $0.kind == .finding && ($0.typeTag ?? "general") == item.key && $0.nodeID != nil
+            }) {
+                showOnMap(finding)
             }
         case .project:
-            if let id = item.nodeID { selectNode(id) }
+            if item.nodeID != nil { showOnMap(item) }
         case .note:
             projectRoute = ProjectRoute(storeId: item.storeId, project: item.project)
         case .finding:
-            if let id = item.nodeID { selectNode(id) } else { projectRoute = ProjectRoute(storeId: item.storeId, project: item.project) }
+            if item.nodeID != nil { showOnMap(item) } else { projectRoute = ProjectRoute(storeId: item.storeId, project: item.project) }
         case .task:
-            if let id = item.nodeID { selectNode(id) } else {
-                projectRoute = ProjectRoute(storeId: item.storeId, project: item.project)
-            }
+            if item.nodeID != nil { showOnMap(item) } else { projectRoute = ProjectRoute(storeId: item.storeId, project: item.project) }
         }
+    }
+
+    /// A list row selects its node on the map.
+    private func showOnMap(_ item: MemoryItem) {
+        guard let id = item.nodeID else { return }
+        modeRaw = MemoryMode.map.rawValue
+        selectNode(id)
     }
 
     private func taskRow(_ item: MemoryItem) -> TaskListRow? {
@@ -483,10 +526,23 @@ struct MemoryView: View {
         }
     }
 
-    private func clearFocus() {
-        focusedNodeID = nil
+    /// Back from the map to the list, at the selected row; the filters widen
+    /// when they would otherwise hide it.
+    private func showInList() {
+        guard let selected = selection else { return }
+        modeRaw = MemoryMode.list.rawValue
         selection = nil
-        command = GraphCommand(action: .reset)
+        command = GraphCommand(action: .clear)
+        query = ""
+        showingSearch = false
+        focusedNodeID = nil
+        guard let target = contents.first(where: { $0.nodeID == selected.id }) else { return }
+        if !MemoryBrowsing.filter(scopedContents, kinds: kinds).contains(where: { $0.id == target.id }) {
+            kindsRaw = ""
+            projectsRaw = ""
+        }
+        highlightedID = target.id
+        scrollTarget = target.id
     }
 
     /// The dossier's Edit: the row's own action when the list has the node,
@@ -524,26 +580,6 @@ struct MemoryView: View {
         return String(node.id[range.upperBound...])
     }
 
-    /// Back from the dossier to the list, at the selected row; a project
-    /// node narrows the scope to that project instead.
-    private func showInList() {
-        guard let selected = selection else { return }
-        selection = nil
-        command = GraphCommand(action: .clear)
-        query = ""
-        searchFocused = false
-        if selected.isProject {
-            project = selected.project ?? ""
-            return
-        }
-        guard let target = contents.first(where: { $0.nodeID == selected.id }) else { return }
-        topic = nil
-        if MemoryBrowsing.filter([target], content: content, topic: nil).isEmpty { content = .all }
-        if height == .collapsed { height = .half }
-        highlightedID = target.id
-        scrollTarget = target.id
-    }
-
     // MARK: - Loading
 
     private func rebuild() async {
@@ -551,7 +587,7 @@ struct MemoryView: View {
         do {
             let next = try await model.graphPayload(storeId: request.store, focusProject: request.project)
             try Task.checkCancellation()
-            guard request.store == selectedStore, request.project == selectedProject else { return }
+            guard request.store == selectedStore, request.project == refreshProject else { return }
             payload = next
             payloadRevision = UUID()
             let scope = "\(request.store)/\(request.project ?? "*")"
@@ -574,11 +610,13 @@ struct MemoryView: View {
 
     private func present() async {
         guard let payload else { return }
-        let filter = content.graphFilter
+        let filter = MemoryBrowsing.graphFilter(kinds: kinds)
         let focus = focusedNodeID
+        let chosen = projectFilter
         do {
             let presentation = try await Task.detached(priority: .userInitiated) {
-                let filtered = payload.filtered(by: filter)
+                let scoped = chosen.isEmpty ? payload : payload.keeping(projects: chosen)
+                let filtered = scoped.filtered(by: filter)
                 let visible = focus.map { filtered.neighborhood(of: $0, steps: 1) } ?? filtered
                 return (visible, try visible.jsonString(), MemoryBrowsing.NodeIndex(payload: visible))
             }.value
@@ -611,8 +649,6 @@ struct MemoryView: View {
             let graphMatches = visible?.search(request.query) ?? []
             results = MemoryBrowsing.results(hits: hits, graphMatches: graphMatches, contents: contents, storeId: request.store)
             searching = false
-            searchFocused = false
-            height = .full
         } catch {}
     }
 
@@ -624,7 +660,6 @@ struct MemoryView: View {
 
     private struct ContentsKey: Equatable {
         let store: String
-        let project: String?
         let revision: UUID
         let nodes: UUID
     }
@@ -633,6 +668,7 @@ struct MemoryView: View {
         let revision: UUID
         let filter: GraphPayload.ContentFilter
         let focus: String?
+        let projects: Set<String>
     }
 
     private struct SearchRequest: Equatable {
@@ -641,6 +677,46 @@ struct MemoryView: View {
         let project: String?
         let revision: UUID
         let nodes: UUID
+    }
+}
+
+enum MemoryMode: String {
+    case map, list
+}
+
+/// The remembered mode and filters, kept per phone.
+enum MemorySettings {
+    static let modeKey = "memory.mode.v1"
+    static let kindsKey = "memory.kinds.v1"
+    static let projectsKey = "memory.projects.v1"
+
+    /// An empty string is every kind, so a fresh phone reads as All kinds.
+    static func decodeKinds(_ raw: String) -> Set<MemoryKind> {
+        let parsed = Set(raw.split(separator: ",").compactMap { MemoryKind(rawValue: String($0)) })
+        return parsed.isEmpty ? Set(MemoryKind.allCases) : parsed
+    }
+
+    static func encodeKinds(_ kinds: Set<MemoryKind>) -> String {
+        kinds.map(\.rawValue).sorted().joined(separator: ",")
+    }
+
+    static func decodeProjects(_ raw: String) -> Set<String> {
+        Set(raw.split(separator: ",").map(String.init))
+    }
+
+    static func encodeProjects(_ projects: Set<String>) -> String {
+        projects.sorted().joined(separator: ",")
+    }
+}
+
+extension GraphPayload {
+    /// The projects slice of the same store payload, keeping every link whose
+    /// endpoints survive.
+    func keeping(projects: Set<String>) -> GraphPayload {
+        let nodes = nodes.filter { projects.contains($0.project) }
+        let ids = Set(nodes.map(\.id))
+        return GraphPayload(nodes: nodes, links: links.filter { ids.contains($0.source) && ids.contains($0.target) },
+                            topics: topics, total: nodes.count)
     }
 }
 

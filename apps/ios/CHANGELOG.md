@@ -13,9 +13,10 @@ lock screen and Changes screen done properly.
 
 ### New
 
-- Memory replaces the Search tab: the graph is the whole page, with phren's own
-  search field, project chips, and a bottom panel that lists the scope's findings,
-  tasks and topics, shows results, or steps through a node. Tasks keep their tab.
+- Memory is map or list: the full graph with its node dossier, or the same findings,
+  notes, tasks and topics as a filterable list. A search icon and two drop-down
+  filters for kinds and projects sit above both; mode and filters are remembered.
+  Tasks keep their tab.
 - The control kit adds a shared search field and a single-select chip row.
 - Approval results show as phren's own notice instead of a system alert.
 - A shared control kit (switches, option rows and groups, text segments, icon
@@ -48,6 +49,12 @@ lock screen and Changes screen done properly.
 
 ### Changed
 
+- Account usage is rebuilt around what each source means: one updated line with the
+  reporting computers, Claude and Codex limits with phren's own bars and reset captions,
+  OpenCode Go per model with a billed chip, OpenCode marked as an estimate, and
+  OpenRouter folded to one row when the week's charge is zero.
+- The project page keeps only memory: the session actions and project graph link leave
+  its top bar for Agents and Memory. The Skills, Knobs and Schedules band stays.
 - The UI test suite runs its classes on two simulator clones, skips screenshots
   unless asked, and launches with animations off, about 2.5 times faster.
 - Denser chat and Changes screens: the header sits under the status bar, the
