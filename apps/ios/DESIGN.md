@@ -4,6 +4,10 @@ The user's September 8, 2026 screenshots compare Phren with Moshi. The useful
 reference is the density and clarity of the interaction, while keeping Phren's
 own colors and identity.
 
+The shared control contract, dimensions, accessibility and migration recipes
+live in [design/controls.md](design/controls.md). New control surfaces use that
+kit; existing screens migrate with their selection and gesture behaviour.
+
 - Give the work most of the screen. A session is a compact title and metadata
   row, with one primary tap to chat. Put terminal, Moshi, graph, and metadata in
   session details instead of repeating a second action row on every card.

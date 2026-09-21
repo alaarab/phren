@@ -89,53 +89,40 @@ struct ChatQuestionOptionRow: View {
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: selected ? (multi ? "checkmark.square.fill" : "checkmark.circle.fill") : (multi ? "square" : "circle"))
-                    .foregroundStyle(selected ? PhrenTheme.cyan : PhrenTheme.textDim)
-                    .padding(.top, 1)
-                if let colorDot {
-                    Circle().fill(colorDot).frame(width: 8, height: 8)
-                        .padding(.top, PhrenTheme.Space.xs).accessibilityHidden(true)
-                }
-                if let provider { AgentProviderGlyph(source: provider, size: 18).accessibilityHidden(true) }
-                VStack(alignment: .leading, spacing: PhrenTheme.Space.xs) {
-                    Text(label).foregroundStyle(muted ? PhrenTheme.textMuted : PhrenTheme.text).fixedSize(horizontal: false, vertical: true)
-                    if let detail, !detail.isEmpty {
-                        Text(detail).font(PhrenTheme.Font.caption).foregroundStyle(PhrenTheme.textMuted)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    if let preview {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            Text(preview).font(PhrenTheme.Font.monoCaption2).foregroundStyle(PhrenTheme.text)
-                                .lineLimit(inline ? 6 : nil).fixedSize(horizontal: true, vertical: true)
-                                .padding(8)
-                        }
-                        .background(PhrenTheme.bgSunken, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.small, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: PhrenTheme.Radius.small, style: .continuous)
-                            .stroke(PhrenTheme.border, lineWidth: 1))
-                        .padding(.top, 2)
-                    }
-                }
-                Spacer(minLength: 0)
-                if let trailingCaption {
-                    Text(trailingCaption).font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
-                }
-                if let badge { PhrenChip(text: badge) }
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, minHeight: minimumHeight, alignment: .leading)
-            .background(selected ? PhrenTheme.cyan.opacity(0.1) : PhrenTheme.surfaceRaised,
-                        in: RoundedRectangle(cornerRadius: radius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous)
-                .stroke(selected ? PhrenTheme.cyan.opacity(0.5) : .clear, lineWidth: 1))
-            .contentShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+        PhrenOptionRow(title: label, caption: detail, selected: selected,
+                       mark: multi ? .check : .radio, disabled: busy,
+                       glyph: glyph,
+                       trailing: trailing,
+                       detail: preview.map { value in AnyView(previewContent(value)) },
+                       radius: radius, minimumHeight: minimumHeight ?? 44, muted: muted, action: action)
+            // The preview sits in a scroller, which drops it from the button's label.
+            .accessibilityValue(preview ?? "")
+    }
+
+    private var glyph: AnyView? {
+        if let colorDot {
+            return AnyView(Circle().fill(colorDot).frame(width: 8, height: 8).padding(.top, PhrenTheme.Space.xs))
         }
-        .buttonStyle(.plain)
-        .disabled(busy)
-        .accessibilityAddTraits(selected ? .isSelected : [])
-        // The preview sits in a scroller, which drops it from the button's label.
-        .accessibilityValue(preview ?? "")
+        if let provider { return AnyView(AgentProviderGlyph(source: provider, size: 18)) }
+        return nil
+    }
+
+    private var trailing: AnyView? {
+        if let trailingCaption { return AnyView(PhrenOptionRow.trailingCaption(trailingCaption)) }
+        if let badge { return AnyView(PhrenChip(text: badge)) }
+        return nil
+    }
+
+    private func previewContent(_ value: String) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            Text(value).font(PhrenTheme.Font.monoCaption2).foregroundStyle(PhrenTheme.text)
+                .lineLimit(inline ? 6 : nil).fixedSize(horizontal: true, vertical: true)
+                .padding(8)
+        }
+        .background(PhrenTheme.bgSunken, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.small, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: PhrenTheme.Radius.small, style: .continuous)
+            .stroke(PhrenTheme.border, lineWidth: 1))
+        .padding(.top, 2)
     }
 }
 

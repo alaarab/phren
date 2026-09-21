@@ -48,6 +48,28 @@ final class SchedulesFileTests: XCTestCase {
         XCTAssertEqual(value.model, "gpt-5.6-sol")
         XCTAssertEqual(value.prompt, "Run the full test suite, fix what is red, and leave a summary in tasks.\n")
         XCTAssertEqual(value.every, .weekly(days: [.mon, .tue, .wed, .thu, .fri], hour: 7, minute: 30))
+        XCTAssertEqual(value.notify, [.finish, .failure])
+    }
+
+    func testNotifyRoundTripsAndDefaultsWhenAbsent() throws {
+        var expected = schedule()
+        expected.notify = [.start, .failure]
+        let rendered = SchedulesFile.render([expected], preserving: nil)
+        XCTAssertTrue(rendered.contains("notify: [start, failure]"))
+        XCTAssertEqual(SchedulesFile.parse(rendered), [expected])
+
+        let withoutNotify = rendered.components(separatedBy: "\n")
+            .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("notify:") }
+            .joined(separator: "\n")
+        XCTAssertEqual(try XCTUnwrap(SchedulesFile.parse(withoutNotify).first).notify, [.finish, .failure])
+
+        let unknownEvent = rendered.replacingOccurrences(of: "notify: [start, failure]", with: "notify: [start, pager]")
+        XCTAssertEqual(SchedulesFile.parse(unknownEvent), [])
+
+        let json = try JSONEncoder().encode(expected)
+        XCTAssertEqual(try JSONDecoder().decode(Schedule.self, from: json), expected)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: json) as? [String: Any])
+        XCTAssertEqual(object["notify"] as? [String], ["start", "failure"])
     }
 
     func testCodableUsesTheFlatHookShape() throws {

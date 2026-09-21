@@ -72,6 +72,25 @@ final class ScheduleEditorTests: XCTestCase {
     }
 
     @MainActor
+    func testNotifyStartStaysOnAfterSavingAndReopening() {
+        let app = launchSchedules()
+        let row = app.descendants(matching: .any)["schedule-row:7f3a2c1d"]
+        XCTAssertTrue(row.waitForExistence(timeout: 8))
+        row.tap()
+
+        // The switch carries the toggle trait, so it is not in `buttons`.
+        let start = app.descendants(matching: .any)["schedule-notify:start"]
+        tap(start, in: app)
+        XCTAssertEqual(start.value as? String, "On")
+        app.buttons["schedule-save"].tap()
+
+        XCTAssertTrue(row.waitForExistence(timeout: 8))
+        row.tap()
+        let reopened = app.descendants(matching: .any)["schedule-notify:start"]
+        XCTAssertTrue(reopened.waitForExistence(timeout: 5))
+        XCTAssertEqual(reopened.value as? String, "On")
+    }
+
     private func capture(_ app: XCUIApplication, _ name: String) {
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = name

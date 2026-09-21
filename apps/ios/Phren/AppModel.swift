@@ -201,8 +201,19 @@ final class AppModel {
     /// Bumped by an intent that left a chat to open under `AgentLaunch.takePending()`.
     var pendingChatVersion = 0
     var pendingProjectVersion = 0
+    struct PendingSchedule: Equatable { let project: String; let scheduleID: String }
+    private(set) var pendingSchedule: PendingSchedule?
+    var pendingScheduleVersion = 0
     var showingMemoryMaintenance = false
     var showingMemoryConnection = false
+
+    func openScheduleHistory(project: String, scheduleID: String) {
+        pendingSchedule = .init(project: project, scheduleID: scheduleID)
+        pendingScheduleVersion += 1
+        selectedTab = .agents
+    }
+
+    func clearPendingSchedule() { pendingSchedule = nil }
 
     /// Parsed `stores.yaml`, from whichever attached store actually carries
     /// the registry (see `refreshStoreRegistry`). Powers the claim-awareness

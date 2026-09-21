@@ -13,6 +13,7 @@ struct LiveSessionsView: View {
     private var overview: SessionOverviewMonitor { .shared }
     @State private var selected: OverviewSelection?
     @State private var sessionOpen: SessionOpen?
+    @State private var scheduleOpen: ScheduleHistoryOpen?
     @State private var closeRequest: SessionCloseRequest?
     @State private var closeError: String?
     @State private var focusFilter = AgentFocusFilterStore.load()
@@ -23,6 +24,14 @@ struct LiveSessionsView: View {
         var attachments: [AgentAttachment] = []
         var id: String { "\(session.id.hostID)|\(session.id.muxID)|\(session.id.workspace)|\(session.id.tab)|\(destination.rawValue)" }
         static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id && lhs.draft == rhs.draft && lhs.attachments.count == rhs.attachments.count }
+        func hash(into hasher: inout Hasher) { hasher.combine(id) }
+    }
+    private struct ScheduleHistoryOpen: Identifiable, Hashable {
+        let storeID: String
+        let project: String
+        let schedule: Schedule
+        var id: String { storeID + "/" + project + "/" + schedule.id }
+        static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
         func hash(into hasher: inout Hasher) { hasher.combine(id) }
     }
     private var preferences: LiveSessionPreferences? { try? LiveSessionPreferences.read(data) }
@@ -164,6 +173,7 @@ struct LiveSessionsView: View {
             case .terminal: HerdrTerminalView(host: open.session.host, session: open.session).id(open.id)
             }
         }
+        .modifier(ScheduleOpenRouting(scheduleOpen: $scheduleOpen, openPending: openPendingSchedule))
         // Siri and Spotlight leave an exact session and destination here.
         .onChange(of: model.pendingChatVersion, initial: true) { _, _ in
             if let pending = AgentLaunch.takePendingOpen() {
@@ -203,6 +213,35 @@ struct LiveSessionsView: View {
                                                                   hookComputerID: association.computerID,
                                                                   in: data)
                 } catch { /* Keep the verified connection unchanged when an identity conflicts. */ }
+            }
+        }
+    }
+
+    /// A schedule notification lands here; the run's history opens once the
+    /// store snapshot that holds the schedule is in.
+    private struct ScheduleOpenRouting: ViewModifier {
+        @Binding var scheduleOpen: ScheduleHistoryOpen?
+        let openPending: () -> Void
+        @Environment(AppModel.self) private var model
+
+        func body(content: Content) -> some View {
+            content
+                .navigationDestination(item: $scheduleOpen) { open in
+                    ScheduleHistoryView(storeId: open.storeID, project: open.project, schedule: open.schedule)
+                }
+                .onChange(of: model.pendingScheduleVersion, initial: true) { _, _ in openPending() }
+                .onChange(of: model.searchRevision) { _, _ in openPending() }
+        }
+    }
+
+    private func openPendingSchedule() {
+        guard let pending = model.pendingSchedule else { return }
+        for store in model.storeDescriptors {
+            if let schedule = model.snapshot(for: store.id).schedules[pending.project]?.first(where: { $0.id == pending.scheduleID }) {
+                selected = nil; sessionOpen = nil
+                scheduleOpen = .init(storeID: store.id, project: pending.project, schedule: schedule)
+                model.clearPendingSchedule()
+                return
             }
         }
     }

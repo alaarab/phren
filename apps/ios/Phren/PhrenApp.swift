@@ -24,6 +24,7 @@ struct PhrenApp: App {
                 .onChange(of: appearance.palette) { _, _ in Self.applyPhrenChrome() }
                 .modifier(ExternalURLTestCapture())
                 .task {
+                    guard !AppRuntime.isControlsFixture else { return }
                     // ActivityKit reconciliation can wait until SwiftUI has
                     // produced the first scene.
                     _ = SessionWorkingActivityController.shared
@@ -41,6 +42,7 @@ struct PhrenApp: App {
                     Button("OK") { approvals.message = nil }
                 } message: { Text(approvals.message ?? "") }
                 .onChange(of: scenePhase) { _, phase in
+                    guard !AppRuntime.isControlsFixture else { return }
                     // Live sync runs only while the app is visible; returning
                     // to the foreground triggers an immediate catch-up pull.
                     switch phase {
@@ -151,7 +153,21 @@ struct RootView: View {
     // GitHub is a memory connection, not the app's authentication boundary.
     // Keep this hierarchy stable when that connection expires or signs out,
     // so SSH navigation, terminals, and in-flight chat are not torn down.
-    var body: some View { MainTabView() }
+    var body: some View {
+        #if DEBUG
+        if AppRuntime.isControlsFixture {
+            let reduceMotion = ProcessInfo.processInfo.arguments.contains("--controls-reduce-motion")
+            PhrenControlsFixture()
+                .dynamicTypeSize(ProcessInfo.processInfo.arguments.contains("--controls-accessibility") ? .accessibility5 : .large)
+                // The Reduce Motion environment value is read-only; the fixture drops animations the same way.
+                .transaction { transaction in if reduceMotion { transaction.animation = nil } }
+        } else {
+            MainTabView()
+        }
+        #else
+        MainTabView()
+        #endif
+    }
 }
 
 struct MainTabView: View {

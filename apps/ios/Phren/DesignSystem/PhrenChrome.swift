@@ -59,7 +59,7 @@ struct PhrenIconSegment<Value: Hashable>: View {
                     Image(systemName: item.icon)
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(selected ? tint : PhrenTheme.textMuted)
-                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .frame(minWidth: 44, maxWidth: .infinity, minHeight: 44)
                         .background(selected ? tint.opacity(0.16) : .clear, in: Capsule())
                         .contentShape(Rectangle())
                 }
@@ -95,34 +95,7 @@ struct PhrenChip: View {
     }
 }
 
-struct PhrenSwitch: View {
-    @Binding var isOn: Bool
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        Button {
-            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
-                isOn.toggle()
-            }
-        } label: {
-            ZStack {
-                Capsule()
-                    .fill(isOn ? PhrenTheme.accentSolid : PhrenTheme.surfaceRaised)
-                    .frame(width: 44, height: 26)
-                Circle()
-                    .fill(PhrenTheme.onAccent)
-                    .frame(width: 22, height: 22)
-                    .offset(x: isOn ? 9 : -9)
-            }
-            .frame(width: 44, height: 44)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Enabled")
-        .accessibilityValue(isOn ? "On" : "Off")
-        .accessibilityAddTraits(.isToggle)
-    }
-}
+// PhrenSwitch lives in PhrenControls.swift.
 
 struct PhrenStatLabel: View {
     var added: Int? = nil
@@ -296,13 +269,29 @@ struct PhrenSheetHeader: View {
     var identifierPrefix: String? = nil
     let cancel: () -> Void
     let save: () -> Void
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        ZStack {
-            Text(title)
-                .font(PhrenTypography.subheadline.weight(.semibold))
-                .foregroundStyle(PhrenTheme.text)
-                .lineLimit(1)
+        VStack(spacing: 0) {
+            if dynamicTypeSize.isAccessibilitySize { titleText.padding(.top, PhrenTheme.Space.small) }
+            ZStack {
+                if !dynamicTypeSize.isAccessibilitySize { titleText }
+                actions
+            }
+        }
+        .padding(.horizontal, PhrenTheme.Space.large)
+        .frame(minHeight: 56)
+    }
+
+    private var titleText: some View {
+        Text(title)
+            .font(PhrenTypography.subheadline.weight(.semibold))
+            .foregroundStyle(PhrenTheme.text)
+            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var actions: some View {
             HStack {
                 Button(action: cancel) {
                     Text("Cancel").frame(minWidth: 44, minHeight: 44, alignment: .leading)
@@ -321,8 +310,5 @@ struct PhrenSheetHeader: View {
             }
             .font(PhrenTypography.body)
             .foregroundStyle(PhrenTheme.accentSolid)
-        }
-        .padding(.horizontal, PhrenTheme.Space.large)
-        .frame(height: 56)
     }
 }

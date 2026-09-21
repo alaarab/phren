@@ -13,6 +13,13 @@ lock screen and Changes screen done properly.
 
 ### New
 
+- A shared control kit (switches, option rows and groups, text segments, icon
+  buttons, action sheets, dialogs, steppers, screens, groups and rows) drawn
+  by Phren instead of the system controls. The chat question card, Project
+  Knobs and the schedule editor use it; `design/controls.md` is the contract.
+- Schedules: a Notify group in the editor chooses which runs reach the phone
+  as notifications (Start, Finish, Failure; Finish and Failure by default).
+  Tapping one opens the run's session, or the schedule's history.
 - Agent work follows a conductor's remote leads and their nested workers
   through the computer that owns them: computer chips, remote questions and
   changes, and clear offline or enrollment states.

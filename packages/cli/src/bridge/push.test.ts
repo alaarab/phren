@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { approvalPushPayload, upsertPushDevice } from "./push.js";
+import { approvalPushPayload, schedulePushPayload, upsertPushDevice } from "./push.js";
 import { PushBindingStore } from "./agent-hooks.js";
 
 describe("approval push payload", () => {
@@ -33,6 +33,19 @@ describe("approval push payload", () => {
     devices = upsertPushDevice(devices, { ...one, token: "c".repeat(64) });
     expect(devices).toHaveLength(2);
     expect(devices.find(device => device.deviceID === one.deviceID)?.token).toBe("c".repeat(64));
+    expect(devices.every(device => device.kinds.includes("approval"))).toBe(true);
+  });
+});
+
+describe("schedule push payload", () => {
+  it("includes the lifecycle alert and run route", () => {
+    expect(schedulePushPayload({ kind: "scheduleFailed", scheduleId: "7f3a2c1d", project: "demo",
+      name: "Nightly test sweep", computer: "Desk", runId: "run-1", status: "failed", reason: "Tests failed",
+      route: "phren://session?route=opaque" })).toEqual({
+      aps: { alert: { title: "Nightly test sweep failed", body: "demo on Desk. Tests failed" }, sound: "default", category: "PHREN_SCHEDULE" },
+      phren: { kind: "scheduleFailed", scheduleId: "7f3a2c1d", project: "demo", name: "Nightly test sweep",
+        computer: "Desk", runId: "run-1", status: "failed", reason: "Tests failed", route: "phren://session?route=opaque" },
+    });
   });
 });
 

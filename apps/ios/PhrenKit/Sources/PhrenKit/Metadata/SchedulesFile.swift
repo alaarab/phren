@@ -14,6 +14,13 @@ public struct Schedule: Codable, Equatable, Identifiable, Sendable {
         public var id: String { rawValue }
     }
 
+    /// Which run events the Hook pushes to the phone. Absent in the file means finish and failure.
+    public enum Notify: String, Codable, CaseIterable, Hashable, Identifiable, Sendable {
+        case start, finish, failure
+        public var id: String { rawValue }
+        public static let defaults: Set<Notify> = [.finish, .failure]
+    }
+
     public enum Every: Equatable, Sendable {
         case interval(minutes: Int)
         case daily(hour: Int, minute: Int)
@@ -38,13 +45,14 @@ public struct Schedule: Codable, Equatable, Identifiable, Sendable {
     public var computer: String
     public var harness: Harness
     public var model: String?
+    public var notify: Set<Notify>
     public var every: Every
     public var prompt: String
     public let createdAt: Date
     public var updatedAt: Date
 
     public init(id: String, name: String, enabled: Bool, computer: String,
-                harness: Harness, model: String? = nil, every: Every,
+                harness: Harness, model: String? = nil, notify: Set<Notify> = Notify.defaults, every: Every,
                 prompt: String, createdAt: Date, updatedAt: Date) {
         self.id = id
         self.name = name
@@ -52,6 +60,7 @@ public struct Schedule: Codable, Equatable, Identifiable, Sendable {
         self.computer = computer
         self.harness = harness
         self.model = model
+        self.notify = notify
         self.every = every
         self.prompt = prompt
         self.createdAt = createdAt
@@ -64,7 +73,7 @@ public struct Schedule: Codable, Equatable, Identifiable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, enabled, computer, harness, model, every
+        case id, name, enabled, computer, harness, model, notify, every
         case at, days, interval, once, cron, prompt, createdAt, updatedAt
     }
 
@@ -76,6 +85,7 @@ public struct Schedule: Codable, Equatable, Identifiable, Sendable {
         computer = try values.decode(String.self, forKey: .computer)
         harness = try values.decode(Harness.self, forKey: .harness)
         model = try values.decodeIfPresent(String.self, forKey: .model)
+        notify = Set(try values.decodeIfPresent([Notify].self, forKey: .notify) ?? Array(Notify.defaults))
         prompt = try values.decode(String.self, forKey: .prompt)
         createdAt = try Self.timestamp(values.decode(String.self, forKey: .createdAt))
         updatedAt = try Self.timestamp(values.decode(String.self, forKey: .updatedAt))
@@ -109,6 +119,7 @@ public struct Schedule: Codable, Equatable, Identifiable, Sendable {
         try values.encode(computer, forKey: .computer)
         try values.encode(harness, forKey: .harness)
         try values.encodeIfPresent(model, forKey: .model)
+        try values.encode(Notify.allCases.filter(notify.contains), forKey: .notify)
         try values.encode(every.kind, forKey: .every)
         switch every {
         case .interval(let minutes): try values.encode(SchedulesFile.intervalText(minutes), forKey: .interval)
@@ -233,8 +244,19 @@ public enum SchedulesFile {
               let updatedAt = ISO8601Dates.parse(fields["updatedAt"]) else { return nil }
 
         let model = fields["model"].flatMap { $0.isEmpty ? nil : $0 }
+        let notify: Set<Schedule.Notify>
+        if let rawNotify = fields["notify"] {
+            // An inline list only; an unknown event rejects the entry rather than silently dropping it.
+            guard rawNotify.trimmingCharacters(in: .whitespaces).hasPrefix("[") else { return nil }
+            let values = inlineList(rawNotify)
+            let parsed = values.compactMap(Schedule.Notify.init(rawValue:))
+            guard parsed.count == values.count else { return nil }
+            notify = Set(parsed)
+        } else {
+            notify = Schedule.Notify.defaults
+        }
         return Schedule(id: id, name: name, enabled: enabled, computer: computer,
-                        harness: harness, model: model, every: every, prompt: prompt,
+                        harness: harness, model: model, notify: notify, every: every, prompt: prompt,
                         createdAt: createdAt, updatedAt: updatedAt)
     }
 
@@ -314,6 +336,7 @@ public enum SchedulesFile {
             lines.append("    computer: \(yamlScalar(schedule.computer))")
             lines.append("    harness: \(schedule.harness.rawValue)")
             if let model = schedule.model { lines.append("    model: \(yamlScalar(model))") }
+            lines.append("    notify: [\(Schedule.Notify.allCases.filter(schedule.notify.contains).map(\.rawValue).joined(separator: ", "))]")
             lines.append("    every: \(schedule.every.kind)")
             switch schedule.every {
             case .interval(let minutes): lines.append("    interval: \(intervalText(minutes))")

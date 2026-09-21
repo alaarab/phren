@@ -15,6 +15,7 @@ schedules:
     computer: Desk
     harness: codex
     model: gpt-5.6-sol
+    notify: [finish, failure]
     every: weekly
     at: "07:30"
     days: [mon, tue, wed, thu, fri]
@@ -24,7 +25,7 @@ schedules:
     updatedAt: 2026-09-20T21:00:00Z
 ```
 
-The `id` is eight lowercase hexadecimal characters and does not change. Names are 1 to 80 characters, prompts are 1 to 8000 characters, and a project may have at most 64 schedules. `model` is optional; without it, the selected harness uses its default.
+The `id` is eight lowercase hexadecimal characters and does not change. Names are 1 to 80 characters, prompts are 1 to 8000 characters, and a project may have at most 64 schedules. `model` is optional; without it, the selected harness uses its default. `notify` is an optional list containing `start`, `finish`, and `failure`. When it is absent, Phren notifies on finish and failure.
 
 `every` selects one timing form:
 
@@ -63,7 +64,7 @@ The Hook checks schedules every 30 seconds. It records a run before launching, s
 
 When Herdr is available, the Hook creates a workspace or tab in the project source directory, starts the selected harness, waits for it to accept input, and sends the prompt. Without Herdr, it starts the harness headlessly and writes a fanout manifest and JSON event log under the store's private runtime directory. Scheduled Codex jobs use workspace-write sandboxing.
 
-Run history is local to the computer in the Hook runtime as `schedule-runs.jsonl`; it is never stored or synced with the project. Each line is one run, and only the newest 2000 runs are retained. A run records its schedule and project, timestamps, status, failure reason when present, and either its Herdr destination or headless job directory.
+Run history is local to the computer in the Hook runtime as `schedule-runs.jsonl`; it is never stored or synced with the project. Each line is one run, and only the newest 2000 runs are retained. A run records its schedule and project, timestamps, status, failure reason when present, notification delivery result, and either its Herdr destination or headless job directory. If APNs is not configured, a requested notification records `notified: false` and `notifyReason: "no push config"`, writes the reason to the Hook service log, and never interrupts the run.
 
 ## Hook routes
 
@@ -74,4 +75,3 @@ All schedule routes are JSON `POST` requests on the authenticated Hook connectio
 | `/v1/schedules` | All store schedules with project, local `nextRun`, latest local run, and running state. `nextRun` is null for schedules owned by another computer. |
 | `/v1/schedules/run` | Runs `{ project, id }` now. Returns 404 for an unknown schedule and 409 if it is already running or belongs to another computer. |
 | `/v1/schedules/history` | Returns newest-first local runs. Accepts optional `project`, `id`, and `limit` (default 50, maximum 500). |
-

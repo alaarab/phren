@@ -7,6 +7,8 @@ built from phren's own components. No `Form`, `List` section chrome,
 `Picker`, `Toggle`, `DatePicker`, `Stepper`, `Menu` or `contextMenu` is
 used anywhere on these screens.
 
+Shared control measurements and migration rules: [controls.md](controls.md).
+
 Components used (all existing unless marked new):
 
 | Component | Where it lives | Used for |
@@ -17,9 +19,9 @@ Components used (all existing unless marked new):
 | `PhrenChip` | PhrenChrome.swift | computer, harness and model chips on rows |
 | `PhrenCountBadge` | PhrenChrome.swift | counts beside section labels |
 | `PhrenMetadataHeader` | PhrenChrome.swift | the header of the history screen |
-| `ChatQuestionOptionRow` | ChatInteractionCards.swift | single-choice rows (computer, harness, model, weekday, project) |
+| `PhrenOptionRow` | PhrenControls.swift | single-choice rows (computer, harness, model, project) |
 | `PhrenTimelineRail` | PhrenChrome.swift | the run history rail |
-| `PhrenSwitch` (new) | PhrenChrome.swift | on/off: a 44x26 capsule, `PhrenTheme.accentSolid` when on, `PhrenTheme.surfaceRaised` when off, a 22pt white knob that slides with a 0.18 s ease; `.accessibilityAddTraits(.isToggle)` |
+| `PhrenSwitch` | PhrenControls.swift | on/off: a 44x26 capsule, `PhrenTheme.accentSolid` when on, `PhrenTheme.surfaceRaised` when off, a 22pt white knob that slides with a 0.18 s ease; `.accessibilityAddTraits(.isToggle)` |
 | `PhrenTimeField` (new) | Schedules/ScheduleControls.swift | a 24-hour time: two monospaced number fields "07" ":" "30" in one 44pt capsule; tapping opens the numeric keypad; values clamp on commit |
 | `PhrenDurationField` (new) | Schedules/ScheduleControls.swift | an interval: a number field and a unit segment (min, h, d) in one 44pt capsule |
 | `PhrenDateField` (new) | Schedules/ScheduleControls.swift | a date and time for `once`: three fields "2026-09-21" "09" ":" "30" in one row, numeric keypads, validated on commit; no wheel |
@@ -115,8 +117,9 @@ title "New schedule" / "Edit schedule" centered
 `PhrenTypography.subheadline.weight(.semibold)`, "Save" trailing in
 `PhrenTheme.accentSolid` (disabled `PhrenTheme.textDim` until valid).
 Identifiers `schedule-editor`, `schedule-cancel`, `schedule-save`. Below it a
-`ScrollView` with 16pt margins and 24pt between groups. Each group has a
-`plainListSectionLabel()` caption.
+`PhrenScreen` with 16pt margins and 24pt between groups. Each `PhrenGroup`
+has a `plainListSectionLabel()` caption. At accessibility text sizes the title
+moves above the Cancel/Save row; the header grows from its 56pt minimum.
 
 Groups in order:
 
@@ -127,20 +130,20 @@ Groups in order:
    Identifier `schedule-prompt`. Under it a right-aligned muted counter
    "412 / 8000" in `PhrenTypography.monoCaption2` once the text exceeds
    6000 characters.
-3. **Project** (only from the all-projects list). One `ChatQuestionOptionRow`
+3. **Project** (only from the all-projects list). One `PhrenOptionRow`
    per project, radio style, the snapshot's project names sorted. Identifier
    `schedule-project:<name>`.
-4. **Computer.** One `ChatQuestionOptionRow` per computer: the connected
+4. **Computer.** One `PhrenOptionRow` per computer: the connected
    computers (`LiveSessionPreferences` hosts, each with its host colour dot
    from `PhrenTheme.hostColor` before the name) first, then the remaining
    `machines.yaml` keys in muted text with "offline" as trailing caption.
    Identifier `schedule-computer:<name>`. Selecting a computer reloads the
    model list.
-5. **Harness.** Three `ChatQuestionOptionRow`s: Claude, Codex, OpenCode, each
+5. **Harness.** Three `PhrenOptionRow`s: Claude, Codex, OpenCode, each
    with the provider glyph (`AgentProviderGlyph`) leading. Identifier
    `schedule-harness:<kind>`. Changing the harness reloads models.
 6. **Model.** The chosen computer's `/v1/models?source=<harness>` list as
-   `ChatQuestionOptionRow`s: first "Harness default" (nil), then each model
+   `PhrenOptionRow`s: first "Harness default" (nil), then each model
    with its name and, in muted caption, its description; the catalogue's
    default is marked with a "default" `PhrenChip`. While loading, three
    skeleton rows (`PhrenTheme.surfaceRaised` at 0.5 opacity, 44pt). If the
@@ -150,8 +153,10 @@ Groups in order:
 7. **When.** A `PhrenIconSegment` with five items: `repeat` (Every),
    `sun.max` (Daily), `calendar` (Weekly), `1.circle` (Once), `terminal`
    (Cron); identifier `schedule-every:<kind>`. Under it the fields for the
-   chosen kind, each on its own 44pt line with a leading caption in
-   `PhrenTypography.caption` `PhrenTheme.textMuted` 96pt wide:
+   chosen kind, each on its own 44pt-minimum line with a leading caption in
+   `PhrenTypography.caption` `PhrenTheme.textMuted` 96pt wide. Captions move
+   above fields at accessibility sizes; the date field always gets a full-width
+   line:
    - Every: "Interval" `PhrenDurationField` (default 6 h; minimum 5 min).
    - Daily: "At" `PhrenTimeField` (default 07:30).
    - Weekly: "Days" a wrapping row of seven 40pt day chips Mon…Sun
@@ -166,7 +171,11 @@ Groups in order:
    time" is NOT shown; the computer's time zone is implicit.
 8. **Enabled.** One 44pt row: "Enabled" in `PhrenTypography.body` leading,
    `PhrenSwitch` trailing. Identifier `schedule-enabled`.
-9. **Delete** (edit only): a 44pt full-width "Delete schedule" button,
+9. **Notify.** Three 44pt rows: Start, Finish and Failure, each with a
+   `PhrenSwitch` trailing. Identifiers `schedule-notify:start`,
+   `schedule-notify:finish` and `schedule-notify:failure`. Finish and Failure
+   are on by default; Start is off.
+10. **Delete** (edit only): a 44pt full-width "Delete schedule" button,
    `PhrenTheme.danger` text on `PhrenTheme.surfaceRaised`, radius 12, with the
    same in-place confirm as the list row.
 

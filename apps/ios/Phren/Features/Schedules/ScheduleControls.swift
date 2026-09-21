@@ -4,6 +4,7 @@ import SwiftUI
 
 struct PhrenTimeField: View {
     @Binding private var isValid: Bool
+    @Environment(\.isEnabled) private var isEnabled
     @Binding private var hour: Int
     @Binding private var minute: Int
     @State private var hourText: String
@@ -57,6 +58,7 @@ struct PhrenTimeField: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Time")
+        .opacity(isEnabled ? 1 : 0.45)
     }
 
     private func numberField(_ label: String, text: Binding<String>, field: Field) -> some View {
@@ -88,6 +90,9 @@ struct PhrenTimeField: View {
 
 struct PhrenDurationField: View {
     @Binding private var isValid: Bool
+    @Environment(\.isEnabled) private var isEnabled
+    @ScaledMetric(relativeTo: .subheadline) private var amountWidth: CGFloat = 54
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Binding private var minutes: Int
     @State private var amountText: String
     @State private var unit: Unit
@@ -132,14 +137,17 @@ struct PhrenDurationField: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: PhrenTheme.Space.xs) {
-            HStack(spacing: PhrenTheme.Space.xs) {
+            let layout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                : AnyLayout(HStackLayout(spacing: 4))
+            layout {
                 TextField("6", text: $amountText)
                     .font(PhrenTypography.monoSubheadline.monospacedDigit())
                     .foregroundStyle(PhrenTheme.text)
                     .keyboardType(.numberPad)
                     .multilineTextAlignment(.center)
                     .textFieldStyle(.plain)
-                    .frame(width: 54, height: 44)
+                    .frame(width: amountWidth).frame(minHeight: 44)
                     .focused($amountFocused)
                     .accessibilityLabel("Interval amount")
                     .onChange(of: amountText) { _, value in
@@ -147,25 +155,9 @@ struct PhrenDurationField: View {
                         if filtered != value { amountText = filtered }
                     }
 
-                HStack(spacing: PhrenTheme.Space.xs) {
-                    ForEach(Unit.allCases, id: \.self) { candidate in
-                        Button {
-                            select(candidate)
-                        } label: {
-                            Text(candidate.label)
-                                .font(PhrenTypography.caption.weight(.semibold))
-                                .foregroundStyle(unit == candidate ? PhrenTheme.onAccent : PhrenTheme.textSecondary)
-                                .frame(minWidth: 40, minHeight: 40)
-                                .background(unit == candidate ? PhrenTheme.accentSolid : .clear, in: Capsule())
-                                .frame(minWidth: 44, minHeight: 44)
-                                .contentShape(Rectangle())
-                        }
-                        .frame(minWidth: 44, minHeight: 44)
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(candidate.accessibilityLabel)
-                        .accessibilityAddTraits(unit == candidate ? .isSelected : [])
-                    }
-                }
+                PhrenTextSegment(items: Unit.allCases.map {
+                    PhrenOption(id: $0.label, value: $0, title: $0.label, accessibilityLabel: $0.accessibilityLabel)
+                }, selection: Binding(get: { unit }, set: select), identifier: "schedule-duration-unit", bare: true)
             }
             .padding(.horizontal, PhrenTheme.Space.small)
             .frame(minHeight: 44)
@@ -192,6 +184,7 @@ struct PhrenDurationField: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Interval")
+        .opacity(isEnabled ? 1 : 0.45)
     }
 
     private var enteredMinutes: Int? {
@@ -231,6 +224,8 @@ struct PhrenDurationField: View {
 
 struct PhrenDateField: View {
     @Binding private var isValid: Bool
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Binding private var date: Date
     @State private var dateText: String
     @State private var hourText: String
@@ -255,7 +250,10 @@ struct PhrenDateField: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: PhrenTheme.Space.xs) {
-            HStack(spacing: PhrenTheme.Space.xs) {
+            let layout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                : AnyLayout(HStackLayout(spacing: 4))
+            layout {
                 TextField("YYYY-MM-DD", text: $dateText)
                     .font(PhrenTypography.monoSubheadline.monospacedDigit())
                     .foregroundStyle(PhrenTheme.text)
@@ -270,24 +268,26 @@ struct PhrenDateField: View {
                         if formatted != value { dateText = formatted }
                     }
 
-                TextField("00", text: $hourText)
-                    .scheduleNumberField(label: "Hour")
-                    .focused($focusedField, equals: .hour)
-                    .onChange(of: hourText) { _, value in
-                        let filtered = ScheduleFieldText.digits(value, limit: 2)
-                        if filtered != value { hourText = filtered }
-                    }
-                Text(":")
-                    .font(PhrenTypography.monoSubheadline)
-                    .foregroundStyle(PhrenTheme.textMuted)
-                    .accessibilityHidden(true)
-                TextField("00", text: $minuteText)
-                    .scheduleNumberField(label: "Minute")
-                    .focused($focusedField, equals: .minute)
-                    .onChange(of: minuteText) { _, value in
-                        let filtered = ScheduleFieldText.digits(value, limit: 2)
-                        if filtered != value { minuteText = filtered }
-                    }
+                HStack(spacing: PhrenTheme.Space.xs) {
+                    TextField("00", text: $hourText)
+                        .scheduleNumberField(label: "Hour")
+                        .focused($focusedField, equals: .hour)
+                        .onChange(of: hourText) { _, value in
+                            let filtered = ScheduleFieldText.digits(value, limit: 2)
+                            if filtered != value { hourText = filtered }
+                        }
+                    Text(":")
+                        .font(PhrenTypography.monoSubheadline)
+                        .foregroundStyle(PhrenTheme.textMuted)
+                        .accessibilityHidden(true)
+                    TextField("00", text: $minuteText)
+                        .scheduleNumberField(label: "Minute")
+                        .focused($focusedField, equals: .minute)
+                        .onChange(of: minuteText) { _, value in
+                            let filtered = ScheduleFieldText.digits(value, limit: 2)
+                            if filtered != value { minuteText = filtered }
+                        }
+                }
             }
             .padding(.horizontal, PhrenTheme.Space.small)
             .frame(minHeight: 44)
@@ -312,6 +312,7 @@ struct PhrenDateField: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Date and time")
+        .opacity(isEnabled ? 1 : 0.45)
     }
 
     private var validationMessage: String? {
@@ -394,6 +395,7 @@ struct PhrenDateField: View {
 }
 
 struct PhrenCodeField: View {
+    @Environment(\.isEnabled) private var isEnabled
     @Binding var text: String
     let placeholder: String
 
@@ -408,6 +410,7 @@ struct PhrenCodeField: View {
             .background(PhrenTheme.surfaceRaised,
                         in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.questionOption, style: .continuous))
             .accessibilityLabel(placeholder)
+            .opacity(isEnabled ? 1 : 0.45)
     }
 }
 
@@ -496,15 +499,24 @@ struct ScheduleChipFlow: Layout {
     }
 }
 
-private extension View {
-    func scheduleNumberField(label: String) -> some View {
-        font(PhrenTypography.monoSubheadline.monospacedDigit())
+private struct ScheduleNumberFieldStyle: ViewModifier {
+    let label: String
+    @ScaledMetric(relativeTo: .subheadline) private var numberWidth: CGFloat = 44
+
+    func body(content: Content) -> some View {
+        content.font(PhrenTypography.monoSubheadline.monospacedDigit())
             .foregroundStyle(PhrenTheme.text)
             .keyboardType(.numberPad)
             .multilineTextAlignment(.center)
             .textFieldStyle(.plain)
-            .frame(width: 44, height: 44)
+            .frame(width: numberWidth).frame(minHeight: 44)
             .accessibilityLabel(label)
+    }
+}
+
+private extension View {
+    func scheduleNumberField(label: String) -> some View {
+        modifier(ScheduleNumberFieldStyle(label: label))
     }
 }
 

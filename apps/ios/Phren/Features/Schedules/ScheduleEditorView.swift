@@ -9,6 +9,7 @@ struct ScheduleEditorView: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @AppStorage("sessions.live.preferences.v1") private var preferencesData = Data()
 
     @State private var name: String
@@ -30,6 +31,7 @@ struct ScheduleEditorView: View {
     @State private var validDate = true
     @State private var modelsUnavailable = false
     @State private var enabled: Bool
+    @State private var notify: Set<Schedule.Notify>
     @State private var models: [AgentModelChoice] = []
     @State private var loadingModels = false
     @State private var saving = false
@@ -93,6 +95,7 @@ struct ScheduleEditorView: View {
         _onceDate = State(initialValue: once)
         _cron = State(initialValue: cron)
         _enabled = State(initialValue: schedule?.enabled ?? true)
+        _notify = State(initialValue: schedule?.notify ?? Schedule.Notify.defaults)
     }
 
     private var snapshot: LocalStore.Snapshot { model.snapshot(for: storeId) }
@@ -144,25 +147,24 @@ struct ScheduleEditorView: View {
         VStack(spacing: 0) {
             header
             ActionErrorBanner()
-            ScrollView {
-                VStack(alignment: .leading, spacing: PhrenTheme.Space.section) {
-                    nameGroup
-                    promptGroup
-                    if project == nil { projectGroup }
-                    computerGroup
-                    harnessGroup
-                    if harness != nil, !computer.isEmpty { modelGroup }
-                    whenGroup
-                    enabledGroup
-                    if schedule != nil { deleteGroup }
-                }
-                .padding(PhrenTheme.Space.large)
+            PhrenScreen {
+                nameGroup
+                promptGroup
+                if project == nil { projectGroup }
+                computerGroup
+                harnessGroup
+                if harness != nil, !computer.isEmpty { modelGroup }
+                whenGroup
+                enabledGroup
+                notifyGroup
+                if schedule != nil { deleteGroup }
             }
             .accessibilityIdentifier("schedule-editor-scroll")
             .scrollDismissesKeyboard(.interactively)
         }
         .background(PhrenTheme.bg)
-        .accessibilityIdentifier("schedule-editor")
+        // The container id would hide the scroller's and rows' ids from UI tests.
+        .phrenContainerMarker("schedule-editor", label: schedule == nil ? "New schedule" : "Edit schedule")
         .presentationDetents([.large])
         .interactiveDismissDisabled(saving)
         .task {
@@ -185,7 +187,7 @@ struct ScheduleEditorView: View {
     }
 
     private var nameGroup: some View {
-        editorGroup("Name") {
+        PhrenGroup("Name", identifier: "schedule-group:name") {
             TextField("Nightly test sweep", text: $name)
                 .font(PhrenTypography.body)
                 .foregroundStyle(PhrenTheme.text)
@@ -199,7 +201,7 @@ struct ScheduleEditorView: View {
     }
 
     private var promptGroup: some View {
-        editorGroup("Prompt") {
+        PhrenGroup("Prompt", identifier: "schedule-group:prompt") {
             PhrenCodeField(text: $prompt, placeholder: "What should the agent do?")
                 .accessibilityIdentifier("schedule-prompt")
                 .onChange(of: prompt) { _, value in if value.count > 8_000 { prompt = String(value.prefix(8_000)) } }
@@ -213,9 +215,9 @@ struct ScheduleEditorView: View {
     }
 
     private var projectGroup: some View {
-        editorGroup("Project") {
+        PhrenGroup("Project", identifier: "schedule-group:project") {
             ForEach(projects, id: \.self) { option in
-                ChatQuestionOptionRow(label: option, selected: selectedProject == option) {
+                PhrenOptionRow(title: option, selected: selectedProject == option) {
                     selectedProject = option
                     captureProject(option)
                 }
@@ -225,13 +227,15 @@ struct ScheduleEditorView: View {
     }
 
     private var computerGroup: some View {
-        editorGroup("Computer") {
+        PhrenGroup("Computer", identifier: "schedule-group:computer") {
             ForEach(computerChoices) { choice in
-                ChatQuestionOptionRow(
-                    label: choice.name, selected: SchedulesView.canonicalHost(computer) == choice.id,
-                    radius: PhrenTheme.Radius.questionOption,
-                    colorDot: choice.host.map { PhrenTheme.hostColor($0.color ?? LiveHost.defaultColor(for: $0.id)) },
-                    trailingCaption: choice.host == nil ? "offline" : nil,
+                PhrenOptionRow(
+                    title: choice.name, selected: SchedulesView.canonicalHost(computer) == choice.id,
+                    glyph: choice.host.map { host in
+                        AnyView(Circle().fill(PhrenTheme.hostColor(host.color ?? LiveHost.defaultColor(for: host.id)))
+                            .frame(width: 8, height: 8).padding(.top, PhrenTheme.Space.xs))
+                    },
+                    trailing: choice.host == nil ? AnyView(PhrenOptionRow.trailingCaption("offline")) : nil,
                     muted: choice.host == nil
                 ) {
                     computer = choice.name
@@ -244,11 +248,10 @@ struct ScheduleEditorView: View {
     }
 
     private var harnessGroup: some View {
-        editorGroup("Harness") {
+        PhrenGroup("Harness", identifier: "schedule-group:harness") {
             ForEach(Self.harnesses, id: \.self) { option in
-                ChatQuestionOptionRow(label: ScheduleWords.harnessName(option), selected: harness == option,
-                                      radius: PhrenTheme.Radius.questionOption,
-                                      provider: option.rawValue) {
+                PhrenOptionRow(title: ScheduleWords.harnessName(option), selected: harness == option,
+                               glyph: AnyView(AgentProviderGlyph(source: option.rawValue, size: 18))) {
                     harness = option
                     modelID = nil
                     customModel = ""
@@ -259,7 +262,7 @@ struct ScheduleEditorView: View {
     }
 
     private var modelGroup: some View {
-        editorGroup("Model") {
+        PhrenGroup("Model", identifier: "schedule-group:model") {
             if loadingModels {
                 ForEach(0..<3, id: \.self) { _ in
                     RoundedRectangle(cornerRadius: PhrenTheme.Radius.questionOption, style: .continuous)
@@ -299,8 +302,8 @@ struct ScheduleEditorView: View {
     }
 
     private func modelRow(label: String, detail: String?, id: String?, isDefault: Bool) -> some View {
-        ChatQuestionOptionRow(label: label, detail: detail, selected: modelID == id,
-                              radius: PhrenTheme.Radius.questionOption, badge: isDefault ? "default" : nil) {
+        PhrenOptionRow(title: label, caption: detail, selected: modelID == id,
+                       trailing: isDefault ? AnyView(PhrenChip(text: "default")) : nil) {
             modelID = id
             customModel = id ?? ""
         }
@@ -308,7 +311,7 @@ struct ScheduleEditorView: View {
     }
 
     private var whenGroup: some View {
-        editorGroup("When") {
+        PhrenGroup("When", identifier: "schedule-group:when") {
             PhrenIconSegment(items: [
                 .init(value: .interval, icon: "repeat", label: "Every"),
                 .init(value: .daily, icon: "sun.max", label: "Daily"),
@@ -334,7 +337,7 @@ struct ScheduleEditorView: View {
                     PhrenTimeField(hour: $hour, minute: $minute, isValid: $validTime)
                 }
             case .once:
-                fieldRow("On") {
+                fieldRow("On", stacked: true) {
                     PhrenDateField(date: $onceDate, isValid: $validDate)
                 }
             case .cron:
@@ -376,21 +379,41 @@ struct ScheduleEditorView: View {
     }
 
     private var enabledGroup: some View {
-        editorGroup("Enabled") {
-            HStack {
-                Text("Enabled").font(PhrenTypography.body).foregroundStyle(PhrenTheme.text)
-                Spacer()
-                PhrenSwitch(isOn: $enabled)
-                    .accessibilityIdentifier("schedule-enabled")
-            }
-            .frame(minHeight: 44)
+        PhrenGroup("Enabled", identifier: "schedule-group:enabled") {
+            switchRow("Enabled", identifier: "schedule-enabled", isOn: $enabled)
         }
+    }
+
+    private var notifyGroup: some View {
+        PhrenGroup("Notify", identifier: "schedule-group:notify") {
+            switchRow("Start", identifier: "schedule-notify:start", isOn: notifyBinding(.start))
+            switchRow("Finish", identifier: "schedule-notify:finish", isOn: notifyBinding(.finish))
+            switchRow("Failure", identifier: "schedule-notify:failure", isOn: notifyBinding(.failure))
+        }
+    }
+
+    private func notifyBinding(_ kind: Schedule.Notify) -> Binding<Bool> {
+        Binding(get: { notify.contains(kind) },
+                set: { on in if on { notify.insert(kind) } else { notify.remove(kind) } })
+    }
+
+    private func switchRow(_ label: String, identifier: String, isOn: Binding<Bool>) -> some View {
+        HStack {
+            Text(label).font(PhrenTypography.body).foregroundStyle(PhrenTheme.text)
+            Spacer()
+            PhrenSwitch(isOn: isOn, label: label)
+                .accessibilityIdentifier(identifier)
+        }
+        .frame(minHeight: 44)
     }
 
     private var deleteGroup: some View {
         Group {
             if confirmingDelete, let id = schedule?.id {
-                HStack(spacing: PhrenTheme.Space.small) {
+                let layout = dynamicTypeSize.isAccessibilitySize
+                    ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                    : AnyLayout(HStackLayout(spacing: 8))
+                layout {
                     Text("Delete this schedule?")
                         .font(PhrenTypography.subheadline)
                         .foregroundStyle(PhrenTheme.text)
@@ -419,27 +442,20 @@ struct ScheduleEditorView: View {
         }
     }
 
-    private func editorGroup<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
-            Text(title).plainListSectionLabel()
-            content()
-        }
-    }
-
-    private func fieldRow<Content: View>(_ label: String, alignment: VerticalAlignment = .center,
+    private func fieldRow<Content: View>(_ label: String, alignment: VerticalAlignment = .center, stacked: Bool = false,
                                          @ViewBuilder content: () -> Content) -> some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: alignment, spacing: PhrenTheme.Space.medium) {
-                Text(label)
-                    .font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
-                    .frame(width: 96, alignment: .leading).frame(minHeight: 44, alignment: .leading)
-                content()
-                Spacer(minLength: 0)
-            }
-            VStack(alignment: .leading, spacing: PhrenTheme.Space.xs) {
-                Text(label).font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
-                content().frame(maxWidth: .infinity, alignment: .leading)
-            }
+        let vertical = stacked || dynamicTypeSize.isAccessibilitySize
+        let layout = vertical
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: PhrenTheme.Space.small))
+            : AnyLayout(HStackLayout(alignment: alignment, spacing: PhrenTheme.Space.medium))
+        return layout {
+            Text(label)
+                .font(PhrenTypography.caption)
+                .foregroundStyle(PhrenTheme.textMuted)
+                .frame(width: vertical ? nil : 96, alignment: .leading)
+                .frame(minHeight: 44, alignment: .leading)
+            content()
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -489,6 +505,7 @@ struct ScheduleEditorView: View {
             computer: computer,
             harness: harness,
             model: modelID,
+            notify: notify,
             every: scheduleEvery,
             prompt: prompt,
             createdAt: schedule?.createdAt ?? now,

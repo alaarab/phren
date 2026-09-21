@@ -21,31 +21,28 @@ struct ProjectKnobsView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            ScrollView {
-                VStack(alignment: .leading, spacing: PhrenTheme.Space.section) {
-                    findingSensitivityOptions
-                    proactivityOptions(
-                        title: "Proactivity",
-                        key: "proactivity",
-                        selection: knobs.proactivity
-                    ) { knobs.proactivity = $0 }
-                    proactivityOptions(
-                        title: "Proactivity for findings",
-                        key: "proactivityFindings",
-                        selection: knobs.proactivityFindings
-                    ) { knobs.proactivityFindings = $0 }
-                    proactivityOptions(
-                        title: "Proactivity for tasks",
-                        key: "proactivityTask",
-                        selection: knobs.proactivityTask
-                    ) { knobs.proactivityTask = $0 }
-                    taskModeOptions
+            PhrenScreen {
+                findingSensitivityOptions
+                proactivityOptions(
+                    title: "Proactivity",
+                    key: "proactivity",
+                    selection: knobs.proactivity
+                ) { knobs.proactivity = $0 }
+                proactivityOptions(
+                    title: "Proactivity for findings",
+                    key: "proactivityFindings",
+                    selection: knobs.proactivityFindings
+                ) { knobs.proactivityFindings = $0 }
+                proactivityOptions(
+                    title: "Proactivity for tasks",
+                    key: "proactivityTask",
+                    selection: knobs.proactivityTask
+                ) { knobs.proactivityTask = $0 }
+                taskModeOptions
 
-                    Text("Changes save automatically. Inherit global uses your shared setting.")
-                        .font(PhrenTheme.Font.caption)
-                        .foregroundStyle(PhrenTheme.textMuted)
-                }
-                .padding(PhrenTheme.Space.large)
+                Text("Changes save automatically. Inherit global uses your shared setting.")
+                    .font(PhrenTheme.Font.caption)
+                    .foregroundStyle(PhrenTheme.textMuted)
             }
         }
         .background(PhrenTheme.bg.ignoresSafeArea())
@@ -63,22 +60,9 @@ struct ProjectKnobsView: View {
     }
 
     private var findingSensitivityOptions: some View {
-        VStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
-            Text("Finding sensitivity")
-                .plainListSectionLabel()
-                .accessibilityIdentifier("knob-findingSensitivity")
-            optionRow(
-                label: "Inherit global",
-                selected: knobs.findingSensitivity == nil,
-                identifier: "knob-findingSensitivity:inherit"
-            ) { knobs.findingSensitivity = nil }
-            ForEach(ProjectKnobs.FindingSensitivity.allCases, id: \.self) { value in
-                optionRow(
-                    label: value.rawValue.capitalized,
-                    selected: knobs.findingSensitivity == value,
-                    identifier: "knob-findingSensitivity:\(value.rawValue)"
-                ) { knobs.findingSensitivity = value }
-            }
+        PhrenGroup("Finding sensitivity", identifier: "knob-findingSensitivity") {
+            PhrenOptionGroup(options: inheritedOptions(ProjectKnobs.FindingSensitivity.allCases),
+                             selection: $knobs.findingSensitivity, identifier: "knob-findingSensitivity")
         }
     }
 
@@ -88,59 +72,23 @@ struct ProjectKnobsView: View {
         selection: ProjectKnobs.Proactivity?,
         select: @escaping (ProjectKnobs.Proactivity?) -> Void
     ) -> some View {
-        VStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
-            Text(title)
-                .plainListSectionLabel()
-                .accessibilityIdentifier("knob-\(key)")
-            optionRow(
-                label: "Inherit global",
-                selected: selection == nil,
-                identifier: "knob-\(key):inherit"
-            ) { select(nil) }
-            ForEach(ProjectKnobs.Proactivity.allCases, id: \.self) { value in
-                optionRow(
-                    label: value.rawValue.capitalized,
-                    selected: selection == value,
-                    identifier: "knob-\(key):\(value.rawValue)"
-                ) { select(value) }
-            }
+        PhrenGroup(title, identifier: "knob-\(key)") {
+            PhrenOptionGroup(options: inheritedOptions(ProjectKnobs.Proactivity.allCases),
+                             selection: Binding(get: { selection }, set: select), identifier: "knob-\(key)")
         }
     }
 
     private var taskModeOptions: some View {
-        VStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
-            Text("Task mode")
-                .plainListSectionLabel()
-                .accessibilityIdentifier("knob-taskMode")
-            optionRow(
-                label: "Inherit global",
-                selected: knobs.taskMode == nil,
-                identifier: "knob-taskMode:inherit"
-            ) { knobs.taskMode = nil }
-            ForEach(ProjectKnobs.TaskMode.allCases, id: \.self) { value in
-                optionRow(
-                    label: value.rawValue.capitalized,
-                    selected: knobs.taskMode == value,
-                    identifier: "knob-taskMode:\(value.rawValue)"
-                ) { knobs.taskMode = value }
-            }
+        PhrenGroup("Task mode", identifier: "knob-taskMode") {
+            PhrenOptionGroup(options: inheritedOptions(ProjectKnobs.TaskMode.allCases),
+                             selection: $knobs.taskMode, identifier: "knob-taskMode")
         }
     }
 
-    private func optionRow(
-        label: String,
-        selected: Bool,
-        identifier: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        ChatQuestionOptionRow(
-            label: label,
-            selected: selected,
-            radius: PhrenTheme.Radius.questionOption,
-            minimumHeight: 44,
-            action: action
-        )
-        .accessibilityIdentifier(identifier)
+    private func inheritedOptions<Value: RawRepresentable & Hashable>(_ values: [Value]) -> [PhrenOption<Value?>]
+        where Value.RawValue == String {
+        [PhrenOption<Value?>(id: "inherit", value: nil, title: "Inherit global")]
+            + values.map { PhrenOption(id: $0.rawValue, value: Optional($0), title: $0.rawValue.capitalized) }
     }
 
     private func load() {
