@@ -106,7 +106,12 @@ The iPhone explicitly renews a 25-second approval watch with
 Pending tabs expose `approvalPending`; the exact conversation's status stream
 provides the action ID, input and expiry. Requests wait at most 55 seconds, then
 return to the agent's terminal prompt without approving anything. Answers are
-single use and validated against the exact provider conversation.
+single use and validated against the exact provider conversation. An opencode
+permission ask is not a lifecycle callback: the plugin writes it under the
+store's `.runtime/approvals`, and the Hook watches that directory, maps the ask
+to its pane through the recorded session binding or Herdr's opencode session id,
+and pushes it to registered phones with the ask's title and message. The same
+`POST /v1/approvals/answer` route writes the plugin's answer file.
 
 On iOS, a request received in an open chat or discovered from the foreground
 session overview can create a Live Activity with Deny and Approve on the Lock

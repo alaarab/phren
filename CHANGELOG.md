@@ -7,8 +7,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- An opencode permission ask reaches the phone as a push. The Hook watches the
+  approvals directory, maps a new request to its pane through the recorded
+  session binding (or Herdr's opencode session id), sends the same kind of
+  binding-backed alert a held Claude request sends, and writes the plugin's
+  answer file when the phone approves or denies it. The alert carries the ask's
+  title and message, so an external_directory ask reads
+  `external_directory: <pattern>`.
+- A fan-out worker whose permission the plugin refused no longer looks
+  finished. The plugin writes `blocked.json` when it denies under
+  `PHREN_FANOUT_JOB`, and the Hook reports the child as failed with the reason
+  `blocked: <type> <pattern>` even when `exit.txt` says 0, carries the reason on
+  the child row, and pushes a notification naming the blocked worker.
 - The phone's agent tree lists the newest fan-out workers first, so a computer with more
   than 128 finished jobs on disk no longer hides the ones running now.
+- A Codex approval or terminal dialog whose command and options the Hook could
+  read is published to the phone as a structured question instead of a bare
+  approval, so the chat can ask it with its real choices and answer by the
+  option's own key (`y`, `p`, `Esc`); the `p` answer is accepted by `/v1/keys`.
 - A dispatch whose remote agent had not written its session yet when the launch
   returned reported an uncertain delivery without sending the brief; the dispatch now
   waits up to fifteen seconds for the pane's session before sending.

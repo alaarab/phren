@@ -22,7 +22,11 @@ const configSchema = z.object({
 });
 type APNsConfig = z.infer<typeof configSchema>;
 
-export interface ApprovalPush { binding: string; provider: string; question: boolean; expiresAt: string }
+export interface ApprovalPush { binding: string; provider: string; question: boolean; expiresAt: string;
+  /** What the request is, when the provider names it (an opencode permission
+   * ask): shown in the alert so the phone can answer without opening Phren. */
+  title?: string; message?: string }
+export interface FanoutBlockedPush { job: string; label: string; provider: string; reason: string }
 export type SchedulePushKind = "scheduleStarted" | "scheduleFinished" | "scheduleFailed";
 export interface SchedulePush {
   kind: SchedulePushKind;
@@ -38,14 +42,22 @@ export interface SchedulePush {
 export interface SchedulePushResult { notified: boolean; reason?: string }
 
 export function approvalPushPayload(value: ApprovalPush, host?: string): Record<string, unknown> {
-  const label = value.provider === "claude" ? "Claude" : value.provider === "codex" ? "Codex" : "Your agent";
+  const label = value.provider === "claude" ? "Claude" : value.provider === "codex" ? "Codex" : value.provider === "opencode" ? "opencode" : "Your agent";
   return {
     aps: {
-      alert: { title: value.question ? `${label} has a question` : `${label} needs approval`, body: "Open Phren to review the request." },
+      alert: { title: value.title ?? (value.question ? `${label} has a question` : `${label} needs approval`),
+        body: value.message ?? "Open Phren to review the request." },
       sound: "default", category: value.question ? "PHREN_AGENT_QUESTION" : "PHREN_AGENT_APPROVAL",
       "interruption-level": "time-sensitive",
     },
     phren: { version: 1, binding: value.binding, expiresAt: value.expiresAt, ...(host ? { host } : {}) },
+  };
+}
+
+export function fanoutBlockedPushPayload(value: FanoutBlockedPush): Record<string, unknown> {
+  return {
+    aps: { alert: { title: `${value.label} blocked`, body: value.reason }, sound: "default", category: "PHREN_FANOUT" },
+    phren: { kind: "fanoutBlocked", job: value.job, provider: value.provider, label: value.label, reason: value.reason },
   };
 }
 
@@ -144,6 +156,17 @@ export class ApprovalPushService {
     if (!devices.length) return false;
     return (await Promise.all(devices.map(device => this.sender!.send(device, approvalPushPayload(value, device.hostID), {
       expiration: String(Math.floor(Date.parse(value.expiresAt) / 1000)), collapseId: value.binding,
+    })))).some(Boolean);
+  }
+  /** A headless worker whose permission the plugin refused. Approval-registered
+   * phones already accept agent alerts; the payload carries the reason so the
+   * notification is actionable on its own. */
+  async notifyFanoutBlocked(value: FanoutBlockedPush): Promise<boolean> {
+    if (!this.sender || !this.devices.length) return false;
+    const devices = this.devices.filter(device => device.kinds.includes("approval"));
+    if (!devices.length) return false;
+    return (await Promise.all(devices.map(device => this.sender!.send(device, fanoutBlockedPushPayload(value), {
+      expiration: "0", collapseId: `fanout-${value.job}`,
     })))).some(Boolean);
   }
   async notifySchedule(value: SchedulePush): Promise<SchedulePushResult> {

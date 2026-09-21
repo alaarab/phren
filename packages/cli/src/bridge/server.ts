@@ -441,7 +441,7 @@ export async function serve(version: string): Promise<void> {
             // A remembered prompt is answered by any key but a cursor move; the
             // menu window stays open through Enter because some choices (Codex
             // full access) open a second confirmation the phone still walks.
-            if (keys.some(key => key !== "Up" && key !== "Down" && key !== "Tab")) agentHooks.clearTerminalPrompt(target);
+            if (keys.some(key => key !== "Up" && key !== "Down" && key !== "Tab")) { agentHooks.clearTerminalPrompt(target); agentHooks.releaseChoice(target); }
             if (keys.includes("Escape")) agentHooks.menuClosed(target);
             result = { ok: true };
           } else if (url.pathname === "/v1/secret") {
@@ -677,7 +677,7 @@ export async function serve(version: string): Promise<void> {
 }
 
 /** The phone can press these and nothing else; never a typed string. */
-const ANSWER_KEYS = ["Escape", "Enter", "Up", "Down", "Tab", "y", "n", "1", "2", "3", "4", "5", "6", "7", "8", "9"] as const;
+const ANSWER_KEYS = ["Escape", "Enter", "Up", "Down", "Tab", "y", "n", "p", "1", "2", "3", "4", "5", "6", "7", "8", "9"] as const;
 const HERDR_KEYS: Partial<Record<(typeof ANSWER_KEYS)[number], string>> = { Escape: "esc", Enter: "enter", Up: "up", Down: "down", Tab: "tab" };
 
 /** A secret typed into a terminal prompt: printable, bounded, never logged. */

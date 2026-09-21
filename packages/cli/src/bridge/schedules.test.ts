@@ -71,6 +71,17 @@ describe("scheduled prompt timing", () => {
     expect(nextRun(schedule({ createdAt: "2026-10-31T16:00:00.000Z" }))?.toISOString()).toBe("2026-11-01T15:30:00.000Z");
   });
 
+  it("reports today's edited time after a daily schedule changes from 02:00 to 14:10", () => {
+    process.env.TZ = "America/Los_Angeles";
+    // The last run was this morning at 02:00 local (09:00Z).
+    const lastRun: ScheduleRun = { id: "run-one", scheduleId: "7f3a2c1d", project: "demo",
+      startedAt: "2026-09-21T09:00:00.000Z", status: "finished", launch: { mode: "headless" } };
+    // The pre-edit schedule already ran today, so its next run is tomorrow 02:00.
+    expect(nextRun(schedule({ at: "02:00" }), lastRun)?.toISOString()).toBe("2026-09-22T09:00:00.000Z");
+    // Edited to 14:10, the next run follows the new time today, not tomorrow.
+    expect(nextRun(schedule({ at: "14:10" }), lastRun)?.toISOString()).toBe("2026-09-21T21:10:00.000Z");
+  });
+
   it("matches machine keys case-insensitively and ignores only a trailing .local", () => {
     expect(computerMatches("Desk", "desk.local")).toBe(true);
     expect(computerMatches("DESK.local", "desk")).toBe(true);

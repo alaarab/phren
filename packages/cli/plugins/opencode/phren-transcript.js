@@ -27,6 +27,50 @@ function approvalDirectory() {
   return path.join(storeRoot(), ".runtime", "approvals");
 }
 
+function fanoutDirectory() {
+  const configured = process.env.PHREN_FANOUT_DIR?.trim();
+  if (configured) return path.resolve(configured);
+  return path.join(storeRoot(), ".runtime", "agent-fanouts", text(process.env.PHREN_FANOUT_JOB));
+}
+
+function fanoutPatterns(input) {
+  const value = input?.pattern;
+  if (Array.isArray(value)) return value.filter(entry => typeof entry === "string" && entry);
+  return typeof value === "string" && value ? [value] : [];
+}
+
+/** The worktree's grandparent is the scratch root the fan-out launcher owns:
+ * external reads and writes are allowed only inside it. */
+function underScratchRoot(value) {
+  const scratch = path.dirname(path.dirname(path.resolve(process.cwd())));
+  if (scratch === path.parse(scratch).root) return false;
+  const resolved = path.resolve(scratch, value);
+  return resolved === scratch || resolved.startsWith(scratch + path.sep);
+}
+
+/** A headless fan-out worker may edit, run commands and fetch. Anything else
+ * is refused outright; external directories only inside the scratch root. */
+function fanoutAllowed(input) {
+  const kind = text(input?.type);
+  if (kind === "edit" || kind === "bash" || kind === "webfetch") return true;
+  if (kind !== "external_directory") return false;
+  const patterns = fanoutPatterns(input);
+  return patterns.length > 0 && patterns.every(underScratchRoot);
+}
+
+function writeBlocked(input) {
+  try {
+    const directory = fanoutDirectory();
+    mkdirSync(directory, { recursive: true });
+    writeJsonAtomic(path.join(directory, "blocked.json"), {
+      type: text(input?.type) || "action",
+      pattern: fanoutPatterns(input).join(", "),
+      message: permissionMessage(input),
+      at: new Date().toISOString(),
+    });
+  } catch {}
+}
+
 function approvalPaths(sessionID) {
   const base = path.join(approvalDirectory(), `opencode-${sessionID}`);
   return { request: `${base}.request.json`, answer: `${base}.answer.json` };
@@ -190,8 +234,11 @@ export const PhrenTranscriptPlugin = async () => {
       // worktree are granted here and anything else is refused outright rather
       // than waiting 50 seconds for an answer that never comes.
       if (process.env.PHREN_FANOUT_JOB) {
-        const kind = text(input?.type);
-        setStatus(output, kind === "edit" || kind === "bash" || kind === "webfetch" ? "allow" : "deny");
+        if (fanoutAllowed(input)) { setStatus(output, "allow"); return; }
+        setStatus(output, "deny");
+        // A denied permission aborts the turn; record what was refused so the
+        // Hook can report the worker as blocked rather than finished.
+        writeBlocked(input);
         return;
       }
       let request, answer;

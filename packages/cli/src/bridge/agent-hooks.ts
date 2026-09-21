@@ -2,16 +2,21 @@ import { defaultPhrenPath } from "../shared.js";
 import { disabledHint } from "../modules/registry.js";
 import { activateModules as moduleSnapshot, type ModuleSnapshot } from "../modules/runtime.js";
 import { request, createServer, type Server, type ServerResponse } from "node:http";
-import { mkdir, writeFile, readFile, rename, chmod, unlink, lstat } from "node:fs/promises";
-import { readFileSync } from "node:fs";
+import { mkdir, writeFile, readFile, readdir, rename, chmod, unlink, lstat } from "node:fs/promises";
+import { readFileSync, watch, type FSWatcher } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { BridgeError, bridgeRoot, object, objects, provider, serverName, sessionId, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
-import { herdrRoot, rpc, snapshot, trustedDirectory, validateTarget } from "./herdr.js";
+import { herdrRoot, rpc, servers, snapshot, trustedDirectory, validateTarget } from "./herdr.js";
 import { capturesChanges, ToolChanges } from "./changes.js";
 import { phrenStoreRoot, unwrapPastedContent } from "./transcripts.js";
+import { blockedFanouts } from "./fanouts.js";
 import { ApprovalPushService } from "./push.js";
+
+const APPROVAL_SWEEP_MS = 2_000;
+const APPROVAL_DEBOUNCE_MS = 100;
+const FANOUT_SWEEP_MS = 5_000;
 
 const opencodeSession = /^ses_[0-9A-Za-z]{1,64}$/;
 function opencodeApprovalFile(session: string, kind: "request" | "answer"): string | undefined {
@@ -29,6 +34,83 @@ function opencodeRequest(session: string): Json | undefined {
   } catch { return undefined; }
 }
 
+/** The terminal keys an agent's own dialog accepts. Kept in step with
+ * `ANSWER_KEYS` in server.ts; "p" is Codex's "don't ask again" answer. */
+const choiceKeys = new Set(["Escape", "Enter", "Up", "Down", "Tab", "y", "n", "p", "1", "2", "3", "4", "5", "6", "7", "8", "9"]);
+interface TerminalChoiceOption { label: string; key: string }
+/** The actual question a terminal dialog is asking, when its command and
+ * options are visible to the Hook: a title, the command it is about, and one
+ * row per choice carrying the key that answers it. */
+export interface TerminalChoice { title?: string; body?: string; options: TerminalChoiceOption[] }
+
+function choiceKey(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const text = value.trim().toLowerCase();
+  if (!text) return undefined;
+  if (text === "esc" || text === "escape") return "Escape";
+  if (text === "enter" || text === "return") return "Enter";
+  if (text === "up" || text === "down" || text === "tab") return text[0].toUpperCase() + text.slice(1);
+  return choiceKeys.has(text) ? text : undefined;
+}
+function commandText(value: unknown): string | undefined {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (Array.isArray(value)) {
+    const parts = value.filter((part): part is string => typeof part === "string" && !!part.trim());
+    if (parts.length) return parts.join(" ");
+  }
+  return undefined;
+}
+function optionLabel(value: unknown): string | undefined {
+  if (typeof value === "string") return value.trim() || undefined;
+  const fields = object(value);
+  for (const key of ["label", "name", "title", "text", "value"]) {
+    if (typeof fields[key] === "string" && fields[key].trim()) return fields[key].trim();
+  }
+  return undefined;
+}
+function labeledOption(label: string, key: unknown): TerminalChoiceOption | undefined {
+  let resolved = choiceKey(key);
+  const trailing = /^(.+?)\s*\(([A-Za-z0-9]+)\)\s*$/.exec(label);
+  if (!resolved && trailing) resolved = choiceKey(trailing[2]);
+  return resolved ? { label, key: resolved } : undefined;
+}
+function structuredOptions(value: unknown): TerminalChoiceOption[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap(item => {
+    const label = optionLabel(item);
+    if (!label) return [];
+    const fields = object(item);
+    const key = ["key", "shortcut", "hotkey", "accelerator", "value"].map(name => choiceKey(fields[name])).find(Boolean);
+    return labeledOption(label, key) ?? [];
+  });
+}
+/** Numbered options as Codex draws them: "1. Yes, proceed (y)". */
+function numberedOptions(text: string): TerminalChoiceOption[] {
+  return text.split(/\r?\n/).flatMap(line => {
+    const match = /^\s*\d+[.)]\s+(.+?)\s*$/.exec(line);
+    if (!match) return [];
+    return labeledOption(match[1].trim(), undefined) ?? [];
+  });
+}
+/** Read the question a terminal dialog is asking from the request it carries:
+ * an explicit options list, or numbered lines inside its text. Undefined when
+ * there are not at least two answerable choices. */
+export function terminalChoice(input: unknown): TerminalChoice | undefined {
+  const fields = object(input), command = commandText(fields.command ?? fields.cmd);
+  let options = [fields.options, fields.choices, fields.actions, fields.answers].map(structuredOptions).find(list => list.length >= 2) ?? [];
+  if (options.length < 2) {
+    const text = [fields.question, fields.description, fields.justification, fields.prompt, fields.message, fields.text, fields.content, fields.display]
+      .filter((value): value is string => typeof value === "string").join("\n");
+    const parsed = numberedOptions(text);
+    if (parsed.length >= 2) options = parsed;
+  }
+  if (options.length < 2) return undefined;
+  const title = [fields.question, fields.description, fields.justification, fields.prompt]
+    .find((value): value is string => typeof value === "string" && !!value.trim() && value.trim() !== command);
+  if (!title && !command) return undefined;
+  return { ...(title ? { title: String(title).slice(0, 4_000) } : {}), ...(command ? { body: command.slice(0, 4_000) } : {}), options: options.slice(0, 12) };
+}
+
 const localSocket = () => path.join(bridgeRoot(), "agent.sock");
 const bindingPath = (server: string, pane: string) => path.join(bridgeRoot(), "bindings", encodeURIComponent(serverName.parse(server)), encodeURIComponent(pane) + ".json");
 export async function recordedSession(server: string, pane: Json, pids: number[]): Promise<string | undefined> {
@@ -39,8 +121,11 @@ export async function recordedSession(server: string, pane: Json, pids: number[]
   } catch { return undefined; }
 }
 
-interface Pending { target: Target; response: ServerResponse; tool: string; input: unknown; message: string; expiresAt: string; timer: NodeJS.Timeout }
+interface Pending { target: Target; response: ServerResponse; tool: string; input: unknown; message: string; choice?: TerminalChoice; expiresAt: string; timer: NodeJS.Timeout }
 interface PushBinding { action: string; expiresAt: number }
+/** An opencode permission ask the plugin wrote to disk, held here so it can be
+ * pushed and answered by binding like a Claude request the Hook holds itself. */
+interface OpencodeHeld { target: Target; request: Json; expiresAt: number }
 export class PushBindingStore {
   private values = new Map<string, PushBinding>();
   constructor(private now = Date.now, private limit = 128) {}
@@ -119,7 +204,7 @@ export class AgentHooks {
   /** The permission request a conversation is drawing in its own terminal
    * because nobody was there to hold it: what the phone shows above its
    * answer keys until the pane stops waiting. */
-  private terminalPrompts = new Map<string, { tool: string; message: string; at: number }>();
+  private terminalPrompts = new Map<string, { tool: string; message: string; choice?: TerminalChoice; at: number }>();
   /** Conversations Claude Code is compacting, by target, until the new context
    * starts. The phone shows the state instead of the summary row's text. */
   private compactingSince = new Map<string, number>();
@@ -131,7 +216,107 @@ export class AgentHooks {
   readonly overview = new ApprovalWatchLeases();
   private server?: Server;
   private pushBindings = new PushBindingStore();
+  /** opencode permission asks seen on disk, by request id. */
+  private opencode = new Map<string, OpencodeHeld>();
+  private opencodeWatcher?: FSWatcher;
+  private opencodePoll?: NodeJS.Timeout;
+  private opencodeDebounce?: NodeJS.Timeout;
+  /** Fan-out jobs already pushed as blocked, by job id and blocked timestamp. */
+  private fanoutSeen = new Map<string, number>();
+  private fanoutTimer?: NodeJS.Timeout;
   constructor(readonly push = new ApprovalPushService(), private modules?: ModuleSnapshot) {}
+  private approvalsDirectory(): string { return path.join(phrenStoreRoot(), ".runtime", "approvals"); }
+  private scheduleOpencodeSweep() {
+    if (this.opencodeDebounce) return;
+    this.opencodeDebounce = setTimeout(() => { this.opencodeDebounce = undefined; void this.sweepOpencodeApprovals(); }, APPROVAL_DEBOUNCE_MS);
+    this.opencodeDebounce.unref?.();
+  }
+  /** Read every live opencode request file, map it to a target through the
+   * recorded bindings or Herdr's explicit opencode session id, and register it
+   * for a push and a push-binding answer. A file that vanished or expired is
+   * forgotten. */
+  async sweepOpencodeApprovals(): Promise<void> {
+    const directory = this.approvalsDirectory();
+    let entries: string[] = [];
+    try { entries = await readdir(directory); } catch { /* Nothing to watch yet. */ }
+    const live = new Set<string>();
+    for (const name of entries) {
+      const match = /^opencode-(ses_[0-9A-Za-z]{1,64})\.request\.json$/.exec(name);
+      if (!match) continue;
+      const request = opencodeRequest(match[1]);
+      if (!request) continue;
+      const id = String(request.id);
+      live.add(id);
+      if (this.opencode.has(id)) continue;
+      const target = await this.resolveOpencodeTarget(match[1]);
+      if (!target) continue;
+      const expiresAt = typeof request.expiresAt === "string" ? Date.parse(request.expiresAt) : NaN;
+      if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) continue;
+      this.opencode.set(id, { target, request, expiresAt });
+      if (!this.push.available) continue;
+      const binding = randomUUID();
+      this.pushBindings.add(binding, { action: id, expiresAt });
+      const title = typeof request.title === "string" ? request.title : `Allow ${String(request.type ?? "action")}?`;
+      const message = typeof request.message === "string" ? request.message : "";
+      // The held request is what stops a later sweep from pushing again; a
+      // failed delivery only drops the binding and leaves the card in place.
+      void this.push.notify({ binding, provider: "opencode", question: false, expiresAt: String(request.expiresAt), title, message })
+        .then(delivered => { if (!delivered) this.pushBindings.dropAction(id); })
+        .catch(() => {});
+    }
+    for (const [id, held] of this.opencode) {
+      if (!live.has(id) || held.expiresAt <= Date.now()) { this.opencode.delete(id); this.pushBindings.dropAction(id); }
+    }
+  }
+  /** A session's exact pane. A recorded binding carries the full target; when
+   * there is none, Herdr's explicit `ses_` identity names the pane. */
+  private async resolveOpencodeTarget(session: string): Promise<Target | undefined> {
+    const root = path.join(bridgeRoot(), "bindings");
+    let folders: string[] = [];
+    try { folders = await readdir(root); } catch { /* No bindings yet. */ }
+    for (const folder of folders) {
+      let names: string[] = [];
+      try { names = await readdir(path.join(root, folder)); } catch { continue; }
+      for (const name of names) {
+        if (!name.endsWith(".json")) continue;
+        let value: Json;
+        try { value = object(JSON.parse(await readFile(path.join(root, folder, name), "utf8"))); } catch { continue; }
+        if (value.source !== "opencode" || value.session !== session) continue;
+        if (typeof value.workspace !== "string" || typeof value.tab !== "string") continue;
+        const parsed = targetSchema.safeParse({ server: decodeURIComponent(folder), workspace: value.workspace, tab: value.tab,
+          pane: decodeURIComponent(name.slice(0, -".json".length)), source: "opencode", session });
+        if (parsed.success) return parsed.data;
+      }
+    }
+    const live = await servers().catch(() => [] as Json[]);
+    for (const entry of live) {
+      const server = String(entry.session);
+      const state = await snapshot(server).catch(() => undefined);
+      if (!state) continue;
+      for (const pane of objects(state.panes)) {
+        if (pane.agent !== "opencode") continue;
+        const reported = object(pane.agent_session);
+        if (reported.kind !== "id" || reported.agent !== "opencode" || reported.value !== session) continue;
+        const parsed = targetSchema.safeParse({ server, workspace: pane.workspace_id, tab: pane.tab_id,
+          pane: pane.pane_id, source: "opencode", session });
+        if (parsed.success) return parsed.data;
+      }
+    }
+    return undefined;
+  }
+  /** Push once for each fan-out job whose blocked.json the plugin wrote. */
+  private async sweepBlockedFanouts(): Promise<void> {
+    const jobs = await blockedFanouts().catch(() => []);
+    const live = new Set<string>();
+    for (const job of jobs) {
+      live.add(job.id);
+      const stamp = job.at ? Date.parse(job.at) : 0;
+      if (this.fanoutSeen.get(job.id) === stamp) continue;
+      this.fanoutSeen.set(job.id, stamp);
+      void this.push.notifyFanoutBlocked({ job: job.id, label: job.label, provider: job.provider, reason: job.reason }).catch(() => {});
+    }
+    for (const id of this.fanoutSeen.keys()) if (!live.has(id)) this.fanoutSeen.delete(id);
+  }
   watch(target: Target): () => void {
     const key = JSON.stringify(target);
     this.watching.set(key, (this.watching.get(key) || 0) + 1);
@@ -172,8 +357,9 @@ export class AgentHooks {
     return { decision: "block", reason: "Phren sent this message to a different conversation in this pane; it was not delivered here. Send it again from the phone." };
   }
   private rememberTerminalPrompt(target: Target, body: Json) {
+    const choice = terminalChoice(body.input);
     this.terminalPrompts.set(JSON.stringify(target), { tool: String(body.tool || "action").slice(0, 200),
-      message: JSON.stringify(body.input || {}, null, 2).slice(0, 32_768), at: Date.now() });
+      message: JSON.stringify(body.input || {}, null, 2).slice(0, 32_768), ...(choice ? { choice } : {}), at: Date.now() });
     while (this.terminalPrompts.size > 64) this.terminalPrompts.delete(this.terminalPrompts.keys().next().value!);
   }
   /** The request the agent is showing in its terminal, if one fell through
@@ -182,7 +368,7 @@ export class AgentHooks {
     const key = JSON.stringify(target), entry = this.terminalPrompts.get(key);
     if (!entry) return undefined;
     if (Date.now() - entry.at > 900_000) { this.terminalPrompts.delete(key); return undefined; }
-    return { toolName: entry.tool, message: entry.message, at: new Date(entry.at).toISOString() };
+    return { toolName: entry.tool, message: entry.message, ...(entry.choice ? { choice: entry.choice } : {}), at: new Date(entry.at).toISOString() };
   }
   clearTerminalPrompt(target: Target) { this.terminalPrompts.delete(JSON.stringify(target)); }
   private startCompacting(target: Target) {
@@ -209,8 +395,11 @@ export class AgentHooks {
   menuClosed(target: Target) { this.menus.delete(JSON.stringify(target)); }
   approval(target: Target): Json | undefined {
     const pending = [...this.pending.entries()].find(([, p]) => JSON.stringify(p.target) === JSON.stringify(target));
-    if (pending) return { actionId: pending[0], toolName: pending[1].tool, title: `Allow ${pending[1].tool}?`, message: pending[1].message, expiresAt: pending[1].expiresAt };
+    if (pending) return { actionId: pending[0], toolName: pending[1].tool, title: `Allow ${pending[1].tool}?`, message: pending[1].message,
+      ...(pending[1].choice ? { choice: pending[1].choice } : {}), expiresAt: pending[1].expiresAt };
     if (target.source !== "opencode") return undefined;
+    const held = [...this.opencode.values()].find(value => JSON.stringify(value.target) === JSON.stringify(target));
+    if (held) return { actionId: held.request.id, toolName: held.request.type, title: held.request.title, message: held.request.message, expiresAt: held.request.expiresAt };
     const request = opencodeRequest(target.session);
     return request ? { actionId: request.id, toolName: request.type, title: request.title, message: request.message, expiresAt: request.expiresAt } : undefined;
   }
@@ -240,6 +429,7 @@ export class AgentHooks {
       const temporary = file + "." + randomUUID();
       await writeFile(temporary, JSON.stringify({ id, decision }), { mode: 0o600, flag: "wx" });
       await rename(temporary, file);
+      this.opencode.delete(id); this.pushBindings.dropAction(id);
       return;
     }
     const entry = this.pending.get(id);
@@ -254,13 +444,25 @@ export class AgentHooks {
       ...(answered ? { updatedInput: answered } : {}),
     } } }));
   }
+  /** A held approval that is really a terminal dialog, answered from the
+   * phone with its own keys: let the callback fall back to the terminal at
+   * once instead of leaving the card up until the 55-second timer. */
+  releaseChoice(target: Target) {
+    for (const [id, entry] of this.pending) {
+      if (!entry.choice || JSON.stringify(entry.target) !== JSON.stringify(target)) continue;
+      this.pending.delete(id); this.dropPushBindings(id); clearTimeout(entry.timer);
+      if (!entry.response.destroyed) entry.response.end("{}");
+    }
+  }
   async answerPush(binding: string, decision: unknown) {
     if (!["approve", "deny"].includes(String(decision))) throw new BridgeError(400, "The approval answer is not valid.");
     const linked = this.pushBindings.consume(binding);
     if (!linked) throw new BridgeError(409, "This approval is no longer pending.");
     const pending = this.pending.get(linked.action);
-    if (!pending) throw new BridgeError(409, "This approval is no longer pending.");
-    await this.answer(pending.target, linked.action, decision);
+    if (pending) { await this.answer(pending.target, linked.action, decision); return; }
+    const held = this.opencode.get(linked.action);
+    if (held) { await this.answer(held.target, linked.action, decision); return; }
+    throw new BridgeError(409, "This approval is no longer pending.");
   }
   private dropPushBindings(action: string) {
     this.pushBindings.dropAction(action);
@@ -291,7 +493,8 @@ export class AgentHooks {
         if (!pids.length) throw new Error("No foreground process");
         const file = bindingPath(target.server, target.pane); await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
         const temporary = file + "." + randomUUID();
-        await writeFile(temporary, JSON.stringify({ terminal: pane.terminal_id, source: target.source, session: target.session, pids }), { mode: 0o600, flag: "wx" });
+        await writeFile(temporary, JSON.stringify({ terminal: pane.terminal_id, source: target.source, session: target.session, pids,
+          workspace: target.workspace, tab: target.tab }), { mode: 0o600, flag: "wx" });
         await rename(temporary, file);
         // What a shell call changed on disk: snapshot before, diff after.
         const input = typeof body.input === "string" ? { patch: body.input } : object(body.input), command = [input.command, input.cmd].find(v => typeof v === "string") as string | undefined;
@@ -321,8 +524,9 @@ export class AgentHooks {
         const locallyWatched = this.watching.has(JSON.stringify(target)) || this.overview.has(target.server);
         const timer = setTimeout(() => { this.pending.delete(action); this.dropPushBindings(action); this.rememberTerminalPrompt(target, body); res.end("{}"); }, 55_000);
         const expiresAt = new Date(Date.now() + 55_000).toISOString();
+        const choice = terminalChoice(body.input);
         this.pending.set(action, { target, response: res, tool: String(body.tool || "action").slice(0, 200), input: body.input,
-          message: JSON.stringify(body.input || {}, null, 2).slice(0, 32_768), expiresAt, timer });
+          message: JSON.stringify(body.input || {}, null, 2).slice(0, 32_768), ...(choice ? { choice } : {}), expiresAt, timer });
         res.on("close", () => { clearTimeout(timer); this.pending.delete(action); this.dropPushBindings(action); });
         if (this.push.available) {
           const binding = randomUUID();
@@ -340,12 +544,32 @@ export class AgentHooks {
     this.server.requestTimeout = 65_000;
     await new Promise<void>((resolve, reject) => { this.server!.once("error", reject); this.server!.listen(localSocket(), () => resolve()); });
     await chmod(localSocket(), 0o600);
+    // A permission ask the opencode plugin writes must reach the phone even
+    // when nobody is polling; fs.watch catches the atomic rename, and a slow
+    // poll covers a watcher that a platform drops.
+    await mkdir(this.approvalsDirectory(), { recursive: true, mode: 0o700 }).catch(() => {});
+    try {
+      this.opencodeWatcher = watch(this.approvalsDirectory(), { persistent: false }, () => this.scheduleOpencodeSweep());
+      this.opencodeWatcher.on("error", () => { this.opencodeWatcher?.close(); this.opencodeWatcher = undefined; });
+    } catch { this.opencodeWatcher = undefined; }
+    this.opencodePoll = setInterval(() => this.scheduleOpencodeSweep(), APPROVAL_SWEEP_MS);
+    this.opencodePoll.unref?.();
+    this.fanoutTimer = setInterval(() => { void this.sweepBlockedFanouts(); }, FANOUT_SWEEP_MS);
+    this.fanoutTimer.unref?.();
+    this.scheduleOpencodeSweep();
+    void this.sweepBlockedFanouts();
   }
   close() {
     void this.changes.close().catch(() => {});
     for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.response.end("{}"); }
     this.pending.clear(); this.server?.close(); this.server?.closeAllConnections();
     this.pushBindings.clear();
+    this.opencode.clear();
+    if (this.opencodeDebounce) clearTimeout(this.opencodeDebounce);
+    if (this.opencodePoll) clearInterval(this.opencodePoll);
+    this.opencodeWatcher?.close(); this.opencodeWatcher = undefined;
+    if (this.fanoutTimer) clearInterval(this.fanoutTimer);
+    this.fanoutSeen.clear();
   }
 }
 

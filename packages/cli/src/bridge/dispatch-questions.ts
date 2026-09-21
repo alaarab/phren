@@ -9,7 +9,7 @@ const uuid = z.string().uuid();
 const timestamp = z.string().datetime({ offset: true });
 const plain = (max: number) => z.string().min(1).max(max).refine(value => !!value.trim() && !/[\x00-\x1f\x7f]/.test(value));
 const questionText = plain(4000);
-const answerKey = z.enum(["Escape", "Enter", "Up", "Down", "Tab", "y", "n", "1", "2", "3", "4", "5", "6", "7", "8", "9"]);
+const answerKey = z.enum(["Escape", "Enter", "Up", "Down", "Tab", "y", "n", "p", "1", "2", "3", "4", "5", "6", "7", "8", "9"]);
 const optionSchema = z.object({ label: questionText }).strict();
 const codexQuestionSchema = z.object({ question: questionText, options: z.array(optionSchema).max(12).optional(), kind: z.literal("text").optional() }).strict();
 const computerSchema = z.object({ id: uuid, name: plain(100) }).strict();
