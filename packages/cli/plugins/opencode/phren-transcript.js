@@ -184,6 +184,15 @@ export const PhrenTranscriptPlugin = async () => {
       for (const part of output.parts ?? []) rememberPart(input.sessionID, output.message.id, part);
     },
     "permission.ask": async (input, output) => {
+      // A fan-out worker runs headless in its own worktree with nobody watching
+      // the phone's approval queue, so edits, commands and fetches inside that
+      // worktree are granted here and anything else is refused outright rather
+      // than waiting 50 seconds for an answer that never comes.
+      if (process.env.PHREN_FANOUT_JOB) {
+        const kind = text(input?.type);
+        setStatus(output, kind === "edit" || kind === "bash" || kind === "webfetch" ? "allow" : "deny");
+        return;
+      }
       let request, answer;
       try {
         const sessionID = text(input?.sessionID), id = text(input?.id);

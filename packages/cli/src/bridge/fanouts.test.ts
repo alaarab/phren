@@ -51,6 +51,19 @@ describe("fan-out manifests", () => {
     expect(await fanoutChildren("codex", "bbbbbbbb-2222-4222-8222-222222222222", env)).toEqual([]);
   });
 
+  it("accepts legacy parents and scopes a new computer-bound parent when supplied", async () => {
+    const computer = "11111111-1111-4111-8111-111111111111";
+    const legacy = await fixture("job-legacy");
+    expect(await fanoutChildren("codex", parent, legacy.env, computer)).toHaveLength(1);
+
+    const remote = await fixture("job-remote", { parent: { provider: "codex", session: parent, computer } });
+    expect(await fanoutChildren("codex", parent, remote.env, computer)).toHaveLength(1);
+    expect(await fanoutChildren("codex", parent, remote.env, "22222222-2222-4222-8222-222222222222")).toEqual([]);
+
+    const unknown = await fixture("job-unknown-parent", { parent: { provider: "codex", session: parent, computer, path: "/home/sam/private" } });
+    expect(await fanoutChildren("codex", parent, unknown.env, computer)).toEqual([]);
+  });
+
   it("labels an existing worktree without exposing its path", async () => {
     const worktree = await mkdtemp(path.join(tmpdir(), "phren-worker-repo-")); roots.push(worktree);
     await execFileAsync("git", ["-C", worktree, "init", "-q"]);
