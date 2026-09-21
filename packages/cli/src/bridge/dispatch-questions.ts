@@ -155,8 +155,9 @@ export class DispatchQuestionRelay {
   }
 
   async answer(value: unknown): Promise<Json> {
-    const notification = await this.notification(value);
-    const request = questionAnswerRequest(notification, object(value).answer);
+    const body = z.object({ notificationId: z.string().regex(/^[a-f0-9]{64}$/), answer: z.unknown() }).strict().parse(value);
+    const notification = await this.notification({ notificationId: body.notificationId });
+    const request = questionAnswerRequest(notification, body.answer);
     if (!this.forward) throw new BridgeError(503, "The dispatch question relay has no remote answer transport.");
     const file = answerPath(this.root, notification.id), existing = await readStored(file, answerReceiptSchema);
     if (existing) throw new BridgeError(409, existing.state === "uncertain"

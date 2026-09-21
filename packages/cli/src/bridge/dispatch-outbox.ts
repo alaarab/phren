@@ -214,7 +214,8 @@ export async function pruneDispatchArtifacts(root = bridgeRoot(), now = Date.now
       if (!z.string().uuid().safeParse(id).success) continue;
       const entry = group(id); entry.size += info.size; entry.files.push({ file, size: info.size });
       const stamp = [value.deliveredAt, value.updatedAt, value.createdAt].find(item => typeof item === "string") as string | undefined;
-      entry.at = Math.max(entry.at, stamp ? Date.parse(stamp) || info.mtimeMs : info.mtimeMs);
+      const parsedStamp = stamp ? Date.parse(stamp) : Number.NaN;
+      entry.at = Math.max(entry.at, Number.isNaN(parsedStamp) ? info.mtimeMs : parsedStamp);
       if (directory === "dispatches") entry.receiptState = String(value.state);
       if (directory === "dispatch-reports") entry.reportState = String(value.reportState);
       if (directory === "dispatch-outbox") entry.outboxStates.push(String(value.state));
