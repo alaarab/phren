@@ -411,8 +411,9 @@ struct PhrenSingleSelectSheet<Value: Hashable>: View {
                                 .phrenIdentifier("\(rowPrefix)-message")
                         }
                         ForEach(options) { option in
+                            // One choice: a radio mark, and the sheet closes on the tap.
                             PhrenOptionRow(title: option.title, caption: option.caption,
-                                           selected: selection == option.value, mark: .check,
+                                           selected: selection == option.value, mark: .radio,
                                            disabled: !option.isEnabled, icon: option.icon,
                                            glyph: option.glyph, trailing: option.trailing,
                                            muted: option.muted) {
@@ -425,8 +426,10 @@ struct PhrenSingleSelectSheet<Value: Hashable>: View {
             }
             .scrollBounceBehavior(.basedOnSize)
             if let footer { footer }
+            // A single choice needs no Done; the row itself closes the sheet.
+            // The button stays for cancelling with nothing chosen, labelled so.
             Button(action: dismiss) {
-                Text("Done").font(PhrenTypography.body.weight(.medium))
+                Text(selection == nil ? "Cancel" : "Close").font(PhrenTypography.body.weight(.medium))
                     .foregroundStyle(PhrenTheme.accent)
                     .padding(.horizontal, PhrenTheme.Space.medium)
                     .frame(maxWidth: .infinity, minHeight: 44)
