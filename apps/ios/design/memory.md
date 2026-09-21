@@ -1,6 +1,10 @@
 # Memory: one page for the graph, findings and tasks
 
-Status: proposal, September 20. Owner's prompt: the Search tab is a wasted
+Status: v1 shipped in 1.0.1 build 127; superseded by v2 below (owner,
+September 21). Sections 1 to 6 describe v1 and stay for the parts v2 keeps
+(rows, results, dossier bridge, fixture). Section 7 is what to build now.
+
+Original status: proposal, September 20. Owner's prompt: the Search tab is a wasted
 bottom slot (an empty screen with a bar), the graph is the only place that
 browses findings fully, and the graph, the tasks and the findings could become
 one page.
@@ -117,3 +121,62 @@ exists and the Memory tab does. Existing `GraphTests` keep passing unchanged.
 3. Results mode over `SearchIndex` plus the graph's own search.
 4. Task and finding actions on rows.
 5. Fixture, tests, screenshots at the standard size, changelog.
+
+## 7. v2: map or list (owner, September 21)
+
+Owner's words: "there should just be a search icon and then two drop-down
+multiple select things, one findings/tasks etc. and the other projects, one
+line, no blank space; a list view icon brings up the list separate from the
+map rather than forcing them together; the list looks right and follows the
+filters; map or list."
+
+### 7.1 Layout
+
+1. **Top bar** (44pt): title "Memory" centred; trailing search icon
+   (`magnifyingglass`, 44pt target, id `memory-search-toggle`). Tapping it
+   slides the existing `PhrenSearchField` in under the bar (id
+   `memory-search`); the field's clear button or an empty submit slides it
+   away. Search applies to both modes.
+2. **Filter line** (one row, 44pt, 16pt gutters): two phren drop-downs and
+   the mode toggle.
+   - **Kinds** drop-down (id `memory-kinds`): button label reads "All kinds"
+     or the chosen ones joined ("Findings, Tasks"); tap opens a
+     `PhrenDialog`-styled sheet with one `PhrenOptionRow` per kind
+     (Findings, Notes, Tasks, Topics), multi-select with check marks, ids
+     `memory-kind:<kind>`, a "Done" row at the bottom. At least one kind
+     stays selected.
+   - **Projects** drop-down (id `memory-projects`): label "All projects" or
+     the chosen names ("phren, ledger", middle-truncated past two); same
+     sheet shape, one row per project of the selected store, store chooser
+     as the first row when the phone has several stores, ids
+     `memory-project:<name>`. Empty selection means all.
+   - **Mode toggle** at the trailing edge: `PhrenIconSegment` with two
+     values, map (`point.3.connected.trianglepath.dotted`) and list
+     (`list.bullet`), id `memory-mode`, value "map" or "list". Remembered
+     per phone.
+3. **Map mode**: the graph fills everything from the filter line to the tab
+   bar. No bottom panel. Selecting a node opens the web dossier as today;
+   its "Show in list" row switches to list mode scrolled to that row.
+4. **List mode**: the v1 panel rows (section 2) fill the same area,
+   grouped by project when more than one project is selected, counts line
+   at the top ("413 findings · 583 tasks · 9 topics" for the current
+   filters). Tapping a row in list mode switches to map mode with that node
+   selected; the row's action glyph opens the same action sheet as v1.
+
+### 7.2 Removed from v1
+
+The scope chip row, the content-filter chip row, the bottom panel and its
+three heights, and the drag handle. `MemoryPanel` becomes the list-mode
+body. The panel identifiers `memory-panel`, `memory-panel-height`,
+`memory-filter:*`, `memory-scope:*` go; `MemoryTests` is rewritten for the
+new ids (owner: keep the tests few; one test per mode plus one for the
+filters is enough, no accessibility-size tests).
+
+### 7.3 Bug to fix alongside
+
+On the device the graph web view stops about two thirds down the screen
+and leaves a dead band above the panel (screenshot, September 21, 21:02).
+The web view's height must follow the SwiftUI frame it is given; check
+`GraphWebView` sizing against `GeometryReader` in `MemoryView` and the
+renderer's resize handler in `index.html`. In v2 the graph gets the whole
+area, which must hold on rotation and when the search field slides in.
