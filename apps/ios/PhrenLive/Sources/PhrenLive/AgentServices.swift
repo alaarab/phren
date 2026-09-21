@@ -24,7 +24,7 @@ extension PhrenConnection {
     public static func accountUsage(host: LiveHost, privateKey: Data) async throws -> AccountUsageSnapshot {
         do {
             let bytes = try await fetchData(host: host, key: .init(rawRepresentation: privateKey),
-                                           request: .init(path: "/v1/usage", maximumResponseBytes: 65_536))
+                                           request: .init(path: "/v1/usage?sources=codex,claude,opencode,opencode-go,openrouter", maximumResponseBytes: 65_536))
             return try AccountUsageSnapshot.read(bytes)
         } catch let error as LiveConnectionError {
             switch error {

@@ -477,6 +477,12 @@ socket.on('close', () => process.exit(0));
     if (process.platform !== "darwin") expect(simulators.data.simulators).toEqual([]);
     const health = await api("/v1/health");
     expect(health.data.product).toBe("phren-hook"); expect(health.data.protocol).toBe(1);
+    // A phone that predates OpenCode Go names no sources and must not meet one it cannot read.
+    const legacyUsage = await api("/v1/usage");
+    expect(legacyUsage.status).toBe(200);
+    expect(legacyUsage.data.accounts.map((a: { source: string }) => a.source)).not.toContain("opencode-go");
+    const fullUsage = await api("/v1/usage?sources=codex,claude,opencode,opencode-go,openrouter");
+    expect(fullUsage.data.accounts.map((a: { source: string }) => a.source)).toContain("opencode-go");
     const workspaces = await api("/v1/workspaces?mux=herdr:default");
     expect(workspaces.data.groups[0].children[0].id).toBe("w1:t1");
     expect((await api("/v1/workspaces/panes?groupId=w1&childId=w1:t1")).data.panes[0].sessionId).toBe(session);
