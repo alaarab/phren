@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "vitest";
 import { grantAdmin, makeTempDir, setupIsolatedCliEnv, runCliSpawn, type IsolatedCliEnv } from "./test-helpers.js";
 import { getMachineName } from "./link/link.js";
 import { REGISTRY } from "./cli-registry.js";
@@ -24,7 +24,7 @@ describe("CLI integration: search", () => {
   let phrenDir: string;
   let cleanup: () => void;
 
-  beforeEach(() => {
+  beforeAll(() => {
     ({ phrenDir, cleanup } = setupPhrenDir());
     // Create a project with searchable content
     const projDir = path.join(phrenDir, "test-proj");
@@ -47,7 +47,7 @@ describe("CLI integration: search", () => {
     );
   });
 
-  afterEach(() => cleanup());
+  afterAll(() => cleanup());
 
   it("returns matching results for a known query", () => {
     const { stdout, exitCode } = runCli(
@@ -103,11 +103,11 @@ describe("CLI integration: doctor", () => {
   let phrenDir: string;
   let cleanup: () => void;
 
-  beforeEach(() => {
+  beforeAll(() => {
     ({ phrenDir, cleanup } = setupPhrenDir());
   });
 
-  afterEach(() => cleanup());
+  afterAll(() => cleanup());
 
   it("outputs health check results", () => {
     const { stdout, stderr, exitCode } = runCli(
@@ -175,12 +175,12 @@ describe("CLI integration: hooks", () => {
   let cleanup: () => void;
   let homeDir: string;
 
-  beforeEach(() => {
+  beforeAll(() => {
     ({ phrenDir, cleanup } = setupPhrenDir());
     homeDir = path.dirname(phrenDir);
   });
 
-  afterEach(() => cleanup());
+  afterAll(() => cleanup());
 
   it("shows Claude hook config from ~/.claude/settings.json", () => {
     const claudeDir = path.join(homeDir, ".claude");
@@ -341,13 +341,13 @@ describe("CLI integration: add-finding", () => {
   let phrenDir: string;
   let cleanup: () => void;
 
-  beforeEach(() => {
+  beforeAll(() => {
     ({ phrenDir, cleanup } = setupPhrenDir());
     const projDir = path.join(phrenDir, "test-proj");
     fs.mkdirSync(projDir, { recursive: true });
   });
 
-  afterEach(() => cleanup());
+  afterAll(() => cleanup());
 
   it("writes a finding to FINDINGS.md", () => {
     const { stdout, exitCode } = runCli(
@@ -377,13 +377,13 @@ describe("CLI integration: pin", () => {
   let phrenDir: string;
   let cleanup: () => void;
 
-  beforeEach(() => {
+  beforeAll(() => {
     ({ phrenDir, cleanup } = setupPhrenDir());
     const projDir = path.join(phrenDir, "test-proj");
     fs.mkdirSync(projDir, { recursive: true });
   });
 
-  afterEach(() => cleanup());
+  afterAll(() => cleanup());
 
   it("writes a truth to truths.md", () => {
     const { stdout, exitCode } = runCli(
@@ -413,7 +413,7 @@ describe("CLI integration: prune and consolidate atomic writes", () => {
   let phrenDir: string;
   let cleanup: () => void;
 
-  beforeEach(() => {
+  beforeAll(() => {
     ({ phrenDir, cleanup } = setupPhrenDir());
     const projectDir = path.join(phrenDir, "test-proj");
     fs.mkdirSync(projectDir, { recursive: true });
@@ -423,7 +423,7 @@ describe("CLI integration: prune and consolidate atomic writes", () => {
     );
   });
 
-  afterEach(() => cleanup());
+  afterAll(() => cleanup());
 
   it("prune --dry-run does not create backups", () => {
     const backupPath = path.join(phrenDir, "test-proj", "FINDINGS.md.bak");
@@ -469,7 +469,7 @@ describe("CLI integration: search edge cases", () => {
   let phrenDir: string;
   let cleanup: () => void;
 
-  beforeEach(() => {
+  beforeAll(() => {
     ({ phrenDir, cleanup } = setupPhrenDir());
     const projDir = path.join(phrenDir, "alpha");
     fs.mkdirSync(projDir, { recursive: true });
@@ -480,7 +480,7 @@ describe("CLI integration: search edge cases", () => {
     fs.writeFileSync(path.join(projDir, "AGENTS.md"), "# alpha\n\nProject-level instructions for alpha.\n");
   });
 
-  afterEach(() => cleanup());
+  afterAll(() => cleanup());
 
   it("--type findings filters to findings docs only", () => {
     const { stdout, exitCode } = runCli(
@@ -624,11 +624,11 @@ describe("CLI integration: config subcommands", () => {
   let phrenDir: string;
   let cleanup: () => void;
 
-  beforeEach(() => {
+  beforeAll(() => {
     ({ phrenDir, cleanup } = setupPhrenDir());
   });
 
-  afterEach(() => cleanup());
+  afterAll(() => cleanup());
 
   it("config with no subcommand prints help", () => {
     const { stdout, exitCode } = runCli(
@@ -771,11 +771,11 @@ describe("CLI integration: maintain subcommands", () => {
   let phrenDir: string;
   let cleanup: () => void;
 
-  beforeEach(() => {
+  beforeAll(() => {
     ({ phrenDir, cleanup } = setupPhrenDir());
   });
 
-  afterEach(() => cleanup());
+  afterAll(() => cleanup());
 
   it("maintain with no subcommand prints help", () => {
     const { stdout, exitCode } = runCli(
@@ -901,11 +901,11 @@ describe("CLI integration: quality-feedback", () => {
   let phrenDir: string;
   let cleanup: () => void;
 
-  beforeEach(() => {
+  beforeAll(() => {
     ({ phrenDir, cleanup } = setupPhrenDir());
   });
 
-  afterEach(() => cleanup());
+  afterAll(() => cleanup());
 
   it("records helpful feedback", () => {
     const { stdout, exitCode } = runCli(
@@ -1194,13 +1194,13 @@ describe("CLI integration: pin edge cases", () => {
   let phrenDir: string;
   let cleanup: () => void;
 
-  beforeEach(() => {
+  beforeAll(() => {
     ({ phrenDir, cleanup } = setupPhrenDir());
     const projDir = path.join(phrenDir, "pin-proj");
     fs.mkdirSync(projDir, { recursive: true });
   });
 
-  afterEach(() => cleanup());
+  afterAll(() => cleanup());
 
   it("creates truths.md with truth content", () => {
     const { exitCode } = runCli(
@@ -1243,14 +1243,14 @@ describe("CLI integration: doctor edge cases", () => {
   let projectsDir: string;
   const origProjectsDir = process.env.PROJECTS_DIR;
 
-  beforeEach(() => {
+  beforeAll(() => {
     ({ phrenDir, cleanup } = setupPhrenDir());
     projectsDir = path.join(path.dirname(phrenDir), "projects");
     fs.mkdirSync(projectsDir, { recursive: true });
     process.env.PROJECTS_DIR = projectsDir;
   });
 
-  afterEach(() => {
+  afterAll(() => {
     process.env.PROJECTS_DIR = origProjectsDir;
     cleanup();
   });
@@ -1318,14 +1318,14 @@ describe("CLI integration: inspect-index and debug-injection", () => {
   let phrenDir: string;
   let cleanup: () => void;
 
-  beforeEach(() => {
+  beforeAll(() => {
     ({ phrenDir, cleanup } = setupPhrenDir());
     const projDir = path.join(phrenDir, "idx-proj");
     fs.mkdirSync(projDir, { recursive: true });
     fs.writeFileSync(path.join(projDir, "FINDINGS.md"), "# idx-proj FINDINGS\n\n## 2025-01-01\n\n- indexed content here\n");
   });
 
-  afterEach(() => cleanup());
+  afterAll(() => cleanup());
 
   it("inspect-index returns index contents", () => {
     const { stdout, exitCode } = runCli(
@@ -1668,7 +1668,7 @@ describe("CLI integration: detect-skills", () => {
   let homeDir: string;
   let cleanup: () => void;
 
-  beforeEach(() => {
+  beforeAll(() => {
     const tmp = makeTempDir("phren-detect-skills-test-");
     phrenDir = path.join(tmp.path, ".phren");
     homeDir = path.join(tmp.path, "home");
@@ -1678,7 +1678,7 @@ describe("CLI integration: detect-skills", () => {
     cleanup = tmp.cleanup;
   });
 
-  afterEach(() => cleanup());
+  afterAll(() => cleanup());
 
   it("reports no skills directory when ~/.claude/skills/ missing", () => {
     const { stdout, exitCode } = runCli(
@@ -2007,7 +2007,7 @@ describe("CLI integration: search history", () => {
   let phrenDir: string;
   let cleanup: () => void;
 
-  beforeEach(() => {
+  beforeAll(() => {
     ({ phrenDir, cleanup } = setupPhrenDir());
     const projDir = path.join(phrenDir, "hist-proj");
     fs.mkdirSync(projDir, { recursive: true });
@@ -2017,7 +2017,7 @@ describe("CLI integration: search history", () => {
     );
   });
 
-  afterEach(() => cleanup());
+  afterAll(() => cleanup());
 
   it("--history shows empty history when no searches have been made", () => {
     const { stdout, exitCode } = runCli(

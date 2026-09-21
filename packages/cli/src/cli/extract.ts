@@ -16,7 +16,7 @@ import {
 } from "../shared/governance.js";
 import { detectProject } from "../shared/index.js";
 import { commandExists } from "../hooks.js";
-import { runGit as runGitShared, isFeatureEnabled, clampInt, errorMessage, isValidProjectName, resolveExecCommand } from "../utils.js";
+import { runGit, isFeatureEnabled, clampInt, errorMessage, isValidProjectName, resolveExecCommand } from "../utils.js";
 import { storeAwareProjectPath } from "../store-routing.js";
 import { appendFindingJournal, compactFindingJournals } from "../finding/journal.js";
 import { findingQualityReason } from "../content/quality.js";
@@ -34,10 +34,6 @@ import {
   type FindingCitation,
   type FindingProvenanceSource,
 } from "../content/citation.js";
-
-function runGit(cwd: string, args: string[]): string | null {
-  return runGitShared(cwd, args, EXEC_TIMEOUT_MS, debugLog);
-}
 
 function shouldRetryGh(err: unknown): boolean {
   const message = err instanceof Error
@@ -58,7 +54,7 @@ function inferProject(arg?: string): string | null {
 
 export function parseGitLogRecords(cwd: string, days: number): Array<{ hash: string; subject: string; body: string }> {
   const fmt = "%H%x1f%s%x1f%b%x1e";
-  const raw = runGit(cwd, ["log", `--since=${days} days ago`, "--first-parent", `--pretty=format:${fmt}`]) || "";
+  const raw = runGit(cwd, ["log", `--since=${days} days ago`, "--first-parent", `--pretty=format:${fmt}`], EXEC_TIMEOUT_MS, debugLog) || "";
   const records: Array<{ hash: string; subject: string; body: string }> = [];
   for (const rec of raw.split("\x1e")) {
     const trimmed = rec.trim();
@@ -482,7 +478,7 @@ export async function handleExtractMemories(
     return;
   }
 
-  const repoRoot = runGit(cwdArg || process.cwd(), ["rev-parse", "--show-toplevel"]);
+  const repoRoot = runGit(cwdArg || process.cwd(), ["rev-parse", "--show-toplevel"], EXEC_TIMEOUT_MS, debugLog);
   if (!repoRoot) {
     if (!silent) console.error("extract-memories must run from inside a git repository.");
     if (!silent) process.exit(1);

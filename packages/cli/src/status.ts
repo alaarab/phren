@@ -17,7 +17,7 @@ import { mergeConfig, getWorkflowPolicy } from "./shared/governance.js";
 import { getMcpEnabledPreference, getHooksEnabledPreference } from "./init/init.js";
 import { getManagementPreset, resolveManagementCapabilities } from "./init/management-preset.js";
 import { getTelemetrySummary } from "./telemetry.js";
-import { runGit as runGitShared, errorMessage } from "./utils.js";
+import { runGit, errorMessage } from "./utils.js";
 import { logger } from "./logger.js";
 import { readRuntimeHealth, resolveTaskFilePath, FINDINGS_FILENAME } from "./data/access.js";
 import { assessSyncOutage } from "./shared/governance.js";
@@ -52,10 +52,6 @@ function countBullets(filePath: string): number {
 function countQueueItems(phrenPath: string, project: string): number {
   const queueFile = path.join(phrenPath, project, "review.md");
   return countBullets(queueFile);
-}
-
-function runGit(cwd: string, args: string[]): string | null {
-  return runGitShared(cwd, args, EXEC_TIMEOUT_QUICK_MS, debugLog);
 }
 
 function hasCommandHook(value: unknown): boolean {
@@ -356,8 +352,8 @@ export async function runStatus() {
   console.log(`\n  ${DIM}phren holds${RESET}  ${projectDirs.length} projects, ${totalFindings} findings${moduleEnabled(phrenPath, "tasks", profile) ? `, ${totalTask} tasks` : ""}, ${totalQueue} queued`);
 
   const gitTarget = manifest?.installMode === "project-local" && manifest.workspaceRoot ? manifest.workspaceRoot : phrenPath;
-  const isGitRepo = runGit(gitTarget, ["rev-parse", "--is-inside-work-tree"]) === "true";
-  const hasOriginRemote = isGitRepo && Boolean(runGit(gitTarget, ["remote", "get-url", "origin"]));
+  const isGitRepo = runGit(gitTarget, ["rev-parse", "--is-inside-work-tree"], EXEC_TIMEOUT_QUICK_MS, debugLog) === "true";
+  const hasOriginRemote = isGitRepo && Boolean(runGit(gitTarget, ["remote", "get-url", "origin"], EXEC_TIMEOUT_QUICK_MS, debugLog));
   const runtime = readRuntimeHealth(phrenPath);
   if (manifest?.installMode === "project-local") {
     console.log(`\n  ${DIM}sync${RESET}     workspace-managed`);
@@ -385,14 +381,14 @@ export async function runStatus() {
 
   // Recent changes (git log)
   if (isGitRepo) {
-    const log = runGit(gitTarget, ["log", "--oneline", "-5", "--no-decorate"]);
+    const log = runGit(gitTarget, ["log", "--oneline", "-5", "--no-decorate"], EXEC_TIMEOUT_QUICK_MS, debugLog);
     if (log) {
       console.log(`\n  ${DIM}recent${RESET}`);
       for (const line of log.split("\n")) {
         console.log(`    ${DIM}${line}${RESET}`);
       }
     }
-    const dirty = runGit(gitTarget, ["status", "--porcelain"]);
+    const dirty = runGit(gitTarget, ["status", "--porcelain"], EXEC_TIMEOUT_QUICK_MS, debugLog);
     if (dirty) {
       const count = dirty.split("\n").filter(Boolean).length;
       console.log(`    ${YELLOW}${count} uncommitted change(s)${RESET}`);

@@ -1,10 +1,10 @@
 import { execFile } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, open, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { lstat, mkdir, open, readFile, readdir, unlink } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
-import { bridgeRoot, targetSchema, type Target } from "./protocol.js";
+import { atomic, bridgeRoot, targetSchema, type Target } from "./protocol.js";
 
 const exec = promisify(execFile);
 const DAY = 86_400_000;
@@ -46,12 +46,6 @@ function reportKey(dispatchId: string, turnId: string): string {
 
 function retryDelay(attempts: number): number {
   return Math.min(60_000, 1000 * 2 ** Math.min(6, Math.max(0, attempts - 1)));
-}
-
-async function atomic(file: string, value: unknown): Promise<void> {
-  const temporary = `${file}.${randomUUID()}.tmp`;
-  await writeFile(temporary, JSON.stringify(value), { mode: 0o600, flag: "wx" });
-  await rename(temporary, file);
 }
 
 async function regularJson(file: string): Promise<string | undefined> {

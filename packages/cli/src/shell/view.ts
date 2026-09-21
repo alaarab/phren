@@ -16,7 +16,6 @@ import {
   resolveTaskFilePath,
   ShellState,
 } from "../data/access.js";
-import { getNonPrimaryStores } from "../store-registry.js";
 import {
   style,
   badge,
@@ -52,6 +51,7 @@ import { readInstallPreferences } from "../init/preferences.js";
 import { PROJECT_HOOK_EVENTS, isProjectHookEnabled, readProjectConfig } from "../project-config.js";
 import { getScopedSkills } from "../skill/registry.js";
 import { errorMessage } from "../utils.js";
+import { resolveProjectStorePath } from "../cli/namespaces-utils.js";
 import { logger } from "../logger.js";
 import type { GraphController } from "./graph/controller.js";
 import { renderGraphView, graphSummary } from "./graph/graph-view.js";
@@ -66,17 +66,6 @@ export interface ViewContext {
   setScroll: (n: number) => void;
   /** The knowledge-graph view's controller (created on first use). Absent in hosts that only render menus. */
   graph?: () => GraphController;
-}
-
-/** Resolve which store (primary or team) contains a project */
-function resolveProjectStorePath(phrenPath: string, project: string): string {
-  if (fs.existsSync(path.join(phrenPath, project))) return phrenPath;
-  try {
-    for (const store of getNonPrimaryStores(phrenPath)) {
-      if (fs.existsSync(path.join(store.path, project))) return store.path;
-    }
-  } catch { /* fall through */ }
-  return phrenPath;
 }
 
 // ── Tab bar ────────────────────────────────────────────────────────────────

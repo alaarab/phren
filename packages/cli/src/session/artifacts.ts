@@ -9,7 +9,7 @@ import {
   readSessionStateFile,
   scanSessionFiles,
   sessionFileForId,
-  sessionsDir,
+  runtimeSessionsDir,
   writeSessionStateFile,
 } from "./utils.js";
 
@@ -56,7 +56,7 @@ function normalizeSummary(summary?: string): string | undefined {
 }
 
 function sessionMessagesFileForId(phrenPath: string, sessionId: string): string {
-  return path.join(sessionsDir(phrenPath), `session-${sessionId}-messages.json`);
+  return path.join(  runtimeSessionsDir(phrenPath), `session-${sessionId}-messages.json`);
 }
 
 function inferProjectForSession(phrenPath: string, sessionId: string): string | undefined {
@@ -109,7 +109,7 @@ function parseSessionMessagesSnapshot(filePath: string): SessionMessagesSnapshot
 }
 
 function listSessionMessageSnapshots(phrenPath: string): Array<{ snapshot: SessionMessagesSnapshot; mtimeMs: number }> {
-  const dir = sessionsDir(phrenPath);
+  const dir =   runtimeSessionsDir(phrenPath);
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -142,7 +142,7 @@ function listSessionMessageSnapshots(phrenPath: string): Array<{ snapshot: Sessi
 }
 
 export function lastSummaryPath(phrenPath: string): string {
-  return path.join(sessionsDir(phrenPath), "last-summary.json");
+  return path.join(  runtimeSessionsDir(phrenPath), "last-summary.json");
 }
 
 export function readLastSummary(phrenPath: string): SessionSummaryRecord | null {
@@ -183,7 +183,7 @@ export function findMostRecentSummaryWithProject(phrenPath: string, project?: st
     return fastPath;
   }
 
-  const dir = sessionsDir(phrenPath);
+  const dir =   runtimeSessionsDir(phrenPath);
   const results = scanSessionFiles<SessionState>(
     dir,
     readSessionStateFile,

@@ -15,6 +15,12 @@ import {
   isArchiveEnd as isArchiveEndMeta,
   stripLifecycleMetadata as stripLifecycleMetadataMeta,
 } from "../content/metadata.js";
+import {
+  VALID_FINDING_SENSITIVITY,
+  VALID_PROACTIVITY_LEVELS,
+  VALID_TASK_MODES,
+  VALID_RISKY_SECTIONS,
+} from "./policy-constants.js";
 
 /** @internal Exported for tests. */
 export const MAX_QUEUE_ENTRY_LENGTH = 500;
@@ -457,12 +463,14 @@ export interface ResolvedConfig {
   workflowPolicy: WorkflowPolicy;
 }
 
-export const VALID_PROACTIVITY_LEVELS = ["high", "medium", "low"] as const;
-export const VALID_TASK_MODES = ["off", "manual", "suggest", "auto"] as const;
-export type TaskMode = typeof VALID_TASK_MODES[number];
-export const VALID_FINDING_SENSITIVITY = ["minimal", "conservative", "balanced", "aggressive"] as const;
-export type FindingSensitivityLevel = typeof VALID_FINDING_SENSITIVITY[number];
-export const VALID_RISKY_SECTIONS = ["Review", "Stale", "Conflicts"] as const;
+export {
+  VALID_PROACTIVITY_LEVELS,
+  VALID_TASK_MODES,
+  type TaskMode,
+  VALID_FINDING_SENSITIVITY,
+  type FindingSensitivityLevel,
+  VALID_RISKY_SECTIONS,
+} from "./policy-constants.js";
 
 function pickEnum<T extends string>(value: unknown, allowed: readonly T[]): T | undefined {
   return typeof value === "string" && allowed.includes(value as T) ? value as T : undefined;
