@@ -11,12 +11,14 @@ import { parseFile } from "./parser.js";
 import {
   codeDatabasePath,
   counts,
+  getMeta,
   insertReferences,
   listIndexedFiles,
   loadSymbolIdsByName,
   openCodeDatabase,
   purgeFile,
   replaceFileSymbols,
+  setMeta,
   upsertFileRow,
   type BlameInput,
   type IndexedFile,
@@ -219,6 +221,13 @@ export async function indexProject(store: string, project: string, options: Inde
   if (!database) throw new Error(`Code index: could not open the index for ${project}.`);
   const { db } = database;
 
+  // Remember which checkout this index came from so read-side queries can
+  // return a definition's source snippet even when the index was built with
+  // `--repo` against a path the project does not register.
+  const previousRoot = getMeta(db, "repo_root");
+  const rootChanged = previousRoot !== repoRoot;
+  if (rootChanged) setMeta(db, "repo_root", repoRoot);
+
   let existing: Map<string, IndexedFile>;
   try {
     existing = listIndexedFiles(db);
@@ -340,7 +349,7 @@ export async function indexProject(store: string, project: string, options: Inde
 
   // Nothing parsed and nothing vanished means the database on disk is already
   // current; skip the export and write.
-  if (parsedFiles.length > 0 || vanished.length > 0) database.persist();
+  if (parsedFiles.length > 0 || vanished.length > 0 || rootChanged) database.persist();
   const totals = counts(db);
   database.close();
 
