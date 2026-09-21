@@ -27,9 +27,11 @@ describe("model catalogue", () => {
       ].map(JSON.stringify).join("\n") + "\n");
       await writeFile(path.join(root, "settings.json"), JSON.stringify({ model: "claude-fable-5-1[1m]" }));
       const models = await readClaudeModels();
-      expect(models.map(m => m.id)).toEqual(["fable", "opus", "sonnet", "haiku", "claude-sonnet-5", "claude-fable-5-1", "claude-fable-5-1[1m]"]);
+      // Exact models the way Claude Code's menu shows them: the default first,
+      // then by family; aliases only for families with no exact id here.
+      expect(models.map(m => m.id)).toEqual(["claude-fable-5-1[1m]", "claude-fable-5-1", "claude-sonnet-5", "opus", "haiku"]);
       expect(models.find(m => m.id === "claude-fable-5-1[1m]")).toMatchObject({ name: "Fable 5.1 (1M context)", isDefault: true });
-      expect(models.find(m => m.id === "claude-sonnet-5")).toMatchObject({ name: "Sonnet 5" });
+      expect(models.find(m => m.id === "claude-sonnet-5")).toMatchObject({ name: "Sonnet 5", description: "Fast and capable." });
     } finally { process.env.CLAUDE_CONFIG_DIR = old; }
   });
 

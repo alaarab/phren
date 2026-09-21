@@ -4,8 +4,9 @@ import path from "node:path";
 import { z } from "zod";
 import { readProjectConfig } from "../project-config.js";
 import { computerName } from "./computers.js";
+import { dispatchParentSchema, validateDispatchParent } from "./dispatch-tree.js";
 import { hookPeers, peerRequest, type HookPeer } from "./peers.js";
-import { BridgeError, bridgeRoot, PROTOCOL, startingTargetSchema, targetSchema, type Json } from "./protocol.js";
+import { BridgeError, bridgeRoot, PROTOCOL, startingTargetSchema, targetSchema, type Json, type Target } from "./protocol.js";
 import { phrenStoreRoot } from "./transcripts.js";
 
 const text = (max: number) => z.string().min(1).max(max).refine(value => !!value.trim() && !/[\x00-\x1f\x7f]/.test(value));
@@ -17,11 +18,14 @@ export const dispatchSchema = z.object({
   model: text(200).optional().describe("Explicit model, otherwise the remote harness default."),
   prompt: z.string().min(1).max(32768).refine(value => !/[\x00-\x08\x0b-\x1f\x7f]/.test(value)).describe("Worker brief, at most 32768 characters."),
   label: text(200).describe("Short task label."),
+  parent: dispatchParentSchema.optional().describe("Explicit local conversation parent for work-tree attachment."),
+  parentTarget: targetSchema.optional().describe("Complete live target for the explicit parent."),
 }).strict();
 export type DispatchInput = z.infer<typeof dispatchSchema>;
 const remoteTarget = z.union([targetSchema, startingTargetSchema]);
 const receiptSchema = dispatchSchema.omit({ prompt: true }).extend({
   id: z.string().uuid(), createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
+  computerId: z.string().uuid().optional(),
   state: z.enum(["launching", "sending", "accepted", "uncertain", "failed"]),
   target: remoteTarget.optional(), error: z.string().max(500).optional(),
 });
@@ -61,38 +65,48 @@ export async function dispatchStatus(): Promise<Receipt[]> {
   return receipts.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
-async function capacity(peer: HookPeer): Promise<number> {
+async function capacity(peer: HookPeer): Promise<{ working: number; computerId: string }> {
   const value = await peerRequest(peer, "/v1/dispatch/capacity");
-  const result = z.object({ product: z.literal("phren-hook"), protocol: z.literal(PROTOCOL), working: z.number().int().nonnegative(), servers: z.array(z.string()) }).parse(value);
+  const result = z.object({ product: z.literal("phren-hook"), protocol: z.literal(PROTOCOL), working: z.number().int().nonnegative(),
+    servers: z.array(z.string()), computer: z.object({ id: z.string().uuid() }).passthrough() }).parse(value);
   if (!result.servers.includes(peer.server)) throw new BridgeError(503, "Herdr is not running on the selected computer. Headless dispatch is not installed yet.");
-  return result.working;
+  return { working: result.working, computerId: result.computer.id };
 }
 
 export class DispatchService {
   private active = false;
+  constructor(private readonly identity?: { computerID: string; validateParentTarget: (target: Target) => Promise<unknown> }) {}
   async dispatch(input: unknown): Promise<Json> {
     const data = dispatchSchema.parse(input);
     if (this.active) throw new BridgeError(429, "A dispatch is already being placed. Try again after its receipt arrives.");
     this.active = true;
     try {
+      if (data.parent !== undefined || data.parentTarget !== undefined) {
+        if (!this.identity) throw new BridgeError(503, "This Hook cannot validate a dispatch parent.");
+        await validateDispatchParent(data, this.identity.computerID, this.identity.validateParentTarget);
+      }
       if ((await readdir(path.join(bridgeRoot(), "dispatches")).catch(() => [])).length >= 1024) throw new BridgeError(429, "Dispatch history is full. Archive old receipts before dispatching again.");
       const peers = await hookPeers();
       let peer: HookPeer | undefined;
+      let remoteComputerID: string | undefined;
       if (data.computer === "anywhere") {
         const available = await Promise.all(peers.map(async candidate => {
-          try { return { peer: candidate, working: await capacity(candidate) }; } catch { return undefined; }
+          try { return { peer: candidate, ...await capacity(candidate) }; } catch { return undefined; }
         }));
-        peer = available.filter((item): item is NonNullable<typeof item> => !!item)
-          .sort((a, b) => a.working - b.working || a.peer.name.localeCompare(b.peer.name))[0]?.peer;
+        const selected = available.filter((item): item is NonNullable<typeof item> => !!item)
+          .sort((a, b) => a.working - b.working || a.peer.name.localeCompare(b.peer.name))[0];
+        peer = selected?.peer;
+        remoteComputerID = selected?.computerId;
         if (!peer) throw new BridgeError(503, "No enrolled computer with a running Herdr is connected.");
       } else {
         peer = peers.find(candidate => candidate.name === data.computer);
         if (!peer) throw new BridgeError(404, "Unknown computer. Add its verified connection to hooks.yaml.");
-        await capacity(peer);
+        remoteComputerID = (await capacity(peer)).computerId;
       }
       // Prompts are sent over the pipe, never stored in the dispatch ledger.
       const { prompt, ...metadata } = data;
-      const receipt: Receipt = { ...metadata, computer: peer.name, id: randomUUID(), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), state: "launching" };
+      const receipt: Receipt = { ...metadata, computer: peer.name, computerId: remoteComputerID!, id: randomUUID(),
+        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), state: "launching" };
       await save(receipt);
       try {
         const launched = await peerRequest(peer, `/v1/workspaces/launch?server=${encodeURIComponent(peer.server)}`,

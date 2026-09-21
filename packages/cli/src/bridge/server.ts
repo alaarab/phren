@@ -11,6 +11,8 @@ import { homeDirectory, startChangeRetention } from "./changes.js";
 import { threadHealth } from "./codex-threads.js";
 import { WorkspaceContextUsage } from "./context.js";
 import { DispatchService, dispatchProjectDirectory, dispatchStatus } from "./dispatch.js";
+import { remoteChildren } from "./dispatch-tree.js";
+import { hookPeers, peerRequest } from "./peers.js";
 import { candidateRepos, enrollProject } from "./enroll.js";
 import { browseFiles } from "./files.js";
 import { gitBranches, gitDiscard, gitLog, gitPulls, gitStage, gitStatus, gitTree, gitUnstage } from "./git.js";
@@ -88,7 +90,7 @@ export async function serve(version: string): Promise<void> {
   try { computerID = (await readFile(identityFile, "utf8")).trim(); }
   catch { computerID = randomUUID(); await writeFile(identityFile, computerID, { flag: "wx", mode: 0o600 }); }
   const launches = new LaunchLimiter();
-  const dispatches = new DispatchService();
+  const dispatches = new DispatchService({ computerID, validateParentTarget: target => validateTarget(target, false, true) });
   const locatedDirectories = new Set<string>();
   const journal = new ActivityJournal();
   const agentHooks = new AgentHooks();
@@ -128,7 +130,7 @@ export async function serve(version: string): Promise<void> {
           case "/v1/dispatch/capacity": {
             const live = await servers();
             const snapshots = await Promise.all(live.map(server => snapshot(String(server.session))));
-            result = { product: "phren-hook", protocol: PROTOCOL, servers: live.map(server => server.session),
+            result = { product: "phren-hook", protocol: PROTOCOL, computer: info.computer, servers: live.map(server => server.session),
               working: snapshots.reduce((sum, value) => sum + objects(value.panes).filter(pane => pane.agent && pane.agent_status === "working").length, 0) };
             break;
           }
@@ -220,7 +222,23 @@ export async function serve(version: string): Promise<void> {
           }
           case "/v1/subagents": {
             const target = targetFromURL(url); await validateTarget(target);
-            result = { agents: publicChildAgents(await childAgentTree(target.source, target.session)) }; break;
+            const local = await childAgentTree(target.source, target.session, 0, new Set(), computerID);
+            let remote: Awaited<ReturnType<typeof remoteChildren>> = [];
+            if (url.searchParams.get("remote") !== "0") {
+              const peers = await hookPeers().catch(() => []);
+              remote = await remoteChildren({ provider: target.source, session: target.session, computer: computerID },
+                await dispatchStatus(), async receipt => {
+                  const peer = peers.find(candidate => candidate.name === receipt.computer);
+                  const remoteTarget = targetSchema.safeParse(receipt.target);
+                  if (!peer || !remoteTarget.success) return;
+                  const query = new URLSearchParams(Object.entries(remoteTarget.data).map(([key, value]) => [key, String(value)]));
+                  query.set("remote", "0");
+                  const snapshot = await peerRequest(peer, `/v1/subagents?${query}`);
+                  return { target: remoteTarget.data, computer: snapshot.computer,
+                    agents: Array.isArray(snapshot.agents) ? snapshot.agents : [] };
+                });
+            }
+            result = { computer: info.computer, agents: publicChildAgents([...local, ...remote]) }; break;
           }
           case "/v1/subagents/transcript": {
             const target = targetFromURL(url); await validateTarget(target);
@@ -359,7 +377,11 @@ export async function serve(version: string): Promise<void> {
             if (!holding && (keys.every(key => key === "Escape") ? !["working", "blocked", "waiting", "unknown"].includes(status)
               : !["blocked", "waiting", "unknown"].includes(status))) throw new BridgeError(409, keys.every(key => key === "Escape") ? "This agent is no longer working." : "This agent is not waiting for an answer.");
             await rpc(target.server, "agent.send_keys", { target: target.pane, keys: keys.map(key => HERDR_KEYS[key] ?? key) });
-            if (keys.some(key => key !== "Up" && key !== "Down" && key !== "Tab")) { agentHooks.clearTerminalPrompt(target); agentHooks.menuClosed(target); }
+            // A remembered prompt is answered by any key but a cursor move; the
+            // menu window stays open through Enter because some choices (Codex
+            // full access) open a second confirmation the phone still walks.
+            if (keys.some(key => key !== "Up" && key !== "Down" && key !== "Tab")) agentHooks.clearTerminalPrompt(target);
+            if (keys.includes("Escape")) agentHooks.menuClosed(target);
             result = { ok: true };
           } else if (url.pathname === "/v1/secret") {
             // A password the terminal is reading (sudo, a login) cannot be

@@ -7,6 +7,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- OpenCode fan-out workers no longer stall on permission prompts. A headless worker's
+  edits, commands and fetches in its own worktree are granted by the Hook's OpenCode
+  plugin and anything else is refused at once instead of timing out after 50 seconds.
+- The Claude model list the phone shows matches Claude Code's own /model menu:
+  exact models, default first, an alias only for a family with no exact id.
 - The menu window the Hook opens after a bare slash command stays open through
   Enter, so a choice that opens a second confirmation (Codex full access) can
   still be answered from the phone; Escape closes it.
@@ -19,6 +24,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- Conductor dispatch receipts can retain a validated local conversation parent
+  and durable remote computer identity, while `/v1/subagents` projects remote
+  leads and their bounded local fan-out trees without exporting checkout paths.
 - Modules design, built-in manifests and store/profile configuration resolution,
   plus `phren modules list` to inspect configured enablement without changing
   runtime registration.

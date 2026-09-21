@@ -6,15 +6,15 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { glob } from "glob";
 import { withTranscriptIndex } from "./transcript-index.js";
-import { BridgeError, object, objects, sessionId, type Json, type Provider } from "./protocol.js";
+import { BridgeError, object, objects, sessionId, type Json, type Provider, type Target } from "./protocol.js";
 import { materializeCodexThread, materializedRoot } from "./codex-threads.js";
 import { namedPaths, SHELL_TOOLS, outputCallIds, type ChangeLookup } from "./changes.js";
 import { fanoutChildren, visibleCodexExecEvent, visibleOpenCodeRunEvent } from "./fanouts.js";
 
 export interface Entry { line: number; raw: Json }
 export interface ChildAgentRelation {
-  /** `id` is a parent-scoped public reference; `session` never leaves Hook. */
-  id: string; session: string; transcript: string; provider: Provider; path: string; callId: string; state: "running" | "completed";
+  /** `id` is a parent-scoped public reference; local session and transcript details never leave Hook. */
+  id: string; session?: string; transcript?: string; provider: Provider; path: string; callId: string; state: "running" | "completed" | "unavailable";
   /** Fan-out manifests and Claude child transcripts can name a model. */
   model?: string;
   /** Public checkout labels for fan-outs; full paths remain private. */
@@ -22,9 +22,17 @@ export interface ChildAgentRelation {
   branch?: string;
   /** The checkout a fan-out worker owns; parent-checkout children omit it. */
   cwd?: string;
+  /** Remote rows carry only routing identities, never a local path. */
+  computer?: { id: string; name: string };
+  remote?: { target: Target; child?: string };
   children: ChildAgentRelation[];
 }
-type DirectRelation = Omit<ChildAgentRelation, "id" | "transcript" | "provider" | "children">;
+export interface LocalChildAgentRelation extends ChildAgentRelation {
+  session: string;
+  transcript: string;
+  remote?: undefined;
+}
+type DirectRelation = Pick<LocalChildAgentRelation, "session" | "path" | "callId" | "state">;
 type ChildRelationCache = {
   dev: number; ino: number; fileSize: number; completeOffset: number; mtimeMs: number;
   relations: Map<string, DirectRelation>;
@@ -75,10 +83,12 @@ async function directChildAgents(file: string): Promise<DirectRelation[]> {
 /** Provider-neutral child-agent discovery. Codex currently supplies explicit
  * SubAgentActivity links; other providers return no children until their
  * public transcript format exposes an equivalent relationship. */
-export async function childAgentTree(source: Provider, session: string, depth = 0, seen = new Set<string>()): Promise<ChildAgentRelation[]> {
-  if (depth >= 4 || seen.size >= 128 || seen.has(session)) return [];
-  seen.add(session);
-  const fanouts: ChildAgentRelation[] = (await fanoutChildren(source, session)).map(child => ({
+export async function childAgentTree(source: Provider, session: string, depth = 0, seen = new Set<string>(), computer = "local"): Promise<ChildAgentRelation[]> {
+  const identity = `${computer}\0${source}\0${session}`;
+  if (depth >= 4 || seen.size >= 128 || seen.has(identity)) return [];
+  seen.add(identity);
+  const fanouts: ChildAgentRelation[] = (await fanoutChildren(source, session, process.env,
+    computer === "local" ? undefined : computer)).map(child => ({
     ...child, session: child.session ?? child.id, cwd: child.cwd, children: [],
   }));
   if (!["codex", "claude"].includes(source)) return fanouts;
@@ -90,7 +100,7 @@ export async function childAgentTree(source: Provider, session: string, depth = 
     if (!childFile || !await childTranscriptBelongsTo(childFile, session)) continue;
     verified.push({ ...relation, transcript: childFile, provider: source,
       id: createHash("sha256").update(`${source}\0${session}\0${relation.session}`).digest("hex").slice(0, 32),
-      children: await childAgentTree(source, relation.session, depth + 1, seen).catch(() => []) });
+      children: await childAgentTree(source, relation.session, depth + 1, seen, computer).catch(() => []) });
   }
   return [...verified, ...fanouts];
 }
@@ -134,7 +144,7 @@ async function claudeChildModel(file: string): Promise<string | undefined> {
 
 async function withClaudeChildModels(relations: ChildAgentRelation[]): Promise<ChildAgentRelation[]> {
   return Promise.all(relations.map(async relation => {
-    if (relation.model !== undefined) return relation;
+    if (relation.model !== undefined || relation.transcript === undefined) return relation;
     const model = await claudeChildModel(relation.transcript).catch(() => undefined);
     return model === undefined ? relation : { ...relation, model };
   }));
@@ -252,14 +262,20 @@ async function childTranscriptBelongsTo(file: string, parent: string): Promise<b
 /** Explicit wire projection prevents a provider's private transcript identity
  * from being returned if relation internals grow later. */
 export function publicChildAgents(tree: ChildAgentRelation[]): Json[] {
-  return tree.map(({ id, provider, path: agentPath, callId, state, model, worktreeName, branch, children }) =>
+  return tree.map(({ id, provider, path: agentPath, callId, state, model, worktreeName, branch, computer, remote, children }) =>
     ({ id, provider, path: agentPath, callId, state, ...(model !== undefined ? { model } : {}),
       ...(worktreeName !== undefined ? { worktreeName } : {}), ...(branch !== undefined ? { branch } : {}),
+      ...(computer !== undefined ? { computer: { id: computer.id, name: computer.name } } : {}),
+      ...(remote !== undefined ? { remote: { target: remote.target, ...(remote.child !== undefined ? { child: remote.child } : {}) } } : {}),
       children: publicChildAgents(children) }));
 }
 
-export function childAgent(tree: ChildAgentRelation[], id: string): ChildAgentRelation | undefined {
-  for (const node of tree) { if (node.id === id) return node; const nested = childAgent(node.children, id); if (nested) return nested; }
+export function childAgent(tree: ChildAgentRelation[], id: string): LocalChildAgentRelation | undefined {
+  for (const node of tree) {
+    if (node.remote !== undefined) continue;
+    if (node.id === id && node.session !== undefined && node.transcript !== undefined) return node as LocalChildAgentRelation;
+    const nested = childAgent(node.children, id); if (nested) return nested;
+  }
 }
 
 const CLAUDE_KEYS = new Set(["type", "uuid", "parentUuid", "timestamp", "message", "gitBranch", "cwd", "requestId", "isMeta", "isSidechain", "isCompactSummary", "phrenQueued", "phrenQueueKey", "phrenBackground", "phrenCompacted"]);
