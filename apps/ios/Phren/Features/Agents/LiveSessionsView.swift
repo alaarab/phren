@@ -512,6 +512,12 @@ final class LiveHostMonitor {
         }
         if AppModel.isUITesting && ProcessInfo.processInfo.arguments.contains("--automatic-sessions-fixture") {
             if ProcessInfo.processInfo.arguments.contains("--session-discovery-offline") { throw LiveConnectionError.disconnected }
+            if ProcessInfo.processInfo.arguments.contains("--conductor-fixture"),
+               let launch = AgentChatFixture.launches.last(where: { $0.role == "conductor" }) {
+                let model = launch.kind == "claude" ? "opus" : launch.kind == "codex" ? "gpt-5" : "default"
+                let conductor = #"{"id":"w9:t1","label":"1","title":"Phone conductor","agent":"\#(launch.kind)","agentStatus":"working","cwd":"\#(launch.cwd)","model":"\#(model)","role":"conductor","runningChildren":2,"childProviders":["codex","claude"]}"#
+                return try LiveWorkspaces.read(Data((#"{"kind":"herdr","groups":[{"id":"w9","label":"Phone conductor","children":["# + conductor + #"]},{"id":"w7","label":"Phone work","children":[{"id":"w7:t9","label":"1","title":"Polish the phone app","agent":"codex","agentStatus":"working","cwd":"/work/phone/src"}]}]}"#).utf8))
+            }
             if ProcessInfo.processInfo.arguments.contains("--session-details-fixture") {
                 if previousUpdate != nil && ProcessInfo.processInfo.arguments.contains("--session-details-removed") {
                     return try LiveWorkspaces.read(Data(#"{"kind":"herdr","groups":[]}"#.utf8))
@@ -971,16 +977,20 @@ private struct LiveSessionCard: View, Equatable {
                 do {
                     if let snapshot = try await SessionSubagentSnapshot.load(session) {
                         childTarget = snapshot.target; childAgents = snapshot.agents
+                        let computers = AgentChild.runningRows(snapshot.agents).compactMap { $0.agent.computer?.name }
                         await SessionWorkingActivityController.shared.observeSubagents(
-                            session: session, count: snapshot.agents.reduce(0) { $0 + $1.runningCount })
+                            session: session, count: snapshot.agents.reduce(0) { $0 + $1.runningCount },
+                            computers: computers)
                     } else {
                         childTarget = nil; childAgents = []
-                        await SessionWorkingActivityController.shared.observeSubagents(session: session, count: 0)
+                        await SessionWorkingActivityController.shared.observeSubagents(
+                            session: session, count: session.tab.runningChildren)
                     }
                 } catch {
                     if !Task.isCancelled {
                         childTarget = nil; childAgents = []
-                        await SessionWorkingActivityController.shared.observeSubagents(session: session, count: 0)
+                        await SessionWorkingActivityController.shared.observeSubagents(
+                            session: session, count: session.tab.runningChildren)
                     }
                 }
                 try? await Task.sleep(for: .seconds(10))

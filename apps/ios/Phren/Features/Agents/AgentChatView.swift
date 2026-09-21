@@ -728,17 +728,26 @@ struct AgentChatView: View {
     private func refreshChildAgents() async {
         guard let target = model.target, !target.isStarting else {
             childAgents = []
-            await SessionWorkingActivityController.shared.observeSubagents(session: session, count: 0)
+            await SessionWorkingActivityController.shared.observeSubagents(
+                session: session, count: session.tab.runningChildren)
             return
         }
         #if DEBUG && targetEnvironment(simulator)
-        if AgentChatFixture.enabled { childAgents = (try? AgentChatFixture.childAgents(target).agents) ?? []; return }
+        if AgentChatFixture.enabled {
+            childAgents = (try? AgentChatFixture.childAgents(target).agents) ?? []
+            let computers = AgentChild.runningRows(childAgents).compactMap { $0.agent.computer?.name }
+            await SessionWorkingActivityController.shared.observeSubagents(
+                session: session, count: runningChildAgentCount, computers: computers)
+            return
+        }
         #endif
         do {
             let key = try DeviceSSHKey.load(session.host.id)
             let tree = try await PhrenConnection.childAgents(host: session.host, privateKey: key, target: target)
             childAgents = tree.agents
-            await SessionWorkingActivityController.shared.observeSubagents(session: session, count: runningChildAgentCount)
+            let computers = AgentChild.runningRows(childAgents).compactMap { $0.agent.computer?.name }
+            await SessionWorkingActivityController.shared.observeSubagents(
+                session: session, count: runningChildAgentCount, computers: computers)
         } catch {}
     }
 
@@ -963,7 +972,18 @@ struct AgentChatView: View {
     private var chatHeader: some View {
         HStack(spacing: 10) {
             ChatDismissButton()
-            AgentProviderGlyph(source: model.target?.source, size: 22)
+            Group {
+                if session.tab.isConductor {
+                    Image(systemName: "wand.and.rays")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(PhrenTheme.accent)
+                        .accessibilityLabel("Conductor")
+                        .accessibilityIdentifier("chat-conductor-mark")
+                } else {
+                    AgentProviderGlyph(source: model.target?.source, size: 22)
+                }
+            }
+                .frame(width: 22, height: 22)
                 .overlay(alignment: .bottomTrailing) {
                     ChatActivityIndicator(connected: model.connected && active,
                                           reconnecting: active && model.target != nil && !model.connected && !model.loading && !model.automaticReconnectSuspended,
@@ -976,11 +996,17 @@ struct AgentChatView: View {
                 }
                 .accessibilityElement(children: .contain)
             VStack(alignment: .leading, spacing: 2) {
-                Text(selectedPane?.displayTitle ?? session.projectDisplayName(project?.name))
-                    .font(PhrenTypography.subheadline.weight(.semibold)).lineLimit(1)
-                    .foregroundStyle(selectedPane == nil && project != nil
-                                     ? PhrenTheme.projectColor(storeId: project!.storeID, project: project!.name)
-                                     : PhrenTheme.chatText)
+                HStack(spacing: 4) {
+                    if session.tab.isConductor {
+                        Text("Conductor").foregroundStyle(PhrenTheme.accent)
+                        Text("·")
+                    }
+                    Text(selectedPane?.displayTitle ?? session.projectDisplayName(project?.name))
+                        .foregroundStyle(selectedPane == nil && project != nil
+                                         ? PhrenTheme.projectColor(storeId: project!.storeID, project: project!.name)
+                                         : PhrenTheme.chatText)
+                }
+                .font(PhrenTypography.subheadline.weight(.semibold)).lineLimit(1)
                 HStack(spacing: 4) {
                     if session.usesFolderFallback(mappedProject: project?.name) { Image(systemName: "folder").font(.caption2) }
                     Text(chatLocationProject).foregroundStyle(chatLocationColor).lineLimit(1)

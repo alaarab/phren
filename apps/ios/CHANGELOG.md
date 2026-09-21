@@ -13,6 +13,8 @@ lock screen and Changes screen done properly.
 
 ### New
 
+- Conductor is a launch role with its own provider, model and effort choice,
+  a pinned dispatch-marked session card, and matching chat and Lock Screen identity.
 - Memory is map or list: the full graph with its node dossier, or the same findings,
   notes, tasks and topics as a filterable list. A search icon and two drop-down
   filters for kinds and projects sit above both; mode and filters are remembered.
@@ -62,6 +64,9 @@ lock screen and Changes screen done properly.
 - Denser chat and Changes screens: the header sits under the status bar, the
   composer sits on the home indicator, tool cards are 44pt, and the Changes
   tabs, rows and tree are slimmer.
+- OpenCode conversations draw the same rows as Claude's: a read folds into the
+  same run, an edit or write shows its path and patch card, a task or todo its
+  card, and a phren tool its phren card, instead of a raw-JSON pill.
 - Knobs are chosen with phren's own option rows instead of system pickers.
 - A Codex thread that stopped recording says so in the chat instead of going
   stale.

@@ -22,6 +22,8 @@ final class SessionWorkingActivityController {
     private var overviewModels: [String: String] = [:]
     private var subagents: [String: Int] = [:]
     private var childProviders: [String: [String]] = [:]
+    private var roles: [String: String] = [:]
+    private var leadComputers: [String: [String]] = [:]
     private var chat: (session: SessionWorkingActivityBuilder.Session, at: Date)?
     private var pinnedID: String?
     private var updateTask: Task<Void, Never>?
@@ -51,6 +53,7 @@ final class SessionWorkingActivityController {
         entity.projectStoreID = projectStoreID
         subagents[entity.id] = session.tab.runningChildren
         childProviders[entity.id] = session.tab.childProviders
+        roles[entity.id] = session.tab.role
         let state = normalized(state)
         tools[entity.id] = state == "working" ? toolName : nil
         details[entity.id] = state == "working" ? toolDetail : nil
@@ -61,11 +64,13 @@ final class SessionWorkingActivityController {
     /// Running subagents for a session. The Agents overview already polls this
     /// per card (and the open chat per transcript revision); the controller
     /// only stores the number and lets the existing throttle publish it.
-    func observeSubagents(session: LiveAgentSession, count: Int) async {
+    func observeSubagents(session: LiveAgentSession, count: Int, computers: [String] = []) async {
         let id = AgentSessionEntity(session).id
         let value = max(0, count)
-        guard subagents[id] != value else { return }
+        let names = Array(Set(computers.filter { !$0.isEmpty })).sorted()
+        guard subagents[id] != value || leadComputers[id] != names else { return }
         subagents[id] = value
+        leadComputers[id] = names
         scheduleUpdate()
     }
 
@@ -86,6 +91,7 @@ final class SessionWorkingActivityController {
             if let model = session.tab.model, !model.isEmpty { overviewModels[id] = model } else { overviewModels[id] = nil }
             subagents[id] = session.tab.runningChildren
             childProviders[id] = session.tab.childProviders
+            roles[id] = session.tab.role
         }
         let reportsByID = Dictionary(reports.map { ($0.entity.id, $0) }, uniquingKeysWith: { _, latest in latest })
         let sourceFolders = Dictionary(projects.compactMap { project in
@@ -106,6 +112,8 @@ final class SessionWorkingActivityController {
         overviewModels = overviewModels.filter { retained.contains($0.key) }
         subagents = subagents.filter { retained.contains($0.key) || chat?.session.entry.id == $0.key }
         childProviders = childProviders.filter { retained.contains($0.key) || chat?.session.entry.id == $0.key }
+        roles = roles.filter { retained.contains($0.key) || chat?.session.entry.id == $0.key }
+        leadComputers = leadComputers.filter { retained.contains($0.key) || chat?.session.entry.id == $0.key }
         scheduleUpdate()
     }
 
@@ -119,6 +127,8 @@ final class SessionWorkingActivityController {
         overviewModels = overviewModels.filter { entities[$0.key] != nil || chat?.session.entry.id == $0.key }
         subagents = subagents.filter { entities[$0.key] != nil || chat?.session.entry.id == $0.key }
         childProviders = childProviders.filter { entities[$0.key] != nil || chat?.session.entry.id == $0.key }
+        roles = roles.filter { entities[$0.key] != nil || chat?.session.entry.id == $0.key }
+        leadComputers = leadComputers.filter { entities[$0.key] != nil || chat?.session.entry.id == $0.key }
         starts = starts.filter { entities[$0.key] != nil }
         states = states.filter { entities[$0.key] != nil }
         scheduleUpdate()
@@ -183,12 +193,14 @@ final class SessionWorkingActivityController {
         }
         let began = starts[entity.id] ?? now
         return .init(entry: .init(id: entity.id, project: String((entity.project ?? entity.workspace).prefix(80)),
-                                 provider: provider ?? entity.agent ?? "agent", tool: tool.map { String($0.prefix(60)) },
+                                 provider: provider ?? entity.agent ?? "agent", role: roles[entity.id],
+                                 tool: tool.map { String($0.prefix(60)) },
                                  computer: String(entity.computer.prefix(60)),
                                  model: overviewModels[entity.id].map { String($0.prefix(40)) },
                                  step: presentation.step, branch: branch.map { String($0.prefix(80)) },
                                  projectColor: projectColorHex(entity), subagents: workers,
-                                 childProviders: childProviders[entity.id] ?? [], state: state, startedAt: began),
+                                 childProviders: childProviders[entity.id] ?? [],
+                                 leadComputers: leadComputers[entity.id] ?? [], state: state, startedAt: began),
                      state: state, startedAt: began)
     }
 

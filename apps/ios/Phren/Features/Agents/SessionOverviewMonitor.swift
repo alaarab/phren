@@ -301,6 +301,7 @@ final class SessionOverviewMonitor {
     /// Most recently changed first (Herdr's state counter, when the Hook
     /// reports it), then by computer and workspace so the rest stays stable.
     private static func ordered(_ lhs: LiveAgentSession, _ rhs: LiveAgentSession) -> Bool {
+        if lhs.tab.isConductor != rhs.tab.isConductor { return lhs.tab.isConductor }
         let left = lhs.tab.lastChangedAt ?? .distantPast, right = rhs.tab.lastChangedAt ?? .distantPast
         if left != right { return left > right }
         if lhs.host.id == rhs.host.id, lhs.tab.changedSeq != rhs.tab.changedSeq {

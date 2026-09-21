@@ -223,9 +223,9 @@ import UIKit
         // A session launched from a project runs the harness that was picked.
         let launchedKind = launches.last.map(\.kind).flatMap { session.workspaceID == "w9" ? $0 : nil }
         let remote = flag("--agent-work-navigation") && session.host.id.uuidString.hasSuffix("000002")
-        let agent = remote ? "codex" : launchedKind ?? (flag("--chat-copilot") ? "copilot" : (trailer || flag("--chat-claude-queue") || flag("--chat-claude-image") || flag("--chat-read-images") || flag("--chat-approval-question") || flag("--chat-agent-card") || flag("--chat-todos") || flag("--chat-plan-mode") || flag("--chat-web-tools") || flag("--chat-skill-chip") || flag("--chat-mcp-card") || flag("--chat-compaction") || (tour && flag("--chat-phren-tools"))) ? "claude" : "codex")
+        let agent = remote ? "codex" : launchedKind ?? (flag("--chat-opencode") ? "opencode" : flag("--chat-copilot") ? "copilot" : (trailer || flag("--chat-claude-queue") || flag("--chat-claude-image") || flag("--chat-read-images") || flag("--chat-approval-question") || flag("--chat-agent-card") || flag("--chat-todos") || flag("--chat-plan-mode") || flag("--chat-web-tools") || flag("--chat-skill-chip") || flag("--chat-mcp-card") || flag("--chat-compaction") || flag("--chat-density") || (tour && flag("--chat-phren-tools"))) ? "claude" : "codex")
         var panes: [[String: Any]] = [["id": "\(session.workspaceID):p1", "label": "1", "title": tour ? "Ship the onboarding flow" : "Polish the phone app", "agent": agent,
-                                     "agentStatus": ((flag("--chat-blocked") || flag("--chat-approval") || flag("--chat-approval-question") || flag("--chat-plan-mode") || flag("--chat-question")) && !answered) ? "blocked" : (flag("--chat-queue-completion") || flag("--chat-history-stalled") || (flag("--chat-working") && !stopped) ? "working" : "idle"), "sessionId": remote ? "00000000-0000-0000-0000-000000000042" : agent == "copilot" ? "00000000-0000-0000-0000-000000000023" : "fixture-\(agent)-session", "cwd": root]]
+                                     "agentStatus": ((flag("--chat-blocked") || flag("--chat-approval") || flag("--chat-approval-question") || flag("--chat-plan-mode") || flag("--chat-question")) && !answered) ? "blocked" : (flag("--chat-queue-completion") || flag("--chat-history-stalled") || (flag("--chat-working") && !stopped) ? "working" : "idle"), "sessionId": remote ? "00000000-0000-0000-0000-000000000042" : agent == "copilot" ? "00000000-0000-0000-0000-000000000023" : agent == "opencode" ? "ses_fixtureopencode" : "fixture-\(agent)-session", "cwd": root]]
         if flag("--starting-session-fixture") {
             panes[0]["startingToken"] = startingToken
             if startingAttachedAt == nil || Date.now < startingAttachedAt! {
@@ -257,6 +257,8 @@ import UIKit
         func append(_ role: String, _ text: String) {
             let raw: [String: Any] = target.source == "copilot"
                 ? ["type": role + ".message", "data": ["content": text]]
+                : target.source == "opencode"
+                ? ["type": role == "user" ? "user/message" : "assistant/message", "data": ["message": ["role": role, "content": [["type": "text", "text": text]]]]]
                 : target.source == "codex"
                 ? ["type": "response_item", "payload": ["type": "message", "role": role, "content": [["type": "text", "text": text]]]]
                 : ["type": role, "message": ["role": role, "content": [["type": "text", "text": text]]]]
@@ -388,6 +390,9 @@ import UIKit
                 if target.source == "codex" {
                     entries.append(["line": entries.count, "raw": ["type": "response_item", "payload": ["type": "function_call", "call_id": "phren-" + id, "name": "mcp__phren__" + tool, "arguments": arguments]]])
                     entries.append(["line": entries.count, "raw": ["type": "response_item", "payload": ["type": "function_call_output", "call_id": "phren-" + id, "output": output]]])
+                } else if target.source == "opencode" {
+                    entries.append(["line": entries.count, "raw": ["type": "assistant/message", "data": ["message": ["role": "assistant", "content": [["type": "tool_use", "id": "phren-" + id, "name": "mcp__phren__" + tool, "input": input]]]]]])
+                    entries.append(["line": entries.count, "raw": ["type": "tool/results", "data": ["message": ["role": "user", "content": [["type": "tool_result", "tool_use_id": "phren-" + id, "content": [["type": "text", "text": resultText]]]]]]]])
                 } else {
                     entries.append(["line": entries.count, "raw": ["type": "assistant", "message": ["role": "assistant", "content": [["type": "tool_use", "id": "phren-" + id, "name": "mcp__phren__" + tool, "input": input]]]]])
                     entries.append(["line": entries.count, "raw": ["type": "user", "message": ["role": "user", "content": [["type": "tool_result", "tool_use_id": "phren-" + id, "content": [["type": "text", "text": resultText]]]]]]])
@@ -398,10 +403,44 @@ import UIKit
         // count from the same start as `append`'s, so a history offset keeps
         // calls and replies in order.
         let firstLine = flag("--chat-history") ? 20 : 0
+        // OpenCode names its builtins in lower case and its file arguments in
+        // camelCase; the phone parses that shape as it parses phren-agent's.
+        func openCodeName(_ name: String) -> String {
+            if name.hasPrefix("mcp__") {
+                let parts = name.components(separatedBy: "__")
+                if parts.count >= 3, !parts[1].isEmpty { return parts[1] + "_" + parts.dropFirst(2).joined(separator: "_") }
+            }
+            return ["Bash": "bash", "Read": "read", "Write": "write", "Edit": "edit", "Grep": "grep", "Glob": "glob",
+                    "Task": "task", "Skill": "skill", "WebFetch": "webfetch", "WebSearch": "websearch", "TodoWrite": "todowrite",
+                    "EnterPlanMode": "plan_enter", "ExitPlanMode": "plan_exit"][name] ?? name
+        }
+        func openCodeInput(_ input: [String: Any]) -> [String: Any] {
+            var value: [String: Any] = [:]
+            for (key, item) in input {
+                switch key {
+                case "file_path": value["filePath"] = item
+                case "old_string": value["oldString"] = item
+                case "new_string": value["newString"] = item
+                default: value[key] = item
+                }
+            }
+            return value
+        }
         func claudeCall(_ id: String, _ name: String, _ input: [String: Any]) {
+            if target.source == "opencode" {
+                entries.append(["line": firstLine + entries.count, "raw": ["type": "assistant/message", "data": ["message": ["role": "assistant",
+                    "content": [["type": "tool_use", "id": id, "name": openCodeName(name), "input": openCodeInput(input)]]]]]])
+                return
+            }
             entries.append(["line": firstLine + entries.count, "raw": ["type": "assistant", "message": ["role": "assistant", "content": [["type": "tool_use", "id": id, "name": name, "input": input]]]]])
         }
         func claudeResult(_ id: String, _ text: String, error: Bool = false) {
+            if target.source == "opencode" {
+                var block: [String: Any] = ["type": "tool_result", "tool_use_id": id, "content": text]
+                if error { block["is_error"] = true }
+                entries.append(["line": firstLine + entries.count, "raw": ["type": "tool/results", "data": ["message": ["role": "user", "content": [block]]]]])
+                return
+            }
             var block: [String: Any] = ["type": "tool_result", "tool_use_id": id, "content": text]
             if error { block["is_error"] = true }
             entries.append(["line": firstLine + entries.count, "raw": ["type": "user", "message": ["role": "user", "content": [block]]]])
@@ -546,6 +585,27 @@ import UIKit
         }
         if flag("--chat-markdown") { append("assistant", "# Changes\nHere is the fix in `packages/cli/src/bridge/projects.ts`, using `lsof -Fpcn`:\n```swift\nlet color = \"cyan\"\n```\nReady to test.") }
         if flag("--chat-link") { append("assistant", "[Open linked page](https://example.org/phren-fixture)") }
+        if flag("--chat-density") {
+            // A fixed conversation covering every row the density pass touches:
+            // user bubbles, assistant text, a folded read run, a shell pill, an
+            // edit card, a background job and a subagent card.
+            append("user", "Fold the reads and keep the cards.")
+            append("assistant", "Looking at the project now.")
+            for index in 0..<3 {
+                claudeCall("density-read-\(index)", "Read", ["file_path": "/work/phone/Sources/File\(index).swift"])
+                claudeResult("density-read-\(index)", "let value = \(index)")
+            }
+            append("assistant", "Reads done; checking the tree.")
+            claudeCall("density-shell", "Bash", ["command": "git status --short", "description": "Check the tree"])
+            claudeResult("density-shell", " M Sources/App.swift")
+            claudeCall("density-edit", "Edit", ["file_path": root + "/Sources/App.swift", "old_string": "let accent = green", "new_string": "let accent = purple"])
+            claudeResult("density-edit", "The file \(root)/Sources/App.swift has been updated.")
+            claudeCall("density-bg", "Bash", ["command": "swift test", "description": "Run the suite", "run_in_background": true])
+            claudeResult("density-bg", "Command running in background with ID: density-bg")
+            claudeCall("density-agent", "Task", ["description": "Audit the timeline", "subagent_type": "Explore", "prompt": "Read the timeline and report which calls fold."])
+            claudeResult("density-agent", "# Audit\n\n- Reads fold\n- Cards stay\n\nFinal audit marker.")
+            append("assistant", "All set.")
+        }
         // Real transcripts retain the tool call after it is answered. Keep its
         // line stable so the reply appends instead of reusing a tool message ID.
         if flag("--chat-async-question") || flag("--chat-question-unsupported") {
@@ -822,7 +882,7 @@ import UIKit
     /// "Open on a computer": what the Hook would return after creating a
     /// workspace and starting the agent, plus the snapshot the session comes
     /// from. Recorded so a UI test can check what was asked for.
-    static var launches: [(cwd: String, label: String, kind: String)] = []
+    static var launches: [(cwd: String, label: String, kind: String, role: String, effort: String?)] = []
     static func locate(project: String) async throws -> [PhrenConnection.LocatedFolder] {
         try await Task.sleep(for: .milliseconds(150))
         return [.init(directory: "/work/\(project)", source: "activity", lastSeen: "2026-09-12T01:00:00Z"),
@@ -902,11 +962,12 @@ import UIKit
 
     /// Simulator actions the fixture screen sent, for tests.
     nonisolated(unsafe) static var simulatorActions: [String] = []
-    static func launch(host: LiveHost, cwd: String, label: String, kind: String) async throws -> LiveAgentSession {
+    static func launch(host: LiveHost, cwd: String, label: String, kind: String,
+                       role: String = "agent", effort: String? = nil) async throws -> LiveAgentSession {
         try await Task.sleep(for: .milliseconds(400))
-        launches.append((cwd, label, kind))
+        launches.append((cwd, label, kind, role, effort))
         if flag("--launch-fails") { throw PhrenKitError.validation("Herdr couldn't start \(kind) in the new pane: the fixture said no.") }
-        let json = #"{"kind":"herdr","groups":[{"id":"w9","label":"\#(label)","children":[{"id":"w9:t1","label":"1","title":"\#(label)","agent":"\#(kind)","agentStatus":"idle","cwd":"\#(cwd)","sessionId":"fixture-\#(kind)-session","agentPaneCount":1,"paneCount":1}]}]}"#
+        let json = #"{"kind":"herdr","groups":[{"id":"w9","label":"\#(label)","children":[{"id":"w9:t1","label":"1","title":"\#(label)","agent":"\#(kind)","agentStatus":"working","cwd":"\#(cwd)","sessionId":"fixture-\#(kind)-session","agentPaneCount":1,"paneCount":1,"role":"\#(role)"}]}]}"#
         guard let session = try LiveWorkspaces.read(Data(json.utf8)).sessions(on: host).first else { throw PhrenKitError.validation("Fixture produced no session.") }
         return session
     }

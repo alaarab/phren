@@ -18,12 +18,20 @@ public struct PhrenToolPresentation: Equatable, Sendable {
     public let status: Status
 
     public static func recognizes(_ name: String?) -> Bool {
-        (name ?? "").split(separator: ".").last?.hasPrefix("mcp__phren__") == true
+        bareTool(name) != nil
+    }
+
+    /// The tool after phren's own prefix: Claude Code sends
+    /// `mcp__phren__add_task`; OpenCode names its MCP servers `phren_add_task`.
+    static func bareTool(_ name: String?) -> String? {
+        guard let tool = (name ?? "").split(separator: ".").last.map(String.init) else { return nil }
+        if tool.hasPrefix("mcp__phren__") { return String(tool.dropFirst("mcp__phren__".count)) }
+        if tool.hasPrefix("phren_") { return String(tool.dropFirst("phren_".count)) }
+        return nil
     }
 
     public init?(name: String, input: String, result: String? = nil, isError: Bool = false) {
-        guard Self.recognizes(name) else { return nil }
-        let tool = String(name.split(separator: ".").last!.dropFirst("mcp__phren__".count))
+        guard let tool = Self.bareTool(name) else { return nil }
         let values = Self.object(input) as? [String: Any] ?? [:]
         let response = result.map { Self.unwrap(Self.object($0) ?? $0) }
         let envelope = response as? [String: Any] ?? [:]

@@ -23,6 +23,17 @@ final class LaunchSessionTests: XCTestCase {
         XCTAssertThrowsError(try PhrenConnection.launchedSession(from: Data(#"{"error":"nope"}"#.utf8), kind: .claude))
     }
 
+    func testConductorLaunchBodyCarriesRoleModelAndEffort() throws {
+        let request = PhrenConnection.LaunchRequest(cwd: "/work/phren", label: "phren", kind: .claude,
+                                                    model: "opus", role: .conductor, effort: .high)
+        let data = try PhrenConnection.launchRequestBody(request)
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(body["role"] as? String, "conductor")
+        XCTAssertEqual(body["effort"] as? String, "high")
+        XCTAssertEqual(body["kind"] as? String, "claude")
+        XCTAssertEqual(body["model"] as? String, "opus")
+    }
+
     func testLaunchValidatesInputBeforeConnecting() async throws {
         let host = try LiveHost(name: "Fixture", address: "fixture.invalid", username: "fixture")
         do { _ = try await PhrenConnection.launchSession(host: host, privateKey: Data(), cwd: "relative", label: "phren", kind: .codex); XCTFail("relative cwd") }

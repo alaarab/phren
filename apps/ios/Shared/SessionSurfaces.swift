@@ -86,6 +86,9 @@ struct SessionWorkingActivityAttributes: ActivityAttributes {
         let id: String
         let project: String
         let provider: String
+        /// Optional tab role. Missing means an ordinary agent for activities
+        /// created by older app versions.
+        let role: String?
         let tool: String?
         let computer: String
         /// The model the agent runs, as the Hook's overview named it; nil when
@@ -104,22 +107,27 @@ struct SessionWorkingActivityAttributes: ActivityAttributes {
         let subagents: Int
         /// Distinct providers among the running children, for the leading glyph stack.
         let childProviders: [String]
+        /// Distinct remote computers seen in the child tree. The overview
+        /// cannot supply these, so an empty list deliberately means unknown.
+        let leadComputers: [String]
         /// "working", "waiting" or "idle"; the lock screen colours the step by it.
         let state: String?
         /// When the agent's current turn or session began, so each row has its
         /// own timer; nil when the Hook never reported one.
         let startedAt: Date?
 
-        init(id: String, project: String, provider: String, tool: String? = nil, computer: String,
+        init(id: String, project: String, provider: String, role: String? = nil,
+             tool: String? = nil, computer: String,
              model: String? = nil, step: String? = nil, branch: String? = nil, projectColor: String? = nil,
-             subagents: Int = 0, childProviders: [String] = [], state: String? = nil,
+             subagents: Int = 0, childProviders: [String] = [], leadComputers: [String] = [], state: String? = nil,
              startedAt: Date? = nil) {
-            self.id = id; self.project = project; self.provider = provider; self.tool = tool
+            self.id = id; self.project = project; self.provider = provider; self.role = role; self.tool = tool
             self.computer = computer; self.model = model; self.step = step; self.branch = branch
             self.projectColor = projectColor; self.subagents = subagents
-            self.childProviders = childProviders; self.state = state; self.startedAt = startedAt
+            self.childProviders = childProviders; self.leadComputers = leadComputers
+            self.state = state; self.startedAt = startedAt
         }
-        private enum CodingKeys: String, CodingKey { case id, project, provider, tool, computer, model, step, branch, projectColor, subagents, childProviders, state, startedAt }
+        private enum CodingKeys: String, CodingKey { case id, project, provider, role, tool, computer, model, step, branch, projectColor, subagents, childProviders, leadComputers, state, startedAt }
         /// Decode activities created before the step/subagent/model fields too,
         /// so an upgrade does not make an already-live activity undecodable.
         init(from decoder: Decoder) throws {
@@ -127,6 +135,7 @@ struct SessionWorkingActivityAttributes: ActivityAttributes {
             id = try values.decode(String.self, forKey: .id)
             project = try values.decode(String.self, forKey: .project)
             provider = try values.decode(String.self, forKey: .provider)
+            role = try values.decodeIfPresent(String.self, forKey: .role)
             tool = try values.decodeIfPresent(String.self, forKey: .tool)
             computer = try values.decode(String.self, forKey: .computer)
             model = try values.decodeIfPresent(String.self, forKey: .model)
@@ -135,6 +144,7 @@ struct SessionWorkingActivityAttributes: ActivityAttributes {
             projectColor = try values.decodeIfPresent(String.self, forKey: .projectColor)
             subagents = try values.decodeIfPresent(Int.self, forKey: .subagents) ?? 0
             childProviders = try values.decodeIfPresent([String].self, forKey: .childProviders) ?? []
+            leadComputers = try values.decodeIfPresent([String].self, forKey: .leadComputers) ?? []
             state = try values.decodeIfPresent(String.self, forKey: .state)
             startedAt = try values.decodeIfPresent(Date.self, forKey: .startedAt)
         }

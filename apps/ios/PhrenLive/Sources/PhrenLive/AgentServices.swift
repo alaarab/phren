@@ -297,6 +297,37 @@ extension PhrenConnection {
         public var title: String { self == .claude ? "Claude Code" : self == .copilot ? "Copilot" : self == .opencode ? "opencode" : "Codex" }
     }
 
+    public enum LaunchRole: String, Codable, Sendable, CaseIterable, Identifiable, Hashable {
+        case agent, conductor
+        public var id: String { rawValue }
+    }
+
+    public enum LaunchEffort: String, Codable, Sendable, CaseIterable, Identifiable, Hashable {
+        case low, medium, high
+        public var id: String { rawValue }
+    }
+
+    /// Typed input for `/v1/workspaces/launch`. Role is explicit even for an
+    /// ordinary agent so the phone and Hook never infer different defaults.
+    public struct LaunchRequest: Sendable, Equatable {
+        public let cwd: String
+        public let label: String
+        public let kind: LaunchKind
+        public let workspaceID: String?
+        public let timeoutMs: Int
+        public let model: String?
+        public let role: LaunchRole
+        public let effort: LaunchEffort?
+
+        public init(cwd: String, label: String, kind: LaunchKind, workspaceID: String? = nil,
+                    timeoutMs: Int = 45_000, model: String? = nil, role: LaunchRole = .agent,
+                    effort: LaunchEffort? = nil) {
+            self.cwd = cwd; self.label = label; self.kind = kind
+            self.workspaceID = workspaceID; self.timeoutMs = timeoutMs
+            self.model = model; self.role = role; self.effort = effort
+        }
+    }
+
     /// What `POST /v1/workspaces/launch` hands back: the new pane with the
     /// agent Herdr detected in it. `sessionID` is usually still nil here —
     /// the agent has not written a transcript yet — so the caller polls
@@ -314,29 +345,41 @@ extension PhrenConnection {
     /// `cwd` on the computer, with `kind` started in its pane. Blocks until
     /// Herdr reports the agent ready — up to `timeoutMs` plus a margin.
     public static func launchSession(host: LiveHost, privateKey: Data, cwd: String, label: String, kind: LaunchKind,
-                                     workspaceID: String? = nil, timeoutMs: Int = 45_000, model: String? = nil) async throws -> LaunchedSession {
-        guard cwd.hasPrefix("/"), cwd.utf8.count <= 4_096, !cwd.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else {
+                                     workspaceID: String? = nil, timeoutMs: Int = 45_000, model: String? = nil,
+                                     role: LaunchRole = .agent, effort: LaunchEffort? = nil) async throws -> LaunchedSession {
+        let launch = LaunchRequest(cwd: cwd, label: label, kind: kind, workspaceID: workspaceID,
+                                   timeoutMs: timeoutMs, model: model, role: role, effort: effort)
+        var request = GatewayRequest(path: "/v1/workspaces/launch", body: try launchRequestBody(launch))
+        request.timeoutSeconds = min(120_000, max(3_000, timeoutMs)) / 1_000 + 20
+        let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: request)
+        return try launchedSession(from: data, kind: kind)
+    }
+
+    static func launchRequestBody(_ launch: LaunchRequest) throws -> Data {
+        guard launch.cwd.hasPrefix("/"), launch.cwd.utf8.count <= 4_096,
+              !launch.cwd.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else {
             throw PhrenKitError.validation("Enter the full folder path on this computer.")
         }
-        let name = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = launch.label.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, name.utf8.count <= 200, !name.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else {
             throw PhrenKitError.validation("Enter a short workspace name.")
         }
-        if let workspaceID { guard AgentChatTarget.validID(workspaceID) else { throw PhrenKitError.validation("Choose a Herdr workspace.") } }
-        let timeout = min(120_000, max(3_000, timeoutMs))
-        var body: [String: Any] = ["cwd": cwd, "label": name, "kind": kind.rawValue, "timeoutMs": timeout]
-        body["workspaceId"] = workspaceID
-        if let model {
+        if let workspaceID = launch.workspaceID {
+            guard AgentChatTarget.validID(workspaceID) else { throw PhrenKitError.validation("Choose a Herdr workspace.") }
+        }
+        let timeout = min(120_000, max(3_000, launch.timeoutMs))
+        var body: [String: Any] = ["cwd": launch.cwd, "label": name, "kind": launch.kind.rawValue,
+                                   "timeoutMs": timeout, "role": launch.role.rawValue]
+        body["workspaceId"] = launch.workspaceID
+        if let model = launch.model {
             let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty, trimmed.utf8.count <= 200, !trimmed.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else {
                 throw PhrenKitError.validation("Enter a model name.")
             }
             body["model"] = trimmed
         }
-        var request = GatewayRequest(path: "/v1/workspaces/launch", body: try JSONSerialization.data(withJSONObject: body))
-        request.timeoutSeconds = timeout / 1_000 + 20
-        let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: request)
-        return try launchedSession(from: data, kind: kind)
+        if let effort = launch.effort { body["effort"] = effort.rawValue }
+        return try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
     }
 
     /// Strict: every identifier must be a Herdr id and the agent must be the

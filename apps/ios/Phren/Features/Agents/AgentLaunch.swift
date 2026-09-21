@@ -2,6 +2,40 @@ import PhrenKit
 import PhrenLive
 import SwiftUI
 
+struct ConductorLaunchChoice: Codable, Equatable {
+    let harness: String
+    let model: String
+    let effort: String
+}
+
+private struct ConductorLaunchSettingsDocument: Codable, VersionedDocument {
+    static let currentSchemaVersion = 1
+    var schemaVersion = Self.currentSchemaVersion
+    var stores: [String: ConductorLaunchChoice] = [:]
+}
+
+@MainActor
+enum ConductorLaunchSettings {
+    private static let key = "launch.conductor.choices.v1"
+    private static let document = "conductor launch settings"
+
+    static func load(storeID: String, defaults: UserDefaults = AppRuntime.defaults) -> ConductorLaunchChoice? {
+        guard let choice = PersistedState.load(ConductorLaunchSettingsDocument.self, fromDefaults: defaults,
+                                               key: key, document: document).value?.stores[storeID],
+              PhrenConnection.LaunchKind(rawValue: choice.harness) != nil,
+              PhrenConnection.LaunchEffort(rawValue: choice.effort) != nil else { return nil }
+        return choice
+    }
+
+    static func save(storeID: String, harness: PhrenConnection.LaunchKind, model: String,
+                     effort: PhrenConnection.LaunchEffort, defaults: UserDefaults = AppRuntime.defaults) {
+        var value = PersistedState.load(ConductorLaunchSettingsDocument.self, fromDefaults: defaults,
+                                        key: key, document: document).value ?? .init()
+        value.stores[storeID] = .init(harness: harness.rawValue, model: model, effort: effort.rawValue)
+        PersistedState.save(value, toDefaults: defaults, key: key, document: document)
+    }
+}
+
 /// Starting an agent in a project on a computer — shared by the "Open on a
 /// computer" screen and the Siri intents.
 @MainActor
@@ -48,12 +82,19 @@ enum AgentLaunch {
 
     /// Asks the Hook to create the workspace and start the agent, then waits
     /// for Herdr to list the new tab with its agent so the chat can target it.
-    static func launch(host: LiveHost, cwd: String, label: String, kind: Harness, model: String? = nil, progress: @MainActor (String) -> Void = { _ in }) async throws -> LiveAgentSession {
+    static func launch(host: LiveHost, cwd: String, label: String, kind: Harness, model: String? = nil,
+                       role: PhrenConnection.LaunchRole = .agent,
+                       effort: PhrenConnection.LaunchEffort? = nil,
+                       progress: @MainActor (String) -> Void = { _ in }) async throws -> LiveAgentSession {
         #if DEBUG && targetEnvironment(simulator)
-        if AgentChatFixture.enabled { return try await AgentChatFixture.launch(host: host, cwd: cwd, label: label, kind: kind.rawValue) }
+        if AgentChatFixture.enabled {
+            return try await AgentChatFixture.launch(host: host, cwd: cwd, label: label, kind: kind.rawValue,
+                                                     role: role.rawValue, effort: effort?.rawValue)
+        }
         #endif
         let key = try DeviceSSHKey.load(host.id)
-        let launched = try await PhrenConnection.launchSession(host: host, privateKey: key, cwd: cwd, label: label, kind: kind, model: model)
+        let launched = try await PhrenConnection.launchSession(host: host, privateKey: key, cwd: cwd, label: label,
+                                                               kind: kind, model: model, role: role, effort: effort)
         await progress("Waiting for \(kind.title) to be ready…")
         for _ in 0..<20 {
             if let session = try await PhrenConnection.fetch(host: host, privateKey: key).sessions(on: host)
@@ -64,7 +105,8 @@ enum AgentLaunch {
         }
         // The agent started (the Hook said so) but the overview hasn't caught up;
         // open the chat on the identifiers we have.
-        return try session(host: host, workspaceID: launched.workspaceID, tabID: launched.tabID, label: label, agent: kind.rawValue, agentStatus: launched.agentStatus, cwd: cwd)
+        return try session(host: host, workspaceID: launched.workspaceID, tabID: launched.tabID, label: label,
+                           agent: kind.rawValue, agentStatus: launched.agentStatus, cwd: cwd, role: role)
     }
 
     /// Delivers the first instruction to the one supported agent pane in a
@@ -117,9 +159,10 @@ enum AgentLaunch {
     }
 
     /// A session object from its identifiers alone.
-    static func session(host: LiveHost, workspaceID: String, tabID: String, label: String, agent: String, agentStatus: String?, cwd: String) throws -> LiveAgentSession {
+    static func session(host: LiveHost, workspaceID: String, tabID: String, label: String, agent: String,
+                        agentStatus: String?, cwd: String, role: PhrenConnection.LaunchRole = .agent) throws -> LiveAgentSession {
         let escape = { (s: String) in s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") }
-        let json = #"{"kind":"herdr","groups":[{"id":"\#(escape(workspaceID))","label":"\#(escape(label))","children":[{"id":"\#(escape(tabID))","label":"1","title":"\#(escape(label))","agent":"\#(escape(agent))","agentStatus":"\#(escape(agentStatus ?? "idle"))","cwd":"\#(escape(cwd))"}]}]}"#
+        let json = #"{"kind":"herdr","groups":[{"id":"\#(escape(workspaceID))","label":"\#(escape(label))","children":[{"id":"\#(escape(tabID))","label":"1","title":"\#(escape(label))","agent":"\#(escape(agent))","agentStatus":"\#(escape(agentStatus ?? "idle"))","cwd":"\#(escape(cwd))","role":"\#(role.rawValue)"}]}]}"#
         guard let session = try LiveWorkspaces.read(Data(json.utf8)).sessions(on: host).first else {
             throw PhrenKitError.validation("The workspace was created, but its session couldn't be opened. Find it under Live sessions.")
         }

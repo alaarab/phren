@@ -63,6 +63,10 @@ public struct LiveWorkspaces: Codable, Equatable, Sendable {
         /// The model the pane's agent runs, as the Hook read it from the
         /// transcript; nil for a pane with more than one agent or no answer yet.
         public let model: String?
+        /// The job this tab performs. Older Hooks omit it, which is an ordinary
+        /// agent tab; `conductor` is the one store-wide dispatch lead.
+        public let role: String?
+        public var isConductor: Bool { role == "conductor" }
         /// Running children attached to this pane's conversation. Older Hooks
         /// omit the field and therefore report no workers.
         public var runningChildren: Int { max(0, reportedRunningChildren ?? 0) }
@@ -84,13 +88,14 @@ public struct LiveWorkspaces: Codable, Equatable, Sendable {
                     agent: String? = nil, starting: Bool? = nil, cwd: String? = nil,
                     branch: String? = nil, agentPaneCount: Int? = nil,
                     paneCount: Int? = nil, currentStep: String? = nil,
-                    model: String? = nil, changedSeq: Int? = nil) {
+                    model: String? = nil, role: String? = nil,
+                    changedSeq: Int? = nil) {
             self.id = id; self.label = label; self.title = title
             self.agentStatus = agentStatus; self.approvalPending = approvalPending
             self.agent = agent; self.starting = starting; self.cwd = cwd
             self.branch = branch; self.agentPaneCount = agentPaneCount
             self.paneCount = paneCount; self.currentStep = currentStep
-            self.model = model; self.changedSeq = changedSeq
+            self.model = model; self.role = role; self.changedSeq = changedSeq
             reportedLastChangedAt = nil; reportedContextUsedPercent = nil
             reportedRunningChildren = nil; reportedChildProviders = nil
         }
@@ -103,7 +108,7 @@ public struct LiveWorkspaces: Codable, Equatable, Sendable {
         }
 
         private enum CodingKeys: String, CodingKey {
-            case id, label, title, agentStatus, approvalPending, agent, starting, cwd, branch, agentPaneCount, paneCount, changedSeq, currentStep, model
+            case id, label, title, agentStatus, approvalPending, agent, starting, cwd, branch, agentPaneCount, paneCount, changedSeq, currentStep, model, role
             case reportedContextUsedPercent = "contextUsedPercent"
             case reportedLastChangedAt = "lastChangedAt"
             case reportedRunningChildren = "runningChildren"

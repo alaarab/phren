@@ -88,7 +88,7 @@ struct SessionCardContent: View, Equatable {
                     .frame(width: 44, height: 44).contentShape(Rectangle())
             }
             .buttonStyle(.plain).disabled(onDetails == nil)
-            .accessibilityLabel("\(session.tab.agent?.capitalized ?? "Agent"), \(session.tab.status)")
+            .accessibilityLabel("\(session.tab.isConductor ? "Conductor" : session.tab.agent?.capitalized ?? "Agent"), \(session.tab.status)")
             .accessibilityValue(session.tab.contextUsedPercent.map { "context \(Int($0.rounded()))%" } ?? "")
             .accessibilityHint("Session details")
             .accessibilityIdentifier(identifierPrefix == "live" ? "live-detail:\(session.workspaceID):\(session.tab.id)" : "\(identifierPrefix)-detail:\(session.accessibilityKey)")
@@ -122,7 +122,13 @@ struct SessionCardContent: View, Equatable {
                             .accessibilityIdentifier("\(identifierPrefix)-changed:\(session.accessibilityKey)")
                     }
                 }
-                if session.tab.displayTitle != headline {
+                if session.tab.isConductor {
+                    HStack(spacing: 4) {
+                        Text("Conductor").fontWeight(.semibold).foregroundStyle(PhrenTheme.accent)
+                        Text("· " + session.tab.displayTitle).foregroundStyle(PhrenTheme.sessionTitle)
+                    }
+                    .font(.footnote).lineLimit(textSize.isAccessibilitySize ? 3 : 1)
+                } else if session.tab.displayTitle != headline {
                     Text(session.tab.displayTitle).font(.footnote).foregroundStyle(PhrenTheme.sessionTitle)
                         .lineLimit(textSize.isAccessibilitySize ? 3 : 1)
                 }
@@ -150,6 +156,13 @@ struct SessionCardContent: View, Equatable {
             }
         }
         .contentShape(Rectangle())
+        .overlay(alignment: .topLeading) {
+            if session.tab.isConductor {
+                Color.clear.frame(width: 0, height: 0).accessibilityElement()
+                    .accessibilityLabel("Conductor")
+                    .accessibilityIdentifier("conductor-card:\(session.accessibilityKey)")
+            }
+        }
     }
 }
 
@@ -171,7 +184,15 @@ private struct SessionActivityIndicator: View {
             if fresh && tab.activity == .working {
                 SessionActivityArc(color: color).frame(width: 42, height: 42)
             }
-            AgentProviderGlyph(source: tab.agent, size: 20).opacity(fresh ? 1 : 0.55)
+            if tab.isConductor {
+                Image(systemName: "wand.and.rays")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(PhrenTheme.accent)
+                    .opacity(fresh ? 1 : 0.55)
+                    .accessibilityHidden(true)
+            } else {
+                AgentProviderGlyph(source: tab.agent, size: 20).opacity(fresh ? 1 : 0.55)
+            }
         }
         .frame(width: 42, height: 42)
         .overlay(alignment: .bottomTrailing) {
@@ -184,7 +205,7 @@ private struct SessionActivityIndicator: View {
                 .offset(x: 2, y: 2)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(tab.agent?.capitalized ?? "Agent"), \(tab.status)")
+        .accessibilityLabel("\(tab.isConductor ? "Conductor" : tab.agent?.capitalized ?? "Agent"), \(tab.status)")
         .accessibilityValue(percent.map { "context \(Int($0.rounded()))%" } ?? "")
     }
 }

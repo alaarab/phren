@@ -71,12 +71,17 @@ struct ToolPresentation {
         if rawTitle == "Tool result" {
             body = Self.unwrap(text)
         } else if let fields {
-            path = fields["file_path"] as? String ?? fields["path"] as? String ?? fields["notebook_path"] as? String
+            // OpenCode writes its file arguments in camelCase where Claude Code
+            // and Codex write snake_case; read either so its calls draw the same
+            // path and patch cards instead of raw JSON.
+            path = (fields["file_path"] ?? fields["filePath"] ?? fields["path"] ?? fields["notebook_path"]) as? String
             let edits = (fields["edits"] as? [[String: Any]] ?? []).compactMap { edit -> (String, String)? in
-                guard let old = edit["old_string"] as? String, let new = edit["new_string"] as? String else { return nil }
+                guard let old = (edit["old_string"] ?? edit["oldString"]) as? String,
+                      let new = (edit["new_string"] ?? edit["newString"]) as? String else { return nil }
                 return (old, new)
             }
-            if let old = (fields["old_string"] ?? fields["old_str"]) as? String, let new = (fields["new_string"] ?? fields["new_str"]) as? String {
+            if let old = (fields["old_string"] ?? fields["oldString"] ?? fields["old_str"]) as? String,
+               let new = (fields["new_string"] ?? fields["newString"] ?? fields["new_str"]) as? String {
                 body = Self.updatePatch(path, edits: [(old, new)]); title = "Patch"
             } else if !edits.isEmpty {
                 // MultiEdit: one file, several replacements — one hunk each.

@@ -27,6 +27,12 @@ struct LaunchSessionView: View {
     @State private var launching = false
     @State private var status: String?
     @State private var error: String?
+    @State private var role: PhrenConnection.LaunchRole = .agent
+    @State private var effort: PhrenConnection.LaunchEffort = .medium
+    @State private var showRoles = false
+    @State private var showEfforts = false
+    @State private var runningConductor: LiveAgentSession?
+    @State private var showRunningConductor = false
     @State private var chatSession: LiveAgentSession?
     @State private var terminalRoute: TerminalDestination?
     @State private var modelName = ""
@@ -35,6 +41,7 @@ struct LaunchSessionView: View {
     private var harness: Harness? { Harness(rawValue: kind) }
     /// Harnesses whose CLI accepts a model at startup.
     private var supportsModel: Bool { ["codex", "claude", "opencode"].contains(kind) }
+    private var supportsEffort: Bool { ["codex", "claude", "opencode"].contains(kind) }
     private var modelSuggestions: [String] {
         switch kind {
         case "opencode": return ["openrouter/deepseek/deepseek-v4.1-flash", "openrouter/deepseek/deepseek-v4-pro"]
@@ -51,7 +58,20 @@ struct LaunchSessionView: View {
         default: return "model"
         }
     }
-    private func storedModel(_ kind: String) -> String { UserDefaults.standard.string(forKey: "launch.model.\(kind)") ?? "" }
+    private func storedModel(_ kind: String) -> String { AppRuntime.defaults.string(forKey: "launch.model.\(kind)") ?? "" }
+    private var roleOptions: [PhrenOption<PhrenConnection.LaunchRole>] {
+        [.init(id: "agent", value: .agent, title: "Agent"),
+         .init(id: "conductor", value: .conductor, title: conductorSummary)]
+    }
+    private var effortOptions: [PhrenOption<PhrenConnection.LaunchEffort>] {
+        PhrenConnection.LaunchEffort.allCases.map { .init(id: $0.rawValue, value: $0, title: $0.rawValue.capitalized) }
+    }
+    private var conductorSummary: String {
+        let harnessName = harness.map { $0 == .claude ? "Claude" : $0.title } ?? kind.capitalized
+        let chosenModel = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return ["Conductor", [harnessName, chosenModel.isEmpty ? nil : displayModel(chosenModel)].compactMap { $0 }.joined(separator: " "), effort.rawValue]
+            .joined(separator: " · ")
+    }
     private var preferences: LiveSessionPreferences? { try? LiveSessionPreferences.read(data) }
     private var hosts: [LiveHost] { preferences?.hosts ?? [] }
     private var registry: MachineRegistry { model.machineRegistry(storeId: storeID) }
@@ -148,6 +168,12 @@ struct LaunchSessionView: View {
                 }
 
                 Section {
+                    PhrenSingleSelect(options: roleOptions, selection: $role,
+                                      placeholder: "Role", identifier: "launch-role",
+                                      isPresented: $showRoles)
+                } header: { Text("Role") }
+
+                Section {
                     ForEach(Harness.allCases) { harness in
                         Button { kind = harness.rawValue } label: {
                             HStack(spacing: 10) {
@@ -182,6 +208,14 @@ struct LaunchSessionView: View {
                     }
                 }
 
+                if role == .conductor && supportsEffort {
+                    Section {
+                        PhrenSingleSelect(options: effortOptions, selection: $effort,
+                                          placeholder: "Effort", identifier: "launch-effort",
+                                          isPresented: $showEfforts)
+                    } header: { Text("Effort") }
+                }
+
                 Section {
                     Button {
                         Task { await open() }
@@ -189,7 +223,8 @@ struct LaunchSessionView: View {
                         HStack {
                             if launching { ProgressView().tint(PhrenTheme.chatPanel).padding(.trailing, 6) }
                             Text(launching ? (status ?? "Opening…") : taskRequest == nil
-                                 ? "Open \(project) with \(harness?.title ?? kind)"
+                                 ? role == .conductor ? "Open \(project) with Conductor"
+                                 : "Open \(project) with \(harness?.title ?? kind)"
                                  : "Start \(harness?.title ?? kind) on task")
                                 .fontWeight(.semibold)
                         }
@@ -230,12 +265,76 @@ struct LaunchSessionView: View {
             .navigationDestination(item: $terminalRoute) { HerdrTerminalView(host: $0.host, route: $0.route) }
             .interactiveDismissDisabled(launching)
             .task { modelName = storedModel(kind); await prepare() }
-            .onChange(of: kind) { _, newKind in modelName = storedModel(newKind) }
-            .onChange(of: modelName) { _, newValue in UserDefaults.standard.set(newValue, forKey: "launch.model.\(kind)") }
+            .onChange(of: kind) { _, newKind in
+                if role == .conductor,
+                   let saved = ConductorLaunchSettings.load(storeID: storeID), saved.harness == newKind {
+                    modelName = saved.model
+                    effort = PhrenConnection.LaunchEffort(rawValue: saved.effort) ?? .medium
+                } else {
+                    modelName = storedModel(newKind)
+                }
+                rememberConductorChoice()
+            }
+            .onChange(of: modelName) { _, newValue in
+                AppRuntime.defaults.set(newValue, forKey: "launch.model.\(kind)")
+                rememberConductorChoice()
+            }
+            .onChange(of: effort) { _, _ in rememberConductorChoice() }
         }
         .phrenSingleSelectSheet(isPresented: $showComputers, title: "Computer", options: computerOptions,
                                 selection: $hostID, rowPrefix: "launch-computer",
                                 onSelect: { id in if let host = hosts.first(where: { $0.id == id }) { select(host) } })
+        .phrenSingleSelectSheet(isPresented: $showRoles, title: "Role", options: roleOptions,
+                                selection: $role, rowPrefix: "launch-role", onSelect: roleSelected)
+        .phrenSingleSelectSheet(isPresented: $showEfforts, title: "Effort", options: effortOptions,
+                                selection: $effort, rowPrefix: "launch-effort")
+        .phrenDialog(isPresented: $showRunningConductor, title: "Conductor already running",
+                     message: "This store already has a conductor. Open its chat instead of starting another.",
+                     actions: [
+                        .init(id: "open", title: "Open the running conductor") {
+                            if let runningConductor { chatSession = runningConductor }
+                        },
+                        .init(id: "cancel", title: "Keep this screen", role: .cancel) {}
+                     ], identifier: "launch-conductor-running")
+    }
+
+    private func displayModel(_ value: String) -> String {
+        value.split(separator: "-").map { $0.capitalized }.joined(separator: " ")
+    }
+
+    private func roleSelected(_ selected: PhrenConnection.LaunchRole) {
+        guard selected == .conductor else { return }
+        if let saved = ConductorLaunchSettings.load(storeID: storeID),
+           let savedHarness = Harness(rawValue: saved.harness),
+           let savedEffort = PhrenConnection.LaunchEffort(rawValue: saved.effort) {
+            kind = savedHarness.rawValue
+            modelName = saved.model
+            effort = savedEffort
+        }
+        rememberConductorChoice()
+    }
+
+    private func rememberConductorChoice() {
+        guard role == .conductor, let harness else { return }
+        ConductorLaunchSettings.save(storeID: storeID, harness: harness,
+                                     model: modelName.trimmingCharacters(in: .whitespacesAndNewlines),
+                                     effort: effort)
+    }
+
+    private func existingConductor() -> LiveAgentSession? {
+        for computer in SessionOverviewMonitor.shared.computers {
+            for session in computer.monitor.snapshot?.sessions(on: computer.host) ?? [] where session.tab.isConductor {
+                let match = preferences?.projectMatch(hostID: session.host.id, cwd: session.tab.cwd,
+                                                       projects: model.sessionProjects)
+                if match?.project.storeID == storeID { return session }
+            }
+        }
+        return nil
+    }
+
+    private func offerRunningConductor(_ session: LiveAgentSession) {
+        runningConductor = session
+        showRunningConductor = true
     }
 
     /// Pre-select the first computer the store says has the project, and
@@ -274,13 +373,20 @@ struct LaunchSessionView: View {
 
     private func open() async {
         guard let host = selectedHost, let harness, canOpen else { return }
+        if role == .conductor, let existing = existingConductor() {
+            offerRunningConductor(existing)
+            return
+        }
         let cwd = folder.trimmingCharacters(in: .whitespacesAndNewlines)
         launching = true; error = nil
         defer { launching = false; status = nil }
         do {
             status = "Starting \(harness.title) in \(project)…"
             let chosen = supportsModel ? modelName.trimmingCharacters(in: .whitespacesAndNewlines) : ""
-            let session = try await AgentLaunch.launch(host: host, cwd: cwd, label: project, kind: harness, model: chosen.isEmpty ? nil : chosen) { status = $0 }
+            rememberConductorChoice()
+            let session = try await AgentLaunch.launch(host: host, cwd: cwd, label: project, kind: harness,
+                                                       model: chosen.isEmpty ? nil : chosen, role: role,
+                                                       effort: role == .conductor && supportsEffort ? effort : nil) { status = $0 }
             // Remember the folder for this project on this computer, so the
             // next session is found without asking.
             data = (try? LiveSessionPreferences.assigning(hostID: host.id, directory: cwd, storeID: storeID, project: project, in: data)) ?? data
@@ -302,6 +408,33 @@ struct LaunchSessionView: View {
                 }
             }
             chatSession = session
+        } catch LiveConnectionError.launchConflict(_, let target) where role == .conductor {
+            if let target, var targetHost = selectedHost {
+                if let server = target.server {
+                    targetHost.herdrSession = server == "default" ? nil : server
+                }
+                let session = try? AgentLaunch.session(host: targetHost, workspaceID: target.workspaceID,
+                    tabID: target.tabID, label: project, agent: target.source ?? harness.rawValue,
+                    agentStatus: "working", cwd: cwd, role: .conductor)
+                if let session { offerRunningConductor(session); return }
+            }
+            if let snapshot = try? await LiveHostMonitor.fetch(host),
+               let session = snapshot.sessions(on: host).first(where: { $0.tab.isConductor }) {
+                offerRunningConductor(session)
+            } else if let session = existingConductor() {
+                offerRunningConductor(session)
+            } else {
+                self.error = "A conductor is already running for this store. Refresh Agents and open it there."
+            }
+        } catch LiveConnectionError.gatewayRejection(status: 409, reason: _) where role == .conductor {
+            if let snapshot = try? await LiveHostMonitor.fetch(host),
+               let session = snapshot.sessions(on: host).first(where: { $0.tab.isConductor }) {
+                offerRunningConductor(session)
+            } else if let session = existingConductor() {
+                offerRunningConductor(session)
+            } else {
+                self.error = "A conductor is already running for this store. Refresh Agents and open it there."
+            }
         } catch {
             self.error = error.localizedDescription
         }
@@ -312,8 +445,9 @@ struct LaunchSessionView: View {
 struct SessionLaunchAlert: ViewModifier {
     @Binding var error: String?
     func body(content: Content) -> some View {
-        content.alert("Couldn't open session", isPresented: $error.isPresent()) {
-            Button("OK") { error = nil }
-        } message: { Text(error ?? "") }
+        content.phrenDialog(isPresented: $error.isPresent(), title: "Couldn't open session",
+                            message: error ?? "",
+                            actions: [.init(id: "ok", title: "OK", role: .cancel) { error = nil }],
+                            identifier: "launch-error")
     }
 }

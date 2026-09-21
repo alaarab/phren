@@ -165,8 +165,23 @@ final class SessionSurfacesTests: XCTestCase {
         XCTAssertNil(content.entries.first?.step)
         XCTAssertEqual(content.entries.first?.subagents, 0)
         XCTAssertEqual(content.entries.first?.childProviders, [])
+        XCTAssertEqual(content.entries.first?.leadComputers, [])
+        XCTAssertNil(content.entries.first?.role)
         XCTAssertNil(content.entries.first?.state)
         XCTAssertEqual(content.primary?.project, "App")
+    }
+
+    func testConductorActivityEntryCarriesRoleLeadsAndComputers() throws {
+        let entry = SessionWorkingActivityAttributes.Entry(
+            id: "conductor", project: "App", provider: "claude", role: "conductor",
+            computer: "Desk", subagents: 3, childProviders: ["codex", "opencode"],
+            leadComputers: ["Desk", "Linuxbox"])
+        let data = try JSONEncoder().encode(entry)
+        let decoded = try JSONDecoder().decode(SessionWorkingActivityAttributes.Entry.self, from: data)
+        XCTAssertEqual(decoded.role, "conductor")
+        XCTAssertEqual(decoded.subagents, 3)
+        XCTAssertEqual(decoded.childProviders, ["codex", "opencode"])
+        XCTAssertEqual(decoded.leadComputers, ["Desk", "Linuxbox"])
     }
 
     func testActivityQuietGraceOnlyEndsAfterThirtySecondsWithNoWorkingAgents() {

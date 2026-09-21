@@ -90,6 +90,11 @@ private struct AgentRow: View {
     /// The middle column: the branch (or worktree folder), otherwise how many
     /// fan-out workers are running, otherwise the state word.
     private var detail: String {
+        if entry.role == "conductor", entry.subagents > 0 {
+            let leads = "\(entry.subagents) \(entry.subagents == 1 ? "lead" : "leads")"
+            let computers = Set(entry.leadComputers).count
+            return computers > 0 ? "\(leads) on \(computers) \(computers == 1 ? "computer" : "computers")" : leads
+        }
         if let branch = entry.branch?.trimmingCharacters(in: .whitespacesAndNewlines), !branch.isEmpty { return branch }
         if entry.subagents > 0 { return "\(entry.subagents) \(entry.subagents == 1 ? "worker" : "workers")" }
         return stateWord
@@ -108,7 +113,13 @@ private struct AgentRow: View {
     var body: some View {
         if dynamicTypeSize.isAccessibilitySize {
             VStack(alignment: .leading, spacing: 4) {
-                Text(entry.project).font(WidgetTheme.Font.caption.weight(.semibold)).foregroundStyle(projectColor)
+                HStack(spacing: 5) {
+                    if entry.role == "conductor" {
+                        Image(systemName: "wand.and.rays").foregroundStyle(WidgetTheme.cyan)
+                            .accessibilityLabel("Conductor")
+                    }
+                    Text(entry.project).font(WidgetTheme.Font.caption.weight(.semibold)).foregroundStyle(projectColor)
+                }
                 Text([entry.model, entry.computer, detail].compactMap { $0 }.joined(separator: " · "))
                     .font(WidgetTheme.Font.caption2).foregroundStyle(color)
             }
@@ -119,7 +130,15 @@ private struct AgentRow: View {
 
     private var row: some View {
         HStack(spacing: 6) {
-            ProviderActivityGlyphStack(providers: [entry.provider] + entry.childProviders, size: 14)
+            if entry.role == "conductor" {
+                Image(systemName: "wand.and.rays")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(WidgetTheme.cyan)
+                    .frame(width: 14, height: 14)
+                    .accessibilityLabel("Conductor")
+            } else {
+                ProviderActivityGlyphStack(providers: [entry.provider] + entry.childProviders, size: 14)
+            }
             Text(entry.project).privacySensitive().font(WidgetTheme.Font.caption.weight(.semibold))
                 .foregroundStyle(projectColor).lineLimit(1).truncationMode(.tail).layoutPriority(1)
             if let model = entry.model {

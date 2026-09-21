@@ -39,6 +39,14 @@ final class LiveSessionsTests: XCTestCase {
         XCTAssertNil(tabs[1].paneCount)
     }
 
+    func testConductorRoleIsOptionalAndDecoded() throws {
+        let value = try LiveWorkspaces.read(Data(#"{"kind":"herdr","groups":[{"id":"w1","label":"Phone","children":[{"id":"w1:t1","label":"1","role":"conductor"},{"id":"w1:t2","label":"2"}]}]}"#.utf8))
+        XCTAssertTrue(value.groups[0].children[0].isConductor)
+        XCTAssertEqual(value.groups[0].children[0].role, "conductor")
+        XCTAssertFalse(value.groups[0].children[1].isConductor)
+        XCTAssertNil(value.groups[0].children[1].role)
+    }
+
     func testSearchFindsTitleWorkspaceAgentAndFolderTogether() throws {
         let value = try LiveWorkspaces.read(Data(#"{"kind":"herdr","groups":[{"id":"w1","label":"Phone work","children":[{"id":"w1:t1","label":"1","title":"Fix navigation","agent":"codex","cwd":"/work/mobile/src"}]}]}"#.utf8))
         let host = try LiveHost(name: "Mac", address: "fixture.invalid", username: "fixture")

@@ -6,6 +6,14 @@ import NIOPosix
 import NIOSSH
 import PhrenKit
 
+public struct LiveLaunchConflictTarget: Equatable, Sendable {
+    public let server: String?
+    public let workspaceID: String
+    public let tabID: String
+    public let paneID: String?
+    public let source: String?
+}
+
 public enum LiveConnectionError: LocalizedError, Equatable {
     case untrustedHost(String)
     case changedHost
@@ -14,6 +22,7 @@ public enum LiveConnectionError: LocalizedError, Equatable {
     case disconnected
     case response(Int)
     case gatewayRejection(status: Int, reason: String)
+    case launchConflict(reason: String, target: LiveLaunchConflictTarget?)
     case oversized
     case deliveryUnconfirmed
 
@@ -26,6 +35,7 @@ public enum LiveConnectionError: LocalizedError, Equatable {
         case .disconnected: return "The connection to the computer closed."
         case .response(let status): return "The computer returned HTTP \(status)."
         case .gatewayRejection(let status, let reason): return "\(reason) (HTTP \(status))"
+        case .launchConflict(let reason, _): return "\(reason) (HTTP 409)"
         case .deliveryUnconfirmed: return "The computer did not confirm message delivery."
         case .oversized: return "The Phren Hook response exceeded this request's size limit."
         }
@@ -278,11 +288,28 @@ final class GatewayResponse: ChannelInboundHandler {
                     String($0.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) || CharacterSet.whitespacesAndNewlines.contains($0) })
                         .split(whereSeparator: \.isWhitespace).joined(separator: " ")
                 }.map { String($0.prefix(320)) }
-                exchange.finish(.failure(reason?.isEmpty == false
-                    ? LiveConnectionError.gatewayRejection(status: status, reason: reason!) : .response(status)))
+                if status == 409, request.path == "/v1/workspaces/launch" {
+                    exchange.finish(.failure(LiveConnectionError.launchConflict(
+                        reason: reason?.isEmpty == false ? reason! : "A conductor is already running for this store.",
+                        target: launchConflictTarget(object?["target"] as? [String: Any]))))
+                } else {
+                    exchange.finish(.failure(reason?.isEmpty == false
+                        ? LiveConnectionError.gatewayRejection(status: status, reason: reason!) : .response(status)))
+                }
             } else { exchange.finish(.success(body)) }
         }
     }
     func errorCaught(context: ChannelHandlerContext, error: Error) { exchange.finish(.failure(error)) }
     func channelInactive(context: ChannelHandlerContext) { exchange.finish(.failure(LiveConnectionError.disconnected)) }
+
+    private func launchConflictTarget(_ value: [String: Any]?) -> LiveLaunchConflictTarget? {
+        guard let value,
+              let workspace = (value["workspace"] ?? value["workspaceId"]) as? String,
+              let tab = (value["tab"] ?? value["tabId"]) as? String,
+              AgentChatTarget.validID(workspace), AgentChatTarget.validID(tab) else { return nil }
+        let pane = ((value["pane"] ?? value["paneId"]) as? String).flatMap { AgentChatTarget.validID($0) ? $0 : nil }
+        let server = (value["server"] as? String).flatMap { AgentChatTarget.validID($0) && !$0.contains(":") ? $0 : nil }
+        let source = (value["source"] as? String).flatMap { AgentChatTarget.sources.contains($0) ? $0 : nil }
+        return .init(server: server, workspaceID: workspace, tabID: tab, paneID: pane, source: source)
+    }
 }

@@ -61,7 +61,7 @@ public struct AgentSubagentPresentation: Equatable, Sendable {
     public let state: State
 
     public static func recognizes(_ name: String?) -> Bool {
-        ["Task", "Agent", "spawn_agent"].contains(AgentToolCardJSON.tool(name))
+        ["task", "agent", "spawn_agent"].contains(AgentToolCardJSON.tool(name).lowercased())
     }
 
     /// `notification`: the `<task-notification>` block Claude Code wrote when
@@ -155,28 +155,28 @@ public struct AgentTodoPresentation: Equatable, Sendable {
     public var summary: String { "\(doneCount) of \(items.count) done" }
 
     public static func recognizes(_ name: String?) -> Bool {
-        ["TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "update_plan"].contains(AgentToolCardJSON.tool(name))
+        ["todowrite", "taskcreate", "taskupdate", "tasklist", "update_plan"].contains(AgentToolCardJSON.tool(name).lowercased())
     }
 
     public init?(name: String, input: String, result: String? = nil) {
         guard Self.recognizes(name) else { return nil }
-        let tool = AgentToolCardJSON.tool(name)
+        let tool = AgentToolCardJSON.tool(name).lowercased()
         let values = AgentToolCardJSON.object(input) as? [String: Any] ?? [:]
         var items: [Item] = [], note: String?
         switch tool {
-        case "TodoWrite":
+        case "todowrite":
             title = "Todos"; isSnapshot = true
             items = Self.items(values["todos"], text: "content")
         case "update_plan":
             title = "Plan"; isSnapshot = true
             items = Self.items(values["plan"], text: "step")
             note = Self.nonempty(AgentToolCardJSON.string(values["explanation"], limit: 400))
-        case "TaskCreate":
+        case "taskcreate":
             title = "Tasks"; isSnapshot = false
             let subject = AgentToolCardJSON.string(values["subject"], limit: 300)
             if !subject.isEmpty { items = [Item(text: subject, status: .pending, activeForm: Self.nonempty(AgentToolCardJSON.string(values["activeForm"], limit: 300)))] }
             note = Self.nonempty(AgentToolCardJSON.string(values["description"], limit: 400))
-        case "TaskUpdate":
+        case "taskupdate":
             title = "Tasks"; isSnapshot = false
             let subject = AgentToolCardJSON.string(values["subject"], limit: 300)
             let id = AgentToolCardJSON.string(values["taskId"] ?? values["id"] ?? values["task_id"], limit: 40)
@@ -245,8 +245,8 @@ public struct AgentPlanPresentation: Equatable, Sendable {
     public let plan: String
     public let state: State
 
-    public static func recognizes(_ name: String?) -> Bool { AgentToolCardJSON.tool(name) == "ExitPlanMode" }
-    public static func isPlanMode(_ name: String?) -> Bool { AgentToolCardJSON.tool(name) == "EnterPlanMode" }
+    public static func recognizes(_ name: String?) -> Bool { AgentToolCardJSON.tool(name).lowercased() == "exitplanmode" }
+    public static func isPlanMode(_ name: String?) -> Bool { AgentToolCardJSON.tool(name).lowercased() == "enterplanmode" }
 
     public init?(name: String, input: String, result: String? = nil, isError: Bool = false) {
         guard Self.recognizes(name) else { return nil }
