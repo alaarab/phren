@@ -244,7 +244,17 @@ export async function planAgentHooks(program: string, remove = false, modules?: 
 }
 
 const opencodePluginsDir = () => path.join(process.env.XDG_CONFIG_HOME || path.join(homedir(), ".config"), "opencode", "plugins");
+declare const OPENCODE_PLUGIN_SOURCE: string | undefined;
+/** The first line of every plugin copy phren wrote; a copy without it belongs to the user. */
+export const OPENCODE_PLUGIN_MARKER = "// Installed by Phren Hook";
+/** Whether to (re)write the installed plugin: a missing copy, or one phren wrote that is now out of date. */
+export function opencodePluginNeedsWrite(existing: string | undefined, source: string): boolean {
+  if (existing === undefined) return true;
+  if (existing === source) return false;
+  return existing.startsWith(OPENCODE_PLUGIN_MARKER);
+}
 async function opencodePluginSource(): Promise<string | undefined> {
+  if (typeof OPENCODE_PLUGIN_SOURCE === "string") return OPENCODE_PLUGIN_SOURCE;
   const here = path.dirname(fileURLToPath(import.meta.url));
   for (const candidate of [
     path.join(here, "..", "..", "plugins", "opencode", "phren-transcript.js"),
@@ -260,12 +270,11 @@ async function applyOpencodePlugin(remove = false): Promise<boolean> {
   const source = await opencodePluginSource();
   const existing = await missingFile(readFile(file, "utf8"));
   if (remove) {
-    if (source !== undefined && existing === source) await unlink(file);
+    if (existing !== undefined && (existing === source || existing.startsWith(OPENCODE_PLUGIN_MARKER))) await unlink(file);
     return false;
   }
-  if (existing !== undefined && existing !== source) return false;
+  if (source === undefined || !opencodePluginNeedsWrite(existing, source)) return false;
   if (!(await lstat(path.dirname(dir)).catch(() => null))?.isDirectory()) return false;
-  if (source === undefined) return false;
   await mkdir(dir, { recursive: true });
   await atomic(file, source, 0o644);
   return true;

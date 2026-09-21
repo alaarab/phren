@@ -12,7 +12,7 @@ vi.mock("node:fs/promises", async importOriginal => {
   return { ...fs, copyFile: async (src: string, dst: string) => src.endsWith("bridge-hook.mjs") ? fs.writeFile(dst, "bundle fixture") : fs.copyFile(src, dst) };
 });
 vi.mock("./transport.js", () => ({ health: async () => ({ version: "0.2.14" }) }));
-import { install } from "./install.js";
+import { install, OPENCODE_PLUGIN_MARKER, opencodePluginNeedsWrite } from "./install.js";
 
 beforeEach(async () => {
   state.home = await mkdtemp("/tmp/phren-install-");
@@ -83,4 +83,12 @@ it("reconciles Hook and Git owners independently and preserves user hooks", asyn
   config = JSON.parse(await readFile(settings, "utf8"));
   expect(JSON.stringify(config.hooks.PostToolUse)).toContain("bridge-hook.mjs");
   expect(config.hooks.PostToolUse[0]).toEqual(own);
+});
+
+it("replaces the OpenCode plugin copies it wrote and leaves a user's own copy alone", () => {
+  const shipped = `${OPENCODE_PLUGIN_MARKER} and replaced on every update.\nexport const v = 2;\n`;
+  expect(opencodePluginNeedsWrite(undefined, shipped)).toBe(true);
+  expect(opencodePluginNeedsWrite(shipped, shipped)).toBe(false);
+  expect(opencodePluginNeedsWrite(`${OPENCODE_PLUGIN_MARKER} and replaced on every update.\nexport const v = 1;\n`, shipped)).toBe(true);
+  expect(opencodePluginNeedsWrite("export const mine = true;\n", shipped)).toBe(false);
 });
