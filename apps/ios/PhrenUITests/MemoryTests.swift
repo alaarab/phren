@@ -85,11 +85,11 @@ final class MemoryTests: XCTestCase {
         tasks.tap()
         expectation(for: NSPredicate(format: "selected == true"), evaluatedWith: tasks)
         waitForExpectations(timeout: 5)
-        let row = app.buttons["memory-row:task:b0b8c9d0"]
+        let row = app.buttons["memory-row:task:10a1b2c3"]
         XCTAssertTrue(row.waitForExistence(timeout: 8))
         // Under the Tasks filter the section chip is folded away, so the row reads by its text.
-        XCTAssertTrue(row.label.contains("Move cart totals"))
-        let actionButton = app.buttons["memory-row:task:b0b8c9d0:actions"]
+        XCTAssertTrue(row.label.contains("Fix the queue strip"))
+        let actionButton = app.buttons["memory-row:task:10a1b2c3:actions"]
         XCTAssertTrue(actionButton.waitForExistence(timeout: 5))
         XCTAssertTrue(actionButton.isHittable)
         XCTAssertGreaterThanOrEqual(actionButton.frame.height, 44)
@@ -106,7 +106,7 @@ final class MemoryTests: XCTestCase {
         XCTAssertTrue(app.buttons["task-status"].waitForExistence(timeout: 10))
         app.buttons["task-status"].tap()
         app.buttons["Done"].tap()
-        XCTAssertTrue(app.buttons["task-detail:sample/brain/phren/b0b8c9d0"].waitForExistence(timeout: 10),
+        XCTAssertTrue(app.buttons["task-detail:sample/brain/phren/10a1b2c3"].waitForExistence(timeout: 10),
                       "the Tasks tab lists the task under Done")
     }
 
