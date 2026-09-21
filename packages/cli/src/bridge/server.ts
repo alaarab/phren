@@ -714,11 +714,19 @@ const plainText = (max: number) => z.string().min(1).max(max).refine(t => !/[\x0
  * by diffing snapshots; `agent.start` returns once Herdr has detected the
  * agent and it is ready for input, which can take most of `timeoutMs`.
  */
+/** The Herdr agent-name slug for a human label: "Conductor smoke 4" becomes "conductor-smoke-4". */
+export function herdrAgentName(label: string): string {
+  const slug = label.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^[^a-z]+/, "").replace(/-+$/, "").slice(0, 32).replace(/-+$/, "");
+  return slug || "agent";
+}
+
 export async function launchSession(server: string, data: Json): Promise<Json> {
   const cwd = z.string().min(1).max(4096).refine(t => path.isAbsolute(t) && !/[\x00-\x1f\x7f]/.test(t)).parse(data.cwd);
   const label = plainText(200).parse(data.label);
   const kind = z.enum(launchKinds).parse(data.kind);
-  const name = data.name === undefined ? label : plainText(200).parse(data.name);
+  // Herdr's agent name is a slug (lowercase, digits, - or _, 1 to 32 chars);
+  // the label a person typed is not, so derive one from it.
+  const name = herdrAgentName(data.name === undefined ? label : plainText(200).parse(data.name));
   const model = typeof data.model === "string" && data.model.trim() ? plainText(200).parse(data.model.trim()) : undefined;
   const modelFlag: Partial<Record<(typeof launchKinds)[number], string>> = { codex: "--model", claude: "--model", opencode: "--model" };
   const args = model && modelFlag[kind] ? [modelFlag[kind], model] : undefined;

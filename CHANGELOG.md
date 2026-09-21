@@ -7,6 +7,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Launching an agent from the phone or a dispatch with a label Herdr cannot use as an
+  agent name (spaces, capitals, more than 32 characters) failed with "Herdr reported an
+  error"; the Hook now derives a valid agent name from the label.
 - Git run by phren never prompts for credentials. A store with an HTTPS remote and
   no credential helper used to make the session-start sync ask for a GitHub username
   in the agent's pane, so Codex and OpenCode never reached their first prompt on that
