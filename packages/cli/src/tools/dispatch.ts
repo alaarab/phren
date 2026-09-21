@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { hookRequest } from "../bridge/client.js";
 import { dispatchSchema } from "../bridge/dispatch.js";
+import { handOff, handOffSchema } from "../bridge/hand-off.js";
 import { mcpResponse } from "./types.js";
 
 export function register(server: McpServer): void {
@@ -14,6 +15,18 @@ export function register(server: McpServer): void {
       return mcpResponse({ ok: result.ok === true, data: result, message: `${result.computer}: ${result.state}.` });
     } catch (error) {
       return mcpResponse({ ok: false, error: error instanceof Error ? error.message : "Dispatch failed." });
+    }
+  });
+  server.registerTool("hand_off", {
+    title: "◆ phren · hand off",
+    description: "Deliver a prompt to an existing local or enrolled-computer agent session through Phren Hook. Prefer a session that already owns the project and is idle or doing related work.",
+    inputSchema: handOffSchema,
+  }, async input => {
+    try {
+      const result = await handOff(input);
+      return mcpResponse({ ok: result.ok, data: result, message: result.delivered ? "Prompt delivered to the existing session." : "Prompt delivery was not confirmed." });
+    } catch (error) {
+      return mcpResponse({ ok: false, error: error instanceof Error ? error.message : "Hand-off failed." });
     }
   });
 }

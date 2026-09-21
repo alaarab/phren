@@ -127,6 +127,9 @@ try {
       // The OpenCode transcript plugin rides inside the bundle too, so a copied
       // or relocated bundle still installs and updates it.
       OPENCODE_PLUGIN_SOURCE: JSON.stringify(fs.readFileSync(path.join(cliRoot, "plugins/opencode/phren-transcript.js"), "utf8")),
+      // A conductor launch must work from the relocated Hook bundle without
+      // depending on the npm package tree still being present.
+      CONDUCTOR_SKILL_SOURCE: JSON.stringify(fs.readFileSync(path.join(cliRoot, "starter/global/skills/conductor/SKILL.md"), "utf8")),
     },
   });
   const entryPath = path.join(tempRoot, "index.js");

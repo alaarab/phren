@@ -49,6 +49,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- Conductor sessions can be launched from the phone with a chosen Claude,
+  Codex or OpenCode harness and effort, are marked in workspace overviews, and
+  are limited to one running conductor per store. The new `hand_off` MCP tool,
+  `phren_admin` action and `phren hand-off` command send work to an existing
+  local or enrolled-computer session.
 - Schedule notifications: a schedule's optional `notify` list (`start`, `finish`,
   `failure`; finish and failure when absent) makes the Hook push each run's
   start, finish or failure to registered phones through the approvals' APNs

@@ -86,7 +86,7 @@ descendants appear in help or dispatch.
 | `hook` | Off | `bridge` service and phone transport, native agent chat, approvals, workspace control, transcript/subagent reading, files, web previews, usage and simulators |
 | `git` | Off | `auto_extract_findings`, `maintain extract`/`extract-memories`, repository diffs and `/v1/git/*`, change capture and Changes UI |
 | `schedules` | Off | `schedule`, project `schedules.yaml`, scheduler, run history and Schedules UI |
-| `conductor` | Off | `dispatch` MCP and CLI, `bridge enroll-computer`, dispatch routes, receipts, peer configuration and the `conductor` skill |
+| `conductor` | Off | `dispatch` and `hand_off` MCP tools, dispatch and hand-off CLI commands, `bridge enroll-computer`, dispatch routes, receipts, peer configuration and the `conductor` skill |
 
 All optional modules require memory; conductor also requires Hook. Git and
 schedules can manage their local/store data without Hook. Their phone routes

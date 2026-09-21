@@ -215,6 +215,11 @@ export const REGISTRY: Command[] = [
     subcommands: [{ name: "status", usage: "phren dispatch status", summary: "List local dispatch receipts" }],
     run: async args => (await import("./bridge/dispatch-command.js")).runDispatch(args),
   },
+  {
+    name: "hand-off", topic: "core", usage: "phren hand-off <computer|local> --session <id> --text <prompt>",
+    summary: "Send work to an existing agent session through Phren Hook",
+    run: async args => (await import("./bridge/dispatch-command.js")).runHandOff(args),
+  },
   // Setup (featured: init, quickstart)
   {
     name: "init",

@@ -5,6 +5,7 @@ import { chmod, lstat, mkdir, readFile, rm, unlink, writeFile } from "node:fs/pr
 import { createServer, type IncomingMessage } from "node:http";
 import { hostname } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { WebSocket, WebSocketServer } from "ws";
 import { z } from "zod";
 import { ActivityJournal } from "./activity.js";
@@ -22,7 +23,7 @@ import { paneChatState, paneIdentity, panes, rpc, servers, snapshot, trustedDire
 import { LaunchLimiter } from "./limits.js";
 import { locateProject } from "./locate.js";
 import { launchDirectory, repositoryBranch, repositoryDiff, webServers } from "./projects.js";
-import { BridgeError, bridgeRoot, id, type Json, MAX_FRAME, object, objects, PROTOCOL, provider, type Provider, serverName, socketPath, startingTargetSchema, type Target, targetFromURL, targetSchema } from "./protocol.js";
+import { atomic, BridgeError, bridgeRoot, id, type Json, MAX_FRAME, object, objects, PROTOCOL, provider, type Provider, serverName, socketPath, startingTargetSchema, type Target, targetFromURL, targetSchema } from "./protocol.js";
 import { CodexQuestions } from "./questions.js";
 import { bootedSimulators, type SimulatorAction, simulatorAct, simulatorApps, simulatorScreenshot } from "./simulators.js";
 import { TabActivityStore } from "./tab-activity.js";
@@ -233,6 +234,10 @@ export async function serve(version: string): Promise<void> {
               if (agents.length === 1) {
                 const chat = chatStates.get(agents[0]);
                 if (chat?.starting === true) tab.starting = true;
+                if (typeof chat?.sessionId === "string" && provider.safeParse(agents[0].agent).success) {
+                  tab.target = { server, workspace: group.id, tab: tab.id, pane: agents[0].pane_id,
+                    source: agents[0].agent, session: chat.sessionId };
+                }
               }
               if (modules.has("git") && typeof tab.cwd === "string" && tab.agent) tab.branch = await repositoryBranch(tab.cwd);
               // The model the pane's agent is running, and what it is doing
@@ -333,6 +338,7 @@ export async function serve(version: string): Promise<void> {
         } else {
         if (url.pathname === "/v1/workspaces/launch") {
           result = await launches.run(async () => {
+            if (data.role === "conductor" && !modules.has("conductor")) throw new BridgeError(404, disabledHint("conductor"));
             if (data.project !== undefined && data.cwd !== undefined) throw new BridgeError(400, "Choose project or cwd, not both.");
             const cwd = data.project !== undefined ? await dispatchProjectDirectory(data.project)
               : await launchDirectory(data.cwd, await journal.recent(), locatedDirectories);
@@ -503,7 +509,8 @@ export async function serve(version: string): Promise<void> {
     } catch (error) {
       response.statusCode = error instanceof BridgeError ? error.status : error instanceof z.ZodError || error instanceof SyntaxError ? 400 : 503;
       response.setHeader("Content-Type", "application/json");
-      response.end(JSON.stringify({ error: error instanceof BridgeError ? error.message : "Phren Hook could not complete this request. Run phren bridge doctor on the computer." }));
+      response.end(JSON.stringify({ error: error instanceof BridgeError ? error.message : "Phren Hook could not complete this request. Run phren bridge doctor on the computer.",
+        ...(error instanceof BridgeError ? error.details : {}) }));
     }
   });
   http.requestTimeout = 20_000; http.headersTimeout = 10_000; http.maxHeadersCount = 32;
@@ -706,6 +713,55 @@ async function typeSecret(server: string, pane: string, text: string): Promise<v
 
 const launchKinds = ["codex", "claude", "copilot", "opencode"] as const;
 const plainText = (max: number) => z.string().min(1).max(max).refine(t => !/[\x00-\x1f\x7f]/.test(t));
+declare const CONDUCTOR_SKILL_SOURCE: string | undefined;
+
+async function conductorBrief(): Promise<string> {
+  let source: string | undefined;
+  if (typeof CONDUCTOR_SKILL_SOURCE === "string") source = CONDUCTOR_SKILL_SOURCE;
+  else {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    for (const candidate of [
+      path.join(here, "..", "starter", "global", "skills", "conductor", "SKILL.md"),
+      path.join(here, "..", "..", "starter", "global", "skills", "conductor", "SKILL.md"),
+    ]) {
+      source = await readFile(candidate, "utf8").catch(() => undefined);
+      if (source !== undefined) break;
+    }
+  }
+  if (source === undefined) throw new BridgeError(503, "The shipped conductor brief is unavailable. Reinstall Phren Hook.");
+  const match = /^---\r?\n[\s\S]*?\r?\n---\r?\n([\s\S]*)$/.exec(source);
+  const brief = (match?.[1] ?? source).trim();
+  if (!brief) throw new BridgeError(503, "The shipped conductor brief is empty. Reinstall Phren Hook.");
+  return brief;
+}
+
+async function prepareConductor(kind: (typeof launchKinds)[number], effort: "low" | "medium" | "high", model?: string): Promise<string[]> {
+  const brief = await conductorBrief();
+  const briefDirectory = path.join(bridgeRoot(), "conductor");
+  await mkdir(briefDirectory, { recursive: true, mode: 0o700 });
+  const briefFile = path.join(briefDirectory, "brief.md");
+  if (await readFile(briefFile, "utf8").catch(() => undefined) !== brief + "\n") await atomic(briefFile, brief + "\n");
+  if (kind === "claude") return [...(model ? ["--model", model] : []), "--append-system-prompt", brief, "--effort", effort];
+  if (kind === "codex") return [...(model ? ["--model", model] : []), "-c", `model_reasoning_effort=${effort}`, "-c", `developer_instructions=${JSON.stringify(brief)}`];
+  if (kind === "opencode") {
+    const directory = path.join(process.env.XDG_CONFIG_HOME || path.join(homeDirectory(), ".config"), "opencode", "agents");
+    const file = path.join(directory, "conductor.md");
+    const definition = `---\ndescription: Coordinate the owner's work across agent sessions.\nmode: primary\n---\n\n${brief}\n`;
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    if (await readFile(file, "utf8").catch(() => undefined) !== definition) await atomic(file, definition, 0o644);
+    return [...(model ? ["--model", model] : []), "--agent", "conductor", "--variant", effort];
+  }
+  throw new BridgeError(400, "The selected harness cannot run as a conductor.");
+}
+
+async function targetForPane(server: string, pane: Json): Promise<Json | undefined> {
+  if (!provider.safeParse(pane.agent).success || !id.safeParse(pane.workspace_id).success || !id.safeParse(pane.tab_id).success || !id.safeParse(pane.pane_id).success) return undefined;
+  const binding = { server, workspace: pane.workspace_id, tab: pane.tab_id, pane: pane.pane_id, source: pane.agent };
+  const session = await paneIdentity(server, pane);
+  if (session) return { ...binding, session };
+  const chat = await paneChatState(server, pane).catch((): Json => ({}));
+  return chat.starting === true ? { ...binding, starting: true, startingToken: chat.startingToken } : undefined;
+}
 
 /**
  * "Open on a computer": a new Herdr workspace (or a tab in an existing one)
@@ -724,15 +780,29 @@ export async function launchSession(server: string, data: Json): Promise<Json> {
   const cwd = z.string().min(1).max(4096).refine(t => path.isAbsolute(t) && !/[\x00-\x1f\x7f]/.test(t)).parse(data.cwd);
   const label = plainText(200).parse(data.label);
   const kind = z.enum(launchKinds).parse(data.kind);
+  const role = z.enum(["agent", "conductor"]).default("agent").parse(data.role);
+  const effort = z.enum(["low", "medium", "high"]).default("medium").parse(data.effort);
+  if (role === "conductor" && kind === "copilot") throw new BridgeError(400, "Copilot cannot run as a conductor.");
   // Herdr's agent name is a slug (lowercase, digits, - or _, 1 to 32 chars);
   // the label a person typed is not, so derive one from it.
-  const name = herdrAgentName(data.name === undefined ? label : plainText(200).parse(data.name));
+  const baseName = herdrAgentName(data.name === undefined ? label : plainText(200).parse(data.name));
+  const name = role === "conductor" ? herdrAgentName(`conductor-${baseName}`) : baseName;
   const model = typeof data.model === "string" && data.model.trim() ? plainText(200).parse(data.model.trim()) : undefined;
   const modelFlag: Partial<Record<(typeof launchKinds)[number], string>> = { codex: "--model", claude: "--model", opencode: "--model" };
-  const args = model && modelFlag[kind] ? [modelFlag[kind], model] : undefined;
   const workspace = data.workspaceId === undefined ? undefined : id.parse(data.workspaceId);
   const timeout = Math.min(120_000, Math.max(3_000, data.timeoutMs === undefined ? 45_000 : z.number().int().parse(data.timeoutMs)));
   const before = await snapshot(server);
+  if (role === "conductor") {
+    const otherServers = (await servers()).map(item => String(item.session)).filter(name => name !== server);
+    const overviews = [{ name: server, value: before }, ...await Promise.all(otherServers.map(async name => ({ name, value: await snapshot(name) })))];
+    for (const overview of overviews) {
+      const existing = objects(overview.value.panes).find(pane => typeof pane.agent_name === "string" && pane.agent_name.startsWith("conductor-")
+        && provider.safeParse(pane.agent).success && !["completed", "exited", "failed", "stopped"].includes(String(pane.agent_status)));
+      if (existing) throw new BridgeError(409, "A conductor is already running for this store.", { target: await targetForPane(overview.name, existing) });
+    }
+  }
+  const args = role === "conductor" ? await prepareConductor(kind, effort, model)
+    : model && modelFlag[kind] ? [modelFlag[kind], model] : undefined;
   if (workspace && !objects(before.workspaces).some(w => w.workspace_id === workspace)) throw new BridgeError(409, "The workspace changed.");
   const knownWorkspaces = new Set(objects(before.workspaces).map(w => w.workspace_id));
   const knownTabs = new Set(objects(before.tabs).map(t => t.tab_id));
@@ -765,7 +835,7 @@ export async function launchSession(server: string, data: Json): Promise<Json> {
   const binding = { server, workspace: created.workspaceId, tab: created.tabId, pane: created.paneId, source: kind };
   const target = sessionId ? { ...binding, session: sessionId }
     : chat.starting === true ? { ...binding, starting: true, startingToken: chat.startingToken } : undefined;
-  return { ok: true, ...created, agent: kind, agentStatus, sessionId, target };
+  return { ok: true, ...created, agent: kind, agentStatus, role, sessionId, target };
 }
 
 async function workspaceAction(server: string, operation: string, data: Json): Promise<Json> {

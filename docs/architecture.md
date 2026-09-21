@@ -2,7 +2,7 @@
 
 How project memory flows through the system, from user prompt to repo-backed state and back into bounded retrieval.
 
-Current public surface: 62 MCP tools across 15 modules, exposed through two profiles: `core` (10 tools, the default) and `full`; see `api-reference.md`.
+Current public surface: 63 MCP tools across 15 modules, exposed through two profiles: `core` (10 tools, the default) and `full`; see `api-reference.md`.
 
 ## System Overview
 
@@ -27,7 +27,7 @@ Claude / Copilot / Cursor / Codex
                 v
 +---------------+---------------+
 | MCP Server (phren-mcp)       |
-| 62 tools · core profile: 10  |
+| 63 tools · core profile: 10  |
 +---------------+---------------+
                 |
                 v
