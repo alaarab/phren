@@ -131,12 +131,14 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
     localFiles: ["<bridge>/hooks.yaml", "<bridge>/dispatches/*.json"], phoneScreens: [], skills: ["conductor"],
   },
   {
-    // Stage 1 ships the local indexer and store only. Tools, Hook routes, the
-    // phone screen and the skill arrive in later stages, which is why the
-    // declarations below are empty.
+    // Stage 1 shipped the local indexer and store; stage 2 adds the five read
+    // tools, the matching CLI subcommands and the code skill. Hook routes and
+    // the phone screen arrive in stage 3, which is why those stay empty.
     schemaVersion: 1, name: "code", version: VERSION, defaultEnabled: false, requires: ["memory"],
-    tools: [], cliCommands: ["code index", "code status"], agentHooks: [], hookRoutes: [], capabilities: [],
-    storeFiles: [], localFiles: ["<store>/.runtime/code/*.sqlite"], phoneScreens: [], skills: [],
+    tools: full(["code_search", "code_definition", "code_references", "code_outline", "code_usage"]),
+    cliCommands: ["code index", "code status", "code search", "code outline", "code refs", "code def", "code usage"],
+    agentHooks: [], hookRoutes: [], capabilities: [],
+    storeFiles: [], localFiles: ["<store>/.runtime/code/*.sqlite"], phoneScreens: [], skills: ["code"],
   },
 ];
 

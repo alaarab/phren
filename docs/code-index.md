@@ -125,3 +125,33 @@ Measured: a synthetic 100k-line TypeScript project indexes cold in about two
 seconds (well under the 20 s target), and re-indexing one changed file stays
 under the 200 ms target. The gated test is
 `packages/cli/src/code/indexer.perf.test.ts`, run with `PHREN_PERF=1`.
+
+Stage 2 shipped the read side on top of that store. Where this document
+specified less than the implementation needed, the choices were:
+
+- **Queries.** `packages/cli/src/code/query.ts` opens the project database per
+  call (read-only, `create = false`) and every function takes `store, project`
+  first, matching `codeIndexStatus`. Search runs one SQL pass that unions an
+  exact/prefix name match with an FTS5 `MATCH`, then ranks in JavaScript by
+  exact, prefix, bm25 and usage. FTS terms are rewritten to prefix queries
+  (`name*`), and name matching is case-insensitive; a query with no usable
+  tokens still matches by name.
+- **Name resolution.** `parseSymbolQuery` strips a trailing `()` and splits a
+  dotted `Foo.bar` into container and name. `pickSymbol` then prefers an
+  exported symbol, then a non-variable kind, then the most-used, then file
+  order, and reports how many candidates shared the name. `Foo.bar` narrows to
+  symbols whose stored `parent` is `Foo`.
+- **Definition snippets.** Definition needs a source checkout, but an index
+  built with `--repo` against an unregistered worktree would otherwise have
+  none. A `meta(key, value)` side table records `repo_root` at index time, and
+  the query reads the snippet (at most 40 lines) from there, falling back to the
+  project's registered source path.
+- **Results.** The five MCP tools return compact text, one `path:line kind name
+  signature` line per hit with the doc appended, not a JSON envelope. Local
+  variables (`kind = 'variable'`) and names under three characters are excluded
+  from the hot usage list, so a one-letter loop counter or a busy one-function
+  local cannot dominate it; the cold list keeps every symbol.
+- **CLI and skill.** `phren code search|outline|refs|def|usage` live on the same
+  module gate as `index|status`, and `starter/global/skills/code/SKILL.md`
+  points agents at the tools before grep and at `path:line` citations.
+  `code_outline` takes the project-relative path the index stores.

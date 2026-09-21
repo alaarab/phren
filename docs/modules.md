@@ -87,7 +87,7 @@ descendants appear in help or dispatch.
 | `git` | Off | `auto_extract_findings`, `maintain extract`/`extract-memories`, repository diffs and `/v1/git/*`, change capture and Changes UI |
 | `schedules` | Off | `schedule`, project `schedules.yaml`, scheduler, run history and Schedules UI |
 | `conductor` | Off | `dispatch` and `hand_off` MCP tools, dispatch and hand-off CLI commands, `bridge enroll-computer`, dispatch routes, receipts, peer configuration and the `conductor` skill |
-| `code` | Off | Code index for a project: `phren code index`/`code status`, a grammar-backed symbol/reference/usage index under `<store>/.runtime/code/*.sqlite`. Stage 1 ships the indexer and store; its MCP tools, Hook routes, phone screen and skill arrive in later stages |
+| `code` | Off | Code index for a project: `code_search`, `code_definition`, `code_references`, `code_outline` and `code_usage`; `phren code index`/`status`/`search`/`outline`/`refs`/`def`/`usage`; a grammar-backed symbol/reference/usage index under `<store>/.runtime/code/*.sqlite`; and the `code` skill. Stage 2 ships the tools, CLI and skill; Hook routes and the phone screen arrive in stage 3 |
 
 All optional modules require memory; conductor also requires Hook. Git and
 schedules can manage their local/store data without Hook. Their phone routes

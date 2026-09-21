@@ -17,6 +17,7 @@ import { register as registerExtract } from "../tools/extract.js";
 import { register as registerConfig } from "../tools/config.js";
 import { register as registerNotes } from "../tools/notes.js";
 import { register as registerSummaries } from "../tools/summaries.js";
+import { register as registerCode } from "../tools/code.js";
 import { register as registerDispatch } from "../tools/dispatch.js";
 import type { McpContext } from "../tools/types.js";
 
@@ -39,6 +40,7 @@ const ALL_REGISTER_FNS = [
   registerConfig,
   registerNotes,
   registerSummaries,
+  registerCode,
   registerDispatch,
 ];
 
