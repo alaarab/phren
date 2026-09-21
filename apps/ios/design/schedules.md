@@ -220,3 +220,36 @@ once already run) and answers `/v1/schedules` (state), `/v1/schedules/run`
 (flips the run to running for 2 s) and `/v1/schedules/history` (three runs,
 one failed). The store fixture holds the matching `schedules.yaml` so the
 editor round-trips.
+
+## 7. v2 editor: drop-downs, not lists (owner, September 21)
+
+Owner: "the schedules page should have drop-down menus rather than a super
+long list; same goes for models; and computer."
+
+- The editor becomes a short form. Each of these is one 44pt row with a
+  label on the left and a phren drop-down on the right that opens a sheet of
+  `PhrenOptionRow`s with check marks (the `PhrenMultiSelect` sheet shape,
+  single-select where noted):
+  - **Computer** (single): connected computers first with their colour dot,
+    offline ones muted with "offline" trailing; id `schedule-computer`,
+    rows `schedule-computer:<name>`.
+  - **Harness** (single): Claude, Codex, OpenCode with their glyphs; id
+    `schedule-harness`, rows `schedule-harness:<rawValue>`.
+  - **Model** (single, shown once a harness and computer are chosen):
+    "Harness default" first, then the computer's catalogue with the one-line
+    description under the name and a "default" chip; id `schedule-model`,
+    rows `schedule-model:<id>`. Loading shows one muted row.
+  - **Notify** (multi): Start, Finish, Failure; summary reads "Finish,
+    Failure"; id `schedule-notify`, rows `schedule-notify:<event>`.
+- Name, prompt, the When band (kind segment, day chips, time and date
+  fields) and Enabled stay as they are. Project stays a drop-down too when
+  the editor is opened for all projects (`schedule-project`).
+- The sheet's Save stays disabled until computer and harness are chosen.
+- The whole editor fits one screen for a daily schedule without scrolling on
+  an iPhone 17 Pro.
+
+The same drop-down is the model picker in chat (`ChatModelPickerSheet`:
+the `/model` command opens the single-select sheet with the same rows and
+the custom-id field at the bottom; ids `chat-model:<id>` kept) and the
+computer chooser in the launch flow (`LaunchSessionView`, ids
+`launch-computer:<udid>` kept).

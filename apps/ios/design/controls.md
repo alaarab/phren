@@ -535,3 +535,11 @@ and ScheduleEditor UI tests. Inspect the resulting screenshots on a narrow
 phone, then check VoiceOver focus/escape and keyboard-open field layouts.
 Swift, xcodebuild and simulator tests cannot be run in the implementation
 worktree; static review is not a claim of compilation or visual validation.
+
+## PhrenSingleSelect
+
+The single-choice sibling of `PhrenMultiSelect`: the same pill button and
+sheet, one check mark, closes on choice. Rows accept a glyph, a title, a
+caption and a trailing chip. Used for the schedule editor's computer,
+harness and model, the chat `/model` picker and the launch flow's computer
+chooser. Ids: `<identifier>` on the button, `<identifier>:<value>` on rows.
