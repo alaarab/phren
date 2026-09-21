@@ -299,9 +299,7 @@ struct MemoryView: View {
         MemoryPanel(rows: displayRows, counts: counts, countKinds: kinds,
                     groupByProject: groupByProject, showKind: showsKindChips, emptyText: emptyText,
                     highlightedID: highlightedID, scrollTarget: $scrollTarget,
-                    canWrite: { model.canWrite(storeId: $0.storeId, project: $0.project) && !moving },
-                    onSelect: open, onMove: move, onEdit: edit, onDelete: confirmDelete,
-                    onActions: { actionItem = $0 })
+                    onSelect: open, onActions: { actionItem = $0 })
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 

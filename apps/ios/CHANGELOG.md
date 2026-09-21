@@ -120,6 +120,8 @@ lock screen and Changes screen done properly.
 
 ### Fixed
 
+- The Memory list scrolls again: a vertical drag on a row moves the list, and the row
+  actions stay on the ellipsis glyph.
 - Sending no longer throws the transcript past its end: the scroll waits for the new
   row and the keyboard, and holds its target to the content end.
 - The project dossier in the memory graph is a dialog again for assistive tech.
