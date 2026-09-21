@@ -13,6 +13,11 @@ lock screen and Changes screen done properly.
 
 ### New
 
+- Memory replaces the Search tab: the graph is the whole page, with phren's own
+  search field, project chips, and a bottom panel that lists the scope's findings,
+  tasks and topics, shows results, or steps through a node. Tasks keep their tab.
+- The control kit adds a shared search field and a single-select chip row.
+- Approval results show as phren's own notice instead of a system alert.
 - A shared control kit (switches, option rows and groups, text segments, icon
   buttons, action sheets, dialogs, steppers, screens, groups and rows) drawn
   by Phren instead of the system controls. The chat question card, Project
@@ -96,6 +101,9 @@ lock screen and Changes screen done properly.
 
 ### Fixed
 
+- Schedule history opens older run records that have no notification result.
+- Long rich transcripts keep a bounded accessibility tree, and folded tool and
+  patch rows do not prepare hidden details until they are opened.
 - Schedules: Run now takes its own tap beside the chips, the swipe actions no
   longer peek through the card's corners, and the all-projects list resolves
   the computer and next run like the per-project list.

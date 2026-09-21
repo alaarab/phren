@@ -39,7 +39,7 @@ struct ToolCardChrome: ViewModifier {
     func body(content: Content) -> some View {
         if collapsed {
             content
-                .padding(.horizontal, 12).frame(maxWidth: .infinity, height: 44, alignment: .leading)
+                .padding(.horizontal, 12).frame(height: 44).frame(maxWidth: .infinity, alignment: .leading)
                 .background(PhrenTheme.phrenCardSurface, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium))
                 .overlay(RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium).strokeBorder(PhrenTheme.phrenCardBorder, lineWidth: 0.5))
         } else {
