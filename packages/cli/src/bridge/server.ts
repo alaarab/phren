@@ -199,7 +199,15 @@ export async function serve(version: string): Promise<void> {
             response.setHeader("Content-Type", "application/octet-stream"); response.end(bytes); return;
           }
           case "/v1/simulators/apps": result = { apps: await simulatorApps(String(url.searchParams.get("udid") ?? "")) }; break;
-          case "/v1/usage": result = await accountUsage.read(); break;
+          case "/v1/usage": {
+            // A phone built before OpenCode Go rejects the whole response when it
+            // meets a source it does not know, so a client names the sources it
+            // understands and an older one gets the original four.
+            const known = new Set((url.searchParams.get("sources") ?? "codex,claude,opencode,openrouter").split(",").map(s => s.trim()).filter(Boolean));
+            const usage = await accountUsage.read();
+            result = { ...usage, accounts: usage.accounts.filter(account => known.has(account.source)) };
+            break;
+          }
           case "/v1/push/status": result = agentHooks.push.status; break;
           case "/v1/projects/locate": {
             const candidates = await locateProject(String(url.searchParams.get("project") ?? ""), await journal.recent());

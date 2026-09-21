@@ -7,6 +7,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Account usage no longer breaks a phone that predates OpenCode Go: the phone names the
+  sources it understands and an older one keeps getting the original four.
 - A Claude subagent the orchestrator stopped leaves the phone's running count; its
   "killed" notification now counts as finished like a completed one.
 - A store that was never set up stays that way: the modules migration no longer creates
