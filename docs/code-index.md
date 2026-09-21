@@ -188,3 +188,33 @@ this document specified less than the implementation needed:
   `symbol=` tag in its text output; `search_knowledge` adds `symbol`/`symbols`
   by scanning a findings doc's citation comments, since its snippet may not
   include the citation line.
+
+Stage 3 shipped the Hook routes and the phone screen. Where this document left a
+choice, the implementation took these:
+
+- **Routes.** `packages/cli/src/bridge/code-routes.ts` adds a sixth route,
+  `GET /v1/code/status`, beside the five named above, all GET with query
+  parameters and all declared on the `code` module, so a disabled module is a
+  404 before any handler runs. Each route is a thin JSON formatter over
+  `code/query.ts`; a project with no index is a 404 whose message names
+  `phren code index <project>`. `/v1/health` and workspace snapshots now carry
+  `capabilities.code`, which the phone uses to hide the Code cell.
+- **Re-index on change.** There is no separate filesystem watcher to hook: the
+  git module captures changes through `ToolChanges` around the agent's
+  PreToolUse/PostToolUse callbacks. `ToolChanges` gained an `onRecord` callback,
+  and `CodeReindexer` maps a changed repository root to an indexed project
+  (registered source path, matching the checkout's real path), debounces 500 ms
+  and re-indexes incrementally. A repository whose `.git/HEAD` changed since the
+  last event runs a full re-index. The re-indexer is only constructed while the
+  `code` module is on, and only projects that already have a database are
+  followed; each run logs one line.
+- **Phone.** `CodeView` (capability `code`) is reached from a fourth cell on the
+  project page band. A search field (id `code-search`) lists symbols as
+  `sessionCard()` rows (id `code-row:<id>`); with no query it shows the usage
+  screen's Hot and Cold sections. Tapping a row opens `CodeSymbolDossier` (id
+  `code-dossier`): the definition snippet in the Changes screen's monospace, the
+  last-change line, references grouped by file, and a Findings section reserved
+  for stage 4.
+- **Memory graph symbol layer.** Deferred with stage 4, so the graph does not
+  draw a symbol layer yet. The `code` capability and the dossier leave the
+  citation plumbing for stage 4 to fill.

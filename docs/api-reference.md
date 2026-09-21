@@ -901,3 +901,7 @@ The hottest and coldest symbols by resolved-reference count, so cold code is vis
 | `top` | number | no | How many hot and how many cold symbols (1-100, default 10). |
 
 CLI equivalents: `phren code search <project> <query> [--kind k] [--limit n]`, `phren code def <project> <symbol>`, `phren code refs <project> <symbol>`, `phren code outline <project> <path>`, `phren code usage <project> [--top n]`.
+
+### Hook routes
+
+When the `code` module is enabled, Phren Hook serves the same index to the phone over its private HTTP pipe: `GET /v1/code/status?project=`, `/v1/code/search?project=&q=&kind=&limit=`, `/v1/code/outline?project=&path=`, `/v1/code/definition?project=&symbol=`, `/v1/code/references?project=&symbol=&limit=` and `/v1/code/usage?project=&top=`. Each returns JSON shaped from the corresponding query; a project with no index is a 404 naming `phren code index`. See [phren-hook.md](phren-hook.md) and the canonical route table in `packages/cli/src/bridge/AGENT_CONNECTIONS.md`.

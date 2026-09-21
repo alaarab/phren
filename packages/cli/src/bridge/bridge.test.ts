@@ -1535,4 +1535,17 @@ describe("Hook module capabilities", () => {
     expect(() => requireRoute(snapshot, "POST", "/v1/dispatch")).toThrow("module conductor is disabled");
     expect(() => requireRoute(snapshot, "POST", "/v1/schedules")).not.toThrow();
   });
+
+  it("gates the code routes and capability on the code module", async () => {
+    const { BUILTIN_MODULES } = await import("../modules/registry.js");
+    const { capabilitiesForModules, requireRoute } = await import("./server.js");
+    const snapshot = (names: string[]) => ({ store: "/store", profile: "work", generation: "test",
+      modules: BUILTIN_MODULES.filter(module => names.includes(module.name)), has: (name: string) => names.includes(name) });
+    const on = snapshot(["memory", "code"]);
+    expect(capabilitiesForModules(on).code).toBe(true);
+    expect(() => requireRoute(on, "GET", "/v1/code/search")).not.toThrow();
+    const off = snapshot(["memory"]);
+    expect(capabilitiesForModules(off).code).toBeUndefined();
+    expect(() => requireRoute(off, "GET", "/v1/code/search")).toThrow("enable it with phren modules enable code");
+  });
 });

@@ -11,6 +11,7 @@ import { z } from "zod";
 import { ActivityJournal } from "./activity.js";
 import { AgentHooks } from "./agent-hooks.js";
 import { homeDirectory, startChangeRetention } from "./changes.js";
+import { CodeReindexer, CodeRoutes } from "./code-routes.js";
 import { threadHealth } from "./codex-threads.js";
 import { WorkspaceContextUsage } from "./context.js";
 import { DispatchService, dispatchProjectDirectory, dispatchStatus } from "./dispatch.js";
@@ -56,7 +57,7 @@ async function childActivity(source: Provider, session: string): Promise<ChildAc
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", shell: "ssh-pty", herdr: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, repositoryFiles: true, subagents: true, dispatch: true, approvalPush: "direct-apns", simulators: process.platform === "darwin" };
+  files: true, repositoryFiles: true, subagents: true, dispatch: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true };
 
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
@@ -143,6 +144,11 @@ export async function serve(version: string): Promise<void> {
     launch: createScheduleLauncher((server, data) => launchSession(server, data), scheduleStore),
     push: { notify: value => agentHooks.push.notifySchedule(value) },
     locateProject: async project => (await locateProject(project, await journal.recent()))[0]?.directory }) : undefined;
+  const codeRoutes = modules.has("code") ? new CodeRoutes(scheduleStore) : undefined;
+  // The code module follows the git module's recorded file changes: an
+  // incremental re-index after a save, a full one after a branch switch.
+  const codeReindexer = codeRoutes ? new CodeReindexer({ store: scheduleStore }) : undefined;
+  if (codeReindexer) agentHooks.changes.onRecord = files => codeReindexer.record(files);
   const info = { product: "phren-hook", protocol: PROTOCOL, version, computer: { id: computerID, name: hostname() }, capabilities: activeCapabilities,
     modules: Object.fromEntries(modules.modules.map(module => [module.name, module.version])),
     store: modules.store, profile: modules.profile, generation: modules.generation };
@@ -306,6 +312,12 @@ export async function serve(version: string): Promise<void> {
             const page = await reader.read();
             result = { ...page, type: "backlog", source, session }; break;
           }
+          case "/v1/code/status": result = await codeRoutes!.status(url.searchParams.get("project")); break;
+          case "/v1/code/search": result = await codeRoutes!.search(url.searchParams.get("project"), url.searchParams.get("q"), url.searchParams.get("kind"), url.searchParams.get("limit")); break;
+          case "/v1/code/outline": result = await codeRoutes!.outline(url.searchParams.get("project"), url.searchParams.get("path")); break;
+          case "/v1/code/definition": result = await codeRoutes!.definition(url.searchParams.get("project"), url.searchParams.get("symbol")); break;
+          case "/v1/code/references": result = await codeRoutes!.references(url.searchParams.get("project"), url.searchParams.get("symbol"), url.searchParams.get("limit")); break;
+          case "/v1/code/usage": result = await codeRoutes!.usage(url.searchParams.get("project"), url.searchParams.get("top")); break;
           default: throw new BridgeError(404, "Unknown Phren Hook route.");
         }
       } else if (request.method === "POST") {
@@ -670,7 +682,7 @@ export async function serve(version: string): Promise<void> {
     })().finally(() => { recording = false; }).catch(() => {});
   }, 5000);
   await new Promise<void>(resolve => {
-    const stop = () => { stopRetention(); clearInterval(scheduleTimer); clearInterval(activityTimer); scheduler?.close(); agentHooks.close(); ws.clients.forEach(c => c.terminate()); ws.close(); http.close(() => resolve()); http.closeAllConnections(); };
+    const stop = () => { stopRetention(); clearInterval(scheduleTimer); clearInterval(activityTimer); scheduler?.close(); codeReindexer?.close(); agentHooks.close(); ws.clients.forEach(c => c.terminate()); ws.close(); http.close(() => resolve()); http.closeAllConnections(); };
     process.once("SIGTERM", stop); process.once("SIGINT", stop);
   });
   await unlink(socketPath()).catch(() => {});
