@@ -124,6 +124,9 @@ try {
       // The simulator input helper's Swift source rides inside the bundle
       // and is compiled on the Mac that needs it.
       SIMTAP_SOURCE: JSON.stringify(fs.readFileSync(path.join(srcRoot, "bridge/native/simtap.swift"), "utf8")),
+      // The OpenCode transcript plugin rides inside the bundle too, so a copied
+      // or relocated bundle still installs and updates it.
+      OPENCODE_PLUGIN_SOURCE: JSON.stringify(fs.readFileSync(path.join(cliRoot, "plugins/opencode/phren-transcript.js"), "utf8")),
     },
   });
   const entryPath = path.join(tempRoot, "index.js");
