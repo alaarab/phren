@@ -7,6 +7,7 @@ import { agentHook } from "./agent-hooks.js";
 import { provider } from "./protocol.js";
 import { AccountUsageReader, captureClaudeUsage } from "./usage.js";
 import { acceptComputer, enrollComputer } from "./computers.js";
+import { ARCHIVE_MAX_FOLDERS, archiveFinishedFanouts } from "./fanouts.js";
 
 export async function runBridge(args: string[], version: string): Promise<number> {
   switch (args[0]) {
@@ -16,6 +17,18 @@ export async function runBridge(args: string[], version: string): Promise<number
         await acceptComputer(args[1], await readFile(args[3], "utf8"));
         console.log(`Enrolled ${args[1]} for Phren Hook.`);
       } else throw new Error("Usage: phren bridge enroll-computer <name> [--accept <public-key-file>]");
+      break;
+    }
+    case "fanouts": {
+      const flags = args.slice(2);
+      if (args[1] !== "archive" || flags.some(flag => flag !== "--dry-run")) {
+        throw new Error("Usage: phren bridge fanouts archive [--dry-run]");
+      }
+      const dryRun = flags.includes("--dry-run");
+      const { moved, deleted } = await archiveFinishedFanouts(process.env, { dryRun });
+      const doing = dryRun ? "Would archive" : "Archived";
+      const removal = dryRun ? "would delete" : "deleted";
+      console.log(`${doing} ${moved.length} fan-out job(s); ${removal} ${deleted} past the ${ARCHIVE_MAX_FOLDERS}-folder cap.`);
       break;
     }
     case "usage-statusline": await captureClaudeUsage(args[1] || ""); break;
@@ -36,7 +49,7 @@ export async function runBridge(args: string[], version: string): Promise<number
         shell: muxes.length > 0 ? "available" : "Herdr is not running: chat is unavailable, project shells and agents still open over SSH",
       } }, null, 2));
     }
-    default: throw new Error("Usage: phren bridge <install|status|doctor|usage|update|rollback|uninstall|enroll-computer>");
+    default: throw new Error("Usage: phren bridge <install|status|doctor|usage|update|rollback|uninstall|enroll-computer|fanouts archive>");
   }
   return 0;
 }

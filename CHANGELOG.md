@@ -7,6 +7,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- Finished fan-out jobs archive themselves. The Hook sweeps the store's
+  `.runtime/agent-fanouts` at start and then hourly, moving a folder whose
+  manifest status is completed, failed or cancelled and whose `finishedAt`
+  (or `exit.txt` mtime when there is none) is more than 24 hours old into
+  `.runtime/agent-fanouts-archive/<job id>`. A folder with no manifest goes
+  there too once its `exit.txt` is that old, gaining a synthesized manifest
+  `{ "status": "failed", "reason": "no manifest" }`. A folder without
+  `exit.txt` is still running and is never touched. The archive keeps at most
+  500 folders, deleting the oldest beyond that, and one log line records each
+  sweep that moved anything. Run the sweep by hand with
+  `phren bridge fanouts archive [--dry-run]`. See `docs/fanout.md`.
 - The `code` module now serves its symbol index to the phone. Phren Hook adds
   `GET /v1/code/status`, `/v1/code/search`, `/v1/code/outline`,
   `/v1/code/definition`, `/v1/code/references` and `/v1/code/usage`, gated by the

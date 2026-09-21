@@ -200,9 +200,12 @@ const TEAM_SUBCOMMANDS: Subcommand[] = [
 
 export const REGISTRY: Command[] = [
   {
-    name: "bridge", topic: "setup", usage: "phren bridge <install|status|doctor|update|rollback|uninstall|enroll-computer>",
+    name: "bridge", topic: "setup", usage: "phren bridge <install|status|doctor|update|rollback|uninstall|enroll-computer|fanouts archive>",
     summary: "Install Phren Hook and enroll phone or computer connections",
-    subcommands: [{ name: "enroll-computer", usage: "phren bridge enroll-computer <name> [--accept <public-key-file>]", summary: "Print or accept a restricted computer dispatch key" }],
+    subcommands: [
+      { name: "enroll-computer", usage: "phren bridge enroll-computer <name> [--accept <public-key-file>]", summary: "Print or accept a restricted computer dispatch key" },
+      { name: "fanouts archive", usage: "phren bridge fanouts archive [--dry-run]", summary: "Archive finished fan-out jobs older than 24 hours" },
+    ],
     run: async args => {
       const { runBridge } = await import("./bridge/command.js");
       const { VERSION } = await import("./package-metadata.js");
