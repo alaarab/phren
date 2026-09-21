@@ -522,3 +522,41 @@ new worker. Two capabilities make that real:
 
 Voice comes later (the owner's earlier note: talk to the conductor, spoken or
 short replies), on top of this.
+
+## Grants: standing permission to send work out (September 21)
+
+Owner: "I could see myself wanting to give permission to the conductor to
+send things out to the agents. Could be project specific or global too."
+
+Today every `dispatch` and `hand_off` the conductor makes is a tool call the
+owner approves from the phone card, one at a time. A grant lets the owner
+say once that the conductor may send work out on its own, either everywhere
+or for named projects.
+
+- **Where it lives.** `conductor.yaml` next to `hooks.yaml`:
+
+  ```yaml
+  grants:
+    - scope: global            # or project:phren
+      actions: [dispatch, hand_off]
+      computers: [Linuxbox]    # optional; omitted means any verified peer
+      until: 2026-10-01T00:00Z # optional; omitted means until revoked
+  ```
+
+  Matching is by the work's project: a project grant covers a dispatch or
+  hand-off whose `project` is that name; a global grant covers all. The most
+  specific matching grant wins; a grant never widens a peer's own `accept`
+  list on the target computer.
+- **How it is enforced.** The Hook checks the grant before the conductor's
+  call reaches the approval card: with a grant, the call runs and the phone
+  gets a receipt row ("Sent to Linuxbox under the phren grant") instead of a
+  question; without one, the card asks as now and offers "Allow for this
+  project" and "Allow everywhere" as the two extra answers that write a
+  grant. The `granted` field on the receipt records which grant applied.
+- **Where the owner sees it.** Conductor settings on the phone lists the
+  grants as `sessionCard()` rows (scope, actions, computers, until) with
+  Revoke on the ellipsis; `phren conductor grants [add|remove]` on the CLI.
+  Ids `conductor-grant:<n>`, `conductor-grant-add`.
+- **What a grant never covers.** Enrolling computers, changing hooks.yaml,
+  or anything the conductor's own harness would have asked the owner about
+  in its own session (file writes, shell) stay with that harness's rules.
