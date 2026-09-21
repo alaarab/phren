@@ -10,6 +10,7 @@ import {
   type OutlineEntry,
 } from "./query.js";
 import { codeIndexStatus } from "./status.js";
+import { findingsCitingSymbol, formatCitingFinding } from "./citations.js";
 
 /**
  * The `phren code` subcommands.
@@ -209,6 +210,12 @@ export async function runCodeCommand(args: string[], ctx: CliContext): Promise<n
     if (candidates > 1) console.log(`${candidates} candidates shared this name; showing the best.`);
     if (blame) console.log(`last change ${blame.at} ${blame.authorHash.slice(0, 12)}`);
     if (snippet) { console.log(""); console.log(snippet); }
+    const citing = findingsCitingSymbol(store, project, symbol);
+    if (citing.length > 0) {
+      console.log("");
+      console.log("Findings");
+      for (const finding of citing) console.log(formatCitingFinding(finding));
+    }
     return;
   }
 

@@ -103,6 +103,8 @@ function buildFindingCitation(
     file: citationInput?.file,
     line: citationInput?.line,
     commit: citationInput?.commit || (citationInput?.repo || inferredRepo ? headCommit ?? getHeadCommit(citationInput?.repo || inferredRepo || "") : undefined),
+    symbol: citationInput?.symbol,
+    symbol_unresolved: citationInput?.symbol_unresolved ? true : undefined,
     supersedes: citationInput?.supersedes,
     task_item: citationInput?.task_item,
   };

@@ -19,6 +19,7 @@ import {
 } from "../shared.js";
 import { getCurrentActor, getMachineName } from "../machine-identity.js";
 import { type FindingProvenance } from "../content/citation.js";
+import { symbolCitationForFinding } from "../code/citations.js";
 import {
   addFindingToFile,
   addFindingsToFile,
@@ -155,7 +156,7 @@ async function handleAddFinding(
   params: {
     project: string;
     finding: string | string[];
-    citation?: { file?: string; line?: number; repo?: string; commit?: string; supersedes?: string; task_item?: string };
+    citation?: { file?: string; line?: number; repo?: string; commit?: string; symbol?: string; supersedes?: string; task_item?: string };
     sessionId?: string;
     findingType?: (typeof FINDING_TYPES)[number];
     scope?: string;
@@ -266,13 +267,20 @@ async function handleAddFinding(
   return withWriteQueue(async () => {
     try {
       const taggedFinding = applyFindingTypePrefix(finding, findingType);
+      // Memory link: auto-attach a symbol citation when the finding names one
+      // unique symbol, or validate an explicit `symbol:` citation. Never rewrites
+      // the finding text; only the citation comment gains the symbol.
+      const symbolCitation = await symbolCitationForFinding(phrenPath, project, taggedFinding, citation?.symbol);
+      const citationForWrite = (citation || symbolCitation.symbol)
+        ? { ...(citation ?? {}), ...symbolCitation }
+        : undefined;
       // Jaccard "maybe zone" scan — free, no LLM call. Return candidates so the agent decides.
       const potentialDuplicates = findJaccardCandidates(phrenPath, project, taggedFinding);
       // Heuristic contradiction candidates — also free, also agent-decides. No extra API call.
       const potentialConflicts = findConflictCandidates(phrenPath, project, taggedFinding);
       const semanticConflicts = await checkSemanticConflicts(phrenPath, project, taggedFinding);
       runCustomHooks(phrenPath, "pre-finding", { PHREN_PROJECT: project });
-      const result = addFindingToFile(phrenPath, project, taggedFinding, citation, {
+      const result = addFindingToFile(phrenPath, project, taggedFinding, citationForWrite, {
         sessionId,
         scope: normalizedScope,
         extraAnnotations: semanticConflicts.checked ? semanticConflicts.annotations : undefined,
@@ -767,6 +775,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           line: z.number().int().positive().optional().describe("1-based line number in file."),
           repo: z.string().optional().describe("Git repository root path for citation validation."),
           commit: z.string().optional().describe("Git commit SHA that supports this finding."),
+          symbol: z.string().optional().describe("A code symbol this finding is about: Name, Type.member or name(). Validated against the project's code index; stored unresolved when it does not resolve."),
           supersedes: z.string().optional().describe("First 60 chars of the old finding this one replaces. The old entry will be marked as superseded."),
           task_item: z.string().optional().describe("Task item stable ID like bid:abcd1234, positional ID like A1, or item text to link this finding to."),
         }).optional().describe("Optional source citation for traceability (only used when finding is a single string)."),

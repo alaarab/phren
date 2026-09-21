@@ -155,3 +155,36 @@ specified less than the implementation needed, the choices were:
   module gate as `index|status`, and `starter/global/skills/code/SKILL.md`
   points agents at the tools before grep and at `path:line` citations.
   `code_outline` takes the project-relative path the index stores.
+
+Stage 4 shipped the memory link in `packages/cli/src/code/citations.ts`. Where
+this document specified less than the implementation needed:
+
+- **Auto-attach is a write-path step, not a content step.** The code index opens
+  through sql.js, which is asynchronous, while `addFindingToFile` holds a
+  synchronous file lock. The scan therefore runs in the async `add_finding`
+  handler before the write: `symbolCitationForFinding` opens the project index
+  read-only, walks the finding's identifier-shaped tokens in order, and returns
+  the first that `pickSymbol` resolves to exactly one declaration. It requires a
+  name of four or more characters and a non-variable kind unless the symbol is
+  exported. `addFindingToFile` then stores the citation; it never touches the
+  finding text.
+- **Explicit symbols are stored, not rejected.** An explicit `symbol:` citation
+  is resolved against the index. A hit is stored as given; a miss is stored with
+  `symbol_unresolved: true`, mirroring how an invalid file citation is kept and
+  later flagged. `validateFindingCitation` returns false for an unresolved
+  symbol, so the trust filter queues it as `invalid_citation`. With no index at
+  all there is nothing to validate against, so an explicit symbol is stored
+  unchanged and nothing is auto-attached.
+- **Reading the citing findings.** `code_definition` and `phren code def` append
+  a `Findings` block after the snippet: one line per finding, its `L<n>|fid` and
+  the first 160 characters of its text. The scan goes through the existing
+  finding parser: `readFindings` for FINDINGS.md, and `parseFindingsContent`
+  (extracted from `readFindings`) over `reference/topics/*.md` via
+  `listTopicFiles`, so archived findings are found without a second markdown
+  parser. A citation matches a query when the parsed names are equal and, if
+  both sides carry a container, the containers are equal, so `Point.length`
+  matches `length()` and vice versa.
+- **Read surfaces.** `get_findings` adds a top-level `symbol` per finding and a
+  `symbol=` tag in its text output; `search_knowledge` adds `symbol`/`symbols`
+  by scanning a findings doc's citation comments, since its snippet may not
+  include the citation line.

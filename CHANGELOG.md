@@ -91,6 +91,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   search|outline|refs|def|usage` subcommands and a `code` skill ship with them,
   and the index now records its `repo_root` so a `--repo` index can still
   return source snippets.
+- Code index, stage 4: the memory link. `add_finding` attaches a `symbol:`
+  citation when a finding names exactly one symbol the project's index resolves
+  (four or more characters, and not a local variable unless exported), and an
+  explicit `symbol:` citation is validated against the index and stored even
+  when it does not resolve, marked `symbol_unresolved`. `code_definition` and
+  `phren code def` list the findings that cite the symbol after the snippet, and
+  `get_findings` and `search_knowledge` return the symbol citation so the phone
+  can show it.
 - Schedule notifications: a schedule's optional `notify` list (`start`, `finish`,
   `failure`; finish and failure when absent) makes the Hook push each run's
   start, finish or failure to registered phones through the approvals' APNs

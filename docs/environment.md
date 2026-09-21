@@ -64,6 +64,22 @@ These control how much context the UserPromptSubmit hook injects into each promp
 | `PHREN_MEMORY_EXTRACT_WINDOW_DAYS` | integer | `30` | How far back (in days) the `extract-memories` command looks in git and GitHub history. |
 | `PHREN_FINDINGS_CAP` | integer | `20` | Maximum findings in FINDINGS.md before auto-archival moves old entries to `reference/`. |
 
+## Finding citations
+
+A finding can carry a source citation in a `<!-- phren:cite {json} -->` comment.
+Besides `file`, `line`, `repo` and `commit`, the object may name a code symbol as
+`symbol: "Name"`, `symbol: "Type.member"` or `symbol: "name()"`. When the project
+has a code index (the `code` module), a finding whose text names exactly one
+symbol the index resolves, at least four characters long and not a local
+variable unless exported, gets that `symbol` citation attached automatically;
+the finding text is never rewritten. An explicit `symbol` is validated against
+the index and stored either way: one that does not resolve is kept with
+`symbol_unresolved: true`, the symbol counterpart of an invalid file citation,
+and the trust filter treats it as `invalid_citation`. `code_definition` lists
+the findings that cite a symbol, and `get_findings` / `search_knowledge` return
+the symbol so a client can show it. See
+[store-format.md](store-format.md#3-metadata-comments).
+
 ## File Locking
 
 | Variable | Type | Default | Description |
