@@ -7,6 +7,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- The phone's agent tree lists the newest fan-out workers first, so a computer with more
+  than 128 finished jobs on disk no longer hides the ones running now.
 - A dispatch whose remote agent had not written its session yet when the launch
   returned reported an uncertain delivery without sending the brief; the dispatch now
   waits up to fifteen seconds for the pane's session before sending.

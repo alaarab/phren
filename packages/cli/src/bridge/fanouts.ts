@@ -117,7 +117,11 @@ export async function fanoutChildren(parentProvider: Provider, parentSession: st
   const configured = fanoutRoot(env);
   let root: string;
   try { root = await realpath(configured); } catch { return []; }
-  const names = (await readdir(root).catch(() => [])).filter(name => jobID.safeParse(name).success).slice(0, MAX_JOBS);
+  // Newest first, so a directory that outgrew MAX_JOBS drops old finished
+  // jobs rather than the workers running right now.
+  const entries = (await readdir(root).catch(() => [])).filter(name => jobID.safeParse(name).success);
+  const stamped = await Promise.all(entries.map(async name => ({ name, at: (await stat(path.join(root, name)).catch(() => undefined))?.mtimeMs ?? 0 })));
+  const names = stamped.sort((a, b) => b.at - a.at).slice(0, MAX_JOBS).map(entry => entry.name);
   const children: FanoutChild[] = [];
   for (const name of names) {
     const directory = path.join(root, name);
