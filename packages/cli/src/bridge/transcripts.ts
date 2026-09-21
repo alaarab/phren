@@ -183,7 +183,9 @@ async function claudeChildAgents(file: string, session: string): Promise<ChildAg
       const content = typeof raw.content === "string" ? raw.content : typeof object(raw.message).content === "string" ? String(object(raw.message).content) : "";
       if (content.includes("<task-notification>")) {
         const child = /<task-id>([^<>]{1,128})<\/task-id>/.exec(content)?.[1], taskStatus = /<status>([^<>]+)<\/status>/.exec(content)?.[1];
-        const previous = child && launches.get(child); if (previous && ["completed", "failed", "cancelled"].includes(taskStatus ?? "")) previous.state = "completed";
+        // A stopped agent's notification says "killed"; it is finished as
+        // much as a completed one and must leave the running count.
+        const previous = child && launches.get(child); if (previous && ["completed", "failed", "cancelled", "killed"].includes(taskStatus ?? "")) previous.state = "completed";
       }
       if (content.includes("<teammate-message")) {
         const from = /<teammate-message teammate_id="([A-Za-z0-9][A-Za-z0-9_-]{0,63})"/.exec(content)?.[1];
