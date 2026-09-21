@@ -1,6 +1,8 @@
 import { parseArgs } from "node:util";
 import { hookRequest } from "./client.js";
 import { dispatchSchema } from "./dispatch.js";
+import { handOff } from "./hand-off.js";
+import { sessionId } from "./protocol.js";
 
 export async function runDispatch(args: string[]): Promise<number> {
   if (args.length === 1 && args[0] === "status") {
@@ -27,4 +29,15 @@ export async function runDispatch(args: string[]): Promise<number> {
   const result = await hookRequest("/v1/dispatch", input, undefined, 180_000);
   console.log(JSON.stringify(result, null, 2));
   return result.ok === true ? 0 : 1;
+}
+
+export async function runHandOff(args: string[]): Promise<number> {
+  const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
+    session: { type: "string" }, text: { type: "string" },
+  } });
+  if (positionals.length !== 1 || !values.session || !values.text) throw new Error("Usage: phren hand-off <computer|local> --session <id> --text <prompt>");
+  const computer = positionals[0] === "local" ? undefined : positionals[0];
+  const result = await handOff({ ...(computer ? { computer } : {}), session: sessionId.parse(values.session), text: values.text });
+  console.log(JSON.stringify(result, null, 2));
+  return result.ok ? 0 : 1;
 }

@@ -35,7 +35,10 @@ its local checkouts, fanout and provider rate limits. Where installed, local
 workers use the fanout wrapper's `scripts/run.sh --provider codex|opencode
 --label --worktree [--model] [--mode]` contract and parent-bound manifests.
 
-Call `dispatch` in the full MCP profile, or
+Prefer handing work to a session that already owns the project and is idle or
+doing related work; call `hand_off` in full or `phren_admin(action: "hand_off",
+computer?, target|session, text)` in core. Otherwise dispatch a new worker.
+Write one short line either way. Call `dispatch` in full or
 `phren_admin(action: "dispatch", computer, project, harness, model?, prompt, label)`
 in core. The CLI equivalent is `phren dispatch <computer|anywhere> <project>
 --harness <harness> --label <label> --prompt <brief> [--model <model>]`.

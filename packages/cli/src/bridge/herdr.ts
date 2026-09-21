@@ -81,6 +81,7 @@ export function workspaceSnapshot(s: Json, contextUsedPercent?: ReadonlyMap<Json
       const changed = Math.max(0, ...panes.map(p => Number.isSafeInteger(p.state_change_seq) ? Number(p.state_change_seq) : 0));
       return { id: t.tab_id, label: t.label, title: agent?.title || agent?.terminal_title_stripped,
         agent: agent?.agent, agentStatus: t.agent_status, cwd: agent?.foreground_cwd || agent?.cwd,
+        role: typeof agent?.agent_name === "string" && agent.agent_name.startsWith("conductor-") ? "conductor" : undefined,
         changedSeq: changed || undefined,
         lastChangedAt: lastChanged?.get(tabActivityKey(t.workspace_id, t.tab_id)),
         approvalPending: panes.some(p => approvalPanes?.has(String(p.pane_id))) || undefined,
