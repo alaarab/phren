@@ -28,6 +28,9 @@ extension View {
 /// "live · updated 3s ago" freshness indicator shown on every list screen —
 /// the visible promise that what you see is what's on GitHub right now.
 struct LiveStatusBar: View {
+    /// A single caption line, for a navigation bar subtitle, instead of the
+    /// full-width bar under the top bar.
+    var compact = false
     @Environment(AppModel.self) private var model
     @State private var now = Date()
 
@@ -39,18 +42,21 @@ struct LiveStatusBar: View {
                 .fill(indicatorColor)
                 .frame(width: 5, height: 5)
             Text(statusText)
-                .font(.caption)
+                .font(compact ? .caption2 : .caption)
                 .foregroundStyle(PhrenTheme.textMuted)
-            Spacer()
-            if model.syncStatus.pendingCount > 0 {
-                Label("\(model.syncStatus.pendingCount)", systemImage: "arrow.up.circle")
-                    .font(.caption)
-                    .foregroundStyle(PhrenTheme.amber)
+                .lineLimit(1)
+            if !compact {
+                Spacer()
+                if model.syncStatus.pendingCount > 0 {
+                    Label("\(model.syncStatus.pendingCount)", systemImage: "arrow.up.circle")
+                        .font(.caption)
+                        .foregroundStyle(PhrenTheme.amber)
+                }
             }
         }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 8)
-        .background(PhrenTheme.bg)
+        .padding(.horizontal, compact ? 0 : 24)
+        .padding(.vertical, compact ? 0 : 8)
+        .background(compact ? Color.clear : PhrenTheme.bg)
         .onReceive(ticker) { now = $0 }
     }
 

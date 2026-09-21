@@ -219,7 +219,7 @@ final class AgentChatTests: XCTestCase {
         XCTAssertEqual(tree.label, "1 running agent", "The composer badge counts only running agents")
         capture(app, "Agent tree in the composer")
         tree.tap()
-        XCTAssertTrue(app.buttons["chat-subagents-done"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["chat-subagents-back"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.navigationBars["Agent work"].exists)
         let completedID = "a" + String(repeating: "1", count: 31)
         XCTAssertFalse(app.buttons["child-agent:\(completedID)"].exists, "Finished agents are out of scope in Agent work")
@@ -230,7 +230,7 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(runningAgent.label.contains("Claude"), "The provider or model appears above the task name")
         XCTAssertFalse(app.staticTexts["Running"].exists, "The avatar's dot already says the agent is running")
         capture(app, "Agent work cards")
-        app.buttons["chat-subagents-done"].tap()
+        app.buttons["chat-subagents-back"].tap()
         app.buttons["chat-switch-agent"].tap()
         let fixtureChildID = "b2222222222222222222222222222222"
         let drawerChild = app.buttons["drawer-child-agent:\(fixtureChildID)"]
@@ -287,7 +287,7 @@ final class AgentChatTests: XCTestCase {
         app.buttons["chat-close"].tap()
 
         app.buttons["chat-agent-tree"].tap()
-        XCTAssertTrue(app.buttons["chat-subagents-done"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["chat-subagents-back"].waitForExistence(timeout: 5))
         let remoteLead = app.buttons["child-agent:c1000000-0000-0000-0000-000000000002/remote-parser-lead/lead"]
         XCTAssertTrue(remoteLead.waitForExistence(timeout: 5))
         XCTAssertTrue(remoteLead.label.contains("Linuxbox"), remoteLead.label)

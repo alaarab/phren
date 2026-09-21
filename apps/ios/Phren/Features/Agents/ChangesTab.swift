@@ -26,7 +26,6 @@ struct ChangesTab: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            modeToggle
             if mode == "diff" { diffMode } else { listMode }
         }
         .background(PhrenTheme.bg)
@@ -45,40 +44,9 @@ struct ChangesTab: View {
         }
         .onAppear { reload() }
         .onDisappear { loadTask?.cancel() }
-    }
-
-    // MARK: - Mode
-
-    private var modeToggle: some View {
-        HStack(spacing: 4) {
-            modePill("List", icon: "list.bullet", value: "list", identifier: "changes-mode-list")
-            modePill("Diff", icon: "rectangle.split.2x1", value: "diff", identifier: "changes-mode-diff")
-        }
-        .padding(2)
-        .background(PhrenTheme.surface, in: Capsule())
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, PhrenTheme.Space.medium).padding(.vertical, 2)
-    }
-
-    private func modePill(_ title: String, icon: String, value: String, identifier: String) -> some View {
-        let selected = mode == value
-        return Button {
-            guard mode != value else { return }
-            mode = value
-            if value == "diff", diff == nil { reload() }
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: icon).font(PhrenTheme.Font.caption.weight(.semibold))
-                Text(title).font(PhrenTheme.Font.subheadline.weight(.medium))
-            }
-            .foregroundStyle(selected ? PhrenTheme.accent : PhrenTheme.textMuted)
-            .padding(.horizontal, 14).frame(minHeight: 32)
-            .background(selected ? PhrenTheme.accent.opacity(0.16) : .clear, in: Capsule())
-            .contentShape(Rectangle().inset(by: -6))
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(selected ? .isSelected : [])
-        .accessibilityIdentifier(identifier)
+        // The List/Diff toggle lives in the section band above; load the diff
+        // the first time Diff is chosen.
+        .onChange(of: mode) { _, value in if value == "diff" && diff == nil { reload() } }
     }
 
     // MARK: - List
@@ -328,7 +296,8 @@ struct ChangesDiffList: View {
                                                     runStart: DiffPalette.run(section.document.rows, at: index).start,
                                                     runEnd: DiffPalette.run(section.document.rows, at: index).end,
                                                     wrap: wrap, scrollCode: !wrap, markGutter: index == firstNumberedRow(section.document),
-                                                    numberWidth: 17)
+                                                    numberWidth: gutterNumberWidth(section.document),
+                                                    widestNumber: section.document.widestNumber)
                                             .id(rowID(section, row))
                                     }
                                 }
@@ -396,6 +365,12 @@ struct ChangesDiffList: View {
 
     private func firstNumberedRow(_ document: DiffDocument) -> Int {
         document.rows.firstIndex { $0.old != nil || $0.new != nil } ?? -1
+    }
+
+    /// The gutter tracks the document's widest line number, so a three-digit
+    /// number gets a column wide enough for all three digits.
+    private func gutterNumberWidth(_ document: DiffDocument) -> CGFloat {
+        DiffPalette.numberWidth(forDigits: document.widestNumber.count)
     }
 
     private func rowID(_ section: ChangesDiffSection, _ row: DiffDocument.Row) -> String {

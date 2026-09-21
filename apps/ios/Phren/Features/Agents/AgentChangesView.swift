@@ -12,6 +12,7 @@ struct AgentChangesView: View {
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("sessions.live.preferences.v1") private var hostData = Data()
     @AppStorage("changes.wrap") private var wrapLines = true
+    @AppStorage("changes.mode") private var mode = "list"
     @State private var model: ChangesModel
     @State private var selection: ChangesSection = .changes
     @State private var loadTask: Task<Void, Never>?
@@ -36,7 +37,6 @@ struct AgentChangesView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
             tabBar
             Rectangle().fill(PhrenTheme.border).frame(height: 0.5)
             selectedSection
@@ -44,10 +44,18 @@ struct AgentChangesView: View {
         }
         .background(PhrenTheme.chatCanvas)
         .environment(model)
+        // A marker for "the Changes screen is up", kept in the body rather
+        // than the toolbar so its element stays reachable.
+        .overlay(alignment: .topLeading) {
+            Color.clear.frame(width: 1, height: 1).accessibilityElement().accessibilityIdentifier("changes-header")
+        }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .presentationDragIndicator(.visible)
         .toolbar {
+            // The branch and its counts ride in the top bar beside the back
+            // chevron, so the content starts right under the section band.
+            ToolbarItem(placement: .principal) { titleBar }
             ToolbarItem(placement: .topBarTrailing) {
                 Button { wrapLines.toggle() } label: {
                     Image(systemName: "text.alignleft")
@@ -77,23 +85,18 @@ struct AgentChangesView: View {
         loadTask = Task { await model.load() }
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 2) {
+    /// The top bar's two lines: the branch in body weight, the counts in
+    /// caption underneath.
+    private var titleBar: some View {
+        VStack(spacing: 0) {
             Text(title)
-                .font(PhrenTheme.Font.title2.weight(.bold))
+                .font(PhrenTheme.Font.body.weight(.medium))
                 .foregroundStyle(PhrenTheme.text)
                 .lineLimit(1)
-                .minimumScaleFactor(0.8)
                 .accessibilityIdentifier("changes-title")
             statusLine
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 16)
-        .padding(.top, 4)
-        .padding(.bottom, 8)
-        .overlay(alignment: .topLeading) {
-            Color.clear.frame(width: 1, height: 1).accessibilityElement().accessibilityIdentifier("changes-header")
-        }
     }
 
     private var title: String {
@@ -122,20 +125,20 @@ struct AgentChangesView: View {
                     }
                 }
             }
-            .font(PhrenTheme.Font.monoFootnote)
+            .font(PhrenTheme.Font.monoCaption)
             .foregroundStyle(PhrenTheme.textMuted)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(spoken)
             .accessibilityIdentifier("changes-status-line")
         } else if let error = model.error {
             Text(error)
-                .font(PhrenTheme.Font.monoFootnote)
+                .font(PhrenTheme.Font.monoCaption)
                 .foregroundStyle(PhrenTheme.warning)
-                .lineLimit(2)
+                .lineLimit(1)
                 .accessibilityIdentifier("changes-status-error")
         } else {
             Text("Loading…")
-                .font(PhrenTypography.monoFootnote)
+                .font(PhrenTypography.monoCaption)
                 .foregroundStyle(PhrenTheme.textMuted)
                 .accessibilityIdentifier("changes-status-line")
         }
@@ -146,40 +149,79 @@ struct AgentChangesView: View {
             + Text("+\(status.additions)").foregroundColor(PhrenTheme.success)
             + Text(" ")
             + Text("-\(status.deletions)").foregroundColor(PhrenTheme.danger))
-            .fixedSize(horizontal: false, vertical: true)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .truncationMode(.middle)
     }
 
     private var separator: some View { Text("·").foregroundStyle(PhrenTheme.textDim) }
 
+    /// One 44pt band: the five section icons on the left, the Changes tab's
+    /// List/Diff toggle on the right. The toggle only means something while
+    /// Changes is showing.
     private var tabBar: some View {
-        HStack(spacing: 4) {
-            ForEach(ChangesSection.allCases) { section in
-                Button { selection = section } label: {
-                    Image(systemName: section.symbol)
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(selection == section ? PhrenTheme.accent : PhrenTheme.textMuted)
-                        .frame(maxWidth: .infinity, minHeight: 32)
-                        .background {
-                            if selection == section {
-                                RoundedRectangle(cornerRadius: PhrenTheme.Radius.small, style: .continuous)
-                                    .fill(PhrenTheme.surface)
+        HStack(spacing: 8) {
+            HStack(spacing: 4) {
+                ForEach(ChangesSection.allCases) { section in
+                    Button { selection = section } label: {
+                        Image(systemName: section.symbol)
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(selection == section ? PhrenTheme.accent : PhrenTheme.textMuted)
+                            .frame(maxWidth: .infinity, minHeight: 32)
+                            .background {
+                                if selection == section {
+                                    RoundedRectangle(cornerRadius: PhrenTheme.Radius.small, style: .continuous)
+                                        .fill(PhrenTheme.surface)
+                                }
                             }
-                        }
-                        .contentShape(Rectangle().inset(by: -6))
+                            .contentShape(Rectangle().inset(by: -6))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(section.title)
+                    .accessibilityIdentifier(section.accessibilityIdentifier)
+                    .accessibilityAddTraits(selection == section ? [.isSelected] : [])
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(section.title)
-                .accessibilityIdentifier(section.accessibilityIdentifier)
-                .accessibilityAddTraits(selection == section ? [.isSelected] : [])
             }
+            .frame(maxWidth: .infinity)
+            .padding(2)
+            .overlay {
+                Color.clear.frame(maxWidth: .infinity, minHeight: 36).accessibilityElement()
+                    .accessibilityIdentifier("changes-tab-bar")
+                    .allowsHitTesting(false)
+            }
+            if selection == .changes { modeToggle }
+        }
+        .frame(minHeight: 44)
+        .padding(.horizontal, 10)
+    }
+
+    private var modeToggle: some View {
+        HStack(spacing: 4) {
+            modePill("List", icon: "list.bullet", value: "list", identifier: "changes-mode-list")
+            modePill("Diff", icon: "rectangle.split.2x1", value: "diff", identifier: "changes-mode-diff")
         }
         .padding(2)
-        .padding(.horizontal, 10)
-        .overlay {
-            Color.clear.frame(maxWidth: .infinity, minHeight: 36).accessibilityElement()
-                .accessibilityIdentifier("changes-tab-bar")
-                .allowsHitTesting(false)
+        .background(PhrenTheme.surface, in: Capsule())
+    }
+
+    private func modePill(_ title: String, icon: String, value: String, identifier: String) -> some View {
+        let selected = mode == value
+        return Button {
+            guard mode != value else { return }
+            mode = value
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: icon).font(PhrenTheme.Font.caption.weight(.semibold))
+                Text(title).font(PhrenTheme.Font.subheadline.weight(.medium))
+            }
+            .foregroundStyle(selected ? PhrenTheme.accent : PhrenTheme.textMuted)
+            .padding(.horizontal, 14).frame(minHeight: 32)
+            .background(selected ? PhrenTheme.accent.opacity(0.16) : .clear, in: Capsule())
+            .contentShape(Rectangle().inset(by: -6))
         }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityIdentifier(identifier)
     }
 
     @ViewBuilder private var selectedSection: some View {

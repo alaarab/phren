@@ -100,7 +100,8 @@ struct FileDiffView: View {
                         } else {
                             ForEach(Array(document.rows.enumerated()), id: \.element.id) { index, row in
                                 let run = DiffPalette.run(document.rows, at: index)
-                                DiffRowView(row: row, language: language, runStart: run.start, runEnd: run.end, wrap: wrap, compact: true)
+                                DiffRowView(row: row, language: language, runStart: run.start, runEnd: run.end, wrap: wrap, compact: true,
+                                            widestNumber: document.widestNumber)
                                     .id(row.id)
                                     .overlay(alignment: .leading) { focusMarker(row.change) }
                             }

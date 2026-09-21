@@ -29,6 +29,14 @@ enum DiffPalette {
     static let font = PhrenTheme.Font.monoCaption
     static let numberWidth: CGFloat = 34
     static let compactNumberWidth: CGFloat = 26
+    static let numberWidthMin: CGFloat = 17
+
+    /// A gutter column wide enough for the widest number in a document. Two
+    /// digits keep the original 17pt column; a third widens it by one digit
+    /// so the number never wraps.
+    static func numberWidth(forDigits digits: Int) -> CGFloat {
+        max(numberWidthMin, CGFloat(max(2, digits)) * 8 + 1)
+    }
 
     /// The gutter tint for one row of a run of inserted or removed lines:
     /// a plain rectangle, rounded only where the run starts and ends, so
@@ -71,6 +79,9 @@ struct DiffRowView: View {
     /// The width of each number column. The Changes screen's two numbers share
     /// a fixed 40pt gutter; the chat diff keeps the editor's wider columns.
     var numberWidth: CGFloat = DiffPalette.numberWidth
+    /// The widest line number in the document, drawn invisibly to reserve the
+    /// column's width. The visible number right-aligns over it.
+    var widestNumber = "99"
 
     var body: some View {
         if row.kind == .hunk {
@@ -87,7 +98,8 @@ struct DiffRowView: View {
                     // The line's number on its side of the change and the sign
                     // beside it, in one narrow column.
                     HStack(spacing: 3) {
-                        Text((row.new ?? row.old).map(String.init) ?? "").frame(width: DiffPalette.compactNumberWidth, alignment: .trailing).foregroundStyle(PhrenTheme.textDim)
+                        DiffGutterNumber(value: row.new ?? row.old, widest: widestNumber, minimumWidth: DiffPalette.compactNumberWidth)
+                            .foregroundStyle(PhrenTheme.textDim)
                         Text(DiffPalette.sign(row.kind)).frame(width: 10, alignment: .center)
                             .foregroundStyle(row.kind == .added ? PhrenTheme.success : row.kind == .removed ? PhrenTheme.danger : PhrenTheme.textDim)
                     }
@@ -98,8 +110,8 @@ struct DiffRowView: View {
                         // The tint spans the row's full height, so a run of lines
                         // shares one unbroken block.
                         HStack(spacing: 0) {
-                            Text(row.old.map(String.init) ?? "").frame(width: numberWidth, alignment: .trailing)
-                            Text(row.new.map(String.init) ?? "").frame(width: numberWidth, alignment: .trailing)
+                            DiffGutterNumber(value: row.old, widest: widestNumber, minimumWidth: numberWidth)
+                            DiffGutterNumber(value: row.new, widest: widestNumber, minimumWidth: numberWidth)
                         }
                         .font(PhrenTypography.monoCaption2)
                         .foregroundStyle(PhrenTheme.textDim).padding(.trailing, 6).padding(.vertical, 1.5)
@@ -165,6 +177,25 @@ struct DiffRowView: View {
         case .removed: return "-" + row.text.dropFirst()
         default: return String(row.text.dropFirst())
         }
+    }
+}
+
+/// One gutter number: a clear copy of the document's widest number reserves
+/// the column, and the row's own number right-aligns over it. The copy is
+/// monospaced and fixed horizontally, so a three-digit number never wraps.
+private struct DiffGutterNumber: View {
+    let value: Int?
+    let widest: String
+    let minimumWidth: CGFloat
+
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            Text(widest).monospacedDigit().foregroundStyle(.clear)
+            Text(value.map(String.init) ?? "").monospacedDigit()
+        }
+        .fixedSize(horizontal: true, vertical: false)
+        .frame(minWidth: minimumWidth, alignment: .trailing)
+        .accessibilityHidden(true)
     }
 }
 

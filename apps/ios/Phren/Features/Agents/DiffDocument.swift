@@ -170,6 +170,13 @@ struct DiffDocument {
 
     /// `@@ -12,3 +14,2 @@` — the old side is all a fold needs. A missing count
     /// means one line; a missing old range (`@@ -0,0 +…`) means zero.
+    /// The widest line number in the patch, so a gutter can reserve exactly
+    /// its width and never wrap a three-digit number onto two lines.
+    var widestNumber: String {
+        let number = rows.reduce(0) { max($0, $1.old ?? 0, $1.new ?? 0) }
+        return String(max(1, number))
+    }
+
     static func hunkHeader(_ text: String) -> DiffFolds.Hunk? {
         guard let match = text.range(of: #"^@@ -([0-9]+)(?:,([0-9]+))? "#, options: .regularExpression) else { return nil }
         let numbers = text[match].dropFirst(4).prefix { $0.isNumber || $0 == "," }.split(separator: ",")

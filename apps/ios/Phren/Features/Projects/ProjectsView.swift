@@ -263,64 +263,15 @@ struct ProjectDetailView: View {
         case summary = "Summary"
     }
 
+    private var displayTitle: String {
+        model.hasMultipleStores ? "\(project) · \(model.storeName(for: storeId))" : project
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            LiveStatusBar()
             ActionErrorBanner()
-            Button { skillsPresentationID = UUID(); showingSkills = true } label: {
-                HStack(spacing: 10) {
-                    Label("Skills", systemImage: "wand.and.stars")
-                    Spacer()
-                    Text("Project and global").foregroundStyle(PhrenTheme.textMuted)
-                    Image(systemName: "chevron.right").font(.caption.weight(.semibold))
-                }
-                .font(.subheadline)
-                .padding(.horizontal, 14).frame(minHeight: 44)
-                .background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: 12))
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Project skills")
-            .accessibilityIdentifier("project-skills")
-            .padding(.horizontal, 16).padding(.bottom, 8)
-            Button { showingKnobs = true } label: {
-                HStack(spacing: 10) {
-                    Label("Knobs", systemImage: "slider.horizontal.3")
-                    Spacer()
-                    Text(knobsSummary).foregroundStyle(PhrenTheme.textMuted)
-                    Image(systemName: "chevron.right").font(.caption.weight(.semibold))
-                }
-                .font(.subheadline)
-                .padding(.horizontal, 14).frame(minHeight: 44)
-                .background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: 12))
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Project knobs")
-            .accessibilityIdentifier("project-knobs-row")
-            .padding(.horizontal, 16).padding(.bottom, 8)
-            if SessionOverviewMonitor.shared.allowsSchedules() {
-                NavigationLink { SchedulesView(storeId: storeId, project: project) } label: {
-                    HStack(spacing: 10) {
-                        Label("Schedules", systemImage: "clock.badge.checkmark")
-                        Spacer()
-                        Text(schedulesSummary).foregroundStyle(PhrenTheme.textMuted)
-                        Image(systemName: "chevron.right").font(.caption.weight(.semibold))
-                    }
-                    .font(.subheadline)
-                    .padding(.horizontal, 14).frame(minHeight: 44)
-                    .background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: 12))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Project schedules")
-                .accessibilityIdentifier("project-schedules-row")
-                .padding(.horizontal, 16).padding(.bottom, 8)
-            }
-            Picker("Section", selection: $tab) {
-                ForEach(Tab.allCases, id: \.self) { Text($0.rawValue) }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal)
-            .padding(.bottom, 4)
-
+            controlBand
+            sectionChips
             switch tab {
             case .findings: FindingsTab(storeId: storeId, project: project)
             case .notes: NotesTab(storeId: storeId, project: project)
@@ -337,9 +288,19 @@ struct ProjectDetailView: View {
                 .accessibilityElement().accessibilityLabel("Project page")
                 .accessibilityIdentifier("project-detail:\(storeId):\(project)")
         }
-        .navigationTitle(model.hasMultipleStores ? "\(project) · \(model.storeName(for: storeId))" : project)
+        .navigationTitle(displayTitle)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            // The project name and its live freshness share the top bar, so
+            // the controls and the content start right under it.
+            ToolbarItem(placement: .principal) {
+                VStack(spacing: 0) {
+                    Text(displayTitle)
+                        .font(PhrenTheme.Font.subheadline.weight(.semibold))
+                        .foregroundStyle(PhrenTheme.text).lineLimit(1)
+                    LiveStatusBar(compact: true)
+                }
+            }
             ToolbarItem(placement: .primaryAction) {
                 ProjectSessionActions(storeId: storeId, project: project)
             }
@@ -356,6 +317,69 @@ struct ProjectDetailView: View {
         .sheet(isPresented: $showingKnobs) {
             ProjectKnobsView(storeId: storeId, project: project)
         }
+    }
+
+    /// One 44pt band with three equal cells: the project's controls, each a
+    /// tap into the same destination as before, its short value underneath.
+    private var controlBand: some View {
+        HStack(spacing: 0) {
+            Button { skillsPresentationID = UUID(); showingSkills = true } label: {
+                controlCell(icon: "wand.and.stars", title: "Skills", value: "Both")
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Project skills")
+            .accessibilityIdentifier("project-skills")
+            controlDivider
+            Button { showingKnobs = true } label: {
+                controlCell(icon: "slider.horizontal.3", title: "Knobs", value: knobsSummary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Project knobs")
+            .accessibilityIdentifier("project-knobs-row")
+            if SessionOverviewMonitor.shared.allowsSchedules() {
+                controlDivider
+                NavigationLink { SchedulesView(storeId: storeId, project: project) } label: {
+                    controlCell(icon: "clock.badge.checkmark", title: "Schedules", value: schedulesSummary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Project schedules")
+                .accessibilityIdentifier("project-schedules-row")
+            }
+        }
+        .frame(minHeight: 44)
+        .background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal, 16).padding(.top, 8)
+    }
+
+    private func controlCell(icon: String, title: String, value: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(PhrenTheme.textSecondary)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(PhrenTheme.Font.caption.weight(.semibold)).foregroundStyle(PhrenTheme.text)
+                Text(value).font(PhrenTheme.Font.caption2).foregroundStyle(PhrenTheme.textMuted)
+                    .lineLimit(1).truncationMode(.tail)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .contentShape(Rectangle())
+    }
+
+    private var controlDivider: some View {
+        Rectangle().fill(PhrenTheme.border).frame(width: 1, height: 28).accessibilityHidden(true)
+    }
+
+    private var sectionChips: some View {
+        PhrenChipRow(
+            items: Tab.allCases.map { PhrenOption(id: $0.rawValue, value: $0, title: $0.rawValue) },
+            selection: $tab,
+            identifier: "project-section"
+        )
+        .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 4)
     }
 
     /// "2 set" when the project overrides anything, "Global" when it inherits

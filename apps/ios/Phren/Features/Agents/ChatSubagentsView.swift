@@ -9,7 +9,6 @@ struct ChatSubagentsView: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage("sessions.live.preferences.v1") private var hostData = Data()
     @State private var selected: AgentWorkNavigation?
-    @State private var changes: AgentWorkNavigation?
     private var overview: SessionOverviewMonitor { .shared }
 
     /// Finished agents are out of scope here: the sheet is about work in
@@ -42,24 +41,11 @@ struct ChatSubagentsView: View {
                     } else {
                         ForEach(rows) { row in
                             let navigation = navigation(for: row.agent)
-                            HStack(spacing: 6) {
-                                Button { selected = navigation } label: {
-                                    AgentTreeRowView(row: row, resolution: navigation?.resolution)
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityIdentifier("child-agent:\(row.agent.computer == nil ? row.agent.id : row.agent.navigationID)")
-                                if navigation?.resolution.destination != nil {
-                                    Button { changes = navigation } label: {
-                                        Image(systemName: "plus.forwardslash.minus")
-                                            .frame(width: 44, height: 44)
-                                            .foregroundStyle(PhrenTheme.textMuted)
-                                            .background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.small))
-                                    }
-                                    .buttonStyle(.plain)
-                                    .accessibilityLabel("Changes for \(row.agent.name)")
-                                    .accessibilityIdentifier("child-agent-changes:\(row.agent.navigationID)")
-                                }
+                            Button { selected = navigation } label: {
+                                AgentTreeRowView(row: row, resolution: navigation?.resolution)
                             }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("child-agent:\(row.agent.computer == nil ? row.agent.id : row.agent.navigationID)")
                         }
                     }
                     }.padding(.horizontal, 16).padding(.vertical, 8)
@@ -67,12 +53,6 @@ struct ChatSubagentsView: View {
             }
             .background(PhrenTheme.chatCanvas)
             .navigationDestination(item: $selected) { AgentWorkDestinationView(navigation: $0) }
-            .navigationDestination(item: $changes) { navigation in
-                if let destination = navigation.resolution.destination {
-                    AgentChangesView(session: destination.session(for: navigation.agent),
-                                     target: destination.target, child: destination.child)
-                }
-            }
             .toolbar(.hidden, for: .navigationBar)
         }
     }
@@ -89,22 +69,23 @@ struct ChatSubagentsView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
+            Button { dismiss() } label: {
+                Image(systemName: "chevron.left").font(.system(size: 18, weight: .medium))
+                    .frame(width: 44, height: 44)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Back")
+            .accessibilityIdentifier("chat-subagents-back")
             VStack(alignment: .leading, spacing: 1) {
                 Text("Agent work").font(.subheadline.weight(.medium)).foregroundStyle(PhrenTheme.text)
                 Text("\(running) running")
                     .font(.caption).foregroundStyle(PhrenTheme.textMuted)
             }
             Spacer(minLength: 8)
-            Button("Done") { dismiss() }
-                .font(.caption.weight(.medium))
-                .buttonStyle(.bordered)
-                .buttonBorderShape(.capsule)
-                .controlSize(.small)
-                .frame(minHeight: 44)
-                .accessibilityIdentifier("chat-subagents-done")
         }
-        .padding(.horizontal, 12).padding(.vertical, 6)
-        // A marker rather than an identifier on the row, so Done keeps its own id.
+        .foregroundStyle(PhrenTheme.text)
+        .padding(.horizontal, 4).padding(.vertical, 2)
+        // A marker rather than an identifier on the row, so Back keeps its own id.
         .overlay(alignment: .topLeading) {
             Color.clear.frame(width: 1, height: 1).accessibilityElement().accessibilityIdentifier("chat-subagents-header")
         }
