@@ -23,7 +23,6 @@ import {
   addFindingToFile,
   addFindingsToFile,
   checkSemanticConflicts,
-  autoMergeConflicts,
 } from "../shared/content.js";
 import { jaccardTokenize, jaccardSimilarity, stripMetadata, detectConflicts, extractDynamicEntities } from "../content/dedup.js";
 import type { PhrenResult } from "../phren-core.js";
@@ -43,6 +42,7 @@ import { permissionDeniedError } from "../governance/rbac.js";
 import { TEAM_STORE_PATHSPECS } from "../cli/session-git.js";
 import { withFileLock } from "../governance/locks.js";
 import { runtimeFile } from "../phren-paths.js";
+import { mergeStoreUpstream, type RunStoreGit } from "../sync/store-merge.js";
 
 
 
@@ -599,6 +599,10 @@ async function handlePushChanges(
         stdio: ["ignore", "pipe", "pipe"],
       }
     ).trim();
+    const mergeGit: RunStoreGit = async (_cwd, args) => {
+      try { return { ok: true, output: runGit(args) }; }
+      catch (err: unknown) { return { ok: false, output: "", error: errorMessage(err) }; }
+    };
 
     try {
       const status = runGit(["status", "--porcelain"]);
@@ -653,30 +657,10 @@ async function handlePushChanges(
           debugLog(`Push attempt ${attempt + 1} failed: ${lastPushError}`);
 
           if (attempt < 3) {
-            try {
-              runGit(["pull", "--rebase", "--quiet"], { timeout: 15000 });
-            } catch (pullErr: unknown) {
-              logger.warn("push_changes", `pullRebase: ${pullErr instanceof Error ? pullErr.message : String(pullErr)}`);
-              const resolved = autoMergeConflicts(phrenPath);
-              if (resolved) {
-                try {
-                  runGit(["rebase", "--continue"], {
-                    timeout: 10000,
-                    env: { ...process.env, GIT_EDITOR: "true" },
-                  });
-                } catch (continueErr: unknown) {
-                  logger.warn("push_changes", `rebaseContinue: ${continueErr instanceof Error ? continueErr.message : String(continueErr)}`);
-                  try { runGit(["rebase", "--abort"]); } catch (abortErr: unknown) {
-                    logger.warn("push_changes", `rebaseAbort: ${abortErr instanceof Error ? abortErr.message : String(abortErr)}`);
-                  }
-                  break;
-                }
-              } else {
-                try { runGit(["rebase", "--abort"]); } catch (abortErr: unknown) {
-                  logger.warn("push_changes", `rebaseAbort2: ${abortErr instanceof Error ? abortErr.message : String(abortErr)}`);
-                }
-                break;
-              }
+            const merged = await mergeStoreUpstream(phrenPath, { git: mergeGit, commitLocalWrites: false });
+            if (merged.status !== "updated" && merged.status !== "unchanged") {
+              logger.warn("push_changes", `mergeRemote: ${merged.detail}`);
+              break;
             }
 
             await new Promise(r => setTimeout(r, delays[attempt]));
@@ -715,6 +699,10 @@ async function handlePushChanges(
             env: opts.env,
             stdio: ["ignore", "pipe", "pipe"],
           }).trim();
+        const mergeStoreGit: RunStoreGit = async (_cwd, gitArgs) => {
+          try { return { ok: true, output: runStoreGit(gitArgs) }; }
+          catch (err: unknown) { return { ok: false, output: "", error: errorMessage(err) }; }
+        };
 
         try {
           const storeStatus = runStoreGit(["status", "--porcelain"]);
@@ -733,7 +721,8 @@ async function handlePushChanges(
             teamResults.push({ store: store.name, pushed: true });
           } catch {
             try {
-              runStoreGit(["pull", "--rebase", "--quiet"], { timeout: 15000 });
+              const merged = await mergeStoreUpstream(store.path, { git: mergeStoreGit, commitLocalWrites: false });
+              if (merged.status !== "updated" && merged.status !== "unchanged") throw new Error(merged.detail);
               runStoreGit(["push"], { timeout: 15000 });
               teamResults.push({ store: store.name, pushed: true });
             } catch (retryErr: unknown) {

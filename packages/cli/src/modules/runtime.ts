@@ -16,7 +16,12 @@ export interface ModuleSnapshot {
   has(name: string): boolean;
 }
 
-export function moduleSnapshot(store: string, profile = resolveRuntimeProfile(store), legacyHook = false): ModuleSnapshot {
+/** The runtime profile for module gating; unscoped while a store is still being set up. */
+function snapshotProfile(store: string): string {
+  try { return resolveRuntimeProfile(store); } catch { return ""; }
+}
+
+export function moduleSnapshot(store: string, profile = snapshotProfile(store), legacyHook = false): ModuleSnapshot {
   const config = readConfig(store);
   const hasStore = !!config || fs.existsSync(path.join(store, "phren.root.yaml")) || fs.existsSync(installPreferencesFile(store));
   const modules = !hasStore && legacyHook
@@ -38,10 +43,13 @@ export function requireModule(store: string, name: string, profile?: string): vo
 export function migrateInstalledModules(store: string, legacyHook = false): void {
   const hookRoot = process.env.PHREN_BRIDGE_HOME || path.join(homedir(), ".local", "share", "phren", "bridge");
   const installedHook = legacyHook || fs.existsSync(path.join(hookRoot, "installed.json"));
+  // A store without .config was never set up; migration must not create it and
+  // make `phren add` believe the store is ready.
+  if (!fs.existsSync(path.join(store, ".config"))) return;
   if (fs.existsSync(path.join(store, "phren.root.yaml")) || fs.existsSync(installPreferencesFile(store))) migrateModules(store, installedHook);
 }
 
-export function activateModules(store: string, profile = resolveRuntimeProfile(store), legacyHook = false): ModuleSnapshot {
+export function activateModules(store: string, profile = snapshotProfile(store), legacyHook = false): ModuleSnapshot {
   migrateInstalledModules(store, legacyHook);
   return moduleSnapshot(store, profile, legacyHook);
 }

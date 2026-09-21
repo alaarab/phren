@@ -19,3 +19,6 @@
 # this stays here so a store created before that move, or one where the
 # migration hasn't run yet, never has its credentials committed.
 .config/auth-profiles.json
+
+# Legacy location used by module migration before backups moved to .runtime/.
+.config/modules.yaml.migration-backup

@@ -63,9 +63,16 @@ describe("module configuration writes", () => {
     const before = fs.readFileSync(file, "utf8");
     migrateModules(tmp.path, true);
     expect(fs.readFileSync(file, "utf8")).toBe(before);
-    expect(fs.readFileSync(file + ".migration-backup", "utf8")).toBe(before);
+    expect(fs.readFileSync(path.join(tmp.path, ".runtime", "modules.yaml.migration-backup"), "utf8")).toBe(before);
+    expect(fs.existsSync(file + ".migration-backup")).toBe(false);
     setModuleEnabled(tmp.path, "tasks", false);
     expect(fs.readFileSync(path.join(tmp.path, "demo", "tasks.md"), "utf8")).toContain("Retained");
+  });
+
+  it("writes nothing while the store is mid-rebase", () => {
+    fs.mkdirSync(path.join(tmp.path, ".git", "rebase-merge"), { recursive: true });
+    migrateModules(tmp.path, true);
+    expect(fs.readdirSync(tmp.path)).toEqual([".git"]);
   });
 });
 
@@ -80,7 +87,10 @@ it("keeps an unbound legacy Hook host-only without creating a store", () => {
 
 
 it("keeps snapshots read-only until legacy runtime activation", async () => {
+  // An initialized legacy store: the marker file plus the .config directory
+  // every set-up store has. A store without .config is never migrated.
   fs.writeFileSync(path.join(tmp.path, "phren.root.yaml"), "version: 1\n");
+  fs.mkdirSync(path.join(tmp.path, ".config"), { recursive: true });
   expect(moduleSnapshot(tmp.path, "").has("git")).toBe(false);
   expect(fs.existsSync(path.join(tmp.path, ".config", "modules.yaml"))).toBe(false);
   const { activateModules } = await import("./runtime.js");

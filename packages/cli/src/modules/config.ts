@@ -2,7 +2,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as yaml from "js-yaml";
 import { withFileLock } from "../governance/locks.js";
-import { atomicWriteText, installPreferencesFile } from "../phren-paths.js";
+import { atomicWriteText, installPreferencesFile, runtimeFile } from "../phren-paths.js";
+import { inProgressGitOperation } from "../sync/git-state.js";
 import { BUILTIN_MODULES, readConfig, resolveModules, validateConfig } from "./registry.js";
 import type { ModulesConfig } from "./manifest.js";
 
@@ -24,6 +25,7 @@ export function setModuleEnabled(store: string, name: string, value: boolean, pr
 
 /** Freeze legacy surfaces before runtime defaults can change an existing install. */
 export function migrateModules(store: string, hookInstalled = false): void {
+  if (inProgressGitOperation(store)) return;
   const file = path.join(store, ".config", "modules.yaml");
   if (readConfig(store)) return;
   const legacy = fs.existsSync(path.join(store, "phren.root.yaml")) || fs.existsSync(installPreferencesFile(store));
@@ -38,7 +40,7 @@ export function migrateModules(store: string, hookInstalled = false): void {
       || (conductor && ["hook", "conductor"].includes(module.name)) || (schedules && module.name === "schedules"),
     ])) };
     const text = yaml.dump(config, { noRefs: true });
-    atomicWriteText(file + ".migration-backup", text);
+    atomicWriteText(runtimeFile(store, "modules.yaml.migration-backup"), text);
     atomicWriteText(file, text);
   });
 }

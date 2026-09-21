@@ -195,7 +195,7 @@ function warnIfSyncDegraded(phrenPath: string): void {
       "<phren-notice>",
       assessment.summary,
       `Your findings and tasks are safe on disk in ${phrenPath}, but they are not reaching the remote.`,
-      `Diagnose with: phren status  (then: cd ${phrenPath} && git pull --rebase)`,
+      `Diagnose with: phren status  (then: phren store sync)`,
       "<phren-notice>",
       "",
     ].join("\n"));

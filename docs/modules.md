@@ -369,8 +369,8 @@ Runtime activation migrates legacy stores once, preserving explicit config if
 already present. A fresh `phren init` writes a version-only config before
 provisioning, so it uses the memory/tasks defaults. Existing memory installs
 retain Git extraction; an existing Hook or conductor installation preserves its
-bundled optional surfaces. Migration records explicit values and stages a
-`.config/modules.yaml.migration-backup` before publishing them. It does not
+bundled optional surfaces. Migration records explicit values and keeps its
+backup in the git-ignored `.runtime/` directory. It does not
 install a service or enroll credentials on a computer receiving synced config.
 
 ## Ordered independent work packages

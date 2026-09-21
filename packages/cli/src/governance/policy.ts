@@ -56,7 +56,7 @@ export interface IndexPolicy {
  * could go two months without syncing while every Stop hook looked healthy.
  * Failures now get their own values:
  *
- * - `pull-failed`          — the pull/rebase leg failed, so push never ran
+ * - `pull-failed`          - the fetch/merge leg failed, so push never ran
  * - `push-failed`          — push was attempted and rejected
  * - `unrelated-histories`  — local and remote share no merge base; no amount of
  *                            retrying will fix it, so it is called out by name

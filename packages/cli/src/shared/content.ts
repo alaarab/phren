@@ -10,6 +10,7 @@ export {
   extractConflictVersions,
   mergeFindings,
   mergeTask,
+  isAutoMergeableStorePath,
   autoMergeConflicts,
 } from "../content/validate.js";
 

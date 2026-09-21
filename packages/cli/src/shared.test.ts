@@ -48,6 +48,7 @@ import {
   checkConsolidationNeeded,
   mergeFindings,
   mergeTask,
+  isAutoMergeableStorePath,
   autoMergeConflicts,
   filterTrustedFindingsDetailed,
   upsertCanonical,
@@ -1114,6 +1115,14 @@ describe("autoMergeConflicts", () => {
 
   afterEach(() => {
     if (gitCleanup) gitCleanup();
+  });
+
+  it("limits union merges to findings, tasks, and root task archives", () => {
+    expect(isAutoMergeableStorePath("demo/FINDINGS.md")).toBe(true);
+    expect(isAutoMergeableStorePath("demo/tasks.md")).toBe(true);
+    expect(isAutoMergeableStorePath(".config/task-archive/demo.md")).toBe(true);
+    expect(isAutoMergeableStorePath("demo/archive.md")).toBe(false);
+    expect(isAutoMergeableStorePath("demo/.config/task-archive/other.md")).toBe(false);
   });
 
   it("returns true when there are no conflicted files", () => {

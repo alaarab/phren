@@ -108,7 +108,7 @@ export function scheduleBackgroundMaintenance(phrenPathLocal: string, project?: 
     if (project) spawnArgs.push(project);
     // Keep this log under .runtime/ (gitignored), matching background-sync.log.
     // Writing it under .config/ makes it a tracked file that diverges per machine
-    // and breaks the Stop-hook pull-rebase.
+    // and breaks the Stop-hook fetch and merge.
     const logPath = runtimeFile(phrenPathLocal, "background-maintenance.log");
     const logFd = fs.openSync(logPath, "a");
     fs.writeSync(

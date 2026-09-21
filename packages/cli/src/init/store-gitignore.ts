@@ -37,6 +37,8 @@ export const STORE_SECRET_GITIGNORE_LINES = [
   // store created before the move, or one where the migration has not run yet,
   // never has its credentials committed.
   ".config/auth-profiles.json",
+  // Legacy module migration backups were once written into the working tree.
+  ".config/modules.yaml.migration-backup",
 ] as const;
 
 /**

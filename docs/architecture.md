@@ -300,8 +300,8 @@ During Session
 
 Stop Hook
   ├─ primary: git add -A, commit, push
-  ├─ team: git add journal/, commit, pull --rebase, push
-  └─ readonly: git pull only
+  ├─ team: git add journal/, commit, fetch, merge, push
+  └─ readonly: fetch, then fast-forward or merge
 ```
 
 ### Write Routing

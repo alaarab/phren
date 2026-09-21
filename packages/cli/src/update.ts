@@ -78,7 +78,7 @@ export async function runPhrenUpdate(opts: RunPhrenUpdateOptions = {}): Promise<
       } catch (err: unknown) {
         logger.debug("runPhrenUpdate gitStatus", errorMessage(err));
       }
-      const pull = run("git", ["pull", "--rebase", "--autostash"], root);
+      const pull = run("git", ["pull", "--ff-only", "--autostash"], root);
       run(shellCommand("npm"), ["install"], root);
       try {
         run(shellCommand("npm"), ["run", "build"], root);

@@ -475,8 +475,17 @@ export function mergeTask(ours: string, theirs: string): string {
   return lines.join("\n");
 }
 
+/** The store paths whose record-oriented markdown can safely use union merge. */
+export function isAutoMergeableStorePath(relFile: string): boolean {
+  const normalized = relFile.replace(/\\/g, "/");
+  const filename = path.posix.basename(normalized).toLowerCase();
+  return filename === "findings.md"
+    || isTaskFileName(filename)
+    || /^\.config\/task-archive\/[^/]+\.md$/i.test(normalized);
+}
+
 /**
- * Attempt to auto-resolve git conflicts in FINDINGS.md and tasks.md files.
+ * Attempt to auto-resolve git conflicts in union-safe store markdown files.
  * Returns true if all conflicts were resolved, false if any remain.
  */
 export function autoMergeConflicts(phrenPath: string): boolean {
@@ -502,7 +511,7 @@ export function autoMergeConflicts(phrenPath: string): boolean {
     const fullPath = path.join(phrenPath, relFile);
     const filename = path.basename(relFile).toLowerCase();
 
-    const canAutoMerge = filename === "findings.md" || isTaskFileName(filename);
+    const canAutoMerge = isAutoMergeableStorePath(relFile);
     if (!canAutoMerge) {
       debugLog(`Cannot auto-merge: ${relFile} (not a known mergeable file)`);
       allResolved = false;
