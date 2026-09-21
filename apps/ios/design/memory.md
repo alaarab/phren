@@ -46,14 +46,18 @@ Top to bottom, over the app background:
      ("42 findings · 9 tasks · 6 topics"), the content-filter chips, and a
      list of rows for the scope, findings first, newest first. This is the
      "browse findings fully" the owner asked for.
-   - a query typed: **results** in the same rows, ranked, each row's kind
-     chip colored by kind, grouped by project only when the scope is `All`.
+   - a query typed: **results** in the same rows, ranked, with each row's kind
+     chip colored by kind when the content filter is `All`, grouped by project
+     only when the scope is `All`.
+     Completed results dismiss the keyboard and open the panel to full height;
+     Return does the same immediately.
      Tapping a result selects its node (graph pans to it) and opens the
      dossier. Results outside the loaded graph (SearchIndex hits) open their
      project's contents the way SearchView did.
    - a node selected: the **dossier** as it is today (Edit, Delete, Previous
      and Next, Focus), plus a "Show in list" row that returns to the contents
-     list scrolled to that row.
+     list, opened full and scrolled to that row. The collapsed native row has no drag handle
+     while the dossier is open.
 
 The panel has three heights: collapsed (one header line, 56pt), half, full.
 Drag or tap the header to change; the graph stays interactive above it.
@@ -61,11 +65,13 @@ Drag or tap the header to change; the graph stays interactive above it.
 ## 2. Rows
 
 One row shape for findings, notes, tasks and topics: text (2 lines, body),
-then a 28pt meta line of chips: kind (finding / note / task / topic, colored
-by `kindColor`), type tag when present (decision, pitfall...), project when
-the scope is `All`, and the date right-aligned in `caption2`. Tasks add their
-section (Backlog / Active / Done) in the kind chip's place. 44pt minimum, no
-dividers, single rectangles (`sessionCard()` at list density, 4pt gap).
+then a 28pt meta line of chips. The kind or task-section chip appears only
+under the `All` content filter. The type tag remains when present, the project
+appears only when the scope is `All`, and the date is right-aligned in
+`caption2`. The whole flat rectangle selects the node. Its trailing action is
+a plain 44pt ellipsis glyph with no separate circle background. Rows have a
+44pt minimum, no dividers, and use `sessionCard()` at list density with a 4pt
+gap.
 
 Swipe on a task row: Done / Backlog, same as the Tasks tab. Swipe on a finding:
 Edit / Delete, same as the dossier. Nothing new to learn.
@@ -78,8 +84,9 @@ Edit / Delete, same as the dossier. Nothing new to learn.
 - Scope chips and content-filter chips: `PhrenChipRow` (single-select).
 - Panel header: title, count, drag handle; `memory-panel` id; `memory-panel-
   height` value "collapsed | half | full".
-- Rows: `memory-row:<kind>:<id>`. Dossier ids stay as they are so the graph
-  tests keep passing.
+- Rows: `memory-row:<kind>:<id>`. The collapsed dossier bridge exposes
+  `memory-selected-row`, and the plain row action uses the row id plus
+  `:actions`. Dossier ids stay as they are so the graph tests keep passing.
 
 ## 4. States
 
@@ -98,10 +105,10 @@ Edit / Delete, same as the dossier. Nothing new to learn.
 Launch flag `--memory-fixture`: two stores, three projects, 40 findings
 (mixed types), 9 tasks across sections, 6 topics, links between them, one
 stale store. UI tests (`MemoryTests`): search selects a node and pans; a
-project chip narrows counts; content filter hides tasks; a task row swipes to
-Done and the Tasks tab agrees; the dossier's Show in list scrolls the panel;
-accessibility XXXL lays out; the Search tab id no longer exists and the Memory
-tab does. Existing `GraphTests` keep passing unchanged.
+project chip narrows counts; content filter hides tasks; a task row's explicit
+action moves it to Done and the Tasks tab agrees; the dossier's Show in list
+scrolls the panel; accessibility XXXL lays out; the Search tab id no longer
+exists and the Memory tab does. Existing `GraphTests` keep passing unchanged.
 
 ## 6. Order of work
 

@@ -1,8 +1,8 @@
 // Run after bundle-graph.mjs. Exercises the actual iPhone page at phone dimensions.
 import assert from "node:assert/strict";
-import { after, before, test } from "node:test";
 import { readFile } from "node:fs/promises";
 import http from "node:http";
+import { after, before, test } from "node:test";
 import { chromium } from "@playwright/test";
 
 let server;
@@ -84,6 +84,15 @@ test("phone graph renders, selects nodes, and accepts camera commands", { timeou
     window.phrenHost.reset();
     window.phrenHost.clear();
   });
+  await page.waitForFunction(() => window.messages.some(message => message.name === "graphSelect" && message.body === null));
+  await page.evaluate(() => { window.messages = []; window.phrenHost.focusNode("mobile"); });
+  await page.waitForFunction(() => window.messages.some(message =>
+    message.name === "graphSelect" && message.body?.id === "mobile"));
+  assert.equal(await page.locator("#graph-dossier").isVisible(), true, "project selection opens the dossier");
+  assert.equal(await page.locator('[data-action="edit"]').isVisible(), false, "project omits Edit");
+  assert.equal(await page.locator('[data-action="delete"]').isVisible(), false, "project omits Delete");
+  assert.equal(await page.locator(".dossier-step").isVisible(), false, "project omits stepping");
+  await page.evaluate(() => window.phrenHost.clear());
   await page.waitForFunction(() => window.messages.some(message => message.name === "graphSelect" && message.body === null));
   await page.evaluate(graph => window.phrenHost.render(graph), graph);
   assert.equal(await page.locator("#graph-canvas canvas").count(), 1, "refresh reuses the canvas");

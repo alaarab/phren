@@ -56,19 +56,19 @@ final class ScheduleEditorTests: XCTestCase {
     @MainActor
     func testHistoryShowsThreeRunsAndFailureReason() {
         let app = launchSchedules()
-        let history = app.buttons.matching(NSPredicate(
-            format: "identifier == %@ OR label CONTAINS[c] %@", "schedule-history:7f3a2c1d", "ago"
-        )).firstMatch
+        let history = app.descendants(matching: .any)["schedule-history:7f3a2c1d"]
         XCTAssertTrue(history.waitForExistence(timeout: 8))
         history.tap()
+        XCTAssertTrue(app.navigationBars["History"].waitForExistence(timeout: 5))
 
         let rows = app.descendants(matching: .any)
             .matching(NSPredicate(format: "identifier BEGINSWITH %@", "schedule-history-row:"))
         XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 8))
         XCTAssertEqual(rows.count, 3)
         capture(app, "Schedule run history")
-        XCTAssertTrue(app.descendants(matching: .any)
-            .matching(NSPredicate(format: "label CONTAINS[c] %@", "failed:")).firstMatch.exists)
+        let failed = app.descendants(matching: .any)["schedule-history-row:history-failed"]
+        XCTAssertTrue(failed.exists)
+        XCTAssertTrue(failed.label.localizedCaseInsensitiveContains("failed: Tests failed"), failed.label)
     }
 
     @MainActor

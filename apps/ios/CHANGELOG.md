@@ -101,9 +101,12 @@ lock screen and Changes screen done properly.
 
 ### Fixed
 
+- Project cards keep their compact two-line height with the themed project colour.
+- Task details keep the agent action visible above long plans.
+- Selecting a project from graph search opens its dossier again.
 - Schedule history opens older run records that have no notification result.
-- Long rich transcripts keep a bounded accessibility tree, and folded tool and
-  patch rows do not prepare hidden details until they are opened.
+- Long rich transcripts keep one accessibility element per dense reply or large
+  folded patch card, and hidden patch details are prepared only after opening.
 - Schedules: Run now takes its own tap beside the chips, the swipe actions no
   longer peek through the card's corners, and the all-projects list resolves
   the computer and next run like the per-project list.

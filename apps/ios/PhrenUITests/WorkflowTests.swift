@@ -60,7 +60,10 @@ final class WorkflowTests: XCTestCase {
         let long = app.buttons["task-detail:sample/brain/demo/dead0001"]
         XCTAssertTrue(long.waitForExistence(timeout: 5))
         XCTAssertLessThan(long.frame.height, 180)
-        XCTAssertLessThan(long.frame.minY - app.otherElements["task-controls"].frame.maxY, 32)
+        let group = app.buttons["tasks-project:demo"]
+        XCTAssertTrue(group.exists)
+        XCTAssertLessThan(group.frame.minY - app.buttons["task-status"].frame.maxY, 32)
+        XCTAssertLessThan(long.frame.minY - group.frame.maxY, 32)
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = "Scannable backlog with full task details on demand"
         screenshot.lifetime = .keepAlways
@@ -86,6 +89,7 @@ final class WorkflowTests: XCTestCase {
         app.tabBars.buttons["Tasks"].tap()
         let task = app.buttons["task-detail:sample/brain/demo/dead0001"]
         XCTAssertTrue(task.waitForExistence(timeout: 8)); task.tap()
+        XCTAssertTrue(app.navigationBars["Task details"].waitForExistence(timeout: 5))
         let start = app.buttons["task-start-agent"]
         XCTAssertTrue(start.waitForExistence(timeout: 5)); start.tap()
         XCTAssertTrue(app.buttons["launch-computer:A1000000-0000-0000-0000-000000000001"].waitForExistence(timeout: 5))
@@ -114,6 +118,7 @@ final class WorkflowTests: XCTestCase {
         XCTAssertTrue(app.tabBars.buttons["Tasks"].waitForExistence(timeout: 15)); app.tabBars.buttons["Tasks"].tap()
         let task = app.buttons["task-detail:sample/brain/demo/dead0001"]
         XCTAssertTrue(task.waitForExistence(timeout: 8)); task.tap()
+        XCTAssertTrue(app.navigationBars["Task details"].waitForExistence(timeout: 5))
         app.buttons["task-start-agent"].tap()
         XCTAssertTrue(app.buttons["launch-computer:A1000000-0000-0000-0000-000000000001"].waitForExistence(timeout: 5))
         app.swipeUp()
@@ -135,8 +140,9 @@ final class WorkflowTests: XCTestCase {
         app.tabBars.buttons["Tasks"].tap()
         XCTAssertFalse(app.segmentedControls.buttons["Backlog"].exists)
         XCTAssertFalse(app.textFields["task-search-field"].exists)
-        let controls = app.otherElements["task-controls"]
-        XCTAssertLessThan(controls.frame.height, 58)
+        let status = app.buttons["task-status"]
+        let sort = app.buttons["task-sort"]
+        XCTAssertLessThan(sort.frame.maxY - status.frame.minY, 58)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Created Jan 1, 2026")).firstMatch.exists)
 
         app.buttons["task-sort"].tap()

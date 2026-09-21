@@ -172,7 +172,7 @@ struct TaskListView: View {
                                     .rotationEffect(.degrees(collapsedProjects.contains(group.project) ? -90 : 0))
                                     .padding(.trailing, 14)
                             }
-                            .frame(minHeight: 32).contentShape(Rectangle())
+                            .frame(minHeight: 44).contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("\(group.project), \(group.rows.count) tasks")
@@ -352,7 +352,7 @@ struct TaskListView: View {
         .padding(.leading, 20)
         .padding(.trailing, 8)
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("task-controls")
+        .phrenContainerMarker("task-controls", label: "Task controls")
     }
 
     /// The + button is disabled cross-store when no (store, project) pair is
@@ -670,26 +670,29 @@ struct TaskDetailsSheet: View {
     var body: some View {
         let row = currentRow
         PhrenList {
+                if !row.task.checked {
+                    Section {
+                        Button {
+                            launchingAgent = true
+                        } label: {
+                            PhrenRow(icon: "sparkles", title: "Start an agent on this task")
+                        }
+                        .buttonStyle(.plain)
+                        .phrenIdentifier("task-start-agent")
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                    } header: {
+                        Text("Agent")
+                    } footer: {
+                        Text("Choose a computer and harness. Phren sends this task to the new agent and marks backlog work active after delivery succeeds.")
+                    }
+                }
                 Section {
                     Text(.init(TasksFile.stripPinnedTag(TasksFile.stripPriorityTag(row.task.line))))
                         .textSelection(.enabled)
                 }
                 if let context = row.task.context {
                     Section("Context") { Text(.init(context)).textSelection(.enabled) }
-                }
-                if !row.task.checked {
-                    Section {
-                        Button {
-                            launchingAgent = true
-                        } label: {
-                            Label("Start an agent on this task", systemImage: "sparkles")
-                        }
-                        .accessibilityIdentifier("task-start-agent")
-                    } header: {
-                        Text("Agent")
-                    } footer: {
-                        Text("Choose a computer and harness. Phren sends this task to the new agent and marks backlog work active after delivery succeeds.")
-                    }
                 }
                 Section {
                     LabeledContent("Project", value: row.project)

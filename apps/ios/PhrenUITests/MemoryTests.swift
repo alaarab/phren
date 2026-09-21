@@ -14,21 +14,24 @@ final class MemoryTests: XCTestCase {
         let row = app.buttons["memory-row:finding:1a2b3c4d"]
         XCTAssertTrue(row.waitForExistence(timeout: 8), "the ledger finding is a result")
         XCTAssertTrue(app.staticTexts["memory-section:ledger"].exists, "results across projects are grouped by project")
+        XCTAssertTrue(app.keyboards.element.waitForNonExistence(timeout: 5), "completed results dismiss the keyboard")
+        expectation(for: NSPredicate(format: "value == %@", "full"), evaluatedWith: panel(app))
+        waitForExpectations(timeout: 5)
         capture(app, "Memory results")
 
         row.tap()
-        XCTAssertTrue(app.webViews.otherElements["Node details"].waitForExistence(timeout: 10), "the dossier opens")
-        XCTAssertTrue(app.webViews.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Idempotency keys")).firstMatch
-            .waitForExistence(timeout: 5), "the dossier shows the selected finding")
+        let selected = app.descendants(matching: .any)["memory-selected-row"]
+        XCTAssertTrue(selected.waitForExistence(timeout: 10), "the dossier opens")
+        XCTAssertTrue(selected.label.contains("Idempotency keys"), "the native dossier row identifies the selected finding")
         XCTAssertEqual(panel(app).value as? String, "collapsed", "the panel collapses under the dossier")
         XCTAssertTrue(app.buttons["Zoom in"].isHittable, "the graph stays interactive")
         capture(app, "Memory dossier")
 
         app.buttons["memory-show-in-list"].tap()
-        XCTAssertTrue(app.webViews.otherElements["Node details"].waitForNonExistence(timeout: 5), "Show in list closes the dossier")
+        XCTAssertTrue(selected.waitForNonExistence(timeout: 5), "Show in list closes the dossier")
         XCTAssertTrue(row.waitForExistence(timeout: 5))
         XCTAssertTrue(row.isHittable, "the list is scrolled to the row")
-        XCTAssertEqual(panel(app).value as? String, "half")
+        XCTAssertEqual(panel(app).value as? String, "full", "the list opens full so the row has room")
         XCTAssertEqual(field.value as? String, "Search memory", "the query is cleared")
         capture(app, "Memory show in list")
     }
@@ -72,18 +75,29 @@ final class MemoryTests: XCTestCase {
     }
 
     @MainActor
-    func testTaskRowSwipesToDoneAndTheTasksTabAgrees() {
+    func testTaskRowActionMovesToDoneAndTheTasksTabAgrees() {
         let app = launch()
-        app.buttons["memory-scope:phren"].tap()
-        app.buttons["memory-filter:tasks"].tap()
+        let scope = app.buttons["memory-scope:phren"]
+        scope.tap()
+        expectation(for: NSPredicate(format: "selected == true"), evaluatedWith: scope)
+        waitForExpectations(timeout: 5)
+        let tasks = app.buttons["memory-filter:tasks"]
+        tasks.tap()
+        expectation(for: NSPredicate(format: "selected == true"), evaluatedWith: tasks)
+        waitForExpectations(timeout: 5)
         let row = app.buttons["memory-row:task:b0b8c9d0"]
         XCTAssertTrue(row.waitForExistence(timeout: 8))
-        XCTAssertTrue(row.label.contains("Backlog"))
-        row.swipeLeft()
-        let done = app.buttons["memory-row:task:b0b8c9d0:done"]
-        XCTAssertTrue(done.waitForExistence(timeout: 5), "swiping reveals Done")
+        // Under the Tasks filter the section chip is folded away, so the row reads by its text.
+        XCTAssertTrue(row.label.contains("Move cart totals"))
+        let actionButton = app.buttons["memory-row:task:b0b8c9d0:actions"]
+        XCTAssertTrue(actionButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(actionButton.isHittable)
+        XCTAssertGreaterThanOrEqual(actionButton.frame.height, 44)
+        actionButton.tap()
+        let done = app.buttons["memory-actions:done"]
+        XCTAssertTrue(done.waitForExistence(timeout: 5), "the row actions offer Done")
         XCTAssertGreaterThanOrEqual(done.frame.height, 44)
-        capture(app, "Memory task swipe")
+        capture(app, "Memory task actions")
         done.tap()
         expectation(for: NSPredicate(format: "label CONTAINS %@", "Done"), evaluatedWith: row)
         waitForExpectations(timeout: 10)

@@ -9,6 +9,16 @@ final class ChatTranscriptPerformanceTests: XCTestCase {
         let frame = try AgentChatTranscript.read(data, source: "codex")
         XCTAssertEqual(frame.totalLines, 60)
         XCTAssertTrue(frame.messages.contains { $0.textByteCount > 60_000 })
+        let changes = frame.messages.filter(\.isChange)
+        XCTAssertEqual(changes.count, 20)
+        XCTAssertTrue(changes.allSatisfy {
+            DiffDocumentSummaryCache.value(for: $0.text, key: $0.renderKey).rowCount > 120
+        }, "Heavy folded patches use the bounded accessibility path")
+        let replies = frame.messages.filter { $0.text.contains("Heavy fixture reply") }
+        XCTAssertEqual(replies.count, 20)
+        XCTAssertTrue(replies.allSatisfy {
+            ChatRichTextDocumentCache.value($0.text, key: $0.renderKey).condensesAccessibility
+        }, "Heavy replies use the bounded accessibility path")
         var prepared = ChatTranscriptPreparation()
         prepared.update(frame.messages)
         let revision = prepared.revision
@@ -45,5 +55,6 @@ final class ChatTranscriptPerformanceTests: XCTestCase {
         XCTAssertEqual(summary.added, document.added)
         XCTAssertEqual(summary.removed, document.removed)
         XCTAssertEqual(summary.truncated, document.truncated)
+        XCTAssertEqual(summary.rowCount, document.rows.count)
     }
 }

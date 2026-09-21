@@ -62,6 +62,11 @@ struct MemoryPanel: View {
         }
     }
 
+    private var showsHandle: Bool {
+        if case .dossier = mode { return false }
+        return true
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -84,6 +89,7 @@ struct MemoryPanel: View {
     private var header: some View {
         VStack(spacing: 0) {
             Capsule().fill(interactive ? PhrenTheme.textDim : PhrenTheme.border)
+                .opacity(showsHandle ? 1 : 0)
                 .frame(width: 32, height: 4).padding(.top, 6)
                 .accessibilityHidden(true)
             HStack(alignment: .center, spacing: PhrenTheme.Space.small) {
@@ -127,7 +133,15 @@ struct MemoryPanel: View {
                     Text(project).font(PhrenTypography.caption).foregroundStyle(PhrenTheme.sessionProject).lineLimit(1)
                 }
             }
+            .phrenContainerMarker("memory-selected-row", label: selectedRowLabel(node), value: node.id)
         }
+    }
+
+    private func selectedRowLabel(_ node: GraphNodeRef) -> String {
+        var parts = ["Selected", MemoryRowCard.kindTitle(for: node)]
+        if let label = node.fullLabel ?? node.label ?? node.text { parts.append(label) }
+        if let project = node.project { parts.append(project) }
+        return parts.joined(separator: ", ")
     }
 
     @ViewBuilder private var headerTrailing: some View {
@@ -266,7 +280,7 @@ struct MemoryPanel: View {
 
     private func cards(_ items: [MemoryItem], showProject: Bool) -> some View {
         ForEach(items) { item in
-            MemoryRowCard(item: item, showProject: self.showProject && showProject,
+            MemoryRowCard(item: item, showKind: content == .all, showProject: self.showProject && showProject,
                           highlighted: highlightedID == item.id, canWrite: canWrite(item),
                           onSelect: { onSelect(item) }, onMove: { onMove(item, $0) },
                           onEdit: { onEdit(item) }, onDelete: { onDelete(item) }, onActions: { onActions(item) })
@@ -284,6 +298,7 @@ struct MemoryPanel: View {
 /// opens the same actions as a sheet.
 struct MemoryRowCard: View {
     let item: MemoryItem
+    let showKind: Bool
     let showProject: Bool
     let highlighted: Bool
     let canWrite: Bool
@@ -374,10 +389,16 @@ struct MemoryRowCard: View {
             .accessibilityAction { onSelect() }
             .phrenIdentifier(item.rowIdentifier)
             if hasActionMenu {
-                PhrenIconButton(icon: "ellipsis", label: ["Actions", item.text].joined(separator: ", "), action: onActions)
-                    .phrenIdentifier("\(item.rowIdentifier):actions")
-                    .padding(.trailing, 2)
-                    .padding(.top, 2)
+                Button(action: onActions) {
+                    Image(systemName: "ellipsis")
+                        .font(PhrenTypography.icon(16, weight: .semibold))
+                        .foregroundStyle(PhrenTheme.accent)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(["Actions", item.text].joined(separator: ", "))
+                .phrenIdentifier("\(item.rowIdentifier):actions")
             }
         }
         .sessionCard()
@@ -393,7 +414,9 @@ struct MemoryRowCard: View {
     private var hasActionMenu: Bool { item.kind != .topic }
 
     @ViewBuilder private var chips: some View {
-        PhrenChip(text: Self.kindTitle(for: item), color: Self.kindColor(for: item))
+        if showKind {
+            PhrenChip(text: Self.kindTitle(for: item), color: Self.kindColor(for: item))
+        }
         if let tag = item.typeTag {
             PhrenChip(text: tag, color: item.kind == .task ? Self.priorityColor(tag) : PhrenTheme.chipColor(.type))
         }

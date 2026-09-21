@@ -111,7 +111,7 @@ struct MemoryView: View {
             VStack(spacing: 0) {
                 ActionErrorBanner()
                 PhrenSearchField(text: $query, placeholder: "Search memory", identifier: "memory-search",
-                                 focus: $searchFocused) { searchFocused = false }
+                                 focus: $searchFocused, onSubmit: submitSearch)
                     .padding(.horizontal, PhrenTheme.Space.large).padding(.top, PhrenTheme.Space.small)
                 scopeRow
                     .padding(.horizontal, PhrenTheme.Space.large).padding(.vertical, PhrenTheme.Space.xs)
@@ -303,6 +303,11 @@ struct MemoryView: View {
     private func refreshContents() {
         contents = MemoryBrowsing.contents(snapshot: snapshot, storeId: selectedStore, project: selectedProject, nodes: nodes)
         if contents.isEmpty, payload != nil, height == .collapsed { height = .half }
+    }
+
+    private func submitSearch() {
+        searchFocused = false
+        if !trimmedQuery.isEmpty { height = .full }
     }
 
     // MARK: - Rows
@@ -606,6 +611,8 @@ struct MemoryView: View {
             let graphMatches = visible?.search(request.query) ?? []
             results = MemoryBrowsing.results(hits: hits, graphMatches: graphMatches, contents: contents, storeId: request.store)
             searching = false
+            searchFocused = false
+            height = .full
         } catch {}
     }
 

@@ -285,7 +285,13 @@
         }
       },
       focusNode: function (id) {
-        if (window.phrenGraph && window.phrenGraph.focusNode) window.phrenGraph.focusNode(id);
+        if (!window.phrenGraph || !window.phrenGraph.focusNode) return;
+        var node = payloadNodes.find(function (candidate) { return candidate.id === id; });
+        var alreadySelected = selectedNode && selectedNode.id === id;
+        // Host-driven selection owns the dossier immediately. The renderer
+        // still handles camera movement and reports its normalized node later.
+        if (node) showDossier(node);
+        if (!alreadySelected) window.phrenGraph.focusNode(id);
       },
       revealNode: function (id) {
         window.phrenGraph.clearSelection();

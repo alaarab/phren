@@ -80,7 +80,8 @@ struct ProjectsView: View {
                                     .foregroundStyle(.secondary)
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(PhrenTheme.Space.medium)
+                                .padding(.horizontal, PhrenTheme.Space.medium)
+                                .padding(.vertical, PhrenTheme.Space.small)
                                 .background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium))
                             }
                             .buttonStyle(.plain)

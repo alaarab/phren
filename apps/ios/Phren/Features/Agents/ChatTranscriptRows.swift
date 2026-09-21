@@ -98,6 +98,19 @@ private struct ChatMessageRow<Historical: View>: View {
         if let revealedText { return revealedText }
         return ChatMessageDisplayCache.text(for: message, imagePaths: images.compactMap(\.path), hasImages: !images.isEmpty, inlineImages: inlineImages)
     }
+    private var richTextCacheKey: String {
+        "\(message.renderKey)|\(inlineImages)|\(images.map(\.id))|\(revealedText?.utf8.count ?? -1)"
+    }
+    /// Generated replies with many inline links already draw as one rich-text
+    /// element. Let the identified message bubble own that element instead of
+    /// adding a second container around it.
+    private var condensedAccessibilityText: String? {
+        let text = displayText
+        guard !text.isEmpty, !(text == "[Image attachment]" && inlineImages) else { return nil }
+        let preview = ToolOutputPreview(text, lines: 40, characters: 6_000)
+        let document = ChatRichTextDocumentCache.value(preview.text, key: richTextCacheKey)
+        return document.condensesAccessibility ? document.accessibilityText : nil
+    }
     var body: some View { ChatPerformance.measure("message row") { content } }
     @ViewBuilder private var content: some View {
         #if DEBUG
@@ -126,7 +139,7 @@ private struct ChatMessageRow<Historical: View>: View {
                     let preview = ToolOutputPreview(text, lines: 40, characters: 6_000)
                     ChatRichText(text: preview.text, reply: text, messageID: message.id,
                                  replyLabel: message.role == .user ? "Copy message" : "Copy reply",
-                                 cacheKey: "\(message.renderKey)|\(inlineImages)|\(images.map(\.id))|\(revealedText?.utf8.count ?? -1)").equatable()
+                                 cacheKey: richTextCacheKey).equatable()
                     if preview.truncated {
                         Button("Read full message") { openOutput(.init(title: message.role == .user ? "Your message" : "Agent reply", text: text)) }
                             .font(.caption).accessibilityIdentifier("chat-message-full:\(message.id)")
@@ -148,14 +161,36 @@ private struct ChatMessageRow<Historical: View>: View {
             .background(message.role == .user ? PhrenTheme.chatUserBubble : .clear, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         }
         .opacity(message.isQueued ? 0.5 : 1)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(message.role == .user ? "Your message" : "Agent reply")
-        .accessibilityIdentifier("chat-message:\(message.id)")
+        .modifier(ChatMessageAccessibility(
+            role: message.role == .user ? "Your message" : "Agent reply",
+            identifier: "chat-message:\(message.id)",
+            condensedText: condensedAccessibilityText
+        ))
         // The bubble's menu: pictures, padding, anything that is not a
         // block. Each block of text has its own, nearer menu that wins.
         .contextMenu {
             Button("Copy message", systemImage: "doc.on.doc") { ChatClipboard.copy(message.text) }
             ShareLink(item: message.text)
+        }
+    }
+}
+
+private struct ChatMessageAccessibility: ViewModifier {
+    let role: String
+    let identifier: String
+    let condensedText: String?
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if let condensedText {
+            content
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(role): \(condensedText)")
+                .accessibilityIdentifier(identifier)
+        } else {
+            content
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel(role)
+                .accessibilityIdentifier(identifier)
         }
     }
 }

@@ -117,6 +117,15 @@ struct ChatToolActivity: View, Equatable {
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.messages == rhs.messages && lhs.imageContext == rhs.imageContext }
     @State private var expanded = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// A very large folded patch shows only summary rows on screen. Its outer
+    /// button remains accessible; opening it restores the patch controls and
+    /// their identifiers.
+    private var condensesCollapsedAccessibility: Bool {
+        !expanded && messages.contains { message in
+            message.isChange
+                && DiffDocumentSummaryCache.value(for: message.text, key: message.renderKey).rowCount > 120
+        }
+    }
     var body: some View {
         ChatPerformance.measure("tool row") { content }
     }
@@ -177,6 +186,7 @@ struct ChatToolActivity: View, Equatable {
                     }
                 }
                 .padding(.horizontal, 10).padding(.bottom, 10)
+                .accessibilityHidden(condensesCollapsedAccessibility)
             }
             // The pictures a result carries — a Read of a screenshot, every
             // frame of it — under the pill without opening the card, side by

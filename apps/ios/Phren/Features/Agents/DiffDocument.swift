@@ -8,6 +8,7 @@ struct DiffDocumentSummary {
     let added: Int
     let removed: Int
     let truncated: Bool
+    let rowCount: Int
 
     init(patch: String) {
         let preview = DiffPreview(patch)
@@ -15,6 +16,7 @@ struct DiffDocumentSummary {
         added = preview.added
         removed = preview.removed
         truncated = preview.truncated
+        rowCount = preview.lines.count
     }
 }
 
