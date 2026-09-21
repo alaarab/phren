@@ -7,6 +7,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- A dispatch whose remote agent had not written its session yet when the launch
+  returned reported an uncertain delivery without sending the brief; the dispatch now
+  waits up to fifteen seconds for the pane's session before sending.
 - Launching an agent from the phone or a dispatch with a label Herdr cannot use as an
   agent name (spaces, capitals, more than 32 characters) failed with "Herdr reported an
   error"; the Hook now derives a valid agent name from the label.
