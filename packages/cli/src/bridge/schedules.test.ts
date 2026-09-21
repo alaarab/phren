@@ -8,18 +8,22 @@ import {
   nextRun,
   parseSchedule,
   readScheduleRuns,
+  scheduleSessionRoute,
   writeScheduleDocument,
   writeScheduleRuns,
+  type SchedulePushSender,
   type Schedule,
   type ScheduleRun,
 } from "./schedules.js";
+import type { SchedulePush } from "./push.js";
 
 const originalTimezone = process.env.TZ;
 const temporary: string[] = [];
 
 afterEach(async () => {
   if (originalTimezone === undefined) delete process.env.TZ; else process.env.TZ = originalTimezone;
-  await Promise.all(temporary.splice(0).map(directory => rm(directory, { recursive: true, force: true })));
+  // A run's notification result is recorded after the completion chain; retry while that last write lands.
+  await Promise.all(temporary.splice(0).map(directory => rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })));
 });
 
 function schedule(fields: Partial<Schedule> = {}): Schedule {
@@ -33,6 +37,27 @@ async function storeFixture(item: Schedule): Promise<{ store: string; project: s
   const project = path.join(store, "demo"); await mkdir(project);
   await writeScheduleDocument(project, [item]);
   return { store, project, runs: path.join(store, "runs.jsonl") };
+}
+
+function fakePush(values: SchedulePush[]): SchedulePushSender {
+  return { notify: async value => { values.push(value); return { notified: true }; } };
+}
+
+async function waitForStatus(scheduler: Scheduler, status: ScheduleRun["status"]): Promise<ScheduleRun> {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const run = (await scheduler.history())[0];
+    if (run?.status === status) return run;
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  throw new Error(`Schedule run did not reach ${status}.`);
+}
+
+async function waitForPushes(values: SchedulePush[], count: number): Promise<void> {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    if (values.length >= count) return;
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  throw new Error(`Schedule produced ${values.length} of ${count} expected pushes.`);
 }
 
 describe("scheduled prompt timing", () => {
@@ -92,5 +117,58 @@ describe("Scheduler", () => {
     expect(kept).toHaveLength(2000);
     expect(kept[0].id).toBe("run-5");
     expect(kept.at(-1)?.id).toBe("run-2004");
+  });
+
+  it("sends only the selected start and finish notifications", async () => {
+    const fixture = await storeFixture(schedule({ notify: ["start", "finish"] }));
+    const pushes: SchedulePush[] = [];
+    let finish!: (value: { status: "finished" }) => void;
+    const completion = new Promise<{ status: "finished" }>(resolve => { finish = resolve; });
+    const scheduler = new Scheduler({ now: () => new Date("2026-09-20T10:00:00.000Z"), store: fixture.store, runsFile: fixture.runs,
+      computer: "Desk", push: fakePush(pushes), launch: async () => ({ launch: { mode: "herdr", server: "default", workspaceId: "w1",
+        tabId: "w1:t1", paneId: "w1:p1" }, completion }) });
+    const run = await scheduler.launchNow("demo", "7f3a2c1d");
+    expect(pushes.map(push => push.kind)).toEqual(["scheduleStarted"]);
+    expect(pushes[0].route).toBe(scheduleSessionRoute(schedule(), { mode: "herdr", server: "default", workspaceId: "w1",
+      tabId: "w1:t1", paneId: "w1:p1" }));
+    finish({ status: "finished" });
+    await waitForStatus(scheduler, "finished");
+    await waitForPushes(pushes, 2);
+    expect(pushes.map(push => push.kind)).toEqual(["scheduleStarted", "scheduleFinished"]);
+    expect(new Set(pushes.map(push => push.runId))).toEqual(new Set([run.id]));
+  });
+
+  it("sends failure without start when that is the selected event", async () => {
+    const fixture = await storeFixture(schedule({ notify: ["failure"] }));
+    const pushes: SchedulePush[] = [];
+    const scheduler = new Scheduler({ now: () => new Date("2026-09-20T10:00:00.000Z"), store: fixture.store, runsFile: fixture.runs,
+      computer: "Desk", push: fakePush(pushes), launch: async () => ({ launch: { mode: "headless" },
+        completion: Promise.resolve({ status: "failed", reason: "Tests failed" }) }) });
+    await scheduler.launchNow("demo", "7f3a2c1d");
+    await waitForStatus(scheduler, "failed");
+    await waitForPushes(pushes, 1);
+    expect(pushes).toMatchObject([{ kind: "scheduleFailed", status: "failed", reason: "Tests failed" }]);
+  });
+
+  it("defaults to finish and failure notifications", async () => {
+    const fixture = await storeFixture(schedule());
+    const pushes: SchedulePush[] = [];
+    const scheduler = new Scheduler({ now: () => new Date("2026-09-20T10:00:00.000Z"), store: fixture.store, runsFile: fixture.runs,
+      computer: "Desk", push: fakePush(pushes), launch: async () => ({ launch: { mode: "headless" },
+        completion: Promise.resolve({ status: "finished" }) }) });
+    await scheduler.launchNow("demo", "7f3a2c1d");
+    await waitForStatus(scheduler, "finished");
+    await waitForPushes(pushes, 1);
+    expect(pushes.map(push => push.kind)).toEqual(["scheduleFinished"]);
+  });
+
+  it("records and logs a missing push configuration without throwing", async () => {
+    const fixture = await storeFixture(schedule({ notify: ["start"] }));
+    const logs: string[] = [];
+    const scheduler = new Scheduler({ now: () => new Date("2026-09-20T10:00:00.000Z"), store: fixture.store, runsFile: fixture.runs,
+      computer: "Desk", log: message => logs.push(message), launch: async () => ({ launch: { mode: "headless" } }) });
+    const run = await scheduler.launchNow("demo", "7f3a2c1d");
+    expect(await scheduler.history()).toMatchObject([{ id: run.id, notified: false, notifyReason: "no push config" }]);
+    expect(logs).toEqual([expect.stringContaining("no push config")]);
   });
 });

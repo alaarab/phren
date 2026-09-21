@@ -9,16 +9,19 @@ import * as yaml from "js-yaml";
 import { z } from "zod";
 import { fanoutRoot } from "./fanouts.js";
 import { paneIdentity, rpc, servers, snapshot } from "./herdr.js";
+import type { SchedulePush, SchedulePushKind, SchedulePushResult } from "./push.js";
 import { BridgeError, bridgeRoot, objects, type Json } from "./protocol.js";
 import { getProjectSourcePath } from "../project-config.js";
 import { defaultPhrenPath, getProjectDirs } from "../shared.js";
 
 export const SCHEDULE_EVERY = ["interval", "daily", "weekly", "once", "cron"] as const;
 export const SCHEDULE_HARNESSES = ["claude", "codex", "opencode"] as const;
+export const SCHEDULE_NOTIFY = ["start", "finish", "failure"] as const;
 export const WEEKDAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
 
 export type ScheduleEvery = typeof SCHEDULE_EVERY[number];
 export type ScheduleHarness = typeof SCHEDULE_HARNESSES[number];
+export type ScheduleNotify = typeof SCHEDULE_NOTIFY[number];
 export type Weekday = typeof WEEKDAYS[number];
 export type ScheduleRunStatus = "launched" | "running" | "finished" | "failed" | "skipped";
 
@@ -29,6 +32,7 @@ export interface Schedule {
   computer: string;
   harness: ScheduleHarness;
   model?: string;
+  notify?: ScheduleNotify[];
   every: ScheduleEvery;
   at?: string;
   days?: Weekday[];
@@ -47,6 +51,7 @@ export interface ScheduleLaunchRecord {
   tabId?: string;
   paneId?: string;
   sessionId?: string;
+  server?: string;
   jobDir?: string;
 }
 
@@ -58,6 +63,8 @@ export interface ScheduleRun {
   finishedAt?: string;
   status: ScheduleRunStatus;
   reason?: string;
+  notified?: boolean;
+  notifyReason?: string;
   launch: ScheduleLaunchRecord;
 }
 
@@ -75,6 +82,7 @@ export interface ScheduleLaunchContext {
 }
 
 export type ScheduleLauncher = ((context: ScheduleLaunchContext) => Promise<ScheduleLaunchResult>) & { close?: () => void };
+export interface SchedulePushSender { notify(value: SchedulePush): Promise<SchedulePushResult> }
 
 export interface ScheduleStatus extends Schedule {
   project: string;
@@ -142,6 +150,8 @@ export function parseSchedule(value: unknown): Schedule {
     updatedAt: timestamp.parse(raw.updatedAt),
   };
   if (raw.model !== undefined) schedule.model = singleLine(200).parse(raw.model);
+  if (raw.notify !== undefined) schedule.notify = z.array(z.enum(SCHEDULE_NOTIFY)).max(3).parse(raw.notify)
+    .filter((kind, index, kinds) => kinds.indexOf(kind) === index);
   if (every === "daily" || every === "weekly") schedule.at = clockTime.parse(raw.at);
   if (every === "weekly") schedule.days = z.array(z.enum(WEEKDAYS)).min(1).max(7).parse(raw.days).filter((day, index, days) => days.indexOf(day) === index);
   if (every === "interval") { schedule.interval = singleLine(32).parse(raw.interval); intervalMilliseconds(schedule.interval); }
@@ -187,6 +197,17 @@ export function canonicalComputer(value: string): string {
 
 export function computerMatches(wanted: string, current: string): boolean {
   return canonicalComputer(wanted) === canonicalComputer(current);
+}
+
+export function scheduleNotifications(schedule: Schedule): Set<ScheduleNotify> {
+  return new Set(schedule.notify ?? ["finish", "failure"]);
+}
+
+export function scheduleSessionRoute(schedule: Schedule, launch: ScheduleLaunchRecord): string | undefined {
+  if (launch.mode !== "herdr" || !launch.server || !launch.workspaceId || !launch.tabId || !launch.paneId) return undefined;
+  const route = Buffer.from(JSON.stringify({ server: launch.server, workspace: launch.workspaceId, tab: launch.tabId,
+    pane: launch.paneId, source: schedule.harness })).toString("base64url");
+  return `phren://session?route=${encodeURIComponent(route)}`;
 }
 
 interface CronField { values: number[]; wildcard: boolean }
@@ -304,15 +325,19 @@ export class Scheduler {
   private readonly runsFile: string;
   private readonly computer: () => string;
   private readonly locateProject: (project: string) => Promise<string | undefined>;
+  private readonly push?: SchedulePushSender;
+  private readonly log: (message: string) => void;
   private serial: Promise<void> = Promise.resolve();
   private ticking = false;
 
   constructor(options: { now: () => Date; store: string; launch: ScheduleLauncher; runsFile: string; computer?: string | (() => string);
-    locateProject?: (project: string) => Promise<string | undefined> }) {
+    locateProject?: (project: string) => Promise<string | undefined>; push?: SchedulePushSender; log?: (message: string) => void }) {
     this.now = options.now; this.store = options.store; this.launch = options.launch; this.runsFile = options.runsFile;
     if (typeof options.computer === "function") this.computer = options.computer;
     else { const computer = options.computer; this.computer = () => computer ?? hostname(); }
     this.locateProject = options.locateProject ?? (async () => undefined);
+    this.push = options.push;
+    this.log = options.log ?? (message => console.error(message));
   }
 
   private projectDirectories(): string[] { return getProjectDirs(this.store); }
@@ -380,12 +405,18 @@ export class Scheduler {
       const launched = await this.launch({ schedule: prepared.schedule, project: prepared.project, projectDir: prepared.projectDir,
         cwd: prepared.cwd, runId: prepared.run.id });
       const running = await this.updateRun(prepared.run.id, { status: "running", launch: launched.launch });
-      if (launched.completion) void launched.completion.then(result => this.finishRun(prepared.run.id, result.status, result.reason))
-        .catch(error => this.finishRun(prepared.run.id, "failed", error instanceof Error ? error.message : "The scheduled agent failed."));
+      const notified = this.notifyRun(running, prepared.schedule, "scheduleStarted");
+      if (launched.completion) void launched.completion.then(async result => {
+        await this.finishRun(prepared.run.id, prepared.schedule, result.status, result.reason, notified);
+      }).catch(async error => {
+        await this.finishRun(prepared.run.id, prepared.schedule, "failed",
+          error instanceof Error ? error.message : "The scheduled agent failed.", notified);
+      });
+      await notified;
       return running;
     } catch (error) {
       const reason = error instanceof Error ? error.message : "The scheduled agent could not start.";
-      await this.finishRun(prepared.run.id, "failed", reason);
+      await this.finishRun(prepared.run.id, prepared.schedule, "failed", reason);
       throw error instanceof BridgeError ? error : new BridgeError(503, reason);
     }
   }
@@ -400,8 +431,29 @@ export class Scheduler {
     });
   }
 
-  private async finishRun(id: string, status: "finished" | "failed", reason?: string): Promise<void> {
-    await this.updateRun(id, { status, finishedAt: this.now().toISOString(), ...(reason ? { reason } : {}) });
+  private async finishRun(id: string, schedule: Schedule, status: "finished" | "failed", reason?: string,
+    previousNotification?: Promise<void>): Promise<void> {
+    const run = await this.updateRun(id, { status, finishedAt: this.now().toISOString(), ...(reason ? { reason } : {}) });
+    await previousNotification;
+    await this.notifyRun(run, schedule, status === "finished" ? "scheduleFinished" : "scheduleFailed");
+  }
+
+  private async notifyRun(run: ScheduleRun, schedule: Schedule, kind: SchedulePushKind): Promise<void> {
+    const preference: ScheduleNotify = kind === "scheduleStarted" ? "start" : kind === "scheduleFinished" ? "finish" : "failure";
+    if (!scheduleNotifications(schedule).has(preference)) return;
+    const route = scheduleSessionRoute(schedule, run.launch);
+    const value: SchedulePush = { kind, scheduleId: schedule.id, project: run.project, name: schedule.name,
+      computer: schedule.computer, runId: run.id, status: kind === "scheduleStarted" ? "running" : kind === "scheduleFinished" ? "finished" : "failed",
+      ...(run.reason ? { reason: run.reason } : {}), ...(route ? { route } : {}) };
+    let result: SchedulePushResult;
+    try { result = this.push ? await this.push.notify(value) : { notified: false, reason: "no push config" }; }
+    catch { result = { notified: false, reason: "push delivery failed" }; }
+    try {
+      await this.updateRun(run.id, { notified: result.notified, ...(result.reason ? { notifyReason: result.reason } : { notifyReason: undefined }) });
+    } catch (error) {
+      this.log(`[schedule] ${kind} notification result for run ${run.id} could not be recorded: ${error instanceof Error ? error.message : "unknown error"}`);
+    }
+    if (!result.notified) this.log(`[schedule] ${kind} notification for run ${run.id}: ${result.reason ?? "not delivered"}`);
   }
 
   async tick(): Promise<void> {
@@ -442,7 +494,7 @@ async function launchInHerdr(server: string, context: ScheduleLaunchContext, lau
     if (pane) sessionId = await paneIdentity(server, pane).catch(() => undefined);
     if (!sessionId) await new Promise(resolve => setTimeout(resolve, 200));
   }
-  const launch: ScheduleLaunchRecord = { mode: "herdr", workspaceId, tabId, paneId,
+  const launch: ScheduleLaunchRecord = { mode: "herdr", server, workspaceId, tabId, paneId,
     ...(sessionId ? { sessionId } : {}) };
   return { launch, completion: watchHerdrRun(server, { workspaceId, tabId, paneId }, signal) };
 }

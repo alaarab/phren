@@ -140,6 +140,7 @@ export async function serve(version: string): Promise<void> {
   const scheduleStore = defaultPhrenPath();
   const scheduler = modules.has("schedules") ? new Scheduler({ now: () => new Date(), store: scheduleStore, runsFile: scheduleRunsFile(),
     launch: createScheduleLauncher((server, data) => launchSession(server, data), scheduleStore),
+    push: { notify: value => agentHooks.push.notifySchedule(value) },
     locateProject: async project => (await locateProject(project, await journal.recent()))[0]?.directory }) : undefined;
   const info = { product: "phren-hook", protocol: PROTOCOL, version, computer: { id: computerID, name: hostname() }, capabilities: activeCapabilities,
     modules: Object.fromEntries(modules.modules.map(module => [module.name, module.version])),

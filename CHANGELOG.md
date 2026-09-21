@@ -27,6 +27,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- Schedule notifications: a schedule's optional `notify` list (`start`, `finish`,
+  `failure`; finish and failure when absent) makes the Hook push each run's
+  start, finish or failure to registered phones through the approvals' APNs
+  configuration, one collapse id per run. A run records `notified` and, when
+  nothing was sent, `notifyReason`; a missing push configuration is logged and
+  never interrupts the scheduled agent.
 - Modules: phren's features are switchable per store and profile. Memory and
   tasks stay on; conductor, schedules and the rest can be turned off, the MCP
   and CLI surfaces shrink to match, the Hook reports its capabilities so the

@@ -10,6 +10,7 @@ const deviceSchema = z.object({
   hostID: z.string().uuid(),
   token: z.string().regex(/^[0-9a-f]{64}$/),
   environment: z.enum(["development", "production"]),
+  kinds: z.array(z.enum(["approval", "scheduleStarted", "scheduleFinished", "scheduleFailed"])).max(4).default(["approval"]),
 });
 export type PushDevice = z.infer<typeof deviceSchema>;
 
@@ -22,6 +23,19 @@ const configSchema = z.object({
 type APNsConfig = z.infer<typeof configSchema>;
 
 export interface ApprovalPush { binding: string; provider: string; question: boolean; expiresAt: string }
+export type SchedulePushKind = "scheduleStarted" | "scheduleFinished" | "scheduleFailed";
+export interface SchedulePush {
+  kind: SchedulePushKind;
+  scheduleId: string;
+  project: string;
+  name: string;
+  computer: string;
+  runId: string;
+  status: "running" | "finished" | "failed";
+  reason?: string;
+  route?: string;
+}
+export interface SchedulePushResult { notified: boolean; reason?: string }
 
 export function approvalPushPayload(value: ApprovalPush, host?: string): Record<string, unknown> {
   const label = value.provider === "claude" ? "Claude" : value.provider === "codex" ? "Codex" : "Your agent";
@@ -32,6 +46,19 @@ export function approvalPushPayload(value: ApprovalPush, host?: string): Record<
       "interruption-level": "time-sensitive",
     },
     phren: { version: 1, binding: value.binding, expiresAt: value.expiresAt, ...(host ? { host } : {}) },
+  };
+}
+
+export function schedulePushPayload(value: SchedulePush): Record<string, unknown> {
+  const state = value.kind === "scheduleStarted" ? "started" : value.kind === "scheduleFinished" ? "finished" : "failed";
+  return {
+    aps: {
+      alert: { title: `${value.name} ${state}`, body: `${value.project} on ${value.computer}${value.reason ? `. ${value.reason}` : ""}` },
+      sound: "default", category: "PHREN_SCHEDULE",
+    },
+    phren: { kind: value.kind, scheduleId: value.scheduleId, project: value.project, name: value.name,
+      computer: value.computer, runId: value.runId, status: value.status, ...(value.reason ? { reason: value.reason } : {}),
+      ...(value.route ? { route: value.route } : {}) },
   };
 }
 
@@ -72,16 +99,15 @@ class APNsSender {
     this.jwt = { value, created };
     return value;
   }
-  send(device: PushDevice, payload: Record<string, unknown>): Promise<boolean> {
+  send(device: PushDevice, payload: Record<string, unknown>, headers: { expiration: string; collapseId: string }): Promise<boolean> {
     const authority = device.environment === "production" ? "https://api.push.apple.com" : "https://api.sandbox.push.apple.com";
     return new Promise(resolve => {
       const client = connect(authority); let settled = false;
       const finish = (ok: boolean) => { if (settled) return; settled = true; client.close(); resolve(ok); };
       client.once("error", () => finish(false));
-      const phren = payload.phren as { binding: string; expiresAt: string };
       const request = client.request({ ":method": "POST", ":path": `/3/device/${device.token}`,
         authorization: `bearer ${this.token()}`, "apns-topic": this.config.topic, "apns-push-type": "alert",
-        "apns-priority": "10", "apns-expiration": String(Math.floor(Date.parse(phren.expiresAt) / 1000)), "apns-collapse-id": phren.binding });
+        "apns-priority": "10", "apns-expiration": headers.expiration, "apns-collapse-id": headers.collapseId });
       request.on("response", headers => finish(Number(headers[":status"]) === 200));
       request.once("error", () => finish(false)); request.setTimeout(10_000, () => { request.close(); finish(false); });
       request.end(JSON.stringify(payload));
@@ -114,6 +140,23 @@ export class ApprovalPushService {
   }
   async notify(value: ApprovalPush): Promise<boolean> {
     if (!this.sender || !this.devices.length) return false;
-    return (await Promise.all(this.devices.map(device => this.sender!.send(device, approvalPushPayload(value, device.hostID))))).some(Boolean);
+    const devices = this.devices.filter(device => device.kinds.includes("approval"));
+    if (!devices.length) return false;
+    return (await Promise.all(devices.map(device => this.sender!.send(device, approvalPushPayload(value, device.hostID), {
+      expiration: String(Math.floor(Date.parse(value.expiresAt) / 1000)), collapseId: value.binding,
+    })))).some(Boolean);
+  }
+  async notifySchedule(value: SchedulePush): Promise<SchedulePushResult> {
+    if (!this.sender) return { notified: false, reason: "no push config" };
+    const devices = this.devices.filter(device => device.kinds.includes(value.kind));
+    if (!devices.length) return { notified: false, reason: "no registered devices" };
+    try {
+      const notified = (await Promise.all(devices.map(device => this.sender!.send(device, schedulePushPayload(value), {
+        expiration: "0", collapseId: value.runId,
+      })))).some(Boolean);
+      return notified ? { notified: true } : { notified: false, reason: "push delivery failed" };
+    } catch {
+      return { notified: false, reason: "push delivery failed" };
+    }
   }
 }

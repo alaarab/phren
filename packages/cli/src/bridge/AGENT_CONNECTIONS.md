@@ -116,7 +116,12 @@ match case-insensitively with a trailing `.local` ignored. Run state stays in
 runs. A run is recorded before launch and a `launched` or `running` record blocks
 another launch for that schedule. Headless jobs write their manifest and event
 log under the store's private `agent-fanouts` runtime folder so Agent work can
-discover them.
+discover them. A schedule's optional `notify` list accepts `start`, `finish` and
+`failure`, defaulting to finish and failure when absent. The Hook sends those
+events to registered phones through the same APNs configuration as approvals,
+with one collapse id per run. Missing APNs configuration records `notified: false`
+and `notifyReason: "no push config"` in the run and service log without affecting
+the scheduled agent.
 Computer dispatch keys reuse the phone's `restrict,pty` forced-command line;
 `phren bridge enroll-computer <name>` prints it and `--accept <public-key-file>`
 enrolls it on a receiver. This grants the full phone boundary above, including
