@@ -26,7 +26,16 @@ struct ChatRichText: View, Equatable {
         owner = messageID ?? key
         document = ChatRichTextDocumentCache.value(text, key: key)
     }
-    var body: some View {
+    @ViewBuilder var body: some View {
+        if document.condensesAccessibility {
+            content
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(document.accessibilityText)
+        } else {
+            content
+        }
+    }
+    private var content: some View {
         VStack(alignment: .leading, spacing: 12) {
             ForEach(document.blocks) { block in
                 if let language = block.language {
@@ -129,7 +138,11 @@ private struct ChatParagraph: View {
                 }
             }
     }
+    // These transparent hit targets exist only for the paragraph interaction
+    // fixture. Adding one for every paragraph in every UI test makes an
+    // unrelated long transcript's accessibility snapshot much larger.
     private static let testing = AppRuntime.isUITesting
+        && ProcessInfo.processInfo.arguments.contains("--chat-paragraphs")
 }
 
 /// A fenced block is just the code: no title bar. Press and hold copies it

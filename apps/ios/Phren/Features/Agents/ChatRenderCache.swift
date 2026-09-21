@@ -49,6 +49,20 @@ enum DiffDocumentCache {
     }
 }
 
+enum DiffDocumentSummaryCache {
+    final class Box: NSObject { let value: DiffDocumentSummary; init(_ value: DiffDocumentSummary) { self.value = value } }
+    private static let values: NSCache<NSString, Box> = {
+        let cache = NSCache<NSString, Box>(); cache.countLimit = 500; cache.totalCostLimit = 8 * 1_024 * 1_024; return cache
+    }()
+    static func value(for patch: String, key suppliedKey: String? = nil) -> DiffDocumentSummary {
+        let key = (suppliedKey ?? "\(patch.utf8.count)|\(patch.hashValue)") as NSString
+        if let cached = values.object(forKey: key) { return cached.value }
+        let summary = DiffDocumentSummary(patch: patch)
+        values.setObject(Box(summary), forKey: key, cost: patch.utf8.count)
+        return summary
+    }
+}
+
 enum ChatMessageDisplayCache {
     static let values: NSCache<NSString, NSString> = {
         let cache = NSCache<NSString, NSString>(); cache.countLimit = 1_000; cache.totalCostLimit = 16 * 1_024 * 1_024; return cache

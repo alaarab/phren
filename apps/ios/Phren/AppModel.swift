@@ -88,7 +88,7 @@ struct FailedOpEntry: Identifiable {
 /// target (rather than the TabView's default no-selection mode) so a widget
 /// deep link's `onOpenURL` handler can jump the user straight to a tab.
 enum AppTab: Hashable {
-    case projects, agents, tasks, search, settings
+    case projects, agents, tasks, memory, settings
 }
 
 /// Why a mutation couldn't be routed to a store. Surfaced as

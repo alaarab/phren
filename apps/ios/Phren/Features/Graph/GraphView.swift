@@ -588,13 +588,13 @@ struct GraphNodeRef: Codable, Equatable, Identifiable {
     }
 }
 
-private struct ProjectRoute: Identifiable, Hashable {
+struct ProjectRoute: Identifiable, Hashable {
     let storeId: String
     let project: String
     var id: String { "\(storeId):\(project)" }
 }
 
-private struct ActivityView: UIViewControllerRepresentable {
+struct ActivityView: UIViewControllerRepresentable {
     let activityItems: [Any]
 
     func makeUIViewController(context: Context) -> UIActivityViewController {

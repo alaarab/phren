@@ -38,6 +38,45 @@ struct PhrenCountBadge: View {
     }
 }
 
+/// A compact in-app result notice. It keeps transient feedback inside Phren's
+/// visual language instead of handing the whole screen to a system alert.
+struct PhrenNoticeBanner: View {
+    let title: String
+    let message: String
+    var icon = "checkmark.circle.fill"
+    var tint = PhrenTheme.success
+    var identifier = "phren-notice"
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: PhrenTheme.Space.small) {
+            Image(systemName: icon)
+                .font(PhrenTypography.icon(16, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 22)
+                .frame(minHeight: 44)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: PhrenTheme.Space.xs) {
+                Text(title)
+                    .font(PhrenTypography.subheadline.weight(.semibold))
+                    .foregroundStyle(PhrenTheme.text)
+                Text(message)
+                    .font(PhrenTypography.footnote)
+                    .foregroundStyle(PhrenTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            PhrenIconButton(icon: "xmark", label: "Dismiss \(title)", action: dismiss)
+                .phrenIdentifier("\(identifier)-dismiss")
+        }
+        .padding(.horizontal, PhrenTheme.Space.medium)
+        .padding(.vertical, PhrenTheme.Space.small)
+        .phrenPanel()
+        .phrenElevation()
+        .phrenContainerMarker(identifier, label: "\(title): \(message)")
+    }
+}
+
 struct PhrenIconSegment<Value: Hashable>: View {
     struct Item: Identifiable {
         let value: Value
@@ -79,6 +118,8 @@ struct PhrenChip: View {
     let text: String
     var icon: String? = nil
     var role: PhrenTheme.ChipRole = .type
+    /// A colour the roles do not cover (a row's kind, a task's section).
+    var color: Color? = nil
     var monospaced = false
 
     var body: some View {
@@ -87,9 +128,9 @@ struct PhrenChip: View {
             Text(text)
         }
         .font(monospaced ? PhrenTypography.monoCaption2.weight(.medium) : PhrenTypography.caption2.weight(.medium))
-        .foregroundStyle(PhrenTheme.chipColor(role))
+        .foregroundStyle(color ?? PhrenTheme.chipColor(role))
         .padding(.horizontal, 7).padding(.vertical, 3)
-        .background(PhrenTheme.chipColor(role).opacity(0.14), in: Capsule())
+        .background((color ?? PhrenTheme.chipColor(role)).opacity(0.14), in: Capsule())
         .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
         .fixedSize(horizontal: false, vertical: true)
     }

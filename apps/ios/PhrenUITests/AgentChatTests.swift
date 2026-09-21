@@ -994,7 +994,10 @@ final class AgentChatTests: XCTestCase {
     }
 
     @MainActor
-    func testLiveActivityCanDenyTheExactRequest() {
+    func testLiveActivityCanDenyTheExactRequest() throws {
+        guard ProcessInfo.processInfo.environment["PHREN_UI_TEST_LIVE_ACTIVITY"] == "1" else {
+            throw XCTSkip("Set PHREN_UI_TEST_LIVE_ACTIVITY=1 on a simulator runner with Live Activities enabled; expanded Dynamic Island presentation is controlled by SpringBoard and is not deterministic in shared simulator runs.")
+        }
         let app = launch(extra: ["--chat-approval", "--approval-live-activity"])
         app.buttons["live-chat:w7:w7:t9"].tap()
         XCTAssertTrue(app.buttons["chat-approval-deny"].waitForExistence(timeout: 10))
@@ -1004,9 +1007,10 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(springboard.buttons["Deny"].waitForExistence(timeout: 10))
         capture(springboard, "Permission Live Activity")
         springboard.buttons["Deny"].tap()
-        XCTAssertTrue(app.alerts["Permission request"].waitForExistence(timeout: 10))
+        let notice = app.descendants(matching: .any)["approval-result-notice"]
+        XCTAssertTrue(notice.waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["Denial sent."].exists)
-        app.alerts.buttons["OK"].tap()
+        app.buttons["approval-result-notice-dismiss"].tap()
     }
 
     @MainActor

@@ -75,18 +75,28 @@
   }
   .dossier-icon-button, .dossier-step-button {
     display: grid;
+    position: relative;
     place-items: center;
     box-sizing: border-box;
-    width: 32px;
-    height: 32px;
+    width: 44px;
+    height: 44px;
     padding: 0;
+    border: 0;
+    background: transparent;
+    color: #8b96c9;
+  }
+  .dossier-icon-button::before, .dossier-step-button::before {
+    position: absolute;
+    inset: 6px;
+    content: "";
     border: 1px solid rgba(103, 232, 249, 0.22);
     border-radius: 999px;
     background: rgba(22, 27, 52, 0.9);
-    color: #8b96c9;
   }
   .dossier-icon-button[hidden], .dossier-step[hidden] { display: none; }
   .dossier-icon-button svg, .dossier-step-button svg {
+    position: relative;
+    z-index: 1;
     width: 16px;
     height: 16px;
     fill: none;
@@ -151,7 +161,7 @@
     padding-top: 12px;
   }
   .dossier-actions button {
-    height: 36px;
+    height: 44px;
     min-width: 0;
     padding: 0 8px;
     overflow: hidden;
@@ -163,11 +173,16 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .dossier-actions button:active, .dossier-icon-button:active, .dossier-step-button:active {
+  .dossier-actions button:active {
     border-color: rgba(103, 232, 249, 0.55);
     color: #e6f6ff;
     background: rgba(22, 27, 52, 0.96);
   }
+  .dossier-icon-button:active::before, .dossier-step-button:active::before {
+    border-color: rgba(103, 232, 249, 0.55);
+    background: rgba(22, 27, 52, 0.96);
+  }
+  .dossier-icon-button:active, .dossier-step-button:active { color: #e6f6ff; }
 
 </style>
 </head>

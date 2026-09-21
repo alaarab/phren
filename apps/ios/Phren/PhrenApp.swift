@@ -38,9 +38,19 @@ struct PhrenApp: App {
                     await ApprovalPushNotifications.registerSavedHosts()
                     AgentLaunch.restorePendingNavigation()
                 }
-                .alert("Permission request", isPresented: $approvals.message.isPresent()) {
-                    Button("OK") { approvals.message = nil }
-                } message: { Text(approvals.message ?? "") }
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    if let message = approvals.message {
+                        PhrenNoticeBanner(
+                            title: "Permission request",
+                            message: message,
+                            icon: approvalNoticeFailed(message) ? "exclamationmark.triangle.fill" : "checkmark.circle.fill",
+                            tint: approvalNoticeFailed(message) ? PhrenTheme.danger : PhrenTheme.success,
+                            identifier: "approval-result-notice"
+                        ) { approvals.message = nil }
+                        .padding(.horizontal, PhrenTheme.Space.large)
+                        .padding(.vertical, PhrenTheme.Space.small)
+                    }
+                }
                 .onChange(of: scenePhase) { _, phase in
                     guard !AppRuntime.isControlsFixture else { return }
                     // Live sync runs only while the app is visible; returning
@@ -76,6 +86,10 @@ struct PhrenApp: App {
                     }
                 }
         }
+    }
+
+    private func approvalNoticeFailed(_ message: String) -> Bool {
+        message.contains("invalid") || message.contains("wasn't confirmed")
     }
 
     /// Neutral chrome keeps the content and small status accents in focus.
@@ -193,11 +207,11 @@ struct MainTabView: View {
                 .tabItem { Label("Tasks", systemImage: "checklist") }
                 .tag(AppTab.tasks)
             Group {
-                if model.phase == .ready { SearchView() }
-                else { MemoryConnectionPrompt(title: "Search memory") }
+                if model.phase == .ready { MemoryView() }
+                else { MemoryConnectionPrompt(title: "Memory") }
             }
-                .tabItem { Label("Search", systemImage: "magnifyingglass") }
-                .tag(AppTab.search)
+                .tabItem { Label("Memory", systemImage: "point.3.connected.trianglepath.dotted") }
+                .tag(AppTab.memory)
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape") }
                 .tag(AppTab.settings)

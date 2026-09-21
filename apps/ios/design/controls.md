@@ -354,6 +354,51 @@ a danger caption. Identifier: `screen-code:field` (existing `schedule-prompt`);
 accessibility label is the supplied prompt. Dynamic Type expands line heights
 and the enclosing editor scrolls; no fixed pixel height clips the text.
 
+## PhrenSearchField
+
+Purpose: a one-line search input, the Memory tab's field. Requires a text
+binding and an identifier; takes a placeholder, an optional owner focus
+(`FocusState<Bool>.Binding`) for dismissing the keyboard, and an onSubmit.
+
+Geometry: 44 minimum height, 12 leading inset, 8 between the 15-point
+magnifier and the field, raised radius-12 surface. Body text, cyan caret,
+`.webSearch` keyboard, search return key, no autocorrection. A 44 by 44
+clear button (`xmark.circle.fill`, textMuted) appears once there is text and
+takes the trailing inset. Normal is the only visual state besides disabled
+(0.45 opacity, no input); focus is the keyboard, not a drawn state;
+destructive is inapplicable.
+
+Accessibility: the text field carries the identifier itself (a field has no
+children to hide): `screen-search`, for example `memory-search`; the clear
+button is `screen-search:clear` with the label "Clear search". Dynamic Type
+grows the row; the clear target never shrinks.
+
+## PhrenChipRow<Value: Hashable>
+
+Purpose: choose exactly one of a short, flat set drawn as chips: Memory's
+scope (All, one per project) and its content filter (All, Findings, Tasks,
+Topics). Takes PhrenOption items, a selection binding and an identifier
+prefix; `tint` gives the selected chip a colour per value (the selected
+project uses sessionProject), `raised` draws unselected chips on
+surfaceRaised for a `surface` panel, `wraps` forces wrapping.
+
+Geometry: one horizontal row that scrolls without an indicator, 8 between
+chips; each chip is a capsule 32 tall with 12 horizontal padding inside a
+44 minimum target. Subheadline medium text, optional 11-point leading icon.
+Normal is textSecondary on surface (or surfaceRaised); selected is the tint
+over the tint at 0.16; disabled is 0.45 opacity. Selecting the selected
+chip keeps it. Changing the selection scrolls that chip into view (0.18
+easing, none under Reduce Motion). Destructive is inapplicable.
+
+Accessibility: each chip is a Button with its title, the selected trait when
+chosen; identifiers `prefix:option.id` (`memory-scope:ledger`,
+`memory-filter:tasks`). At accessibility sizes the row becomes
+`PhrenFlowLayout` rows of chips, so long project lists wrap instead of
+hiding; titles wrap inside a chip rather than truncating.
+
+`PhrenFlowLayout` is the leading-aligned wrapping layout behind the row and
+behind the Memory rows' meta chips at accessibility sizes.
+
 ## Existing chrome and list composition
 
 PhrenIconSegment remains for short icon modes (5 timing modes in Schedules).

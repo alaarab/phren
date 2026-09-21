@@ -42,8 +42,7 @@ struct WebToolCard: View, Equatable {
                     Image(systemName: "chevron.down").font(.system(size: expanded ? 10 : 12, weight: .semibold))
                         .rotationEffect(.degrees(expanded ? 180 : 0)).foregroundStyle(PhrenTheme.phrenCardAccent).accessibilityHidden(true)
                 }
-                .padding(.vertical, expanded ? 0 : 4)
-                .frame(minHeight: expanded ? nil : 44)
+                .frame(height: expanded ? nil : 44)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)

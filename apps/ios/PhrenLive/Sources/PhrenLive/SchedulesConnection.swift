@@ -43,10 +43,13 @@ public struct ScheduleRun: Decodable, Equatable, Identifiable, Sendable {
     public let finishedAt: Date?
     public let status: Status
     public let reason: String?
+    public let notified: Bool?
+    public let notifyReason: String?
     public let launch: Launch
 
     public init(id: String, scheduleID: String, project: String, startedAt: Date,
-                finishedAt: Date? = nil, status: Status, reason: String? = nil, launch: Launch) {
+                finishedAt: Date? = nil, status: Status, reason: String? = nil,
+                notified: Bool? = nil, notifyReason: String? = nil, launch: Launch) {
         self.id = id
         self.scheduleID = scheduleID
         self.project = project
@@ -54,6 +57,8 @@ public struct ScheduleRun: Decodable, Equatable, Identifiable, Sendable {
         self.finishedAt = finishedAt
         self.status = status
         self.reason = reason
+        self.notified = notified
+        self.notifyReason = notifyReason
         self.launch = launch
     }
 
@@ -66,11 +71,13 @@ public struct ScheduleRun: Decodable, Equatable, Identifiable, Sendable {
         finishedAt = try values.decodeIfPresent(String.self, forKey: .finishedAt).map(scheduleTimestamp)
         status = try values.decode(Status.self, forKey: .status)
         reason = try values.decodeIfPresent(String.self, forKey: .reason)
+        notified = try values.decodeIfPresent(Bool.self, forKey: .notified)
+        notifyReason = try values.decodeIfPresent(String.self, forKey: .notifyReason)
         launch = try values.decode(Launch.self, forKey: .launch)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, project, startedAt, finishedAt, status, reason, launch
+        case id, project, startedAt, finishedAt, status, reason, notified, notifyReason, launch
         case scheduleID = "scheduleId"
     }
 }

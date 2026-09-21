@@ -14,7 +14,11 @@ their sessions, exploring a project's findings and graph, adjusting skills or
 instructions, and adding direction when needed. It does not require approving
 every finding or agent action.
 
-The main tabs are **Projects, Agents, Tasks, Search, and Settings**. Tasks is your
+The main tabs are **Projects, Agents, Tasks, Memory, and Settings**. Memory is
+the graph page with search and browsing folded in: a search field, scope chips
+(store, All, one per project), the graph, and a bottom panel that lists the
+scope's findings, notes, tasks and topics, or the search results, or sits
+under the node dossier with a Show in list row. Tasks is your
 workload view: it starts on **Backlog** and remembers your choice of Backlog,
 Active, or Done. A compact status menu, optional search, filters (creation age,
 priority, project, and store), and sorting share one control row. Sort by task
@@ -177,7 +181,7 @@ apps/ios/
     WidgetBridge.swift   # writes the JSON snapshot the widgets read
     Intents/             # App Intents: "Hey Siri, add a task to phren"
     Onboarding/          # welcome → sign-in → repo picker → initial sync
-    Features/            # Projects, Agents, Tasks, Search, Settings tabs
+    Features/            # Projects, Agents, Tasks, Memory, Settings tabs
                          #   + native Skills, Agent setup and Memory graph screens
   PhrenWidgets/          # WidgetKit extension target (Home Screen + Lock Screen)
   PhrenLive/             # app-only SSH transport (SwiftNIO SSH) + connection tests

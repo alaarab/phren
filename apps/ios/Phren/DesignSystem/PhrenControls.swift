@@ -8,10 +8,11 @@ extension View {
     /// Names a container for UI tests without hiding its children's ids: an
     /// identifier on the container itself would replace theirs (a modal's
     /// scroller, a screen's rows), so it goes on a zero-size marker instead.
-    func phrenContainerMarker(_ identifier: String, label: String) -> some View {
+    func phrenContainerMarker(_ identifier: String, label: String, value: String? = nil) -> some View {
         overlay(alignment: .topLeading) {
             Color.clear.frame(width: 1, height: 1)
                 .accessibilityElement().accessibilityLabel(label)
+                .accessibilityValue(value ?? "")
                 .accessibilityIdentifier(identifier)
         }
     }
@@ -586,5 +587,161 @@ struct PhrenRow<Trailing: View>: View {
 extension PhrenRow where Trailing == EmptyView {
     init(icon: String, title: String, chevron: Bool = true) {
         self.init(icon: icon, title: title, chevron: chevron, trailing: { EmptyView() })
+    }
+}
+
+/// One-line search input: magnifier, the field, a clear button once there is
+/// text. The field carries `identifier` itself (a text field has no children
+/// to hide) and the clear button `identifier:clear`.
+struct PhrenSearchField: View {
+    @Binding var text: String
+    var placeholder = "Search"
+    let identifier: String
+    /// The owner's focus, when it needs to dismiss the keyboard itself.
+    var focus: FocusState<Bool>.Binding? = nil
+    var onSubmit: () -> Void = {}
+    @FocusState private var ownFocus: Bool
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        HStack(spacing: PhrenTheme.Space.small) {
+            Image(systemName: "magnifyingglass").font(PhrenTypography.icon(15, weight: .semibold))
+                .foregroundStyle(PhrenTheme.textMuted).accessibilityHidden(true)
+            field
+                .font(PhrenTypography.body).foregroundStyle(PhrenTheme.text).tint(PhrenTheme.cyan)
+                .keyboardType(.webSearch).submitLabel(.search)
+                .autocorrectionDisabled().textInputAutocapitalization(.never)
+                .onSubmit(onSubmit)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .phrenIdentifier(identifier)
+            if !text.isEmpty {
+                Button { text = "" } label: {
+                    Image(systemName: "xmark.circle.fill").font(PhrenTypography.icon(16))
+                        .foregroundStyle(PhrenTheme.textMuted)
+                        .frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).accessibilityLabel("Clear search")
+                .phrenIdentifier("\(identifier):clear")
+            }
+        }
+        .padding(.leading, PhrenTheme.Space.medium)
+        .padding(.trailing, text.isEmpty ? PhrenTheme.Space.medium : 0)
+        .frame(minHeight: 44)
+        .background(PhrenTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.questionOption, style: .continuous))
+        .opacity(isEnabled ? 1 : 0.45)
+    }
+
+    @ViewBuilder private var field: some View {
+        if let focus {
+            TextField(placeholder, text: $text).focused(focus)
+        } else {
+            TextField(placeholder, text: $text).focused($ownFocus)
+        }
+    }
+}
+
+/// Single-select chips in one horizontal row that scrolls, the selected chip
+/// scrolled into view; at accessibility sizes (or `wraps`) they wrap instead.
+/// A chip is 32 points tall inside a 44-point target.
+struct PhrenChipRow<Value: Hashable>: View {
+    let items: [PhrenOption<Value>]
+    @Binding var selection: Value
+    let identifier: String
+    /// The selected chip's colour; accent unless the caller says otherwise.
+    var tint: (Value) -> Color = { _ in PhrenTheme.accent }
+    /// Unselected chips on a `surface` panel need the raised fill to show.
+    var raised = false
+    var wraps = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        if dynamicTypeSize.isAccessibilitySize || wraps {
+            PhrenFlowLayout(spacing: PhrenTheme.Space.small) { chips }
+                .accessibilityElement(children: .contain)
+        } else {
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: PhrenTheme.Space.small) { chips }
+                }
+                .onAppear { reveal(proxy, animated: false) }
+                .onChange(of: selection) { _, _ in reveal(proxy, animated: true) }
+            }
+            .accessibilityElement(children: .contain)
+        }
+    }
+
+    private func reveal(_ proxy: ScrollViewProxy, animated: Bool) {
+        guard let item = items.first(where: { $0.value == selection }) else { return }
+        withAnimation(animated && !reduceMotion ? .easeInOut(duration: 0.18) : nil) { proxy.scrollTo(item.id) }
+    }
+
+    private var chips: some View {
+        ForEach(items) { item in
+            let selected = item.value == selection
+            let color = tint(item.value)
+            Button {
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
+                    selection = PhrenOptionSelection.single(item.value, in: items, current: selection)
+                }
+            } label: {
+                HStack(spacing: PhrenTheme.Space.xs) {
+                    if let icon = item.icon {
+                        Image(systemName: icon).font(PhrenTypography.icon(11, weight: .semibold)).accessibilityHidden(true)
+                    }
+                    Text(item.title).lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .font(PhrenTypography.subheadline.weight(.medium))
+                .foregroundStyle(selected ? color : PhrenTheme.textSecondary)
+                .padding(.horizontal, PhrenTheme.Space.medium)
+                .frame(minHeight: 32)
+                .background(selected ? color.opacity(0.16) : (raised ? PhrenTheme.surfaceRaised : PhrenTheme.surface), in: Capsule())
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).disabled(!item.isEnabled)
+            .opacity(isEnabled && item.isEnabled ? 1 : 0.45)
+            .accessibilityLabel(item.accessibilityLabel ?? item.title)
+            .accessibilityAddTraits(selected ? .isSelected : [])
+            .phrenIdentifier("\(identifier):\(item.id)")
+        }
+    }
+}
+
+/// Leading-aligned rows of whatever fits; the layout behind wrapping chips.
+struct PhrenFlowLayout: Layout {
+    var spacing: CGFloat = PhrenTheme.Space.small
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        arrange(width: proposal.width ?? .infinity, subviews: subviews).size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let frames = arrange(width: bounds.width, subviews: subviews).frames
+        for (index, frame) in frames.enumerated() {
+            subviews[index].place(at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY),
+                                  proposal: ProposedViewSize(frame.size))
+        }
+    }
+
+    private func arrange(width: CGFloat, subviews: Subviews) -> (size: CGSize, frames: [CGRect]) {
+        var frames: [CGRect] = []
+        var x: CGFloat = 0, y: CGFloat = 0, rowHeight: CGFloat = 0, widest: CGFloat = 0
+        for subview in subviews {
+            let proposal = ProposedViewSize(width: width.isFinite ? width : nil, height: nil)
+            let size = subview.sizeThatFits(proposal)
+            if x > 0, x + size.width > width {
+                x = 0
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            frames.append(CGRect(origin: CGPoint(x: x, y: y), size: size))
+            rowHeight = max(rowHeight, size.height)
+            x += size.width + spacing
+            widest = max(widest, x - spacing)
+        }
+        return (CGSize(width: width.isFinite ? width : widest, height: y + rowHeight), frames)
     }
 }

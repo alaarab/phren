@@ -652,7 +652,7 @@ extension PhrenTask.Priority {
 }
 
 /// Reading a long task never opens a text editor or changes its state.
-private struct TaskDetailsSheet: View {
+struct TaskDetailsSheet: View {
     @Environment(AppModel.self) private var model
     @State private var editing = false
     @State private var launchingAgent = false

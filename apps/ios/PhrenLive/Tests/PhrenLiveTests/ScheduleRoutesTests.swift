@@ -53,4 +53,21 @@ final class ScheduleRoutesTests: XCTestCase {
         XCTAssertEqual(status.lastRun?.launch.paneID, "w1:p1")
         XCTAssertTrue(status.running)
     }
+
+    func testRunDecodesWithoutNotificationResultFields() throws {
+        let data = Data(#"""
+        {
+          "id":"run-1","scheduleId":"7f3a2c1d","project":"phone-kit",
+          "startedAt":"2026-09-20T21:01:00Z","status":"finished",
+          "launch":{"mode":"headless","sessionId":"session-1"}
+        }
+        """#.utf8)
+
+        let run = try JSONDecoder().decode(ScheduleRun.self, from: data)
+
+        XCTAssertEqual(run.id, "run-1")
+        XCTAssertEqual(run.status, .finished)
+        XCTAssertNil(run.notified)
+        XCTAssertNil(run.notifyReason)
+    }
 }

@@ -1,6 +1,23 @@
 import Foundation
 import PhrenKit
 
+/// The values a folded patch row draws. Computing them avoids the word-level
+/// comparison and full row model until someone opens that file.
+struct DiffDocumentSummary {
+    let header: String?
+    let added: Int
+    let removed: Int
+    let truncated: Bool
+
+    init(patch: String) {
+        let preview = DiffPreview(patch)
+        header = preview.lines.first { $0.kind == .header }?.text
+        added = preview.added
+        removed = preview.removed
+        truncated = preview.truncated
+    }
+}
+
 /// A unified patch prepared the way VS Code's diff editor presents one: full
 /// rows with old/new line numbers, changed blocks (a run of removed lines
 /// followed by the added lines that replaced them) for next/previous

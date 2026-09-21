@@ -82,10 +82,10 @@ final class TrailerTour: XCTestCase {
         approve.tap()
         settle(1.2)
         app.activate()
-        let sent = app.alerts["Permission request"]
+        let sent = app.descendants(matching: .any)["approval-result-notice"]
         if sent.waitForExistence(timeout: 8) {
             settle(1.5)
-            sent.buttons["OK"].tap()
+            app.buttons["approval-result-notice-dismiss"].tap()
         }
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Answer received")).firstMatch.waitForExistence(timeout: 10))
         settle(3.5)

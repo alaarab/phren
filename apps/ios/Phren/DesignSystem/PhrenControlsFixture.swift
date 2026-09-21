@@ -14,6 +14,8 @@ struct PhrenControlsFixture: View {
     @State private var minutes = 360
     @State private var date = Date(timeIntervalSince1970: 1_790_006_400)
     @State private var code = "Review open work.\nSummarize the next steps."
+    @State private var search = ""
+    @State private var scope = "all"
     @State private var days: Set<Schedule.Weekday> = [.mon, .wed, .fri]
     @State private var sheet: Bool
     @State private var dialog: Bool
@@ -31,6 +33,12 @@ struct PhrenControlsFixture: View {
         _sheet = State(initialValue: presentation == "sheet" || presentation == "long-sheet")
         _dialog = State(initialValue: presentation == "dialog" || presentation == "long-dialog")
         longPresentation = presentation.hasPrefix("long-")
+    }
+
+    private var chipOptions: [PhrenOption<String>] {
+        [.init(id: "all", value: "all", title: "All")] + ["phren", "ledger", "hub", "atlas", "mina", "orders-service", "web"].map {
+            PhrenOption(id: $0, value: $0, title: $0)
+        }
     }
 
     private var options: [PhrenOption<String>] {
@@ -139,6 +147,13 @@ struct PhrenControlsFixture: View {
                     .phrenIdentifier("controls-icon-segment")
                 PhrenDayChips(days: $days).phrenIdentifier("controls-days")
             }
+            PhrenGroup("Chip rows", identifier: "controls-group:chips") {
+                PhrenChipRow(items: chipOptions, selection: $scope, identifier: "controls-chips",
+                             tint: { $0 == "all" ? PhrenTheme.accent : PhrenTheme.sessionProject })
+                PhrenChipRow(items: options, selection: .constant("diff"), identifier: "controls-chips-disabled").disabled(true)
+                PhrenChipRow(items: chipOptions, selection: .constant("ledger"), identifier: "controls-chips-wrapped", wraps: true)
+                    .padding(PhrenTheme.Space.small).background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium))
+            }
         }
     }
 
@@ -149,6 +164,11 @@ struct PhrenControlsFixture: View {
                 PhrenStepperField(title: "Minimum", value: .constant(0), range: 0...4, identifier: "controls-stepper-min")
                 PhrenStepperField(title: "Maximum", value: .constant(4), range: 0...4, identifier: "controls-stepper-max")
                 PhrenStepperField(title: "Disabled", value: .constant(2), range: 0...4, identifier: "controls-stepper-disabled").disabled(true)
+            }
+            PhrenGroup("Search", identifier: "controls-group:search") {
+                PhrenSearchField(text: $search, placeholder: "Search memory", identifier: "controls-search")
+                PhrenSearchField(text: .constant("offline cache"), placeholder: "Search memory", identifier: "controls-search-filled")
+                PhrenSearchField(text: .constant(""), placeholder: "Search memory", identifier: "controls-search-disabled").disabled(true)
             }
             PhrenGroup("Time and text", identifier: "controls-group:fields") {
                 PhrenTimeField(hour: $hour, minute: $minute).phrenIdentifier("controls-time")

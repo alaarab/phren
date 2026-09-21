@@ -80,6 +80,10 @@ enum UITestFixtures {
         // owner's own repo, and it syncs, so the status bar reads live.
         let trailer = arguments.contains("--trailer-fixture")
         let tour = arguments.contains("--store-tour-fixture") || trailer
+        // Memory: the primary store carries three projects' worth of findings,
+        // notes and tasks and syncs; the team store keeps the demo content
+        // and never syncs, so the panel header shows one stale store.
+        let memory = arguments.contains("--memory-fixture")
         let primary = trailer ? "alaarab" : "sample"
         for owner in tour ? [primary] : ["sample", "team"] {
             let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ui-tests-\(UUID().uuidString)")
@@ -89,6 +93,8 @@ enum UITestFixtures {
                 try await populateTrailer(store)
             } else if tour {
                 try await populateTour(store)
+            } else if memory, owner == primary {
+                try await populateMemory(store)
             } else {
             try await store.write("demo/FINDINGS.md", content: "# Findings\n\n- [pattern] Cache repeated requests for offline use\n- [pattern] Retry sync after reconnecting\n- [decision] Connect the phone graph to desktop memory\n", blobSha: nil)
             try await store.write("demo/skills/audit.md", content: SkillFile.template(name: "audit", description: "Review the project", instructions: "Run the checks."), blobSha: nil)
@@ -150,10 +156,13 @@ enum UITestFixtures {
             // video's store answers every poll with "nothing changed", so the
             // status bar reads live and freshly updated the way a synced
             // store does.
-            let engine = SyncEngine(client: trailer ? TrailerGitHubStub() : GitHubClient(), store: store, stateDirectory: directory)
+            let synced = trailer || (memory && owner == primary)
+            let engine = SyncEngine(client: synced ? TrailerGitHubStub() : GitHubClient(), store: store, stateDirectory: directory)
             if trailer {
                 await engine.pull()
                 await engine.startLive()
+            } else if synced {
+                await engine.pull()
             }
             contexts.append(StoreContext(descriptor: StoreDescriptor(owner: owner, name: repo, branch: "main", canPush: true), store: store, engine: engine))
         }
@@ -405,6 +414,113 @@ enum UITestFixtures {
             + finding("f2a3b4c5", "[pattern] Batch the geocoder at eight requests a second and cache by rounded coordinate; the map never waits on the network twice.")
             + finding("a3b4c5d6", "[pitfall] Tiles are one sprite sheet: a missing tile is a wrong offset, not a missing file."), blobSha: nil)
         try await store.write("atlas/phren.project.yaml", content: "ownership: repo-managed\nsourcePath: /work/atlas\n", blobSha: nil)
+    }
+
+    /// The Memory tab's store: three projects, 40 findings over six topics
+    /// with mentions that link the projects, two notes, nine tasks across
+    /// the sections, and one project with nothing saved yet.
+    private static func populateMemory(_ store: LocalStore) async throws {
+        func finding(_ id: String, _ date: String, _ text: String) -> String {
+            "- \(text) <!-- fid:\(id) --> <!-- created: \(date) --> <!-- phren:status \"active\" -->\n"
+        }
+        try await store.write("phren/FINDINGS.md", content: "# phren Findings\n\n## 2026-09-19\n\n"
+            + finding("a0000001", "2026-09-19", "[decision] The Search tab becomes Memory: the graph, the findings and the tasks on one page, with search folded in.")
+            + finding("a0000002", "2026-09-19", "[pattern] Panel heights snap to collapsed, half and full; a drag picks the nearest by its projected end.")
+            + finding("a0000003", "2026-09-19", "[pitfall] A container accessibility identifier hides its children's ids; put it on a zero-size marker instead.")
+            + "\n## 2026-09-18\n\n"
+            + finding("a0000004", "2026-09-18", "[bug] Five or more string terms chained in an accessibility label make the type checker give up; join an array instead.")
+            + finding("a0000005", "2026-09-18", "[pattern] Rows are one flat rectangle on the panel surface, four points apart, with no dividers.")
+            + finding("a0000006", "2026-09-18", "[workaround] scrollTo on a lazy list that just appeared needs one run loop turn before it finds the row.")
+            + finding("a0000007", "2026-09-18", "[context] The ledger service and the hub app share the store; their findings link through project mentions.")
+            + "\n## 2026-09-16\n\n"
+            + finding("a0000008", "2026-09-16", "[pitfall] XCUITest: reading UIPasteboard from the runner raises the paste prompt and hangs the run; verify copies through an in-app signal instead.")
+            + finding("a0000009", "2026-09-16", "[decision] Session cards are one flat rounded rectangle under small upper-case section labels; the computer's name sits beside the branch.")
+            + finding("a0000010", "2026-09-16", "[pattern] Long chats keep tools compact while scrolling: cache the rendered Markdown per message and load older pages a few at a time.")
+            + "\n## 2026-09-15\n\n"
+            + finding("a0000011", "2026-09-15", "[bug] Two Live Activities: the island shows the highest relevanceScore, so the approval activity is 1.0 and the working summary 0.5.")
+            + finding("a0000012", "2026-09-15", "[pattern] Every chat card belongs to the phren card family: a chip for the server, a verb for the tool, rows for the input, never raw JSON.")
+            + finding("a0000013", "2026-09-15", "[workaround] The graph's own back button replaces the system one so a canvas drag never pops the screen.")
+            + "\n## 2026-09-12\n\n"
+            + finding("a0000014", "2026-09-12", "[pitfall] osascript from a launchd agent hangs forever: a background agent cannot be prompted for Automation. Use the AX API from a pinned helper.")
+            + finding("a0000015", "2026-09-12", "[pattern] The overview reveals every computer together after the first response, with an eight-second ceiling for unreachable ones.")
+            + "\n## 2026-09-09\n\n"
+            + finding("a0000016", "2026-09-09", "[decision] Dictation types straight into the message as you speak; Send after dictation is a setting, not the default.")
+            + finding("a0000017", "2026-09-09", "[context] Reduce Motion removes the panel's height animation and the sheet's finger-following offset.")
+            + finding("a0000018", "2026-09-09", "[pattern] Controls stay at least 44 points; reduce padding and duplicate rows before text size.")
+            + "\n## 2026-09-15\n\n"
+            + finding("f1e2d3c4", "2026-09-15", "[bug] The checkout form re-rendered on every keystroke because the cart context held the whole order; splitting CartContext into totals and items fixed it.")
+            + finding("e2d3c4b5", "2026-09-15", "[pattern] SessionStore keeps the draft cart in IndexedDB so a refresh mid-checkout restores the cart instead of emptying it.")
+            + "\n## 2026-09-13\n\n"
+            + finding("d3c4b5a6", "2026-09-13", "[decision] Route-level code splitting took the initial bundle from 1.4MB to 410KB; the analytics SDK loads after first paint.")
+            + finding("c4b5a6f7", "2026-09-13", "[pitfall] A blank page on iOS 17 was a top-level await in the analytics bundle; Safari 17.0 does not support it in classic scripts.")
+            + finding("b5a6f7e8", "2026-09-13", "[context] Sign-in talks to the ledger token service; the phren store keeps the shared session rules.")
+            + "\n## 2026-09-10\n\n"
+            + finding("a6f7e8d9", "2026-09-10", "[pattern] Playwright smoke tests run against the preview deploy on every PR; they cover sign-in, add to cart and checkout only.")
+            + finding("e8d9c0b1", "2026-09-10", "[workaround] The dev server needs the proxy entry for /api or local sign-in loops forever on the callback.")
+            + finding("f7e8d9c0", "2026-09-10", "[pattern] Access tokens live for 10 minutes and refresh tokens for 30 days; refresh rotation revokes the old token on first use to detect replay."), blobSha: nil)
+        try await store.write("phren/tasks.md", content: """
+        # phren tasks
+
+        ## Active
+
+        - [ ] Fix the queue strip: one row per queued message, remove and send-now on each [high] <!-- bid:10a1b2c3 created:2026-09-17T09:00:00.000Z -->
+          Context: The strip sits on the composer; the transcript never moves when it changes.
+        - [ ] Ship the Memory tab: search field, scope chips, the panel and its rows [high] <!-- bid:11a1b2c3 created:2026-09-19T08:30:00.000Z -->
+
+        ## Queue
+
+        - [ ] Widget: show the session that needs you most on the Lock Screen <!-- bid:20b2c3d4 created:2026-09-12T10:00:00.000Z -->
+        - [ ] Terminal: pinch to change the text size and the remote grid together <!-- bid:30c3d4e5 -->
+        - [ ] Move cart totals to a server-computed field <!-- bid:b0b8c9d0 created:2026-09-14T12:00:00.000Z -->
+
+        ## Done
+
+        - [x] Inline approvals in chat, with Open terminal beside Deny and Approve <!-- bid:50e5f6a7 created:2026-09-05T10:00:00.000Z -->
+        """, blobSha: nil)
+        try await store.write("phren/notes/2026-09-18.md", content: """
+        ## 09:12 <!-- nid:aa11bb22 -->
+
+        Ship the Memory tab before the schedule editor lands; the graph is the page people open.
+
+        ## 14:40 <!-- nid:cc33dd44 -->
+
+        Retest the graph with forty findings on the phone; the labels crowd at the default zoom.
+        """, blobSha: nil)
+        try await store.write("ledger/FINDINGS.md", content: "# ledger Findings\n\n## 2026-09-16\n\n"
+            + finding("1a2b3c4d", "2026-09-16", "[pitfall] Idempotency keys must be scoped per merchant: a retried POST /orders with a key reused across merchants returned the other merchant's order.")
+            + finding("2b3c4d5e", "2026-09-16", "[decision] Invoices are generated from the ledger, never from order totals; the two disagreed by tax adjustments until the ledger became the source of truth.")
+            + "\n## 2026-09-14\n\n"
+            + finding("3c4d5e6f", "2026-09-14", "[bug] A cart total drifting by one cent traced to TaxCalculator rounding per line instead of per order; totals are now rounded once at the end.")
+            + finding("4d5e6f7a", "2026-09-14", "[pattern] OrderRepository loaded line items with one query per row; batching them through LineItemLoader cut p95 checkout latency from 840ms to 210ms.")
+            + finding("5e6f7a8b", "2026-09-14", "[decision] Webhook signatures are verified with a constant-time compare; the previous string equality leaked timing and was flagged in the pentest.")
+            + finding("6a7b8c9d", "2026-09-14", "[workaround] The billing sandbox drops the first request after an idle hour; a warm-up ping before the nightly run keeps the suite green.")
+            + "\n## 2026-09-11\n\n"
+            + finding("6f7a8b9c", "2026-09-11", "[decision] The ledger is append-only; corrections are new entries with a reversal reference, which keeps the monthly close reproducible.")
+            + finding("7a8b9c0d", "2026-09-11", "[pitfall] The orders table needs the (merchant_id, created_at) index or the merchant dashboard query does a full scan once a merchant passes 50k orders.")
+            + finding("8b9c0d1e", "2026-09-11", "[pattern] Currency amounts are stored as integer minor units; the one float column left in refunds was the source of the July reconciliation gap.")
+            + finding("8c9d0e1f", "2026-09-11", "[context] The hub checkout calls ledger for totals; a ledger outage shows in hub as an empty cart summary.")
+            + "\n## 2026-09-08\n\n"
+            + finding("9c0d1e2f", "2026-09-08", "[pattern] Cursor pagination replaced offset pagination on GET /orders because offset pages shifted while new orders arrived during export.")
+            + finding("0d1e2f3a", "2026-09-08", "[decision] Contract tests against the billing sandbox run nightly, not on every push: the sandbox rate limit made the PR suite flaky.")
+            + finding("0e2f3a4b", "2026-09-08", "[bug] Refund webhooks arrived twice under retry; the handler now records the event id before acting.")
+            + finding("1f3a4b5c", "2026-09-08", "[workaround] The export job streams CSV rows instead of building the file in memory; the 2GB export no longer restarts the worker."), blobSha: nil)
+        try await store.write("ledger/tasks.md", content: """
+        # ledger tasks
+
+        ## Active
+
+        - [ ] Backfill merchant_id onto legacy idempotency rows [high] <!-- bid:70a7b8c9 created:2026-09-16T12:00:00.000Z -->
+          Context: Idempotency keys are merchant-scoped now; the sign-up form still needs the retry banner.
+
+        ## Queue
+
+        - [ ] Retire the offset pagination shim after the export clients migrate <!-- bid:80b8c9d0 created:2026-09-10T12:00:00.000Z -->
+
+        ## Done
+
+        - [x] Batch line items through LineItemLoader <!-- bid:90c9d0e1 created:2026-09-13T12:00:00.000Z -->
+        """, blobSha: nil)
+        try await store.write("hub/FINDINGS.md", content: "# hub Findings\n", blobSha: nil)
     }
 
     private static func populateWorkflow(_ store: LocalStore, owner: String) async throws {

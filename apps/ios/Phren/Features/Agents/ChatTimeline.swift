@@ -93,7 +93,7 @@ struct ChatReadRun: View, Equatable {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     Image(systemName: "chevron.down").font(.system(size: 12, weight: .semibold))
                         .rotationEffect(.degrees(expanded ? 180 : 0)).foregroundStyle(PhrenTheme.chatNeutralDim)
-                }.font(PhrenTypography.footnote).padding(.horizontal, 12).padding(.vertical, 4).frame(minHeight: 44)
+                }.font(PhrenTypography.footnote).padding(.horizontal, 12).frame(height: 44)
             }.buttonStyle(.plain)
                 .accessibilityLabel("\(title), \(groups.count) read operations")
                 .accessibilityValue(expanded ? "Expanded" : "Collapsed")
@@ -155,7 +155,7 @@ struct ChatToolActivity: View, Equatable {
                         .rotationEffect(.degrees(expanded ? 180 : 0)).foregroundStyle(PhrenTheme.chatNeutralDim)
                 }
                 .font(PhrenTypography.footnote)
-                .padding(.horizontal, 12).padding(.vertical, 4).frame(minHeight: 44)
+                .padding(.horizontal, 12).frame(height: 44)
                 .contentShape(Rectangle())
             }.buttonStyle(.plain)
                 .accessibilityLabel("\(summary.title), \(summary.count) \(summary.count == 1 ? "operation" : "operations")")

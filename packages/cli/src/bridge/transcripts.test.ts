@@ -204,6 +204,26 @@ describe("child agent relationships", () => {
     } finally { process.env.CLAUDE_CONFIG_DIR = old; await rm(root, { recursive: true, force: true }); }
   });
 
+  it("counts a Claude child the orchestrator stopped as finished", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "phren-claude-killed-"));
+    const old = process.env.CLAUDE_CONFIG_DIR; process.env.CLAUDE_CONFIG_DIR = root;
+    const parent = "dddddddd-4444-4444-8444-444444444444", agentId = "k1lledworker";
+    const project = path.join(root, "projects/project"); await mkdir(path.join(project, parent, "subagents"), { recursive: true });
+    const launch = { type: "user", toolUseResult: { status: "async_launched", agentId, description: "Build the panel" },
+      message: { role: "user", content: [{ type: "tool_result", tool_use_id: "tool-killed", content: "launched" }] } };
+    const killed = { type: "queue-operation", operation: "enqueue",
+      content: `<task-notification><task-id>${agentId}</task-id><status>killed</status><summary>Agent was stopped</summary></task-notification>` };
+    await writeFile(path.join(project, `${parent}.jsonl`), [launch, killed].map(JSON.stringify).join("\n") + "\n");
+    await writeFile(path.join(project, parent, "subagents", `agent-${agentId}.jsonl`), [{ type: "user", isSidechain: true, sessionId: parent, agentId,
+      message: { role: "user", content: "Build it" } }, { type: "user", isSidechain: true, sessionId: parent, agentId,
+      message: { role: "user", content: [{ type: "text", text: "[Request interrupted by user]" }] } }].map(JSON.stringify).join("\n") + "\n");
+    try {
+      const tree = await childAgentTree("claude", parent);
+      expect(tree).toHaveLength(1);
+      expect(tree[0]).toMatchObject({ path: "Build the panel", callId: "tool-killed", state: "completed" });
+    } finally { process.env.CLAUDE_CONFIG_DIR = old; await rm(root, { recursive: true, force: true }); }
+  });
+
   it("picks up a Claude child whose transcript appears after its launch was recorded", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "phren-claude-late-child-"));
     const old = process.env.CLAUDE_CONFIG_DIR; process.env.CLAUDE_CONFIG_DIR = root;

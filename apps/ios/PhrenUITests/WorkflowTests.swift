@@ -25,19 +25,19 @@ final class WorkflowTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing"]
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["Search"].waitForExistence(timeout: 15))
-        app.tabBars.buttons["Search"].tap()
-        let field = app.searchFields.firstMatch
+        XCTAssertTrue(app.tabBars.buttons["Memory"].waitForExistence(timeout: 15))
+        app.tabBars.buttons["Memory"].tap()
+        let field = app.textFields["memory-search"]
         XCTAssertTrue(field.waitForExistence(timeout: 5))
         field.tap(); field.typeText("offline")
-        let finding = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Cache repeated requests for offline use")).firstMatch
+        let finding = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Cache repeated requests for offline use")).firstMatch
         XCTAssertTrue(finding.waitForExistence(timeout: 8))
-        field.buttons["Clear text"].tap()
-        field.typeText("nomatchabcdef")
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "No Results")).firstMatch.waitForExistence(timeout: 8))
+        app.buttons["memory-search:clear"].tap()
+        field.tap(); field.typeText("nomatchabcdef")
+        XCTAssertTrue(app.staticTexts["No matches"].firstMatch.waitForExistence(timeout: 8))
         XCTAssertFalse(finding.exists)
-        field.buttons["Clear text"].tap()
-        XCTAssertTrue(app.staticTexts["Search your memory"].waitForExistence(timeout: 5))
+        app.buttons["memory-search:clear"].tap()
+        XCTAssertTrue(app.staticTexts["memory-panel-counts"].waitForExistence(timeout: 5))
     }
 
     @MainActor

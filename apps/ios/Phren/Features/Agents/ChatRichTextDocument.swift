@@ -4,7 +4,25 @@ import Foundation
 /// is copied and selected on its own), headings, fenced code, pipe tables.
 struct ChatRichTextDocument {
     let blocks: [Block]
-    init(_ text: String) { blocks = Self.parse(text) }
+    /// SwiftUI exposes every linked run as a separate accessibility descendant.
+    /// Keep ordinary replies fully interactive, but make pathological generated
+    /// prose one readable element instead of hundreds of repeated link nodes.
+    let condensesAccessibility: Bool
+    let accessibilityText: String
+    init(_ text: String) {
+        let blocks = Self.parse(text)
+        self.blocks = blocks
+        let links = blocks.reduce(0) { count, block in
+            count + block.attributed.runs.filter { $0.link != nil }.count
+                + block.attributedRows.reduce(0) { $0 + $1.reduce(0) { $0 + $1.runs.filter { $0.link != nil }.count } }
+        }
+        condensesAccessibility = links > 16
+        accessibilityText = blocks.compactMap { block in
+            if block.language != nil { return block.text }
+            if !block.rows.isEmpty { return block.rows.map { $0.joined(separator: ", ") }.joined(separator: "\n") }
+            return String(block.attributed.characters)
+        }.joined(separator: "\n\n")
+    }
     struct Block: Identifiable {
         let id: Int
         let text: String
