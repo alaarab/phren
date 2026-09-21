@@ -379,7 +379,7 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
         } else if (req.method === "agent.start") {
           const target = extraPanes.find(p => p.pane_id === req.params.pane_id);
           if (failAgentStart || !target) { socket.end(JSON.stringify({ id: req.id, error: { code: 1, message: "agent not detected" } }) + "\n"); return; }
-          target.agent = req.params.kind; target.agent_status = "idle";
+          target.agent = req.params.kind; target.agent_name = req.params.name; target.agent_status = "idle";
         }
         const pane = { pane_id: "w1:p1", tab_id: "w1:t1", workspace_id: "w1", terminal_id: terminalID, agent: "codex", agent_status: agentStatus,
           agent_session: reportIdentity ? { kind: "id", agent: "codex", value: current } : undefined, cwd: root };
@@ -1329,6 +1329,39 @@ schedules:
   describe("isolated fixture", () => {
     beforeEach(startFixture);
     afterEach(stopFixture);
+    it.each([
+      { kind: "claude", effort: "high", required: ["--append-system-prompt", "--effort", "high"] },
+      { kind: "codex", effort: "low", required: ["-c", "model_reasoning_effort=low", "-c"] },
+      { kind: "opencode", effort: "medium", required: ["--agent", "conductor", "--variant", "medium"] },
+    ])("launches a $kind conductor with its brief and effort", async ({ kind, effort, required }) => {
+      const launched = await api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: `${kind} lead`, kind, role: "conductor", effort });
+      expect(launched.status, JSON.stringify(launched.data)).toBe(200);
+      expect(launched.data).toMatchObject({ ok: true, role: "conductor", agent: kind });
+      const params = commands.find(c => c.method === "agent.start")?.params as any;
+      expect(params.name).toMatch(/^conductor-/);
+      let cursor = -1;
+      for (const value of required) { cursor = params.args.indexOf(value, cursor + 1); expect(cursor).toBeGreaterThanOrEqual(0); }
+      if (kind !== "opencode") expect(JSON.stringify(params.args)).toContain("# Conductor");
+      expect(JSON.stringify(params.args)).not.toContain("name: conductor");
+      expect(await readFile(path.join(root, "bridge/conductor/brief.md"), "utf8")).toContain("# Conductor");
+      if (kind === "opencode") {
+        const definition = await readFile(path.join(root, ".config/opencode/agents/conductor.md"), "utf8");
+        expect(definition).toContain("mode: primary"); expect(definition).toContain("# Conductor");
+      }
+    });
+
+    it("reports the conductor role and returns its target when a second launch is refused", async () => {
+      const first = await api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "Owner", kind: "codex", role: "conductor", effort: "high" });
+      expect(first.status).toBe(200);
+      const overview = await api("/v1/workspaces?mux=herdr:default");
+      const tab = overview.data.groups.find((group: any) => group.id === first.data.workspaceId).children[0];
+      expect(tab).toMatchObject({ role: "conductor", agent: "codex" });
+      const second = await api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "Another", kind: "claude", role: "conductor" });
+      expect(second.status).toBe(409);
+      expect(second.data.target).toMatchObject({ server: "default", workspace: first.data.workspaceId, tab: first.data.tabId, pane: first.data.paneId, source: "codex" });
+      expect(commands.filter(c => c.method === "agent.start")).toHaveLength(1);
+    });
+
     it("dispatches through a fake SSH pipe to a second Hook and its registered project", async () => {
       await dispatchFixture();
       const sent = await api("/v1/dispatch", { computer: "Linuxbox", project: "phren", harness: "codex", model: "test-model", label: "Worker", prompt: "Run the assigned checks" });

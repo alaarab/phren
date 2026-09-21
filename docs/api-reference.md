@@ -1,6 +1,6 @@
 # MCP API Reference
 
-Phren exposes 62 MCP tools across 15 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the six built-in [Modules](modules.md). **`core`**, the default, exposes the seven memory tools plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default ten. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
+Phren exposes 63 MCP tools across 15 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the six built-in [Modules](modules.md). **`core`**, the default, exposes the seven memory tools plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default ten. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
 
 Why: the full surface is about 53k characters of schema, roughly 13k tokens, downloaded before a session says a word, and 59 similar verbs to pick the wrong one from. Core is about 17k characters.
 
@@ -17,13 +17,13 @@ Why: the full surface is about 53k characters of schema, roughly 13k tokens, dow
 | `add_task` | Add a task | — |
 | `manage_task` | `action`: complete, update, remove, pin, tidy | `complete_task`, `update_task`, `remove_task`, `pin_task`, `tidy_done_tasks` |
 | `session` | `action`: start, end, context, history | `session_start`, `session_end`, `session_context`, `session_history` |
-| `phren_admin` | `action`: any remaining tool by name, or `list_actions` | skills, hooks, config, notes, review queue, export/import, doctor, health, stores, projects, fragment graph, extraction, topic summaries (`get_topic_summaries`, `set_topic_summary`) |
+| `phren_admin` | `action`: any remaining tool by name, or `list_actions` | skills, hooks, config, notes, review queue, export/import, doctor, health, stores, projects, fragment graph, extraction, topic summaries (`get_topic_summaries`, `set_topic_summary`), dispatch and hand-off |
 
 A composite takes `action` plus the target tool's own parameters, validated against that tool's schema; a miss returns the parameter list. A nested object parameter (`manage_task` `updates`, `set_config` `settings`, `add_finding` `citation`) may arrive as a real object or as its JSON string — some hosts serialize what a passthrough schema does not name — and both are accepted. `phren_admin list_actions` returns every admin action with its full parameter list. The individual tool sections below still describe each tool's parameters; in the core profile, reach them through the composite that stands for them.
 
 All tools return structured JSON: `{ ok, message, data?, error? }`.
 
-Module layout: search, tasks, findings, daily notes, memory quality, data management, fragment graph, sessions, operations/review, skills, hooks, extraction, configuration, topic summaries, dispatch.
+Module layout: search, tasks, findings, daily notes, memory quality, data management, fragment graph, sessions, operations/review, skills, hooks, extraction, configuration, topic summaries, dispatch and hand-off.
 
 ## Cross-computer dispatch
 
@@ -54,6 +54,31 @@ reports, remote tree rows and headless fallback are later work packages.
 
 CLI equivalent:
 `phren dispatch Desk phren --harness codex --label 'Checks' --prompt 'Run the assigned checks'`.
+
+### `hand_off`
+
+Deliver a prompt to an existing session through the local Hook or a verified
+peer. In the core profile use `phren_admin(action: "hand_off", ...)`; full
+exposes `hand_off` directly. Supply exactly one of `target` or `session`.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `computer` | string | no | Enrolled computer name. Omit for the local Hook. |
+| `target` | object | one of | Complete live Hook target. |
+| `session` | string | one of | Session id resolved through the selected Hook's workspace overview. |
+| `text` | string | yes | Prompt to deliver, up to 32768 characters. |
+
+Returns `{ ok, delivered, target }`. CLI equivalent:
+`phren hand-off local --session <id> --text 'Continue with the review'`.
+
+### Hook workspace launch fields
+
+`POST /v1/workspaces/launch` accepts `role: "agent" | "conductor"` (default
+`agent`) and `effort: "low" | "medium" | "high"` (default `medium`). A
+conductor launch supports Claude, Codex and OpenCode, attaches the shipped
+conductor brief, prefixes the Herdr agent name with `conductor-`, and returns
+`role: "conductor"`. Workspace overview tabs report that role. A second running
+conductor for the store is rejected with status 409 and the existing target.
 
 ---
 

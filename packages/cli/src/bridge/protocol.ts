@@ -37,7 +37,7 @@ export function objects(value: unknown): Json[] { return Array.isArray(value) ? 
 export function bridgeRoot(): string { return process.env.PHREN_BRIDGE_HOME || path.join(homedir(), ".local/share/phren/bridge"); }
 export function socketPath(): string { return path.join(bridgeRoot(), "hook.sock"); }
 export class BridgeError extends Error {
-  constructor(public status: number, message: string) { super(message); }
+  constructor(public status: number, message: string, public details?: Json) { super(message); }
 }
 export const requestID = () => randomUUID();
 

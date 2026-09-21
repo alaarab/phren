@@ -492,8 +492,11 @@ unavailable PyYAML. The sandbox refused a process-status (`ps`) diagnostic.
 agent) and `effort: "low" | "medium" | "high"`. A conductor launch attaches the
 conductor brief (the shipped `conductor` skill body) to whichever harness the
 owner chose and sets its effort: Claude via `--append-system-prompt` and
-`--effort`; Codex via `-c model_reasoning_effort=<level>` and the brief as
-developer instructions; OpenCode via a Hook-written agent definition
+`--effort`; Codex via `-c model_reasoning_effort=<level>` and the supported
+`-c developer_instructions=<brief>` setting. The Hook also keeps the canonical
+body at `<bridge>/conductor/brief.md`; it does not use
+`model_instructions_file`, which would replace Codex's built-in instructions.
+OpenCode uses a Hook-written agent definition
 `conductor` and `--variant`. The overview tab reports `role`, and the Herdr
 agent name is prefixed `conductor-`, so the phone can distinguish it without
 reading harness session files. Only one conductor runs per store; a second
