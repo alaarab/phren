@@ -1,10 +1,10 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir, homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
-import { fanoutChildren, visibleCodexExecEvent, visibleOpenCodeRunEvent } from "./fanouts.js";
+import { ARCHIVE_MAX_FOLDERS, archiveFinishedFanouts, fanoutChildren, visibleCodexExecEvent, visibleOpenCodeRunEvent } from "./fanouts.js";
 import type { ChangedFile } from "./changes.js";
 import { object, objects } from "./protocol.js";
 
@@ -33,6 +33,36 @@ async function fixture(id: string, overrides: Record<string, unknown> = {}, even
 function codexFixture(id: string, session?: string, overrides: Record<string, unknown> = {}) {
   return fixture(id, { provider: "codex", model: "gpt-5-codex", ...(session ? { session } : {}), ...overrides },
     '{"type":"thread.started","thread_id":"cccccccc-3333-4333-8333-333333333333"}\n');
+}
+
+const HOUR_MS = 60 * 60 * 1000;
+
+/** One job folder inside an existing store root. `manifest: null` writes no
+ * manifest at all; `exit: false` leaves out the launcher's exit stamp. */
+async function archiveJob(root: string, id: string,
+  options: { manifest?: Record<string, unknown> | null; exit?: boolean; exitAgeMs?: number } = {}) {
+  const directory = path.join(root, ".runtime/agent-fanouts", id);
+  await mkdir(directory, { recursive: true });
+  if (options.manifest !== null) {
+    await writeFile(path.join(directory, "manifest.json"), JSON.stringify({
+      schemaVersion: 1, id, parent: { provider: "codex", session: parent }, provider: "opencode",
+      taskLabel: "Review bridge", cwd: "/repo", worktree: "/repo-wt", eventLog: "events.jsonl",
+      createdAt: "2026-09-19T19:00:00.000Z", startedAt: "2026-09-19T19:00:01.000Z",
+      updatedAt: "2026-09-19T19:00:02.000Z", status: "running", ...(options.manifest ?? {}),
+    }));
+  }
+  if (options.exit !== false) {
+    await writeFile(path.join(directory, "exit.txt"), "0\n");
+    if (options.exitAgeMs !== undefined) {
+      const stamp = new Date(Date.now() - options.exitAgeMs);
+      await utimes(path.join(directory, "exit.txt"), stamp, stamp);
+    }
+  }
+  return directory;
+}
+
+async function present(target: string): Promise<boolean> {
+  return Boolean(await stat(target).catch(() => undefined));
 }
 
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
@@ -258,5 +288,80 @@ describe("fan-out manifests", () => {
     expect(visibleCodexExecEvent({ type: "made.up" })).toBeUndefined();
     expect(visibleCodexExecEvent({ type: "item.completed", item: { id: "item_2", type: "command_execution", exit_code: null } }))
       .toMatchObject({ type: "response_item", payload: { type: "function_call_output", call_id: "item_2", output: "\n[finished]" } });
+  });
+});
+
+describe("fan-out archive sweep", () => {
+  async function store(): Promise<{ root: string; env: NodeJS.ProcessEnv; live: string; archive: string }> {
+    const root = await mkdtemp(path.join(tmpdir(), "phren-fanouts-")); roots.push(root);
+    return { root, env: { PHREN_PATH: root },
+      live: path.join(root, ".runtime/agent-fanouts"), archive: path.join(root, ".runtime/agent-fanouts-archive") };
+  }
+
+  it("moves a finished job only once it is older than 24 hours", async () => {
+    const { root, env, live, archive } = await store();
+    await archiveJob(root, "job-aged", { manifest: { status: "completed", finishedAt: new Date(Date.now() - 38 * HOUR_MS).toISOString() } });
+    await archiveJob(root, "job-exit-aged", { manifest: { status: "failed" }, exitAgeMs: 25 * HOUR_MS });
+    await archiveJob(root, "job-fresh", { manifest: { status: "completed", finishedAt: new Date(Date.now() - HOUR_MS).toISOString() } });
+
+    const dry = await archiveFinishedFanouts(env, { dryRun: true });
+    expect(dry).toEqual({ moved: ["job-aged", "job-exit-aged"], deleted: 0 });
+    expect(await present(path.join(live, "job-aged"))).toBe(true);
+    expect(await present(archive)).toBe(false);
+
+    const result = await archiveFinishedFanouts(env);
+    expect(result).toEqual({ moved: ["job-aged", "job-exit-aged"], deleted: 0 });
+    expect(await present(path.join(archive, "job-aged"))).toBe(true);
+    expect(await present(path.join(archive, "job-exit-aged"))).toBe(true);
+    expect(await present(path.join(live, "job-aged"))).toBe(false);
+    expect(await present(path.join(live, "job-fresh"))).toBe(true);
+    expect(await present(path.join(archive, "job-fresh"))).toBe(false);
+  });
+
+  it("never touches a job folder without exit.txt, whatever its manifest says", async () => {
+    const { root, env, live, archive } = await store();
+    await archiveJob(root, "job-running", { exit: false });
+    await archiveJob(root, "job-no-exit",
+      { manifest: { status: "completed", finishedAt: new Date(Date.now() - 40 * 24 * HOUR_MS).toISOString() }, exit: false });
+
+    const result = await archiveFinishedFanouts(env);
+    expect(result).toEqual({ moved: [], deleted: 0 });
+    expect(await present(path.join(live, "job-running"))).toBe(true);
+    expect(await present(path.join(live, "job-no-exit"))).toBe(true);
+    expect(await present(archive)).toBe(false);
+  });
+
+  it("archives a folder with no manifest as failed with the reason", async () => {
+    const { root, env, live, archive } = await store();
+    await archiveJob(root, "job-orphan", { manifest: null, exitAgeMs: 25 * HOUR_MS });
+    await archiveJob(root, "job-orphan-new", { manifest: null, exitAgeMs: HOUR_MS });
+
+    const result = await archiveFinishedFanouts(env);
+    expect(result).toEqual({ moved: ["job-orphan"], deleted: 0 });
+    expect(await present(path.join(live, "job-orphan-new"))).toBe(true);
+    expect(JSON.parse(await readFile(path.join(archive, "job-orphan", "manifest.json"), "utf8")))
+      .toEqual({ status: "failed", reason: "no manifest" });
+  });
+
+  it("caps the archive at 500 folders and deletes the oldest", async () => {
+    const { root, env, archive } = await store();
+    await mkdir(archive, { recursive: true });
+    for (let index = 0; index < ARCHIVE_MAX_FOLDERS; index++) {
+      const directory = path.join(archive, `kept-${String(index).padStart(3, "0")}`);
+      await mkdir(directory);
+      await writeFile(path.join(directory, "exit.txt"), "0\n");
+      const stamp = new Date(Date.now() - 40 * 24 * HOUR_MS + index * 60_000);
+      await utimes(path.join(directory, "exit.txt"), stamp, stamp);
+    }
+    await archiveJob(root, "job-in",
+      { manifest: { status: "completed", finishedAt: new Date(Date.now() - 25 * HOUR_MS).toISOString() },
+        exitAgeMs: 25 * HOUR_MS });
+
+    const result = await archiveFinishedFanouts(env);
+    expect(result).toEqual({ moved: ["job-in"], deleted: 1 });
+    expect(await present(path.join(archive, "kept-000"))).toBe(false);
+    expect(await present(path.join(archive, "kept-001"))).toBe(true);
+    expect(await present(path.join(archive, "job-in"))).toBe(true);
+    expect((await readdir(archive))).toHaveLength(ARCHIVE_MAX_FOLDERS);
   });
 });

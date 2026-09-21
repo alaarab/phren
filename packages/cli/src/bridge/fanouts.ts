@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstat, readdir, readFile, realpath, stat } from "node:fs/promises";
+import { lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -12,6 +12,11 @@ const MAX_MANIFEST_BYTES = 64 * 1024;
 const MAX_EVENT_LOG_BYTES = 64 * 1024 * 1024;
 const MAX_BLOCKED_BYTES = 16 * 1024;
 const MAX_JOBS = 128;
+/** A finished job is archived once its finish stamp is older than this. */
+const ARCHIVE_AGE_MS = 24 * 60 * 60 * 1000;
+/** How many folders the archive keeps; the oldest beyond that are deleted. */
+export const ARCHIVE_MAX_FOLDERS = 500;
+const ARCHIVED_STATUSES = new Set(["completed", "failed", "cancelled"]);
 const WORKTREE_CACHE_MS = 15_000;
 const exec = promisify(execFile);
 const jobID = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/);
@@ -107,11 +112,19 @@ async function worktreeDetails(worktree: string): Promise<WorktreeDetails> {
   return details;
 }
 
-export function fanoutRoot(env: NodeJS.ProcessEnv = process.env): string {
+function storeRoot(env: NodeJS.ProcessEnv): string {
   const configured = env.PHREN_PATH?.trim();
-  const store = !configured ? path.join(homedir(), ".phren")
+  return !configured ? path.join(homedir(), ".phren")
     : configured === "~" ? homedir() : configured.startsWith("~/") ? path.join(homedir(), configured.slice(2)) : path.resolve(configured);
-  return path.join(store, ".runtime", "agent-fanouts");
+}
+
+export function fanoutRoot(env: NodeJS.ProcessEnv = process.env): string {
+  return path.join(storeRoot(env), ".runtime", "agent-fanouts");
+}
+
+/** Where the archive sweep moves finished job folders, same id, one directory over. */
+export function fanoutArchiveRoot(env: NodeJS.ProcessEnv = process.env): string {
+  return path.join(storeRoot(env), ".runtime", "agent-fanouts-archive");
 }
 
 async function regularContainedFile(root: string, candidate: string, maxBytes: number): Promise<string | undefined> {
@@ -207,6 +220,101 @@ export async function blockedFanouts(env: NodeJS.ProcessEnv = process.env): Prom
     } catch { /* Torn or untrusted jobs are not pushed. */ }
   }
   return blocked;
+}
+
+export interface FanoutArchiveResult {
+  /** Job folders moved (or, on a dry run, that would be moved), by id. */
+  moved: string[];
+  /** Archive folders deleted past the cap (or that would be deleted). */
+  deleted: number;
+}
+
+/** The job's own manifest when it parses, absent when the folder has none. */
+async function jobManifest(root: string, directory: string): Promise<FanoutManifest | undefined> {
+  const manifestFile = await regularContainedFile(root, path.join(directory, "manifest.json"), MAX_MANIFEST_BYTES);
+  if (!manifestFile) return undefined;
+  try { return manifestSchema.parse(JSON.parse(await readFile(manifestFile, "utf8"))); } catch { return undefined; }
+}
+
+/** The launcher's exit stamp: its presence is what says the job is finished. */
+async function exitStamp(directory: string): Promise<number | undefined> {
+  const exit = await lstat(path.join(directory, "exit.txt")).catch(() => undefined);
+  return exit?.isFile() && !exit.isSymbolicLink() ? exit.mtimeMs : undefined;
+}
+
+/** When an archived folder counts as finished for the cap: its manifest's
+ * finishedAt, else exit.txt's mtime, else the folder's own mtime. */
+async function archivedFinishedAt(directory: string): Promise<number> {
+  const manifestFile = await lstat(path.join(directory, "manifest.json")).catch(() => undefined);
+  if (manifestFile?.isFile() && !manifestFile.isSymbolicLink() && manifestFile.size <= MAX_MANIFEST_BYTES) {
+    try {
+      const value = JSON.parse(await readFile(path.join(directory, "manifest.json"), "utf8")) as { finishedAt?: unknown };
+      const finished = typeof value.finishedAt === "string" ? Date.parse(value.finishedAt) : NaN;
+      if (Number.isFinite(finished)) return finished;
+    } catch { /* Missing, torn, or synthesized manifests fall back to the exit stamp. */ }
+  }
+  const exit = await exitStamp(directory);
+  if (exit !== undefined) return exit;
+  return (await stat(directory).catch(() => undefined))?.mtimeMs ?? 0;
+}
+
+/** Move finished fan-out job folders into the archive.
+ *
+ * A folder moves when it has exit.txt (without it the job is still running and
+ * is never touched), its manifest status is completed, failed or cancelled,
+ * and its finishedAt (or exit.txt's mtime when there is none) is over
+ * ARCHIVE_AGE_MS old. A folder with no manifest goes too once its exit.txt is
+ * that old, gaining a synthesized {status: failed, reason: "no manifest"}
+ * manifest in the archive. The archive keeps ARCHIVE_MAX_FOLDERS folders,
+ * deleting the oldest beyond that. `dryRun` reports the same work without
+ * touching anything. */
+export async function archiveFinishedFanouts(env: NodeJS.ProcessEnv = process.env,
+  options: { dryRun?: boolean; now?: number } = {}): Promise<FanoutArchiveResult> {
+  const now = options.now ?? Date.now(), dryRun = options.dryRun ?? false;
+  const moves: Array<{ name: string; basis: number }> = [];
+  const configured = fanoutRoot(env);
+  const root = await realpath(configured).catch(() => undefined);
+  const archive = path.join(path.dirname(root ?? configured), "agent-fanouts-archive");
+  if (root) {
+    const names = (await readdir(root).catch(() => [])).filter(name => jobID.safeParse(name).success).sort();
+    for (const name of names) {
+      const directory = path.join(root, name);
+      const metadata = await lstat(directory).catch(() => undefined);
+      if (!metadata?.isDirectory() || metadata.isSymbolicLink()) continue;
+      const exit = await exitStamp(directory);
+      if (exit === undefined) continue;
+      const manifest = await jobManifest(root, directory);
+      let basis: number;
+      if (manifest && ARCHIVED_STATUSES.has(manifest.status)) {
+        const finished = manifest.finishedAt ? Date.parse(manifest.finishedAt) : NaN;
+        basis = Number.isFinite(finished) ? finished : exit;
+      } else if (!manifest) {
+        basis = exit;
+      } else continue;
+      if (now - basis <= ARCHIVE_AGE_MS) continue;
+      moves.push({ name, basis });
+      if (dryRun) continue;
+      await mkdir(archive, { recursive: true, mode: 0o700 });
+      const destination = path.join(archive, name);
+      await rm(destination, { recursive: true, force: true });
+      await rename(directory, destination);
+      if (!manifest) await writeFile(path.join(destination, "manifest.json"),
+        JSON.stringify({ status: "failed", reason: "no manifest" }), { mode: 0o600 });
+    }
+  }
+  // Cap the archive: after the moves it may hold ARCHIVE_MAX_FOLDERS + n folders.
+  const archived = (await readdir(archive).catch(() => [])).filter(name => jobID.safeParse(name).success);
+  const entries: Array<{ name: string; age: number }> = [];
+  for (const name of archived) entries.push({ name, age: await archivedFinishedAt(path.join(archive, name)) });
+  // On a dry run the moves never landed, so weigh them at their finish stamp.
+  if (dryRun) for (const move of moves) entries.push({ name: move.name, age: move.basis });
+  let deleted = 0;
+  if (entries.length > ARCHIVE_MAX_FOLDERS) {
+    const excess = entries.sort((a, b) => a.age - b.age || a.name.localeCompare(b.name)).slice(0, entries.length - ARCHIVE_MAX_FOLDERS);
+    for (const entry of excess) if (!dryRun) await rm(path.join(archive, entry.name), { recursive: true, force: true });
+    deleted = excess.length;
+  }
+  return { moved: moves.map(move => move.name), deleted };
 }
 
 /** Project raw `opencode run --format json` rows into the small public chat

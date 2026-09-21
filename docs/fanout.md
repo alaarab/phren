@@ -56,3 +56,31 @@ turn. The Hook treats a job with `blocked.json` as failed regardless of
 `exit.txt`: `/v1/subagents` reports the child with the reason
 `blocked: <type> <pattern>`, and a registered phone receives one push naming the
 worker and the reason.
+
+## Archiving finished jobs
+
+Job folders do not pile up forever. A sweep the Hook runs at start and then
+hourly moves a folder from `<store>/.runtime/agent-fanouts` to
+`<store>/.runtime/agent-fanouts-archive/<job id>` when all of these hold:
+
+- the folder contains `exit.txt`. A folder without it is still running, and
+  the sweep never touches it, whatever its manifest says;
+- its `manifest.json` status is `completed`, `failed` or `cancelled`; and
+- its `finishedAt` is more than 24 hours old. When the manifest has no
+  `finishedAt`, the modification time of `exit.txt` decides.
+
+A folder with no manifest at all is moved once its `exit.txt` is more than 24
+hours old. The sweep writes `{ "status": "failed", "reason": "no manifest" }`
+as its manifest in the archive.
+
+The archive holds at most 500 folders; the oldest beyond that are deleted.
+Each sweep that moved or deleted anything writes one line to the Hook's log.
+
+Run the sweep by hand with:
+
+```
+phren bridge fanouts archive [--dry-run]
+```
+
+`--dry-run` reports what would move and what would be deleted without touching
+anything.

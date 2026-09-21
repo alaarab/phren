@@ -70,6 +70,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
     cliCommands: [
       "bridge", "bridge install", "bridge update", "bridge uninstall", "bridge rollback", "bridge status",
       "bridge doctor", "bridge usage", "bridge usage-statusline", "bridge hook", "bridge serve", "bridge ssh",
+      "bridge fanouts archive",
     ],
     agentHooks: [
       { agents: ["codex", "claude"], events: ["SessionStart", "UserPromptSubmit", "Stop", "PermissionRequest"], handler: "bridge-hook.mjs hook <agent>" },
