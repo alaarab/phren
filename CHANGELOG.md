@@ -7,6 +7,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- A Claude subagent the orchestrator stopped leaves the phone's running count; its
+  "killed" notification now counts as finished like a completed one.
 - A store that was never set up stays that way: the modules migration no longer creates
   `.config` on it, so `phren add` still says to run `phren init`, and module gating
   falls back to the unscoped view while `phren init` is creating the profiles.
