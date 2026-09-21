@@ -70,6 +70,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   are limited to one running conductor per store. The new `hand_off` MCP tool,
   `phren_admin` action and `phren hand-off` command send work to an existing
   local or enrolled-computer session.
+- Code index, stage 1: the `code` module gains a local, per-project index of
+  symbols and references for TypeScript, TSX, JavaScript, Swift, Python, Rust,
+  Go, Ruby and Bash, built with `web-tree-sitter` and a line-based fallback for
+  every other file. `phren code index <project>` walks the project's tracked
+  files and stores the result in `<store>/.runtime/code/<project>.sqlite`
+  (files, symbols, references, FTS5 over name/signature/doc, and a hashed
+  blame); `phren code status <project>` prints the counts. Incremental indexing
+  re-parses only files whose hash changed.
 - Schedule notifications: a schedule's optional `notify` list (`start`, `finish`,
   `failure`; finish and failure when absent) makes the Hook push each run's
   start, finish or failure to registered phones through the approvals' APNs
