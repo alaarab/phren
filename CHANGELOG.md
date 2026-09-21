@@ -78,6 +78,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   (files, symbols, references, FTS5 over name/signature/doc, and a hashed
   blame); `phren code status <project>` prints the counts. Incremental indexing
   re-parses only files whose hash changed.
+- Code index, stage 2: five MCP tools over that index, `code_search`,
+  `code_definition`, `code_references`, `code_outline` and `code_usage`, each in
+  the `code` module and returning compact text. `code_search` ranks exact name,
+  then prefix, then FTS5 relevance, then usage count; `code_definition` accepts
+  `Foo`, `Foo.bar` and `bar()`, prefers exported non-variable symbols when a
+  common name has several candidates, and returns the lines, signature, doc,
+  last change and a source snippet; `code_references` groups resolved
+  references by file; `code_outline` nests a file's symbols by parent; and
+  `code_usage` returns the hottest and coldest symbols, excluding one- and
+  two-character variables from the hot list. The matching `phren code
+  search|outline|refs|def|usage` subcommands and a `code` skill ship with them,
+  and the index now records its `repo_root` so a `--repo` index can still
+  return source snippets.
 - Schedule notifications: a schedule's optional `notify` list (`start`, `finish`,
   `failure`; finish and failure when absent) makes the Hook push each run's
   start, finish or failure to registered phones through the approvals' APNs

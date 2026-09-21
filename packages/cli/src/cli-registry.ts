@@ -344,11 +344,16 @@ export const REGISTRY: Command[] = [
   {
     name: "code",
     topic: "core",
-    usage: "phren code <index|status> [project] [--full] [--repo <path>]",
-    summary: "Index a project's code symbols and references",
+    usage: "phren code <index|status|search|outline|refs|def|usage> [project]",
+    summary: "Index and query a project's code symbols and references",
     subcommands: [
       { name: "index", usage: "phren code index <project> [--full] [--repo <path>]", summary: "Build or refresh the code index" },
       { name: "status", usage: "phren code status <project> [--top <n>]", summary: "Show index counts, languages and hot symbols" },
+      { name: "search", usage: "phren code search <project> <query> [--kind k] [--limit n]", summary: "Ranked symbol search" },
+      { name: "outline", usage: "phren code outline <project> <path>", summary: "A file's symbols in source order, nested" },
+      { name: "refs", usage: "phren code refs <project> <symbol>", summary: "References to a symbol, grouped by file" },
+      { name: "def", usage: "phren code def <project> <symbol>", summary: "A symbol's definition, doc, snippet and last change" },
+      { name: "usage", usage: "phren code usage <project> [--top n]", summary: "Hottest and coldest symbols by reference count" },
     ],
     run: async (args, ctx) => (await import("./code/command.js")).runCodeCommand(args, ctx),
   },

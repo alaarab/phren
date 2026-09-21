@@ -94,6 +94,7 @@ function createSchema(db: SqlJsDatabase): void {
        tokenize = "porter unicode61"
      )`,
   );
+  db.run(`CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
   db.run(`CREATE INDEX IF NOT EXISTS symbols_file ON symbols(file)`);
   db.run(`CREATE INDEX IF NOT EXISTS symbols_name ON symbols(name)`);
   db.run(`CREATE INDEX IF NOT EXISTS references_symbol ON "references"(symbol_id)`);
@@ -288,6 +289,24 @@ export function insertReferences(db: SqlJsDatabase, file: string, references: Re
       reference.kind,
     ]);
   }
+}
+
+/**
+ * Small key/value side table. It carries facts about the index itself rather
+ * than its contents; stage 2 records `repo_root` so definition queries can read
+ * the source snippet after an index built with `--repo`.
+ */
+export function setMeta(db: SqlJsDatabase, key: string, value: string): void {
+  db.run(
+    `INSERT INTO meta (key, value) VALUES (?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    [key, value],
+  );
+}
+
+export function getMeta(db: SqlJsDatabase, key: string): string | undefined {
+  const row = rowsOf(db, `SELECT value FROM meta WHERE key = ?`, [key])[0];
+  return row ? stringAt(row, 0) : undefined;
 }
 
 export function counts(db: SqlJsDatabase): CodeCounts {

@@ -1,6 +1,6 @@
 # MCP API Reference
 
-Phren exposes 63 MCP tools across 15 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the six built-in [Modules](modules.md). **`core`**, the default, exposes the seven memory tools plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default ten. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
+Phren exposes 68 MCP tools across 16 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the six built-in [Modules](modules.md). **`core`**, the default, exposes the seven memory tools plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default ten. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
 
 Why: the full surface is about 53k characters of schema, roughly 13k tokens, downloaded before a session says a word, and 59 similar verbs to pick the wrong one from. Core is about 17k characters.
 
@@ -17,13 +17,13 @@ Why: the full surface is about 53k characters of schema, roughly 13k tokens, dow
 | `add_task` | Add a task | — |
 | `manage_task` | `action`: complete, update, remove, pin, tidy | `complete_task`, `update_task`, `remove_task`, `pin_task`, `tidy_done_tasks` |
 | `session` | `action`: start, end, context, history | `session_start`, `session_end`, `session_context`, `session_history` |
-| `phren_admin` | `action`: any remaining tool by name, or `list_actions` | skills, hooks, config, notes, review queue, export/import, doctor, health, stores, projects, fragment graph, extraction, topic summaries (`get_topic_summaries`, `set_topic_summary`), dispatch and hand-off |
+| `phren_admin` | `action`: any remaining tool by name, or `list_actions` | skills, hooks, config, notes, review queue, export/import, doctor, health, stores, projects, fragment graph, extraction, topic summaries (`get_topic_summaries`, `set_topic_summary`), code index (`code_search`, `code_definition`, `code_references`, `code_outline`, `code_usage`), dispatch and hand-off |
 
 A composite takes `action` plus the target tool's own parameters, validated against that tool's schema; a miss returns the parameter list. A nested object parameter (`manage_task` `updates`, `set_config` `settings`, `add_finding` `citation`) may arrive as a real object or as its JSON string — some hosts serialize what a passthrough schema does not name — and both are accepted. `phren_admin list_actions` returns every admin action with its full parameter list. The individual tool sections below still describe each tool's parameters; in the core profile, reach them through the composite that stands for them.
 
 All tools return structured JSON: `{ ok, message, data?, error? }`.
 
-Module layout: search, tasks, findings, daily notes, memory quality, data management, fragment graph, sessions, operations/review, skills, hooks, extraction, configuration, topic summaries, dispatch and hand-off.
+Module layout: search, tasks, findings, daily notes, memory quality, data management, fragment graph, sessions, operations/review, skills, hooks, extraction, configuration, topic summaries, code index, dispatch and hand-off.
 
 ## Cross-computer dispatch
 
@@ -839,3 +839,59 @@ Store the paragraph you wrote as the topic's `## Now` block and refresh the proj
 | `project` | string | yes | Project name, optionally store-qualified. |
 | `topic` | string | yes | Topic slug, as listed by `get_topic_summaries`. |
 | `text` | string | yes | Four to six plain sentences; only facts the bullets state, names spelled as the bullets spell them. |
+
+---
+
+## Code Index
+
+Read tools over the local symbol index the `code` module keeps per project under `<store>/.runtime/code/<project>.sqlite`. The module is off by default; enable it with `phren modules enable code`, then build the index with `phren code index <project>` (`--repo <path>` for a checkout the project does not register). Results are compact text, one line per hit, not JSON. The `/code` skill drives them.
+
+### `code_search`
+
+Ranked symbol search over names, signatures and doc comments. Use it instead of grep when you want a symbol rather than raw text. Ranking is exact name, then prefix, then FTS5 relevance, then usage count.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name, optionally store-qualified. |
+| `query` | string | yes | Symbol name, or words from its signature or doc comment. |
+| `kind` | enum | no | `function`, `method`, `class`, `struct`, `enum`, `interface`, `type` or `variable`. |
+| `limit` | number | no | Maximum hits (1-100, default 20). |
+
+### `code_definition`
+
+Go to a symbol's definition. Accepts `Foo`, `Foo.bar` and `bar()`; returns the file and lines, signature, doc, the last change (blame hash and date, never a name) and a source snippet of at most 40 lines. When a common name matches several symbols it prefers an exported, non-variable declaration and reports the candidate count.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name, optionally store-qualified. |
+| `symbol` | string | yes | A symbol name: `Foo`, `Foo.bar` or `bar()`. |
+
+### `code_references`
+
+Every resolved reference to a symbol, grouped by file, with a total and a candidate count when the name is ambiguous. Accepts the same name forms as `code_definition`. Only references the index could resolve to exactly one definition are counted.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name, optionally store-qualified. |
+| `symbol` | string | yes | A symbol name: `Foo`, `Foo.bar` or `bar()`. |
+| `limit` | number | no | Maximum reference lines (1-500, default 200). |
+
+### `code_outline`
+
+A file's symbols in source order, nested under their parent class or container, with line, signature and doc. Use it before reading a large file.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name, optionally store-qualified. |
+| `path` | string | yes | Project-relative file path, as stored in the index. |
+
+### `code_usage`
+
+The hottest and coldest symbols by resolved-reference count, so cold code is visible too. Local variables are excluded from the hot list so a busy local or a one-letter loop name cannot dominate it.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name, optionally store-qualified. |
+| `top` | number | no | How many hot and how many cold symbols (1-100, default 10). |
+
+CLI equivalents: `phren code search <project> <query> [--kind k] [--limit n]`, `phren code def <project> <symbol>`, `phren code refs <project> <symbol>`, `phren code outline <project> <path>`, `phren code usage <project> [--top n]`.

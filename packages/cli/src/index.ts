@@ -285,6 +285,7 @@ async function main() {
     import("./tools/config.js"),
     import("./tools/notes.js"),
     import("./tools/summaries.js"),
+    ...(hasModule("code") ? [import("./tools/code.js")] : []),
     ...(hasModule("conductor") ? [import("./tools/dispatch.js")] : []),
   ]);
   for (const mod of toolModules) mod.register(server, ctx);
