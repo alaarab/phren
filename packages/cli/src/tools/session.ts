@@ -18,12 +18,12 @@ import { getActiveTaskForSession } from "../task/lifecycle.js";
 import { listTaskCheckpoints, writeTaskCheckpoint } from "../session/checkpoints.js";
 import {
   findMostRecentSummaryWithProject as findMostRecentSummaryRecord,
-  writeLastSummary as writeLastSummaryRecord,
+  writeLastSummary,
 } from "../session/artifacts.js";
 import { markImpactEntriesCompletedForSession } from "../finding/impact.js";
 import {
   debugError, scanSessionFiles,
-  type SessionState, sessionsDir, sessionFileForId,
+  type SessionState, runtimeSessionsDir, sessionFileForId,
   readSessionStateFile, writeSessionStateFile,
 } from "../session/utils.js";
 import { getRuntimeHealth } from "../governance/policy.js";
@@ -117,7 +117,7 @@ const _sessionMap = new Map<string, string>();
 
 /** Find the most recent *active* (not ended) session file by mtime. */
 function findMostRecentSession(phrenPath: string): { file: string; state: SessionState } | null {
-  const dir = sessionsDir(phrenPath);
+  const dir = runtimeSessionsDir(phrenPath);
   const results = scanSessionFiles<SessionState>(
     dir,
     readSessionStateFile,
@@ -135,7 +135,7 @@ export function resolveActiveSessionScope(phrenPath: string, project?: string): 
   const envScope = normalizeMemoryScope(process.env.PHREN_SCOPE);
   if (envScope) return envScope;
 
-  const dir = sessionsDir(phrenPath);
+  const dir = runtimeSessionsDir(phrenPath);
   const results = scanSessionFiles<SessionState>(
     dir,
     readSessionStateFile,
@@ -158,11 +158,6 @@ export function resolveActiveSessionScope(phrenPath: string, project?: string): 
     }
   }
   return normalizeMemoryScope(bestState?.agentScope);
-}
-
-/** Write the last summary for fast retrieval by next session_start. */
-function writeLastSummary(phrenPath: string, summary: string, sessionId: string, project?: string): void {
-  writeLastSummaryRecord(phrenPath, { summary, sessionId, project, endedAt: new Date().toISOString() });
 }
 
 /** Find the most recent session with a summary (including ended sessions).
@@ -197,7 +192,7 @@ function resolveSessionFile(phrenPath: string, sessionId?: string, connectionId?
 
 /** Remove session files older than 24 hours. */
 function cleanupStaleSessions(phrenPath: string): number {
-  const dir = sessionsDir(phrenPath);
+  const dir = runtimeSessionsDir(phrenPath);
   // Scan all session files (keep all, we'll filter and unlink manually)
   const results = scanSessionFiles<SessionState | null>(
     dir,
@@ -289,7 +284,7 @@ interface SessionHistoryEntry {
 
 /** List all sessions (both active and ended) from the sessions directory, sorted newest first. */
 export function listAllSessions(phrenPath: string, limit = 50): SessionHistoryEntry[] {
-  const dir = sessionsDir(phrenPath);
+  const dir = runtimeSessionsDir(phrenPath);
   // scanSessionFiles returns results sorted by mtime (newest first)
   const results = scanSessionFiles<SessionState>(
     dir,
@@ -657,7 +652,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     // session_start can restore project context even after a normal session_end.
     const effectiveSummary = endedState.summary;
     if (effectiveSummary) {
-      writeLastSummary(phrenPath, effectiveSummary, state.sessionId, endedState.project);
+      writeLastSummary(phrenPath, { summary: effectiveSummary, sessionId: state.sessionId, project: endedState.project });
     }
 
     if (endedState.project && isValidProjectName(endedState.project)) {

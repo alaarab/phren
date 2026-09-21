@@ -5,10 +5,10 @@ import { execFileSync } from "child_process";
 import { debugLog, EXEC_TIMEOUT_MS, getProjectDirs } from "../shared.js";
 import { errorMessage } from "../utils.js";
 import { countActiveFindings } from "./archive.js";
-import { isTaskFileName } from "../data/tasks.js";
+import { isTaskFileName } from "../filenames.js";
 import { METADATA_REGEX } from "./metadata.js";
 import { getNonPrimaryStores, getStoreProjectDirs } from "../store-registry.js";
-import { FINDINGS_FILENAME } from "../data/access.js";
+import { FINDINGS_FILENAME } from "../filenames.js";
 
 /** Maximum allowed length for a single finding entry (token budget protection). */
 export const MAX_FINDING_LENGTH = 2000;

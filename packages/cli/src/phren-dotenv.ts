@@ -6,7 +6,9 @@ let _loadedEnvKey: string | undefined;
 let _loadedEnvPath: string | null = null;
 let _loadedEnvMtimeMs = -1;
 
-function homeDir(): string {
+// Private copy: importing homeDir from phren-paths here would create a cycle,
+// since phren-paths imports this module and bootstraps it at module load.
+function dotenvHomeDir(): string {
   return process.env.HOME || process.env.USERPROFILE || os.homedir();
 }
 
@@ -29,7 +31,7 @@ function resolveDotEnvPath(phrenPath?: string): string | null {
   const candidates = [
     phrenPath ? path.join(phrenPath, ".env") : null,
     envPath ? path.join(envPath, ".env") : null,
-    path.join(homeDir(), ".phren", ".env"),
+    path.join(dotenvHomeDir(), ".phren", ".env"),
   ].filter((candidate): candidate is string => Boolean(candidate));
 
   const seen = new Set<string>();

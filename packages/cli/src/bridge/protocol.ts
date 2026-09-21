@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { rename, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { z } from "zod";
@@ -39,6 +40,23 @@ export class BridgeError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
 export const requestID = () => randomUUID();
+
+/**
+ * Write a file atomically: serialize to a fresh temp name, then rename it over
+ * the target so a reader never observes a partial file. `value` may be
+ * pre-serialized text or any JSON-serializable value. The default mode is 0600
+ * because every caller writes per-user state.
+ */
+export async function atomic(file: string, value: unknown, mode = 0o600): Promise<void> {
+  const temporary = `${file}.${randomUUID()}.tmp`;
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  await writeFile(temporary, text, { mode, flag: "wx" });
+  try {
+    await rename(temporary, file);
+  } finally {
+    await unlink(temporary).catch(() => {});
+  }
+}
 
 export function targetFromURL(url: URL): Target {
   return targetSchema.parse(Object.fromEntries(["server", "workspace", "tab", "pane", "source", "session"].map(k => [k, url.searchParams.get(k)])));

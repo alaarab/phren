@@ -128,6 +128,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- The phone Hook bundle carries only what the Hook runs: `phren init`, the agent hooks
+  installer, governance policy, the doctor and the FTS indexer left it (86 source files
+  and the glob package), 1.5 MB down to 1.25 MB. One definition each for the git, path,
+  atomic-write and task-text helpers that had two or three copies.
 - Codex fan-out child transcripts export the shell command, a bounded output
   tail, and the changed paths, and `/v1/subagents` reports a fan-out's model
   when its manifest names one.

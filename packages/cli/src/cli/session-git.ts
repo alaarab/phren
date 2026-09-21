@@ -4,12 +4,8 @@
  */
 import { execFileSync } from "child_process";
 import * as path from "path";
-import {
-  EXEC_TIMEOUT_MS,
-  debugLog,
-  errorMessage,
-} from "./hooks-context.js";
-import { runGit } from "../utils.js";
+import { EXEC_TIMEOUT_MS, debugLog } from "../shared.js";
+import { errorMessage, runGit } from "../utils.js";
 import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import { withFileLock } from "../governance/locks.js";
 import { runtimeFile } from "../phren-paths.js";

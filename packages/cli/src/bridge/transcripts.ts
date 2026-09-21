@@ -1,10 +1,9 @@
-import { readdir, readFile, realpath, stat } from "node:fs/promises";
+import { readdir, readFile, realpath, stat, lstat } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import path from "node:path";
-import { glob } from "glob";
 import { withTranscriptIndex } from "./transcript-index.js";
 import { BridgeError, object, objects, sessionId, type Json, type Provider, type Target } from "./protocol.js";
 import { materializeCodexThread, materializedRoot } from "./codex-threads.js";
@@ -352,6 +351,57 @@ function chatFrame(raw: Json, source: Provider): Json {
   return Array.isArray(message.content)
     ? { ...raw, [key]: { ...message, content: imageReferences(message.content, source === "claude") } } : raw;
 }
+/** Compile one path segment to a regexp: `*` and `?` are the only wildcards,
+ * neither crosses `/`. */
+function segmentRegExp(segment: string): RegExp {
+  const source = segment.split(/([*?])/).map(part => {
+    if (part === "*") return "[^/]*";
+    if (part === "?") return "[^/]";
+    return part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }).join("");
+  return new RegExp(`^${source}$`);
+}
+
+/** The fixed transcript layouts globbed for: `*` within a single segment, no
+ * `**`, dotfiles skipped, symlinked directories not followed. Kept native so
+ * the Hook bundle does not carry the `glob` package. */
+async function findPatternMatches(root: string, pattern: string): Promise<string[]> {
+  const segments = pattern.split("/");
+  const expressions = segments.map(segmentRegExp);
+  const matches: string[] = [];
+  const walk = async (dir: string, index: number): Promise<void> => {
+    const segment = segments[index];
+    const last = index === segments.length - 1;
+    if (!segment.includes("*") && !segment.includes("?")) {
+      const next = path.join(dir, segment);
+      try {
+        const info = await lstat(next);
+        if (last) {
+          // glob returns a symlink to a file here too; the caller's realpath
+          // check is what rejects one pointing outside the provider folder.
+          if (info.isFile() || info.isSymbolicLink()) matches.push(next);
+        } else if (info.isDirectory()) {
+          await walk(next, index + 1);
+        }
+      } catch { /* no match */ }
+      return;
+    }
+    let entries;
+    try { entries = await readdir(dir, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      if (entry.name.startsWith(".") || !expressions[index].test(entry.name)) continue;
+      const next = path.join(dir, entry.name);
+      if (last) {
+        if (entry.isFile() || entry.isSymbolicLink()) matches.push(next);
+      } else if (entry.isDirectory()) {
+        await walk(next, index + 1);
+      }
+    }
+  };
+  await walk(root, 0);
+  return matches;
+}
+
 export async function transcriptPath(source: Provider, session: string): Promise<string> {
   if (!sessionId.safeParse(session).success) throw new BridgeError(400, "Invalid conversation identity.");
   const base = source === "codex" ? path.join(process.env.CODEX_HOME || path.join(homedir(), ".codex"), "sessions")
@@ -361,7 +411,7 @@ export async function transcriptPath(source: Provider, session: string): Promise
   const root = await realpath(base).catch(() => base);
   const pattern = source === "codex" ? `*/*/*/rollout-*-${session}.jsonl` : source === "claude" ? `*/${session}.jsonl`
     : source === "phren" ? `session-${session}.events.jsonl` : source === "opencode" ? `opencode-${session}.events.jsonl` : `${session}/events.jsonl`;
-  const matches = await glob(pattern, { cwd: root, absolute: true, follow: false }).catch(() => [] as string[]);
+  const matches = await findPatternMatches(root, pattern).catch(() => [] as string[]);
   if (matches.length !== 1) {
     // Codex 0.155 keeps new threads only in its sqlite store; the Hook
     // materializes those into a rollout-shaped file of its own.

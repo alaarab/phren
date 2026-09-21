@@ -10,7 +10,7 @@ import {
   hasExecutionIntent,
   hasDiscoveryIntent,
   shouldAutoCaptureFindingsForLevel,
-} from "./shared.js";
+} from "./proactivity.js";
 
 describe("proactivity config", () => {
   const originalEnv = {

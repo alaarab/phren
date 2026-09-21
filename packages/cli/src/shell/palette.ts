@@ -1,9 +1,8 @@
 import { execFileSync } from "child_process";
-import * as path from "path";
-import { fileURLToPath } from "url";
 import type { TaskItem, QueueItem } from "../data/access.js";
 import { runLink } from "../link/link.js";
 import { runPhrenUpdate } from "../update.js";
+import { resolveEntryScript } from "../init/shared.js";
 import {
   type PhrenResult,
   EXEC_TIMEOUT_MS,
@@ -98,11 +97,6 @@ export function normalizeSection(sectionRaw: string): "Active" | "Queue" | "Done
 }
 
 // ── Infrastructure ───────────────────────────────────────────────────────────
-
-export function resolveEntryScript(): string {
-  const current = fileURLToPath(import.meta.url);
-  return path.resolve(path.dirname(current), "index.js");
-}
 
 export async function defaultRunHooks(phrenPath: string): Promise<string> {
   const entry = resolveEntryScript();

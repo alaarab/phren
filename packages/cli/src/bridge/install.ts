@@ -8,7 +8,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { bridgeRoot, object, objects } from "./protocol.js";
+import { bridgeRoot, object, objects, atomic } from "./protocol.js";
 import { herdrRoot } from "./herdr.js";
 import { health } from "./transport.js";
 
@@ -52,12 +52,6 @@ export function upgradeKeys(text: string): { text: string; changed: number } {
 const quote = (s: string) => "'" + s.replace(/'/g, "'\\''") + "'";
 const xml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const systemdQuote = (s: string) => '"' + s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/%/g, "%%") + '"';
-
-async function atomic(file: string, text: string, mode = 0o600) {
-  const temporary = file + `.phren-${process.pid}`;
-  await writeFile(temporary, text, { mode, flag: "wx" });
-  try { await rename(temporary, file); } finally { await unlink(temporary).catch(() => {}); }
-}
 
 async function activate(version: string) {
   const root = bridgeRoot();

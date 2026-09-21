@@ -14,8 +14,7 @@ import {
 } from "./shared.js";
 import { defaultMachineName, getMachineName } from "./machine-identity.js";
 import { errorMessage, isValidProjectName } from "./utils.js";
-import { TASK_FILE_ALIASES } from "./data/tasks.js";
-import { FINDINGS_FILENAME } from "./data/access.js";
+import { FINDINGS_FILENAME, TASK_FILE_ALIASES } from "./filenames.js";
 import { withSafeLock } from "./shared/data-utils.js";
 import { logger } from "./logger.js";
 import type { RetentionPolicyPatch } from "./governance/policy.js";
@@ -24,7 +23,7 @@ import {
   VALID_PROACTIVITY_LEVELS,
   VALID_TASK_MODES,
   VALID_RISKY_SECTIONS,
-} from "./governance/policy.js";
+} from "./governance/policy-constants.js";
 import { getNonPrimaryStores, getStoreProjectDirs } from "./store-registry.js";
 
 export interface ProfilePolicyDefaults {

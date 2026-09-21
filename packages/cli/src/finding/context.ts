@@ -1,7 +1,8 @@
 import * as fs from "fs";
 import * as path from "path";
 import { safeProjectPath } from "../utils.js";
-import { resolveTaskFilePath } from "../data/tasks.js";
+import { resolveTaskFilePath, stripBid, stripBulletPrefix } from "../data/tasks.js";
+import { runtimeSessionsDir } from "../session/utils.js";
 
 type TaskSection = "Active" | "Queue" | "Done";
 type TaskPriority = "high" | "medium" | "low" | undefined;
@@ -30,23 +31,6 @@ interface TaskReferenceResolution {
 const ACTIVE_HEADINGS = new Set(["active", "in progress", "in-progress", "current", "wip"]);
 const QUEUE_HEADINGS = new Set(["queue", "queued", "task", "todo", "upcoming", "next"]);
 const DONE_HEADINGS = new Set(["done", "completed", "finished", "archived"]);
-const BID_PATTERN = /\s*<!--\s*bid:([a-z0-9]{8})\s*-->/;
-
-function stripBulletPrefix(line: string): string {
-  return line
-    .replace(/^-\s*\[[ xX]\]\s+/, "")
-    .replace(/^-\s+/, "")
-    .trim();
-}
-
-function stripBid(text: string): { clean: string; bid?: string } {
-  const match = text.match(BID_PATTERN);
-  if (!match) return { clean: text.trimEnd() };
-  return {
-    clean: text.replace(BID_PATTERN, "").trimEnd(),
-    bid: match[1],
-  };
-}
 
 function normalizePriority(text: string): TaskPriority {
   const match = text.replace(/\s*\[pinned\]/gi, "").match(/\[(high|medium|low)\]\s*$/i);
@@ -78,7 +62,7 @@ function parseTaskItems(taskPath: string): ParsedTaskItem[] {
 
     counters[section] += 1;
     const itemId = `${section === "Active" ? "A" : section === "Queue" ? "Q" : "D"}${counters[section]}`;
-    const stripped = stripBulletPrefix(line);
+    const stripped = stripBulletPrefix(line).body;
     const { clean, bid } = stripBid(stripped);
     items.push({
       id: itemId,
@@ -157,12 +141,8 @@ export function resolveAutoFindingTaskItem(phrenPath: string, project: string): 
   return undefined;
 }
 
-function sessionsDir(phrenPath: string): string {
-  return path.join(phrenPath, ".runtime", "sessions");
-}
-
 function listActiveSessions(phrenPath: string): SessionStateSnapshot[] {
-  const dir = sessionsDir(phrenPath);
+  const dir = runtimeSessionsDir(phrenPath);
   if (!fs.existsSync(dir)) return [];
 
   const sessions: SessionStateSnapshot[] = [];

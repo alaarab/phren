@@ -7,7 +7,7 @@ import { readInstallPreferences } from "./init/preferences.js";
 import { debugLog } from "./shared.js";
 import { errorMessage } from "./utils.js";
 import { storeAwareProjectPath } from "./store-routing.js";
-import { withFileLock } from "./shared/governance.js";
+import { withFileLock } from "./governance/locks.js";
 import type { RetentionPolicyPatch } from "./governance/policy.js";
 
 export const PROJECT_OWNERSHIP_MODES = ["phren-managed", "detached", "repo-managed"] as const;

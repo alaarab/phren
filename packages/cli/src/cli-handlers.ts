@@ -14,9 +14,9 @@ import {
   defaultPhrenPath,
   findPhrenPath,
   isInstallMode,
-  parseProactivityLevel,
   type InstallMode,
 } from "./shared.js";
+import { parseProactivityLevel } from "./proactivity.js";
 import { errorMessage, getOptionValue, getPositionalArgs } from "./utils.js";
 import { addProjectFromPath } from "./core/project.js";
 import {

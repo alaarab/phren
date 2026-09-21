@@ -7,7 +7,7 @@ import {
   parsePhrenErrorCode,
   type PhrenResult,
 } from "../shared.js";
-import { withFileLock as withFileLockRaw } from "./governance.js";
+import { withFileLock as withFileLockRaw } from "../governance/locks.js";
 import { isValidProjectName, safeProjectPath, errorMessage } from "../utils.js";
 import { resolveProject } from "../store-routing.js";
 

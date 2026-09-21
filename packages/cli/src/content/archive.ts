@@ -4,12 +4,12 @@ import * as crypto from "crypto";
 import { debugLog, runtimeFile, phrenOk, phrenErr, PhrenError, appendAuditLog, tryUnlink, type PhrenResult } from "../shared.js";
 import { isValidProjectName, errorMessage } from "../utils.js";
 import { storeAwareProjectPath } from "../store-routing.js";
-import { withFileLock } from "../shared/governance.js";
+import { withFileLock } from "../governance/locks.js";
 import { walkDirectory } from "../shared/data-utils.js";
 import { appendArchivedEntriesToTopicDoc, classifyTopicForText, readProjectTopics, topicReferencePath } from "../project-topics.js";
 import { isCitationLine, isArchiveStart, isArchiveEnd, stripComments } from "./metadata.js";
 import { logger } from "../logger.js";
-import { FINDINGS_FILENAME } from "../data/access.js";
+import { FINDINGS_FILENAME } from "../filenames.js";
 
 /**
  * Count active (non-archived) finding entries in FINDINGS.md content.

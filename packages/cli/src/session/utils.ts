@@ -30,14 +30,14 @@ export interface SessionState {
   agentCreated?: boolean;
 }
 
-export function sessionsDir(phrenPath: string): string {
+export function runtimeSessionsDir(phrenPath: string): string {
   const dir = path.join(phrenPath, ".runtime", "sessions");
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
 
 export function sessionFileForId(phrenPath: string, sessionId: string): string {
-  return path.join(sessionsDir(phrenPath), `session-${sessionId}.json`);
+  return path.join(runtimeSessionsDir(phrenPath), `session-${sessionId}.json`);
 }
 
 export function isSessionStateFileName(name: string): boolean {
