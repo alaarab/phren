@@ -63,20 +63,6 @@ final class ChangesTabTests: XCTestCase {
     }
 
     @MainActor
-    func testChangesAtAccessibilityTextSize() {
-        let app = launchChanges(extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
-        let title = app.staticTexts["changes-title"]
-        XCTAssertTrue(title.waitForExistence(timeout: 8))
-        XCTAssertGreaterThanOrEqual(title.frame.minX, 0)
-        XCTAssertLessThanOrEqual(title.frame.maxX, app.frame.maxX)
-        for identifier in ["changes-tab-changes", "changes-tab-history", "changes-tab-branches", "changes-tab-pulls", "changes-tab-tree"] {
-            XCTAssertTrue(app.buttons[identifier].isHittable)
-        }
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "Changes accessibility text"; shot.lifetime = .keepAlways; add(shot)
-    }
-
-    @MainActor
     private func launchChanges(extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["PHREN_PERFORMANCE_LOG"] = "1"

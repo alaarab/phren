@@ -107,7 +107,7 @@ Launch flag `--memory-fixture`: two stores, three projects, 40 findings
 stale store. UI tests (`MemoryTests`): search selects a node and pans; a
 project chip narrows counts; content filter hides tasks; a task row's explicit
 action moves it to Done and the Tasks tab agrees; the dossier's Show in list
-scrolls the panel; accessibility XXXL lays out; the Search tab id no longer
+scrolls the panel; the Search tab id no longer
 exists and the Memory tab does. Existing `GraphTests` keep passing unchanged.
 
 ## 6. Order of work
@@ -116,4 +116,4 @@ exists and the Memory tab does. Existing `GraphTests` keep passing unchanged.
 2. `MemoryView` with the panel's contents mode; retire `SearchView`.
 3. Results mode over `SearchIndex` plus the graph's own search.
 4. Task and finding actions on rows.
-5. Fixture, tests, screenshots at standard and XXXL, changelog.
+5. Fixture, tests, screenshots at the standard size, changelog.

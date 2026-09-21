@@ -146,20 +146,6 @@ final class MemoryTests: XCTestCase {
     }
 
     @MainActor
-    func testAccessibilityXXXLLaysOut() {
-        let app = launch(extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
-        let chip = app.buttons["memory-scope:phren"]
-        XCTAssertTrue(chip.waitForExistence(timeout: 10))
-        XCTAssertGreaterThanOrEqual(chip.frame.height, 44)
-        XCTAssertTrue(app.staticTexts["memory-panel-counts"].waitForExistence(timeout: 10))
-        capture(app, "Memory XXXL")
-        app.staticTexts["memory-panel-counts"].tap()
-        XCTAssertTrue(app.buttons["memory-filter:tasks"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["memory-row:finding:a0000001"].waitForExistence(timeout: 5))
-        capture(app, "Memory XXXL full")
-    }
-
-    @MainActor
     private func launch(extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--memory-fixture"] + extra

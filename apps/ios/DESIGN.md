@@ -53,7 +53,7 @@ kit; existing screens migrate with their selection and gesture behaviour.
 Review the actual keyboard-open screen, not just the empty terminal. Test both
 scroll directions, hold-and-drag, copy/paste, first-tap controls and links with
 the keyboard hidden, pinch in/out, keyboard dismissal, and returning
-from another app. Inspect standard and accessibility text sizes. A compact layout
+from another app. Inspect the standard text size; there are no accessibility-size UI tests (owner, September 20: they made every run slow). A compact layout
 must preserve session identity, freshness checks, and the optional Moshi default.
 
 Moshi references: [keyboard controls](https://getmoshi.app/docs/keyboard) and

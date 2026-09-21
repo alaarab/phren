@@ -193,28 +193,6 @@ final class AllSessionsTests: XCTestCase {
     }
 
     @MainActor
-    func testLargeTextKeepsComputerLabelsAndDetailsReadable() {
-        let app = launch(extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
-        let first = row(app, host: mac)
-        XCTAssertTrue(first.waitForExistence(timeout: 10))
-        let title = app.staticTexts["Build the iPhone overview"]
-        // The state is the section's business; the computer rides the first
-        // line beside the branch, above the title.
-        let metadata = first.descendants(matching: .any)["on Test Mac"].firstMatch
-        XCTAssertTrue(metadata.exists)
-        XCTAssertFalse(first.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Working")).firstMatch.exists)
-        XCTAssertLessThanOrEqual(metadata.frame.minY, title.frame.minY)
-        XCTAssertGreaterThan(first.frame.height, 90)
-        XCTAssertTrue(first.frame.contains(metadata.frame))
-        let details = app.buttons["overview-detail:\(mac):herdr:default:w1:w1:t1"]
-        XCTAssertGreaterThanOrEqual(details.frame.height, 44)
-        XCTAssertTrue(details.isHittable)
-        capture(app, "All sessions with accessibility text")
-        details.tap()
-        XCTAssertTrue(app.navigationBars["Session details"].waitForExistence(timeout: 5))
-    }
-
-    @MainActor
     func testEmptyOverviewKeepsComputerAndWebControlsAvailable() {
         let app = launch(extra: ["--all-sessions-empty"])
         XCTAssertTrue(app.staticTexts["No sessions running on the connected computers"].waitForExistence(timeout: 10))

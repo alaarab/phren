@@ -41,7 +41,7 @@ final class GraphInteractionTests: XCTestCase {
         // The graph's own node label carries the same words, so ask for the
         // dialog rather than the text.
         XCTAssertTrue(
-            app.webViews.otherElements["Node details"].waitForNonExistence(timeout: 2),
+            nodeDetails(in: app).waitForNonExistence(timeout: 2),
             "dossier closes: dialog disappears"
         )
     }
@@ -180,7 +180,12 @@ final class GraphInteractionTests: XCTestCase {
         let result = app.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] %@", "demo")).firstMatch
         _ = result.waitForExistence(timeout: 5)
         result.tap()
-        return app.webViews.otherElements["Node details"]
+        return nodeDetails(in: app)
+    }
+
+    /// The dossier is a dialog, which WebKit reports as "Node details, web dialog".
+    private func nodeDetails(in app: XCUIApplication) -> XCUIElement {
+        app.webViews.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", "Node details")).firstMatch
     }
 
     @MainActor

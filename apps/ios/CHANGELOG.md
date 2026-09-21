@@ -109,6 +109,7 @@ lock screen and Changes screen done properly.
 
 ### Fixed
 
+- The project dossier in the memory graph is a dialog again for assistive tech.
 - Project cards keep their compact two-line height with the themed project colour.
 - Task details keep the agent action visible above long plans.
 - Selecting a project from graph search opens its dossier again.
