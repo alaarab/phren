@@ -4,12 +4,23 @@ import { bootstrapPhrenDotEnv } from "./phren-dotenv.js";
 
 // ── Shared Git helper ────────────────────────────────────────────────────────
 
+/**
+ * Git run by phren never asks a human anything. Without this, a store or
+ * project with an HTTPS remote and no credential helper makes git read
+ * "Username for 'https://github.com':" from the controlling terminal, which
+ * inside an agent's pane stalls the agent before its first prompt.
+ */
+export const nonInteractiveGitEnv = (): NodeJS.ProcessEnv => ({
+  ...process.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never", GIT_ASKPASS: "", SSH_ASKPASS: "",
+});
+
 export function runGitOrThrow(cwd: string, args: string[], timeoutMs: number): string {
   const result = spawnSync("git", args, {
     cwd,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
     timeout: timeoutMs,
+    env: nonInteractiveGitEnv(),
   });
   if (result.error) throw result.error;
   if (result.status !== 0) {

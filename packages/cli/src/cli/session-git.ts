@@ -10,6 +10,7 @@ import {
   errorMessage,
 } from "./hooks-context.js";
 import { runGit } from "../utils.js";
+import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import { withFileLock } from "../governance/locks.js";
 import { runtimeFile } from "../phren-paths.js";
 import { mergeStoreUpstream, type RunStoreGit } from "../sync/store-merge.js";
@@ -61,6 +62,7 @@ export async function runBestEffortGit(args: string[], cwd: string): Promise<{ o
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
         timeout: EXEC_TIMEOUT_MS,
+        env: nonInteractiveGitEnv(),
       }).trim();
       return { ok: true, output };
     } catch (err: unknown) {
