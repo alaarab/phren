@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Git run by phren never prompts for credentials. A store with an HTTPS remote and
+  no credential helper used to make the session-start sync ask for a GitHub username
+  in the agent's pane, so Codex and OpenCode never reached their first prompt on that
+  computer and every launch from the phone or a dispatch reported a failure.
 - Account usage no longer breaks a phone that predates OpenCode Go: the phone names the
   sources it understands and an older one keeps getting the original four.
 - A Claude subagent the orchestrator stopped leaves the phone's running count; its
