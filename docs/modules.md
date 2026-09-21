@@ -56,7 +56,7 @@ version; external modules will version independently.
 | `phoneScreens` | Compiled phone screen identifiers and required capability names; never downloaded UI code |
 | `skills` | Owned starter skill names, provisioned only when enabled |
 
-The six built-ins are enumerated in
+The seven built-ins are enumerated in
 [`modules/registry.ts`](../packages/cli/src/modules/registry.ts). Tool names,
 CLI paths and HTTP/WS routes there refer to current implementations. Capability names (`memory`, `tasks`, `hook`, `git`, `schedules`) are emitted
 from the same snapshot that gates Hook routes.
@@ -87,6 +87,7 @@ descendants appear in help or dispatch.
 | `git` | Off | `auto_extract_findings`, `maintain extract`/`extract-memories`, repository diffs and `/v1/git/*`, change capture and Changes UI |
 | `schedules` | Off | `schedule`, project `schedules.yaml`, scheduler, run history and Schedules UI |
 | `conductor` | Off | `dispatch` and `hand_off` MCP tools, dispatch and hand-off CLI commands, `bridge enroll-computer`, dispatch routes, receipts, peer configuration and the `conductor` skill |
+| `code` | Off | Code index for a project: `phren code index`/`code status`, a grammar-backed symbol/reference/usage index under `<store>/.runtime/code/*.sqlite`. Stage 1 ships the indexer and store; its MCP tools, Hook routes, phone screen and skill arrive in later stages |
 
 All optional modules require memory; conductor also requires Hook. Git and
 schedules can manage their local/store data without Hook. Their phone routes

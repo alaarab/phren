@@ -83,3 +83,45 @@ No editor. Ids `code-search`, `code-row:<id>`, `code-dossier`.
 
 Each stage is one worker; stage 1 must land before 2, stages 3 and 4 can
 run in parallel after 2.
+
+## Implementation notes
+
+Stage 1 shipped `packages/cli/src/code/` as `languages.ts` (extension map and
+per-language symbol queries), `parser.ts` (one `web-tree-sitter` init, grammar
+loader, query, references, line fallback), `store.ts` (sql.js-fts5 schema and
+upsert), `indexer.ts` (`git ls-files` walk, hash, parse, reference resolution,
+blame) and `status.ts`. Deviations from this document, and the reasons:
+
+- **Grammars.** Nine grammars ship as `.wasm` under `packages/cli/grammars/`
+  (TypeScript, TSX, JavaScript, Swift, Python, Rust, Go, Ruby, Bash). Sources,
+  versions and sha256 sums are recorded in `packages/cli/grammars/README.md`.
+  The document also names JSON and Markdown-heading grammars; stage 1 leaves
+  them on the line fallback. No outline gap, since the fallback still runs.
+- **Blame granularity.** `blame(file, line, author_hash, at)` stores the last
+  commit that touched the file at each symbol's start line, not a per-line
+  `git blame`. One file-level lookup per changed file (or one `git log` walk
+  for a cold index) replaces a `git blame` subprocess per file, which is what
+  lets a cold index of a real repository finish. The author is `sha256("Name
+  <email>")`; the name and address never reach the database.
+- **Reference resolution.** A reference resolves only when exactly one symbol
+  owns the name: one same-file definition, or one project-wide definition when
+  the file has none. A name that several definitions share (a local variable, a
+  common helper) is ambiguous and is skipped rather than attributed to every
+  match. `references(symbol_id, file, line, kind)` holds resolved edges only,
+  which is what usage counts read.
+- **File rows.** `files.mtime` is recorded but the content hash decides
+  re-parsing, so a same-mtime edit cannot hide a change. `--full` re-parses
+  every tracked file.
+- **Repository selection.** `phren code index <project>` uses the project's
+  registered source path. A `--repo <path>` (`--path` alias) flag overrides
+  it, which is how the index is run against a worktree whose project points at
+  a different checkout. `phren code status` accepts `--top <n>`.
+- **Storage.** The database lives in `.runtime/code/`, never in the synced
+  store. `openCodeDatabase` caches the sql.js module per process so the
+  incremental path stays inside its budget. The FTS5 table is `symbols_fts`,
+  over `name`, `signature` and `doc`, with rowids matching `symbols.id`.
+
+Measured: a synthetic 100k-line TypeScript project indexes cold in about two
+seconds (well under the 20 s target), and re-indexing one changed file stays
+under the 200 ms target. The gated test is
+`packages/cli/src/code/indexer.perf.test.ts`, run with `PHREN_PERF=1`.
