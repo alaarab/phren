@@ -73,6 +73,27 @@ async function capacity(peer: HookPeer): Promise<{ working: number; computerId: 
   return { working: result.working, computerId: result.computer.id };
 }
 
+/**
+ * A freshly started agent may not have written its session yet when the launch
+ * returns, so the launch carries no target. Ask the remote pane for its session
+ * for a few seconds before giving up; the pane ids from the launch are enough
+ * to find it.
+ */
+async function settledTarget(peer: HookPeer, launched: Json, harness: string): Promise<Json | undefined> {
+  const workspace = launched.workspaceId, tab = launched.tabId, pane = launched.paneId;
+  if (typeof workspace !== "string" || typeof tab !== "string" || typeof pane !== "string") return undefined;
+  for (let attempt = 0; attempt < 15; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, 1_000));
+    try {
+      const result = await peerRequest(peer, `/v1/workspaces/panes?server=${encodeURIComponent(peer.server)}&groupId=${encodeURIComponent(workspace)}&childId=${encodeURIComponent(tab)}`);
+      const found = (Array.isArray(result.panes) ? result.panes : []).find((p: Json) => p && typeof p === "object" && (p as Json).id === pane) as Json | undefined;
+      const session = found?.sessionId;
+      if (typeof session === "string" && session) return { server: peer.server, workspace, tab, pane, source: harness, session };
+    } catch { /* The pane list can lag the launch; try again. */ }
+  }
+  return undefined;
+}
+
 export class DispatchService {
   private active = false;
   constructor(private readonly identity?: { computerID: string; validateParentTarget: (target: Target) => Promise<unknown> }) {}
@@ -111,7 +132,7 @@ export class DispatchService {
       try {
         const launched = await peerRequest(peer, `/v1/workspaces/launch?server=${encodeURIComponent(peer.server)}`,
           { project: data.project, kind: data.harness, model: data.model, label: data.label });
-        const target = remoteTarget.parse(launched.target);
+        const target = remoteTarget.parse(launched.target ?? await settledTarget(peer, launched, data.harness));
         if (target.source !== data.harness || target.server !== peer.server) throw new BridgeError(502, "The remote Hook returned a different launch target.");
         receipt.target = target;
         receipt.state = "sending"; receipt.updatedAt = new Date().toISOString(); await save(receipt);
