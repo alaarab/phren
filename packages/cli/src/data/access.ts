@@ -91,7 +91,8 @@ export {
 } from "../shell/state-store.js";
 export { getRuntimeHealth as readRuntimeHealth } from "../shared/governance.js";
 
-export const FINDINGS_FILENAME = "FINDINGS.md";
+import { FINDINGS_FILENAME } from "../filenames.js";
+export { FINDINGS_FILENAME } from "../filenames.js";
 
 export interface FindingItem {
   id: string;

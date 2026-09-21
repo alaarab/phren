@@ -1,6 +1,6 @@
 import * as fs from "fs";
-import * as os from "os";
 import * as path from "path";
+import { homeDir } from "./phren-paths.js";
 
 export type HookToolName = "claude" | "copilot" | "cursor" | "codex";
 export const HOOK_TOOL_NAMES = ["claude", "copilot", "cursor", "codex"] as const;
@@ -8,10 +8,6 @@ export const HOOK_TOOL_NAMES = ["claude", "copilot", "cursor", "codex"] as const
 export type McpRootKey = "mcpServers" | "servers";
 
 type CommandExistsFn = (cmd: string) => boolean;
-
-function homeDir(env: NodeJS.ProcessEnv = process.env): string {
-  return env.HOME || env.USERPROFILE || os.homedir();
-}
 
 function joinPortable(base: string, ...parts: string[]): string {
   const usePosix = base.startsWith("/") && !base.includes("\\");

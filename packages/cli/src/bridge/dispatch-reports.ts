@@ -1,11 +1,11 @@
-import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { lstat, mkdir, readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { DispatchConnections, type DispatchStream } from "./dispatch-connections.js";
 import { ClaudeBackgroundInbox, CodexBackgroundInbox, DispatchOutbox, pruneDispatchArtifacts, type BackgroundDelivery, type OutboxItem } from "./dispatch-outbox.js";
 import { hookPeers, peerRequest, type HookPeer } from "./peers.js";
-import { bridgeRoot, object, objects, provider, startingTargetSchema, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
+import { atomic, bridgeRoot, object, objects, provider, startingTargetSchema, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
 
 const computerIdentity = z.object({ id: z.string().uuid(), name: z.string().min(1).max(100) }).strict();
 const parentIdentity = z.object({ provider, session: z.string().min(1).max(200), computer: z.string().uuid() }).strict();
@@ -47,11 +47,6 @@ export interface DispatchReportsOptions {
   inboxes?: Partial<Record<Provider, BackgroundDelivery>>;
   root?: string;
   now?: () => number;
-}
-
-function atomic(file: string, value: unknown): Promise<void> {
-  const temporary = `${file}.${randomUUID()}.tmp`;
-  return writeFile(temporary, JSON.stringify(value), { mode: 0o600, flag: "wx" }).then(() => rename(temporary, file));
 }
 
 function truncateUtf8(value: string, limit = 4000): { text: string; truncated: boolean } {
