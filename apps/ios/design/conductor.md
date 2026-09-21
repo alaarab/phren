@@ -164,3 +164,17 @@ harness's own session files.
 header, `launch-role*` and `launch-effort*` above. One UI test: launch a
 conductor with the fixture, see the card pinned with the mark, open its
 chat, see the header mark. No accessibility-size tests.
+
+### Siri and the Action button (owner, September 21; stage three)
+
+One App Intent, `TellConductorIntent`, with a spoken `message` parameter:
+Siri phrase "Tell my conductor …", also exposed in Shortcuts so the Action
+button on the side of the phone can run it. It sends the message to the
+running conductor's session through the Hook (`/v1/prompt`), launching one
+with the remembered choice when none runs, and speaks back the conductor's
+first line (the dispatch log line) through the intent's dialog. When the
+conductor asks a question, the intent returns it as the dialog and the next
+"Tell my conductor …" answers it. No new screens; Settings gains one row
+"Conductor" with the remembered harness, model, effort and a "Add to Siri"
+button (`SiriTipView` is Apple's; use phren's own row that opens the
+Shortcuts app deep link). Ids: `settings-conductor`, `settings-conductor-siri`.
