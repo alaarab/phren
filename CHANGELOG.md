@@ -18,6 +18,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- A `.config/modules.yaml` key for a module this Hook build does not know (a
+  newer CLI enabled it) no longer makes `phren-hook ssh` and `serve` exit with
+  `Unknown module`, which showed every phone Offline on every computer. The
+  unknown key is ignored with one warning line on stderr naming the key and the
+  Hook version, and every known module keeps its value. `phren modules enable
+  <name>` now also warns, without refusing, when the installed Hook recorded in
+  `<bridge>/installed.json` is older than the module's version in the manifest.
 - An opencode permission ask reaches the phone as a push. The Hook watches the
   approvals directory, maps a new request to its pane through the recorded
   session binding (or Herdr's opencode session id), sends the same kind of

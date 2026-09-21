@@ -1,6 +1,7 @@
 import { resolveRuntimeProfile } from "../runtime-profile.js";
 import { resolveAllStores } from "../store-registry.js";
-import { migrateInstalledModules, moduleSnapshot } from "./runtime.js";
+import { isVersionNewer } from "../init/init.js";
+import { installedHookVersion, migrateInstalledModules, moduleSnapshot } from "./runtime.js";
 import { BUILTIN_MODULES, moduleSource, readConfig } from "./registry.js";
 import { setModuleEnabled } from "./config.js";
 import type { CliContext } from "../cli-registry.js";
@@ -35,6 +36,13 @@ export async function runModules(args: string[], ctx: CliContext): Promise<numbe
     migrateInstalledModules(store);
     setModuleEnabled(store, name!, action === "enable", profile);
     console.log(`${name} ${action === "enable" ? "enabled" : "disabled"}${profile ? ` for profile ${profile}` : " for the store"}. Run phren init to reconcile integrations; restart MCP and Hook to refresh their surfaces.`);
+    if (action === "enable") {
+      const manifest = BUILTIN_MODULES.find(module => module.name === name);
+      const installed = installedHookVersion();
+      if (manifest && installed && isVersionNewer(manifest.version, installed)) {
+        console.error(`warning: installed Phren Hook ${installed} is older than module ${name} ${manifest.version}; run phren bridge update so the Hook knows this module.`);
+      }
+    }
     return;
   }
   const snapshot = moduleSnapshot(store, selectedProfile);
