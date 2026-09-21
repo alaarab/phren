@@ -10,7 +10,7 @@ import { BUILTIN_MODULES, enabled } from "./registry.js";
 
 let tmp: ReturnType<typeof makeTempDir>;
 beforeEach(() => { tmp = makeTempDir("modules-test-"); });
-afterEach(() => { vi.restoreAllMocks(); tmp.cleanup(); });
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); tmp.cleanup(); });
 
 function configure(text: string): void {
   fs.mkdirSync(path.join(tmp.path, ".config"), { recursive: true });
@@ -79,9 +79,12 @@ profiles:
     expect(() => names()).toThrow("Cannot read .config/modules.yaml");
   });
 
-  it("rejects unknown module names even in an inactive profile", () => {
+  it("ignores unknown module names even in an inactive profile", () => {
     configure("version: 1\nprofiles:\n  work:\n    enabled:\n      code-map: false\n");
-    expect(() => names()).toThrow('Unknown module "code-map"');
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(names()).toEqual(["memory", "tasks"]);
+    expect(error.mock.calls.map(([line]) => String(line)))
+      .toContain(`warning: unknown module "code-map" in .config/modules.yaml ignored by Hook ${VERSION}`);
   });
 
   it.each([
@@ -195,4 +198,33 @@ describe("phren modules list", () => {
       expect(await lookupCommand("modules")!.run(args, { phrenPath, profile: () => "work" })).toBe(1);
       expect(phrenPath).not.toHaveBeenCalled();
     });
+});
+
+describe("phren modules enable", () => {
+  it("warns when the installed Hook is older than the module without refusing", async () => {
+    configure("version: 1\n");
+    const bridge = path.join(tmp.path, "bridge");
+    fs.mkdirSync(bridge, { recursive: true });
+    fs.writeFileSync(path.join(bridge, "installed.json"), JSON.stringify({ version: "0.0.1" }));
+    vi.stubEnv("PHREN_BRIDGE_HOME", bridge);
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    await lookupCommand("modules")!.run(["enable", "git"], { phrenPath: () => tmp.path, profile: () => "work" });
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("git enabled"));
+    expect(names()).toContain("git");
+    const warnings = error.mock.calls.map(([line]) => String(line));
+    expect(warnings.some(line => line.includes("installed Phren Hook 0.0.1 is older than module git") && line.includes(VERSION))).toBe(true);
+  });
+
+  it("stays quiet when no Hook is installed", async () => {
+    configure("version: 1\n");
+    const bridge = path.join(tmp.path, "empty-bridge");
+    fs.mkdirSync(bridge, { recursive: true });
+    vi.stubEnv("PHREN_BRIDGE_HOME", bridge);
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    await lookupCommand("modules")!.run(["enable", "git"], { phrenPath: () => tmp.path, profile: () => "work" });
+    expect(names()).toContain("git");
+    expect(error).not.toHaveBeenCalled();
+  });
 });

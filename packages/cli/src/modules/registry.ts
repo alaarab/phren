@@ -162,19 +162,33 @@ export function readConfig(store: string): ModulesConfig | undefined {
   let config: ModulesConfig;
   try { config = configSchema.parse(yaml.load(source, { schema: yaml.CORE_SCHEMA })); }
   catch { throw new Error("Invalid .config/modules.yaml: expected version: 1 and boolean module overrides."); }
-  return validateConfig(config);
+  return validateConfig(config, true);
 }
 
-export function validateConfig(input: unknown): ModulesConfig {
+/** Warned once per process so serve's migrate-then-snapshot double read stays one line. */
+const warnedUnknownModules = new Set<string>();
+
+/**
+ * Unknown keys belong to a newer CLI that enabled a module this build (the
+ * Hook) does not know; they are ignored, kept for writes, and warned about
+ * once instead of failing every Hook connection.
+ */
+export function validateConfig(input: unknown, warnUnknown = false): ModulesConfig {
   const parsed = configSchema.safeParse(input);
   if (!parsed.success) throw new Error("Invalid .config/modules.yaml: expected version: 1 and boolean module overrides.");
   const config = parsed.data;
   const names = new Set(BUILTIN_MODULES.map(module => module.name));
+  const unknown = new Set<string>();
   for (const values of [config.enabled, ...Object.values(config.profiles ?? {}).map(profile => profile.enabled)]) {
     for (const [name, value] of Object.entries(values ?? {})) {
-      if (!names.has(name)) throw new Error(`Unknown module "${name}" in .config/modules.yaml.`);
+      if (!names.has(name)) { unknown.add(name); continue; }
       if (name === "memory" && !value) throw new Error("The memory module cannot be disabled.");
     }
+  }
+  for (const name of unknown) {
+    if (!warnUnknown || warnedUnknownModules.has(name)) continue;
+    warnedUnknownModules.add(name);
+    console.error(`warning: unknown module "${name}" in .config/modules.yaml ignored by Hook ${VERSION}`);
   }
   return config;
 }

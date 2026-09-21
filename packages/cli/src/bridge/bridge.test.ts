@@ -8,7 +8,7 @@ import { createServer as createNetServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import { ApprovalWatchLeases } from "./agent-hooks.js";
 import { capturesChanges, namedPaths, outputCallIds, ToolChanges } from "./changes.js";
@@ -1547,5 +1547,27 @@ describe("Hook module capabilities", () => {
     const off = snapshot(["memory"]);
     expect(capabilitiesForModules(off).code).toBeUndefined();
     expect(() => requireRoute(off, "GET", "/v1/code/search")).toThrow("enable it with phren modules enable code");
+  });
+
+  it("starts the gateway snapshot despite an unknown module key in the store", async () => {
+    const { activateModules } = await import("../modules/runtime.js");
+    const { VERSION } = await import("../package-metadata.js");
+    const store = await mkdtemp(path.join(tmpdir(), "phren-unknown-module-"));
+    try {
+      await mkdir(path.join(store, ".config"), { recursive: true });
+      await writeFile(path.join(store, ".config", "modules.yaml"),
+        "version: 1\nenabled:\n  hook: true\n  git: true\n  gateway-future: true\n");
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        const snapshot = activateModules(store, undefined, true);
+        expect(snapshot.has("hook")).toBe(true);
+        expect(snapshot.has("git")).toBe(true);
+        expect(snapshot.has("gateway-future")).toBe(false);
+        expect(error.mock.calls.map(([line]) => String(line)))
+          .toEqual([`warning: unknown module "gateway-future" in .config/modules.yaml ignored by Hook ${VERSION}`]);
+      } finally { error.mockRestore(); }
+    } finally {
+      await rm(store, { recursive: true, force: true });
+    }
   });
 });

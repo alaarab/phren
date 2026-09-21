@@ -49,6 +49,15 @@ export function migrateInstalledModules(store: string, legacyHook = false): void
   if (fs.existsSync(path.join(store, "phren.root.yaml")) || fs.existsSync(installPreferencesFile(store))) migrateModules(store, installedHook);
 }
 
+/** The version in <bridge>/installed.json, or undefined when no Hook is installed. */
+export function installedHookVersion(): string | undefined {
+  const hookRoot = process.env.PHREN_BRIDGE_HOME || path.join(homedir(), ".local", "share", "phren", "bridge");
+  try {
+    const parsed = JSON.parse(fs.readFileSync(path.join(hookRoot, "installed.json"), "utf8")) as { version?: unknown };
+    return typeof parsed.version === "string" && parsed.version.trim() ? parsed.version.trim() : undefined;
+  } catch { return undefined; }
+}
+
 export function activateModules(store: string, profile = snapshotProfile(store), legacyHook = false): ModuleSnapshot {
   migrateInstalledModules(store, legacyHook);
   return moduleSnapshot(store, profile, legacyHook);
