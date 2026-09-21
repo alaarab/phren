@@ -122,6 +122,8 @@ Search the user's personal project store using FTS5 full-text search with synony
 | `include_history` | boolean | no | Include historical findings (`superseded`, `retracted`). Defaults to `false`. |
 | `synthesize` | boolean | no | Generate a short synthesis paragraph from top hits (requires LLM endpoint/key configuration). |
 
+A findings result carries `symbol` (and `symbols`) when a `symbol:` citation is present, so a client can show which code symbol the finding is about.
+
 ### `get_project_summary`
 
 Get a project's summary card and list of indexed documents.
@@ -150,6 +152,8 @@ List recent findings for a project without requiring a search query.
 | `include_superseded` | boolean | no | Include superseded findings (legacy compatibility flag). |
 | `include_history` | boolean | no | Include historical findings (`superseded`, `retracted`). |
 | `status` | enum | no | Filter by lifecycle status: `active`, `superseded`, `contradicted`, `stale`, `invalid_citation`, `retracted`. |
+
+Each returned finding includes its `citationData` and a top-level `symbol` when it carries a `symbol:` citation.
 
 ---
 
@@ -311,12 +315,14 @@ Record a single insight to a project's FINDINGS.md. Call this the moment you dis
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name. |
 | `finding` | string or string[] | yes | The insight, as a single bullet point (or an array of bullet points for batch capture). Be specific enough to act on without extra context. |
-| `citation` | object | no | Optional source citation: `{ file?, line?, repo?, commit?, task_item? }`. |
+| `citation` | object | no | Optional source citation: `{ file?, line?, repo?, commit?, symbol?, task_item? }`. |
 | `sessionId` | string | no | Optional session ID from `session_start`. Pass it if you want session metrics to include this write. |
 | `findingType` | enum | no | Prefix the finding inline with a type tag. One of: `decision`, `pitfall`, `pattern`, `bug`. |
 | `scope` | string | no | Optional memory scope label (defaults to `shared`; for example `researcher` or `builder`). |
 
 The finding is always saved as `active`. `add_finding` never auto-marks a finding as `contradicted`: instead it runs cheap lexical heuristics (no extra LLM/API call) and, when an existing finding looks like a possible duplicate or contradiction, returns it in the response as `potentialDuplicates` / `potentialConflicts` for the calling agent to judge. If a returned candidate is a genuine contradiction, resolve it explicitly with `resolve_contradiction` (or `supersede_finding`); if it is unrelated, ignore it. (Opt-in LLM-confirmed contradiction detection is still available via `PHREN_FEATURE_SEMANTIC_CONFLICT`.)
+
+`citation.symbol` names a code symbol as `Name`, `Type.member` or `name()`. When the project has a code index, the finding text is scanned for a symbol that resolves to exactly one declaration (four or more characters, and not a local variable unless exported) and that symbol is attached automatically; the finding text is never rewritten. An explicit `symbol` is validated against the index and stored either way: an unresolved one is kept with `symbol_unresolved` set, the symbol counterpart of an invalid file citation, and the trust filter treats it as `invalid_citation`.
 
 ### `supersede_finding`
 
@@ -859,7 +865,7 @@ Ranked symbol search over names, signatures and doc comments. Use it instead of 
 
 ### `code_definition`
 
-Go to a symbol's definition. Accepts `Foo`, `Foo.bar` and `bar()`; returns the file and lines, signature, doc, the last change (blame hash and date, never a name) and a source snippet of at most 40 lines. When a common name matches several symbols it prefers an exported, non-variable declaration and reports the candidate count.
+Go to a symbol's definition. Accepts `Foo`, `Foo.bar` and `bar()`; returns the file and lines, signature, doc, the last change (blame hash and date, never a name) and a source snippet of at most 40 lines. When a common name matches several symbols it prefers an exported, non-variable declaration and reports the candidate count. After the snippet it adds a `Findings` block, one line per finding that cites the symbol (its id and first 160 characters), read from the project's FINDINGS.md and archived topic files.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|

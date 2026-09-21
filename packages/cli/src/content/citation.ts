@@ -13,6 +13,15 @@ export interface FindingCitation {
   file?: string;
   line?: number;
   commit?: string;
+  /**
+   * A symbol the finding is about, as `Name`, `Type.member` or `name()`.
+   * Auto-attached on write when the project has a code index and the finding
+   * text names exactly one resolvable symbol; an explicit one is validated
+   * against the index and stored either way.
+   */
+  symbol?: string;
+  /** True when an explicit symbol citation could not be resolved in the index. */
+  symbol_unresolved?: boolean;
   supersedes?: string;
   task_item?: string;
 }
@@ -196,6 +205,8 @@ export function parseCitationComment(line: string): FindingCitation | null {
       file: typeof parsed.file === "string" ? parsed.file : undefined,
       line: typeof parsed.line === "number" ? parsed.line : undefined,
       commit: typeof parsed.commit === "string" ? parsed.commit : undefined,
+      symbol: typeof parsed.symbol === "string" && parsed.symbol.trim() ? parsed.symbol : undefined,
+      symbol_unresolved: parsed.symbol_unresolved === true ? true : undefined,
       supersedes: typeof parsed.supersedes === "string" ? parsed.supersedes : undefined,
       task_item: typeof parsed.task_item === "string" ? parsed.task_item : undefined,
     };
@@ -203,6 +214,16 @@ export function parseCitationComment(line: string): FindingCitation | null {
     debugLog(`parseCitationComment: malformed citation JSON: ${errorMessage(err)}`);
     return null;
   }
+}
+
+/** Every distinct `symbol:` value in a document's `phren:cite` comments, in order. */
+export function collectSymbolCitations(content: string): string[] {
+  const found = new Set<string>();
+  for (const line of content.split("\n")) {
+    const citation = parseCitationComment(line);
+    if (citation?.symbol) found.add(citation.symbol);
+  }
+  return [...found];
 }
 
 function resolveCitationFile(citation: FindingCitation): string | null {
@@ -266,6 +287,11 @@ function cachedBlame(repoPath: string, relFile: string, line: number): string | 
 }
 
 export function validateFindingCitation(citation: FindingCitation): boolean {
+  // A symbol citation is resolved against the project's code index at write
+  // time (the index lives outside the synced store, so it is not available
+  // here). The write path records `symbol_unresolved` when it could not
+  // resolve one; that is the symbol counterpart of a missing cited file.
+  if (citation.symbol && citation.symbol_unresolved) return false;
   if (citation.repo && !fs.existsSync(citation.repo)) return false;
   if (citation.commit && citation.repo && !commitExists(citation.repo, citation.commit)) return false;
 

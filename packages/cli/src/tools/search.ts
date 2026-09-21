@@ -37,7 +37,7 @@ import { entryScoreKey, getQualityMultiplier, getRetentionPolicy, recordLookupEv
 import { bestFindingNodeId } from "../finding-graph-id.js";
 import { callLlm } from "../content/dedup.js";
 import { rankResults, searchKnowledgeRows, applyTrustFilter, searchFederatedStores, type FederatedDocRow } from "../shared/retrieval.js";
-import { formatActorAttribution, parseScopeComment, parseSourceComment } from "../content/citation.js";
+import { formatActorAttribution, parseScopeComment, parseSourceComment, collectSymbolCitations } from "../content/citation.js";
 import { resolveActiveSessionScope } from "./session.js";
 import { logger } from "../logger.js";
 
@@ -424,6 +424,7 @@ async function handleSearchKnowledge(
       const snippet = extractSnippet(row.content, query);
       const lifecycle = row.type === "findings" ? lifecycleByRowKey.get(findingRowKey(row)) : undefined;
       const federationSource = "federationSource" in row ? (row as FederatedDocRow).federationSource : undefined;
+      const symbols = row.type === "findings" ? collectSymbolCitations(row.content) : [];
       return {
         project: row.project,
         filename: row.filename,
@@ -432,6 +433,7 @@ async function handleSearchKnowledge(
         path: row.path,
         status: lifecycle?.primaryStatus,
         statuses: lifecycle?.statuses,
+        ...(symbols.length > 0 ? { symbol: symbols[0], symbols } : {}),
         ...(federationSource ? { federation_source: federationSource } : {}),
       };
     });
@@ -742,6 +744,7 @@ async function handleGetFindings(
   }
   const capped = filteredItems.slice(0, limit ?? 50).map(entry => ({
     ...entry,
+    symbol: entry.citationData?.symbol,
     lifecycle: {
       status: entry.status,
       status_updated: entry.status_updated,
@@ -754,6 +757,7 @@ async function handleGetFindings(
     metadata.push(`status=${entry.status}`);
     if (entry.taskItem) metadata.push(`task=${entry.taskItem}`);
     if (entry.scope) metadata.push(`scope=${entry.scope}`);
+    if (entry.symbol) metadata.push(`symbol=${entry.symbol}`);
     if (entry.supersedes) metadata.push(`supersedes="${entry.supersedes.slice(0, 30)}"`);
     if (entry.supersededBy) metadata.push(`superseded_by="${entry.supersededBy.slice(0, 30)}"`);
     if (entry.contradicts?.length) metadata.push(`contradicts=${entry.contradicts.length}`);
