@@ -14,10 +14,14 @@ final class LaunchSessionTests: XCTestCase {
         XCTAssertTrue(session.waitForExistence(timeout: 10)); session.tap()
         let newThread = app.buttons["New thread"]
         XCTAssertTrue(newThread.waitForExistence(timeout: 8)); newThread.tap()
+        let chooser = app.buttons["launch-computer"]
+        XCTAssertTrue(chooser.waitForExistence(timeout: 5))
+        chooser.tap()
         let mac = app.buttons["launch-computer:A1000000-0000-0000-0000-000000000001"]
         XCTAssertTrue(mac.waitForExistence(timeout: 5))
         XCTAssertTrue(mac.label.contains("has phone"), "machines.yaml + the profile say this computer carries the project")
         XCTAssertTrue(mac.isSelected, "The computer that has the project is chosen up front")
+        app.buttons["launch-computer-done"].tap()
         let folder = app.textFields["launch-folder"]
         XCTAssertTrue(app.buttons["launch-found:/work/phone"].waitForExistence(timeout: 5), "The computer reports where the project is")
         XCTAssertEqual(folder.value as? String, "/work/phone", "The folder is the computer's own answer")

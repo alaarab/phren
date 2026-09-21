@@ -162,6 +162,12 @@ struct AgentChatView: View {
     @State private var transcriptContentHeight: CGFloat = 0
     @State private var scrollMetrics = ChatScrollMetrics(contentHeight: 0, viewportHeight: 0, offsetY: 0)
     @State private var scrollPinRequest: ChatPinRequest?
+    /// A send grows the transcript, resigns the composer and resizes the
+    /// viewport in one frame. The pin that follows waits for layout and then
+    /// for the keyboard animation; no other pin runs inside that transition.
+    @State private var sendScrollToken = 0
+    @State private var sendScrollTask: Task<Void, Never>?
+    @State private var suppressComposingPin = false
     @State private var fellBackToTerminal = false
     @ScaledMetric(relativeTo: .body) private var composerTextSize = 14.0
     @FocusState private var composing: Bool
@@ -451,6 +457,10 @@ struct AgentChatView: View {
                     if atBottom && !model.loadingHistory { pinToBottom(proxy) }
                 }
                 .onChange(of: composing) { _, _ in
+                    // A send resigns focus in the same frame it appends its
+                    // row; pinAfterSend owns that scroll, so this transition
+                    // must not also enqueue one against an unlaid row.
+                    guard !suppressComposingPin else { return }
                     // The keyboard's safe-area change keeps the bottom
                     // anchored on its own, so a view already at the end needs
                     // no help; pinning it again fights the transaction and,
@@ -461,6 +471,7 @@ struct AgentChatView: View {
                           scrollMetrics.distanceFromBottom > 8 else { return }
                     pinToBottom(proxy)
                 }
+                .onChange(of: sendScrollToken) { _, _ in pinAfterSend(proxy) }
             }
             if let approval = model.approval, let prompt = approval.questionPrompt, let input = approval.questionInput {
                 // Claude Code asks through a permission request: answer it with
@@ -848,6 +859,25 @@ struct AgentChatView: View {
         }
     }
 
+    /// The pin that follows a send. The sent row grows the transcript and the
+    /// composer's resignation closes the keyboard in the same frame, so a pin
+    /// resolved then can target a row the lazy stack has not laid out. Wait one
+    /// run loop for the row, pin, then pin once more when the keyboard
+    /// animation has finished. `pinToBottom` holds each target to the content
+    /// end (the clamped numeric offset on iOS 18, the bottom marker before it).
+    private func pinAfterSend(_ proxy: ScrollViewProxy) {
+        sendScrollTask?.cancel()
+        sendScrollTask = Task { @MainActor in
+            await Task.yield()
+            suppressComposingPin = false
+            guard atBottom, !model.loadingHistory else { return }
+            pinToBottom(proxy)
+            do { try await Task.sleep(for: .milliseconds(350)) } catch { return }
+            guard atBottom, !model.loadingHistory else { return }
+            pinToBottom(proxy)
+        }
+    }
+
     private func loadHistoryIfNeeded(_ proxy: ScrollViewProxy, automatic: Bool = false) {
         guard active, paginationReady, model.connected, model.hasMore, !model.loadingHistory,
               historyTask == nil, nearHistoryTop, !automatic || historyChain < Self.automaticHistoryPages,
@@ -1217,7 +1247,9 @@ struct AgentChatView: View {
                             // the argument form, which applies without one.
                             showingModelPicker = true
                         } else {
+                            suppressComposingPin = true
                             sendDraft()
+                            sendScrollToken &+= 1
                         }
                     } label: {
                         Group {

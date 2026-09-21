@@ -2,8 +2,9 @@ import PhrenKit
 import PhrenLive
 import SwiftUI
 
-/// The `/model` choice as a sheet: the agent's usual names, the current one
-/// marked, and a field for any other id. Choosing sends `/model <id>`.
+/// The `/model` choice as a sheet: phren's single-select card with the agent's
+/// usual names, the current one checked, and a field for any other id at the
+/// bottom. Choosing sends `/model <id>`.
 struct ChatModelPickerSheet: View {
     let source: String
     let current: String?
@@ -23,66 +24,49 @@ struct ChatModelPickerSheet: View {
         return host == nil || failed ? AgentModelChoice.choices(source: source) : []
     }
     private var customCommand: String? { AgentModelChoice.command(for: custom) }
+    private var options: [PhrenOption<String>] {
+        choices.map { choice in
+            PhrenOption(id: choice.argument, value: choice.argument, title: choice.name,
+                        caption: choice.description,
+                        trailing: choice.isDefault ? AnyView(PhrenChip(text: "default")) : nil)
+        }
+    }
+    private var isLoading: Bool { loading && reported == nil }
+    /// The row the card checks: the current model, matched loosely, recomputed
+    /// as the computer's report arrives. The card owns the write; choosing a
+    /// row sends through `onSelect` instead.
+    private var currentSelection: Binding<String> {
+        Binding(get: { choices.first(where: isCurrent)?.argument ?? "__none__" }, set: { _ in })
+    }
 
     var body: some View {
-        NavigationStack {
-            PhrenList {
-                Section {
-                    if loading && reported == nil {
-                        HStack(spacing: 10) {
-                            ProgressView().tint(PhrenTheme.textMuted)
-                            Text("Asking the computer…").foregroundStyle(PhrenTheme.textMuted)
-                        }
-                        .frame(minHeight: 44)
-                        .accessibilityIdentifier("chat-model-loading")
-                    }
-                    ForEach(choices) { choice in
-                        Button { choose("/model " + choice.argument) } label: {
-                            HStack(spacing: 10) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    HStack(spacing: 6) {
-                                        Text(choice.name).foregroundStyle(PhrenTheme.text)
-                                        if choice.isDefault {
-                                            Text("default").font(.caption2.weight(.semibold)).foregroundStyle(PhrenTheme.textMuted)
-                                                .padding(.horizontal, 5).padding(.vertical, 1)
-                                                .background(PhrenTheme.surfaceRaised, in: Capsule())
-                                        }
-                                    }
-                                    Text(choice.argument).font(.system(.caption, design: .monospaced)).foregroundStyle(PhrenTheme.textMuted)
-                                    if let description = choice.description {
-                                        Text(description).font(.caption).foregroundStyle(PhrenTheme.textMuted).lineLimit(2)
-                                    }
-                                }
-                                Spacer(minLength: 8)
-                                if isCurrent(choice) {
-                                    Image(systemName: "checkmark").foregroundStyle(PhrenTheme.accent).accessibilityLabel("Current")
-                                }
-                            }
-                            .frame(minHeight: 44).contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("chat-model:\(choice.argument)")
-                    }
-                }
-                Section("Other") {
-                    HStack(spacing: 8) {
-                        TextField("model id", text: $custom)
-                            .textInputAutocapitalization(.never).autocorrectionDisabled()
-                            .font(.system(.body, design: .monospaced))
-                            .accessibilityIdentifier("chat-model-custom")
-                            .onSubmit { if let customCommand { choose(customCommand) } }
-                        Button("Use") { if let customCommand { choose(customCommand) } }
-                            .disabled(customCommand == nil)
-                            .accessibilityIdentifier("chat-model-use-custom")
-                    }
-                }
-            }
-            .navigationTitle("Model").navigationBarTitleDisplayMode(.inline)
-            .task { await loadFromComputer() }
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.accessibilityIdentifier("chat-model-cancel") } }
-            .phrenScreen()
-        }
+        PhrenSingleSelectSheet(title: "Model", options: options, selection: currentSelection,
+                               rowPrefix: "chat-model", loading: isLoading,
+                               loadingLabel: "Asking the computer…", footer: AnyView(customField),
+                               onSelect: { argument in choose("/model " + argument) },
+                               dismiss: { dismiss() })
         .presentationDetents([.medium, .large])
+        .task { await loadFromComputer() }
+    }
+
+    private var customField: some View {
+        HStack(spacing: 8) {
+            TextField("model id", text: $custom)
+                .textInputAutocapitalization(.never).autocorrectionDisabled()
+                .font(.system(.body, design: .monospaced))
+                .padding(.horizontal, PhrenTheme.Space.medium)
+                .frame(minHeight: 44)
+                .background(PhrenTheme.surfaceRaised,
+                            in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.questionOption, style: .continuous))
+                .accessibilityIdentifier("chat-model-custom")
+                .onSubmit { if let customCommand { choose(customCommand) } }
+            Button("Use") { if let customCommand { choose(customCommand) } }
+                .font(PhrenTypography.body.weight(.medium))
+                .foregroundStyle(PhrenTheme.accent)
+                .frame(minWidth: 44, minHeight: 44)
+                .disabled(customCommand == nil)
+                .accessibilityIdentifier("chat-model-use-custom")
+        }
     }
 
     private func loadFromComputer() async {

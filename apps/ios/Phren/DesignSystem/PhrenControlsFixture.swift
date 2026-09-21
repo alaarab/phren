@@ -7,6 +7,8 @@ struct PhrenControlsFixture: View {
     @State private var page: Int
     @State private var enabled = true
     @State private var choice = "list"
+    @State private var singleChoice = "list"
+    @State private var singleSelect = false
     @State private var choices: Set<String> = ["list"]
     @State private var number = 2
     @State private var hour = 7
@@ -78,6 +80,8 @@ struct PhrenControlsFixture: View {
                      actions: dialogActions, identifier: "controls-dialog")
         .phrenMultiSelectSheet(isPresented: $multiSelect, title: "Options", options: options,
                                selection: $choices, rowPrefix: "controls-multiselect")
+        .phrenSingleSelectSheet(isPresented: $singleSelect, title: "Options", options: options,
+                                selection: $singleChoice, rowPrefix: "controls-singleselect")
     }
 
     @ViewBuilder private var pageContent: some View {
@@ -127,6 +131,11 @@ struct PhrenControlsFixture: View {
                                  identifier: "controls-multiselect", isPresented: $multiSelect)
                 PhrenMultiSelect(options: options, selection: .constant(["list"]), allLabel: "All options",
                                  identifier: "controls-multiselect-disabled", isPresented: .constant(false))
+                    .disabled(true)
+                PhrenSingleSelect(options: options, selection: $singleChoice, placeholder: "Choose an option",
+                                  identifier: "controls-singleselect", isPresented: $singleSelect)
+                PhrenSingleSelect(options: options, selection: .constant("list"), placeholder: "Choose an option",
+                                  identifier: "controls-singleselect-disabled", isPresented: .constant(false))
                     .disabled(true)
             }
             PhrenGroup("Glyph and detail", identifier: "controls-group:glyph") {

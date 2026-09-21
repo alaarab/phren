@@ -16,12 +16,19 @@ final class ScheduleEditorTests: XCTestCase {
         prompt.tap()
         prompt.typeText("Review open work and summarize the next steps.")
 
-        let project = app.buttons["schedule-project:demo"]
-        if project.exists { tap(project, in: app) }
-        tap(app.buttons["schedule-computer:Desk"], in: app)
-        tap(app.buttons["schedule-harness:codex"], in: app)
+        let project = app.buttons["schedule-project"]
+        if project.exists {
+            tap(project, in: app)
+            app.buttons["schedule-project:demo"].tap()
+        }
+        tap(app.buttons["schedule-computer"], in: app)
+        app.buttons["schedule-computer:Desk"].tap()
+        tap(app.buttons["schedule-harness"], in: app)
+        app.buttons["schedule-harness:codex"].tap()
+        tap(app.buttons["schedule-model"], in: app)
         let model = app.buttons["schedule-model:gpt-5.6-sol"]
-        tap(model, in: app)
+        XCTAssertTrue(model.waitForExistence(timeout: 5))
+        model.tap()
         tap(app.buttons["schedule-every:daily"], in: app)
         capture(app, "Schedule editor daily fields")
         app.buttons["schedule-save"].tap()
@@ -78,17 +85,26 @@ final class ScheduleEditorTests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 8))
         row.tap()
 
-        // The switch carries the toggle trait, so it is not in `buttons`.
-        let start = app.descendants(matching: .any)["schedule-notify:start"]
-        tap(start, in: app)
-        XCTAssertEqual(start.value as? String, "On")
+        // Notify is a drop-down of check rows now.
+        let notify = app.buttons["schedule-notify"]
+        XCTAssertTrue(notify.waitForExistence(timeout: 5))
+        notify.tap()
+        let start = app.buttons["schedule-notify:start"]
+        XCTAssertTrue(start.waitForExistence(timeout: 5))
+        XCTAssertFalse(start.isSelected)
+        start.tap()
+        XCTAssertTrue(start.isSelected)
+        app.buttons["schedule-notify-done"].tap()
         app.buttons["schedule-save"].tap()
 
         XCTAssertTrue(row.waitForExistence(timeout: 8))
         row.tap()
-        let reopened = app.descendants(matching: .any)["schedule-notify:start"]
+        let reopened = app.buttons["schedule-notify"]
         XCTAssertTrue(reopened.waitForExistence(timeout: 5))
-        XCTAssertEqual(reopened.value as? String, "On")
+        reopened.tap()
+        let reopenedStart = app.buttons["schedule-notify:start"]
+        XCTAssertTrue(reopenedStart.waitForExistence(timeout: 5))
+        XCTAssertTrue(reopenedStart.isSelected)
     }
 
     private func capture(_ app: XCUIApplication, _ name: String) {

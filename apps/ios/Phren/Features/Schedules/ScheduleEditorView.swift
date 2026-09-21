@@ -32,6 +32,11 @@ struct ScheduleEditorView: View {
     @State private var modelsUnavailable = false
     @State private var enabled: Bool
     @State private var notify: Set<Schedule.Notify>
+    @State private var showProject = false
+    @State private var showComputer = false
+    @State private var showHarness = false
+    @State private var showModel = false
+    @State private var showNotify = false
     @State private var models: [AgentModelChoice] = []
     @State private var loadingModels = false
     @State private var saving = false
@@ -121,6 +126,59 @@ struct ScheduleEditorView: View {
         return choices
     }
     private var selectedProjectName: String? { project ?? selectedProject }
+
+    private var projectOptions: [PhrenOption<String?>] {
+        projects.map { PhrenOption(id: $0, value: $0, title: $0) }
+    }
+    private var computerOptions: [PhrenOption<String>] {
+        computerChoices.map { choice in
+            PhrenOption(
+                id: choice.name, value: choice.name, title: choice.name,
+                glyph: choice.host.map { host in
+                    AnyView(Circle().fill(PhrenTheme.hostColor(host.color ?? LiveHost.defaultColor(for: host.id)))
+                        .frame(width: 8, height: 8).padding(.top, PhrenTheme.Space.xs))
+                },
+                trailing: choice.host == nil ? AnyView(PhrenOptionRow.trailingCaption("offline")) : nil,
+                muted: choice.host == nil
+            )
+        }
+    }
+    private var harnessOptions: [PhrenOption<Schedule.Harness?>] {
+        Self.harnesses.map { option in
+            PhrenOption(id: option.rawValue, value: option, title: ScheduleWords.harnessName(option),
+                        glyph: AnyView(AgentProviderGlyph(source: option.rawValue, size: 18)))
+        }
+    }
+    /// "Harness default" (nil) first, then the computer's catalogue while it is
+    /// connected, then any custom id the user typed while offline.
+    private var modelOptions: [PhrenOption<String?>] {
+        var options: [PhrenOption<String?>] = [.init(id: "default", value: nil, title: "Harness default")]
+        if chosenHost != nil, !modelsUnavailable {
+            options += models.map { choice in
+                PhrenOption(id: choice.argument, value: choice.argument, title: choice.name,
+                            caption: choice.description,
+                            trailing: choice.isDefault ? AnyView(PhrenChip(text: "default")) : nil)
+            }
+        }
+        if !customModel.isEmpty, !options.contains(where: { $0.value == customModel }) {
+            options.append(.init(id: customModel, value: customModel, title: customModel))
+        }
+        return options
+    }
+    private var notifyOptions: [PhrenOption<Schedule.Notify>] {
+        Schedule.Notify.allCases.map { option in
+            PhrenOption(id: option.rawValue, value: option, title: Self.notifyTitle(option))
+        }
+    }
+    private static func notifyTitle(_ notify: Schedule.Notify) -> String {
+        switch notify {
+        case .start: return "Start"
+        case .finish: return "Finish"
+        case .failure: return "Failure"
+        }
+    }
+    private var modelsLoading: Bool { loadingModels && chosenHost != nil && !modelsUnavailable }
+    private var computerOffline: Bool { chosenHost == nil || modelsUnavailable }
     private var modelLoadID: String {
         computer + "|" + (harness.map { $0.rawValue } ?? "")
     }
@@ -151,12 +209,8 @@ struct ScheduleEditorView: View {
             PhrenScreen {
                 nameGroup
                 promptGroup
-                if project == nil { projectGroup }
-                computerGroup
-                harnessGroup
-                if harness != nil, !computer.isEmpty { modelGroup }
+                targetsSection
                 whenGroup
-                notifyGroup
                 if schedule != nil { deleteGroup }
             }
             .accessibilityIdentifier("schedule-editor-scroll")
@@ -167,6 +221,33 @@ struct ScheduleEditorView: View {
         .phrenContainerMarker("schedule-editor", label: schedule == nil ? "New schedule" : "Edit schedule")
         .presentationDetents([.large])
         .interactiveDismissDisabled(saving)
+        .phrenSingleSelectSheet(isPresented: $showProject, title: "Project", options: projectOptions,
+                                selection: $selectedProject, rowPrefix: "schedule-project")
+        .phrenSingleSelectSheet(isPresented: $showComputer, title: "Computer", options: computerOptions,
+                                selection: $computer, rowPrefix: "schedule-computer")
+        .phrenSingleSelectSheet(isPresented: $showHarness, title: "Harness", options: harnessOptions,
+                                selection: $harness, rowPrefix: "schedule-harness")
+        .phrenSingleSelectSheet(isPresented: $showModel, title: "Model", options: modelOptions,
+                                selection: $modelID, rowPrefix: "schedule-model",
+                                loading: modelsLoading, loadingLabel: "Loading models…",
+                                message: computerOffline ? "Connect \(computer) to list models" : nil,
+                                footer: computerOffline ? AnyView(modelCustomField) : nil)
+        .phrenMultiSelectSheet(isPresented: $showNotify, title: "Notify", options: notifyOptions,
+                               selection: $notify, rowPrefix: "schedule-notify")
+        .onChange(of: computer) { _, _ in
+            typing = false
+            modelID = nil
+            customModel = ""
+        }
+        .onChange(of: harness) { _, _ in
+            typing = false
+            modelID = nil
+            customModel = ""
+        }
+        .onChange(of: selectedProject) { _, value in
+            typing = false
+            if let value { captureProject(value) }
+        }
         .task {
             captureOpeningState()
             if selectedProject == nil {
@@ -216,104 +297,57 @@ struct ScheduleEditorView: View {
         }
     }
 
-    private var projectGroup: some View {
-        PhrenGroup("Project", identifier: "schedule-group:project") {
-            ForEach(projects, id: \.self) { option in
-                PhrenOptionRow(title: option, selected: selectedProject == option) {
-                    typing = false
-                    selectedProject = option
-                    captureProject(option)
+    /// Computer, harness, model, notify and (from the all-projects list)
+    /// project as compact labelled drop-down rows instead of long lists,
+    /// so the whole editor fits one screen.
+    private var targetsSection: some View {
+        VStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
+            if project == nil {
+                fieldRow("Project") {
+                    PhrenSingleSelect(options: projectOptions, selection: $selectedProject,
+                                      placeholder: "Choose a project", identifier: "schedule-project",
+                                      isPresented: $showProject)
                 }
-                .accessibilityIdentifier("schedule-project:\(option)")
+            }
+            fieldRow("Computer") {
+                PhrenSingleSelect(options: computerOptions, selection: $computer,
+                                  placeholder: "Choose a computer", identifier: "schedule-computer",
+                                  isPresented: $showComputer)
+            }
+            fieldRow("Harness") {
+                PhrenSingleSelect(options: harnessOptions, selection: $harness,
+                                  placeholder: "Choose a harness", identifier: "schedule-harness",
+                                  isPresented: $showHarness)
+            }
+            if harness != nil, !computer.isEmpty {
+                fieldRow("Model") {
+                    PhrenSingleSelect(options: modelOptions, selection: $modelID,
+                                      placeholder: "Harness default", identifier: "schedule-model",
+                                      isPresented: $showModel)
+                }
+            }
+            fieldRow("Notify") {
+                PhrenMultiSelect(options: notifyOptions, selection: $notify, allLabel: "All",
+                                 identifier: "schedule-notify", isPresented: $showNotify)
             }
         }
     }
 
-    private var computerGroup: some View {
-        PhrenGroup("Computer", identifier: "schedule-group:computer") {
-            ForEach(computerChoices) { choice in
-                PhrenOptionRow(
-                    title: choice.name, selected: SchedulesView.canonicalHost(computer) == choice.id,
-                    glyph: choice.host.map { host in
-                        AnyView(Circle().fill(PhrenTheme.hostColor(host.color ?? LiveHost.defaultColor(for: host.id)))
-                            .frame(width: 8, height: 8).padding(.top, PhrenTheme.Space.xs))
-                    },
-                    trailing: choice.host == nil ? AnyView(PhrenOptionRow.trailingCaption("offline")) : nil,
-                    muted: choice.host == nil
-                ) {
-                    typing = false
-                    computer = choice.name
-                    modelID = nil
-                    customModel = ""
-                }
-                .accessibilityIdentifier("schedule-computer:\(choice.name)")
+    private var modelCustomField: some View {
+        TextField("Model id", text: $customModel)
+            .font(PhrenTypography.monoSubheadline)
+            .foregroundStyle(PhrenTheme.text)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+            .padding(.horizontal, PhrenTheme.Space.medium)
+            .frame(minHeight: 44)
+            .background(PhrenTheme.surfaceRaised,
+                        in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.questionOption, style: .continuous))
+            .accessibilityIdentifier("schedule-model-custom")
+            .onChange(of: customModel) { _, value in
+                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                modelID = trimmed.isEmpty ? nil : trimmed
             }
-        }
-    }
-
-    private var harnessGroup: some View {
-        PhrenGroup("Harness", identifier: "schedule-group:harness") {
-            ForEach(Self.harnesses, id: \.self) { option in
-                PhrenOptionRow(title: ScheduleWords.harnessName(option), selected: harness == option,
-                               glyph: AnyView(AgentProviderGlyph(source: option.rawValue, size: 18))) {
-                    typing = false
-                    harness = option
-                    modelID = nil
-                    customModel = ""
-                }
-                .accessibilityIdentifier("schedule-harness:\(option.rawValue)")
-            }
-        }
-    }
-
-    private var modelGroup: some View {
-        PhrenGroup("Model", identifier: "schedule-group:model") {
-            if loadingModels {
-                ForEach(0..<3, id: \.self) { _ in
-                    RoundedRectangle(cornerRadius: PhrenTheme.Radius.questionOption, style: .continuous)
-                        .fill(PhrenTheme.surfaceRaised.opacity(0.5))
-                        .frame(height: 44)
-                        .accessibilityHidden(true)
-                }
-            } else if chosenHost == nil || modelsUnavailable {
-                Text("Connect \(computer) to list models")
-                    .font(PhrenTypography.subheadline)
-                    .foregroundStyle(PhrenTheme.textMuted)
-                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            } else {
-                modelRow(label: "Harness default", detail: nil, id: nil, isDefault: false)
-                ForEach(models) { choice in
-                    modelRow(label: choice.name, detail: choice.description, id: choice.argument,
-                             isDefault: choice.isDefault)
-                }
-            }
-            if chosenHost == nil || modelsUnavailable {
-            TextField("Model id", text: $customModel)
-                .font(PhrenTypography.monoSubheadline)
-                .foregroundStyle(PhrenTheme.text)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .padding(.horizontal, PhrenTheme.Space.medium)
-                .frame(minHeight: 44)
-                .background(PhrenTheme.surfaceRaised,
-                            in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.questionOption, style: .continuous))
-                .accessibilityIdentifier("schedule-model-custom")
-                .onChange(of: customModel) { _, value in
-                    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-                    modelID = trimmed.isEmpty ? nil : trimmed
-                }
-            }
-        }
-    }
-
-    private func modelRow(label: String, detail: String?, id: String?, isDefault: Bool) -> some View {
-        PhrenOptionRow(title: label, caption: detail, selected: modelID == id,
-                       trailing: isDefault ? AnyView(PhrenChip(text: "default")) : nil) {
-            typing = false
-            modelID = id
-            customModel = id ?? ""
-        }
-        .accessibilityIdentifier("schedule-model:\(id ?? "default")")
     }
 
     private var whenGroup: some View {
@@ -383,19 +417,6 @@ struct ScheduleEditorView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-    }
-
-    private var notifyGroup: some View {
-        PhrenGroup("Notify", identifier: "schedule-group:notify") {
-            switchRow("Start", identifier: "schedule-notify:start", isOn: notifyBinding(.start))
-            switchRow("Finish", identifier: "schedule-notify:finish", isOn: notifyBinding(.finish))
-            switchRow("Failure", identifier: "schedule-notify:failure", isOn: notifyBinding(.failure))
-        }
-    }
-
-    private func notifyBinding(_ kind: Schedule.Notify) -> Binding<Bool> {
-        Binding(get: { notify.contains(kind) },
-                set: { on in if on { notify.insert(kind) } else { notify.remove(kind) } })
     }
 
     private func switchRow(_ label: String, identifier: String, isOn: Binding<Bool>) -> some View {

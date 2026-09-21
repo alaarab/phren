@@ -50,6 +50,12 @@ struct PhrenOption<Value: Hashable>: Identifiable {
     let title: String
     var caption: String? = nil
     var icon: String? = nil
+    /// A custom leading view (a provider mark, a host colour dot).
+    var glyph: AnyView? = nil
+    /// A passive trailing badge, such as the model catalogue's "default" chip.
+    var trailing: AnyView? = nil
+    /// A listed choice that is not currently available, such as an offline computer.
+    var muted = false
     var accessibilityLabel: String? = nil
     var isEnabled = true
 }
@@ -327,6 +333,179 @@ extension View {
         modifier(PhrenMultiSelectModifier(isPresented: isPresented, title: title, options: options,
                                           selection: selection, rowPrefix: rowPrefix,
                                           requiresSelection: requiresSelection, leading: leading))
+    }
+}
+
+/// The single-choice sibling of `PhrenMultiSelect`: the same 44-point pill
+/// that summarises the chosen option and opens a PhrenDialog-styled card of
+/// check rows. Tapping a row closes the card. The owner presents the card at
+/// the screen root with `.phrenSingleSelectSheet`, the same contract as
+/// `phrenMultiSelectSheet`, so its scrim covers the screen.
+struct PhrenSingleSelect<Value: Hashable>: View {
+    let options: [PhrenOption<Value>]
+    @Binding var selection: Value
+    /// Shown when the selection names no option (including the empty start).
+    var placeholder: String
+    let identifier: String
+    @Binding var isPresented: Bool
+    @Environment(\.isEnabled) private var isEnabled
+
+    private var chosen: PhrenOption<Value>? { options.first { $0.value == selection } }
+    private var summary: String { chosen?.title ?? placeholder }
+
+    var body: some View {
+        Button { isPresented = true } label: {
+            HStack(spacing: PhrenTheme.Space.xs) {
+                Text(summary).font(PhrenTypography.subheadline.weight(.medium))
+                    .lineLimit(1).truncationMode(.middle)
+                    .foregroundStyle(chosen == nil ? PhrenTheme.textMuted : PhrenTheme.text)
+                Image(systemName: "chevron.down")
+                    .font(PhrenTypography.icon(9, weight: .semibold)).accessibilityHidden(true)
+            }
+            .foregroundStyle(isEnabled ? PhrenTheme.text : PhrenTheme.textMuted)
+            .padding(.horizontal, PhrenTheme.Space.medium)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .background(PhrenTheme.surfaceRaised, in: Capsule())
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .opacity(isEnabled ? 1 : 0.45)
+        .accessibilityLabel(placeholder)
+        .accessibilityValue(summary)
+        .phrenIdentifier(identifier)
+    }
+}
+
+/// The card `PhrenSingleSelect` opens: one check `PhrenOptionRow` per option
+/// and a Done row. A row choice commits and dismisses. While `loading` is
+/// true the rows are replaced by one muted row. `message` carries a listed
+/// but unavailable note (an offline computer); `footer` an owner control
+/// below the options (the chat picker's custom id field). Rows identify as
+/// `rowPrefix:option.id`; Done is `rowPrefix-done`.
+struct PhrenSingleSelectSheet<Value: Hashable>: View {
+    let title: String
+    let options: [PhrenOption<Value>]
+    @Binding var selection: Value
+    let rowPrefix: String
+    var loading = false
+    var loadingLabel = "Loading…"
+    var message: String? = nil
+    var footer: AnyView? = nil
+    /// Runs after the selection is set, before the card dismisses.
+    var onSelect: ((Value) -> Void)? = nil
+    let dismiss: () -> Void
+    @AccessibilityFocusState private var titleFocused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: PhrenTheme.Space.medium) {
+            Text(title).font(PhrenTypography.subheadline.weight(.semibold))
+                .accessibilityAddTraits(.isHeader).accessibilityFocused($titleFocused)
+            ScrollView {
+                VStack(spacing: PhrenTheme.Space.small) {
+                    if loading {
+                        PhrenOptionRow(title: loadingLabel, disabled: true, muted: true) {}
+                            .phrenIdentifier("\(rowPrefix)-loading")
+                    } else {
+                        if let message {
+                            PhrenOptionRow(title: message, disabled: true, muted: true) {}
+                                .phrenIdentifier("\(rowPrefix)-message")
+                        }
+                        ForEach(options) { option in
+                            PhrenOptionRow(title: option.title, caption: option.caption,
+                                           selected: selection == option.value, mark: .check,
+                                           disabled: !option.isEnabled, icon: option.icon,
+                                           glyph: option.glyph, trailing: option.trailing,
+                                           muted: option.muted) {
+                                select(option)
+                            }
+                            .phrenIdentifier("\(rowPrefix):\(option.id)")
+                        }
+                    }
+                }
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            if let footer { footer }
+            Button(action: dismiss) {
+                Text("Done").font(PhrenTypography.body.weight(.medium))
+                    .foregroundStyle(PhrenTheme.accent)
+                    .padding(.horizontal, PhrenTheme.Space.medium)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .background(PhrenTheme.surfaceRaised,
+                                in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.questionOption))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).phrenIdentifier("\(rowPrefix)-done")
+        }
+        .padding(PhrenTheme.Space.large)
+        .frame(maxWidth: 360)
+        .background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.large))
+        .clipShape(RoundedRectangle(cornerRadius: PhrenTheme.Radius.large))
+        .accessibilityElement(children: .contain).accessibilityAddTraits(.isModal)
+        .accessibilityAction(.escape, dismiss)
+        .phrenContainerMarker("\(rowPrefix)-sheet", label: title)
+        .onAppear { titleFocused = true }
+    }
+
+    private func select(_ option: PhrenOption<Value>) {
+        guard option.isEnabled else { return }
+        selection = PhrenOptionSelection.single(option.value, in: options, current: selection)
+        onSelect?(option.value)
+        dismiss()
+    }
+}
+
+private struct PhrenSingleSelectModifier<Value: Hashable>: ViewModifier {
+    @Binding var isPresented: Bool
+    let title: String
+    let options: [PhrenOption<Value>]
+    @Binding var selection: Value
+    let rowPrefix: String
+    let loading: Bool
+    let loadingLabel: String
+    let message: String?
+    let footer: AnyView?
+    let onSelect: ((Value) -> Void)?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content
+            .allowsHitTesting(!isPresented).accessibilityHidden(isPresented)
+            .overlay {
+                if isPresented {
+                    GeometryReader { geometry in
+                        ZStack {
+                            Color.black.opacity(0.5).ignoresSafeArea().contentShape(Rectangle())
+                                .onTapGesture { isPresented = false }
+                                .accessibilityHidden(true)
+                            PhrenSingleSelectSheet(title: title, options: options, selection: $selection,
+                                                   rowPrefix: rowPrefix, loading: loading,
+                                                   loadingLabel: loadingLabel, message: message,
+                                                   footer: footer, onSelect: onSelect,
+                                                   dismiss: { isPresented = false })
+                                .frame(maxWidth: 360, maxHeight: max(44, geometry.size.height - 32))
+                                .padding(PhrenTheme.Space.large)
+                                .transition(.opacity)
+                        }
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                    }
+                    .zIndex(1)
+                }
+            }
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: isPresented)
+    }
+}
+
+extension View {
+    func phrenSingleSelectSheet<Value: Hashable>(isPresented: Binding<Bool>, title: String,
+                                                 options: [PhrenOption<Value>], selection: Binding<Value>,
+                                                 rowPrefix: String, loading: Bool = false,
+                                                 loadingLabel: String = "Loading…", message: String? = nil,
+                                                 footer: AnyView? = nil,
+                                                 onSelect: ((Value) -> Void)? = nil) -> some View {
+        modifier(PhrenSingleSelectModifier(isPresented: isPresented, title: title, options: options,
+                                           selection: selection, rowPrefix: rowPrefix, loading: loading,
+                                           loadingLabel: loadingLabel, message: message, footer: footer,
+                                           onSelect: onSelect))
     }
 }
 

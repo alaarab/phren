@@ -49,6 +49,8 @@ lock screen and Changes screen done properly.
 
 ### Changed
 
+- The schedule editor, the chat /model picker and the launch computer chooser pick
+  from phren's own drop-down rows instead of long option lists.
 - Account usage is rebuilt around what each source means: one updated line with the
   reporting computers, Claude and Codex limits with phren's own bars and reset captions,
   OpenCode Go per model with a billed chip, OpenCode marked as an estimate, and
@@ -118,6 +120,8 @@ lock screen and Changes screen done properly.
 
 ### Fixed
 
+- Sending no longer throws the transcript past its end: the scroll waits for the new
+  row and the keyboard, and holds its target to the content end.
 - The project dossier in the memory graph is a dialog again for assistive tech.
 - Project cards keep their compact two-line height with the themed project colour.
 - Task details keep the agent action visible above long plans.

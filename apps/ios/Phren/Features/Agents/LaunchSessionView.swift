@@ -17,6 +17,7 @@ struct LaunchSessionView: View {
     @AppStorage("sessions.live.preferences.v1") private var data = Data()
     @AppStorage("launch.kind.v1") private var kind = "codex"
     @State private var hostID: UUID?
+    @State private var showComputers = false
     @State private var folder = ""
     @State private var folderEdited = false
     @State private var computerNames: [UUID: String] = [:]
@@ -55,6 +56,14 @@ struct LaunchSessionView: View {
     private var hosts: [LiveHost] { preferences?.hosts ?? [] }
     private var registry: MachineRegistry { model.machineRegistry(storeId: storeID) }
     private var selectedHost: LiveHost? { hosts.first { $0.id == hostID } }
+    private var computerOptions: [PhrenOption<UUID?>] {
+        hosts.map { host in
+            PhrenOption(id: host.id.uuidString, value: host.id, title: host.name,
+                        caption: knowsProject(host) ? "has \(project)"
+                            : (host.fingerprint == nil ? "finish verifying in Agents" : nil),
+                        icon: "desktopcomputer")
+        }
+    }
 
     /// The store knows this computer has the project, by the name the
     /// computer gives itself (from the Hook), or by how it was saved here.
@@ -99,25 +108,10 @@ struct LaunchSessionView: View {
                 Section {
                     if hosts.isEmpty {
                         Text("Connect a computer in Agents first. Phren Hook on it creates the workspace.").foregroundStyle(PhrenTheme.textMuted)
-                    }
-                    ForEach(hosts) { host in
-                        Button { select(host) } label: {
-                            HStack(spacing: 10) {
-                                Image(systemName: "desktopcomputer").foregroundStyle(PhrenTheme.textMuted)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(host.name).foregroundStyle(PhrenTheme.text)
-                                    if knowsProject(host) {
-                                        Text("has \(project)").font(.caption).foregroundStyle(PhrenTheme.success)
-                                    } else if host.fingerprint == nil {
-                                        Text("finish verifying in Agents").font(.caption).foregroundStyle(PhrenTheme.warning)
-                                    }
-                                }
-                                Spacer()
-                                if host.id == hostID { Image(systemName: "checkmark").foregroundStyle(PhrenTheme.cyan) }
-                            }
-                        }
-                        .accessibilityIdentifier("launch-computer:\(host.id)")
-                        .accessibilityAddTraits(host.id == hostID ? .isSelected : [])
+                    } else {
+                        PhrenSingleSelect(options: computerOptions, selection: $hostID,
+                                          placeholder: "Choose a computer", identifier: "launch-computer",
+                                          isPresented: $showComputers)
                     }
                 } header: { Text("Computer") }
 
@@ -239,6 +233,9 @@ struct LaunchSessionView: View {
             .onChange(of: kind) { _, newKind in modelName = storedModel(newKind) }
             .onChange(of: modelName) { _, newValue in UserDefaults.standard.set(newValue, forKey: "launch.model.\(kind)") }
         }
+        .phrenSingleSelectSheet(isPresented: $showComputers, title: "Computer", options: computerOptions,
+                                selection: $hostID, rowPrefix: "launch-computer",
+                                onSelect: { id in if let host = hosts.first(where: { $0.id == id }) { select(host) } })
     }
 
     /// Pre-select the first computer the store says has the project, and

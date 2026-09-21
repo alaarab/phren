@@ -1554,7 +1554,7 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(app.buttons["chat-options-model"].waitForExistence(timeout: 5))
         app.buttons["chat-options-model"].tap()
         XCTAssertTrue(app.buttons["chat-model:gpt-5.6-sol"].waitForExistence(timeout: 5))
-        app.buttons["chat-model-cancel"].tap()
+        app.buttons["chat-model-done"].tap()
     }
 
     @MainActor
