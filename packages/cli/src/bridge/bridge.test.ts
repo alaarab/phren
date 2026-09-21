@@ -17,6 +17,7 @@ import { planAgentHooks, upgradeKeys } from "./install.js";
 import { locateProject } from "./locate.js";
 import { repositoryBranch, repositoryDiff } from "./projects.js";
 import { object } from "./protocol.js";
+import { herdrAgentName } from "./server.js";
 import { historicalImage, phrenStoreRoot, TranscriptReader, transcriptPath, visibleEvent } from "./transcripts.js";
 import { dispatch } from "./transport.js";
 import { enrollComputer, publicComputerKey } from "./computers.js";
@@ -29,6 +30,14 @@ const row = (text: string) => ({ type: "response_item", payload: { type: "messag
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 describe("Phren Hook boundaries", () => {
+  it("derives a Herdr agent name from a human label", () => {
+    expect(herdrAgentName("Conductor smoke 4")).toBe("conductor-smoke-4");
+    expect(herdrAgentName("  42 fix the queue strip, remove & send now  ")).toBe("fix-the-queue-strip-remove-send");
+    expect(herdrAgentName("phren")).toBe("phren");
+    expect(herdrAgentName("!!!")).toBe("agent");
+    expect(herdrAgentName("a".repeat(50))).toHaveLength(32);
+  });
+
   it("expires overview approval watches and isolates servers", () => {
     let now = 100;
     const leases = new ApprovalWatchLeases(() => now);
@@ -636,7 +645,7 @@ schedules:
     expect(launched.status, JSON.stringify(launched.data)).toBe(200);
     expect(launched.data).toMatchObject({ workspaceId: "w1", tabId: "w1:t2", paneId: "w1:p2", agent: "codex" });
     expect(commands.find(c => c.method === "tab.create")?.params).toMatchObject({ workspace_id: "w1", label: "second", cwd: await realpathAsync(root) });
-    expect(commands.find(c => c.method === "agent.start")?.params).toMatchObject({ name: "Codex here", pane_id: "w1:p2", timeout_ms: 3_000 });
+    expect(commands.find(c => c.method === "agent.start")?.params).toMatchObject({ name: "codex-here", pane_id: "w1:p2", timeout_ms: 3_000 });
   });
   it("reports a failed agent start without hiding the workspace it created", async () => {
     failAgentStart = true;
