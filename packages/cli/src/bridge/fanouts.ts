@@ -140,8 +140,29 @@ async function regularContainedFile(root: string, candidate: string, maxBytes: n
 
 async function readBlocked(jobRoot: string): Promise<Blocked | undefined> {
   const file = await regularContainedFile(jobRoot, path.join(jobRoot, "blocked.json"), MAX_BLOCKED_BYTES);
+  if (file) {
+    try { return blockedSchema.parse(JSON.parse(await readFile(file, "utf8"))); } catch { /* fall through to stderr */ }
+  }
+  return readRefusedFromStderr(jobRoot);
+}
+
+/** OpenCode refuses some permissions itself in headless runs, before any
+ * plugin sees them, and only says so on stderr: `permission requested:
+ * <type> (<pattern>); auto-rejecting`. The launcher captures stderr into the
+ * job directory, so that line is the evidence when blocked.json is absent. */
+const REFUSED_LINE = /permission requested: ([a-z_]+) \(([^)]*)\); auto-rejecting/;
+async function readRefusedFromStderr(jobRoot: string): Promise<Blocked | undefined> {
+  const file = await regularContainedFile(jobRoot, path.join(jobRoot, "stderr.log"), 4 * 1024 * 1024);
   if (!file) return undefined;
-  try { return blockedSchema.parse(JSON.parse(await readFile(file, "utf8"))); } catch { return undefined; }
+  try {
+    const text = await readFile(file, "utf8");
+    const tail = text.slice(-16_384);
+    const matches = [...tail.matchAll(new RegExp(REFUSED_LINE.source, "g"))];
+    const last = matches[matches.length - 1];
+    if (!last) return undefined;
+    const at = (await stat(file)).mtime.toISOString();
+    return { type: last[1], pattern: last[2].slice(0, 500), message: `${last[1]}: ${last[2]}`.slice(0, 600), at };
+  } catch { return undefined; }
 }
 
 export function blockedReason(value: Blocked): string {

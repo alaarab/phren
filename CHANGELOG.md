@@ -29,6 +29,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- A fan-out worker that OpenCode itself refused a permission for (headless runs reject
+  external_directory and doom_loop before any plugin runs) is reported as failed with
+  the reason read from the job's stderr, instead of completed.
 - Choosing Full Access under Codex's `/permissions` no longer leaves the
   terminal sitting on "Enable full access?". The Hook's menu walk reads the
   pane's terminal lines for that second confirmation, answers it with `1` then
