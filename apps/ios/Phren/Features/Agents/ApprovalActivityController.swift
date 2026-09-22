@@ -120,7 +120,8 @@ final class ApprovalActivityController {
             }
             #endif
             try await PhrenConnection.answerApproval(host: record.host, privateKey: DeviceSSHKey.load(record.host.id),
-                                                    target: record.target, actionID: record.actionID, approve: approve)
+                                                    target: record.target, actionID: record.actionID, approve: approve,
+                                                    decision: approve ? .approve : .deny)
             message = approve ? "Approval sent." : "Denial sent."
         } catch {
             await end([requestID])

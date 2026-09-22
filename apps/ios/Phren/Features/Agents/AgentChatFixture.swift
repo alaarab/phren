@@ -8,6 +8,14 @@ import UIKit
 @MainActor enum AgentChatFixture {
     static var enabled: Bool { AppModel.isUITesting && ProcessInfo.processInfo.arguments.contains("--native-chat-fixture") }
     static var schedulesEnabled: Bool { AppModel.isUITesting && ProcessInfo.processInfo.arguments.contains("--schedules-fixture") }
+    static var grantsEnabled: Bool { AppModel.isUITesting && ProcessInfo.processInfo.arguments.contains("--conductor-grants-fixture") }
+    /// Two standing conductor grants for the grants screen: one global
+    /// dispatch, one project-scoped dispatch+hand off with an expiry.
+    static let fixtureGrants: [ConductorGrant] = (try? [
+        ConductorGrant(scope: "global", actions: [.dispatch]),
+        ConductorGrant(scope: "project:phone", actions: [.dispatch, .handOff],
+                       computers: ["Desk"], until: "2026-12-01T09:30:00Z"),
+    ]) ?? []
     static var sent: [(String, String)] = []
     static var startingAttachedAt: Date?
     static let startingToken = String(repeating: "a", count: 64)

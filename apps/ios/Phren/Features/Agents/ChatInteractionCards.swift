@@ -6,7 +6,7 @@ struct ChatApprovalCard<Terminal: View>: View {
     let approval: AgentApproval
     let busy: Bool
     @ViewBuilder let terminal: () -> Terminal
-    let answer: (Bool) -> Void
+    let answer: (ApprovalDecision) -> Void
     @Environment(\.dynamicTypeSize) private var typeSize
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -22,6 +22,7 @@ struct ChatApprovalCard<Terminal: View>: View {
                 }
             }
             terminal().buttonStyle(.bordered).frame(maxWidth: .infinity)
+            if approval.conductor != nil { grantAnswers }
             if typeSize.isAccessibilitySize {
                 VStack(spacing: 12) { deny; approve }.disabled(busy)
             } else {
@@ -30,13 +31,30 @@ struct ChatApprovalCard<Terminal: View>: View {
             if busy { ProgressView() }
         }.padding(12).phrenCard().accessibilityElement(children: .contain)
     }
+    /// Grant-scoped answers the Hook writes into `conductor.yaml` while still
+    /// approving this call. "Allow for this project" is hidden when the call
+    /// has no project to scope a grant to.
+    @ViewBuilder private var grantAnswers: some View {
+        if let conductor = approval.conductor {
+            VStack(spacing: 8) {
+                if conductor.project != nil {
+                    Button { answer(.allowProject) } label: {
+                        Text("Allow for this project").lineLimit(1).frame(maxWidth: .infinity, minHeight: 32)
+                    }.buttonStyle(.bordered).accessibilityIdentifier("chat-approval-allow-project")
+                }
+                Button { answer(.allowEverywhere) } label: {
+                    Text("Allow everywhere").lineLimit(1).frame(maxWidth: .infinity, minHeight: 32)
+                }.buttonStyle(.bordered).accessibilityIdentifier("chat-approval-allow-everywhere")
+            }.disabled(busy)
+        }
+    }
     private var deny: some View {
-        Button(role: .destructive) { answer(false) } label: {
+        Button(role: .destructive) { answer(.deny) } label: {
             Text("Deny").lineLimit(1).frame(maxWidth: .infinity, minHeight: 32)
         }.buttonStyle(.bordered).accessibilityIdentifier("chat-approval-deny")
     }
     private var approve: some View {
-        Button { answer(true) } label: {
+        Button { answer(.approve) } label: {
             Text("Approve").lineLimit(1).frame(maxWidth: .infinity, minHeight: 32)
         }.buttonStyle(.borderedProminent).tint(PhrenTheme.cyan).accessibilityIdentifier("chat-approval-approve")
     }

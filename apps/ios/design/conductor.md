@@ -165,6 +165,32 @@ header, `launch-role*` and `launch-effort*` above. One UI test: launch a
 conductor with the fixture, see the card pinned with the mark, open its
 chat, see the header mark. No accessibility-size tests.
 
+## Grants
+
+Standing conductor authorizations live in the Hook's `conductor.yaml` and are
+reached from the conductor chat's ellipsis sheet: a **Grants** link, shown only
+for a conductor session, opens a list of rows. Each row reads the scope
+("Everywhere" or the project name), one PhrenChip per action ("Dispatch",
+"Hand off"), the computers (or "Any computer") and the expiry, or "Until
+revoked". An **Add grant** row opens a PhrenScreen editor with scope (Everywhere
+or a project), actions, optional computers and an optional `PhrenDateField`
+expiry; Save posts to `/v1/conductor/grants`. Each grant's **Revoke** button
+opens a confirm dialog before DELETE by list index.
+
+Ids: `conductor-grant:<n>` on each row, `conductor-grant-add` on the add row,
+`conductor-grant-revoke:<n>` on each revoke button, and
+`conductor-grant-add-cancel` / `conductor-grant-add-save` from
+`PhrenSheetHeader`'s identifier prefix.
+
+A conductor approval card whose Hook payload carries `conductor` also shows
+**Allow for this project** (`chat-approval-allow-project`, hidden when the
+call has no project) and **Allow everywhere**
+(`chat-approval-allow-everywhere`) above Approve and Deny. Both approve this
+call and write the grant through the Hook's `answer` path.
+
+Fixture: `--conductor-grants-fixture` supplies two grants (one global
+dispatch, one `project:phone` dispatch + hand off on Desk with an expiry).
+
 ### Siri and the Action button (owner, September 21; stage three)
 
 One App Intent, `TellConductorIntent`, with a spoken `message` parameter:

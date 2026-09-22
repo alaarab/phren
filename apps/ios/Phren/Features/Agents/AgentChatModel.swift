@@ -561,23 +561,27 @@ final class AgentChatModel {
     }
 
     /// `updatedInput` answers a Claude AskUserQuestion approval: its own input
-    /// plus the chosen answers, sent with the approval.
-    func answer(_ session: LiveAgentSession, approval expected: AgentApproval? = nil, approve: Bool = false, updatedInput: [String: Any]? = nil,
+    /// plus the chosen answers, sent with the approval. `decision` is the
+    /// Hook's effective answer when a conductor call offers grant-scoped
+    /// allows; a plain approve/deny is derived from `approve` otherwise.
+    func answer(_ session: LiveAgentSession, approval expected: AgentApproval? = nil, approve: Bool = false,
+                decision: ApprovalDecision? = nil, updatedInput: [String: Any]? = nil,
                 question prompt: AgentQuestionPrompt? = nil, selections: [[Int]] = [], answers: [AgentQuestionAnswer]? = nil) async {
         guard !answering, !sending, let target else { return }
         guard (expected != nil && expected == approval && interactionConnected)
             || (prompt != nil && prompt == question && canAnswerQuestion && connected) else { return }
+        let effective = decision ?? (approve ? .approve : .deny)
         answering = true; deliveryError = nil
         defer { answering = false }
         if let expected { await ApprovalActivityController.shared.answered(target: target, actionID: expected.id) }
         do {
             #if DEBUG && targetEnvironment(simulator)
             if AgentChatFixture.enabled {
-                AgentChatFixture.answered = true; AgentChatFixture.denied = expected != nil && !approve
+                AgentChatFixture.answered = true; AgentChatFixture.denied = expected != nil && !effective.allows
                 AgentChatFixture.answeredInput = updatedInput
-            } else { try await submitAnswer(session, target: target, approval: expected, approve: approve, updatedInput: updatedInput, question: prompt, selections: selections, answers: answers) }
+            } else { try await submitAnswer(session, target: target, approval: expected, decision: effective, updatedInput: updatedInput, question: prompt, selections: selections, answers: answers) }
             #else
-            try await submitAnswer(session, target: target, approval: expected, approve: approve, updatedInput: updatedInput, question: prompt, selections: selections, answers: answers)
+            try await submitAnswer(session, target: target, approval: expected, decision: effective, updatedInput: updatedInput, question: prompt, selections: selections, answers: answers)
             #endif
             guard self.target == target else { return }
             if approval?.id == expected?.id { approval = nil }
@@ -589,10 +593,10 @@ final class AgentChatModel {
             deliveryError = "Answer wasn't confirmed. Check the conversation or terminal before answering again. Phren hasn't retried it."
         }
     }
-    private func submitAnswer(_ session: LiveAgentSession, target: AgentChatTarget, approval: AgentApproval?, approve: Bool, updatedInput: [String: Any]?,
+    private func submitAnswer(_ session: LiveAgentSession, target: AgentChatTarget, approval: AgentApproval?, decision: ApprovalDecision, updatedInput: [String: Any]?,
                               question: AgentQuestionPrompt?, selections: [[Int]], answers: [AgentQuestionAnswer]?) async throws {
         let key = try DeviceSSHKey.load(session.host.id)
-        if let approval { try await PhrenConnection.answerApproval(host: session.host, privateKey: key, target: target, actionID: approval.actionId, approve: approve, updatedInput: updatedInput) }
+        if let approval { try await PhrenConnection.answerApproval(host: session.host, privateKey: key, target: target, actionID: approval.actionId, approve: decision.allows, decision: decision, updatedInput: updatedInput) }
         else if let question { try await PhrenConnection.answerQuestions(host: session.host, privateKey: key, target: target, prompt: question, answers: answers ?? selections.map { AgentQuestionAnswer(selections: $0) }) }
     }
 

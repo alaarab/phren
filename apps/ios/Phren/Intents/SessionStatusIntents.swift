@@ -245,7 +245,8 @@ struct SessionApprovalIntent: AppIntent {
             }
             #endif
             try await PhrenConnection.answerApproval(host: record.host, privateKey: DeviceSSHKey.load(record.host.id),
-                                                     target: record.target, actionID: record.actionID, approve: decision)
+                                                     target: record.target, actionID: record.actionID, approve: decision,
+                                                     decision: decision ? .approve : .deny)
         }
         return .result(dialog: approve ? "Approved." : "Rejected.")
     }

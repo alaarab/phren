@@ -484,9 +484,10 @@ struct AgentChatView: View {
                 // the request's own input plus the answers; Skip denies.
                 ChatQuestionCard(prompt: prompt, busy: model.answering || !active || !model.interactionConnected,
                                  title: "\(model.target?.providerName ?? "Claude") has a question", allowsTyping: true,
-                                 skip: { sendTask = Task { await model.answer(session, approval: approval, approve: false) } }) { answers in
+                                 skip: {                     sendTask = Task { await model.answer(session, approval: approval, approve: false) }
+                }) { answers in
                     guard let updated = try? prompt.answeredInput(input, answers: answers) else { return }
-                    sendTask = Task { await model.answer(session, approval: approval, approve: true, updatedInput: updated) }
+                    sendTask = Task { await model.answer(session, approval: approval, decision: .approve, updatedInput: updated) }
                 }
                 .id(approval.id)
                 .padding(.horizontal, 12).padding(.vertical, 6)
@@ -494,7 +495,7 @@ struct AgentChatView: View {
                 // Claude Code's plan review is a permission request for
                 // ExitPlanMode: Approve plan builds it, Keep planning denies.
                 ChatPlanApprovalCard(plan: plan, id: approval.id, busy: model.answering || !active || !model.interactionConnected) { approve in
-                    sendTask = Task { await model.answer(session, approval: approval, approve: approve) }
+                    sendTask = Task { await model.answer(session, approval: approval, decision: approve ? .approve : .deny) }
                 }
                 .id(approval.id)
                 .padding(.horizontal, 12).padding(.vertical, 6)
@@ -513,8 +514,8 @@ struct AgentChatView: View {
                     NavigationLink { HerdrTerminalView(host: session.host, session: session, target: model.target) } label: {
                         Label("Open terminal", systemImage: "terminal").frame(maxWidth: .infinity, minHeight: 32)
                     }.accessibilityIdentifier("chat-approval-terminal")
-                } answer: { approve in
-                    sendTask = Task { await model.answer(session, approval: approval, approve: approve) }
+                } answer: { decision in
+                    sendTask = Task { await model.answer(session, approval: approval, decision: decision) }
                 }
                 .id(approval.id)
                 .padding(.horizontal, 12).padding(.vertical, 6)
@@ -1085,6 +1086,12 @@ struct AgentChatView: View {
             PhrenList {
                 Section {
                     NavigationLink { HerdrWorkspacesView(hostID: session.host.id) } label: { Label("Herdr workspaces", systemImage: "rectangle.split.3x1") }
+                    if session.tab.isConductor {
+                        NavigationLink {
+                            ConductorGrantsView(host: session.host, storeId: project?.storeID ?? appModel.storeDescriptors.first?.id)
+                        } label: { Label("Grants", systemImage: "checkmark.seal") }
+                        .accessibilityIdentifier("chat-options-grants")
+                    }
                     if model.panes.filter({ (try? $0.target(hostID: session.host.id, workspaceID: session.workspaceID, tabID: session.tab.id, muxID: session.host.muxID)) != nil }).count > 1 {
                         Button { afterOptions { model.chooseAnother(); refresh = UUID() } } label: { Label("Choose another agent", systemImage: "person.2") }
                             .disabled(model.sending)

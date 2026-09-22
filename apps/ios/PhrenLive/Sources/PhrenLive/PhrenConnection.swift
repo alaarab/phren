@@ -256,7 +256,7 @@ final class GatewayResponse: ChannelInboundHandler {
             headers.add(name: "Content-Type", value: "application/json")
             headers.add(name: "Content-Length", value: String(body.count))
         }
-        let head = HTTPRequestHead(version: .http1_1, method: request.body == nil ? .GET : .POST, uri: request.path, headers: headers)
+        let head = HTTPRequestHead(version: .http1_1, method: gatewayMethod(request), uri: request.path, headers: headers)
         context.write(wrapOutboundOut(.head(head)), promise: nil)
         if let body = request.body {
             context.write(wrapOutboundOut(.body(.byteBuffer(ByteBuffer(bytes: body)))), promise: nil)
@@ -301,6 +301,16 @@ final class GatewayResponse: ChannelInboundHandler {
     }
     func errorCaught(context: ChannelHandlerContext, error: Error) { exchange.finish(.failure(error)) }
     func channelInactive(context: ChannelHandlerContext) { exchange.finish(.failure(LiveConnectionError.disconnected)) }
+
+    private func gatewayMethod(_ request: GatewayRequest) -> HTTPMethod {
+        switch request.method {
+        case "GET": return .GET
+        case "POST": return .POST
+        case "DELETE": return .DELETE
+        case nil: return request.body == nil ? .GET : .POST
+        default: return request.body == nil ? .GET : .POST
+        }
+    }
 
     private func launchConflictTarget(_ value: [String: Any]?) -> LiveLaunchConflictTarget? {
         guard let value,

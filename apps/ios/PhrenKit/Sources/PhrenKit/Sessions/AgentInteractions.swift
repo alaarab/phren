@@ -9,6 +9,9 @@ public struct AgentApproval: Decodable, Equatable, Sendable, Identifiable {
     /// A Codex approval that is really a terminal dialog: the Hook read the
     /// command and its option list, so the phone can ask it as a question.
     public let choice: AgentPromptChoice?
+    /// Present when this permission ask is a conductor dispatch or hand-off:
+    /// the card can offer the Hook's grant-scoped answers.
+    public let conductor: ConductorCall?
     public var id: String { actionId }
 
     public var expiration: Date? {

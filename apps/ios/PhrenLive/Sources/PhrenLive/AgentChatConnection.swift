@@ -205,6 +205,8 @@ extension PhrenConnection {
 struct GatewayRequest: Sendable {
     var path: String
     var body: Data? = nil
+    /// HTTP method override. Nil derives GET from an empty body and POST otherwise.
+    var method: String? = nil
     var maximumResponseBytes = 1_048_576
     var webSocket = false
     var streaming = false

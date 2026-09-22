@@ -25,6 +25,11 @@ lock screen and Changes screen done properly.
 
 - Conductor is a launch role with its own provider, model and effort choice,
   a pinned dispatch-marked session card, and matching chat and Lock Screen identity.
+- Grants: a conductor's standing dispatch and hand-off authorizations open
+  from the chat options as a list of scope, action and computer rows, with
+  add and revoke. A conductor permission card also offers "Allow for this
+  project" and "Allow everywhere", which approve the call and write the
+  matching grant on the computer.
 
 - Code: the project page's Code cell opens a symbol search over the computer's
   code index, with the hottest and coldest symbols when no query is typed. Tap a

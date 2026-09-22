@@ -53,13 +53,16 @@ extension PhrenConnection {
 
     /// `updatedInput` answers Claude Code's AskUserQuestion: the request's own
     /// input plus `answers` (see `AgentQuestionPrompt.answeredInput`), sent
-    /// only with an approval.
+    /// only with an approval. `decision` is the Hook's effective answer: a
+    /// plain approve/deny, or a grant-scoped allow that still approves.
     public static func answerApproval(host: LiveHost, privateKey: Data, target: AgentChatTarget, actionID: String, approve: Bool,
+                                      decision: ApprovalDecision? = nil,
                                       updatedInput: [String: Any]? = nil) async throws {
         guard !actionID.isEmpty, actionID.utf8.count <= 512 else { throw PhrenKitError.validation("Refresh the approval.") }
-        var fields: [String: Any] = ["source": target.source, "sessionId": target.sessionID, "actionId": actionID, "decision": approve ? "approve" : "deny"]
+        let effective = decision ?? (approve ? .approve : .deny)
+        var fields: [String: Any] = ["source": target.source, "sessionId": target.sessionID, "actionId": actionID, "decision": effective.rawValue]
         if let updatedInput {
-            guard approve, updatedInput["answers"] is [String: Any] else { throw PhrenKitError.validation("Answer the question before sending.") }
+            guard effective.allows, updatedInput["answers"] is [String: Any] else { throw PhrenKitError.validation("Answer the question before sending.") }
             let bytes = try JSONSerialization.data(withJSONObject: updatedInput)
             guard bytes.count <= 32_768 else { throw PhrenKitError.validation("The answer is too long.") }
             fields["updatedInput"] = updatedInput
