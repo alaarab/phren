@@ -85,9 +85,11 @@ private struct ChatTranscriptRow: View, Equatable {
 }
 
 private struct ChatMessageRow<Historical: View>: View {
-    @Environment(\.openToolOutput) private var openOutput
     let message: AgentChatMessage
     var revealedText: String? = nil
+    /// A long reply unfolds in place, rendered like the rest of the bubble;
+    /// the monospace pager is for tool output, not for prose (owner, Sep 21).
+    @State private var expanded = false
     let images: [ChatAttachmentDraft]
     let preview: (ChatAttachmentDraft) -> Void
     @ViewBuilder let historical: () -> Historical
@@ -137,12 +139,14 @@ private struct ChatMessageRow<Historical: View>: View {
                 let text = displayText
                 if !text.isEmpty && !(text == "[Image attachment]" && inlineImages) {
                     let preview = ToolOutputPreview(text, lines: 40, characters: 6_000)
-                    ChatRichText(text: preview.text, reply: text, messageID: message.id,
+                    ChatRichText(text: expanded ? text : preview.text, reply: text, messageID: message.id,
                                  replyLabel: message.role == .user ? "Copy message" : "Copy reply",
-                                 cacheKey: richTextCacheKey).equatable()
+                                 cacheKey: expanded ? richTextCacheKey + ":full" : richTextCacheKey).equatable()
                     if preview.truncated {
-                        Button("Read full message") { openOutput(.init(title: message.role == .user ? "Your message" : "Agent reply", text: text)) }
-                            .font(.caption).accessibilityIdentifier("chat-message-full:\(message.id)")
+                        Button(expanded ? "Show less" : "Show more") { withAnimation(.easeInOut(duration: 0.18)) { expanded.toggle() } }
+                            .font(.caption).foregroundStyle(PhrenTheme.accent)
+                            .frame(minHeight: 44, alignment: .leading)
+                            .accessibilityIdentifier("chat-message-full:\(message.id)")
                     }
                 }
                 if revealedText != nil {

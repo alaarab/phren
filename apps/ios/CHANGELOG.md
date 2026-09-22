@@ -13,6 +13,8 @@ lock screen and Changes screen done properly.
 
 ### Fixed
 
+- A long reply unfolds in place with Show more, rendered like the rest of the bubble,
+  instead of opening the monospace pager meant for tool output.
 - A Codex queued follow-up question waiting in the terminal now opens as the
   chat's question card: the Hook reads its text and options from the thread
   store, the card lists them, and Send presses alt+up (Codex's queue binding)
