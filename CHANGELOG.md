@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- Hook: the Claude live preview also skips a running tool group ("⏺ Running 2 agents…") and its sub-agent tree.
 - Conductor: new `live_sessions` MCP tool and `phren dispatch sessions` list live agents on this and every enrolled computer, with the target `hand_off` takes. The conductor brief now names the whole store as its scope and lists its tools, so it stops probing the CLI. A conductor labeled "Conductor" is named `conductor` in Herdr, not `conductor-conductor`.
 - Hook: a conductor is recognized by the name Herdr keeps in its `agents` list as well as on the pane, so it pins to the top of Agents again and a second conductor is refused.
 - Hook: a Claude conductor reads its brief with `--append-system-prompt-file` (Herdr refuses a multi-line argument for zsh); the Claude live preview also skips collapsed tool groups (a `⏺` line followed by `⎿`) and stops at the input box's titled rule.
