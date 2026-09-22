@@ -109,6 +109,30 @@ export function visibleTerminalChoice(text: string): TerminalChoice | undefined 
   if (!title && !options.length) return undefined;
   return { ...(title ? { title: title.slice(0, 4_000) } : {}), options: options.slice(0, 12) };
 }
+/** The numbered dialog Claude Code and opencode draw straight in the pane when
+ * a permission ask falls back to the terminal (no PermissionRequest hook
+ * fires): the last non-empty line above the first "1." row is the question,
+ * each row is an option keyed by its own number with its text cut at the first
+ * " · ", and a footer offering "Esc to cancel" gains the Escape option.
+ * Undefined without two numbered rows and a question. */
+function numberedDialog(text: string): TerminalChoice | undefined {
+  const row = /^\s*[>❯]?\s*(\d+)\.\s+(.+?)\s*$/;
+  const lines = text.split(/\r?\n/);
+  const first = lines.findIndex(line => row.test(line));
+  if (first < 0) return undefined;
+  const title = lines.slice(0, first).map(line => line.trim()).filter(Boolean).pop();
+  if (!title) return undefined;
+  const options: TerminalChoiceOption[] = [];
+  for (const line of lines.slice(first)) {
+    const match = row.exec(line);
+    if (!match) continue;
+    const label = match[2].split(" · ")[0].trim();
+    if (label) options.push({ label, key: match[1] });
+  }
+  if (options.length < 2) return undefined;
+  if (lines.some(line => line.includes("Esc to cancel"))) options.push({ label: "Cancel", key: "Escape" });
+  return { title: title.slice(0, 4_000), options: options.slice(0, 12) };
+}
 /** Read the question a terminal dialog is asking from the request it carries:
  * an explicit options list, or numbered lines inside its text. Undefined when
  * there are not at least two answerable choices. */
@@ -237,8 +261,12 @@ export class AgentHooks {
   private deliveries = new Map<string, Delivery[]>();
   /** The permission request a conversation is drawing in its own terminal
    * because nobody was there to hold it: what the phone shows above its
-   * answer keys until the pane stops waiting. */
-  private terminalPrompts = new Map<string, { tool: string; message: string; choice?: TerminalChoice; at: number }>();
+   * answer keys until the pane stops waiting. `dialog` marks a choice parsed
+   * from the pane's own numbered lines, whose answers gain an Enter. */
+  private terminalPrompts = new Map<string, { tool: string; message: string; choice?: TerminalChoice; dialog?: boolean; at: number }>();
+  /** The last time each pane's terminal lines were read for a dialog, so a
+   * status tick reads them at most once per three seconds per pane. */
+  private dialogReads = new Map<string, number>();
   /** Conversations Claude Code is compacting, by target, until the new context
    * starts. The phone shows the state instead of the summary row's text. */
   private compactingSince = new Map<string, number>();
@@ -417,6 +445,33 @@ export class AgentHooks {
     return { toolName: entry.tool, message: entry.message, ...(entry.choice ? { choice: entry.choice } : {}), at: new Date(entry.at).toISOString() };
   }
   clearTerminalPrompt(target: Target) { this.terminalPrompts.delete(JSON.stringify(target)); }
+  /** Claude Code's auto-mode fallback (and opencode) draws a numbered dialog
+   * in the pane with no PermissionRequest hook behind it. While the pane
+   * waits with nothing else to ask, read its last lines (at most once per
+   * three seconds per pane) and publish the dialog as a terminal choice; drop
+   * it when the pane leaves waiting or the dialog lines vanish. A remembered
+   * permission request that is not a dialog keeps the slot untouched. */
+  async syncTerminalDialog(target: Target, active: boolean): Promise<void> {
+    const key = JSON.stringify(target), entry = this.terminalPrompts.get(key);
+    if (entry && !entry.dialog) return;
+    if (!active) { if (entry) this.terminalPrompts.delete(key); return; }
+    const now = Date.now();
+    if (now - (this.dialogReads.get(key) ?? 0) < 3_000) return;
+    this.dialogReads.set(key, now);
+    while (this.dialogReads.size > 128) this.dialogReads.delete(this.dialogReads.keys().next().value!);
+    const dialog = numberedDialog(await this.paneLines(target));
+    if (!dialog?.title) { if (entry) this.terminalPrompts.delete(key); return; }
+    this.terminalPrompts.set(key, { tool: "Question", message: dialog.title, choice: dialog, dialog: true, at: now });
+    while (this.terminalPrompts.size > 64) this.terminalPrompts.delete(this.terminalPrompts.keys().next().value!);
+  }
+  /** The phone answers a parsed dialog with the option's own digit, but the
+   * pane also needs Enter to submit the selection. Only an answer whose entry
+   * came from a parsed dialog gains the extra key. */
+  dialogAnswerKeys<K extends string>(target: Target, keys: readonly K[]): (K | "Enter")[] {
+    const entry = this.terminalPrompts.get(JSON.stringify(target));
+    const digit = keys.some(key => key.length === 1 && key >= "1" && key <= "9");
+    return entry?.dialog && digit ? [...keys, "Enter"] : [...keys];
+  }
   private startCompacting(target: Target) {
     this.compactingSince.set(JSON.stringify(target), Date.now());
     while (this.compactingSince.size > 64) this.compactingSince.delete(this.compactingSince.keys().next().value!);
