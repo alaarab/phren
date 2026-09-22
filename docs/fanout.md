@@ -1,9 +1,54 @@
 # Fan-out workers
 
-A fan-out launches headless agent workers in isolated worktrees so a lead can
-delegate bounded tasks. The launcher lives outside this repository at
-`~/.phren/global/skills/fanout/scripts/run.sh`; the Hook discovers each job by
-reading the job directory it writes.
+Enable `hook`, then `fanout`. Fresh stores enable memory only.
+
+```sh
+phren modules enable hook
+phren modules enable fanout
+phren fanout run --tier narrow --label parser --worktree /home/sam/work/parser < brief.txt
+phren fanout usage
+phren fanout list
+phren fanout resume JOB < review.txt
+phren fanout review JOB --model gpt-5.6-terra
+phren fanout archive --dry-run
+```
+
+The launcher reads the local Hook's `/v1/usage`, including OpenCode Go. Without
+Hook it uses the same account readers directly. Ordered candidates are selected
+from `<store>/.config/fanout.yaml`. A printed reason is stored in the manifest.
+Usage at or above the threshold is skipped. Recent OpenCode log errors saying
+Go usage limit exceeded or Rate limit exceeded exclude that provider for 30
+minutes. Unknown usage is reported explicitly and does not invent headroom.
+
+```yaml
+threshold: 80
+computerCap: 6
+providerCap: {codex: 3, claude: 2, opencode-go: 4}
+swiftBuildCap: 2
+tiers:
+  narrow:
+    - {provider: opencode, model: opencode-go/mimo-v2-flash}
+    - {provider: codex, model: gpt-5.6-terra}
+  wide:
+    - {provider: codex, model: gpt-6-astra}
+    - {provider: claude, model: opus}
+  review:
+    - {provider: codex, model: gpt-5.6-terra}
+    - {provider: claude, model: sonnet}
+```
+
+Explicit `--provider` and `--model` choices still respect quotas and caps.
+Reservation and concurrency checks share a store lock. Swift briefs check
+running xcodebuild processes against a cap of two. All workers run at nice 15.
+Codex, OpenCode and Claude own their argv and resume semantics in adapters.
+Claude uses `claude -p --output-format stream-json`. A fresh review uses the
+provider's read-only or planning mode. Codex resumes retain their original
+sandbox and worktree; a review prompt cannot change that inherited sandbox.
+
+Every 30 seconds, the watchdog checks the last 60 OpenCode tool calls. Two or
+fewer distinct inputs produce `looped.txt` and `blocked.json` and stop the worker.
+Signals finalize cancellation; refusals override an otherwise successful exit.
+The existing external store scripts remain usable and are not removed.
 
 ## Job directory
 
@@ -81,7 +126,7 @@ Each sweep that moved or deleted anything writes one line to the Hook's log.
 Run the sweep by hand with:
 
 ```
-phren bridge fanouts archive [--dry-run]
+phren fanout archive [--dry-run]
 ```
 
 `--dry-run` reports what would move and what would be deleted without touching

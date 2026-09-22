@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
-import { makeTempDir } from "../test-helpers.js";
+import { makeTempDir, initTestPhrenRoot } from "../test-helpers.js";
 import { createToolGate, type ToolHandler } from "../mcp/profile.js";
 import { register as registerTask } from "./tasks.js";
 import type { McpContext } from "./types.js";
@@ -26,6 +26,7 @@ const parse = (res: unknown) => JSON.parse((res as { content: { text: string }[]
 
 beforeEach(() => {
   tmp = makeTempDir("tasks-composite-");
+  initTestPhrenRoot(tmp.path);
   const projectDir = path.join(tmp.path, PROJECT);
   fs.mkdirSync(projectDir, { recursive: true });
   fs.writeFileSync(path.join(projectDir, TASKS_FILENAME), SAMPLE);

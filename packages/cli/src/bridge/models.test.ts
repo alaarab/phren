@@ -1,38 +1,72 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import { claudeName, ModelCatalog, readClaudeModels, readOpenCodeModels } from "./models.js";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+import { CLAUDE_MENU, claudeName, ModelCatalog, readClaudeModels, readOpenCodeModels } from "./models.js";
+
+/** The `case "..."` block of a Swift switch, from its first `from` to `to`. */
+function swiftSection(text: string, from: string, to: string): string {
+  const start = text.indexOf(from);
+  expect(start, `missing ${from}`).toBeGreaterThan(-1);
+  const end = text.indexOf(to, start + from.length);
+  return text.slice(start, end < 0 ? text.length : end);
+}
+
+/** `[argument, name]` rows written as `AgentModelChoice(name:..., argument:...)`. */
+function swiftRows(section: string): [string, string][] {
+  return [...section.matchAll(/name: "([^"]+)", argument: "([^"]+)"/g)].map(match => [match[2], match[1]]);
+}
+
+/** The arguments a Swift section marks `isDefault: true`, in list order. */
+function swiftDefaults(section: string): string[] {
+  return [...section.matchAll(/argument: "([^"]+)"[^\n]*isDefault: true/g)].map(match => match[1]);
+}
 
 describe("model catalogue", () => {
-  let root: string | undefined;
-  afterEach(async () => { if (root) await rm(root, { recursive: true, force: true }); root = undefined; });
-
-  it("names Claude ids the way the menu does", () => {
-    expect(claudeName("claude-fable-5-1")).toBe("Fable 5.1");
-    expect(claudeName("claude-haiku-4-5-20251001")).toBe("Haiku 4.5");
-    expect(claudeName("claude-opus-5[1m]")).toBe("Opus 5 (1M context)");
+  it("keeps claudeName in step with the menu it titles", () => {
+    // claudeName reads menu-shaped ids for bridge step labels; every menu
+    // row must spell its own display name.
+    expect(CLAUDE_MENU.map(model => model.name)).toEqual(CLAUDE_MENU.map(model => claudeName(model.id)));
     expect(claudeName("sonnet")).toBe("Sonnet");
   });
 
-  it("lists Claude aliases, the models this computer ran, and the configured one", async () => {
-    root = await mkdtemp(path.join(tmpdir(), "phren-models-"));
-    const old = process.env.CLAUDE_CONFIG_DIR; process.env.CLAUDE_CONFIG_DIR = root;
-    try {
-      const project = path.join(root, "projects/-home-sam-app"); await mkdir(project, { recursive: true });
-      await writeFile(path.join(project, "a.jsonl"), [
-        { type: "assistant", message: { model: "claude-sonnet-5", role: "assistant", content: "hi" } },
-        { type: "assistant", message: { model: "claude-sonnet-5", role: "assistant", content: "again" } },
-        { type: "assistant", message: { model: "claude-fable-5-1", role: "assistant", content: "hi" } },
-      ].map(JSON.stringify).join("\n") + "\n");
-      await writeFile(path.join(root, "settings.json"), JSON.stringify({ model: "claude-fable-5-1[1m]" }));
-      const models = await readClaudeModels();
-      // Exact models the way Claude Code's menu shows them: the default first,
-      // then by family; aliases only for families with no exact id here.
-      expect(models.map(m => m.id)).toEqual(["claude-fable-5-1[1m]", "claude-fable-5-1", "claude-sonnet-5", "opus", "haiku"]);
-      expect(models.find(m => m.id === "claude-fable-5-1[1m]")).toMatchObject({ name: "Fable 5.1 (1M context)", isDefault: true });
-      expect(models.find(m => m.id === "claude-sonnet-5")).toMatchObject({ name: "Sonnet 5", description: "Fast and capable." });
-    } finally { process.env.CLAUDE_CONFIG_DIR = old; }
+  it("lists Claude's menu exactly the way Claude Code shows it, the default first", async () => {
+    const models = await readClaudeModels();
+    expect(models.map(model => [model.id, model.name])).toEqual(CLAUDE_MENU.map(model => [model.id, model.name]));
+    expect(models.map(model => [model.id, model.name])).toEqual([
+      ["claude-fable-5-1", "Fable 5.1"],
+      ["claude-opus-5", "Opus 5"],
+      ["claude-sonnet-5", "Sonnet 5"],
+      ["claude-haiku-4-5-20251001", "Haiku 4.5"],
+      ["claude-fable-5-1[1m]", "Fable 5.1 (1M context)"],
+    ]);
+    expect(models.filter(model => model.isDefault).map(model => model.id)).toEqual(["claude-fable-5-1"]);
+    // The table is a fresh copy each call, so a caller cannot corrupt it.
+    models[0].name = "Changed";
+    expect((await readClaudeModels())[0].name).toBe("Fable 5.1");
+  });
+
+  it("keeps the phone's built-in fallbacks and the chat fixture in step with the menu", async () => {
+    const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
+    const [phone, fixture] = await Promise.all([
+      readFile(path.join(root, "apps/ios/PhrenKit/Sources/PhrenKit/Sessions/AgentModelChoice.swift"), "utf8"),
+      readFile(path.join(root, "apps/ios/Phren/Features/Agents/AgentChatFixture.swift"), "utf8"),
+    ]);
+    const menu = CLAUDE_MENU.map(model => [model.id, model.name] as [string, string]);
+    const phoneClaude = swiftSection(phone, 'case "claude":', 'case "codex":');
+    expect(fixture).toContain("AgentModelChoice.choices(source: source)");
+    const phoneCodex = swiftSection(phone, 'case "codex":', "default:");
+
+    expect(swiftRows(phoneClaude)).toEqual(menu);
+    expect([...phoneClaude.matchAll(/description: "([^"]+)"/g)].map(match => match[1])).toEqual(CLAUDE_MENU.map(model => model.description));
+
+    expect(swiftDefaults(phoneClaude)).toEqual(["claude-fable-5-1"]);
+
+    // The Codex built-in mirrors the fixture's app-server shape the same way.
+    expect(swiftRows(phoneCodex).map(([id]) => id)).toEqual(["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra"]);
+    expect(swiftDefaults(phoneCodex)).toEqual(["gpt-6-astra"]);
+
   });
 
   it("caches per source and never lists a provider it does not know", async () => {

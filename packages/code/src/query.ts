@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { SqlJsDatabase, SqlValue } from "../index-query.js";
-import { getProjectSourcePath, readProjectConfig } from "../project-config.js";
+import type { SqlJsDatabase, SqlValue } from "@phren/cli/code-host/index-query";
+import { getProjectSourcePath, readProjectConfig } from "@phren/cli/code-host/project-config";
 import { blameFor, codeDatabasePath, getMeta, openCodeDatabase, rowsOf, numberAt, stringAt } from "./store.js";
 
 /**

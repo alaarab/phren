@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { readdir, readFile, open, stat } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { object, objects, type Json } from "./protocol.js";
@@ -59,70 +59,22 @@ function codexModels(result: Json): AgentModel[] {
   }));
 }
 
-/** Claude Code publishes no catalogue. Its `/model` takes an alias for the
- * latest of each family or a full id; the ids this computer has actually
- * run, read from the first rows of its recent transcripts, fill the rest. */
-export async function readClaudeModels(now = Date.now()): Promise<AgentModel[]> {
-  const root = process.env.CLAUDE_CONFIG_DIR || path.join(homedir(), ".claude");
-  const aliases: AgentModel[] = [
-    { id: "fable", name: "Fable", description: "The latest Fable model." },
-    { id: "opus", name: "Opus", description: "The latest Opus model." },
-    { id: "sonnet", name: "Sonnet", description: "The latest Sonnet model." },
-    { id: "haiku", name: "Haiku", description: "The latest Haiku model." },
-  ];
-  const seen = new Map<string, number>();
-  try {
-    const projects = path.join(root, "projects");
-    const files: { file: string; mtimeMs: number }[] = [];
-    for (const dir of await readdir(projects, { withFileTypes: true })) {
-      if (!dir.isDirectory()) continue;
-      const folder = path.join(projects, dir.name);
-      for (const entry of await readdir(folder, { withFileTypes: true })) {
-        if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
-        const info = await stat(path.join(folder, entry.name)).catch(() => undefined);
-        if (info && now - info.mtimeMs < 30 * 86_400_000) files.push({ file: path.join(folder, entry.name), mtimeMs: info.mtimeMs });
-      }
-    }
-    files.sort((a, b) => b.mtimeMs - a.mtimeMs);
-    for (const { file } of files.slice(0, 40)) {
-      const handle = await open(file, "r");
-      try {
-        const buffer = Buffer.alloc(262_144);
-        const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-        for (const match of buffer.toString("utf8", 0, bytesRead).matchAll(/"model":"(claude-[a-z0-9.-]{1,60})"/g)) {
-          seen.set(match[1], (seen.get(match[1]) ?? 0) + 1);
-        }
-      } finally { await handle.close(); }
-    }
-  } catch { /* No transcripts is not an error; the aliases still stand. */ }
-  let configured: string | undefined;
-  try {
-    const settings = object(JSON.parse(await readFile(path.join(root, "settings.json"), "utf8")));
-    if (typeof settings.model === "string" && settings.model) configured = settings.model.slice(0, 100);
-  } catch { /* The default model is fine to leave unnamed. */ }
-  // Claude Code's own menu lists exact models (Fable 5.1, Opus 5, Sonnet 5,
-  // Haiku 4.5, the 1M context variant), the default first. An alias stands
-  // in only for a family this computer has no exact id for.
-  const family = (id: string) => id.replace(/^claude-/, "").split("-")[0];
-  const ids = [...seen.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([id]) => id);
-  if (configured && !ids.includes(configured)) ids.push(configured);
-  const rank = ["fable", "opus", "sonnet", "haiku"];
-  const exact: AgentModel[] = ids
-    .sort((a, b) => (a === configured ? -1 : b === configured ? 1 : 0) || rank.indexOf(family(a)) - rank.indexOf(family(b)) || a.localeCompare(b))
-    .map(id => ({ id, name: claudeName(id), description: id === configured ? "Set in Claude Code's settings." : familyDescription(family(id)) }));
-  const known = new Set(ids.map(family));
-  const models = [...exact, ...aliases.filter(alias => !known.has(alias.id))];
-  return models.map(model => model.id === configured ? { ...model, isDefault: true } : model);
-}
+/** Claude Code's own `/model` menu, kept here as a maintained table: Claude
+ * publishes no catalogue, and the phone must show the exact display names
+ * and ids the terminal shows. The default leads; the 1M context variant of
+ * the same model follows the rest of the family. Exported so a parity test
+ * can hold the phone's built-in fallback and the chat fixture to it. */
+export const CLAUDE_MENU: readonly AgentModel[] = [
+  { id: "claude-fable-5-1", name: "Fable 5.1", description: "Most intelligent.", isDefault: true },
+  { id: "claude-opus-5", name: "Opus 5", description: "Most capable for long work." },
+  { id: "claude-sonnet-5", name: "Sonnet 5", description: "Fast and capable." },
+  { id: "claude-haiku-4-5-20251001", name: "Haiku 4.5", description: "Fastest and lightest." },
+  { id: "claude-fable-5-1[1m]", name: "Fable 5.1 (1M context)", description: "Fable 5.1 with a 1M context window." },
+];
 
-function familyDescription(family: string): string {
-  switch (family) {
-    case "fable": return "Most intelligent.";
-    case "opus": return "Most capable for long work.";
-    case "sonnet": return "Fast and capable.";
-    case "haiku": return "Fastest and lightest.";
-    default: return "Run on this computer recently.";
-  }
+/** The maintained Claude menu, copied per call so a caller cannot mutate it. */
+export function readClaudeModels(): Promise<AgentModel[]> {
+  return Promise.resolve(CLAUDE_MENU.map(model => ({ ...model })));
 }
 
 /** `opencode models` prints one `provider/model` id per line. The Go plan's

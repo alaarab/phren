@@ -1,0 +1,31 @@
+{
+  "name": "@phren/code",
+  "version": "0.2.14",
+  "description": "Optional symbol index for phren",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/code/src/index.d.ts",
+      "default": "./dist/code/src/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "grammars",
+    "skills"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/build-code.mjs",
+    "lint": "biome lint --config-path ../../biome.json src/"
+  },
+  "dependencies": {
+    "web-tree-sitter": "^0.27.0"
+  },
+  "peerDependencies": {
+    "@phren/cli": "^0.2.14"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "MIT"
+}

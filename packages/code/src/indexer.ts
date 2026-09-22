@@ -3,11 +3,11 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { homedir } from "node:os";
 import { execFileSync } from "node:child_process";
-import { getProjectSourcePath, readProjectConfig } from "../project-config.js";
-import { projectSlugFromPath } from "../phren-paths.js";
-import { errorMessage } from "../utils.js";
-import { tryFileLock } from "../governance/locks.js";
-import { logger } from "../logger.js";
+import { getProjectSourcePath, readProjectConfig } from "@phren/cli/code-host/project-config";
+import { projectSlugFromPath } from "@phren/cli/code-host/phren-paths";
+import { errorMessage } from "@phren/cli/code-host/utils";
+import { tryFileLock } from "@phren/cli/code-host/governance/locks";
+import { logger } from "@phren/cli/code-host/logger";
 import { languageForFile } from "./languages.js";
 import { parseFile } from "./parser.js";
 import {

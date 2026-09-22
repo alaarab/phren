@@ -7,6 +7,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- Code dossier notes save symbol-cited findings and optionally hand off to a live session or dispatch a worker through `POST /v1/code/note`.
+
 - Finished fan-out jobs archive after 24 hours when an exit code and terminal
   state are present. The archive keeps 500 folders; missing manifests gain a
   failure record. Run `phren bridge fanouts archive [--dry-run]` manually.
@@ -49,6 +51,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   44px; the buttons are labelled `Edit`, `Delete`, `Previous node` and
   `Next node`.
 
+- Phren Hook's Claude model catalogue is Claude Code's own `/model` menu, kept
+  as a maintained table in the Hook: Fable 5.1 (the default), Opus 5, Sonnet 5,
+  Haiku 4.5 and Fable 5.1 (1M context), each with the exact display name and id
+  the terminal shows, instead of ids scanned from local transcripts plus family
+  aliases. Codex and OpenCode keep their live catalogues in the same shape.
+
 ### Fixed
 
 - Codex 0.155's own subagents (a Codex thread spawning Codex threads) are back in
@@ -61,6 +69,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   Hook version, and every known module keeps its value. `phren modules enable
   <name>` now also warns, without refusing, when the installed Hook recorded in
   `<bridge>/installed.json` is older than the module's version in the manifest.
+
+- The chat /model picker no longer flashes a built-in list (or another harness's)
+  before the computer answers: it holds a "Loading models from <computer>" row
+  until `/v1/models` replies, then shows that catalogue with the models this
+  phone used for the harness recently first (a remembered id the catalogue
+  dropped still leads as its own row) and the default marked with its chip.
+  The row checked is the session's exact model id, so the 1M context variant
+  is never mistaken for the plain one. The per-harness built-in list appears
+  only when the route fails or answers empty, each row marked "built-in"
+  beside its default chip.
 - An opencode permission ask reaches the phone as a push. The Hook watches the
   approvals directory, maps a new request to its pane through the recorded
   session binding (or Herdr's opencode session id), sends the same kind of

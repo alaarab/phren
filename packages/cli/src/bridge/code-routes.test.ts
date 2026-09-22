@@ -1,15 +1,16 @@
+import { saveCodeNote } from "./code-note.js";
 import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeTempDir } from "../test-helpers.js";
-import { indexProject } from "../code/indexer.js";
-import { search } from "../code/query.js";
+import { indexProject } from "../../../code/src/indexer.js";
+import { search } from "../../../code/src/query.js";
 import { BUILTIN_MODULES } from "../modules/registry.js";
 import { CodeReindexer, CodeRoutes } from "./code-routes.js";
 import { capabilitiesForModules, requireRoute } from "./server.js";
 
-const FIXTURES = path.join(__dirname, "..", "code", "__fixtures__");
+const FIXTURES = path.join(__dirname, "../../../code/src/__fixtures__");
 
 let tmp: ReturnType<typeof makeTempDir>;
 let repo: string;
@@ -123,7 +124,7 @@ describe("code module gate", () => {
 
     const off = snapshot(["memory"]);
     expect(capabilitiesForModules(off).code).toBeUndefined();
-    expect(() => requireRoute(off, "GET", "/v1/code/status")).toThrow("enable it with phren modules enable code");
+    expect(() => requireRoute(off, "GET", "/v1/code/status")).toThrow("phren code needs @phren/code: run phren modules enable code");
   });
 });
 
@@ -153,4 +154,27 @@ describe("code re-index on change", () => {
     reindexer.close();
     expect(calls[1].full).toBe(true);
   });
+});
+
+
+it("saves a symbol note, exposes it in the dossier and sends the bounded brief", async () => {
+  const hit = (await routes.definition("fixture", "Point")).definition.symbol;
+  let brief = "";
+  const input = { project: "fixture", symbol: "Point", file: hit.file, line: hit.line,
+    text: "Point coordinates must remain immutable while calculating distances.", target: { harness: "codex" } };
+  const result = await saveCodeNote(store, input, async (_note, text) => { brief = text; return { ok: true }; });
+  expect(result.saved).toBe(true);
+  expect(brief).toContain(`${hit.file}:${hit.line}`);
+  expect(brief).toContain("class Point");
+  expect(brief).toContain(input.text);
+  expect((await routes.definition("fixture", "Point")).definition.findings[0]).toMatchObject({ symbol: "Point", text: expect.stringContaining(input.text) });
+  await expect(saveCodeNote(store, { ...input, line: 10000 })).rejects.toMatchObject({ status: 409 });
+  await expect(saveCodeNote(store, { ...input, target: undefined, file: "../escape" })).rejects.toThrow();
+});
+
+it("preserves a saved note when agent delivery fails", async () => {
+  const hit = (await routes.definition("fixture", "Point")).definition.symbol;
+  const result = await saveCodeNote(store, { project: "fixture", symbol: "Point", file: hit.file, line: hit.line,
+    text: "Point distance calculations need stable coordinate values throughout the operation.", target: { harness: "codex" } }, async () => { throw new Error("Session went offline"); });
+  expect(result).toMatchObject({ saved: true, delivery: { ok: false, message: "Session went offline" } });
 });

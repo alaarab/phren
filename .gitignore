@@ -51,3 +51,5 @@ packages/vscode/scratch/vscode-webview.html
 
 # Fan-out workers keep scratch files here
 .scratch/
+
+packages/code/dist/

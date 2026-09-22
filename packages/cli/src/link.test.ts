@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { makeTempDir } from "./test-helpers.js";
+import { initTestPhrenRoot, makeTempDir } from "./test-helpers.js";
 import * as fs from "fs";
 import * as path from "path";
 import { execFileSync } from "child_process";
@@ -740,6 +740,7 @@ describe("link", () => {
     });
 
     it("checkData flags task items whose specific terms do not match repo/docs", async () => {
+      initTestPhrenRoot(phrenPath);
       const profilesDir = path.join(phrenPath, "profiles");
       const projectsRoot = path.join(tmpRoot, "projects");
       process.env.PROJECTS_DIR = projectsRoot;

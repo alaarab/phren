@@ -2,26 +2,20 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { z } from "zod";
 import { getProjectDirs } from "../shared.js";
-import { indexProject, resolveRepoRoot, type IndexResult } from "../code/indexer.js";
-import { codeIndexStatus, type CodeStatus } from "../code/status.js";
-import { codeDatabasePath } from "../code/store.js";
-import {
-  definition,
-  outline,
-  references,
-  search,
-  usage,
-  type OutlineEntry,
-  type ReferenceResult,
-  type SymbolDefinition,
-  type SymbolHit,
-  type UsageEntry,
-} from "../code/query.js";
+import type { IndexResult, CodeStatus, OutlineEntry, ReferenceResult, SymbolDefinition, SymbolHit, UsageEntry } from "@phren/code";
+import { CODE_PACKAGE_HINT, loadCodePackage } from "../modules/code-package.js";
+const indexProject: typeof import("@phren/code").indexProject = async (...args) => (await requireCodePackage()).indexProject(...args);
 import { isValidProjectName } from "../utils-paths.js";
 import { errorMessage } from "../utils.js";
 import { logger } from "../logger.js";
 import { BridgeError } from "./protocol.js";
 import type { ChangedFile } from "./changes.js";
+
+export async function requireCodePackage(): Promise<typeof import("@phren/code")> {
+  const code = await loadCodePackage();
+  if (!code) throw new BridgeError(503, CODE_PACKAGE_HINT);
+  return code;
+}
 
 /**
  * Read routes over the `code` module's local symbol index (stage 3).
@@ -55,7 +49,7 @@ export class CodeRoutes {
 
   async status(projectValue: string | null): Promise<CodeStatus> {
     const project = projectSchema.parse(projectValue ?? "");
-    const result = await codeIndexStatus(this.store, project);
+    const result = await (await requireCodePackage()).codeIndexStatus(this.store, project);
     if (!result.available) throw noIndex(project);
     return result;
   }
@@ -65,7 +59,7 @@ export class CodeRoutes {
     const query = querySchema.parse(queryValue ?? "");
     const kind = kindValue === null || kindValue === "" ? undefined : kindSchema.parse(kindValue);
     const limit = limitValue === null || limitValue === "" ? undefined : limitSchema.parse(limitValue);
-    const result = await search(this.store, project, query, kind, limit ?? 20);
+    const result = await (await requireCodePackage()).search(this.store, project, query, kind, limit ?? 20);
     if (!result.available) throw noIndex(project);
     return { project, query, symbols: result.value };
   }
@@ -73,25 +67,25 @@ export class CodeRoutes {
   async outline(projectValue: string | null, pathValue: string | null): Promise<{ project: string; path: string; entries: OutlineEntry[] }> {
     const project = projectSchema.parse(projectValue ?? "");
     const file = pathSchema.parse(pathValue ?? "");
-    const result = await outline(this.store, project, file);
+    const result = await (await requireCodePackage()).outline(this.store, project, file);
     if (!result.available) throw noIndex(project);
     return { project, path: file, entries: result.value };
   }
 
-  async definition(projectValue: string | null, symbolValue: string | null): Promise<{ project: string; definition: SymbolDefinition }> {
+  async definition(projectValue: string | null, symbolValue: string | null): Promise<{ project: string; definition: SymbolDefinition & { findings: import("@phren/code").CitingFinding[] } }> {
     const project = projectSchema.parse(projectValue ?? "");
     const symbol = symbolSchema.parse(symbolValue ?? "");
-    const result = await definition(this.store, project, symbol);
+    const result = await (await requireCodePackage()).definition(this.store, project, symbol);
     if (!result.available) throw noIndex(project);
     if (!result.value) throw new BridgeError(404, `No symbol "${symbol}" in ${project}.`);
-    return { project, definition: result.value };
+    return { project, definition: { ...result.value, findings: (await requireCodePackage()).findingsCitingSymbol(this.store, project, symbol) } };
   }
 
   async references(projectValue: string | null, symbolValue: string | null, limitValue: string | null): Promise<{ project: string; references: ReferenceResult }> {
     const project = projectSchema.parse(projectValue ?? "");
     const symbol = symbolSchema.parse(symbolValue ?? "");
     const limit = limitValue === null || limitValue === "" ? undefined : limitSchema.parse(limitValue);
-    const result = await references(this.store, project, symbol, limit ?? 200);
+    const result = await (await requireCodePackage()).references(this.store, project, symbol, limit ?? 200);
     if (!result.available) throw noIndex(project);
     if (!result.value) throw new BridgeError(404, `No symbol "${symbol}" in ${project}.`);
     return { project, references: result.value };
@@ -100,7 +94,7 @@ export class CodeRoutes {
   async usage(projectValue: string | null, topValue: string | null): Promise<{ project: string; usage: { hot: UsageEntry[]; cold: UsageEntry[] } }> {
     const project = projectSchema.parse(projectValue ?? "");
     const top = topValue === null || topValue === "" ? undefined : topSchema.parse(topValue);
-    const result = await usage(this.store, project, top ?? 10);
+    const result = await (await requireCodePackage()).usage(this.store, project, top ?? 10);
     if (!result.available) throw noIndex(project);
     return { project, usage: { hot: result.value.top, cold: result.value.bottom } };
   }
@@ -144,7 +138,12 @@ export class CodeReindexer {
   /** One recorded change event; schedules an incremental re-index of the project it belongs to. */
   record(files: ChangedFile[]): void {
     if (this.closed || files.length === 0) return;
-    const projects = this.indexedProjects();
+    void this.recordAsync(files).catch(error => this.log(errorMessage(error)));
+  }
+
+  private async recordAsync(files: ChangedFile[]): Promise<void> {
+    const projects = await this.indexedProjects();
+    if (this.closed) return;
     for (const root of new Set(files.map(file => file.root))) {
       const project = projects.find(entry => entry.root === root);
       if (!project) continue;
@@ -163,7 +162,8 @@ export class CodeReindexer {
     this.pendingFull.clear();
   }
 
-  private indexedProjects(): Array<{ project: string; root: string }> {
+  private async indexedProjects(): Promise<Array<{ project: string; root: string }>> {
+    const { codeDatabasePath, resolveRepoRoot } = await requireCodePackage();
     const result: Array<{ project: string; root: string }> = [];
     for (const directory of getProjectDirs(this.store)) {
       const project = path.basename(directory);

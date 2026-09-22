@@ -536,7 +536,10 @@ export async function runInit(opts: InitOptions = {}) {
   }
 
   if (hasExistingInstall) migrateInstalledModules(phrenPath);
-  else initializeModules(phrenPath);
+  else {
+    initializeModules(phrenPath);
+    log("Memory only. Enable what you need with phren modules enable <name>.");
+  }
 
   if (hasExistingInstall) {
       writeRootManifest(phrenPath, {
