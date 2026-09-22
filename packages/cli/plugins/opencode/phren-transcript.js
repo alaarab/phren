@@ -48,14 +48,34 @@ function underScratchRoot(value) {
   return resolved === scratch || resolved.startsWith(scratch + path.sep);
 }
 
-/** A headless fan-out worker may edit, run commands and fetch. Anything else
- * is refused outright; external directories only inside the scratch root. */
+function under(parent, value) {
+  if (!parent || parent === path.parse(parent).root) return false;
+  const root = path.resolve(parent), resolved = path.resolve(root, value);
+  return resolved === root || resolved.startsWith(root + path.sep);
+}
+
+/** Beyond the scratch root, a worker legitimately reads its own machine: the
+ * node_modules its worktree links into the main checkout, the store it was
+ * briefed from, the toolchains a build shells out to, and the temporary
+ * directories those builds write. Everything outside this set is refused. */
+function fanoutReadable(value) {
+  if (underScratchRoot(value)) return true;
+  const home = process.env.HOME || "";
+  const roots = [home, storeRoot(), "/tmp", "/private/tmp", "/var/folders", "/private/var/folders",
+                 "/Applications/Xcode.app", "/Library/Developer"];
+  return roots.some(root => under(root, value));
+}
+
+/** A headless fan-out worker may edit, run commands and fetch, and continue
+ * when OpenCode's own loop detector asks (the launcher's watchdog stops a real
+ * loop and says why, which is a clearer failure than a refused permission).
+ * Anything else is refused outright. */
 function fanoutAllowed(input) {
   const kind = text(input?.type);
-  if (kind === "edit" || kind === "bash" || kind === "webfetch") return true;
+  if (kind === "edit" || kind === "bash" || kind === "webfetch" || kind === "doom_loop") return true;
   if (kind !== "external_directory") return false;
   const patterns = fanoutPatterns(input);
-  return patterns.length > 0 && patterns.every(underScratchRoot);
+  return patterns.length > 0 && patterns.every(fanoutReadable);
 }
 
 function writeBlocked(input) {

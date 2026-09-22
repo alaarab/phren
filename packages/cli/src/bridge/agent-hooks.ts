@@ -58,6 +58,8 @@ function opencodeRequest(session: string): Json | undefined {
 /** The terminal keys an agent's own dialog accepts. Kept in step with
  * `ANSWER_KEYS` in server.ts; "p" is Codex's "don't ask again" answer. */
 const choiceKeys = new Set(["Escape", "Enter", "Up", "Down", "Tab", "y", "n", "p", "1", "2", "3", "4", "5", "6", "7", "8", "9"]);
+/** A question asks in a few lines; more than this is scrollback above it. */
+const QUESTION_LINES = 12;
 interface TerminalChoiceOption { label: string; key: string }
 /** The actual question a terminal dialog is asking, when its command and
  * options are visible to the Hook: a title, the command it is about, and one
@@ -106,13 +108,15 @@ function structuredOptions(value: unknown): TerminalChoiceOption[] {
   });
 }
 /** Numbered options as Codex draws them: "1. Yes, proceed (y)", with the
- * cursor marker ">" or "❯" in front of the highlighted row. The key in
+ * cursor marker in front of the highlighted row. Harnesses draw that marker
+ * with whatever glyph they like (Codex uses "›"), and missing one costs
+ * the option twice over: the row is dropped and its text joins the question. The key in
  * trailing parentheses (y, p, n, esc, enter, a digit) is the answer when
  * present and is cut from the label; otherwise the line's own number answers,
  * so a plain "1. Yes, continue anyway" is still answerable. */
 function numberedOptions(text: string): TerminalChoiceOption[] {
   return text.split(/\r?\n/).flatMap(line => {
-    const match = /^\s*[>❯]?\s*(\d+)[.)]\s+(.+?)\s*$/.exec(line);
+    const match = /^\s*[>❯›▸▶»•*]?\s*(\d+)[.)]\s+(.+?)\s*$/.exec(line);
     if (!match) return [];
     const label = match[2].trim();
     const trailing = /^(.+?)\s*\(([A-Za-z0-9]+)\)\s*$/.exec(label);
@@ -130,9 +134,15 @@ export function visibleTerminalChoice(text: string): TerminalChoice | undefined 
   const options = numberedOptions(text);
   if (options.length < 2) return undefined;
   const lines = text.split(/\r?\n/);
-  const firstOption = lines.findIndex(line => /^\s*[>❯]?\s*\d+[.)]\s+/.test(line));
+  const firstOption = lines.findIndex(line => /^\s*[>❯›▸▶»•*]?\s*\d+[.)]\s+/.test(line));
   const above = firstOption < 0 ? lines.slice(0, 1) : lines.slice(0, firstOption);
-  const title = above.map(line => line.trim()).filter(line => line && !/^press enter\b/i.test(line)).join("\n").trim();
+  // Only the question's own block: everything above the last blank line is
+  // whatever the agent printed before it asked, and reading a pane of
+  // scrollback as the question is worse than reading none of it.
+  let start = above.length;
+  while (start > 0 && above[start - 1].trim()) start -= 1;
+  const question = above.slice(Math.max(start, above.length - QUESTION_LINES));
+  const title = question.map(line => line.trim()).filter(line => line && !/^press enter\b/i.test(line)).join("\n").trim();
   if (!title) return undefined;
   return { title: title.slice(0, 4_000), options: options.slice(0, 12) };
 }
@@ -150,7 +160,7 @@ function passwordLine(text: string): boolean {
  * " · ", and a footer offering "Esc to cancel" gains the Escape option.
  * Undefined without two numbered rows and a question. */
 function numberedDialog(text: string): TerminalChoice | undefined {
-  const row = /^\s*[>❯]?\s*(\d+)\.\s+(.+?)\s*$/;
+  const row = /^\s*[>❯›▸▶»•*]?\s*(\d+)\.\s+(.+?)\s*$/;
   const lines = text.split(/\r?\n/);
   const first = lines.findIndex(line => row.test(line));
   if (first < 0) return undefined;
