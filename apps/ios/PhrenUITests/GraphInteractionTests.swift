@@ -81,7 +81,8 @@ final class GraphInteractionTests: XCTestCase {
         let delete = app.webViews.buttons["Delete"]
         XCTAssertTrue(delete.waitForExistence(timeout: 5), "finding offers Delete")
         delete.tap()
-        XCTAssertTrue(app.sheets.buttons["Delete"].waitForExistence(timeout: 5),
+        // The confirmation is phren's own dialog, not a system sheet.
+        XCTAssertTrue(app.buttons["graph-delete-dialog:delete"].waitForExistence(timeout: 5),
                       "delete confirmation appears")
     }
 
@@ -215,8 +216,15 @@ final class GraphInteractionTests: XCTestCase {
         app.terminate()
         app.launch()
         openMemoryGraph(from: app)
-        app.buttons["Store: sample/brain"].tap()
-        let team = app.buttons["graph-store:team/brain"]
+        // Right after the relaunch the graph screen is still settling; a tap
+        // that lands during the push does not present the store chooser.
+        let storeButton = app.buttons["graph-store"]
+        XCTAssertTrue(storeButton.waitForExistence(timeout: 5))
+        let team = app.descendants(matching: .any)["graph-store:team/brain"]
+        for _ in 0..<3 where !team.exists {
+            storeButton.tap()
+            _ = team.waitForExistence(timeout: 3)
+        }
         XCTAssertTrue(team.waitForExistence(timeout: 5))
         team.tap()
         XCTAssertTrue(app.buttons["Store: team/brain"].waitForExistence(timeout: 5))

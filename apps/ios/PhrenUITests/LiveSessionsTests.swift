@@ -96,7 +96,7 @@ final class LiveSessionsTests: XCTestCase {
         app.buttons["Connection settings"].tap()
         app.swipeUp()
         app.buttons["Forget computer"].tap()
-        app.sheets.buttons["Forget computer"].tap()
+        app.buttons["live-host-forget-dialog:forget"].tap()
         XCTAssertTrue(app.navigationBars["Computer removed"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["Build graph"].exists)
     }

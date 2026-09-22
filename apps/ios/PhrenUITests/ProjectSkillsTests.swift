@@ -71,8 +71,14 @@ final class ProjectSkillsTests: XCTestCase {
         XCTAssertTrue(picker.waitForExistence(timeout: 5))
         picker.tap()
         app.buttons["skill-move-destination:other"].tap()
+        // The chooser card animates away after a choice; Move is only
+        // reachable once it is gone and the chooser shows the new value.
+        XCTAssertTrue(app.descendants(matching: .any)["skill-move-destination-sheet"].waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["skill-move-destination"].waitForExistence(timeout: 5))
         capture(app, "Move skill destination")
-        app.buttons["skill-move-confirm"].tap()
+        let confirm = app.buttons["skill-move-confirm"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        confirm.tap()
         // The editor closes with the skill; the project list no longer holds it.
         let closed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.navigationBars["audit"])
         XCTAssertEqual(XCTWaiter.wait(for: [closed], timeout: 5), .completed)
