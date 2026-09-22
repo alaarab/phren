@@ -59,6 +59,34 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- A store pull's union merge of `tasks.md` recognized the stable ID only in the
+  short `<!-- bid:HASH -->` comment, so real lines carrying `rank:`, `created:`
+  and the rest were keyed by their whole bullet: the same task came back twice
+  when the two sides differed, and the `GitHub:` continuation line was dropped
+  from the merged file. The merge now reads the full metadata comment for the
+  stable ID and preserves every indented continuation line, so a task keeps its
+  identity, its context and its issue link across a pull.
+- A blocked fan-out worker's `blocked:` reason now reaches the phone in the
+  `/v1/subagents` projection, so a refused permission draws as failed with the
+  type and pattern rather than as a completed worker.
+- The optional `@phren/code` loader now works from the Hook bundle, which runs
+  with no node_modules: it resolves `PHREN_CODE_PACKAGE`, the bridge's own
+  node_modules, `<store>/.runtime/packages/node_modules/@phren/code`, a plain
+  import, then `npm root -g` searched with the mise and Homebrew shims, and
+  reports the path that worked in `/v1/health` as `codePackage`. `phren modules
+  enable code` links a workspace checkout at `packages/code` or installs into
+  the store's `.runtime/packages`, so enabling no longer depends on a global
+  install a service-manager PATH can hide.
+- The phone reaches a loaded computer in milliseconds: the SSH forced command
+  is a small POSIX shell gateway that forwards the phone's byte pipe straight to
+  the Hook socket through `socat` or `nc -U` when the installer finds one, and
+  only falls back to the node gateway otherwise. The installer records and
+  prints the choice in `installed.json`. The launchd plist and systemd unit now
+  run the Hook at `Nice -5` so the daemon wins the CPU against its workers.
+  `GET /v1/health` reports the 1-minute load average and CPU count (`load`) and
+  the node gateway's own startup cost (`gatewayMs`), and the iPhone shows such a
+  computer as "Slow to answer" instead of unreachable, keeping the last
+  snapshot visible.
 - Codex 0.155's own subagents (a Codex thread spawning Codex threads) are back in
   the agent tree, the worker counts and hand-off targets: the thread-store
   materializer now carries the subagent activity rows and each child's parent link.

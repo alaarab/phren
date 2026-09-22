@@ -65,7 +65,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ project: projectInput, query, kind, limit }) => {
-      const code = await loadCodePackage();
+      const code = await loadCodePackage(ctx.phrenPath);
       if (!code) return text(CODE_PACKAGE_HINT);
       const { search, formatSymbolLine } = code;
       const target = resolveTarget(ctx, projectInput);
@@ -89,7 +89,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ project: projectInput, symbol }) => {
-      const code = await loadCodePackage();
+      const code = await loadCodePackage(ctx.phrenPath);
       if (!code) return text(CODE_PACKAGE_HINT);
       const { definition, findingsCitingSymbol, formatCitingFinding } = code;
       const target = resolveTarget(ctx, projectInput);
@@ -124,7 +124,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ project: projectInput, symbol, limit }) => {
-      const code = await loadCodePackage();
+      const code = await loadCodePackage(ctx.phrenPath);
       if (!code) return text(CODE_PACKAGE_HINT);
       const { references } = code;
       const target = resolveTarget(ctx, projectInput);
@@ -153,7 +153,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ project: projectInput, path: filePath }) => {
-      const code = await loadCodePackage();
+      const code = await loadCodePackage(ctx.phrenPath);
       if (!code) return text(CODE_PACKAGE_HINT);
       const { outline } = code;
       const target = resolveTarget(ctx, projectInput);
@@ -178,7 +178,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ project: projectInput, top }) => {
-      const code = await loadCodePackage();
+      const code = await loadCodePackage(ctx.phrenPath);
       if (!code) return text(CODE_PACKAGE_HINT);
       const { usage } = code;
       const target = resolveTarget(ctx, projectInput);

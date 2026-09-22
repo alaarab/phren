@@ -375,8 +375,13 @@ interface TaskRecord {
   continuations: string[];
 }
 
-/** Pattern for stable bid comment embedded in task lines. */
-const MERGE_BID_PATTERN = /<!--\s*bid:([a-z0-9]{8})\s*-->/;
+/**
+ * Pattern for the stable bid comment embedded in task lines. The comment carries
+ * more than the bid in real files (`<!-- bid:HASH rank:N created:... -->`), so the
+ * pattern must accept any trailing fields up to the closing `-->` — matching only
+ * `<!-- bid:HASH -->` silently disabled stable-ID dedup in the union merge.
+ */
+const MERGE_BID_PATTERN = /<!--\s*bid:([a-z0-9]{8})\b[^>]*-->/;
 
 /** Render a TaskRecord back to its original lines. */
 function renderTaskRecord(record: TaskRecord): string[] {
@@ -415,7 +420,10 @@ function parseTaskSections(content: string): Map<string, TaskRecord[]> {
         bullet: line,
         continuations: [],
       };
-    } else if (currentRecord && line.trim().startsWith("Context:")) {
+    } else if (currentRecord && line.startsWith("  ") && line.trim()) {
+      // Any indented, non-empty line belongs to the preceding task: Context:,
+      // GitHub:, sub-bullets. Keeping only Context: dropped GitHub links (and any
+      // future continuation field) from the merged file.
       currentRecord.continuations.push(line);
     } else {
       flush();
