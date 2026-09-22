@@ -47,7 +47,9 @@ export async function rpc(server: string, method: string, params: Json = {}, sig
         if (value.id !== key) throw new Error("Mismatched response");
         if (value.error) {
           const code = typeof object(value.error).code === "string" ? String(object(value.error).code).slice(0, 64) : undefined;
-          throw new BridgeError(409, "Herdr could not perform this action. Refresh the session before trying again.", code ? { herdrCode: code } : undefined);
+          // Herdr's own words say what went wrong; keep them, bounded and plain.
+          const said = String(object(value.error).message ?? "").replace(/[\x00-\x1f\x7f]/g, " ").trim().slice(0, 200);
+          throw new BridgeError(409, said ? `Herdr: ${said}` : "Herdr could not perform this action. Refresh the session before trying again.", code ? { herdrCode: code } : undefined);
         }
         finish(undefined, object(value.result));
       } catch (error) { finish(error instanceof Error ? error : new Error("Invalid Herdr response")); }

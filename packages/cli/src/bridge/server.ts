@@ -976,12 +976,17 @@ export async function launchSession(server: string, data: Json): Promise<Json> {
   // Herdr's agent name is a slug (lowercase, digits, - or _, 1 to 32 chars);
   // the label a person typed is not, so derive one from it.
   const baseName = herdrAgentName(data.name === undefined ? label : plainText(200).parse(data.name));
-  const name = role === "conductor" ? herdrAgentName(`conductor-${baseName}`) : baseName;
+  const wanted = role === "conductor" ? herdrAgentName(`conductor-${baseName}`) : baseName;
   const model = typeof data.model === "string" && data.model.trim() ? plainText(200).parse(data.model.trim()) : undefined;
   const modelFlag: Partial<Record<(typeof launchKinds)[number], string>> = { codex: "--model", claude: "--model", opencode: "--model" };
   const workspace = data.workspaceId === undefined ? undefined : id.parse(data.workspaceId);
   const timeout = Math.min(120_000, Math.max(3_000, data.timeoutMs === undefined ? 45_000 : z.number().int().parse(data.timeoutMs)));
   const before = await snapshot(server);
+  // Herdr agent names are unique per server; a scheduled run or a second
+  // launch with the same label would otherwise collide with the first.
+  const taken = new Set([...objects(before.panes), ...objects(before.agents)].map(item => String(item.agent_name ?? item.name ?? "")));
+  let name = wanted;
+  for (let n = 2; taken.has(name) && n < 100; n++) name = `${wanted.slice(0, 32 - String(n).length - 1)}-${n}`;
   if (role === "conductor") {
     const otherServers = (await servers()).map(item => String(item.session)).filter(name => name !== server);
     const overviews = [{ name: server, value: before }, ...await Promise.all(otherServers.map(async name => ({ name, value: await snapshot(name) })))];
@@ -1019,7 +1024,8 @@ export async function launchSession(server: string, data: Json): Promise<Json> {
     // that screen from the chat instead of stranding the workspace.
     const blocked = error instanceof BridgeError && error.details?.herdrCode === "agent_not_ready";
     if (!blocked) {
-    const reason = error instanceof BridgeError && error.status === 504 ? "it did not become ready in time" : "Herdr reported an error";
+    const reason = error instanceof BridgeError && error.status === 504 ? "it did not become ready in time"
+      : error instanceof BridgeError && error.message.startsWith("Herdr: ") ? error.message.slice(7) : "Herdr reported an error";
     throw new BridgeError(409, `Herdr couldn't start ${kind} in the new "${label}" pane (${reason}). The workspace was created and is still open on the computer — open it from Herdr workspaces.`);
     }
   }

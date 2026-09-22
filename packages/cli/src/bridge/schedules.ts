@@ -515,7 +515,7 @@ export function createScheduleLauncher(launchHerdr: HerdrLauncher, store = defau
 async function launchInHerdr(server: string, context: ScheduleLaunchContext, launchHerdr: HerdrLauncher, signal: AbortSignal): Promise<ScheduleLaunchResult> {
   const launched = await launchHerdr(server, { cwd: context.cwd, label: context.schedule.name, kind: context.schedule.harness, model: context.schedule.model });
   const workspaceId = String(launched.workspaceId), tabId = String(launched.tabId), paneId = String(launched.paneId);
-  await rpc(server, "agent.prompt", { target: paneId, text: context.schedule.prompt });
+  await promptWhenReady(server, paneId, context.schedule.prompt, signal);
   let sessionId = typeof launched.sessionId === "string" ? launched.sessionId : undefined;
   for (let attempt = 0; attempt < 10 && !sessionId; attempt++) {
     const pane = objects((await snapshot(server)).panes).find(item => item.workspace_id === workspaceId && item.tab_id === tabId && item.pane_id === paneId);
@@ -526,6 +526,21 @@ async function launchInHerdr(server: string, context: ScheduleLaunchContext, lau
     ...(sessionId ? { sessionId } : {}) };
   return { launch, completion: watchHerdrRun(server, { workspaceId, tabId, paneId }, signal,
     { source: context.schedule.harness, startedAt: Date.now(), sessionId, onBlocked: context.blockedStartup }) };
+}
+
+/** Herdr refuses a prompt until the agent has finished starting; a run
+ * launched a moment ago waits for it rather than failing on the first try. */
+async function promptWhenReady(server: string, paneId: string, text: string, signal: AbortSignal, waitMs = 60_000): Promise<void> {
+  const deadline = Date.now() + waitMs;
+  for (;;) {
+    try { await rpc(server, "agent.prompt", { target: paneId, text }, signal); return; }
+    catch (error) {
+      const starting = error instanceof BridgeError && error.details?.herdrCode === "agent_not_ready";
+      if (!starting || signal.aborted) throw error;
+      if (Date.now() >= deadline) throw new BridgeError(409, `The agent in ${paneId} never became ready for the prompt; it may be waiting at a startup screen on the computer.`);
+      await new Promise(resolve => setTimeout(resolve, 1_000));
+    }
+  }
 }
 
 function stripTerminalEscapes(line: string): string {
