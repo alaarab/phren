@@ -16,6 +16,7 @@ import { queuedQuestion, threadHealth } from "./codex-threads.js";
 import { WorkspaceContextUsage } from "./context.js";
 import { DispatchService, dispatchProjectDirectory, dispatchStatus } from "./dispatch.js";
 import { remoteChildren } from "./dispatch-tree.js";
+import { addGrant, listGrants, removeGrant } from "./grants.js";
 import { hookPeers, peerRequest } from "./peers.js";
 import { candidateRepos, enrollProject } from "./enroll.js";
 import { browseFiles } from "./files.js";
@@ -176,6 +177,7 @@ export async function serve(version: string): Promise<void> {
         switch (url.pathname) {
           case "/v1/health": result = info; break;
           case "/v1/dispatch": result = { dispatches: await dispatchStatus() }; break;
+          case "/v1/conductor/grants": result = { grants: await listGrants() }; break;
           case "/v1/dispatch/capacity": {
             const live = await servers();
             const snapshots = await Promise.all(live.map(server => snapshot(String(server.session))));
@@ -333,6 +335,8 @@ export async function serve(version: string): Promise<void> {
           result = { runs: await scheduler!.history(input) };
         } else if (url.pathname === "/v1/dispatch") {
           result = await dispatches!.dispatch(data);
+        } else if (url.pathname === "/v1/conductor/grants") {
+          result = { ok: true, grant: await addGrant(data) };
         } else if (url.pathname === "/v1/push/register") {
           await agentHooks.push.register(data); result = { ok: true };
         } else if (url.pathname === "/v1/push/answer") {
@@ -524,6 +528,10 @@ export async function serve(version: string): Promise<void> {
           }
         }
       }
+      } else if (request.method === "DELETE") {
+        if (url.pathname !== "/v1/conductor/grants") throw new BridgeError(404, "Unknown Phren Hook route.");
+        const data = await body(request);
+        result = { ok: true, grant: await removeGrant(data) };
       } else throw new BridgeError(405, "Unsupported request method.");
       const payload = JSON.stringify(result);
       if (Buffer.byteLength(payload) > MAX_FRAME) throw new BridgeError(413, "The response is too large.");

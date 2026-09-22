@@ -312,10 +312,11 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
   let helperPIDs: number[] = [];
   let paneLines = "", drawConfirmation = false;
   let remoteHook: ChildProcess | undefined;
-  function api(url: string, body?: unknown): Promise<{ status: number; data: any }> {
+  function api(url: string, body?: unknown, method?: string): Promise<{ status: number; data: any }> {
     return new Promise((resolve, reject) => {
       const payload = body === undefined ? undefined : JSON.stringify(body);
-      const req = request({ socketPath: path.join(root, "bridge/hook.sock"), path: url, method: payload === undefined ? "GET" : "POST",
+      const verb = method ?? (payload === undefined ? "GET" : "POST");
+      const req = request({ socketPath: path.join(root, "bridge/hook.sock"), path: url, method: verb,
         headers: payload ? { "Content-Length": Buffer.byteLength(payload), "Content-Type": "application/json" } : {} }, res => {
         let data = ""; res.on("data", bytes => data += bytes); res.on("end", () => resolve({ status: res.statusCode!, data: JSON.parse(data) }));
       });
@@ -1475,6 +1476,26 @@ schedules:
   describe("isolated fixture", () => {
     beforeEach(startFixture);
     afterEach(stopFixture);
+
+    it("lists, adds, and revokes conductor grants over the Hook routes", async () => {
+      expect((await api("/v1/conductor/grants")).data).toEqual({ grants: [] });
+      const added = await api("/v1/conductor/grants", { scope: "project:phren", actions: ["dispatch"] });
+      expect(added.status).toBe(200);
+      expect(added.data).toMatchObject({ ok: true, grant: { scope: "project:phren", actions: ["dispatch"] } });
+      expect((await api("/v1/conductor/grants")).data.grants).toHaveLength(1);
+      const duplicate = await api("/v1/conductor/grants", { scope: "project:phren", actions: ["dispatch"] });
+      expect(duplicate.status).toBe(409);
+      const revoked = await api("/v1/conductor/grants", { scope: "project:phren" }, "DELETE");
+      expect(revoked.status).toBe(200);
+      expect(revoked.data.grant).toMatchObject({ scope: "project:phren" });
+      expect((await api("/v1/conductor/grants")).data.grants).toEqual([]);
+      expect((await api("/v1/conductor/grants", { scope: "global" }, "DELETE")).status).toBe(404);
+    });
+
+    it("rejects DELETE on a path that is not the grants route", async () => {
+      expect((await api("/v1/dispatch", undefined, "DELETE")).status).toBe(404);
+    });
+
     it.each([
       { kind: "claude", effort: "high", required: ["--append-system-prompt", "--effort", "high"] },
       { kind: "codex", effort: "low", required: ["-c", "model_reasoning_effort=low", "-c"] },

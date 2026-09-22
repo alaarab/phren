@@ -223,6 +223,14 @@ export const REGISTRY: Command[] = [
     summary: "Send work to an existing agent session through Phren Hook",
     run: async args => (await import("./bridge/dispatch-command.js")).runHandOff(args),
   },
+  {
+    name: "conductor", topic: "core", usage: "phren conductor <subcommand>",
+    summary: "Manage conductor standing grants",
+    subcommands: [
+      { name: "grants", usage: "phren conductor grants [list|add|remove]", summary: "List, add, or remove conductor grants" },
+    ],
+    run: async args => (await import("./bridge/dispatch-command.js")).runConductor(args),
+  },
   // Setup (featured: init, quickstart)
   {
     name: "init",

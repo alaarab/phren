@@ -13,6 +13,7 @@ import { herdrRoot, rpc, servers, snapshot, trustedDirectory, validateTarget } f
 import { capturesChanges, ToolChanges } from "./changes.js";
 import { phrenStoreRoot, unwrapPastedContent } from "./transcripts.js";
 import { archiveFinishedFanouts, blockedFanouts } from "./fanouts.js";
+import { ensureGrant, listGrants, matchGrant, type Grant } from "./grants.js";
 import { ApprovalPushService } from "./push.js";
 
 const APPROVAL_SWEEP_MS = 2_000;
@@ -137,7 +138,24 @@ export async function recordedSession(server: string, pane: Json, pids: number[]
   } catch { return undefined; }
 }
 
-interface Pending { target: Target; response: ServerResponse; tool: string; input: unknown; message: string; choice?: TerminalChoice; expiresAt: string; timer: NodeJS.Timeout }
+interface Pending { target: Target; response: ServerResponse; tool: string; input: unknown; message: string; choice?: TerminalChoice; expiresAt: string; timer: NodeJS.Timeout; conductor?: { action: "dispatch" | "hand_off"; project?: string; computer?: string } }
+
+/** A conductor `dispatch` or `hand_off` permission ask the Hook can answer
+ * itself under a standing grant, or offer the phone two grant-writing answers. */
+function conductorCall(tool: string, input: unknown): Pending["conductor"] | undefined {
+  // MCP tool names vary by harness: `dispatch`, `phren.dispatch`,
+  // `mcp__phren__dispatch`; phren_admin carries the action in its fields.
+  const tail = tool.split(/[._:/]/).pop() ?? tool;
+  const fields = object(input);
+  let action: "dispatch" | "hand_off" | undefined;
+  if (tail === "dispatch") action = "dispatch";
+  else if (tail === "hand_off") action = "hand_off";
+  else if (tail === "admin" && (fields.action === "dispatch" || fields.action === "hand_off")) action = fields.action;
+  if (!action) return undefined;
+  const project = typeof fields.project === "string" ? fields.project : undefined;
+  const computer = typeof fields.computer === "string" ? fields.computer : undefined;
+  return { action, ...(project ? { project } : {}), ...(computer ? { computer } : {}) };
+}
 interface PushBinding { action: string; expiresAt: number }
 /** An opencode permission ask the plugin wrote to disk, held here so it can be
  * pushed and answered by binding like a Claude request the Hook holds itself. */
@@ -467,7 +485,8 @@ export class AgentHooks {
   approval(target: Target): Json | undefined {
     const pending = [...this.pending.entries()].find(([, p]) => JSON.stringify(p.target) === JSON.stringify(target));
     if (pending) return { actionId: pending[0], toolName: pending[1].tool, title: `Allow ${pending[1].tool}?`, message: pending[1].message,
-      ...(pending[1].choice ? { choice: pending[1].choice } : {}), expiresAt: pending[1].expiresAt };
+      ...(pending[1].choice ? { choice: pending[1].choice } : {}), expiresAt: pending[1].expiresAt,
+      ...(pending[1].conductor ? { conductor: pending[1].conductor } : {}) };
     if (target.source !== "opencode") return undefined;
     const held = [...this.opencode.values()].find(value => JSON.stringify(value.target) === JSON.stringify(target));
     if (held) return { actionId: held.request.id, toolName: held.request.type, title: held.request.title, message: held.request.message, expiresAt: held.request.expiresAt };
@@ -504,14 +523,27 @@ export class AgentHooks {
       return;
     }
     const entry = this.pending.get(id);
-    if (!entry || JSON.stringify(entry.target) !== JSON.stringify(target) || !["approve", "deny"].includes(String(decision))) throw new BridgeError(409, "This approval is no longer pending.");
-    if (updatedInput !== undefined && decision !== "approve") throw new BridgeError(400, "Answers go with an approval.");
+    if (!entry || JSON.stringify(entry.target) !== JSON.stringify(target)) throw new BridgeError(409, "This approval is no longer pending.");
+    const grantAnswer = entry.conductor && (decision === "allow-project" || decision === "allow-everywhere") ? decision : undefined;
+    if (grantAnswer && !entry.conductor) throw new BridgeError(400, "Only a conductor dispatch or hand-off can write a grant.");
+    const effective = grantAnswer ? "approve" : decision;
+    if (!["approve", "deny"].includes(String(effective))) throw new BridgeError(409, "This approval is no longer pending.");
+    if (updatedInput !== undefined && effective !== "approve") throw new BridgeError(400, "Answers go with an approval.");
     const answered = updatedInput === undefined ? undefined : answeredQuestionInput(entry.tool, entry.input, updatedInput);
+    if (grantAnswer) {
+      const conductor = entry.conductor!;
+      if (grantAnswer === "allow-project" && !conductor.project) throw new BridgeError(400, "This call has no project to scope a grant to.");
+      await ensureGrant({
+        scope: grantAnswer === "allow-everywhere" ? "global" : `project:${conductor.project}`,
+        actions: [conductor.action],
+        ...(conductor.computer && conductor.computer !== "anywhere" ? { computers: [conductor.computer] } : {}),
+      });
+    }
     await validateTarget(target);
     if (this.pending.get(id) !== entry || entry.response.destroyed) throw new BridgeError(409, "This approval is no longer pending.");
     this.pending.delete(id); this.dropPushBindings(id); clearTimeout(entry.timer);
     entry.response.end(JSON.stringify({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: {
-      behavior: decision === "approve" ? "allow" : "deny", ...(decision === "deny" ? { message: "Declined in Phren." } : {}),
+      behavior: effective === "approve" ? "allow" : "deny", ...(effective === "deny" ? { message: "Declined in Phren." } : {}),
       ...(answered ? { updatedInput: answered } : {}),
     } } }));
   }
@@ -583,6 +615,19 @@ export class AgentHooks {
           res.end("{}"); return;
         }
         if (body.event === "PermissionRequest") this.terminalPrompts.delete(JSON.stringify(target));
+        if (body.event === "PermissionRequest") {
+          const conductor = conductorCall(String(body.tool || "action"), body.input);
+          if (conductor) {
+            // A standing grant answers the call before it becomes an approval card.
+            const grant = matchGrant(await listGrants().catch(() => [] as Grant[]), {
+              action: conductor.action, project: conductor.project, computer: conductor.computer,
+            });
+            if (grant) {
+              res.end(JSON.stringify({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "allow" } } }));
+              return;
+            }
+          }
+        }
         if (body.event !== "PermissionRequest" || target.source === "copilot"
           || (!this.watching.has(JSON.stringify(target)) && !this.overview.has(target.server) && !this.push.available)) {
           if (body.event === "PermissionRequest") this.rememberTerminalPrompt(target, body);
@@ -592,12 +637,14 @@ export class AgentHooks {
         // Timeouts always return control to the ordinary terminal prompt.
         if (this.pending.size >= 64) { res.end("{}"); return; }
         const action = randomUUID();
+        const conductor = body.event === "PermissionRequest" ? conductorCall(String(body.tool || "action"), body.input) : undefined;
         const locallyWatched = this.watching.has(JSON.stringify(target)) || this.overview.has(target.server);
         const timer = setTimeout(() => { this.pending.delete(action); this.dropPushBindings(action); this.rememberTerminalPrompt(target, body); res.end("{}"); }, 55_000);
         const expiresAt = new Date(Date.now() + 55_000).toISOString();
         const choice = terminalChoice(body.input);
         this.pending.set(action, { target, response: res, tool: String(body.tool || "action").slice(0, 200), input: body.input,
-          message: JSON.stringify(body.input || {}, null, 2).slice(0, 32_768), ...(choice ? { choice } : {}), expiresAt, timer });
+          message: JSON.stringify(body.input || {}, null, 2).slice(0, 32_768), ...(choice ? { choice } : {}), expiresAt, timer,
+          ...(conductor ? { conductor } : {}) });
         res.on("close", () => { clearTimeout(timer); this.pending.delete(action); this.dropPushBindings(action); });
         if (this.push.available) {
           const binding = randomUUID();

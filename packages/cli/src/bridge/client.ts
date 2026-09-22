@@ -4,7 +4,8 @@ import { BridgeError, object, socketPath, type Json } from "./protocol.js";
 export async function hookRequest(route: string, data?: Json, options: RequestOptions = { socketPath: socketPath() }, timeout = 75_000): Promise<Json> {
   return new Promise((resolve, reject) => {
     const payload = data === undefined ? undefined : JSON.stringify(data);
-    const req = request({ ...options, path: route, method: payload === undefined ? "GET" : "POST",
+    const method = options.method ?? (payload === undefined ? "GET" : "POST");
+    const req = request({ ...options, path: route, method,
       headers: { Host: "phren.local", Connection: "close", ...(payload ? { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) } : {}) } }, response => {
       const chunks: Buffer[] = []; let size = 0;
       response.on("data", chunk => {
