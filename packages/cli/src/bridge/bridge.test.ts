@@ -1928,7 +1928,7 @@ schedules:
     });
 
     it.each([
-      { kind: "claude", effort: "high", required: ["--append-system-prompt", "--effort", "high"] },
+      { kind: "claude", effort: "high", required: ["--append-system-prompt-file", "--effort", "high"] },
       { kind: "codex", effort: "low", required: ["-c", "model_reasoning_effort=low", "-c"] },
       { kind: "opencode", effort: "medium", required: ["--agent", "conductor", "--variant", "medium"] },
     ])("launches a $kind conductor with its brief and effort", async ({ kind, effort, required }) => {
@@ -1939,7 +1939,10 @@ schedules:
       expect(params.name).toMatch(/^conductor-/);
       let cursor = -1;
       for (const value of required) { cursor = params.args.indexOf(value, cursor + 1); expect(cursor).toBeGreaterThanOrEqual(0); }
-      if (kind !== "opencode") expect(JSON.stringify(params.args)).toContain("# Conductor");
+      if (kind === "codex") expect(JSON.stringify(params.args)).toContain("# Conductor");
+      // Claude reads the multi-line brief from its file: no argument carries a newline.
+      if (kind === "claude") expect(params.args).toContain(path.join(root, "bridge/conductor/brief.md"));
+      expect(params.args.some((arg: string) => arg.includes("\n"))).toBe(false);
       expect(JSON.stringify(params.args)).not.toContain("name: conductor");
       expect(await readFile(path.join(root, "bridge/conductor/brief.md"), "utf8")).toContain("# Conductor");
       if (kind === "opencode") {
