@@ -29,6 +29,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Claude Code's own terminal dialogs no longer show up on the phone as a bare
+  "Waiting for your answer" key strip. When a claude or opencode pane waits
+  with no held approval, no model question, and no remembered prompt, the Hook
+  reads the pane's last lines (at most once per three seconds per pane, ANSI
+  stripped) and publishes a numbered dialog as `terminalPrompt.choice`: the
+  question above the first `1.` row as the title, each `> 1. Yes` style row as
+  an option keyed by its digit with its text cut at the first ` · `, plus
+  `Cancel`/`Escape` when a line offers "Esc to cancel". The choice clears when
+  the pane leaves waiting or the dialog lines vanish, and answering a dialog
+  digit from the phone now sends Enter after it so the selection submits.
 - A fan-out worker that OpenCode itself refused a permission for (headless runs reject
   external_directory and doom_loop before any plugin runs) is reported as failed with
   the reason read from the job's stderr, instead of completed.

@@ -311,6 +311,7 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
   let extraWorkspaces: Record<string, unknown>[] = [], extraTabs: Record<string, unknown>[] = [], extraPanes: Record<string, unknown>[] = [], failAgentStart = false;
   let helperPIDs: number[] = [];
   let paneLines = "", drawConfirmation = false;
+  let paneAgent = "codex";
   let remoteHook: ChildProcess | undefined;
   function api(url: string, body?: unknown, method?: string): Promise<{ status: number; data: any }> {
     return new Promise((resolve, reject) => {
@@ -336,7 +337,7 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     commands = []; current = session; agentStatus = "working"; reportIdentity = true; foregroundPID = process.pid; terminalID = "term-one"; log = ""; holdSnapshot = false; releaseSnapshot = undefined;
     replaceBeforeMutation = false; deliveries = [];
     extraWorkspaces = []; extraTabs = []; extraPanes = []; failAgentStart = false; helperPIDs = []; remoteHook = undefined;
-    paneLines = ""; drawConfirmation = false;
+    paneLines = ""; drawConfirmation = false; paneAgent = "codex";
   }
   async function resetRecord(): Promise<void> {
     record = path.join(root, `codex/sessions/2026/09/10/rollout-2026-09-10T00-00-00-${session}.jsonl`);
@@ -391,8 +392,8 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
           if (failAgentStart || !target) { socket.end(JSON.stringify({ id: req.id, error: { code: 1, message: "agent not detected" } }) + "\n"); return; }
           target.agent = req.params.kind; target.agent_name = req.params.name; target.agent_status = "idle";
         }
-        const pane = { pane_id: "w1:p1", tab_id: "w1:t1", workspace_id: "w1", terminal_id: terminalID, agent: "codex", agent_status: agentStatus,
-          agent_session: reportIdentity ? { kind: "id", agent: "codex", value: current } : undefined, cwd: root };
+        const pane = { pane_id: "w1:p1", tab_id: "w1:t1", workspace_id: "w1", terminal_id: terminalID, agent: paneAgent, agent_status: agentStatus,
+          agent_session: reportIdentity ? { kind: "id", agent: paneAgent, value: current } : undefined, cwd: root };
         const snapshot = { panes: [pane, ...extraPanes], workspaces: [{ workspace_id: "w1", label: "Project" }, ...extraWorkspaces],
           tabs: [{ tab_id: "w1:t1", workspace_id: "w1", label: "1" }, ...extraTabs] };
         const answer = () => socket.end(JSON.stringify({ id: req.id, result: req.method === "session.snapshot" ? { snapshot }
@@ -990,6 +991,45 @@ schedules:
       socket.terminate();
       // The window stays open so the card's own key still lands.
       expect((await api("/v1/keys", { target, keys: ["1"] })).status).toBe(200);
+    });
+
+    it("publishes a Claude terminal numbered dialog, answers it with Enter, and drops it when the pane works", async () => {
+      paneAgent = "claude"; agentStatus = "waiting";
+      paneLines = "Parser aborted (timeout, resource limit, or over-length)\n"
+        + "Do you want to proceed?\n"
+        + "> 1. Yes\n"
+        + "2. Yes, and switch to auto mode · auto mode handles these prompts for you\n"
+        + "3. No\n"
+        + "Esc to cancel · Tab to amend\n";
+      const claude = { ...target, source: "claude" as const };
+      const status = async () => {
+        const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(claude)}`);
+        const frames: any[] = []; socket.on("message", data => frames.push(JSON.parse(data.toString())));
+        await once(socket, "open");
+        for (let i = 0; i < 80 && !frames.length; i++) await sleep(25);
+        socket.terminate();
+        return frames[0].agentStatus;
+      };
+      // No PermissionRequest fired: the Hook reads the pane and finds the dialog.
+      expect(await status()).toMatchObject({ status: "waiting", terminalPrompt: {
+        toolName: "Question", message: "Do you want to proceed?",
+        choice: { title: "Do you want to proceed?",
+          options: [{ label: "Yes", key: "1" },
+            { label: "Yes, and switch to auto mode", key: "2" },
+            { label: "No", key: "3" },
+            { label: "Cancel", key: "Escape" }] } } });
+      // The pane leaves waiting: the card goes with it, dialog or not.
+      agentStatus = "working";
+      expect((await status()).terminalPrompt).toBeUndefined();
+      // Still drawn, still waiting: the dialog is read again past the three second window.
+      agentStatus = "waiting";
+      await sleep(3_100);
+      expect((await status()).terminalPrompt).toMatchObject({ choice: { title: "Do you want to proceed?" } });
+      // The phone sends the option's digit; the Hook appends Enter to submit it.
+      expect((await api("/v1/keys", { target: claude, keys: ["1"] })).status).toBe(200);
+      expect(commands.filter(c => c.method === "agent.send_keys").map(c => c.params.keys)).toEqual([["1", "enter"]]);
+      agentStatus = "working";
+      expect((await status()).terminalPrompt).toBeUndefined();
     });
 
     it("lists the models a computer's agents offer", async () => {

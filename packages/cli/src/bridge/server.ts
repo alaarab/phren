@@ -454,7 +454,10 @@ export async function serve(version: string): Promise<void> {
             // prompt the agent is holding: a menu, a y/n, a trust question.
             if (!holding && (keys.every(key => key === "Escape") ? !["working", "blocked", "waiting", "unknown"].includes(status)
               : !["blocked", "waiting", "unknown"].includes(status))) throw new BridgeError(409, keys.every(key => key === "Escape") ? "This agent is no longer working." : "This agent is not waiting for an answer.");
-            await rpc(target.server, "agent.send_keys", { target: target.pane, keys: keys.map(key => HERDR_KEYS[key] ?? key) });
+            // A digit chosen from a parsed terminal dialog also needs Enter to
+            // submit the selection; the phone only sends the option's key.
+            const answerKeys = agentHooks.dialogAnswerKeys(target, keys);
+            await rpc(target.server, "agent.send_keys", { target: target.pane, keys: answerKeys.map(key => HERDR_KEYS[key] ?? key) });
             // A remembered prompt is answered by any key but a cursor move; the
             // menu window stays open through Enter because some choices (Codex
             // full access) open a second confirmation the Hook now walks itself.
@@ -633,6 +636,13 @@ export async function serve(version: string): Promise<void> {
             const cwd = await trustedDirectory(pane).catch(() => undefined);
             const branch = modules.has("git") && cwd ? await repositoryBranch(cwd) : undefined;
             const waiting = !pendingApproval && ["blocked", "waiting"].includes(String(pane.agent_status));
+            // Claude Code's auto-mode fallback and opencode draw a numbered
+            // dialog in the pane with no PermissionRequest hook behind it:
+            // read the pane (at most once per three seconds) and publish the
+            // dialog as the same terminal choice shape the phone answers.
+            if (target.source === "claude" || target.source === "opencode") {
+              await agentHooks.syncTerminalDialog(target, waiting && !pendingQuestions?.length);
+            }
             const hookPrompt = waiting ? agentHooks.terminalPrompt(target) : undefined;
             // Codex 0.155's queued follow-up question never becomes a held
             // PermissionRequest: it lives as a thread item the terminal shows
