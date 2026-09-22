@@ -26,7 +26,7 @@ import { candidateRepos, enrollProject } from "./enroll.js";
 import { browseFiles } from "./files.js";
 import { MAX_FILE_RANGE, rangeInteger, readFileRange } from "./file-range.js";
 import { gitBranches, gitDiscard, gitLog, gitPulls, gitStage, gitStatus, gitTree, gitUnstage } from "./git.js";
-import { paneChatState, paneIdentity, panes, rpc, servers, snapshot, trustedDirectory, validateStartingTarget, validateTarget, workspaceSnapshot, startingPane } from "./herdr.js";
+import { paneChatState, paneIdentity, panes, rpc, servers, snapshot, trustedDirectory, validateStartingTarget, validateTarget, workspaceSnapshot, startingPane, paneAgentName } from "./herdr.js";
 import { LaunchLimiter } from "./limits.js";
 import { locateProject } from "./locate.js";
 import { gitRoot, launchDirectory, repositoryBranch, repositoryDiff, webServers } from "./projects.js";
@@ -994,7 +994,7 @@ export async function launchSession(server: string, data: Json): Promise<Json> {
     const otherServers = (await servers()).map(item => String(item.session)).filter(name => name !== server);
     const overviews = [{ name: server, value: before }, ...await Promise.all(otherServers.map(async name => ({ name, value: await snapshot(name) })))];
     for (const overview of overviews) {
-      const existing = objects(overview.value.panes).find(pane => typeof pane.agent_name === "string" && pane.agent_name.startsWith("conductor-")
+      const existing = objects(overview.value.panes).find(pane => paneAgentName(overview.value, pane)?.startsWith("conductor-")
         && provider.safeParse(pane.agent).success && !["completed", "exited", "failed", "stopped"].includes(String(pane.agent_status)));
       if (existing) throw new BridgeError(409, "A conductor is already running for this store.", { target: await targetForPane(overview.name, existing) });
     }
