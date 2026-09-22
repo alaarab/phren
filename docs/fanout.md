@@ -84,3 +84,11 @@ phren bridge fanouts archive [--dry-run]
 
 `--dry-run` reports what would move and what would be deleted without touching
 anything.
+
+## OpenCode's own refusals
+
+In `opencode run`, OpenCode rejects some permissions itself (external_directory,
+doom_loop) before any plugin sees them and prints `permission requested: <type>
+(<pattern>); auto-rejecting` to stderr. The launcher captures stderr into the job
+directory, and the Hook reads the last such line from `stderr.log` when no
+`blocked.json` exists, reporting the job as failed with `blocked: <type> <pattern>`.
