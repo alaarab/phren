@@ -138,13 +138,17 @@ public struct AgentRemote: Codable, Equatable, Hashable, Sendable {
 }
 
 public struct AgentChild: Codable, Equatable, Sendable, Identifiable {
-    public enum State: String, Codable, Sendable { case running, completed }
+    public enum State: String, Codable, Sendable { case running, completed, failed }
     public let id: String
     public let provider: String
     public let model: String?
     public let path: String
     public let callId: String
     public let state: State
+    /// A fan-out worker the Hook reports as failed for a refused permission:
+    /// `blocked: <type> <pattern>`. The wire still carries `completed` for
+    /// older clients, so this reason is what marks the worker refused.
+    public let reason: String?
     public let worktreeName: String?
     public let branch: String?
     public let computer: AgentComputer?
@@ -161,11 +165,27 @@ public struct AgentChild: Codable, Equatable, Sendable, Identifiable {
         let leaf = path.split(separator: "/").last.map(String.init) ?? "Agent"
         return leaf.replacingOccurrences(of: "_", with: " ")
     }
+    /// A blocked worker the plugin refused a permission for. It is finished,
+    /// but it failed: never draw it as a completed agent.
+    public var permissionRefused: Bool { reason?.hasPrefix("blocked:") == true }
+    /// The refused permission's type and pattern, without the `blocked:`
+    /// prefix (`external_directory /path`, `doom_loop glob`).
+    public var refusedDetail: String? {
+        guard permissionRefused, let reason else { return nil }
+        let detail = reason.dropFirst("blocked:".count).trimmingCharacters(in: .whitespaces)
+        return detail.isEmpty ? nil : detail
+    }
+    /// The state a row draws. A refused worker is failed whatever the wire
+    /// state says, so an old completed badge can never hide a refusal.
+    public var displayState: State { permissionRefused ? .failed : state }
+    /// A refused worker names the refusal rather than its task.
+    public var displayName: String { permissionRefused ? "Permission refused" : name }
     public var agentCount: Int { 1 + children.reduce(0) { $0 + $1.agentCount } }
-    public var runningCount: Int { (state == .running ? 1 : 0) + children.reduce(0) { $0 + $1.runningCount } }
+    public var runningCount: Int { (displayState == .running ? 1 : 0) + children.reduce(0) { $0 + $1.runningCount } }
+    public var refusedCount: Int { (permissionRefused ? 1 : 0) + children.reduce(0) { $0 + $1.refusedCount } }
 
     private enum CodingKeys: String, CodingKey {
-        case id, provider, model, path, callId, state, worktreeName, branch, computer, remote, children
+        case id, provider, model, path, callId, state, reason, worktreeName, branch, computer, remote, children
     }
 
     public init(from decoder: Decoder) throws {
@@ -176,6 +196,7 @@ public struct AgentChild: Codable, Equatable, Sendable, Identifiable {
         path = try values.decode(String.self, forKey: .path)
         callId = try values.decode(String.self, forKey: .callId)
         state = try values.decode(State.self, forKey: .state)
+        reason = try values.decodeIfPresent(String.self, forKey: .reason)
         worktreeName = try values.decodeIfPresent(String.self, forKey: .worktreeName)
         branch = try values.decodeIfPresent(String.self, forKey: .branch)
         computer = try values.decodeIfPresent(AgentComputer.self, forKey: .computer)
@@ -210,7 +231,9 @@ public extension AgentChild {
     private static func rows(_ agents: [AgentChild], includeCompleted: Bool,
                              depth: Int) -> [AgentChildTreeRow] {
         agents.flatMap { agent in
-            let visible = includeCompleted || agent.state == .running
+            // A refused worker is finished but must stay visible: the sheet is
+            // where the person learns the permission was refused.
+            let visible = includeCompleted || agent.displayState == .running || agent.permissionRefused
             let descendants = rows(agent.children, includeCompleted: includeCompleted,
                                    depth: visible ? depth + 1 : depth)
             return (visible ? [AgentChildTreeRow(agent: agent, depth: depth)] : []) + descendants

@@ -1061,7 +1061,7 @@ struct AgentChatView: View {
         .buttonStyle(.plain).foregroundStyle(PhrenTheme.chatText)
         .padding(.horizontal, 10).frame(minHeight: 48)
         .phrenPanel(radius: PhrenTheme.Radius.large)
-        .padding(.horizontal, 10).padding(.top, 2).padding(.bottom, 4)
+        .padding(.horizontal, 10).padding(.top, PhrenDensity.chatHeaderTop).padding(.bottom, 4)
         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         .accessibilityElement(children: .contain)
         .overlay(alignment: .topLeading) {
@@ -1360,7 +1360,7 @@ struct AgentChatView: View {
             .disabled(model.restoringDraft)
         }
         .buttonStyle(.plain).foregroundStyle(PhrenTheme.chatText)
-        .padding(.horizontal, 10).padding(.top, 6).padding(.bottom, 2)
+        .padding(.horizontal, 10).padding(.top, 6).padding(.bottom, PhrenDensity.composerBottom)
         .background(PhrenTheme.chatCanvas.ignoresSafeArea(.container, edges: .bottom))
     }
 

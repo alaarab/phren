@@ -14,6 +14,11 @@ number counts up on its own.
 
 ### Fixed
 
+- A fan-out worker the computer refused a permission for reads as failed, never
+  completed: its row and its chat header say "Permission refused" with the
+  refused type and pattern and a FAILED badge in the warning tint.
+- A computer under heavy load shows "Slow to answer" on its row and keeps its last snapshot, distinct from unreachable, using the Hook's reported load and gateway cost.
+
 - OpenCode calls use phren memory, todo, patch and subagent cards, with captured tool arguments preserved.
 
 The Tasks tab filters open from done, and the Memory list shows its projects
@@ -29,6 +34,11 @@ and scrolls again.
 
 ### Changed
 
+- Chat, tool cards and Changes are denser: the floating header sits 4 points
+  under the safe area, the composer 4 above the home indicator, transcript
+  rows 6 apart, and expanded tool cards use 8-point padding with 4 between
+  rows. Changes list rows are 44 points, Working tree rows 40 with a 12-point
+  indent per level, and the section band is 40 with 32-point icon tabs.
 - A project's name color comes from the same eight-color palette a computer
   gets, plus the custom color wheel and a hex field; the row previews the name.
 - Knobs are sliders: every stop is visible under its own dot, the current value

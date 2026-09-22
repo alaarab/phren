@@ -30,12 +30,36 @@ public struct LiveCapabilities: Codable, Equatable, Sendable {
     }
 }
 
+public struct HookLoad: Codable, Equatable, Sendable {
+    public let average: Double
+    public let cpus: Int
+    public init(average: Double, cpus: Int) { self.average = average; self.cpus = cpus }
+}
+
 public struct LiveHookInfo: Codable, Equatable, Sendable {
     public let capabilities: LiveCapabilities?
     public let modules: [String: String]?
     public let store: String?
     public let profile: String?
     public let generation: String?
+    /// The computer's 1-minute load average and CPU count, when reported.
+    public let load: HookLoad?
+    /// The node gateway's own startup-to-first-byte cost, when it was the path.
+    public let gatewayMs: Int?
+
+    public init(capabilities: LiveCapabilities?, modules: [String: String]?, store: String?,
+                profile: String?, generation: String?, load: HookLoad? = nil, gatewayMs: Int? = nil) {
+        self.capabilities = capabilities; self.modules = modules; self.store = store
+        self.profile = profile; self.generation = generation; self.load = load; self.gatewayMs = gatewayMs
+    }
+
+    /// Answering, but the computer is oversubscribed or its node gateway was
+    /// slow: distinct from unreachable, so the last snapshot stays visible.
+    public var slowToAnswer: Bool {
+        if let load, load.cpus > 0, load.average > 4 * Double(load.cpus) { return true }
+        if let gatewayMs, gatewayMs > 1_500 { return true }
+        return false
+    }
 }
 
 /// The Phren Hook v1 workspace contract. A child is a tab;
@@ -214,6 +238,8 @@ public struct LiveWorkspaces: Codable, Equatable, Sendable {
         let store: String?
         let profile: String?
         let generation: String?
+        let load: HookLoad?
+        let gatewayMs: Int?
     }
 
     init(kind: String, groups: [Group], focus: Focus?, computer: Computer? = nil, phren: LiveHookInfo? = nil) {
@@ -227,7 +253,7 @@ public struct LiveWorkspaces: Codable, Equatable, Sendable {
         focus = try values.decodeIfPresent(Focus.self, forKey: .focus)
         let info = try values.decodeIfPresent(PhrenInfo.self, forKey: .phren)
         computer = info?.computer
-        phren = info.map { LiveHookInfo(capabilities: $0.capabilities, modules: $0.modules, store: $0.store, profile: $0.profile, generation: $0.generation) }
+        phren = info.map { LiveHookInfo(capabilities: $0.capabilities, modules: $0.modules, store: $0.store, profile: $0.profile, generation: $0.generation, load: $0.load, gatewayMs: $0.gatewayMs) }
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -237,7 +263,8 @@ public struct LiveWorkspaces: Codable, Equatable, Sendable {
         try values.encodeIfPresent(focus, forKey: .focus)
         if computer != nil || phren != nil {
             try values.encode(PhrenInfo(computer: computer, capabilities: phren?.capabilities, modules: phren?.modules,
-                                        store: phren?.store, profile: phren?.profile, generation: phren?.generation), forKey: .phren)
+                                        store: phren?.store, profile: phren?.profile, generation: phren?.generation,
+                                        load: phren?.load, gatewayMs: phren?.gatewayMs), forKey: .phren)
         }
     }
 

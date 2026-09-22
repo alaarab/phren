@@ -13,7 +13,7 @@ struct ChatPlanCard: View {
     /// screen twice. A tap opens it — the review may have gone elsewhere.
     private var folded: Bool { plan.state == .pending && !opened }
     var body: some View {
-        VStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
+        VStack(alignment: .leading, spacing: PhrenDensity.toolCardRowSpacing) {
             Button {
                 withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { opened.toggle() }
             } label: {

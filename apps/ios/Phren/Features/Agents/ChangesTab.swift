@@ -253,7 +253,7 @@ struct ChangesFileRow: View {
             .accessibilityIdentifier("changes-stage:\(file.path)")
         }
         .padding(.horizontal, PhrenTheme.Space.medium)
-        .frame(minHeight: 40)
+        .frame(minHeight: PhrenDensity.changesRowHeight)
         .background(PhrenTheme.bg)
         // An identifier on the row itself would replace the two buttons'
         // own, so the row is marked by a zero-size overlay instead.

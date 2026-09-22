@@ -31,6 +31,9 @@ final class SessionOverviewMonitor {
         let fresh: Bool
         let message: String?
         let needsVerification: Bool
+        /// Answering, but under load or through a slow gateway; distinct from
+        /// unreachable so the last snapshot stays visible.
+        var slow: Bool? = nil
         var id: UUID { host.id }
     }
     /// One value is published for the entire screen: header, groups, resolved
@@ -213,7 +216,7 @@ final class SessionOverviewMonitor {
         var value = Screen(groups: groups, computers: computers.map {
             ComputerRow(host: $0.host, connecting: $0.monitor.isConnecting,
                         fresh: $0.monitor.isFresh(at: date), message: $0.monitor.message,
-                        needsVerification: $0.monitor.fingerprint != nil)
+                        needsVerification: $0.monitor.fingerprint != nil, slow: $0.monitor.slowToAnswer)
         }, focusFilter: configuration.focusFilter, query: configuration.query, memoryReady: configuration.metadataReady,
            memoryConnected: configuration.memoryConnected, preferencesReadable: configuration.preferences != nil)
         for session in groups.flatMap(\.sessions) {

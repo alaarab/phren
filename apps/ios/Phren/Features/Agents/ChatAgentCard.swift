@@ -23,10 +23,20 @@ struct ChatAgentCard: View {
 
     /// The spawn call says "running" until its own result arrives; a Codex
     /// child that the computer has already seen finish is done before that.
+    /// A refused worker is failed whatever either says.
     private var state: AgentSubagentPresentation.State {
+        if child?.agent.permissionRefused == true { return .failed }
         if agent.state == .running, child?.agent.state == .completed { return .done }
         return agent.state
     }
+
+    /// A blocked fan-out worker matched to this call: the refusal, not the
+    /// task, is what the card names.
+    private var refusedChild: AgentChild? {
+        guard let agent = child?.agent, agent.permissionRefused else { return nil }
+        return agent
+    }
+    private var title: String { refusedChild == nil ? agent.name : "Permission refused" }
 
     private var status: ToolCardStatus {
         switch state {
@@ -56,11 +66,18 @@ struct ChatAgentCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
-            ToolCardHeader(icon: "person.2", title: agent.name, status: status)
+        VStack(alignment: .leading, spacing: PhrenDensity.toolCardRowSpacing) {
+            ToolCardHeader(icon: "person.2", title: title, status: status)
             if !agent.description.isEmpty {
                 Text(agent.description).font(.subheadline).foregroundStyle(PhrenTheme.textSecondary)
                     .lineLimit(3).frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if let detail = refusedChild?.refusedDetail {
+                HStack(spacing: 6) {
+                    PhrenChip(text: "FAILED", icon: "exclamationmark", color: PhrenTheme.warning)
+                    Text(detail).font(.caption).foregroundStyle(PhrenTheme.warning).lineLimit(2)
+                }
+                .accessibilityIdentifier("chat-agent-refused:\(entry.callID)")
             }
             if agent.model != nil || agent.background {
                 HStack(spacing: 6) {

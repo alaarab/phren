@@ -19,7 +19,7 @@ struct ChatTodoCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
+        VStack(alignment: .leading, spacing: PhrenDensity.toolCardRowSpacing) {
             Button {
                 withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { expanded.toggle() }
             } label: {

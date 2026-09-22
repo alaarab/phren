@@ -4,8 +4,9 @@ import { activateModules as moduleSnapshot, type ModuleSnapshot } from "../modul
 import { BUILTIN_MODULES, disabledHint } from "../modules/registry.js";
 import { randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, readFile, rm, unlink, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage } from "node:http";
-import { hostname } from "node:os";
+import { cpus, hostname, loadavg } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocket, WebSocketServer } from "ws";
@@ -38,6 +39,7 @@ import { currentModel, currentStep } from "./steps.js";
 import { AccountUsageReader } from "./usage.js";
 import { createScheduleLauncher, Scheduler, scheduleRunsFile } from "./schedules.js";
 import { defaultPhrenPath } from "../shared.js";
+import { loadCodePackage, loadedFrom } from "../modules/code-package.js";
 
 const CHILD_ACTIVITY_CACHE_MS = 5_000;
 interface ChildActivity { runningChildren: number; childProviders: Provider[] }
@@ -72,6 +74,15 @@ export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string,
 export function requireRoute(snapshot: ModuleSnapshot, method: string, route: string): void {
   const owner = BUILTIN_MODULES.find(module => module.hookRoutes.some(entry => entry.method === method && entry.path === route));
   if (owner && !snapshot.has(owner.name)) throw new BridgeError(404, disabledHint(owner.name));
+}
+
+/** Whether the Hook can load @phren/code and, if so, from where. Reported by
+ * /v1/health so a phone can explain a missing code package. */
+async function codePackageStatus(store: string, enabled: boolean): Promise<Record<string, unknown>> {
+  if (!enabled) return { missing: true };
+  const code = await loadCodePackage(store);
+  const from = loadedFrom();
+  return code && from ? { loadedFrom: from } : { missing: true };
 }
 
 
@@ -152,9 +163,20 @@ export async function serve(version: string): Promise<void> {
   // incremental re-index after a save, a full one after a branch switch.
   const codeReindexer = codeRoutes ? new CodeReindexer({ store: scheduleStore }) : undefined;
   if (codeReindexer) agentHooks.changes.onRecord = files => codeReindexer.record(files);
+  // The node gateway writes its own cost after the first response byte, so a
+  // health read reflects the most recent node-path connection, if any.
+  function gatewayTiming(): number | undefined {
+    try {
+      const parsed = JSON.parse(readFileSync(path.join(root, "gateway.json"), "utf8")) as { ms?: unknown };
+      if (typeof parsed.ms === "number" && Number.isFinite(parsed.ms) && parsed.ms >= 0) return Math.round(parsed.ms);
+    } catch { /* the node gateway has not answered yet */ }
+    return undefined;
+  }
   const info = { product: "phren-hook", protocol: PROTOCOL, version, computer: { id: computerID, name: hostname() }, capabilities: activeCapabilities,
     modules: Object.fromEntries(modules.modules.map(module => [module.name, module.version])),
-    store: modules.store, profile: modules.profile, generation: modules.generation };
+    store: modules.store, profile: modules.profile, generation: modules.generation,
+    get load() { return { average: Number(loadavg()[0].toFixed(2)), cpus: cpus().length }; },
+    get gatewayMs() { return gatewayTiming(); } };
   const old = await lstat(socketPath()).catch(() => null);
   if (old) {
     if (!old.isSocket() || (process.getuid && old.uid !== process.getuid())) throw new Error("Refusing to replace an unexpected hook socket.");
@@ -177,7 +199,7 @@ export async function serve(version: string): Promise<void> {
       let result: unknown;
       if (request.method === "GET") {
         switch (url.pathname) {
-          case "/v1/health": result = info; break;
+          case "/v1/health": result = { ...info, codePackage: await codePackageStatus(scheduleStore, modules.has("code")) }; break;
           case "/v1/dispatch": result = { dispatches: await dispatchStatus() }; break;
           case "/v1/conductor/grants": result = { grants: await listGrants() }; break;
           case "/v1/dispatch/capacity": {

@@ -27,7 +27,7 @@ struct MCPToolCard: View, Equatable {
             }.joined(separator: "\n\n")
             openOutput(.init(title: "\(presentation.server) · \(presentation.verb)", text: raw))
         } label: {
-            VStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
+            VStack(alignment: .leading, spacing: PhrenDensity.toolCardRowSpacing) {
                 HStack(spacing: PhrenTheme.Space.small) {
                     Image(systemName: "server.rack").font(.system(size: 14, weight: .medium)).foregroundStyle(PhrenTheme.phrenCardAccent)
                         .frame(width: 18, height: 18).accessibilityHidden(true)

@@ -82,7 +82,7 @@ struct ChatReadRun: View, Equatable {
     }
     var body: some View { ChatPerformance.measure("read-run row") { content } }
     @ViewBuilder private var content: some View {
-        VStack(alignment: .leading, spacing: expanded ? 6 : 0) {
+        VStack(alignment: .leading, spacing: expanded ? PhrenDensity.toolCardRowSpacing : 0) {
             Button {
                 withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { expanded.toggle() }
             } label: {
@@ -101,9 +101,9 @@ struct ChatReadRun: View, Equatable {
             if expanded {
                 ForEach(groups) { group in
                     ChatToolActivity(messages: group.messages, resultImages: resultImages, imageContext: imageContext).equatable()
-                }.padding(.horizontal, 8)
+                }.padding(.horizontal, PhrenDensity.toolCardPadding)
             }
-        }.padding(.bottom, expanded ? 8 : 0)
+        }.padding(.bottom, expanded ? PhrenDensity.toolCardPadding : 0)
             .phrenPanel(tool: true)
     }
 }
@@ -213,7 +213,7 @@ struct ChatToolActivity: View, Equatable {
                 }
             }
             if expanded {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: PhrenDensity.toolCardRowSpacing) {
                     ForEach(messages) { message in
                         // The call and its output, both in full: the command
                         // is what tells you what happened, so it is never
@@ -222,7 +222,7 @@ struct ChatToolActivity: View, Equatable {
                                        id: message.id, renderKey: message.renderKey, isResult: message.isToolResult, collapsible: message.isChange)
                         if message.isToolResult, !message.resultImages.isEmpty, let resultImages { resultImages(message) }
                     }
-                }.padding(.horizontal, 10).padding(.bottom, 10)
+                }.padding(.horizontal, PhrenDensity.toolCardPadding).padding(.bottom, PhrenDensity.toolCardPadding)
             }
         }
         .phrenPanel(tool: true)

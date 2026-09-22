@@ -759,11 +759,12 @@ Device-flow sign-in needs a registered GitHub **OAuth App**:
 1. GitHub → Settings → Developer settings → OAuth Apps → New OAuth App.
 2. Any homepage/callback URL (device flow doesn't use the callback).
 3. In the app's settings, **enable "Device Flow"**.
-4. Copy `Config/Local.xcconfig.example` to `Config/Local.xcconfig` and set
-   `PHREN_GITHUB_CLIENT_ID` to the public client ID and `DEVELOPMENT_TEAM` to
-   your Apple team ID. Local configuration is ignored by git. The committed
-   `Config/App.xcconfig` optionally includes it; command-line build settings
-   can supply the values in CI. No client secret is needed or shipped.
+4. Copy `Config/Local.xcconfig.example` to `Config/Local.xcconfig` (or to
+   `Local.xcconfig` beside `project.yml`) and set `PHREN_GITHUB_CLIENT_ID` to
+   the public client ID and `DEVELOPMENT_TEAM` to your Apple team ID. Local
+   configuration is ignored by git. The committed `Config/App.xcconfig`
+   optionally includes it; command-line build settings can supply the values
+   in CI. No client secret is needed or shipped.
 
 The app reads the ID from its built Info.plist, makes GitHub device sign-in
 the primary button when configured, and retains token sign-in as a fallback.
@@ -786,6 +787,22 @@ a build without OAuth. It never removes the App Group entitlement. Archive
 and export files go under `~/Library/Developer/Xcode/Archives/phren/`.
 `--upload` sends a build to App Store Connect; it does not submit App Review.
 Follow [the device checklist](AppStore/DEVICE_CHECKLIST.md) before release.
+
+`Local.xcconfig` is git-ignored, so a fresh worktree has none and Xcode
+resolves no `DEVELOPMENT_TEAM` there even though the main checkout does. The
+helper finds the team id and OAuth client id the same way from any checkout,
+in this order:
+
+1. `PHREN_APPLE_TEAM_ID` / `PHREN_GITHUB_CLIENT_ID` in the environment.
+2. `Config/Local.xcconfig`, then `Local.xcconfig` beside `project.yml`, in
+   this checkout.
+3. The same files in the repository's main worktree (`git worktree list
+   --porcelain`, first entry).
+4. The main worktree's resolved `xcodebuild -showBuildSettings`.
+
+It prints `team <id> from <source>` before archiving, and `--team` /
+`--client-id` override every source. When no source supplies a client id,
+the build needs `--allow-token-sign-in`.
 
 Until then, the **personal access token** sign-in path works out of the box:
 create a fine-grained PAT with **Contents: Read and write** + **Metadata:

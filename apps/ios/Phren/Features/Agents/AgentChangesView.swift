@@ -156,7 +156,7 @@ struct AgentChangesView: View {
 
     private var separator: some View { Text("·").foregroundStyle(PhrenTheme.textDim) }
 
-    /// One 44pt band: the five section icons on the left, the Changes tab's
+    /// One 40pt band: the five section icons on the left, the Changes tab's
     /// List/Diff toggle on the right. The toggle only means something while
     /// Changes is showing.
     private var tabBar: some View {
@@ -167,14 +167,14 @@ struct AgentChangesView: View {
                         Image(systemName: section.symbol)
                             .font(.system(size: 15, weight: .medium))
                             .foregroundStyle(selection == section ? PhrenTheme.accent : PhrenTheme.textMuted)
-                            .frame(maxWidth: .infinity, minHeight: 32)
+                            .frame(maxWidth: .infinity, minHeight: PhrenDensity.changesIconTabHeight)
                             .background {
                                 if selection == section {
                                     RoundedRectangle(cornerRadius: PhrenTheme.Radius.small, style: .continuous)
                                         .fill(PhrenTheme.surface)
                                 }
                             }
-                            .contentShape(Rectangle().inset(by: -6))
+                            .contentShape(Rectangle().inset(by: -4))
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(section.title)
@@ -185,13 +185,13 @@ struct AgentChangesView: View {
             .frame(maxWidth: .infinity)
             .padding(2)
             .overlay {
-                Color.clear.frame(maxWidth: .infinity, minHeight: 36).accessibilityElement()
+                Color.clear.frame(maxWidth: .infinity, minHeight: PhrenDensity.changesIconTabHeight).accessibilityElement()
                     .accessibilityIdentifier("changes-tab-bar")
                     .allowsHitTesting(false)
             }
             if selection == .changes { modeToggle }
         }
-        .frame(minHeight: 44)
+        .frame(minHeight: PhrenDensity.changesBandHeight)
         .padding(.horizontal, 10)
     }
 

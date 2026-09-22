@@ -27,7 +27,7 @@ struct WebToolCard: View, Equatable {
 
     var body: some View { ChatPerformance.measure("web card row") { content } }
     @ViewBuilder private var content: some View {
-        VStack(alignment: .leading, spacing: expanded ? PhrenTheme.Space.small : 0) {
+        VStack(alignment: .leading, spacing: expanded ? PhrenDensity.toolCardRowSpacing : 0) {
             Button {
                 withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { expanded.toggle() }
             } label: {

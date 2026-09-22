@@ -270,7 +270,7 @@ async function main() {
 
   // Lazy-imported tool registries — only the MCP server needs them. Registration
   // order is irrelevant (each module registers a disjoint set of tools).
-  const codeAvailable = hasModule("code") && !!(await (await import("./modules/code-package.js")).loadCodePackage());
+  const codeAvailable = hasModule("code") && !!(await (await import("./modules/code-package.js")).loadCodePackage(phrenPath));
   const toolModules = await Promise.all([
     import("./tools/search.js"),
     ...(hasModule("tasks") ? [import("./tools/tasks.js")] : []),

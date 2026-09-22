@@ -77,7 +77,7 @@ struct LiveSessionsView: View {
                     if screen.preferencesReadable {
                         ForEach(screen.computers) { computer in
                             NavigationLink { LiveHostView(hostID: computer.id) } label: {
-                                PhrenMenuRow(title: computer.host.name, subtitle: computer.connecting ? "Connecting…" : computer.host.address,
+                                PhrenMenuRow(title: computer.host.name, subtitle: computer.connecting ? "Connecting…" : computer.slow == true ? "Slow to answer" : computer.host.address,
                                              icon: "desktopcomputer", titleColor: PhrenTheme.hostColor(computer.host.color ?? LiveHost.defaultColor(for: computer.host.id)))
                             }
                             .accessibilityIdentifier("live-host:\(computer.id)")
@@ -341,6 +341,8 @@ final class LiveHostMonitor {
     var fingerprint: String?
     var refreshing = false
     var polling = false
+    /// Answering, but under load or through a slow gateway. Not unreachable.
+    var slowToAnswer: Bool { snapshot?.phren?.slowToAnswer == true }
     /// True until this contact period's first request resolves. While the
     /// phone is reaching a computer its cached rows stay in the live groups
     /// and are never labelled stale; only an answer that ages out, or an
@@ -690,7 +692,7 @@ private struct LiveHostView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 6) {
                             Circle().fill(fresh ? PhrenTheme.cyan : PhrenTheme.textDim).frame(width: 5, height: 5)
-                            Text(fresh ? "Live" : monitor.isConnecting ? "Connecting…" : "Disconnected")
+                            Text(fresh ? "Live" : monitor.isConnecting ? "Connecting…" : monitor.slowToAnswer ? "Slow to answer" : "Disconnected")
                             if let date = monitor.lastUpdated {
                                 Text("· updated \(date, style: .relative) ago").lineLimit(1)
                             }

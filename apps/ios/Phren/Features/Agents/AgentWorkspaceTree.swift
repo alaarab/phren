@@ -280,7 +280,11 @@ private struct DrawerChildAgentLabel: View {
             HStack(spacing: 9) {
                 AgentProviderGlyph(source: row.agent.provider.lowercased(), size: 16)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(row.agent.name).font(.subheadline).lineLimit(1)
+                    Text(row.agent.displayName).font(.subheadline)
+                        .foregroundStyle(row.agent.permissionRefused ? PhrenTheme.warning : PhrenTheme.text).lineLimit(1)
+                    if let detail = row.agent.refusedDetail {
+                        Text(detail).font(.caption).foregroundStyle(PhrenTheme.warning).lineLimit(1).truncationMode(.middle)
+                    }
                     Text(metadata).font(.system(.caption, design: .monospaced))
                         .foregroundStyle(PhrenTheme.sessionMeta).lineLimit(1).truncationMode(.middle)
                     if let computer = row.agent.computer {
@@ -299,7 +303,8 @@ private struct DrawerChildAgentLabel: View {
     }
 
     private var rowLabel: String {
-        var parts: [String] = [row.agent.name, metadata]
+        var parts: [String] = [row.agent.displayName, metadata]
+        if let detail = row.agent.refusedDetail { parts.append(detail) }
         if let computer = row.agent.computer { parts.append(computer.name) }
         if unavailable { parts.append("unavailable") }
         if unknown { parts.append("add computer") }

@@ -39,6 +39,30 @@ final class AgentChatTests: XCTestCase {
         XCTAssertNil(withoutModel.model)
     }
 
+    func testBlockedFanoutChildReadsAsRefusedAndNeverCompleted() throws {
+        let blocked = try JSONDecoder().decode(AgentChild.self, from: Data(#"{"id":"a","provider":"opencode","path":"Clean the tree","callId":"fanout:a","state":"completed","reason":"blocked: doom_loop glob","children":[]}"#.utf8))
+        XCTAssertEqual(blocked.reason, "blocked: doom_loop glob")
+        XCTAssertTrue(blocked.permissionRefused)
+        XCTAssertEqual(blocked.refusedDetail, "doom_loop glob")
+        XCTAssertEqual(blocked.displayState, .failed, "A refused worker is never completed")
+        XCTAssertEqual(blocked.displayName, "Permission refused")
+        XCTAssertEqual(blocked.runningCount, 0)
+        XCTAssertEqual(blocked.refusedCount, 1)
+        XCTAssertEqual(AgentChild.runningRows([blocked]).map(\.agent.id), ["a"],
+                       "A refused worker stays visible in the agent work list")
+
+        let clean = try JSONDecoder().decode(AgentChild.self, from: Data(#"{"id":"b","provider":"codex","path":"Clean the tree","callId":"fanout:b","state":"completed","children":[]}"#.utf8))
+        XCTAssertNil(clean.reason)
+        XCTAssertFalse(clean.permissionRefused)
+        XCTAssertNil(clean.refusedDetail)
+        XCTAssertEqual(clean.displayState, .completed)
+        XCTAssertEqual(clean.displayName, "Clean the tree")
+        XCTAssertEqual(AgentChild.runningRows([clean]), [])
+
+        let failed = try JSONDecoder().decode(AgentChild.self, from: Data(#"{"id":"c","provider":"claude","path":"Clean the tree","callId":"fanout:c","state":"failed","children":[]}"#.utf8))
+        XCTAssertEqual(failed.displayState, .failed)
+    }
+
     func testChildAgentDecodesCheckoutDetails() throws {
         let both = try JSONDecoder().decode(AgentChild.self, from: Data(#"{"id":"a","provider":"codex","path":"/root/first","callId":"c1","state":"running","worktreeName":"phren-child-wt-ui","branch":"codex/child-worktree-ui","children":[]}"#.utf8))
         let worktreeOnly = try JSONDecoder().decode(AgentChild.self, from: Data(#"{"id":"b","provider":"codex","path":"/root/second","callId":"c2","state":"running","worktreeName":"phren-child-wt-api","children":[]}"#.utf8))

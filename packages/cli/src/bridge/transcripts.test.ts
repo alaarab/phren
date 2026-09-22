@@ -116,6 +116,17 @@ describe("transcript image payloads", () => {
 });
 
 describe("child agent relationships", () => {
+  it("carries a blocked worker's reason through the wire projection", () => {
+    const tree = [{
+      id: "a".repeat(32), provider: "opencode" as const, path: "Clean the tree", callId: "fanout:a",
+      state: "failed" as const, reason: "blocked: doom_loop glob", children: [],
+    }];
+    // The phone's older relation contract has no failed state, so the reason is
+    // what marks the refusal; the explicit projection must not strip it.
+    expect(publicChildAgents(tree)[0]).toMatchObject({ state: "completed", reason: "blocked: doom_loop glob" });
+    expect(publicChildAgents(tree)[0]).not.toHaveProperty("session");
+  });
+
   it("builds a bounded tree from explicit Codex start/completion events", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "phren-children-"));
     const old = process.env.CODEX_HOME; process.env.CODEX_HOME = root;

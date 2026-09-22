@@ -56,7 +56,7 @@ struct ChangesWorkingTreeTab: View {
                     .listRowBackground(Color.clear)
                 }
             }
-            .environment(\.defaultMinListRowHeight, 32)
+            .environment(\.defaultMinListRowHeight, PhrenDensity.treeRowHeight)
             .refreshable { await loadRoot() }
         }
         .accessibilityIdentifier("changes-tree")
@@ -207,13 +207,13 @@ private struct WorkingTreeRow: View {
             if entry.isDirectory { onToggle(entry) } else { onOpen(entry) }
         } label: { row }
             .buttonStyle(.plain)
-            .frame(minHeight: 32)
-            .listRowInsets(EdgeInsets(top: 0, leading: 12 + CGFloat(level) * 12, bottom: 0, trailing: 12))
+            .frame(minHeight: PhrenDensity.treeRowHeight)
+            .listRowInsets(EdgeInsets(top: 0, leading: 12 + CGFloat(level) * PhrenDensity.treeIndent, bottom: 0, trailing: 12))
             .accessibilityIdentifier("changes-tree-entry:\(entry.path)")
             // A marker beside the button, not over it: an element covering
             // the row would take the hit test away from the button itself.
             .overlay(alignment: .leading) {
-                Color.clear.frame(width: 1, height: 32).accessibilityElement()
+                Color.clear.frame(width: 1, height: PhrenDensity.treeRowHeight).accessibilityElement()
                     .accessibilityIdentifier("changes-tree-row:\(entry.path)")
                     .allowsHitTesting(false)
             }
@@ -247,7 +247,7 @@ private struct WorkingTreeRow: View {
             }
             Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: PhrenDensity.treeRowHeight, alignment: .leading)
         .contentShape(Rectangle().inset(by: -6))
     }
 

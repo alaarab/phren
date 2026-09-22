@@ -366,7 +366,7 @@ export const REGISTRY: Command[] = [
       { name: "def", usage: "phren code def <project> <symbol>", summary: "A symbol's definition, doc, snippet and last change" },
       { name: "usage", usage: "phren code usage <project> [--top n]", summary: "Hottest and coldest symbols by reference count" },
     ],
-    run: async (args, ctx) => (await (await import("./modules/code-package.js")).requireCodePackage()).runCodeCommand(args, ctx),
+    run: async (args, ctx) => (await (await import("./modules/code-package.js")).requireCodePackage(ctx.phrenPath())).runCodeCommand(args, ctx),
   },
   {
     name: "shell",

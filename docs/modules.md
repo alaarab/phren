@@ -433,7 +433,20 @@ On upgrade, activation writes the previous effective configuration into
 are preserved, including an explicit task opt-out.
 
 The code engine, grammars and skill ship as `@phren/code`, outside the CLI tarball.
-`phren modules enable code` installs it with `npm install -g @phren/code` if absent,
-then copies its skill into the store. MCP and Hook load the package only while
-code is enabled. Restart them after enabling it. If installation fails, run the
-printed npm command and retry enablement.
+`phren modules enable code` makes it loadable by this store, then copies its skill
+into the store. MCP and Hook load the package only while code is enabled and
+restart them after enabling it.
+
+Resolution tries, in order: the `PHREN_CODE_PACKAGE` directory; the bridge's own
+`<bridge>/node_modules/@phren/code`; the store's
+`.runtime/packages/node_modules/@phren/code`; a plain `@phren/code` import; then
+`npm root -g`. The global lookup runs with the service `PATH` plus the mise and
+Homebrew shims a daemon usually lacks, because the Hook bundle has no
+node_modules and its service PATH often has no npm. The path that worked is
+reported as `codePackage` in `/v1/health`.
+
+`phren modules enable code` links a workspace checkout found at `packages/code`
+instead of installing, so this repository uses its own package. Otherwise it runs
+`npm install --prefix <store>/.runtime/packages @phren/code` when neither a global
+install nor a loadable copy exists, and prints where the package landed. If
+installation fails, run the printed npm command and retry enablement.

@@ -16,8 +16,9 @@ public struct AgentDestination: Equatable, Sendable, Identifiable {
     }
 
     public func session(for agent: AgentChild) -> LiveAgentSession {
-        LiveAgentSession(remoteHost: host, target: target, title: agent.name,
-                         status: agent.state == .running ? "working" : "done", model: agent.model)
+        let status = agent.permissionRefused ? "failed" : agent.state == .running ? "working" : "done"
+        return LiveAgentSession(remoteHost: host, target: target, title: agent.displayName,
+                                status: status, model: agent.model)
     }
 }
 

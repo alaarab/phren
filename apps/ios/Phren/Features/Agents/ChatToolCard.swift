@@ -44,7 +44,7 @@ struct ToolCardChrome: ViewModifier {
                 .overlay(RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium).strokeBorder(PhrenTheme.phrenCardBorder, lineWidth: 0.5))
         } else {
             content
-                .padding(PhrenTheme.Space.medium).frame(maxWidth: .infinity, alignment: .leading)
+                .padding(PhrenDensity.toolCardPadding).frame(maxWidth: .infinity, alignment: .leading)
                 .background(PhrenTheme.phrenCardSurface, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium))
                 .overlay(RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium).strokeBorder(PhrenTheme.phrenCardBorder, lineWidth: 0.5))
         }

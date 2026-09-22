@@ -12,9 +12,11 @@ struct ChatSubagentsView: View {
     private var overview: SessionOverviewMonitor { .shared }
 
     /// Finished agents are out of scope here: the sheet is about work in
-    /// progress, and a finished worker's result lives in the transcript.
+    /// progress, and a finished worker's result lives in the transcript. A
+    /// refused worker is the exception: the refusal is what the person needs.
     private var rows: [AgentTreeRow] { AgentTreeRow.rows(agents, includeCompleted: false) }
-    private var running: Int { rows.count }
+    private var running: Int { rows.filter { $0.agent.displayState == .running }.count }
+    private var refused: Int { rows.filter(\.agent.permissionRefused).count }
     private var providers: [String] { Array(Set(rows.map { $0.agent.providerName })).sorted() }
 
     var body: some View {
@@ -78,8 +80,8 @@ struct ChatSubagentsView: View {
             .accessibilityIdentifier("chat-subagents-back")
             VStack(alignment: .leading, spacing: 1) {
                 Text("Agent work").font(.subheadline.weight(.medium)).foregroundStyle(PhrenTheme.text)
-                Text("\(running) running")
-                    .font(.caption).foregroundStyle(PhrenTheme.textMuted)
+                Text(refused > 0 ? "\(running) running · \(refused) refused" : "\(running) running")
+                    .font(.caption).foregroundStyle(refused > 0 ? PhrenTheme.warning : PhrenTheme.textMuted)
             }
             Spacer(minLength: 8)
         }
@@ -145,7 +147,13 @@ private extension AgentChild {
 private struct AgentTreeRowView: View {
     let row: AgentTreeRow
     let resolution: AgentDestinationResolution?
-    private var stateName: String { row.agent.state == .running ? "Running" : "Completed" }
+    private var stateName: String {
+        switch row.agent.displayState {
+        case .running: return "Running"
+        case .completed: return "Completed"
+        case .failed: return "Failed"
+        }
+    }
     private var unavailable: Bool {
         if case .offline? = resolution { return true }
         return false
@@ -165,7 +173,7 @@ private struct AgentTreeRowView: View {
                 treeGuide.frame(width: CGFloat(row.depth) * 16 + 4)
             }
             HStack(spacing: 12) {
-                AgentProviderAvatar(provider: row.agent.provider, state: row.agent.state)
+                AgentProviderAvatar(provider: row.agent.provider, state: row.agent.displayState)
                 VStack(alignment: .leading, spacing: 3) {
                     // The branch names the checkout; the worktree folder
                     // repeats it, and the task name repeats it again below.
@@ -178,7 +186,18 @@ private struct AgentTreeRowView: View {
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(PhrenTheme.sessionMeta)
                     .lineLimit(1).truncationMode(.tail)
-                    Text(row.agent.name).font(.body.weight(.medium)).foregroundStyle(PhrenTheme.text).lineLimit(2)
+                    HStack(spacing: 6) {
+                        Text(row.agent.displayName)
+                            .font(.body.weight(.medium))
+                            .foregroundStyle(row.agent.permissionRefused ? PhrenTheme.warning : PhrenTheme.text)
+                            .lineLimit(2)
+                        if row.agent.permissionRefused {
+                            PhrenChip(text: "FAILED", icon: "exclamationmark", color: PhrenTheme.warning)
+                        }
+                    }
+                    if let detail = row.agent.refusedDetail {
+                        Text(detail).font(.caption).foregroundStyle(PhrenTheme.warning).lineLimit(2)
+                    }
                     if let computer = row.agent.computer {
                         AgentComputerChip(computer: computer, unavailable: unavailable, unknown: unknown, starting: starting)
                     }
@@ -192,9 +211,10 @@ private struct AgentTreeRowView: View {
     }
 
     private var rowLabel: String {
-        var parts: [String] = [row.agent.name, row.agent.providerName]
+        var parts: [String] = [row.agent.displayName, row.agent.providerName]
         if let model = row.agent.model { parts.append(model) }
         parts.append(stateName)
+        if let detail = row.agent.refusedDetail { parts.append(detail) }
         if let computer = row.agent.computer { parts.append(computer.name) }
         if unavailable { parts.append("unavailable") }
         if unknown { parts.append("add computer") }
@@ -221,7 +241,13 @@ private struct AgentProviderAvatar: View {
     let provider: String
     let state: AgentChild.State
 
-    private var stateColor: Color { state == .running ? PhrenTheme.cyan : PhrenTheme.success }
+    private var stateColor: Color {
+        switch state {
+        case .running: return PhrenTheme.cyan
+        case .completed: return PhrenTheme.success
+        case .failed: return PhrenTheme.warning
+        }
+    }
 
     var body: some View {
         ZStack {
@@ -234,11 +260,18 @@ private struct AgentProviderAvatar: View {
                 Circle().fill(PhrenTheme.cyan).frame(width: 10, height: 10)
                     .overlay(Circle().strokeBorder(PhrenTheme.surface, lineWidth: 1.5))
                     .offset(x: 1, y: 1)
-            } else {
+            } else if state == .completed {
                 Image(systemName: "checkmark").font(.system(size: 7.5, weight: .bold))
                     .foregroundStyle(Color.black.opacity(0.85))
                     .frame(width: 15, height: 15)
                     .background(PhrenTheme.success, in: Circle())
+                    .overlay(Circle().strokeBorder(PhrenTheme.surface, lineWidth: 1.5))
+                    .offset(x: 1, y: 1)
+            } else {
+                Image(systemName: "exclamationmark").font(.system(size: 7.5, weight: .bold))
+                    .foregroundStyle(Color.black.opacity(0.85))
+                    .frame(width: 15, height: 15)
+                    .background(PhrenTheme.warning, in: Circle())
                     .overlay(Circle().strokeBorder(PhrenTheme.surface, lineWidth: 1.5))
                     .offset(x: 1, y: 1)
             }
@@ -279,16 +312,20 @@ struct SessionSubagentsCard: View {
 
     private var total: Int { agents.reduce(0) { $0 + $1.agentCount } }
     private var running: Int { agents.reduce(0) { $0 + $1.runningCount } }
+    private var refused: Int { agents.reduce(0) { $0 + $1.refusedCount } }
 
     var body: some View {
         Group {
             if let target, !agents.isEmpty {
                 Button { showing = true } label: {
                     HStack(spacing: 12) {
-                        AgentProviderAvatar(provider: agents[0].provider, state: running > 0 ? .running : .completed)
+                        AgentProviderAvatar(provider: agents[0].provider,
+                                            state: running > 0 ? .running : refused > 0 ? .failed : .completed)
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("\(total) \(total == 1 ? "agent" : "agents") · \(running) running")
-                                .font(.system(.caption, design: .monospaced)).foregroundStyle(PhrenTheme.sessionProject)
+                            Text("\(total) \(total == 1 ? "agent" : "agents") · \(running) running"
+                                 + (refused > 0 ? " · \(refused) refused" : ""))
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(refused > 0 ? PhrenTheme.warning : PhrenTheme.sessionProject)
                             Text("Spawned agents").font(.body.weight(.medium)).foregroundStyle(PhrenTheme.text)
                         }
                         Spacer(minLength: 8)
@@ -296,7 +333,8 @@ struct SessionSubagentsCard: View {
                     }.padding(12).sessionCard()
                 }
                 .buttonStyle(.plain)
-                    .accessibilityLabel("Spawned agents, \(total) \(total == 1 ? "agent" : "agents"), \(running) running")
+                    .accessibilityLabel("Spawned agents, \(total) \(total == 1 ? "agent" : "agents"), \(running) running"
+                                        + (refused > 0 ? ", \(refused) refused" : ""))
                     .accessibilityIdentifier("session-spawned-agents")
                     .sheet(isPresented: $showing) { ChatSubagentsView(session: session, target: target, agents: agents) }
             }
@@ -373,7 +411,7 @@ struct ChildAgentTranscriptView: View {
                             .accessibilityIdentifier("child-agent-older")
                         }
                         if history.messages.isEmpty {
-                            Text(agent.state == .running ? "Nothing recorded yet." : "This agent recorded no conversation.")
+                            Text(agent.permissionRefused ? "The worker was refused before it ran." : agent.state == .running ? "Nothing recorded yet." : "This agent recorded no conversation.")
                                 .font(.caption).foregroundStyle(PhrenTheme.textMuted)
                                 .padding(12).frame(maxWidth: .infinity, alignment: .leading).phrenPanel(tool: true)
                         }
@@ -397,6 +435,9 @@ struct ChildAgentTranscriptView: View {
     }
 
     private var stateLine: String {
+        if agent.permissionRefused {
+            return [agent.displayName, agent.refusedDetail].compactMap { $0 }.joined(separator: " · ") + " · read-only view"
+        }
         if agent.state != .running { return "Completed · read-only view" }
         return live ? "Working now · following live" : "Working now · read-only view"
     }
@@ -417,15 +458,20 @@ struct ChildAgentTranscriptView: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Back")
             .accessibilityIdentifier("child-agent-back")
-            AgentProviderAvatar(provider: agent.provider, state: agent.state)
+            AgentProviderAvatar(provider: agent.provider, state: agent.displayState)
             VStack(alignment: .leading, spacing: 1) {
-                Text(agent.name).font(.subheadline.weight(.medium)).foregroundStyle(PhrenTheme.text).lineLimit(1)
+                Text(agent.displayName)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(agent.permissionRefused ? PhrenTheme.warning : PhrenTheme.text).lineLimit(1)
                 Text(transcriptMeta)
                     .font(.caption2).foregroundStyle(PhrenTheme.textMuted).lineLimit(1)
+                if let detail = agent.refusedDetail {
+                    Text(detail).font(.caption2).foregroundStyle(PhrenTheme.warning).lineLimit(1)
+                }
                 if let computer { AgentComputerChip(computer: computer) }
             }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(agent.name), \(agent.providerName)" + (agent.model.map { ", \($0)" } ?? "") + (computer.map { ", \($0.name)" } ?? "") + ", \(stateLine)")
+            .accessibilityLabel("\(agent.displayName), \(agent.providerName)" + (agent.model.map { ", \($0)" } ?? "") + (computer.map { ", \($0.name)" } ?? "") + ", \(stateLine)")
             .accessibilityIdentifier("child-agent-header")
             Spacer(minLength: 0)
             NavigationLink {

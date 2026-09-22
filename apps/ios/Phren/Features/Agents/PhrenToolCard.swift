@@ -14,7 +14,7 @@ struct PhrenToolCard: View {
             }.joined(separator: "\n\n")
             openOutput(.init(title: presentation.verb, text: raw))
         } label: {
-            VStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
+            VStack(alignment: .leading, spacing: PhrenDensity.toolCardRowSpacing) {
                 HStack(spacing: PhrenTheme.Space.small) {
                     Image("PhrenMark").resizable().scaledToFit().frame(width: 14, height: 14).accessibilityHidden(true)
                     Text(presentation.verb).font(PhrenTypography.footnote.weight(.semibold))
@@ -55,7 +55,7 @@ struct PhrenToolCard: View {
                     Text("· \(title)").font(.caption).foregroundStyle(PhrenTheme.textSecondary).lineLimit(1)
                 }
             }
-            .padding(PhrenTheme.Space.medium).frame(maxWidth: .infinity, alignment: .leading)
+            .padding(PhrenDensity.toolCardPadding).frame(maxWidth: .infinity, alignment: .leading)
             .background(PhrenTheme.phrenCardSurface, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium))
             .overlay(RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium).strokeBorder(PhrenTheme.phrenCardBorder, lineWidth: 0.5))
             .contentShape(RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium))

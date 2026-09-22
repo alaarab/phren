@@ -271,7 +271,7 @@ async function handleAddFinding(
       // Memory link: auto-attach a symbol citation when the finding names one
       // unique symbol, or validate an explicit `symbol:` citation. Never rewrites
       // the finding text; only the citation comment gains the symbol.
-      const code = moduleEnabled(phrenPath, "code") ? await loadCodePackage() : undefined;
+      const code = moduleEnabled(phrenPath, "code") ? await loadCodePackage(phrenPath) : undefined;
       const symbolCitation = code ? await code.symbolCitationForFinding(phrenPath, project, taggedFinding, citation?.symbol) : citation?.symbol ? { symbol: citation.symbol } : {};
       const citationForWrite = (citation || symbolCitation.symbol)
         ? { ...(citation ?? {}), ...symbolCitation }

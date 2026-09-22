@@ -47,6 +47,21 @@ final class LiveSessionsTests: XCTestCase {
         XCTAssertNil(value.groups[0].children[1].role)
     }
 
+    func testLoadAndGatewayCostDecodeAndFlagSlowAnswers() throws {
+        let busy = try LiveWorkspaces.read(Data(#"{"kind":"herdr","groups":[],"phren":{"product":"phren-hook","protocol":1,"computer":{"id":"c1000000-0000-0000-0000-000000000001","name":"Desk"},"load":{"average":600.5,"cpus":8},"gatewayMs":4200}}"#.utf8))
+        XCTAssertEqual(busy.phren?.load, HookLoad(average: 600.5, cpus: 8))
+        XCTAssertEqual(busy.phren?.gatewayMs, 4200)
+        XCTAssertTrue(busy.phren?.slowToAnswer == true)
+
+        let calm = try LiveWorkspaces.read(Data(#"{"kind":"herdr","groups":[],"phren":{"load":{"average":2.0,"cpus":8},"gatewayMs":40}}"#.utf8))
+        XCTAssertFalse(calm.phren?.slowToAnswer == true)
+
+        let legacy = try LiveWorkspaces.read(Data(#"{"kind":"herdr","groups":[]}"#.utf8))
+        XCTAssertNil(legacy.phren?.load)
+        XCTAssertNil(legacy.phren?.gatewayMs)
+        XCTAssertFalse(legacy.phren?.slowToAnswer == true)
+    }
+
     func testSearchFindsTitleWorkspaceAgentAndFolderTogether() throws {
         let value = try LiveWorkspaces.read(Data(#"{"kind":"herdr","groups":[{"id":"w1","label":"Phone work","children":[{"id":"w1:t1","label":"1","title":"Fix navigation","agent":"codex","cwd":"/work/mobile/src"}]}]}"#.utf8))
         let host = try LiveHost(name: "Mac", address: "fixture.invalid", username: "fixture")
