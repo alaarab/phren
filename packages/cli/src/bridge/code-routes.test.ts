@@ -232,3 +232,73 @@ stores:
   await expect(resolveCodeStore(store, "sam/missing")).rejects.toMatchObject({ status: 404 });
   await expect(resolveCodeStore(store, "../escape")).rejects.toThrow();
 });
+
+it("pages the whole usage ranking with exact file and family filters", async () => {
+  const first = await routes.usagePage("fixture", { limit: "3" });
+  expect(first.total).toBeGreaterThan(3);
+  expect(first.entries).toHaveLength(3);
+  expect(first.maxUses).toBe(first.entries[0].uses);
+  const collected = [...first.entries];
+  for (let offset = 3; offset < first.total; offset += 3) {
+    const page = await routes.usagePage("fixture", { limit: "3", offset: String(offset) });
+    expect(page.total).toBe(first.total);
+    collected.push(...page.entries);
+  }
+  expect(new Set(collected.map(row => row.id)).size).toBe(first.total);
+  expect(collected.some(row => row.uses === 0)).toBe(true);
+  expect(collected.some(row => row.kind === "variable")).toBe(true);
+  expect(collected.map(row => row.uses)).toEqual(collected.map(row => row.uses).sort((a, b) => b - a));
+  const cold = await routes.usagePage("fixture", { limit: "3", end: "1" });
+  expect(cold.entries.map(row => row.id)).toEqual(collected.slice(-3).map(row => row.id));
+  expect(cold.offset).toBe(first.total - 3);
+  const filtered = await routes.usagePage("fixture", { file: "typescript/app.ts", kind: "types" });
+  expect(filtered.entries.length).toBeGreaterThan(0);
+  expect(filtered.entries.every(row => row.file === "typescript/app.ts" && ["class", "struct", "enum", "interface", "type"].includes(row.kind))).toBe(true);
+  expect((await routes.usagePage("fixture", { file: "missing.ts" })).entries).toEqual([]);
+  expect((await routes.usagePage("fixture", { offset: "999999" })).entries).toEqual([]);
+  for (const values of [{ offset: "-1" }, { limit: "101" }, { kind: "invalid" }, { file: "../escape" }, { directory: "/absolute" }, { end: "yes" }]) {
+    await expect(routes.usagePage("fixture", values)).rejects.toThrow();
+  }
+  await expect(routes.usagePage("missing")).rejects.toMatchObject({ status: 404 });
+});
+
+it("browses only indexed files with descendant symbol and language totals", async () => {
+  fs.mkdirSync(path.join(repo, "typescript-neighbor"));
+  fs.writeFileSync(path.join(repo, "typescript-neighbor", "empty.ts"), "// No declarations\n");
+  fs.mkdirSync(path.join(repo, "src🧠"));
+  fs.writeFileSync(path.join(repo, "src🧠", "app.ts"), "export function unicodeThing() { return 1; }\n");
+  git("add", "typescript-neighbor/empty.ts", "src🧠/app.ts");
+  await routes.reindex("fixture");
+  const root = await routes.tree("fixture");
+  const typescript = root.entries.find(entry => entry.path === "typescript")!;
+  expect(typescript).toMatchObject({ directory: true, languages: ["typescript"] });
+  const children = await routes.tree("fixture", "typescript");
+  expect(children.entries.every(entry => entry.path.startsWith("typescript/") && !entry.directory)).toBe(true);
+  expect(typescript.files).toBe(children.entries.length);
+  expect(typescript.symbols).toBe(children.entries.reduce((sum, entry) => sum + entry.symbols, 0));
+  expect((await routes.tree("fixture", "typescript-neighbor")).entries[0]).toMatchObject({ symbols: 0, files: 1 });
+  expect((await routes.tree("fixture", "type%")).entries).toEqual([]);
+  expect((await routes.tree("fixture", "src🧠")).entries[0].path).toBe("src🧠/app.ts");
+  expect((await routes.usagePage("fixture", { directory: "src🧠" })).entries[0].name).toBe("unicodeThing");
+  for (const directory of ["../escape", "/absolute", "..\\escape", "typescript/"]) await expect(routes.tree("fixture", directory)).rejects.toThrow();
+  await expect(routes.tree("missing")).rejects.toMatchObject({ status: 404 });
+});
+
+it("scopes search to a literal directory and groups type kinds", async () => {
+  expect((await routes.search("fixture", "Point", "types", null, "typescript")).symbols.length).toBeGreaterThan(0);
+  const swift = (await routes.search("fixture", "Point", null, null, "swift")).symbols;
+  expect(swift.length).toBeGreaterThan(0);
+  expect(swift.every(row => row.file.startsWith("swift/"))).toBe(true);
+  expect((await routes.search("fixture", "Point", null, null, "type%")).symbols).toEqual([]);
+});
+
+
+it("reports a completed no-change scan separately from symbol recency", async () => {
+  const before = await routes.recent("fixture", "typescript");
+  const first = await routes.status("fixture");
+  const status = await routes.reindex("fixture");
+  expect(status.lastIndexedAt).toBeGreaterThan(first.lastIndexedAt!);
+  expect((await routes.recent("fixture", "typescript")).entries).toEqual(before.entries);
+  expect(before.entries.length).toBeGreaterThan(0);
+  expect(before.entries.every(row => row.file.startsWith("typescript/"))).toBe(true);
+});
