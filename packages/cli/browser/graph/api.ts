@@ -16,7 +16,8 @@ import { applyHighlight, refreshNodeVisual } from "./nodes.js";
 import { benchLabelTick, forgetEagerLabel, resetLabels, refreshLabels, updateEagerLabelText } from "./labels.js";
 import { applyFilters, disposeScene, setupForceGraph } from "./scene.js";
 import { buildFilterBar, buildHudOverlays } from "./hud.js";
-import { clearSelection, fitCameraToGraph, getNodeAt, peekNode, runIntro, selectNode } from "./interactions.js";
+import { clearSelection, fitCameraToGraph, getNodeAt, peekNode, runIntro, screenPosFor, selectNode } from "./interactions.js";
+import { setSelectionViewport, zoomCamera } from "./selection-camera.js";
 import { disposePulses, mascot, startMascot, stopMascot, walkTo } from "./mascot.js";
 import { refreshProjectPanel } from "./project-panel.js";
 
@@ -274,16 +275,11 @@ function destroy(): void {
 // ── Window globals ──────────────────────────────────────────────────────
 
 ROOT.graphZoom = function graphZoom(factor: number): void {
-  if (!state.fg) return;
-  const camera = state.fg.camera();
-  const target = state.fg.controls()?.target || new THREE.Vector3();
-  const dir = new THREE.Vector3().subVectors(camera.position, target);
-  dir.multiplyScalar(1 / Math.max(factor, 0.05));
-  const next = new THREE.Vector3().addVectors(target, dir);
-  state.fg.cameraPosition({ x: next.x, y: next.y, z: next.z }, undefined, 160);
+  zoomCamera(factor);
 };
 
 ROOT.graphReset = function graphReset(): void {
+  clearSelection();
   fitCameraToGraph(500);
 };
 
@@ -329,6 +325,8 @@ ROOT.phrenGraph = {
   },
   walkTo,
   getNodeAt,
+  screenPosFor,
+  setSelectionViewport,
   getNodeDetail: nodeDetail,
   /** Dossier navigation: prev/next in the ranked list the list mode shows. */
   stepDossier,

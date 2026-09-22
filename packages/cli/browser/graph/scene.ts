@@ -43,6 +43,7 @@ import { buildProjectNav, stepProject } from "./project-nav.js";
 import { refreshProjectPanel } from "./project-panel.js";
 import { computeHierarchicalLayout } from "./layout.js";
 import { buildCages, disposeCages, setCageResolution } from "./cages.js";
+import { beginCameraInteraction, endCameraInteraction, recenterSelection, disposeSelectionCamera } from "./selection-camera.js";
 
 let starfield: THREE.Points | null = null;
 let nebula: THREE.Group | null = null;
@@ -198,7 +199,11 @@ export function applyFilters(options: { resetCamera?: boolean; emitSelection?: b
     // immediate fit would frame the stale (larger) bbox and leave the subset
     // tiny. A short delay lets the new pinned layout settle first.
     const fg = state.fg;
-    setTimeout(() => { if (state.fg === fg) fitCameraToGraph(600); }, 180);
+    const interactionAt = state.lastInteractionAt;
+    setTimeout(() => {
+      if (state.fg === fg && !state.selectedNodeId && !state.focusedProjectId
+        && state.lastInteractionAt === interactionAt) fitCameraToGraph(600);
+    }, 180);
   }
 }
 
@@ -259,6 +264,14 @@ export function setupForceGraph(): void {
   // camera into the cluster before the fit finished.
   fg.controls().autoRotate = false;
   fg.controls().autoRotateSpeed = 0.22;
+  const controls = fg.controls();
+  const startInteraction = () => { noteInteraction(); beginCameraInteraction(); };
+  controls.addEventListener("start", startInteraction);
+  controls.addEventListener("end", endCameraInteraction);
+  state.cleanupFns.push(() => {
+    controls.removeEventListener("start", startInteraction);
+    controls.removeEventListener("end", endCameraInteraction);
+  });
   const pauseRotate = () => noteInteraction();
   state.container.addEventListener("pointerdown", pauseRotate);
   state.container.addEventListener("wheel", pauseRotate, { passive: true });
@@ -347,6 +360,7 @@ export function setupForceGraph(): void {
     state.fg?.width(next.w).height(next.h);
     labelRenderer?.setSize(next.w, next.h);
     setCageResolution(next.w, next.h);
+    recenterSelection();
   };
   if (typeof ResizeObserver === "function") {
     state.resizeObserver = new ResizeObserver(onResize);
@@ -399,6 +413,7 @@ export function setupForceGraph(): void {
 
 /** Dispose everything setupForceGraph created (called from destroy()). */
 export function disposeScene(): void {
+  disposeSelectionCamera();
   if (starfield) {
     starfield.geometry.dispose();
     (starfield.material as THREE.Material).dispose();
