@@ -61,8 +61,6 @@ struct PhrenToolCard: View {
             .contentShape(RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium))
         }
         .buttonStyle(.plain)
-        // Verb, chips and body rows as one card element.
-        .accessibilityElement(children: .combine)
         .accessibilityIdentifier("chat-phren-card:\(messages.first?.toolCallID ?? messages.first?.id ?? "")")
         .accessibilityHint("Read full input and output")
     }

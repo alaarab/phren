@@ -30,8 +30,6 @@ cards, idle reconnects keep the transcript, and the chat header stays alone.
 
 ### Changed
 
-- Folded tool pills and cards in the chat are one accessibility element each, so a long
-  transcript's accessibility tree stays flat and swipes stay quick.
 - The Knobs screen is a plain list like the others: category headers over
   session cards, each knob one row with a caption and a phren drop-down for
   its value, and a Reset row at the bottom that clears every override after

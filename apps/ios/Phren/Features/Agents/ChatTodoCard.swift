@@ -34,9 +34,6 @@ struct ChatTodoCard: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            // Header alone: glyph, title and summary as one element (the
-            // checklist rows sit beside the button when the card is open).
-            .accessibilityElement(children: .combine)
             .accessibilityLabel("\(list.title), \(list.summary)")
             .accessibilityValue(folded ? "Collapsed" : "Expanded")
             .accessibilityHint(entry.cardSuperseded ? "A later list replaced this one" : "")

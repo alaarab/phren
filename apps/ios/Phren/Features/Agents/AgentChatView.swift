@@ -375,7 +375,6 @@ struct AgentChatView: View {
                 }
                 .accessibilityIdentifier("chat-transcript")
                 .contentShape(Rectangle())
-                .environment(\.chatViewportHeight, scrollHeight)
                 .simultaneousGesture(TapGesture().onEnded { composing = false; textSelection.transcriptTapped() })
                 .modifier(ChatHistoryScrollObserver { near in
                     if near && !nearHistoryTop && model.historyError != nil { requestedHistoryLine = nil }
