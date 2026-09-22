@@ -1,4 +1,5 @@
 import { saveCodeNote } from "./code-note.js";
+import { FanoutMessages } from "./fanout-messages.js";
 import { handOff } from "./hand-off.js";
 import { activateModules as moduleSnapshot, type ModuleSnapshot } from "../modules/runtime.js";
 import { BUILTIN_MODULES, disabledHint } from "../modules/registry.js";
@@ -35,6 +36,7 @@ import { TabActivityStore } from "./tab-activity.js";
 import { childAgent, childAgentTree, conversationNamedPaths, historicalImage, publicChildAgents, refreshTranscript, TranscriptReader, transcriptPath } from "./transcripts.js";
 import { listUploads, saveUpload, uploadImage } from "./uploads.js";
 import { ModelCatalog } from "./models.js";
+import { ModelSwitcher, refuseWorkingSlash } from "./model-switch.js";
 import { currentModel, currentStep } from "./steps.js";
 import { TranscriptPreviewStream } from "./transcript-preview.js";
 import { AccountUsageReader } from "./usage.js";
@@ -150,6 +152,7 @@ export async function serve(version: string): Promise<void> {
   const journal = new ActivityJournal();
   const agentHooks = new AgentHooks(undefined, modules);
   const modelCatalog = new ModelCatalog();
+  const modelSwitcher = new ModelSwitcher(agentHooks, modelCatalog);
   const contextUsage = new WorkspaceContextUsage();
   const accountUsage = new AccountUsageReader();
   const tabActivity = new TabActivityStore();
@@ -159,6 +162,11 @@ export async function serve(version: string): Promise<void> {
     launch: createScheduleLauncher((server, data) => launchSession(server, data), scheduleStore),
     push: { notify: value => agentHooks.push.notifySchedule(value) },
     locateProject: async project => (await locateProject(project, await journal.recent()))[0]?.directory }) : undefined;
+  const fanoutMessages = new FanoutMessages({ ...process.env, PHREN_PATH: scheduleStore }, {
+    validate: target => validateTarget(target, false, true),
+    tree: target => childAgentTree(target.source, target.session, 0, new Set(), computerID),
+  });
+  fanoutMessages.start();
   const codeRoutes = modules.has("code") ? new CodeRoutes(scheduleStore) : undefined;
   // The code module follows the git module's recorded file changes: an
   // incremental re-index after a save, a full one after a branch switch.
@@ -347,6 +355,9 @@ export async function serve(version: string): Promise<void> {
             }
             result = { computer: info.computer, agents: publicChildAgents([...local, ...remote]) }; break;
           }
+          case "/v1/subagents/messages": {
+            result = await fanoutMessages.list(targetFromURL(url), url.searchParams.get("child")); break;
+          }
           case "/v1/subagents/transcript": {
             const target = targetFromURL(url); await validateTarget(target);
             const { reader, source, session } = await childConversationReader(target, z.string().parse(url.searchParams.get("child")));
@@ -370,7 +381,9 @@ export async function serve(version: string): Promise<void> {
         }
       } else if (request.method === "POST") {
         const data = await body(request);
-        if (url.pathname === "/v1/code/reindex") {
+        if (url.pathname === "/v1/subagents/resume") {
+          result = await fanoutMessages.send(data);
+        } else if (url.pathname === "/v1/code/reindex") {
           result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, typeof data.store === "string" ? data.store : undefined, true)))
             .reindex(z.string().parse(data.project));
         } else if (url.pathname === "/v1/code/note") {
@@ -443,6 +456,7 @@ export async function serve(version: string): Promise<void> {
             const target = startingTargetSchema.parse(data.target);
             const pane = await validateStartingTarget(target);
             const text = z.string().min(1).max(32768).refine(t => !/[\x00-\x08\x0b-\x1f\x7f]/.test(t)).parse(data.text);
+            refuseWorkingSlash(pane, text);
             await rpc(target.server, "agent.prompt", { target: target.pane, text });
             // A first prompt may create its transcript immediately. Recheck the
             // terminal/process binding, not the absence of a session. Never retry.
@@ -456,11 +470,13 @@ export async function serve(version: string): Promise<void> {
           const target = targetSchema.parse(data.target);
           // Uploads store bytes without answering or interrupting the agent.
           // They still require fresh identity, just like prompt mutations.
-          const sendsInput = ["/v1/prompt", "/v1/keys", "/v1/secret"].includes(url.pathname);
+          const sendsInput = ["/v1/prompt", "/v1/keys", "/v1/secret", "/v1/model"].includes(url.pathname);
+          if (sendsInput) modelSwitcher.assertAvailable(target);
           // A key press is how a prompt the agent draws in its terminal gets
           // answered, so keys are the one input allowed while the agent is
           // blocked or waiting; the status check below is theirs alone.
           const pane = await validateTarget(target, false, sendsInput || url.pathname === "/v1/upload");
+          if (sendsInput) modelSwitcher.assertAvailable(target);
           if (url.pathname === "/v1/prompt") {
             // A waiting agent takes typed text only when nothing structured
             // is pending there: an approval the Hook holds or saw, or a
@@ -478,6 +494,8 @@ export async function serve(version: string): Promise<void> {
             // A working agent queues typed text and submits it when its turn
             // ends, which can be minutes away; waiting for that only delays
             // the phone. The record still guards the paste for ten minutes.
+            refuseWorkingSlash(pane, text);
+            if (target.source === "codex" && /^\s*\/model\s+\S/i.test(text)) throw new BridgeError(422, "Use the model picker to switch Codex models.");
             const expected = agentHooks.expectDelivery(target, text, String(pane.agent_status) === "working" ? 300 : 1_500);
             await rpc(target.server, "agent.prompt", { target: target.pane, text });
             const outcome = await expected;
@@ -498,6 +516,8 @@ export async function serve(version: string): Promise<void> {
               } catch { /* No reliable post-delivery identity. */ }
               result = { ok: true, ...(!confirmed ? { deliveryUncertain: true } : {}) };
             }
+          } else if (url.pathname === "/v1/model") {
+            result = await modelSwitcher.switch(target, data);
           } else if (url.pathname === "/v1/keys") {
             const keys = z.array(z.enum(ANSWER_KEYS)).min(1).max(4).parse(data.keys);
             const status = String(pane.agent_status), menu = agentHooks.menuOpen(target);
@@ -800,7 +820,7 @@ export async function serve(version: string): Promise<void> {
     })().finally(() => { recording = false; }).catch(() => {});
   }, 5000);
   await new Promise<void>(resolve => {
-    const stop = () => { stopRetention(); clearInterval(scheduleTimer); clearInterval(activityTimer); scheduler?.close(); codeReindexer?.close(); agentHooks.close(); ws.clients.forEach(c => c.terminate()); ws.close(); http.close(() => resolve()); http.closeAllConnections(); };
+    const stop = () => { fanoutMessages.close(); stopRetention(); clearInterval(scheduleTimer); clearInterval(activityTimer); scheduler?.close(); codeReindexer?.close(); agentHooks.close(); ws.clients.forEach(c => c.terminate()); ws.close(); http.close(() => resolve()); http.closeAllConnections(); };
     process.once("SIGTERM", stop); process.once("SIGINT", stop);
   });
   await unlink(socketPath()).catch(() => {});

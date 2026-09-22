@@ -151,9 +151,12 @@ export function visibleTerminalChoice(text: string): TerminalChoice | undefined 
   // Only the question's own block: everything above the last blank line is
   // whatever the agent printed before it asked, and reading a pane of
   // scrollback as the question is worse than reading none of it.
+  while (above.length && !above[above.length - 1].trim()) above.pop();
   let start = above.length;
   while (start > 0 && above[start - 1].trim()) start -= 1;
-  const question = above.slice(Math.max(start, above.length - QUESTION_LINES));
+  const menuStart = above.findIndex((line, index) => index >= above.length - QUESTION_LINES
+    && /^\s*(?:select|choose) (?:model|reasoning (?:level|effort))\b/i.test(line));
+  const question = above.slice(menuStart >= 0 ? menuStart : Math.max(start, above.length - QUESTION_LINES));
   const title = question.map(line => line.trim()).filter(line => line && !/^press enter\b/i.test(line)).join("\n").trim();
   if (!title) return undefined;
   return { title: title.slice(0, 4_000), options: options.slice(0, 12),
@@ -670,7 +673,7 @@ export class AgentHooks {
     }
     return entry?.dialog && digit ? [...keys, "Enter"] : [...keys];
   }
-  private async moveDialogHighlight(target: Target, expected: TerminalChoice, key: string): Promise<void> {
+  async moveDialogHighlight(target: Target, expected: TerminalChoice, key: string, beforeKeys?: () => Promise<void>): Promise<void> {
     const intended = expected.options.findIndex(option => option.key === key);
     let current = visibleTerminalChoice(await this.paneLines(target));
     // A held permission can expose just the asking sentence from the title.
@@ -684,6 +687,7 @@ export class AgentHooks {
       if (!matches(current)) break;
       const difference = intended - current.highlightedIndex;
       if (!difference) return;
+      await beforeKeys?.();
       await rpc(target.server, "agent.send_keys", { target: target.pane,
         keys: Array<string>(Math.abs(difference)).fill(difference > 0 ? "down" : "up") });
       await new Promise(resolve => setTimeout(resolve, 150));
@@ -735,11 +739,11 @@ export class AgentHooks {
     return entry && Date.now() - entry.at < 30_000 ? entry.command : undefined;
   }
   menuClosed(target: Target) { this.menus.delete(JSON.stringify(target)); }
-  /** Read what the pane's terminal is currently drawing, ANSI stripped. */
-  private async paneLines(target: Target): Promise<string> {
+  /** Read what the pane draws, stripping ANSI unless placeholder styling is needed. */
+  async paneLines(target: Target, stripAnsi = true): Promise<string> {
     try {
       const result = object(await rpc(target.server, "agent.read",
-        { target: target.pane, source: "visible", lines: 40, strip_ansi: true }, undefined, 2_000));
+        { target: target.pane, source: "visible", lines: 40, strip_ansi: stripAnsi }, undefined, 2_000));
       const read = object(result.read ?? result);
       return typeof read.text === "string" ? read.text : "";
     } catch { return ""; }

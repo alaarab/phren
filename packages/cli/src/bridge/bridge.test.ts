@@ -1078,8 +1078,11 @@ schedules:
       expect((await api("/v1/keys", { target, keys: ["Enter"] })).status).toBe(200);
       expect((await api("/v1/keys", { target, keys: ["Escape"] })).status).toBe(200);
       expect((await api("/v1/keys", { target, keys: ["Down"] })).status).toBe(409);
-      // A prompt with words is a message, not a menu.
-      expect((await api("/v1/prompt", { target, text: "/model gpt-5.6-terra" })).status).toBe(200);
+      // Codex's /model takes no argument, so typing one would land as a chat
+      // message; the Hook refuses it and the phone uses the model route.
+      expect((await api("/v1/prompt", { target, text: "/model gpt-5.6-terra" })).status).toBe(422);
+      // A slash command with words is still a message, not a menu to walk.
+      expect((await api("/v1/prompt", { target, text: "/review the parser change" })).status).toBe(200);
       expect((await api("/v1/keys", { target, keys: ["Enter"] })).status).toBe(409);
     });
 

@@ -141,3 +141,26 @@ directory, and the Hook reads only the final 16 KiB of `stderr.log` when no
 `blocked.json` exists. The last matching refusal becomes the failure reason
 `blocked: <type> <pattern>`. Explicit failed or cancelled manifest states are
 also preserved internally even when an exit code is absent.
+
+## Continue a worker from chat
+
+The child tree publishes `fanout.resumable` for Codex and OpenCode jobs with a
+saved session id. `POST /v1/subagents/resume` accepts `{ target, child, text }`:
+the live parent target, opaque child id from that tree and a message. The Hook
+checks the parent, child relationship and canonical store containment. The
+client cannot supply a job path, worktree, worker session or another store.
+
+A finished worker resumes its own session in the original worktree using the
+fan-out provider adapter, with the prompt on stdin. Its original job and event
+log stay in place. Each continuation records a prompt under `rounds/<id>`;
+the current `prompt.txt` and manifest describe the latest round. Running jobs
+keep messages under `messages/` until their manifest reaches a terminal state.
+A per-job lock prevents overlapping continuation rounds. Archive maintenance
+leaves queued or locked jobs in place.
+
+`GET /v1/subagents/messages` takes the same target query and `child`, returning
+receipts with `id`, `text`, `createdAt` and `status`: `queued`, `running`,
+`completed` or `failed`. Queued receipts survive Hook restarts; running receipts
+are never automatically replayed. The phone polls those receipts and follows
+the existing child transcript stream. Pane-backed children open their full
+session chat, while in-process children send a labeled message to the parent.
