@@ -3,6 +3,7 @@
 // utils-fts.ts (FTS5 query building, synonym/keyword extraction).
 
 export {
+  nonInteractiveGitEnv,
   runGitOrThrow,
   runGit,
   normalizeExecCommand,

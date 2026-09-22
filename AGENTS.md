@@ -21,7 +21,7 @@ Experimental (not published, not wired into the `phren` CLI):
 
 | Package | Path | Status | Description |
 |---------|------|--------|-------------|
-| `@phren/agent` | `experimental/agent/` | Private, experimental | Standalone coding agent. Built by root `pnpm build`; tested by the CI `agent-test` job (`pnpm exec turbo run test --filter=@phren/agent`). Run via the built `phren-agent` binary — **not** via `phren`. |
+| `@phren/agent` | `experimental/agent/` | Private, experimental | Standalone coding agent. Built by root `pnpm build`; tested by the CI `agent-test` job (`pnpm exec turbo run test --filter=@phren/agent`). Run via the built `phren-agent` binary, **not** via `phren`. |
 
 Outside the pnpm workspace:
 
@@ -59,7 +59,13 @@ Outside the pnpm workspace:
 | `packages/cli/src/shell/graph/` | The shell's Graph view: deterministic force layout, braille canvas, controller (data/camera/selection/keys), view renderer, watch mode (tails the lookup log), agents overlay |
 | `packages/cli/src/agents/` | Discovering coding agents running on this machine (`PHREN_FEATURE_AGENTS`). Host-agnostic `AgentRecord` contract plus `providers/` (herdr, phren-agent spawner). Nothing host-specific may leak outside `providers/`. |
 | `packages/code/src/` | Per-project SQLite code index: tree-sitter parsing, incremental transactions, persisted identifier references, symbol queries and finding citations. `phren code index` resolves this machine's checkout. |
-| `packages/cli/src/bridge/code-routes.ts` | Validated code query routes plus per-project debounced reindexing after file changes and HEAD polling. |
+| `packages/cli/src/bridge/code-routes.ts` | Registered-store Code routes: tree, search, outlines and batched counts, definitions with findings, references, paged usage, recent changes and reindex; debounced refresh after recorded file changes. |
+| `packages/cli/src/bridge/code-note.ts` | Validates a dossier line, saves a symbol-cited finding, then optionally hands off to the chosen session or dispatches a worker; delivery failure is separate from save success. |
+| `packages/cli/src/bridge/files.ts` | Read-only `/v1/projects/files` browser for discovered checkouts: relative paths, no symlinks or `.git`, 2 MiB files and at most 500 directory entries. |
+| `packages/cli/src/bridge/transcript-preview.ts` | Ephemeral live reply previews from Claude pane text and Codex/OpenCode deltas, capped at two updates per second and cleared by completed entries. |
+| `apps/ios/Phren/Features/Notifications/` | Local schedule and approval notifications: monitor, notification-center reconciliation, routing and optional background refresh, with no APNs key or relay required. |
+| `apps/ios/PhrenKit/Sources/PhrenKit/Sessions/ApprovalNotificationLedger.swift` | Persistent hashed approval IDs for at-most-once local notifications, without storing prompt text. |
+| `apps/ios/Phren/Intents/ConductorIntents.swift` | Tell, Ask and status shortcuts for the running conductor, also available to the Action button. |
 | `packages/cli/src/bridge/grants.ts` | Standing conductor dispatch/hand-off grants, scope matching, locked atomic updates and stale-row revocation checks. |
 | `packages/cli/src/bridge/hand-off.ts` | Delivers one prompt to an existing local or verified-peer session, with live target validation. |
 | `apps/ios/Phren/Features/Memory/MemoryListModel.swift` | Cached Memory list filtering, counts and sections, with content-based row identity. |
@@ -70,12 +76,12 @@ Outside the pnpm workspace:
 | `packages/cli/src/bridge/computers.ts` | Computer enrollment: creates or reuses the ed25519 dispatch key and prints or accepts the `restrict,pty` `authorized_keys` line. |
 | `packages/cli/src/bridge/peers.ts` | The Hook's verified SSH peer directory (`hooks.yaml`, pinned host keys, at most 32 peers) and one bounded OpenSSH process per request through `phren-hook v1 pipe`. |
 | `packages/cli/src/bridge/codex-threads.ts` | Codex 0.155 thread-history compatibility: materializes `thread_history_1.sqlite` into a rollout-shaped JSONL so existing transcript readers keep working, and flags a working pane whose history stopped advancing (`threadHealth`). |
-| `packages/cli/src/bridge/models.ts` | Per-harness `/model` catalogues: Codex app-server, Claude aliases plus recently run ids, and `opencode models` with the Go plan first, cached by `ModelCatalog`. |
+| `packages/cli/src/bridge/models.ts` | Harness model catalogues: Codex app-server, Claude Code's cached `/model` catalogue with client-version filtering and a built-in fallback, and `opencode models`, cached by `ModelCatalog`. |
 | `.claude-plugin/` | Claude Code plugin manifest + marketplace entry. Points at `global/skills/`, `.mcp.json` and `hooks/hooks.json`; keep the version in step with `packages/cli/package.json`. |
 | `apps/ios/scripts/worker-build.sh` | Shared derived-data and result-bundle hygiene for parallel simulator builds: `<family> build|test <udid>`, `clean`, `status` |
-| `scripts/graph-survey.ts` | Renders the Graph view against synthetic stores from 3 to 40 projects at several terminal sizes. Run it before and after any graph change — three defects were invisible on small fixtures. |
+| `scripts/graph-survey.ts` | Renders the Graph view against synthetic stores from 3 to 40 projects at several terminal sizes. Run it before and after any graph change; three defects were invisible on small fixtures. |
 | `packages/cli/src/status.ts` | `phren status`: health, project, stats overview |
-| `packages/cli/starter/global/skills/` | The `phren-*` slash commands `phren init` provisions into `~/.phren/global/skills` (and symlinks into `~/.claude/skills` under the managed preset). **This is the source `init` actually reads** — `setup.ts` copies from here. |
+| `packages/cli/starter/global/skills/` | The `phren-*` slash commands `phren init` provisions into `~/.phren/global/skills` (and symlinks into `~/.claude/skills` under the managed preset). **This is the source `init` actually reads**; `setup.ts` copies from here. |
 | `.claude/skills/docs/` | Maintainer-only `docs` skill for this repo (update every documentation surface after a change). Not shipped. |
 | `packages/cli/starter/` | Bundled starter templates (4 project types, copied to ~/.phren on init) |
 | `packages/cli/starter/templates/` | Project templates: python-project, monorepo, library, frontend |

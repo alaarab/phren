@@ -5,12 +5,19 @@ Projects grid. Cards show the project name, store when needed, ownership
 badges and finding, task and note counts. There is no Explore section above
 the grid and no Agent setup or maintenance section below it.
 
-The toolbar keeps Add project, More, store filtering when multiple stores
-exist, project search and the quick-capture mic for writable projects.
-More is a PhrenActionSheet with Files, Memory graph, Live sessions, Skills,
-Agent instructions and Memory maintenance. The store sheet uses the shared
+The inline title shares its row with Add project, project search and the
+quick-capture mic for writable projects. Store filtering remains available
+when multiple stores exist. Projects has no More button: Memory owns Files,
+the graph and Memory maintenance; Agents owns Live sessions, Skills and Agent
+instructions. See [tab navigation](navigation.md). The store sheet uses the shared
 radio choice rows. Project search uses PhrenSearchField. Empty stores keep
 the connect-computer and add-project overlay.
+
+The project detail band has four equal columns, each with an icon above a
+single-line title, a 52-point height and space below the inline title. Project
+name colors use the same eight-color palette as computers, plus the custom
+color wheel and hex field. Knobs use PhrenStepSlider with visible stops, a
+current-value label and a reset glyph for overrides.
 
 ## Hold to open an agent
 
@@ -53,10 +60,10 @@ not create an agent.
 
 ## Verification
 
-ProjectsTests captures the grid, More destinations, the project computer
+ProjectsTests captures the grid, inline header, the project computer
 chooser, the computer project chooser and the launch screen. It checks both
 short-tap navigation and the 0.4-second hold route. WorkflowTests reaches
-Files through More. LaunchSessionTests covers the subsequent launch flow.
+Files through Memory. LaunchSessionTests covers the subsequent launch flow.
 
 SelectionSheetTests covers the 22-option multi-select, search-independent chips
 and Done count, short-card density, and the 50-computer chooser's recency,

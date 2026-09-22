@@ -9,8 +9,8 @@ Shared control measurements: [controls.md](controls.md).
 ## Sections
 
 Cross-project lists (the Tasks tab, no project filter chosen) draw one
-section per project, ordered by open count: that project's Active plus Queue
-tasks, highest first, ties by name. A project appears only when the current
+section per project, ordered by the selected status's task count, highest first,
+ties by name. Open counts Active plus Queue. A project appears only when the current
 status section and filters leave it rows. Project-scoped lists and a chosen
 project filter keep the flat `Backlog` / `Active` / `Done` label.
 
@@ -29,19 +29,18 @@ Each header is one 44-point button in the plain list:
   `ProjectNameColor`), so it sits on the same baseline as the chips. The
   color's store comes from the store list, never from filtered rows, so a
   search cannot re-color the header.
-- Two passive `PhrenChip`s: `<n> active` in success green and `<n> queue` in
-  text secondary, each omitted when its count is zero (a Done-only project
-  shows neither). Counts come from the project's unfiltered Active and Queue
-  rows in the current scope, so they still read right under a search or
-  inside a folded section.
+- Passive `PhrenChip`s show the selected status's counts: active and queue
+  under Open, the one status under Active, Backlog or Done, and all three
+  under All. Zero counts are omitted. Counts follow the selected status and current scope; folding does not change
+  them.
 - A trailing chevron that rotates with the fold. At accessibility sizes the
   header stacks: name and chevron on the first line, the chips wrapping
   below in `PhrenFlowLayout`.
 
-Identifiers: the button is `tasks-section-toggle:<project>`; a zero-size
-`phrenContainerMarker` on it is `tasks-section:<project>` with the counts as
-its value. The top control is `tasks-section-all`. Section headers (only)
-carry the `isHeader` accessibility trait; `All` is a control with the
+Identifiers: the fold button is `tasks-section-toggle:<project>`; the
+`tasks-section:<project>` count marker is a separate accessibility element.
+The top control is `tasks-section-all`. Section headings carry `isHeader`
+and fold controls retain their button trait. `All` is a control with the
 Expand/Collapse label. Fold animations run only when Reduce Motion is off
 (0.18s ease, nil otherwise).
 
@@ -70,14 +69,11 @@ launches clear the key unless they pass `--tasks-keep-collapsed`.
 
 ## TasksModel
 
-`TasksModel` (`@Observable @MainActor`) owns selectedProject, query, search
-visibility, selection state, the moving flag and the priority/age filters,
-plus `rawRows` / `rows`, per-project open counts built straight from
-`doc.items(in:)` (no throwaway rows), and a pure static
-`groups(visible:activeCounts:queueCounts:storeIdByProject:)` that orders
-sections by open count (unit-tested in `PhrenTests/TasksModelTests.swift`). `section`, `sort` and the fold key stay
-`@AppStorage` in the view; sheet and navigation routes stay `@State` there.
-`Select all` only gathers rows from expanded sections.
+`TasksModel` owns browsing state and prepares filtered rows, project groups
+and counts when their inputs change. Status, sort and folds remain persisted
+preferences; sheet and navigation routes stay in the view. Unchanged task rows
+do not redraw for unrelated updates. Select all gathers only writable rows
+from expanded sections in the current filter.
 
 ## Task actions
 
@@ -125,10 +121,9 @@ The launch sheet's Cancel button is `launch-cancel`.
 
 The workflow fixture writes two projects per store: `demo` with 0 Active and
 3 Queue tasks, `api` with 3 Active and 1 Queue. Merged across both stores
-that is open 8 vs 6, so `api` sits above `demo` under Backlog even though
-`demo` shows more rows there (6 vs 2); alphabetical order would agree with
-the count order, so the visible-row order is the one being ruled out. Chips
-read `6 active` / `2 queue` on api and `0 active` / `6 queue` on demo.
+that is open 8 vs 6, so `api` sits above `demo` under Open. Backlog puts `demo`
+first with 6 queued tasks before api's 2. Open chips show api's 6 active and
+2 queued tasks, and demo's 6 queued tasks; the zero active count is omitted.
 `PhrenUITests/TasksTests.swift` checks that order, the chip counts, folding
 one section and all sections, in-section filtering, and that a fold survives
 a relaunch (`--tasks-keep-collapsed`); screenshots are `Tasks grouped` and

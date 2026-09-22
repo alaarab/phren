@@ -16,13 +16,19 @@ tectonic docs/whitepaper.tex --outdir docs
 
 - `docs/architecture.md`: Data flow diagrams for hooks, MCP server, FTS5 index, and memory governance.
 - `docs/architecture-team-stores.md`: Team-store and multi-store architecture notes.
-- `docs/llms-install.md`: Installation guide, all 61 MCP tools, hooks, and memory governance pipeline.
+- `docs/llms-install.md`: Installation guide, MCP setup, hooks and memory governance pipeline.
 - `docs/environment.md`: Full reference for all environment variables with types and defaults.
 - `docs/governance.md`: Governance model, review flows, and access controls.
 - `docs/ide-setup.md`: IDE and editor integration setup notes.
 - `docs/performance.md`: Retrieval and indexing performance notes.
 - `docs/shell.md`: Interactive shell user guide: views, keyboard shortcuts, palette commands, the terminal Graph view, the splash.
-- `docs/graph-viewer.md`: The 3D memory viewer (web UI Graph tab and VS Code webview): navigation, contents pane, review mode, bulk actions.
+- `docs/graph-viewer.md`: The 3D memory viewer: web UI, VS Code and iPhone navigation, node dossiers, selection camera, review and bulk actions.
+- `docs/code-index.md`: Local symbol indexing, scoped browsing, paged usage, recent changes and notes sent to agents.
+- `docs/conductor.md`: Conductor launch, verified computers, dispatch, hand-off, standing grants and Siri controls.
+- `docs/fanout.md`: Worker selection, manifests, permission failures, phone visibility and archive retention.
+- `docs/schedules.md`: Scheduled prompts, run history and local reminders.
+- `docs/api-reference.md`: MCP tools and Hook routes, including Code notes, model catalogues, file reads and live previews.
+- `docs/footprint.md`: Files phren writes and external files Hook reads, including Claude Code's cached model catalogue.
 - `docs/agent.md`: The experimental `phren-agent` coding agent (unpublished; lives in `experimental/agent/`).
 - `docs/claude-code-plugin.md`: Installing phren as a Claude Code plugin, and how that differs from `phren init`.
 - `docs/phren-hook.md`: Install and maintain the independent computer helper for the iPhone app.

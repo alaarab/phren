@@ -20,7 +20,7 @@ directly on the SSH PTY in a folder that passes the workspace-creation rules
 (under home or a located project); the phone offers it when no Herdr server is
 running. It is terminal-only, ends with the connection, and has no chat identity.
 The web command relays bytes only to the literal loopback address `127.0.0.1`
-or `::1` and a decimal TCP port from 1 through 65535 — that is any loopback TCP
+or `::1` and a decimal TCP port from 1 through 65535. This reaches any loopback TCP
 listener on the computer, not only web previews, so the device key is worth as
 much as a local login (the terminal command already grants one). Supplied
 commands are never executed as shell text. Device keys keep SSH's `restrict` option and
@@ -94,21 +94,35 @@ Unbound or conflicting identities remain unavailable for chat and attachments.
 - `GET /v1/projects/locate?project=<name>`: where the project lives on that
   computer (activity journal, Herdr's saved workspaces, phren's registration,
   search roots), existing folders only.
-- `GET /v1/projects/repos` and `POST /v1/projects/add`: "Add project" — the
+- `GET /v1/projects/repos` and `POST /v1/projects/add`: "Add project", the
   computer's untracked checkouts, and enrolling one (or cloning a GitHub URL)
   with `phren add` there; the computer pushes its store so the phone can pull.
 - `GET /v1/projects/files?project=<name>&directory=<located folder>&path=<relative path>`:
   browse a discovered checkout read-only. Roots are revalidated on every request;
   traversal, symlinks, `.git`, and special files are refused. Listings have at most
-  500 entries and file responses contain at most 2 MB of base64-encoded bytes.
+  500 entries and file responses contain at most 2 MiB of content, base64 encoded.
+- `GET /v1/models?source=<harness>`: the computer's model catalogue. Claude
+  reads its newest cached terminal catalogue, filters by installed client
+  version and retains names, order and default. Codex uses app-server and
+  OpenCode uses its model command. Results are cached for ten minutes.
+- `/v1/code/*`: registered-store symbol reads, tree summaries, paged usage,
+  recent changes, reindexing and line notes. Session entry points keep their
+  explicit note recipient. See the [route table](../../docs/api-reference.md#hook-routes).
+- `POST /v1/git/tree`: one directory with descendant file counts and a snapshot
+  version. The bounded cache expires after two seconds; status refresh and
+  mutations invalidate it. The phone retains expanded paths and loaded children.
 - `WS /v1/transcripts`: backlog, append, and older frames with provider JSON rows
-  and stable line numbers. History requests include `beforeLine`.
+  and stable line numbers. History requests include `beforeLine`. Live preview
+  frames carry `{preview: {turnStartedAt, text}}` or `{preview: null}` without
+  entering history or advancing its cursor. Claude reads anchored pane text;
+  Codex/OpenCode read deltas, with updates capped at twice a second. A final
+  entry clears its preview immediately.
 - `GET /v1/transcripts/history`: the same exact target tuple plus a positive
   `beforeLine`, returning one older page without first reading the latest page.
 - Provider `source` values: `codex`, `claude`, `copilot`, `phren` (the
-  experimental phren-agent — its `session-<uuid>.events.jsonl` under the store's
+  experimental phren-agent, its `session-<uuid>.events.jsonl` under the store's
   `.runtime/sessions` is the transcript; active once Herdr labels the pane `phren`),
-  and `opencode` — session ids are `ses_…`, and the Phren-installed opencode
+  and `opencode`, session ids are `ses_…`, and the Phren-installed opencode
   plugin mirrors its session to `opencode-<session>.events.jsonl` in the same
   event shape phren-agent uses. opencode loads plugins at startup, so a session
   started before the install has no transcript or session id until restarted.
@@ -124,11 +138,15 @@ Unbound or conflicting identities remain unavailable for chat and attachments.
   terminal. Working panes reject model changes and all slash prompts with 409.
   The phone can hold a cancellable selection until idle and shows successful
   switches as system rows without adding a user message.
+- Working harnesses accept steering immediately through the validated prompt
+  route. Queue captions come from Codex or Claude transcript records. A local
+  pending bubble names Disconnected, Starting or Holding a prompt; it sends
+  when that blocker clears, even while the harness works.
 - `POST /v1/approvals/answer`: one exact pending callback, with approve or deny.
   When the pending tool is Claude Code's `AskUserQuestion`, approve with
-  `updatedInput` — the request's own input plus `answers` keyed by question
+  `updatedInput`, the request's own input plus `answers` keyed by question
   text (a label; labels for multiSelect; any other string is a typed "Other")
-  and an optional free-text `response` — and the hook allows the call with
+  and an optional free-text `response`, and the hook allows the call with
   that input. The questions themselves must be unchanged.
 - `GET /v1/transcripts/blob`: bounded images from an exact transcript row/block.
 - `GET /v1/uploads/image?path=`: the bytes of an image the phone uploaded, which a
@@ -139,7 +157,12 @@ Unbound or conflicting identities remain unavailable for chat and attachments.
   creates a workspace (or a tab in `workspaceId`) in `cwd`, starts `kind`
   (codex/claude/copilot/opencode) in its pane and waits for Herdr to detect it; returns
   `{workspaceId, tabId, paneId, agent, agentStatus?, sessionId?}`. The session
-  id is normally still unknown at that point — poll `/v1/workspaces/panes`.
+  id is normally still unknown at that point; poll `/v1/workspaces/panes`.
+- Launch also accepts the conductor role, model and effort; an existing local
+  conductor returns 409 with its target. Remote work retains verified computer
+  identity and routes through the phone's own enrollment on that computer.
+- `GET`, `POST`, `DELETE /v1/conductor/grants`: standing dispatch and hand-off
+  authorizations. Revocation includes the expected row to reject stale edits.
 - `GET /v1/web-servers`, `/v1/activity`
 - `GET /v1/usage`: account-limit percentages, reset times, and provider spend,
   grouped by provider.
@@ -232,13 +255,16 @@ the foreground overview explicitly renews its 25-second watch with
 `watchApprovals=1`. Ordinary overview reads do not hold requests. Without a
 watcher or service, the agent continues its normal permission workflow.
 An unanswered callback returns no decision after 55 seconds. The user can grant
-or decline the current action; it never installs an always-allow rule. Codex
+or decline the current action. Conductor permission cards can also explicitly
+save project or global standing grants for dispatch and hand-off. Codex
 requires review of new hook definitions in `/hooks`. Existing sessions may need
 to resume to load their provider's hook configuration.
 
 Pending tabs expose `approvalPending`; exact status frames include `expiresAt`.
-The chat keeps its permission explanation, Open terminal, and Deny/Approve
-controls above the composer. The foreground overview also resolves pending tabs
+The chat keeps the provider's asking sentence and ordered phren option rows
+above the composer, with arguments folded under Action details and terminal
+access in the header. Terminal choices retain their real labels, descriptions
+and keys; unresolved prompts offer Open terminal. The foreground overview also resolves pending tabs
 to every exact agent pane and reads their authenticated status, so a permission
 can create a Live Activity without first opening its chat. These bounded reads
 cancel when foreground polling stops and never answer a request.
@@ -255,7 +281,7 @@ offer Open because they require a structured answer in Phren.
 
 This is an ordinary time-sensitive remote notification, not ActivityKit remote
 push-to-start or push-to-update. After Phren is already running, foreground
-discovery still creates the richer Live Activity. To enable suspended delivery:
+discovery still creates the richer Live Activity. To enable direct APNs delivery:
 
 1. Enable Push Notifications for `com.phren.ios` in Certificates, Identifiers &
    Profiles and regenerate the development/distribution profiles.
@@ -273,9 +299,21 @@ discovery still creates the richer Live Activity. To enable suspended delivery:
    terminal permission flow if APNs is unavailable and no foreground watcher is
    connected.
 
-Question dialogs and unsupported interactions stay in Phren's native terminal.
-The protocol reports these capabilities explicitly. No blind terminal keystrokes
-are used to answer a provider's structured approval.
+Local notifications are a separate path with independent approval and schedule
+switches in Settings. The phone polls saved computers during a finite background
+lease and optional BGAppRefreshTask wakes, using its pinned SSH connections.
+Approval identities are hashed and persisted before notification submission.
+Schedule reminders use the next known run and are reconciled after refreshes
+and edits. No APNs key or relay is required; iOS may provide no execution window,
+and tapping an alert revalidates the current request or run. See
+[notifications](design/notifications.md).
+
+Question cards can answer terminal prompts through their actual keys. Claude's
+AskUserQuestion fallback retains its question card and sends option digits;
+Codex terminal options preserve labels and wrapping descriptions. Menus without
+shortcut keys move from the highlighted row, verify the selection before Enter,
+and report failed verification. Unresolved interactions offer Phren's terminal.
+Password entry appears only when the pane is reading a password.
 
 Primary provider contracts:
 [Codex hooks](https://developers.openai.com/codex/hooks),
@@ -313,10 +351,10 @@ and contains status/provenance (agent, state, directory), not prompts or
 transcript text; tab-activity signatures are stored hashed. Uninstall leaves
 local data and SSH backups available for manual recovery.
 
-The Hook's own reference — every route, what a transcript export carries and
+The Hook's own reference, every route, what a transcript export carries and
 strips (Claude top-level allowlist, reduced task-notification envelopes,
 queue rows, `phren_changes` with secret-name redaction), the simulator
-helper's confinement, and the same-user trust boundary of `agent.sock` — is
+helper's confinement, and the same-user trust boundary of `agent.sock`, is
 `packages/cli/src/bridge/AGENT_CONNECTIONS.md`.
 
 Chat drafts use an ordered actor repository. Immutable image digests are

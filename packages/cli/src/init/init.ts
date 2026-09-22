@@ -1,3 +1,4 @@
+import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import { migrateInstalledModules, moduleEnabled } from "../modules/runtime.js";
 import { initializeModules } from "../modules/config.js";
 import { skillEnabled } from "../modules/provision.js";
@@ -379,6 +380,7 @@ export async function runInit(opts: InitOptions = {}) {
     log(`\nCloning existing phren from ${opts._walkthroughCloneUrl}...`);
     try {
       execFileSync("git", ["clone", opts._walkthroughCloneUrl, phrenPath], {
+        env: nonInteractiveGitEnv(),
         stdio: ["ignore", "pipe", "pipe"],
         timeout: 60_000,
       });

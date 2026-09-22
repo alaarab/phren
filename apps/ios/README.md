@@ -3,7 +3,7 @@
 A native SwiftUI app for agents and project memory. Agents and terminals connect
 directly to your computers without GitHub sign-in. For memory, sign in with
 GitHub, pick your store repository, and view + manage your findings, notes,
-tasks, and review queue — **live**. While an agent works on another machine and
+tasks and review queue with live sync. While an agent works on another machine and
 phren's session hooks push commits, the app polls GitHub continuously in the
 foreground, so new findings and tasks appear on your phone within seconds.
 
@@ -14,28 +14,37 @@ their sessions, exploring a project's findings and graph, adjusting skills or
 instructions, and adding direction when needed. It does not require approving
 every finding or agent action.
 
-The main tabs are **Projects, Agents, Tasks, Memory, and Settings**. Memory is
-the graph page with search and browsing folded in: a search field, scope chips
-(store, All, one per project), the graph, and a bottom panel that lists the
-scope's findings, notes, tasks and topics, or the search results, or sits
-under the node dossier with a Show in list row. Tasks is your
-workload view: it starts on **Backlog** and remembers your choice of Backlog,
-Active, or Done. A compact status menu, optional search, filters (creation age,
-priority, project, and store), and sorting share one control row. Sort by task
-order, newest, oldest, or priority; the choice is saved.
+The main tabs are **Projects, Agents, Tasks, Memory, and Settings**. Projects
+leads with the project grid; add, search and voice capture sit beside its inline
+title, with the store filter below. Memory owns the graph and list, Files and
+Memory maintenance. Its search, kind and project filters apply to both modes.
+Multi-select cards fit their content, keep selected chips visible, and add
+search for longer lists, All, None and a selected count on Done.
+
+Tasks starts on **Open**, combining Active and Backlog. Its status drop-down
+also offers Active, Backlog, Done and All and remembers the choice. Search,
+creation age, priority, project, store and sort filters apply before grouping.
+Project sections fold independently, retain their folds and show counts for
+the selected status. Sort by task order, newest, oldest or priority.
 
 Task rows show two-line previews and creation dates. Tap the text to read the
 full plan, check it to complete, or swipe for **Start**, **Backlog**, and **Done**.
-**Select** lets you move several tasks together, including across stores. Bulk
-controls appear only while selecting. Older tasks without a recorded date say
-**Date unknown**. New tasks retain their creation time through edits and offline
-sync. Projects appear above agent setup links; the **More** menu keeps Skills,
-Agent instructions, and Live sessions available without scrolling.
+**Start** opens the agent launch sheet for that task's store and project. A
+Backlog task moves to Active only after the agent accepts its prompt; cancelling
+leaves it in place. **Move to Active** is a separate action. Selecting several
+tasks offers moves only. A move out of the current filter names its destination
+with a View action. Done rows are muted, with a checkmark and done date. Older
+tasks without a recorded date say **Date unknown**; edits and offline sync retain
+known creation times.
 The **Agents** tab opens with sessions from every saved computer, grouped with
 working and waiting sessions first, followed by idle, done, and other open tabs.
 Each compact row names its computer; tap to chat or use its info button for
 terminal and session details. Search matches computers, projects, titles, agents,
-and folders. Computer connections, Skills, and Agent instructions remain below.
+and folders. Computers follow the sessions. Agents' More sheet opens Skills,
+Agent instructions, Add computer, Refresh all sessions and Schedules. A
+horizontal card swipe reveals Close and cancels the card tap; vertical gestures
+keep scrolling. A computer under load can say **Slow to answer** and retain its
+last snapshot, distinct from an unreachable computer.
 
 **Settings → Appearance → Theme** offers Charcoal (white text, dark panels,
 Phren purple controls), Amethyst (deep violet), Graphite (warm charcoal), and Slate
@@ -68,88 +77,129 @@ must support the chosen combination. Changes stay on this iPhone.
 
 **Agents → Account usage** (the chart icon), also available in Settings, shows
 Claude and Codex account limits plus OpenCode and OpenRouter dollar usage.
-OpenCode shows the cost recorded across local sessions for the rolling past
-seven days; OpenRouter shows live usage for its current UTC week. All refresh
-up to once a minute. Claude uses the
+OpenCode Go shows per-model spend over 5 hours, 7 days and 30 days. OpenCode
+shows the cost recorded across local sessions for the rolling past seven days.
+OpenRouter shows live usage for its current UTC week. All refresh up to once a
+minute. Claude uses the
 computer's existing sign-in token against its usage endpoint, including per-model
 weekly limits; an unavailable endpoint falls back to its local status-line and
 usage snapshots. Tokens stay on the computer. Last-reported times distinguish older observations from
 current readings. These are account allowances shared across computers signed
 into the same account, separate from the chat's per-response token details.
 
-Projects uses a card dashboard. Files includes store documents and a Computers
+**Memory → Files** includes store documents and a Computers
 section for browsing discovered project checkouts through Phren Hook. Computer
 files are read-only, with image previews and the same markdown preview/source
 viewer used by skills and agent instructions. Hook limits previews to 2 MB and
-directory listings to 500 entries. Uploaded images have thumbnails; repository
-changes group files into expandable folders within staged/unstaged sections.
+directory listings to 500 entries. Image previews retain full detail, with pinch
+zoom, double tap for actual size, bounded panning, a phren close control and a
+downward swipe to dismiss at fit.
+
+**Code** opens an indexed project's files, with symbol and language counts,
+index time and Reindex. Search filters by kind and directory. Usage shows the
+full paged ranking with bars and file filters; Hot and Cold jump within it.
+Recent shows symbols the index last saw change. A dossier includes definition,
+references and cited findings. Select a line to save a note, send it to a project
+session or start a worker. Code opened from Changes or the chat header keeps
+that session as the note recipient. See [Code index](../../docs/code-index.md).
 
 Herdr uses a single compact header for back, computer/status, and reconnect.
 The terminal starts directly below it; the keyboard stays hidden until requested.
 Swipe down on its shortcut row to dismiss the keyboard.
 
-The chat header names the agent (Claude, Codex, or Copilot glyph, with the
+The chat header names the agent (its provider glyph, with the
 connection state as a small badge), the pane's title, and then the project,
-model, and git branch — the computer is already the session list's business.
+model and git branch. The session list names its computer.
 Its right side opens repository changes and a short options menu (Herdr
 workspaces, project memory, skills, graph, usage, context, switching agent);
-the terminal, slash commands, and dictation stay in the composer, and a
-connection notice offers Reconnect when the conversation drops.
+terminal access remains in the chat header. Slash commands and dictation stay
+in the composer. A connection notice offers Reconnect when the conversation drops.
 
 **Repository changes** is GitHub's files-changed view: Staged Changes and
 Changes as flat rows with a file-type icon, name, folder, status letter
 (M, A, D, R, U), `+N −M` and a diffstat bar. A file opens in a diff editor
 with old/new line numbers in the gutter, tinted inserted and removed rows
-with the changed characters tinted harder, **syntax colouring by language**
+with the changed characters tinted harder, **syntax coloring by language**
 (Swift, Python, TypeScript/JavaScript, JSON, YAML, shell, Rust, Go, Ruby,
 CSS, HTML, SQL, Markdown), hunk rules, next/previous change, inline or
 side-by-side layout, and copy. Patches an agent applies render in the chat
-with the same coloured rows, chat code fences are coloured by their language,
+with the same colored rows, chat code fences are colored by their language,
 and a shell command that wrote files (a heredoc, `sed -i`, a Python
 `open(…, "w")`) offers **See repository changes** so you can read what it
 actually changed.
 
 The transcript reads in plain white and grey in every theme: prose and tool
 titles (Shell, Agent, Patch) in white, commands and icons in neutral grey,
-your own messages on a neutral bubble, and a green connection badge — the
+your own messages on a neutral bubble, and a green connection badge. The
 theme's accent stays on Send and Stop. The header's left control is a back
 chevron.
 
-While an agent is working, a new message **queues** instead of interrupting —
-the Send control becomes Queue, and queued messages sit above the composer
-with Send now (steer the agent immediately), Edit (back into the composer),
-and remove. The first queued message goes out on its own when the turn ends,
-and remaining messages continue after each reply. Pending approvals or questions
-pause delivery. A rejected send keeps its draft and attachments for explicit
-retry; files already uploaded are reused. Upload failures and blocked messages
-have separate explanations. Slash commands still go straight through.
+While an agent works, Send delivers steering through its harness immediately.
+Queued captions come from Codex or Claude's transcript records and clear when
+the harness consumes the message. Only connection, startup or a held prompt
+can keep an unsent bubble above the composer; that bubble names its blocker and
+can be edited or removed. It leaves when input becomes available, even during
+a working turn. A rejected send keeps the draft and attachments for explicit
+retry, reusing files already uploaded.
+
+Replies appear below the live activity row as they are written. Claude pane
+text and Codex/OpenCode deltas become the finished reply without duplicate text
+or restarting its reveal. Thinking and tool activity show elapsed time and
+leave a quiet duration above the reply, including stopped turns. Long-press
+message actions lift the message over a dimmed screen and cover the composer;
+dismissal restores the conversation together.
+
+The model picker waits for the computer's catalogue. Claude's menu follows
+Claude Code's cached catalogue, including names, order, default and the default's
+1M option, filtered to the installed client version. The built-in list is a
+fallback. Codex and OpenCode retain their live catalogues.
 
 Chat uses compact tool activity and a full-width composer. Its smaller Send
 control becomes Stop while an agent works and the draft is empty; typing a new
-message brings Send back so you can steer the agent. **Switch agent**, beside
-Terminal, opens conversations across saved computers and agents within the
-current tab. Each conversation keeps its own draft. Swipe down on the message
+message brings Send back so you can steer the agent. **Switch agent** opens
+conversations across saved computers and agents within the current tab. Each conversation keeps its own draft. Swipe down on the message
 box or its icon row to dismiss the keyboard without sending or losing your draft.
 
 **Open on a computer**, in a project's session menu, starts a fresh session
 where the project lives: the store's `machines.yaml` and profiles say which
 of your computers carry the project and its `phren.project.yaml` remembers
 the folder, so the computer is pre-selected and the folder filled in. Pick
-the harness (Codex, Claude Code, Copilot, opencode) and Open — Phren Hook creates a
+the harness (Codex, Claude Code, Copilot, opencode) and Open. Phren Hook creates a
 Herdr workspace in that folder, starts the agent in it, and the chat opens
 once the agent is ready. The folder is remembered for the project on that
 computer, so later sessions are found without asking.
 
-**Memory maintenance**, available from Projects and Settings, is optional. Its
+**Memory maintenance**, available from Memory and Settings, is optional. Its
 overview groups candidates, stale memories, and conflicts by project and store.
 Open a project to copy a maintenance request into an agent conversation or
 select several entries for manual action. Copying a request does not send it
 or change the queue. Individual triage is still available from the filter menu.
 
+Hold a project or computer for 0.4 seconds to choose where to open an agent.
+The chooser shows computer colors, state and project session counts, puts
+reachable and recently used computers first, and offers the last-used computer.
+Long lists have search; offline computers remain visible with an explanation.
+The Open agent accessibility action reaches the same chooser.
+
+A launch can be an Agent or a **Conductor**, with its own harness, model and
+effort. The conductor has a dispatch mark in its card, chat and Lock Screen
+identity. Agent work follows its remote leads through each computer's enrolled
+connection, puts running jobs first and keeps failures for one hour with their
+age. Dismissed failures stay dismissed. Permission refusals show their type and
+pattern with a FAILED badge. Counts follow the visible rows.
+
+**Settings → Notifications** has separate phren switches for pending approvals
+and scheduled prompts. The phone schedules the next known prompt locally and
+checks approvals during its brief background window and optional iOS background
+refreshes. No APNs key or relay is needed for this path. A due reminder does not
+prove the computer ran the prompt; iOS decides when background checks can run.
+Tapping an alert opens the current chat or schedule history. See
+[notification behavior](design/notifications.md).
+
 ## Architecture
 
 **Serverless.** A phren store is a git repo of markdown, and git is phren's
-sync layer — so the app talks straight to the GitHub REST API. There is no
+sync layer, so the app talks straight to the GitHub REST API. There is no
 phren backend. The GitHub token is stored in the device Keychain and sent only
 to GitHub. Optional live sessions use a separate SSH connection to a computer
 the user adds, using its private Phren Hook service.
@@ -187,7 +237,7 @@ apps/ios/
   PhrenLive/             # app-only SSH transport (SwiftNIO SSH) + connection tests
   PhrenKit/              # Swift package: everything testable, UI-free
     Sources/PhrenKit/
-      Models/            # Finding, Note, PhrenTask, QueueItem — mirror the TS shapes
+      Models/            # Finding, Note, PhrenTask, QueueItem, mirror the TS shapes
       Metadata/          # transcribed regexes from content/metadata.ts et al.
       Markdown/          # FindingsFile / ReviewFile / NotesFile / TasksFile
                          #   + JournalFile (team stores), TruthsFile and
@@ -200,10 +250,15 @@ apps/ios/
   scripts/generate-fixtures.mjs
 ```
 
-Task screens share one filtered/sorted row set per render. Bulk actions resolve
-the current writable selection when tapped. Search parses document dates once
+Task screens reuse one filtered/sorted row set until its inputs change. Bulk
+actions resolve the current writable selection when tapped. Search parses document dates once
 when constructing its index and computes their age at query time, keeping
 recency current without repeating date parsing on every keystroke.
+
+Agents, Projects, Tasks and Memory prepare rows and counts when inputs change.
+Heavy chats keep distant rows at their measured height with only an identifier
+and label, and folded tool bodies are not built. Image previews share a decoded
+cache; the graph prepares payloads off the main actor and retains its web view.
 
 Live session lists use compact, separated cards. Tap the pin beside a session
 to keep it in **Pinned** in the agent overview, and tap it again to unpin.
@@ -241,7 +296,7 @@ by the CLI on its next run; files remain valid):
 - exact-normalized-text dedup only (no Jaccard similarity)
 - no auto-archive cap enforcement
 
-Secret scanning (`scanForSecrets`) **is** ported — the app refuses to commit
+Secret scanning (`scanForSecrets`) **is** ported; the app refuses to commit
 anything the CLI would reject.
 
 ### Sync model
@@ -250,7 +305,7 @@ The store is split into two tiers. The **hot tier** is mirrored eagerly and
 parsed on every sync; the **cold tier** is catalogued for free and downloaded
 one document at a time, only when you open it.
 
-#### Hot tier — mirrored
+#### Hot tier: mirrored
 
 `phren.root.yaml`, `stores.yaml`, `.phren-team.yaml`, and per project directory
 `FINDINGS.md`, `tasks.md`, `review.md`, `summary.md`, `AGENTS.md`, `truths.md`,
@@ -261,18 +316,18 @@ and `<scope>/skills/<name>/SKILL.md` form. Supporting files inside skill folders
 remain on the computer; the phone edits the instruction document only.
 
 The journal is where a team store's findings actually live (see "Team stores"
-below). It is the same shape as `notes/` — one small file per day — with an
+below). It is the same shape as `notes/`, one small file per day, with an
 actor suffix, so it grows with the number of people writing rather than with
 the size of what they wrote.
 
-`truths.md` — phren's pinned, always-injected, never-decaying memory — renders
+`truths.md`, phren's pinned, always-injected, never-decaying memory, renders
 as a read-only section at the head of the Findings tab and is searchable as
 its own `truth` kind. Pinning is `phren pin <project> "…"` from a computer;
 the app never writes it.
 
 `global/FINDINGS.md` is in the hot tier too and remains **read-only**: it is
-the consolidate skill's cross-project output —
-often the largest findings file in a store — and the phone has no business
+the consolidate skill's cross-project output,
+often the largest findings file in a store, and the phone has no business
 rewriting it. Global skills and `global/AGENTS.md` are authored content and
 can be edited from the app. `LocalStore.isSyncedPath` admits global findings on its own branch rather
 than by relaxing `isProjectDirName`, because `isWritablePath` delegates to
@@ -294,42 +349,42 @@ pending edits. Failed writes wait for the next sync attempt, including polls
 where the remote head is unchanged. Explicit **Sign out** still removes local data. `PhrenTests`
 exercises actual app startup with stalled/failed requests and isolated storage.
 
-#### Cold tier — catalogued, hydrated on demand
+#### Cold tier: catalogued, hydrated on demand
 
 Once a project passes its findings cap, the CLI's `autoArchiveToReference`
 moves its oldest findings into `reference/topics/<slug>.md`. That is a lot of
-content — on one real store, 94% of all finding-bytes — and syncing it eagerly
+content, on one real store, 94% of all finding-bytes, and syncing it eagerly
 was measured at **5.5× the 30-day download, 6.9× the cold-start payload and
 6.9× the per-poll parse**. So it isn't synced. Instead:
 
 - The recursive tree the engine already fetches carries every blob's path,
   sha **and size**, so `ColdStore` builds a complete catalogue of the archive
-  from a response that has already been paid for — zero extra requests, zero
+  from a response that has already been paid for, zero extra requests, zero
   extra bytes. It persists as `cold-tier.json`.
 - A document's text is fetched only when you open that topic.
   `ColdStore.hydration(for:)` is the only way in, so the cached-sha vs
   tree-sha comparison can't be skipped: a topic re-consolidated since you last
   read it is refetched, never rendered stale.
 - Oversized blobs are refused *before* the request, on the size the tree
-  already reported — 1 MB raw, against a largest observed topic doc of ~341 KB
+  already reported, 1 MB raw, against a largest observed topic doc of ~341 KB
   (~445 KB base64 through the blobs API). Better a clear message than a
   spinner on a cellular connection.
 - Hydrated documents cache under a 4 MB budget with LRU eviction, outside
   `LocalStore`'s mirrored `files/` tree.
 - **Cold content never enters `SearchIndex`.** Every entry parsed out of a
-  topic doc is stamped `archived`, which the index filters by construction —
+  topic doc is stamped `archived`, which the index filters by construction,
   a phone search returns live knowledge, matching the CLI, which strips
   archived content from its own index. There is no separate search over
   hydrated cold docs either.
 
-The Findings tab ends in one row — "Archived 2026-08-01 — 214 findings in 6
-topics" — that opens the archive browser. The date comes from the
+The Findings tab ends in one row, "Archived 2026-08-01, 214 findings in 6
+topics", that opens the archive browser. The date comes from the
 `<!-- consolidated: … -->` stamp the CLI leaves in the project's own
 `FINDINGS.md`, a file already synced; the topic count and byte total come from
 the catalogue. The finding count only appears once every topic in the project
 has been hydrated at least once, because until then the number lives inside
 documents nobody has downloaded. Archived entries are marked as such and have
-no edit affordance — they are read-only everywhere else in phren too.
+no edit affordance, they are read-only everywhere else in phren too.
 
 `.config/skill-preferences.json` is the only synced configuration document;
 the rest of `.config/` and `reference/` are not synced.
@@ -337,7 +392,7 @@ the rest of `.config/` and `reference/` are not synced.
 #### Writes
 
 - **Writes**: offline-first. Mutations apply to the local cache instantly,
-  queue as domain ops in `pending-ops.json`, and flush FIFO — **coalesced**:
+  queue as domain ops in `pending-ops.json`, and flush FIFO, **coalesced**:
   consecutive queued ops that target the same file are applied to the local
   document in order, serialized once, and pushed as a *single* Contents API
   PUT. One commit per file-batch, not per op: batch-approving 40 review items
@@ -450,7 +505,7 @@ Uninstall stops the background service and removes Phren's agent callbacks.
 Local history, images, settings, and backups are preserved. Remove the iPhone's
 `phren-iphone` public-key line to revoke its SSH access.
 
-### Agent chat, terminal, and project context
+### Agent chat: terminal, and project context
 
 Codex, Claude Code, GitHub Copilot, and opencode sessions appear across connected machines.
 Select an agent to chat, or open its exact Herdr workspace and pane in the native
@@ -464,7 +519,8 @@ per-token output when an agent only writes completed messages. Slash suggestions
 are vertical; the full command menu opens the running agent's own terminal menu,
 including installed skills and custom commands.
 
-Tool calls expand independently with a short output preview. Open **Full output**
+OpenCode memory, todo, patch and subagent calls use phren tool cards with their
+captured arguments. Tool calls expand independently with a short output preview. Open **Full output**
 to read lengthy results in pages; First, Previous, Next, and Last keep every line
 reachable without laying out the entire result at once. **Copy** includes the
 whole output, regardless of the current page.
@@ -478,16 +534,22 @@ does not reload hook configuration. Open transcript descriptors also identify
 existing conversations without restarting them. An ambiguous identity disables
 chat instead of selecting another agent.
 
-Codex and Claude PermissionRequest callbacks can show a native approval while
+Codex and Claude PermissionRequest callbacks can show a phren approval while
 Phren watches that conversation or the foreground session overview. The overview
 creates permission Live Activities without requiring you to open each chat first.
 An activity received while Phren is active stays available on the Lock Screen
-until its request expires; new requests after iOS suspends Phren still require a
-push relay, which is not configured. Only an explicit answer resolves the pending
+until its request expires. Local notifications can discover approvals during
+the phone's finite background lease or an iOS background refresh. Delivery is
+limited by those execution windows. Direct Hook-to-APNs delivery is a separate
+option for owners with their own APNs credentials. Only an explicit answer resolves the pending
 request. If the phone is not watching, the normal terminal prompt appears
 immediately; unanswered phone requests return to the terminal after 55 seconds.
-Question dialogs and unsupported provider interactions use Phren's native
-terminal. No agent is launched automatically.
+Questions use the same provider header and phren radio options as permissions.
+Codex option labels and descriptions wrap separately; MCP arguments stay under
+Action details. Terminal prompts use their actual choices and keys. Unresolved
+prompts offer Open terminal; password entry appears only for a real password
+read. Claude AskUserQuestion cards also support questions answered through the
+terminal, without repeating the tool JSON beside the card.
 
 The terminal keyboard opens only from its keyboard button. Taps keep Herdr's
 switch control and links clickable; swipe to scroll, pinch to adjust text size,
@@ -497,6 +559,14 @@ The **Uploads** tab offers Photos, Camera, and Files. Phren Hook 0.2.14 identifi
 the currently focused pane, then verifies its agent conversation before opening
 the attachments as a native chat draft. With older Hooks, choose the destination
 session explicitly. Attachments upload only when you press Send.
+
+Terminal Paste uploads clipboard images and inserts their paths at the cursor;
+double tap also pastes text or images. Chat uses system image paste without an
+extra clipboard button. Shortcut commands and their actions have separate tap
+targets; tapping a command honors the close-after-shortcut setting. SSH upload
+errors include a readable explanation and the SSH error type. Upload requests
+flush in bounded chunks, and a complete response remains successful if the
+channel later reports a failure.
 
 **Web servers** discovers the user's listening HTTP development apps. Phren opens
 previews through an SSH tunnel, so loopback-only apps work from the iPhone.
@@ -567,7 +637,7 @@ bullets, and is bundled into the app: the first launch of a new version shows
 its section as a "What's new" sheet (once the store is connected), and
 Settings → About → What's new lists every release. `deploy-phone.py` and
 `release.py` run `scripts/changelog.py` first and refuse to build a version
-that has no section — bump the version and write its entry together.
+that has no section; bump the version and write its entry together.
 
 For unattended signing, `signing_helper` points to an existing executable that
 accepts `unlock` and `lock`: `unlock` prints only the dedicated keychain's path
@@ -639,19 +709,23 @@ swift test
 
 ### Memory graph
 
-Open **Projects → More → Memory graph**, or use **Explore graph** on a
-session or in a chat to focus one project. The Memory tab's map is the same
-renderer for everyday browsing. The app bundles the same Three.js renderer as
+Open **Memory → Map**, or use **Explore graph** on a session or in a chat to
+focus one project. The app bundles the same Three.js renderer as
 the VS Code extension and web viewer, using the payload contract shared with
 the terminal graph. All rendering assets are local; browsing cached data
 works offline.
 
-The phone provides native store/project menus, All/Findings/Tasks filters,
+The phone provides phren store/project selectors and kind filters,
 search, zoom buttons and Fit graph. Drag to orbit, pinch to zoom, and tap a
 node for readable details, sharing and a link to its project. Desktop panels
-are replaced by these native controls; editing is available in the project's
+are replaced by phren controls; editing is available in the project's
 normal findings and task screens. Bloom is disabled on the phone, and label
 widths are constrained for the smaller viewport.
+
+Selecting a node centers it in the space above its dossier. The camera follows
+card height and viewport changes, respects Reduce Motion and yields to dragging.
+Closing the dossier restores the view from before selection. See
+[graph selection](design/graph.md).
 
 Use the top-left **Back** button to leave the graph. Interactive back swipes
 are disabled on this screen so canvas and edge drags stay with the map;
@@ -734,7 +808,7 @@ has completed. Other developer accounts still need their own setup:
 2. **Create the App Group** `group.com.phren.ios` (same section → App Groups),
    then enable it on both App IDs above.
 3. **Re-run `xcodegen generate`** and archive. Do **not** hand-edit
-   `Phren/Phren.entitlements` or `PhrenWidgets/PhrenWidgets.entitlements` —
+   `Phren/Phren.entitlements` or `PhrenWidgets/PhrenWidgets.entitlements`,
    both are gitignored and fully regenerated from the `entitlements:` blocks
    in `project.yml` on every `xcodegen generate`; any manual edit is silently
    overwritten the next time someone runs it.
@@ -814,17 +888,17 @@ The `PhrenWidgets` extension (`com.phren.ios.widgets`) puts your memory count
 and your top active task on the Home Screen and Lock Screen without opening
 the app:
 
-- **systemSmall** — memory count, big numeral.
-- **systemMedium** — memory and project counts + top task line + relative last-sync; the
+- **systemSmall**: memory count, big numeral.
+- **systemMedium**: memory and project counts + top task line + relative last-sync; the
   memory half and task half deep-link separately (`phren://projects`,
   `phren://tasks`).
-- **accessoryCircular** / **accessoryRectangular** (Lock Screen) — memory
+- **accessoryCircular** / **accessoryRectangular** (Lock Screen), memory
   count, and memory count + top task line respectively.
 
 The widget does not link PhrenKit or the app target. The app and extension
 compile the same small models in `Shared/`, avoiding duplicated JSON contracts.
-The glance-widget bridge is a JSON file: `AppModel.refresh()` — where per-store sync status
-settles every ~7s live-poll cycle — writes a `WidgetSnapshot` (memory and project
+The glance-widget bridge is a JSON file: `AppModel.refresh()`, where per-store sync status
+settles every ~7s live-poll cycle, writes a `WidgetSnapshot` (memory and project
 counts, top task, last-sync date, and legacy review fields) to the `group.com.phren.ios`
 App Group container through an actor off the main thread, skipping identical
 snapshots, then calls `WidgetCenter.shared.reloadAllTimelines()`
@@ -848,39 +922,49 @@ selects the matching tab. Existing `phren://review` links open the optional
 maintenance sheet. Old snapshots without a memory count show a dash until the
 app writes a fresh snapshot.
 
-Building the widget target requires no extra setup — `xcodegen generate`
+Building the widget target requires no extra setup; `xcodegen generate`
 declares both the extension and the App Group entitlements for both targets.
 The App Group only needs to be provisioned with an actual Apple Developer
 account for a **signed** build to a device or for the app and widget to
 actually share data; an unsigned `xcodebuild build` (e.g. CI) builds and
 embeds the extension fine regardless.
 
-## Siri, Shortcuts, and the Action Button
+## Siri: Shortcuts, and the Action Button
 
-"Hey Siri, add a task to phren" — from a locked phone, mid-walk, without a
-screen. Two App Intents (`Phren/Intents/`) back it:
+"Hey Siri, add a task to phren" captures work without opening a screen.
+App Intents in `Phren/Intents/` also reach a running conductor:
 
 | Intent | Phrases (every one must contain the app name) |
 | --- | --- |
 | `AddPhrenTaskIntent` | "Add a task to phren", "Add a phren task", "New phren task", "Queue a task in phren", "Add a task to `<project>` in phren" |
 | `AddPhrenNoteIntent` | "Add a note to phren", "Add a phren note", "New phren note", "Capture a thought in phren", "Add a note to `<project>` in phren" |
+| `TellConductorIntent` | "Tell my conductor … in phren" |
+| `AskConductorIntent` | "Ask my conductor … in phren" |
+| `ConductorStatusIntent` | "What is phren doing" |
 
-Siri collects the text itself (`requestValueDialog`: "What's the task?" /
+Tell sends a line to the running conductor. Ask waits up to 20 seconds and speaks
+the next reply's first 300 characters, or points to chat if it is still thinking.
+Status speaks working, waiting and idle counts and the conductor's current step.
+With no conductor running, Tell and Ask ask you to start one in Phren. Settings
+> Siri and the Action button lists these phrases and opens Shortcuts. The Action
+button can run any of them. See [Conductor](../../docs/conductor.md).
+
+For task and note capture, Siri collects the text itself (`requestValueDialog`: "What's the task?" /
 "What should the note say?") and confirms with "Added to `<project>`." Both
 appear in the Shortcuts app as **Add Task** / **Add Note** under Capture, so
 binding one to the Action Button needs nothing beyond the app being installed.
 
 **Where it lands.** Naming a project is optional; without one the capture goes
-to the last project anything was captured into — the same
+to the last project anything was captured into, the same
 `VoiceCaptureLastTarget` the in-app voice sheet defaults to, written by both
-surfaces — falling back to the first writable project.
+surfaces, falling back to the first writable project.
 
 **Hearing the name.** Dictation has no entry for "phren" and reliably hears
 "friend" or "fren", so `INAlternativeAppNames` in the app's Info.plist
 registers both (plus a "fren" pronunciation hint). Project names get the same
 treatment in reverse: `ProjectEntityQuery` strips everything but letters and
 digits from both the spoken fragment and the slug, so "alpha lens" matches
-`alphalens`. Every candidate that survives is returned, best match first —
+`alphalens`. Every candidate that survives is returned, best match first,
 when "alpha lens" could equally be `alpha-lens-website`, Siri asks instead of
 guessing. A single candidate resolves silently.
 
@@ -888,17 +972,17 @@ guessing. A single candidate resolves silently.
 own process, which the system launches in the background if it isn't already
 running. That gives two worlds, and the capture path handles both:
 
-- **App alive** — `AppModel.current` (a weak static hook set in the model's
+- **App alive**: `AppModel.current` (a weak static hook set in the model's
   init) has open store contexts, so the op goes through the normal
   `AppModel.enqueue`: local cache, pending queue, sync engine, and widget
   snapshot all see it exactly as they would from a tap.
-- **Cold background launch** — the App struct is constructed, but `bootstrap()`
+- **Cold background launch**: the App struct is constructed, but `bootstrap()`
   never runs (it's driven by a `.task` on a view, and no scene connects), so
   there are no store contexts. The capture path then opens the target store's
   `LocalStore` itself and hands it to a `SyncEngine` wired to a client that
   refuses every request. `enqueue` still does its usual apply-locally +
-  append-to-`pending-ops.json` — the queue file is never written by anything
-  but PhrenKit's own code — while the flush it schedules fails instantly and
+  append-to-`pending-ops.json`, the queue file is never written by anything
+  but PhrenKit's own code, while the flush it schedules fails instantly and
   leaves the op queued for the next foreground sync.
 
 Capture never requires the network and never reads the Keychain, which is what
@@ -917,11 +1001,11 @@ and every mutation routes to the store its item came from.
 
 Semantics, and where they intentionally diverge from the CLI:
 
-- The CLI's cross-store merge is name-keyed and primary-wins — a project that
+- The CLI's cross-store merge is name-keyed and primary-wins, a project that
   exists in two stores silently shows only the first copy. The app keys by
   *(store, project)* and shows both, disambiguated by store badge. No data is
   hidden.
-- Stores are never *discovered* from `stores.yaml` — the CLI's registry holds
+- Stores are never *discovered* from `stores.yaml`, the CLI's registry holds
   local filesystem paths and unnormalized (often SSH) remotes, neither of
   which is actionable on a phone. You add each repo explicitly via the picker.
   The app does read the file, from whichever attached store carries it, for
@@ -944,11 +1028,11 @@ follows the same rule in both directions:
   attributed to the actor in the filename and searchable like any other live
   finding.
 - Adds (and note promotions) append to *this device's* file for today, byte-
-  identical to `appendTeamJournal` — pinned by `JournalFileTests` against
+  identical to `appendTeamJournal`, pinned by `JournalFileTests` against
   fixtures the real CLI wrote. Another actor's file is never rewritten.
 - Journal entries have no edit or delete: `edit_finding`/`remove_finding`
   splice `FINDINGS.md` in every store (only the add path forks), so the
-  controls could only offer a refusal. The log is append-only on both sides —
+  controls could only offer a refusal. The log is append-only on both sides,
   nothing rewrites a journal line in place.
 - A store's role comes from its own `.phren-team.yaml` first, then from a
   `stores.yaml` entry matching its name. Both are hot-tier files. A role
@@ -983,7 +1067,7 @@ exactly which transcription needs updating.
 
 ## Not in the MVP
 
-- Editing or retracting a journal entry (the CLI can't either — its lifecycle
+- Editing or retracting a journal entry (the CLI can't either, its lifecycle
   tools address `FINDINGS.md`, and folding a journal into it has no command
   yet, only `materializeTeamFindings` in `finding/journal.ts`)
 - `stores.yaml` auto-discovery as an add-store suggestion source

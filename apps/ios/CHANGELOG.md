@@ -30,6 +30,8 @@ number counts up on its own.
 
 ### Added
 
+- One file viewer opens computer files, working-tree contents and verified paths in chat. Downloads show progress and resume from the cache after cancellation or backgrounding. Video and audio use phren playback controls; PDFs have page controls, JSON folds, CSV scrolls as a table, Markdown renders, code highlights and images zoom. Save to Files and Share work for every downloaded type.
+
 - Replies appear as they are written below the activity row. Live previews become the finished reply without duplicate text or restarting the reveal animation.
 - Image previews support pinch zoom, double tap for actual size, and bounded panning. Chat and file previews retain full image detail, with a phren close control and a downward swipe to dismiss at fit.
 - Local notifications for the next scheduled prompt and pending approvals, with separate switches in Settings. The phone checks approvals during its brief background window and on optional iOS background refreshes; no APNs key or relay is needed.

@@ -146,7 +146,15 @@ export async function handleDoctor(args: string[]) {
     process.exit(0);
   }
 
-  const result = await runDoctor(getPhrenPath(), fix, checkData);
+  const confirmStoreRemoval = async (message: string): Promise<boolean> => {
+    // Unlike init's general confirmation helper, absent stdin is never consent.
+    if (!process.stdin.isTTY || !process.stdout.isTTY || process.env.CI === "true") return false;
+    const { createInterface } = await import("node:readline/promises");
+    const prompt = createInterface({ input: process.stdin, output: process.stdout });
+    try { return /^(y|yes)$/i.test((await prompt.question(`${message} [y/N] `)).trim()); }
+    finally { prompt.close(); }
+  };
+  const result = await runDoctor(getPhrenPath(), fix, checkData, confirmStoreRemoval);
   if (agentsOnly) {
     const agentChecks = result.checks.filter((check) =>
       check.name.includes("cursor") || check.name.includes("copilot") || check.name.includes("codex") || check.name.includes("windsurf")

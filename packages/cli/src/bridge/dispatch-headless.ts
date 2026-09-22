@@ -1,3 +1,4 @@
+import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import { execFile, spawn as spawnProcess, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { lstat, mkdir, open, readFile, readdir, realpath, rename, stat, unlink, writeFile } from "node:fs/promises";
@@ -111,7 +112,7 @@ async function verifiedWrapper(file: string): Promise<string> {
 async function isolatedWorktree(source: string, destination: string): Promise<string> {
   await mkdir(path.dirname(destination), { recursive: true, mode: 0o700 });
   try {
-    await exec("git", ["-C", source, "worktree", "add", "--detach", destination, "HEAD"], { timeout: 20_000, maxBuffer: 65_536 });
+    await exec("git", ["-C", source, "worktree", "add", "--detach", destination, "HEAD"], { env: nonInteractiveGitEnv(), timeout: 20_000, maxBuffer: 65_536 });
     return await realpath(destination);
   } catch {
     throw new BridgeError(503, "Headless dispatch needs a Git checkout to create an isolated worktree.");

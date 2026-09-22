@@ -127,7 +127,6 @@ struct FileViewerView: View {
     @Environment(AppModel.self) private var model
     @State private var editing = false
     @State private var copied = false
-    @State private var showingActions = false
 
     private var context: StoreContext? { model.storeContexts.first { $0.id == storeId } }
     private var content: String { context?.store.read(path) ?? "" }
@@ -139,18 +138,8 @@ struct FileViewerView: View {
     }
 
     var body: some View {
-        DocumentContentView(path: path, content: content)
-        .phrenScreen()
-        .navigationTitle((path as NSString).lastPathComponent)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                PhrenIconButton(icon: "ellipsis.circle", label: "File actions") { showingActions = true }
-                    .phrenIdentifier("file-actions")
-            }
-        }
-        .phrenActionSheet(isPresented: $showingActions, title: "File actions", actions: fileActions,
-                          identifier: "file-actions-sheet")
+        FileViewer(item: FileViewerItem(name: (path as NSString).lastPathComponent) { Data(content.utf8) }, actions: fileActions)
+            .id(ChatRenderKey.text(content))
         .sheet(isPresented: $editing) {
             DocumentEditorSheet(title: (path as NSString).lastPathComponent, storeId: storeId,
                                 draft: DocumentDraft(path: path, content: content))
@@ -197,7 +186,7 @@ struct DocumentContentView: View {
     }
 }
 
-private struct RepositoryProjectsView: View {
+struct RepositoryProjectsView: View {
     let host: LiveHost
     @Environment(AppModel.self) private var model
     var body: some View {
@@ -241,60 +230,41 @@ private struct RepositoryBrowserView: View {
     let directory: String
     var path = ""
     @State private var response: PhrenConnection.RepositoryFileResponse?
-    @State private var image: UIImage?
     @State private var error: String?
     @State private var refresh = UUID()
-    private var imageKey: String { "\(host.id)/\(project)/\(directory)/\(path)" }
+    @State private var opened: FileViewerItem?
     var body: some View {
         Group {
             if let response {
-                if response.kind == "directory" {
-                    PhrenList {
-                        ForEach(response.entries ?? []) { entry in
+                PhrenList {
+                    ForEach(response.entries ?? []) { entry in
+                        if entry.kind == "directory" {
                             NavigationLink { RepositoryBrowserView(host: host, project: project, directory: directory, path: entry.path) } label: {
-                                HStack {
-                                    if entry.kind == "directory" { Image(systemName: "folder").foregroundStyle(PhrenTheme.cyan) }
-                                    else { PhrenFileTypeIcon(path: entry.path) }
-                                    Text(entry.name).font(.system(.subheadline, design: .monospaced))
-                                }
+                                Label(entry.name, systemImage: "folder")
                             }
+                        } else {
+                            Button { opened = FileViewerItem(host: host, file: RemoteFile(path: entry.path, project: project, directory: directory)) } label: {
+                                HStack { PhrenFileTypeIcon(path: entry.path); Text(entry.name) }.frame(minHeight: 44)
+                            }.buttonStyle(.plain).phrenIdentifier("repository-file:\(entry.path)")
                         }
-                        if response.entries?.isEmpty == true { Text("Empty folder").foregroundStyle(PhrenTheme.textMuted) }
-                        if response.truncated == true { Text("Showing the first 500 entries.").foregroundStyle(PhrenTheme.textMuted) }
                     }
-                } else if let encoded = response.data, let bytes = Data(base64Encoded: encoded) {
-                    if image != nil {
-                        PhrenImageViewer(name: (path as NSString).lastPathComponent) { bytes }
-                    } else if let text = String(data: bytes, encoding: .utf8), !text.contains("\0") {
-                        DocumentContentView(path: path, content: text)
-                    } else { Text("This binary file cannot be previewed.").foregroundStyle(PhrenTheme.textMuted) }
+                    if response.entries?.isEmpty == true { Text("Empty folder").foregroundStyle(PhrenTheme.textMuted) }
+                    if response.truncated == true { Text("Showing the first 500 entries.").foregroundStyle(PhrenTheme.textMuted) }
                 }
             } else if let error { Text(error).foregroundStyle(PhrenTheme.warning).padding() }
-            else { ProgressView("Loading files…") }
+            else { Text("Loading files…").foregroundStyle(PhrenTheme.textMuted) }
         }.navigationTitle(path.isEmpty ? project : (path as NSString).lastPathComponent)
             .navigationBarTitleDisplayMode(.inline).phrenScreen()
-            .toolbar(image == nil ? .visible : .hidden, for: .navigationBar)
-            .toolbar { Button("Refresh", systemImage: "arrow.clockwise") { refresh = UUID() } }
+            .toolbar {
+                PhrenIconButton(icon: "arrow.clockwise", label: "Refresh files") { refresh = UUID() }
+            }
+            .fullScreenCover(item: $opened) { FileViewer(item: $0) }
             .task(id: refresh) {
-                response = nil; image = nil; error = nil
+                response = nil; error = nil
                 do {
-                    let next = try await PhrenConnection.repositoryFiles(host: host, privateKey: DeviceSSHKey.load(host.id), project: project, directory: directory, path: path)
-                    image = await Self.decodedImage(next, key: imageKey)
-                    response = next
+                    response = try await PhrenConnection.repositoryFiles(host: host, privateKey: DeviceSSHKey.load(host.id), project: project, directory: directory, path: path)
                 } catch { if !Task.isCancelled { self.error = error.localizedDescription } }
             }
-    }
-
-    /// Decode an image response once, off the main actor, and remember it by
-    /// path so revisiting the file never decodes again.
-    @MainActor
-    private static func decodedImage(_ response: PhrenConnection.RepositoryFileResponse, key: String) async -> UIImage? {
-        guard response.kind != "directory", let encoded = response.data,
-              let bytes = Data(base64Encoded: encoded) else { return nil }
-        if let cached = ImageRasterCache.image(for: key) { return cached }
-        let decoded = await ImageViewerRasterCache.load(bytes, fullResolution: false)?.image
-        if let decoded { ImageRasterCache.store(decoded, for: key) }
-        return decoded
     }
 }
 

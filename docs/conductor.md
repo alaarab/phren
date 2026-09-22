@@ -38,6 +38,26 @@ check on that computer's Hook; it is not a distributed lock across computers.
 The phone also offers an existing conductor it can associate with the store.
 Workspace overviews and chat show the conductor role.
 
+On the phone, hold a project or computer for 0.4 seconds to open the computer
+chooser. It lists names, colors, reachability and project session counts, puts
+reachable and recently used computers first, and offers the last-used computer.
+Long lists are searchable; offline rows explain why they cannot open. The
+Open agent accessibility action reaches the same flow. Harness, model and
+effort choices follow the computer choice.
+
+## Siri and the Action button
+
+The phone exposes three conductor shortcuts: Tell my conductor sends a line,
+Ask my conductor sends a question and speaks the next reply, and What is Phren
+doing reports working, waiting and idle sessions plus the conductor's current
+step. They use the running conductor across connected computers. If none is
+running, they ask the owner to open Phren and start one.
+
+Ask waits up to 20 seconds and speaks up to 300 characters. A longer response
+or one that arrives later remains in chat. Settings > Siri and the Action
+button lists the phrases and opens Shortcuts, where one can be assigned to the
+Action button. These use the existing Hook prompt and transcript paths.
+
 ## Dispatch new work
 
 ```sh
@@ -65,6 +85,13 @@ remote computer's immutable ID and target. `/v1/subagents` projects those remote
 leads and their local children, bounded to depth four and 128 rows, with public
 computer identity and navigation descriptors rather than private checkout paths.
 The phone uses its own enrolled connection to open a remote session.
+
+Agent work puts running jobs first. Failed jobs remain visible for one hour
+with their age and can be dismissed; dismissals persist on the phone. Counts
+follow the visible rows. A refused permission reads Permission refused with
+its type and pattern and a FAILED badge. Phone visibility does not change the
+Hook's 24-hour archive policy. Remote rows retain their computer identity and
+open chat, changes and questions through that computer's enrolled connection.
 
 ## Hand work to an existing session
 
@@ -104,6 +131,11 @@ Hook routes are `GET`, `POST` and `DELETE /v1/conductor/grants`. Add sends the
 grant object. Delete accepts an index or a scope; the phone includes the
 expected grant with the index so a changed list returns 409 instead of removing
 the wrong row. Mutations are serialized and locked across local processes.
+
+Failed saves keep the grant editor open. Chat permissions use the provider's
+asking sentence and ordered radio options, with action arguments folded under
+Action details and terminal access in the header. Conductor grant choices use
+the same phren controls as other permissions.
 
 ## Implemented adapters that are not wired into placement
 

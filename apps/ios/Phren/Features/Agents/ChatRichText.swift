@@ -48,7 +48,7 @@ struct ChatRichText: View, Equatable {
                             ForEach(Array(block.rows.enumerated()), id: \.offset) { rowIndex, row in
                                 GridRow {
                                     ForEach(Array(row.enumerated()), id: \.offset) { column, _ in
-                                        Text(ChatInlineCode.tinted(block.attributedRows[rowIndex][column]))
+                                        FileLinkedText(attributed: block.attributedRows[rowIndex][column])
                                             .font(.system(size: textSize, weight: rowIndex == 0 ? .semibold : .regular, design: .monospaced))
                                             .foregroundStyle(rowIndex == 0 ? PhrenTheme.chatNeutral : PhrenTheme.chatText)
                                     }
@@ -95,7 +95,7 @@ private struct ChatParagraph: View {
     @Environment(\.chatMessageMenuSource) private var menuSource
     var body: some View {
         let selecting = selection?.target(owner, block.id)
-        Text(ChatInlineCode.tinted(block.attributed))
+        FileLinkedText(attributed: block.attributed)
             .font(.system(size: size, weight: block.heading ? .semibold : .regular, design: .monospaced))
             .foregroundStyle(PhrenTheme.chatText)
             .lineSpacing(3).tint(PhrenTheme.link)
@@ -110,7 +110,7 @@ private struct ChatParagraph: View {
             .id(block.id)
             .overlay {
                 if let selecting {
-                    ChatSelectableText(attributed: ChatInlineCode.tinted(block.attributed), heading: block.heading, size: size,
+                    ChatSelectableText(attributed: ChatInlineCode.tinted(FilePathLinks.linked(block.attributed, existing: [])), heading: block.heading, size: size,
                                        point: selecting.point, identifier: "chat-selectable:\(messageID ?? owner):\(block.id)",
                                        touched: { selection?.noteTouchInside() },
                                        resigned: { selection?.end(owner: owner, block: block.id) })

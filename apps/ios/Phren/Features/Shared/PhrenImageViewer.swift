@@ -100,6 +100,7 @@ struct ImageViewerRaster {
 struct PhrenImageViewer: View {
     let name: String
     let load: () async throws -> Data
+    var showsHeader = true
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var original: Data?
@@ -111,12 +112,13 @@ struct PhrenImageViewer: View {
         name = attachment.name
         load = { ImageViewerOriginals.data(for: attachment) }
     }
-    init(name: String, load: @escaping () async throws -> Data) {
-        self.name = name; self.load = load
+    init(name: String, showsHeader: Bool = true, load: @escaping () async throws -> Data) {
+        self.name = name; self.showsHeader = showsHeader; self.load = load
     }
 
     var body: some View {
         VStack(spacing: 0) {
+            if showsHeader {
             HStack(spacing: PhrenTheme.Space.medium) {
                 Text(name).font(PhrenTypography.subheadline.weight(.semibold))
                     .foregroundStyle(PhrenTheme.text).fixedSize(horizontal: false, vertical: true)
@@ -125,6 +127,7 @@ struct PhrenImageViewer: View {
                     .accessibilityIdentifier("image-viewer-close")
             }
             .padding(.leading, PhrenTheme.Space.large).padding(.trailing, 6).frame(minHeight: 56)
+            }
             if let raster {
                 ImageViewerCanvas(raster: raster, reduceMotion: reduceMotion,
                                   zoomed: { wantsFullResolution = true }, dismiss: { dismiss() })

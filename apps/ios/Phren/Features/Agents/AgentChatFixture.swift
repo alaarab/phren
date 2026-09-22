@@ -652,6 +652,9 @@ import UIKit
             entries.append(["line": entries.count, "raw": ["type": "user", "message": ["role": "user", "content": [
                 ["type": "text", "text": "Look at these [Image: source: \(root)/uploads/a.png] [Image: source: \(root)/uploads/b.png]"]]]]])
         }
+        if flag("--chat-file-links") {
+            append("assistant", "Rendered `video/render.mp4`. Open [the PDF](/home/sam/phren/design.pdf) or `result.json`. The missing `missing.xyz` stays plain text.")
+        }
         if flag("--chat-paragraphs") {
             append("assistant", "Alpha paragraph opens the reply with a summary of what changed on the project screen.\n\nBravo paragraph explains why `ChatRichText` renders blocks, each copying on its own.\n\nCharlie paragraph closes with what to try next on the phone.\n\n```swift\nlet copied = true\n```")
         }

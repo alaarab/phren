@@ -3,6 +3,28 @@ import Foundation
 import PhrenKit
 
 extension PhrenConnection {
+    public static func fileRange(host: LiveHost, privateKey: Data, file: RemoteFile, offset: Int64 = 0,
+                                 length: Int = 1_048_576, version: String? = nil) async throws -> FileChunk {
+        try host.validate()
+        guard offset >= 0, (0...FileChunk.maximumLength).contains(length) else {
+            throw PhrenKitError.validation("Invalid file range.")
+        }
+        var query = file.target.map(GatewayRequest.targetQuery) ?? [:]
+        query["path"] = file.path; query["offset"] = String(offset); query["length"] = String(length)
+        query["project"] = file.project; query["directory"] = file.directory
+        query["child"] = file.child; query["version"] = version
+        if file.uploads { query["scope"] = "uploads" }
+        let bytes = try await fetchData(host: host, key: .init(rawRepresentation: privateKey),
+            request: GatewayRequest(path: GatewayRequest.path("/v1/files/range", query), maximumResponseBytes: length == 0 ? 32_768 : 6_000_000))
+        try Task.checkCancellation()
+        let chunk = try JSONDecoder().decode(FileChunk.self, from: bytes)
+        _ = try chunk.bytes()
+        guard chunk.offset == offset, chunk.length <= length, version == nil || chunk.version == version else {
+            throw PhrenKitError.validation("The computer returned a different file range.")
+        }
+        return chunk
+    }
+
     public struct RepositoryFile: Decodable, Identifiable, Sendable {
         public let name: String
         public let path: String

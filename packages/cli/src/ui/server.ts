@@ -1,3 +1,4 @@
+import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import { moduleSnapshot } from "../modules/runtime.js";
 import { disabledHint } from "../modules/registry.js";
 import * as http from "http";
@@ -767,7 +768,7 @@ function handlePostSync(req: Req, res: Res, url: string, ctx: RouteCtx): void {
     try {
       const EXEC_TIMEOUT = 15_000;
       const runGit = (args: string[]) =>
-        execFileSync("git", args, { cwd: ctx.phrenPath, encoding: "utf8", timeout: EXEC_TIMEOUT }).trim();
+        execFileSync("git", args, { env: nonInteractiveGitEnv(), cwd: ctx.phrenPath, encoding: "utf8", timeout: EXEC_TIMEOUT }).trim();
       const status = runGit(["status", "--porcelain"]);
       if (!status) return jsonOk(res, { ok: true, message: "Nothing to sync — working tree clean." });
       runGit(["add", "--", "*.md", "*.json", "*.yaml", "*.yml", "*.jsonl", "*.txt"]);

@@ -1,3 +1,4 @@
+import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import * as fs from "fs";
 import * as path from "path";
 import { execFileSync } from "child_process";
@@ -134,6 +135,7 @@ export async function handleStoreNamespace(args: string[]) {
     try {
       fs.mkdirSync(storesDir, { recursive: true });
       execFileSync("git", ["clone", "--", remote, storePath], {
+        env: nonInteractiveGitEnv(),
         stdio: "inherit",
         timeout: 60_000,
       });
@@ -245,7 +247,7 @@ export async function handleStoreNamespace(args: string[]) {
           encoding: "utf8",
           stdio: ["ignore", "pipe", "pipe"],
           timeout: 30_000,
-          env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never" },
+          env: nonInteractiveGitEnv(),
         }).trim();
         return { ok: true, output };
       } catch (err: unknown) {
@@ -287,12 +289,14 @@ export async function handleStoreNamespace(args: string[]) {
         if (store.role === "primary") {
           try {
             const sparseList = execFileSync("git", ["sparse-checkout", "list"], {
+              env: nonInteractiveGitEnv(),
               cwd: store.path,
               stdio: "pipe",
               timeout: 10_000,
             }).toString().trim();
             if (sparseList) {
               execFileSync("git", ["sparse-checkout", "reapply"], {
+                env: nonInteractiveGitEnv(),
                 cwd: store.path,
                 stdio: "pipe",
                 timeout: 10_000,

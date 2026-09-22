@@ -1,3 +1,4 @@
+import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { request } from "node:http";
@@ -12,7 +13,7 @@ import { BridgeError, type Json } from "./protocol.js";
 const exec = promisify(execFile);
 export async function git(cwd: string, ...args: string[]): Promise<string> {
   return (await exec("git", ["-C", cwd, "--no-pager", ...args], {
-    timeout: 10_000, maxBuffer: 4_194_304, env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_CONFIG_NOSYSTEM: "1" },
+    timeout: 10_000, maxBuffer: 4_194_304, env: nonInteractiveGitEnv({ ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_CONFIG_NOSYSTEM: "1" }),
   })).stdout;
 }
 export async function gitRoot(dir: string): Promise<string | undefined> {
@@ -116,7 +117,7 @@ export async function repositoryBranch(cwd: string): Promise<string | undefined>
   let value: string | undefined;
   try {
     const { stdout } = await exec("git", ["-C", cwd, "--no-pager", "branch", "--show-current"], {
-      timeout: 5_000, maxBuffer: 65_536, env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_CONFIG_NOSYSTEM: "1" },
+      timeout: 5_000, maxBuffer: 65_536, env: nonInteractiveGitEnv({ ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_CONFIG_NOSYSTEM: "1" }),
     });
     value = stdout.trim().slice(0, 200) || undefined;
   } catch { value = undefined; }

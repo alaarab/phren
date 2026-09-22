@@ -614,6 +614,7 @@ struct AgentChatView: View {
         .keepsInteractivePop(hidesNavigationBar: true, screenTag: Self.screenTag)
         .navigationDestination(item: $openedChild) { AgentWorkDestinationView(navigation: $0) }
         .navigationDestination(item: $fullDiff) { FileDiffView(file: $0.file, section: $0.section) }
+        .environment(\.fileLinkContext, model.target.map { FileLinkContext(host: session.host, target: $0) })
         .navigationDestination(item: $fullToolOutput) { FullToolOutputView(output: $0) }
         .onAppear {
             if !initialized {
@@ -736,8 +737,8 @@ struct AgentChatView: View {
         .sheet(isPresented: $showingChildAgents) {
             if let target = model.target { ChatSubagentsView(session: session, target: target, agents: childAgents) }
         }
-        .sheet(item: $previewImage) { item in
-            PhrenImageViewer(attachment: item.attachment)
+        .fullScreenCover(item: $previewImage) { item in
+            FileViewer(attachment: item.attachment)
         }
         .sheet(isPresented: $showingContext) {
             if let project {

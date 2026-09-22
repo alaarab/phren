@@ -92,8 +92,8 @@ No extra request per iPhone row is needed.
 
 From a project, the iPhone can open a new session on a computer:
 `POST /v1/workspaces/launch` creates a Herdr workspace (or a tab in one) in
-the project's directory and starts the chosen agent — Codex, Claude Code,
-Copilot, or opencode — in its pane, returning once Herdr has detected it ready. Otherwise
+the project's directory and starts Codex, Claude Code, Copilot or OpenCode
+in its pane, returning once Herdr has detected it ready. Otherwise
 the helper does not start coding agents for you. Text updates depend on when
 that agent writes its transcript; usage numbers are never estimated. In Codex,
 review the installed Phren callbacks in `/hooks`. Resume existing sessions if
@@ -111,25 +111,35 @@ phone's "Add project": where agents have worked, Herdr's saved workspaces,
 then one level under the usual project roots, each marked whether phren there
 already tracks it. `POST /v1/projects/add` with `{"directory"}` enrolls an
 existing checkout, or with `{"cloneUrl"}` (https or `git@` GitHub-style URLs
-only) clones it into `$PROJECTS_DIR` or the first usual root first — with the
+only) clones it into `$PROJECTS_DIR` or the first usual root first, with the
 computer's own git credentials, never a token from the phone. Either way it is
 `phren add` with the store's default ownership, followed by a commit and, when
 the store has a remote, a pull and push so the phone can fetch the new project.
 The reply says `store: pushed | committed | unchanged | error`.
 
-`GET /v1/code/status?project=<name>` reports the project's symbol index on this
-computer: file, symbol and reference counts, languages, kinds, the last index
-time and the most-used symbols. `GET /v1/code/search?project=&q=&kind=&limit=`
-ranks symbols by exact name, prefix, full-text relevance and usage;
-`/v1/code/outline?project=&path=` returns a file's symbols in source order;
-`/v1/code/definition?project=&symbol=` returns the definition, a source snippet
-and the last change (a blame hash and date, never a name);
-`/v1/code/references?project=&symbol=&limit=` groups resolved references by
-file; and `/v1/code/usage?project=&top=` returns the hottest and coldest
-symbols. All six need the `code` module and an index for that project; a project
-with no index is a 404 naming `phren code index`. The Hook re-indexes a project
-after the git module records a file change (debounced), and runs a full
-re-index when the repository's HEAD moves.
+The `code` module serves the phone's indexed file tree, search, outlines,
+definitions with cited findings, references, full usage ranking and recent
+symbol changes. Code opens from the project, a session's Changes band or chat
+header. Reads accept a registered store selector; notes and reindexing use POST.
+A dossier note saves a finding before optional conductor delivery and retains
+the originating session when opened from chat. Missing indexes return 404 with
+the indexing command. Recorded file changes trigger a 500 ms debounced refresh;
+a HEAD change requests a full scan. See [Code index](code-index.md) and the
+[complete route table](api-reference.md#hook-routes).
+
+`GET /v1/projects/files` reads files inside a discovered checkout, capped at
+2 MiB per file and 500 directory entries. `POST /v1/git/tree` browses one
+directory of a session's working tree, with descendant file counts and a
+snapshot version. Its bounded cache expires after two seconds; status refresh
+and mutations invalidate it. Indexed projects add batched symbol summaries
+without making an index a requirement for file browsing.
+
+`GET /v1/models?source=claude` reads Claude Code's own cached model catalogue,
+preserving names, order and default and filtering out rows requiring a newer
+client. Codex uses app-server model discovery; OpenCode uses `opencode models`.
+The phone waits for this response before drawing its picker. See
+[model catalogue](api-reference.md#model-catalogue) and
+[files read by Hook](footprint.md#hook-reads-from-installed-agents).
 
 The iPhone explicitly renews a 25-second approval watch with
 `GET /v1/workspaces?watchApprovals=1`. Ordinary overview reads do not hold prompts.
@@ -148,8 +158,21 @@ session overview can create a Live Activity with Deny and Approve on the Lock
 Screen and Dynamic Island. Tapping either authenticates
 and opens Phren, which uses its existing pinned SSH connection and protected
 Keychain key. The widget contains no credentials or executable tool input.
-Expired requests lose their buttons. New requests while the app is suspended
-require a push delivery service, which this foreground SSH helper does not supply.
+Expired requests lose their buttons. The phone also offers local notifications
+for approvals and the next scheduled prompt, with separate switches in Settings.
+It checks saved computers during a brief background lease and optional iOS
+background refreshes. These need no APNs key or relay, but cannot promise
+delivery while the phone is suspended. Approval IDs are deduplicated on the
+device, and tapping rechecks the live request. Direct APNs remains an optional,
+separate path for owners with their own credentials. See
+[phone notifications](../apps/ios/design/notifications.md).
+
+The transcript socket also carries live reply previews. Claude reads pane text
+after the current prompt; Codex and OpenCode supply delta text. Updates are capped at
+twice a second, stay out of history, and give way to the completed entry. Chat
+sends steering to working harnesses immediately and reads their queued state
+from transcripts. Local pending bubbles identify a connection, startup or held
+prompt that prevents delivery.
 
 ## Maintain and diagnose
 
