@@ -135,11 +135,36 @@ private struct NavigationControllerBridge: UIViewControllerRepresentable {
                 // without a viewWillAppear; a screen that draws its own header
                 // hides it again as soon as the scene is active.
                 center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
-                    guard let self, hidesNavigationBar, viewIfLoaded?.window != nil,
-                          let navigationController, navigationController.topViewController === parent else { return }
-                    navigationController.setNavigationBarHidden(true, animated: false)
+                    // SwiftUI settles its toolbar state after the scene turns
+                    // active: re-hide one turn later, not during that pass.
+                    DispatchQueue.main.async { [weak self] in self?.reassertHiddenNavigationBar() }
+                },
+                center.addObserver(forName: .phrenReassertNavigationBarHidden, object: nil, queue: .main) { [weak self] _ in
+                    self?.reassertHiddenNavigationBar()
                 },
             ]
+        }
+        /// Hide the stack's bar again while this screen is still on top.
+        /// A foreground return or a dismissed sheet can restore it without a
+        /// viewWillAppear of its own.
+        func reassertHiddenNavigationBar() {
+            guard hidesNavigationBar, isViewLoaded, view.window != nil,
+                  let navigationController, isHosted(by: navigationController.topViewController),
+                  !navigationController.isNavigationBarHidden else { return }
+            navigationController.setNavigationBarHidden(true, animated: false)
+        }
+        /// Whether this bridge (or a controller it hangs from) is inside the
+        /// given top controller. SwiftUI can wrap a destination in more than
+        /// one hosting controller, so an identity check on `parent` alone
+        /// misses the screen it is meant to guard.
+        private func isHosted(by top: UIViewController?) -> Bool {
+            guard let top else { return false }
+            var controller: UIViewController? = self
+            while let current = controller {
+                if current === top { return true }
+                controller = current.parent
+            }
+            return false
         }
         @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
         deinit {
@@ -332,6 +357,12 @@ private extension Notification.Name {
     static let phrenEnablePanBack = Notification.Name("phren.navigation.pan-back.enable")
     static let phrenDisableAllBackGestures = Notification.Name("phren.navigation.all-back.disable")
     static let phrenEnableAllBackGestures = Notification.Name("phren.navigation.all-back.enable")
+}
+
+extension Notification.Name {
+    /// Posted by a screen whose own header replaces the system bar when the
+    /// stack's bar may have been restored under it (scene active, sheet gone).
+    static let phrenReassertNavigationBarHidden = Notification.Name("phren.navigation.rehide-bar")
 }
 
 /// Escape / ⌘[ / ⌘W answered by the navigation controller itself: it is in

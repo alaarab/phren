@@ -101,8 +101,6 @@ lock screen and Changes screen done properly.
   is gone.
 - Tasks: across projects the backlog is grouped by project, fullest first,
   with a count on each section; tap a project name to fold it.
-- Coming back to a chat from another app no longer shows the system bar
-  above the chat's own header.
 - Projects: project names take the theme's project colour, as on the Agents
   list.
 - The Projects tab's dictate button is gone; Siri and the capture shortcut
@@ -163,6 +161,9 @@ lock screen and Changes screen done properly.
   row the phone already showed, an empty placeholder while the transcript file
   is missing cannot claim the beginning is loaded, and only the Hook's explicit
   conversation-replacement snapshot clears the conversation.
+- The floating chat header is the only bar: the system navigation bar no
+  longer returns above it when the app comes back from another app or a chat
+  sheet is dismissed, and the bar is never titled "Agent chat".
 - A Codex approval in the terminal shows its actual question and options as the
   question card, answered by their own keys (`y`, `p`, `Esc`), instead of a bare
   "Waiting for your answer" line and a key strip; the terminal stays in the

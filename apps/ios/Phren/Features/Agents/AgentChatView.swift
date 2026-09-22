@@ -595,8 +595,6 @@ struct AgentChatView: View {
             }.zIndex(20)
         }
         .interactiveDismissDisabled(model.hasMore || model.loadingHistory)
-        .navigationTitle("Agent chat")
-        .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .navigationBar)
         // Pushed inside a tab, the chat is a full-height screen: the tab bar
         // would otherwise sit under the composer.
@@ -617,6 +615,14 @@ struct AgentChatView: View {
                 }
             }
             visible = true
+        }
+        // UIKit restores the stack's bar as the scene activates, after the
+        // bridge's own became-active pass; ask for one more hide a turn later.
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: .phrenReassertNavigationBarHidden, object: nil)
+            }
         }
         .onChange(of: model.restoringDraft) { _, _ in acceptIncomingAttachments() }
         .onChange(of: model.approval?.id) { _, id in if id != nil { composing = false } }
@@ -658,11 +664,25 @@ struct AgentChatView: View {
         }
     }
 
+    /// Every sheet this screen can present. UIKit restores the stack's bar
+    /// when one goes away; dismissing any of them must re-hide it.
+    private var anySheetPresented: Bool {
+        showingAttachments || showingOptions || launchingNewThread || menuCommand != nil
+            || showingModelPicker || showingUsage || showingSecret || showingChildAgents
+            || previewImage != nil || showingContext || assigningProject
+    }
+
     /// The second half of the chat chrome: dictation, sheets and lifecycle
     /// tasks. Split from `content` so the type checker finishes.
     private func chatSheets<V: View>(_ content: V) -> some View {
         content
         .onChange(of: model.loading) { _, loading in fallBackToTerminalIfShellOnly(loaded: !loading) }
+        .onChange(of: anySheetPresented) { _, presented in
+            guard !presented else { return }
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: .phrenReassertNavigationBarHidden, object: nil)
+            }
+        }
         .sheet(isPresented: $showingAttachments) {
             if let openingTarget = model.target {
                 ChatAttachmentPicker(canAdd: model.attachments.count < ChatAttachmentLimit.maximum, add: { item in

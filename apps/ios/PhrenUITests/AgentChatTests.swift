@@ -505,8 +505,11 @@ final class AgentChatTests: XCTestCase {
         XCUIDevice.shared.press(.home)
         app.activate()
         XCTAssertTrue(app.scrollViews["chat-transcript"].waitForExistence(timeout: 8))
-        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "chat-header").firstMatch.waitForExistence(timeout: 5))
+        let header = app.descendants(matching: .any).matching(identifier: "chat-header").firstMatch
+        XCTAssertTrue(header.waitForExistence(timeout: 5))
         XCTAssertFalse(app.navigationBars["Agent chat"].waitForExistence(timeout: 2), "The system bar stays hidden after the app returns")
+        XCTAssertLessThan(header.frame.minY, 70, "The floating header sits directly under the status bar; no system bar is above it")
+        capture(app, "Chat after foreground")
     }
 
     @MainActor
