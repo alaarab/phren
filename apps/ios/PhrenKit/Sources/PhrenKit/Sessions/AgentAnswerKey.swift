@@ -5,6 +5,8 @@ import Foundation
 public enum AgentAnswerKey: String, CaseIterable, Sendable, Identifiable {
     case enter = "Enter", up = "Up", down = "Down", tab = "Tab", yes = "y", no = "n"
     case one = "1", two = "2", three = "3", escape = "Escape"
+    /// The remaining digits a numbered terminal question can answer with.
+    case four = "4", five = "5", six = "6", seven = "7", eight = "8", nine = "9"
     /// Codex's "yes, and don't ask again for commands that start with …".
     case proceedAlways = "p"
     /// Codex's "answer the last queued follow-up": opens the queue, after

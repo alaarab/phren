@@ -179,6 +179,8 @@ final class AgentChatModel {
     var answering = false
     /// What the agent is asking in its terminal, when the Hook saw the request go by.
     var terminalPrompt: AgentTerminalPrompt?
+    /// True while the pane's own terminal is reading a password.
+    var passwordPrompt = false
     private var statusTask: Task<Void, Never>?
     private var progressTask: Task<Void, Never>?
     private var progressConnected = false
@@ -255,6 +257,7 @@ final class AgentChatModel {
         transcriptContext = .init(); statusBranch = nil
         connected = false; error = nil; deliveryError = nil
         sentImages = []; needsAnswer = false; approval = nil; questionState = AgentQuestionState()
+        terminalPrompt = nil; passwordPrompt = false
         reconciledQueueRows = AgentChatQueues.reconciledRows[chosen.id] ?? []
         queue = AgentChatQueues.items[chosen.id] ?? []
     }
@@ -302,6 +305,7 @@ final class AgentChatModel {
         historyStalled = false; historyStalledSince = nil; modelName = nil
         transcriptContext = .init(); statusBranch = nil
         draft = ""; attachments = []; sentImages = []; deliveryError = nil; needsAnswer = false
+        terminalPrompt = nil; passwordPrompt = false
     }
     func add(_ attachment: AgentAttachment) {
         guard attachments.count < ChatAttachmentLimit.maximum else { deliveryError = "Attach up to \(ChatAttachmentLimit.maximum) files in one message."; return }
@@ -540,6 +544,7 @@ final class AgentChatModel {
                         if awaitingReply, liveActivity != "working", status.activity == "working" { awaitingReply = false }
                         approval = status.approval.flatMap { ApprovalActivityController.shared.wasHandled($0, target: target) ? nil : $0 }
                         if terminalPrompt != status.terminalPrompt { terminalPrompt = status.terminalPrompt }
+                        passwordPrompt = status.passwordPrompt
                         if let prompts = status.pendingQuestions { questionState.replaceAsync(prompts) }
                         capabilities = status.capabilities
                         questionsSupported = status.questionsSupported; asyncQuestionsSupported = status.asyncQuestionsSupported
@@ -554,6 +559,7 @@ final class AgentChatModel {
                 } catch {}
                 guard !Task.isCancelled, self.target == target, generation == run, statusGeneration == statusRun else { return }
                 approval = nil; terminalPrompt = nil; interactionConnected = false; isCompacting = false
+                passwordPrompt = false
                 historyStalled = false; historyStalledSince = nil
                 do { try await Task.sleep(for: .seconds(3)) } catch { return }
             }
@@ -619,7 +625,21 @@ final class AgentChatModel {
                 let chunk = Array(remaining.prefix(4)); remaining = remaining.dropFirst(4)
                 try await PhrenConnection.answerWithKeys(host: session.host, privateKey: try DeviceSSHKey.load(session.host.id), target: target, keys: chunk)
             }
+            // A key that answers (not a cursor move) clears the card and strip
+            // until the next prompt arrives.
+            if keys.contains(where: { ![.up, .down, .tab, .altUp].contains($0) }) { terminalPrompt = nil; passwordPrompt = false }
         } catch { deliveryError = error.localizedDescription }
+    }
+
+    /// Answers a released AskUserQuestion: one keys call per question, since
+    /// the Hook sends the chosen digit then advances its own question index
+    /// with Tab (or submits the last with Enter).
+    func answerTerminalQuestions(_ session: LiveAgentSession, answers: [AgentQuestionAnswer]) async {
+        for answer in answers {
+            let keys = answer.selections.sorted().compactMap { AgentAnswerKey(rawValue: String($0 + 1)) }
+            guard !keys.isEmpty else { continue }
+            await self.answer(session, keys: keys)
+        }
     }
 
     /// Types a secret the agent asked for (a sudo password, a login) into
@@ -633,6 +653,7 @@ final class AgentChatModel {
             if AgentChatFixture.enabled { try await AgentChatFixture.answer(target, secret: secret); return }
             #endif
             try await PhrenConnection.answerWithSecret(host: session.host, privateKey: try DeviceSSHKey.load(session.host.id), target: target, text: secret)
+            terminalPrompt = nil; passwordPrompt = false
         } catch { deliveryError = error.localizedDescription }
     }
 

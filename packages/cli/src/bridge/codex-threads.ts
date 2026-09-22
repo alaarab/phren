@@ -100,9 +100,9 @@ async function materializeThread(session: string): Promise<string | undefined> {
     for (const row of rows) {
       let item: Json; try { item = object(JSON.parse(String(row.item_json))); } catch { continue; }
       const id = String(item.id ?? `ordinal-${row.rollout_ordinal}`), emitted = state.done[id];
-      const call = callRow(item), output = outputRow(item);
+      const calls = callRows(item), output = outputRow(item);
       if (!emitted) {
-        if (call) { lines.push(JSON.stringify(call)); state.done[id] = "call"; }
+        if (calls) { for (const call of calls) lines.push(JSON.stringify(call)); state.done[id] = "call"; }
         else if (subAgentRow(item)) {
           // A child Codex agent (spawn, interaction, completion) rides along
           // as the event the rollout carried before 0.155, so the child
@@ -245,19 +245,34 @@ export async function queuedQuestion(session: string): Promise<{ title: string; 
   } catch { return undefined; } finally { db.close(); }
 }
 
-/** The call row an item starts with; tool inputs, not reasoning. */
-function callRow(item: Json): Json | undefined {
+/** Codex 0.155 code mode stores a generic tool call whose input is JavaScript;
+ * whichever key holds it, the Hook projects the source in the rollout reader. */
+function codeModeInput(item: Json): unknown | undefined {
+  for (const key of ["input", "code", "script"]) {
+    const value = item[key];
+    if (typeof value === "string") return value;
+    if (value && typeof value === "object" && ["code", "source", "script"].some(k => typeof object(value)[k] === "string")) return value;
+  }
+  return undefined;
+}
+
+/** The call row(s) an item starts with; tool inputs, not reasoning. */
+function callRows(item: Json): Json[] | undefined {
   const id = String(item.id ?? "");
   switch (item.type) {
     case "commandExecution":
-      return { type: "response_item", payload: { type: "function_call", name: "shell", call_id: id, arguments: JSON.stringify({ command: String(item.command ?? "").slice(0, 4000), ...(typeof item.cwd === "string" ? { workdir: item.cwd } : {}) }) } };
+      return [{ type: "response_item", payload: { type: "function_call", name: "shell", call_id: id, arguments: JSON.stringify({ command: String(item.command ?? "").slice(0, 4000), ...(typeof item.cwd === "string" ? { workdir: item.cwd } : {}) }) } }];
     case "fileChange":
-      return { type: "response_item", payload: { type: "function_call", name: "apply_patch", call_id: id, arguments: JSON.stringify({ files: objects(item.changes).slice(0, 50).map(c => ({ path: String(c.path ?? ""), kind: String(object(c.kind).type ?? c.kind ?? "") })) }) } };
+      return [{ type: "response_item", payload: { type: "function_call", name: "apply_patch", call_id: id, arguments: JSON.stringify({ files: objects(item.changes).slice(0, 50).map(c => ({ path: String(c.path ?? ""), kind: String(object(c.kind).type ?? c.kind ?? "") })) }) } }];
     case "mcpToolCall":
-      return { type: "response_item", payload: { type: "function_call", name: `mcp__${String(item.server ?? "mcp")}__${String(item.tool ?? "tool")}`, call_id: id, arguments: JSON.stringify(object(item.arguments)) } };
+      return [{ type: "response_item", payload: { type: "function_call", name: `mcp__${String(item.server ?? "mcp")}__${String(item.tool ?? "tool")}`, call_id: id, arguments: JSON.stringify(object(item.arguments)) } }];
     case "webSearch":
-      return { type: "response_item", payload: { type: "function_call", name: "web_search", call_id: id, arguments: JSON.stringify({ query: String(item.query ?? "").slice(0, 2000) }) } };
-    default: return undefined;
+      return [{ type: "response_item", payload: { type: "function_call", name: "web_search", call_id: id, arguments: JSON.stringify({ query: String(item.query ?? "").slice(0, 2000) }) } }];
+    default: {
+      const input = codeModeInput(item);
+      if (input === undefined) return undefined;
+      return [{ type: "response_item", payload: { type: "custom_tool_call", name: String(item.name ?? item.tool ?? "exec"), call_id: id, input } }];
+    }
   }
 }
 
@@ -287,6 +302,10 @@ function outputRow(item: Json): Json | undefined {
       const results = objects(item.results).slice(0, 10).map(r => [r.title, r.snippet].filter(v => typeof v === "string" && v).join(": ")).join("\n");
       return { type: "response_item", payload: { type: "function_call_output", call_id: id, output: results || "searched" } };
     }
-    default: return undefined;
+    default: {
+      if (codeModeInput(item) === undefined) return undefined;
+      const text = [item.aggregatedOutput, item.output, item.result].find(v => typeof v === "string" && v) as string | undefined;
+      return { type: "response_item", payload: { type: "custom_tool_call_output", call_id: id, output: (text ?? String(item.status ?? "completed")).slice(-OUTPUT_TAIL) } };
+    }
   }
 }

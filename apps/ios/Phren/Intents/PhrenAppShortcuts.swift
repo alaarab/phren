@@ -2,8 +2,11 @@ import AppIntents
 import PhrenKit
 
 /// The phrases Siri answers to out of the box — no setup in the Shortcuts app.
-/// iOS allows ten; Pin Session lost its phrase to Dictate (the intent is
+/// iOS allows ten. Pin Session lost its phrase to Dictate (the intent is
 /// still in the Shortcuts app, and pinning only orders the activity's rows).
+/// The conductor's three phrases (stage three) pushed the waiting-sessions,
+/// open-terminal and start-agent shortcuts out of the provider; those intents
+/// remain in the Shortcuts app.
 ///
 /// Every phrase has to contain `\(.applicationName)`; Siri keys on the app
 /// name to route the utterance, and a phrase without it is rejected at build
@@ -58,18 +61,6 @@ struct PhrenAppShortcuts: AppShortcutsProvider {
             }
         )
         AppShortcut(
-            intent: OpenSessionTerminalIntent(),
-            phrases: [
-                "Open terminal for \(\.$session) in \(.applicationName)",
-                "Open terminal in \(.applicationName)",
-            ],
-            shortTitle: "Open terminal",
-            systemImageName: "terminal",
-            parameterPresentation: ParameterPresentation(for: \.$session, summary: Summary("Open terminal for \(\.$session)")) {
-                OptionsCollection(AgentSessionEntityQuery(), title: "Sessions", systemImageName: "terminal")
-            }
-        )
-        AppShortcut(
             intent: OpenProjectIntent(),
             phrases: [
                 "Open \(\.$session) in \(.applicationName)",
@@ -81,18 +72,8 @@ struct PhrenAppShortcuts: AppShortcutsProvider {
             systemImageName: "play.circle"
         )
         AppShortcut(
-            intent: StartSessionIntent(),
-            phrases: [
-                "Start an agent for \(\.$project) in \(.applicationName)",
-                "Start an agent in \(.applicationName)",
-            ],
-            shortTitle: "Start Agent",
-            systemImageName: "play.rectangle"
-        )
-        AppShortcut(
             intent: SessionStatusIntent(),
             phrases: [
-                "What is \(.applicationName) doing",
                 "What is happening in \(.applicationName)",
                 "Is \(\.$session) done in \(.applicationName)",
                 "What is \(\.$session) doing in \(.applicationName)",
@@ -101,13 +82,28 @@ struct PhrenAppShortcuts: AppShortcutsProvider {
             systemImageName: "waveform.path.ecg"
         )
         AppShortcut(
-            intent: ListWaitingSessionsIntent(),
+            intent: TellConductorIntent(),
             phrases: [
-                "Which sessions are waiting in \(.applicationName)",
-                "What needs me in \(.applicationName)",
+                "Tell my conductor \(\.$message) in \(.applicationName)",
             ],
-            shortTitle: "Waiting Sessions",
-            systemImageName: "person.crop.circle.badge.questionmark"
+            shortTitle: "Tell Conductor",
+            systemImageName: "wand.and.rays"
+        )
+        AppShortcut(
+            intent: AskConductorIntent(),
+            phrases: [
+                "Ask my conductor \(\.$question) in \(.applicationName)",
+            ],
+            shortTitle: "Ask Conductor",
+            systemImageName: "wand.and.rays"
+        )
+        AppShortcut(
+            intent: ConductorStatusIntent(),
+            phrases: [
+                "What is \(.applicationName) doing",
+            ],
+            shortTitle: "Conductor Status",
+            systemImageName: "waveform.path.ecg"
         )
         AppShortcut(
             intent: DictateToSessionIntent(),

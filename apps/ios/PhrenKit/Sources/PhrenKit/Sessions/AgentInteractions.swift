@@ -107,21 +107,28 @@ public struct AgentPromptChoice: Decodable, Equatable, Sendable {
 /// in as keys, not as an approval. `choice` is present when the Hook could
 /// read the command and options, so the phone shows them as a question.
 /// `queued` marks Codex's queued follow-up question: alt+up opens the queue
-/// before the option key answers it.
+/// before the option key answers it. `questions` carries a released
+/// AskUserQuestion's normalized question set, with `questionIndex` naming the
+/// one the terminal is currently on; the phone answers each with digits.
 public struct AgentTerminalPrompt: Decodable, Equatable, Sendable {
     public let toolName: String?
     public let message: String?
     public let choice: AgentPromptChoice?
     public let queued: Bool
+    public let questions: [AgentQuestionPrompt.Question]?
+    public let questionIndex: Int?
 
-    public init(toolName: String?, message: String?, choice: AgentPromptChoice? = nil, queued: Bool = false) {
+    public init(toolName: String?, message: String?, choice: AgentPromptChoice? = nil, queued: Bool = false,
+                questions: [AgentQuestionPrompt.Question]? = nil, questionIndex: Int? = nil) {
         self.toolName = toolName
         self.message = message
         self.choice = choice
         self.queued = queued
+        self.questions = questions
+        self.questionIndex = questionIndex
     }
 
-    private enum CodingKeys: String, CodingKey { case toolName, message, choice, queued }
+    private enum CodingKeys: String, CodingKey { case toolName, message, choice, queued, questions, questionIndex }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -129,6 +136,15 @@ public struct AgentTerminalPrompt: Decodable, Equatable, Sendable {
         message = try container.decodeIfPresent(String.self, forKey: .message)
         choice = try container.decodeIfPresent(AgentPromptChoice.self, forKey: .choice)
         queued = try container.decodeIfPresent(Bool.self, forKey: .queued) ?? false
+        questions = try container.decodeIfPresent([AgentQuestionPrompt.Question].self, forKey: .questions)
+        questionIndex = try container.decodeIfPresent(Int.self, forKey: .questionIndex)
+    }
+
+    /// A released AskUserQuestion: the same question card a held permission
+    /// request draws, answered with the option's digit through `/v1/keys`.
+    public var questionPrompt: AgentQuestionPrompt? {
+        guard let questions, !questions.isEmpty else { return nil }
+        return AgentQuestionPrompt(toolUseId: "terminal-question", questions: questions)
     }
 
     /// The same first-line rule as an approval card: the human reason or
@@ -153,6 +169,9 @@ public struct AgentInteractionStatus: Equatable, Sendable {
     public var terminalPrompt: AgentTerminalPrompt? = nil
     public var activity: String? = nil
     public var modelName: String? = nil
+    /// True while the pane's own terminal is reading a password (sudo, a login):
+    /// the phone offers its secret sheet only then.
+    public var passwordPrompt = false
     public var questionsSupported = true
     public var asyncQuestionsSupported = false
     public var capabilities: LiveCapabilities? = nil
@@ -190,6 +209,7 @@ public struct AgentInteractionStatus: Equatable, Sendable {
         let activity = status["status"] as? String
         return .init(approval: approval, terminalPrompt: terminalPrompt, activity: ["working", "idle", "done", "waiting", "blocked", "error"].contains(activity ?? "") ? activity : nil,
                      modelName: (status["modelName"] as? String).map { String($0.prefix(100)) },
+                     passwordPrompt: status["passwordPrompt"] as? Bool ?? false,
                      questionsSupported: (status["capabilities"] as? [String: Any])?["questions"] as? Bool ?? true,
                      asyncQuestionsSupported: (status["capabilities"] as? [String: Any])?["asyncQuestions"] as? Bool ?? false,
                      capabilities: capabilities,

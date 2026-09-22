@@ -22,6 +22,12 @@ struct ChatTimelineEntry: Identifiable, Equatable {
         var calls: [String: Int] = [:], ambiguous: Set<String> = []
         // A background agent's completion, by the call it answers.
         var notifications: [String: String] = [:]
+        // Claude Code's AskUserQuestion is drawn as the question card itself;
+        // its transcript call and result rows would only repeat the JSON.
+        var askedQuestions = Set<String>()
+        for message in messages where message.role == .tool && !message.isToolResult && message.title == "AskUserQuestion" {
+            if let id = message.toolCallID { askedQuestions.insert(id) }
+        }
         for message in messages {
             // Completion metadata feeds the pinned Background panel. It is
             // transport state, not another conversation card.
@@ -29,6 +35,8 @@ struct ChatTimelineEntry: Identifiable, Equatable {
                 if let id = ChatBackgroundJobs.notificationCallID(message.text) { notifications[id] = message.text }
                 continue
             }
+            if message.role == .tool, !message.isToolResult, message.title == "AskUserQuestion" { continue }
+            if message.role == .tool, message.isToolResult, let id = message.toolCallID, askedQuestions.contains(id) { continue }
             guard message.role == .tool else {
                 entries.append(.init(messages: [message], kind: .message))
                 // Phren's result may follow an assistant progress line. Keep

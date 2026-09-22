@@ -329,13 +329,12 @@ private struct ChatQuestionsHeight: PreferenceKey {
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
 
-struct ChatTerminalQuestionCard<Terminal: View, Secret: View>: View {
+struct ChatTerminalQuestionCard<Terminal: View>: View {
     let providerName: String
     let prompt: AgentTerminalPrompt
     let answering: Bool
     let disabled: Bool
     @ViewBuilder let terminal: () -> Terminal
-    @ViewBuilder let secret: () -> Secret
     let answer: (AgentAnswerKey) -> Void
     @State private var selectedKey: AgentAnswerKey?
     @State private var expanded = false
@@ -361,7 +360,6 @@ struct ChatTerminalQuestionCard<Terminal: View, Secret: View>: View {
                 ChatQuestionHeaderLabel(title: title, systemImage: "questionmark.bubble")
                 Spacer(minLength: 0)
                 terminal()
-                secret()
                 ChatQuestionExpandButton { expanded = true }
             }
             promptContent(inline: true)

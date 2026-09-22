@@ -193,14 +193,31 @@ dispatch, one `project:phone` dispatch + hand off on Desk with an expiry).
 
 ### Siri and the Action button (owner, September 21; stage three)
 
-One App Intent, `TellConductorIntent`, with a spoken `message` parameter:
-Siri phrase "Tell my conductor …", also exposed in Shortcuts so the Action
-button on the side of the phone can run it. It sends the message to the
-running conductor's session through the Hook (`/v1/prompt`), launching one
-with the remembered choice when none runs, and speaks back the conductor's
-first line (the dispatch log line) through the intent's dialog. When the
-conductor asks a question, the intent returns it as the dialog and the next
-"Tell my conductor …" answers it. No new screens; Settings gains one row
-"Conductor" with the remembered harness, model, effort and a "Add to Siri"
-button (`SiriTipView` is Apple's; use phren's own row that opens the
-Shortcuts app deep link). Ids: `settings-conductor`, `settings-conductor-siri`.
+Three App Intents, all discoverable in Shortcuts so the Action button can run
+them. They find the one conductor by the first live tab with `role:
+"conductor"` across the connected computers and send through the ordinary
+`/v1/prompt` path; none opens the app.
+
+- `TellConductorIntent`, title "Tell my conductor", one spoken `message`.
+  Sends the line and answers "Sent to the conductor on <computer>". With no
+  conductor running it answers "No conductor is running; open Phren to start
+  one" instead of guessing a session.
+- `AskConductorIntent`, title "Ask my conductor", a spoken `question`. Sends
+  it, then polls the conductor's transcript for up to 20 seconds and speaks
+  the next assistant line's first 300 characters. If none lands it answers
+  "The conductor is thinking; open Phren to read the answer".
+- `ConductorStatusIntent`, title "What is Phren doing". Speaks the overview
+  counts (working, waiting, idle) and the conductor's current step when it has
+  one. It takes over the "What is Phren doing" phrase; session status keeps
+  "What is happening in Phren".
+
+Provider phrases: "Tell my conductor ${message} in ${applicationName}",
+"Ask my conductor ${question} in ${applicationName}", "What is
+${applicationName} doing". The provider sits at iOS's ten-shortcut limit, so
+waiting sessions, open terminal and start agent lost their phrases; those
+intents remain in the Shortcuts app.
+
+Settings gains one row "Siri and the Action button" listing the three phrases
+and a button that opens the Shortcuts app. Ids: `settings-conductor` on the
+row, `settings-conductor-siri` on the open button. PhrenTests covers the
+conductor lookup, the reply extraction and the overview counts with fixtures.

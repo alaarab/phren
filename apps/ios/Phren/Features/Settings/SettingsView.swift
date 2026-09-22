@@ -114,6 +114,8 @@ struct SettingsView: View {
                         .accessibilityIdentifier("settings-notifications")
                     NavigationLink { ShowOnAgentsSettingsView() } label: { settingsRow("Show on Agents", "square.grid.2x2") }
                         .accessibilityIdentifier("settings-show-on-agents")
+                    NavigationLink { ConductorSiriSettingsView() } label: { settingsRow("Siri and the Action button", "wand.and.rays") }
+                        .accessibilityIdentifier("settings-conductor")
                     NavigationLink { LiveSessionsView() } label: { settingsRow("Computers", "desktopcomputer") }
                     NavigationLink { AccountUsageView() } label: { settingsRow("Account usage", "chart.bar") }
                         .accessibilityIdentifier("settings-account-usage")

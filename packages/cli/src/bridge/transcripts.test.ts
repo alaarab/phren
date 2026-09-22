@@ -311,3 +311,44 @@ describe("pasted_content wrappers on Claude user turns", () => {
     expect(remove).toEqual({ type: "phren_queue_consumed", key: enqueue!.phrenQueueKey, timestamp: "t2" });
   });
 });
+
+describe("Codex code-mode projection", () => {
+  let root: string, file: string;
+  beforeEach(async () => { root = await mkdtemp(path.join(tmpdir(), "phren-codemode-")); file = path.join(root, "rollout.jsonl"); });
+  afterEach(async () => { await rm(root, { recursive: true, force: true }); });
+
+  it("projects a native custom tool call into an apply_patch block with its per-file counts", async () => {
+    const source = 'const patch = "*** Begin Patch\\n*** Update File: src/a.ts\\n@@\\n context\\n-old\\n+new\\n*** End Patch";\ntext(await tools.apply_patch(patch));';
+    const call = { type: "response_item", payload: { type: "custom_tool_call", name: "exec", call_id: "code-1", input: source } };
+    const result = { type: "response_item", payload: { type: "custom_tool_call_output", call_id: "code-1", output: "Done" } };
+    await writeFile(file, [call, result].map(JSON.stringify).join("\n") + "\n");
+    const page = await new TranscriptReader(file, "codex").read();
+    const projected = page.entries.map(entry => entry.raw as any).find(raw => raw.payload?.type === "function_call");
+    expect(projected.payload).toMatchObject({ type: "function_call", name: "apply_patch", call_id: "code-1:1" });
+    const patch = JSON.parse(projected.payload.arguments).patch as string;
+    expect(patch.startsWith("*** Begin Patch")).toBe(true);
+    expect(patch.split("\n").filter(line => line.startsWith("+"))).toHaveLength(1);
+    expect(patch.split("\n").filter(line => line.startsWith("-"))).toHaveLength(1);
+    expect(page.entries.find(entry => (entry.raw as any).payload?.type === "custom_tool_call_output")?.raw)
+      .toMatchObject({ payload: { call_id: "code-1:1" } });
+  });
+
+  it("leaves a custom tool call that runs no recognized tool unchanged", async () => {
+    const call = { type: "response_item", payload: { type: "custom_tool_call", name: "exec", call_id: "code-2", input: "const out = await tools.search('needle');" } };
+    await writeFile(file, JSON.stringify(call) + "\n");
+    const page = await new TranscriptReader(file, "codex").read();
+    expect(page.entries.map(entry => entry.raw)).toEqual([call]);
+  });
+
+  it("projects a source object carried in function-call arguments", async () => {
+    const source = 'text(await tools.shell({command: "git status --short"}));';
+    const call = { type: "response_item", payload: { type: "function_call", name: "exec", call_id: "code-3", arguments: JSON.stringify({ source }) } };
+    await writeFile(file, JSON.stringify(call) + "\n");
+    const page = await new TranscriptReader(file, "codex").read();
+    const projected = page.entries.map(entry => entry.raw as any).find(raw => raw.payload?.type === "function_call");
+    expect(projected.payload).toMatchObject({ name: "shell", call_id: "code-3:1" });
+    const args = JSON.parse(projected.payload.arguments);
+    expect(args.command).toBe("git status --short");
+    expect(args.source).toBe(source);
+  });
+});

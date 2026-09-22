@@ -14,11 +14,22 @@ number counts up on its own.
 
 ### Fixed
 
+- A Codex prompt drawn in its pane, like "Would you like to run the following
+  command?", draws as a choice card again, so the key strip no longer covers it.
+  With nothing parsed, the row under "Waiting for your answer" is now Open
+  terminal plus a Keys chip that reveals the strip, and the password action
+  appears only when the terminal is really reading a password ("The terminal is
+  asking for a password" with Enter password). An answered card and strip clear
+  until the next prompt arrives.
 - A fan-out worker the computer refused a permission for reads as failed, never
   completed: its row and its chat header say "Permission refused" with the
   refused type and pattern and a FAILED badge in the warning tint.
 - A computer under heavy load shows "Slow to answer" on its row and keeps its last snapshot, distinct from unreachable, using the Hook's reported load and gateway cost.
 
+- Claude Code's AskUserQuestion that falls back to the terminal is asked with the
+  same question card a held one uses, marked "answered in the terminal"; the
+  answer sends each question's option digit through the keys route. Its
+  transcript tool row no longer repeats the JSON beside the card.
 - OpenCode calls use phren memory, todo, patch and subagent cards, with captured tool arguments preserved.
 
 The Tasks tab filters open from done, and the Memory list shows its projects
@@ -26,6 +37,11 @@ and scrolls again.
 
 ### New
 
+- Siri and the Action button drive the conductor: "Tell my conductor …" sends
+  a line to the running conductor, "Ask my conductor …" speaks its next reply,
+  and "What is Phren doing" reports the working, waiting and idle counts plus
+  the conductor's current step. Settings gains a "Siri and the Action button"
+  row that lists the phrases and opens the Shortcuts app.
 - Tasks: the filter line leads with an Open versus Done status drop-down:
   Open (Active plus Queue, the default), Active, Backlog, Done and All,
   remembered across launches. Project count chips and section order follow

@@ -35,10 +35,41 @@ final class AgentQueuedQuestionTests: XCTestCase {
         let prompt = try status(terminalPrompt: #"{"toolName":"Shell","message":"{\"command\":\"ls\"}"}"#).terminalPrompt
         XCTAssertFalse(try XCTUnwrap(prompt).queued)
     }
+    func testReleasedAskUserQuestionDecodesItsQuestionsForTheCard() throws {
+        let prompt = try XCTUnwrap(status(terminalPrompt:
+            #"{"toolName":"AskUserQuestion","message":"{}","questionIndex":0,"questions":[{"question":"Which accent?","header":"Design","options":[{"label":"Cyan","description":"Keep it"},{"label":"Lavender"}]},{"question":"Which screens?","header":"Scope","multiSelect":true,"options":[{"label":"Chat"},{"label":"Agents"}]}]}"#
+        ).terminalPrompt)
+        XCTAssertNil(prompt.choice)
+        XCTAssertEqual(prompt.questionIndex, 0)
+        XCTAssertEqual(prompt.questions?.count, 2)
+        let card = try XCTUnwrap(prompt.questionPrompt)
+        XCTAssertEqual(card.questions.map(\.header), ["Design", "Scope"])
+        XCTAssertEqual(card.questions.map(\.multiSelect), [nil, true])
+        XCTAssertEqual(card.questions[0].options.map(\.label), ["Cyan", "Lavender"])
+        XCTAssertEqual(card.questions[0].options.first?.description, "Keep it")
+        XCTAssertEqual(card.questions[1].options.map(\.label), ["Chat", "Agents"])
+    }
     func testWaitingStatusWithoutATerminalPromptHasNoCard() throws {
         let json = #"{"agentStatus":{"source":"codex","session":"test-session","status":"blocked"}}"#
         let target = try AgentChatTarget(hostID: UUID(), workspaceID: "w1", tabID: "t1", paneID: "p1", source: "codex", sessionID: "test-session")
         let status = try XCTUnwrap(AgentInteractionStatus.read(Data(json.utf8), target: target))
         XCTAssertNil(status.terminalPrompt)
+        XCTAssertFalse(status.passwordPrompt)
+    }
+    func testDecodesAPasswordPromptAndATerminalChoice() throws {
+        let json = #"""
+        {"agentStatus":{"source":"codex","session":"test-session","status":"waiting","passwordPrompt":true,
+        "terminalPrompt":{"toolName":"Question","message":"Would you like to run the following command?\n$ bun /tmp/x.ts",
+        "choice":{"title":"Would you like to run the following command?\n$ bun /tmp/x.ts",
+        "options":[{"label":"Yes, proceed","key":"y"},{"label":"Yes, and don't ask again","key":"p"},{"label":"No","key":"esc"}]}}}}
+        """#
+        let target = try AgentChatTarget(hostID: UUID(), workspaceID: "w1", tabID: "t1", paneID: "p1", source: "codex", sessionID: "test-session")
+        let status = try XCTUnwrap(AgentInteractionStatus.read(Data(json.utf8), target: target))
+        XCTAssertTrue(status.passwordPrompt)
+        let choice = try XCTUnwrap(status.terminalPrompt?.choice)
+        XCTAssertEqual(choice.options.map(\.label), ["Yes, proceed", "Yes, and don't ask again", "No"])
+        XCTAssertEqual(choice.options.compactMap(\.answerKey), [.yes, .proceedAlways, .escape])
+        let card = try XCTUnwrap(choice.prompt(id: "terminal-choice"))
+        XCTAssertTrue(try XCTUnwrap(card.questions.first?.question).contains("bun /tmp/x.ts"))
     }
 }
