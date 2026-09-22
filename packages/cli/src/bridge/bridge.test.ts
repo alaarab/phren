@@ -356,7 +356,7 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
   let holdSnapshot = false, releaseSnapshot: (() => void) | undefined;
   let replaceBeforeMutation = false;
   let deliveries: { method: string; session: string }[];
-  let extraWorkspaces: Record<string, unknown>[] = [], extraTabs: Record<string, unknown>[] = [], extraPanes: Record<string, unknown>[] = [], failAgentStart = false, blockAgentStart = false;
+  let extraWorkspaces: Record<string, unknown>[] = [], extraTabs: Record<string, unknown>[] = [], extraPanes: Record<string, unknown>[] = [], failAgentStart = false, blockAgentStart = false, promptNotReady = 0;
   let helperPIDs: number[] = [];
   let paneLines = "", drawConfirmation = false;
   let confirmationHasKeys = true;
@@ -390,7 +390,7 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
   function resetVars(): void {
     paneCwd = undefined; commands = []; current = session; agentStatus = "working"; reportIdentity = true; foregroundPID = process.pid; terminalID = "term-one"; log = ""; holdSnapshot = false; releaseSnapshot = undefined;
     replaceBeforeMutation = false; deliveries = [];
-    extraWorkspaces = []; extraTabs = []; extraPanes = []; failAgentStart = false; helperPIDs = []; remoteHook = undefined;
+    extraWorkspaces = []; extraTabs = []; extraPanes = []; failAgentStart = false; promptNotReady = 0; helperPIDs = []; remoteHook = undefined;
     paneLines = ""; drawConfirmation = false; paneAgent = "codex";
     confirmationHasKeys = true;
     menuHighlight = undefined; confirmedMenuRow = undefined; ignoredMenuMoves = 0; menuPane = permissionsMenu;
@@ -419,6 +419,10 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
         pending += bytes;
         if (!pending.includes("\n")) return;
         const req = JSON.parse(pending.split("\n")[0]); commands.push(req);
+        if (req.method === "agent.prompt" && promptNotReady > 0) {
+          promptNotReady--;
+          socket.end(JSON.stringify({ id: req.id, error: { code: "agent_not_ready", message: `agent ${req.params.target} is not an active named agent` } }) + "\n"); return;
+        }
         if (["agent.prompt", "agent.send_keys"].includes(req.method)) {
           // Herdr 0.8.2/protocol 20 and 0.9.0 resolve the current pane occupant.
           // Replace it at dispatch, after every possible snapshot preflight.
@@ -663,8 +667,11 @@ schedules:
       expect(listing.status).toBe(200);
       expect(listing.data.computer).toBe(computer);
       expect(listing.data.schedules[0]).toMatchObject({ id: "7f3a2c1d", project: "demo", running: false, lastRun: null });
+      // Claude is still starting when the run first prompts; the run waits for it.
+      promptNotReady = 1;
       const launched = await api("/v1/schedules/run", { project: "demo", id: "7f3a2c1d" });
       expect(launched.status, JSON.stringify(launched.data)).toBe(200);
+      expect(commands.filter(command => command.method === "agent.prompt" && command.params.text === "Run the test suite.")).toHaveLength(2);
       expect(launched.data.run).toMatchObject({ scheduleId: "7f3a2c1d", project: "demo", status: "running",
         launch: { mode: "herdr" } });
       expect(commands.some(command => command.method === "agent.prompt" && command.params.text === "Run the test suite.")).toBe(true);
@@ -802,15 +809,6 @@ schedules:
       expect(launched.data).toMatchObject({ workspaceId: "w1", tabId: "w1:t2", paneId: "w1:p2", agent: "codex" });
       expect(commands.find(c => c.method === "tab.create")?.params).toMatchObject({ workspace_id: "w1", label: "second", cwd: await realpathAsync(root) });
       expect(commands.find(c => c.method === "agent.start")?.params).toMatchObject({ name: "codex-here", pane_id: "w1:p2", timeout_ms: 3_000 });
-    });
-
-    it("hands back an agent held at a first-run screen so the chat can answer it", async () => {
-      blockAgentStart = true;
-      try {
-        const launched = await api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "Trust", kind: "claude" });
-        expect(launched.status, JSON.stringify(launched.data)).toBe(200);
-        expect(launched.data).toMatchObject({ ok: true, agent: "claude", agentStatus: "blocked" });
-      } finally { blockAgentStart = false; }
     });
 
     it("reports a failed agent start without hiding the workspace it created", async () => {
@@ -1948,6 +1946,22 @@ schedules:
         const definition = await readFile(path.join(root, ".config/opencode/agents/conductor.md"), "utf8");
         expect(definition).toContain("mode: primary"); expect(definition).toContain("# Conductor");
       }
+    });
+
+    it("hands back an agent held at a first-run screen so the chat can answer it", async () => {
+      blockAgentStart = true;
+      try {
+        const launched = await api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "Trust", kind: "claude" });
+        expect(launched.status, JSON.stringify(launched.data)).toBe(200);
+        expect(launched.data).toMatchObject({ ok: true, agent: "claude", agentStatus: "blocked" });
+      } finally { blockAgentStart = false; }
+    });
+
+    it("gives a second launch with the same label its own agent name", async () => {
+      await api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "SR requests", kind: "claude" });
+      const second = await api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "SR requests", kind: "claude" });
+      expect(second.status, JSON.stringify(second.data)).toBe(200);
+      expect(commands.filter(c => c.method === "agent.start").map(c => c.params.name)).toEqual(["sr-requests", "sr-requests-2"]);
     });
 
     it("starts an agent with the chosen model and effort", async () => {
