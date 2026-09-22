@@ -10,6 +10,11 @@ number counts up on its own.
 
 ### Changed
 
+- The agent chat's message box takes focus and raises the keyboard again; its focus flag had stayed a SwiftUI focus state that no field was bound to, so every tap was undone.
+- The conductor starts without a project: it opens in the chosen computer's phren store and works across every project from there. The launch sheet no longer asks for a project or folder.
+- Sessions and a computer's page have no search bar.
+- Choosers such as Code's Symbol kind size to their rows instead of trailing empty space.
+- Expanding a phren card shows its full text in place (every field, result and title) instead of raw input and JSON output; raw output appears only when the card has nothing readable, and a failure still shows its raw error.
 - Agents keeps Start a conductor at the top, replaced in place by the running conductor's card. Launch restores its harness, model, effort and last computer, with a store choice when several stores are connected. Conductor chats have a Grants control in their header.
 - Child conversations explain where messages go: pane agents open their full chat, fan-out workers continue their own sessions or queue another round, and in-process sub-agents send a message to their parent prefixed with the sub-agent's name. Finished resumable workers remain available in the tree.
 - Phren chat cards expand and fold in place with selectable full input and output. Separate chevrons open synced tasks, finding dossiers and captured search results. Failed calls show their reason and keep raw errors in expanded details.

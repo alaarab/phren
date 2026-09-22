@@ -539,6 +539,7 @@ struct PhrenSingleSelectSheet<Value: Hashable>: View {
     var dismissOnSelect = true
     let dismiss: () -> Void
     @AccessibilityFocusState private var titleFocused: Bool
+    @State private var contentHeight: CGFloat = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: PhrenTheme.Space.medium) {
@@ -582,7 +583,11 @@ struct PhrenSingleSelectSheet<Value: Hashable>: View {
                     }
                     .buttonStyle(.plain).phrenIdentifier("\(rowPrefix)-done")
                 }
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
             }
+            // A ScrollView takes every point offered: cap it at its rows so a
+            // short list sizes the card instead of trailing empty space.
+            .frame(maxHeight: contentHeight > 0 ? contentHeight : nil)
             .scrollBounceBehavior(.basedOnSize)
         }
         .padding(PhrenTheme.Space.large)

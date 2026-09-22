@@ -172,18 +172,6 @@ final class LiveSessionsTests: XCTestCase {
     }
 
     @MainActor
-    func testSearchKeepsComputerSetupReachableAndClearRestoresSessions() {
-        let app = launchLayout(count: 6)
-        let search = app.textFields["sessions-search"]
-        search.tap()
-        search.typeText("no-such-session")
-        XCTAssertTrue(app.staticTexts["No matching sessions"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["sessions-add-computer"].exists)
-        app.buttons["sessions-search:clear"].tap()
-        XCTAssertTrue(app.staticTexts["Polish the phone app"].waitForExistence(timeout: 5))
-    }
-
-    @MainActor
     func testSessionSwipeStillOffersCloseInCustomScrollLayout() {
         let app = launchLayout(count: 1)
         let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "overview-chat:")).firstMatch

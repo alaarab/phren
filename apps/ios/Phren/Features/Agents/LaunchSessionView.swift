@@ -154,7 +154,7 @@ struct LaunchSessionView: View {
     }
 
     private var canOpen: Bool {
-        !launching && selectedHost?.fingerprint != nil && folder.hasPrefix("/") && harness != nil
+        !launching && selectedHost?.fingerprint != nil && (role == .conductor || folder.hasPrefix("/")) && harness != nil
     }
 
     var body: some View {
@@ -168,7 +168,9 @@ struct LaunchSessionView: View {
                                               isPresented: $showStores)
                         }
                     }
-                    if !projectOptions.isEmpty {
+                    // A conductor works across every project in the store, so
+                    // it has no project or folder of its own to choose.
+                    if !projectOptions.isEmpty && role != .conductor {
                         PhrenGroup("Project") {
                             PhrenSingleSelect(options: projectOptions, selection: $project,
                                               placeholder: "Project", identifier: "launch-project",
@@ -192,6 +194,7 @@ struct LaunchSessionView: View {
                     }
                 }
 
+                if role != .conductor {
                 PhrenGroup("Folder on that computer") {
                     TextField("/path/to/\(project)", text: Binding(get: { folder }, set: { folder = $0; folderEdited = true }))
                         .font(.system(.body, design: .monospaced)).autocorrectionDisabled().textInputAutocapitalization(.never)
@@ -217,6 +220,11 @@ struct LaunchSessionView: View {
                              ? "The workspace opens here; the agent starts in it."
                              : "From where the project was added to phren. Change it if this computer keeps it elsewhere."))
                         .font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
+                }
+                } else {
+                    Text("The conductor works across every project in this store. It starts in the store on the computer you choose and sends work to any project from there.")
+                        .font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
+                        .accessibilityIdentifier("launch-conductor-scope")
                 }
 
                 PhrenGroup("Harness") {
@@ -263,7 +271,7 @@ struct LaunchSessionView: View {
                         HStack {
                             if launching { ProgressView().tint(PhrenTheme.chatPanel).padding(.trailing, 6) }
                             Text(launching ? (status ?? "Opening…") : taskRequest == nil
-                                 ? role == .conductor ? "Open \(project) with Conductor"
+                                 ? role == .conductor ? "Start the conductor"
                                  : "Open \(project) with \(harness?.title ?? kind)"
                                  : "Start \(harness?.title ?? kind) on task")
                                 .fontWeight(.semibold)
@@ -454,14 +462,15 @@ struct LaunchSessionView: View {
             offerRunningConductor(existing)
             return
         }
-        let cwd = folder.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cwd = role == .conductor ? "" : folder.trimmingCharacters(in: .whitespacesAndNewlines)
+        let label = role == .conductor ? "Conductor" : project
         launching = true; error = nil
         defer { launching = false; status = nil }
         do {
-            status = "Starting \(harness.title) in \(project)…"
+            status = role == .conductor ? "Starting the conductor with \(harness.title)…" : "Starting \(harness.title) in \(project)…"
             let chosen = supportsModel ? modelName.trimmingCharacters(in: .whitespacesAndNewlines) : ""
             rememberConductorChoice()
-            let session = try await AgentLaunch.launch(host: host, cwd: cwd, label: project, kind: harness,
+            let session = try await AgentLaunch.launch(host: host, cwd: cwd, label: label, kind: harness,
                                                        model: chosen.isEmpty ? nil : chosen, role: role,
                                                        effort: role == .conductor && supportsEffort ? effort : nil) { status = $0 }
             if role == .conductor {

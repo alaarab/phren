@@ -51,7 +51,6 @@ final class ConductorEntryTests: XCTestCase {
         let start = app.buttons["sessions-start-conductor"]
         XCTAssertTrue(start.waitForExistence(timeout: 10))
         let startY = start.frame.minY
-        XCTAssertLessThan(startY, app.textFields["sessions-search"].frame.minY)
         app.terminate()
 
         let running = launch(extra: ["--conductor-running-fixture"])
@@ -60,16 +59,9 @@ final class ConductorEntryTests: XCTestCase {
         XCTAssertFalse(running.buttons["sessions-start-conductor"].exists)
         XCTAssertEqual(card.frame.minY, startY, accuracy: 1)
         XCTAssertEqual(running.buttons.matching(identifier: "overview-chat:\(conductorKey)").count, 1)
-        XCTAssertLessThan(card.frame.minY, running.textFields["sessions-search"].frame.minY)
         XCTAssertLessThan(card.frame.minY,
                           running.buttons["overview-chat:A1000000-0000-0000-0000-000000000001:herdr:default:w7:w7:t9"].frame.minY)
         attachUIScreenshot(running, "Running conductor replaces the launch row")
-
-        let search = running.textFields["sessions-search"]
-        search.tap(); search.typeText("no-such-session")
-        XCTAssertTrue(running.staticTexts["No matching sessions"].waitForExistence(timeout: 5))
-        XCTAssertTrue(card.exists, "Searching ordinary sessions keeps the conductor pinned")
-        XCTAssertFalse(running.buttons["sessions-start-conductor"].exists)
     }
 
     @MainActor

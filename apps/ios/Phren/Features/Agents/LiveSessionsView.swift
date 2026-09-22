@@ -80,8 +80,6 @@ struct LiveSessionsView: View {
                     if let store = conductorStore {
                         conductorEntry(store: store, screen: screen)
                     }
-                    PhrenSearchField(text: Binding(get: { sessions.query }, set: sessions.setQuery),
-                                     placeholder: "Search all sessions", identifier: "sessions-search")
                     sessionSections(screen)
                     PhrenGroup("Computers", identifier: "sessions-computers") {
                         if screen.preferencesReadable {
@@ -642,7 +640,6 @@ private struct LiveHostView: View {
     @State private var editing = false
     @State private var refreshID = UUID()
     @State private var localError: String?
-    @State private var query = ""
     @State private var mode: SessionViewMode = .workspaces
     @State private var selected: LiveAgentSession?
     @State private var closeRequest: SessionCloseRequest?
@@ -658,14 +655,7 @@ private struct LiveHostView: View {
         guard let host else { return [] }
         return monitor.snapshot?.sessions(on: host) ?? []
     }
-    private var visible: [LiveAgentSession] {
-        let preferences = preferences
-        let projects = model.sessionProjects
-        return sessions.filter { session in
-            let project = preferences?.projectMatch(hostID: hostID, cwd: session.tab.cwd, projects: projects)
-            return session.matches(query, projectName: project?.project.name)
-        }
-    }
+    private var visible: [LiveAgentSession] { sessions }
 
     var body: some View {
         ScrollView {
@@ -717,9 +707,6 @@ private struct LiveHostView: View {
         .modifier(SessionCloseDialogs(request: $closeRequest, error: $closeError, monitor: { _ in monitor }))
         .navigationTitle(host?.name ?? "Computer removed")
         .navigationBarTitleDisplayMode(.inline)
-        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search sessions")
-        .textInputAutocapitalization(.never)
-        .autocorrectionDisabled()
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 if let host {

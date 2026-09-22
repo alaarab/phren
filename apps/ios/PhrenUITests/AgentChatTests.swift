@@ -87,13 +87,12 @@ final class AgentChatTests: XCTestCase {
         card.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.15)).tap()
         XCTAssertEqual(card.value as? String, "Expanded")
         XCTAssertFalse(app.navigationBars["Task details"].exists)
-        let expanded = app.descendants(matching: .any).matching(identifier: "chat-phren-expanded:phren-task").firstMatch
-        XCTAssertTrue(expanded.waitForExistence(timeout: 5))
-        XCTAssertGreaterThan(expanded.frame.height, foldedHeight)
-        for _ in 0..<12 where !card.isHittable { transcript.swipeDown() }
+        // Expanding unclamps the readable card; it never dumps raw input.
+        XCTAssertGreaterThanOrEqual(card.frame.height, foldedHeight)
+        XCTAssertFalse(app.staticTexts["Input"].exists)
+        for _ in 0..<12 where card.frame.minY < transcript.frame.minY { transcript.swipeDown() }
         card.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.05)).tap()
         XCTAssertEqual(card.value as? String, "Folded")
-        XCTAssertTrue(expanded.waitForNonExistence(timeout: 5))
         let open = app.buttons["chat-phren-open:phren-task"]
         for _ in 0..<12 where !open.isHittable { transcript.swipeDown() }
         XCTAssertTrue(open.isHittable)

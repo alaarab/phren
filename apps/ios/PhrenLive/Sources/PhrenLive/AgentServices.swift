@@ -359,8 +359,11 @@ extension PhrenConnection {
     }
 
     static func launchRequestBody(_ launch: LaunchRequest) throws -> Data {
-        guard launch.cwd.hasPrefix("/"), launch.cwd.utf8.count <= 4_096,
-              !launch.cwd.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else {
+        // A conductor may leave the folder empty: the Hook starts it in the
+        // computer's phren store, since it works across projects.
+        let storeRooted = launch.role == .conductor && launch.cwd.isEmpty
+        guard storeRooted || (launch.cwd.hasPrefix("/") && launch.cwd.utf8.count <= 4_096
+              && !launch.cwd.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)) else {
             throw PhrenKitError.validation("Enter the full folder path on this computer.")
         }
         let name = launch.label.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -371,8 +374,9 @@ extension PhrenConnection {
             guard AgentChatTarget.validID(workspaceID) else { throw PhrenKitError.validation("Choose a Herdr workspace.") }
         }
         let timeout = min(120_000, max(3_000, launch.timeoutMs))
-        var body: [String: Any] = ["cwd": launch.cwd, "label": name, "kind": launch.kind.rawValue,
+        var body: [String: Any] = ["label": name, "kind": launch.kind.rawValue,
                                    "timeoutMs": timeout, "role": launch.role.rawValue]
+        if !storeRooted { body["cwd"] = launch.cwd }
         body["workspaceId"] = launch.workspaceID
         if let model = launch.model {
             let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)

@@ -170,17 +170,10 @@ final class AllSessionsTests: XCTestCase {
     }
 
     @MainActor
-    func testSearchAcrossComputersAndOfflineRowsDoNotDisableTheOtherComputer() {
+    func testOfflineRowsDoNotDisableTheOtherComputer() {
         let app = launch(extra: ["--all-sessions-offline"])
         let first = row(app, host: mac), second = row(app, host: linux)
         XCTAssertTrue(first.waitForExistence(timeout: 10)); XCTAssertTrue(second.waitForExistence(timeout: 10))
-        let search = app.textFields["sessions-search"]
-        XCTAssertTrue(search.waitForExistence(timeout: 5))
-        if !search.isHittable { app.scrollViews["sessions-scroll"].swipeDown() }
-        search.tap(); search.typeText("Test Linux")
-        XCTAssertTrue(second.waitForExistence(timeout: 5)); XCTAssertFalse(first.exists)
-        app.buttons["sessions-search:clear"].tap()
-        XCTAssertTrue(first.waitForExistence(timeout: 5))
         openSessionsAction("refresh", in: app)
         let lastSeen = app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "Last seen")).firstMatch
         XCTAssertTrue(lastSeen.waitForExistence(timeout: 15))

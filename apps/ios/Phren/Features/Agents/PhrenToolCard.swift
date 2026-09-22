@@ -37,7 +37,7 @@ struct PhrenToolCard: View, Equatable {
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("chat-phren-card:\(callID)")
                 .accessibilityValue(model.isExpanded ? "Expanded" : "Folded")
-                .accessibilityHint(model.isExpanded ? "Fold full input and output" : "Expand full input and output")
+                .accessibilityHint(model.isExpanded ? "Fold to a preview" : "Show the full text")
                 if let destination {
                     Button { opened = destination } label: {
                         Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold))
@@ -52,8 +52,10 @@ struct PhrenToolCard: View, Equatable {
             }
             if model.isExpanded {
                 VStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
-                    fullText("Input", presentation.fullInput)
-                    if let output = presentation.fullOutput { fullText("Output", output) }
+                    // Expanding unclamps the readable preview above; the raw
+                    // output shows only when the preview has nothing to say.
+                    if presentation.body.isEmpty, presentation.titles.isEmpty, presentation.resultSummary == nil,
+                       let output = presentation.fullOutput { fullText("Output", output) }
                     ForEach(messages.filter(\.isChange)) { message in fullText("Changes", message.text) }
                     if presentation.status == .failed, let raw = presentation.rawResult {
                         fullText("Raw error", raw)
@@ -113,11 +115,11 @@ struct PhrenToolCard: View, Equatable {
                     }
                 }
             }
-            if !model.isExpanded, !presentation.body.isEmpty {
+            if !presentation.body.isEmpty {
                 Text(presentation.body).font(.subheadline).foregroundStyle(PhrenTheme.textSecondary)
                     .lineLimit(model.bodyLineLimit).frame(maxWidth: .infinity, alignment: .leading)
             }
-            ForEach(Array((model.isExpanded ? [] : presentation.fields).enumerated()), id: \.offset) { _, field in
+            ForEach(Array(presentation.fields.enumerated()), id: \.offset) { _, field in
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(field.name).foregroundStyle(PhrenTheme.textMuted).lineLimit(model.isExpanded ? nil : 1)
                     Text(field.value).foregroundStyle(PhrenTheme.textSecondary).lineLimit(model.isExpanded ? nil : 2)
@@ -127,7 +129,7 @@ struct PhrenToolCard: View, Equatable {
                 Text(summary).font(.caption.weight(.medium)).lineLimit(model.isExpanded ? nil : 2)
                     .foregroundStyle(presentation.status == .failed ? PhrenTheme.danger : PhrenTheme.phrenCardAccent)
             }
-            ForEach(Array((model.isExpanded ? [] : presentation.titles).enumerated()), id: \.offset) { _, title in
+            ForEach(Array(presentation.titles.enumerated()), id: \.offset) { _, title in
                 Text("· \(title)").font(.caption).foregroundStyle(PhrenTheme.textSecondary).lineLimit(model.isExpanded ? nil : 1)
             }
         }

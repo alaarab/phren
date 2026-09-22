@@ -173,7 +173,7 @@ struct AgentChatView: View {
     @State private var suppressComposingPin = false
     @State private var fellBackToTerminal = false
     @ScaledMetric(relativeTo: .body) private var composerTextSize = 14.0
-    @FocusState private var composing: Bool
+    @State private var composing = false
     /// The one paragraph showing native text selection, if any.
     @State private var textSelection = ChatTextSelection()
 
