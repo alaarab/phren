@@ -75,6 +75,7 @@ struct ChatAttachmentPicker: View {
     @State private var camera = false
     @State private var busy = false
     @State private var error: String?
+    @State private var clipboardHasImage = UIPasteboard.general.hasImages
     var body: some View {
         NavigationStack {
             PhrenList {
@@ -85,21 +86,11 @@ struct ChatAttachmentPicker: View {
                         Button("Camera", systemImage: "camera") { camera = true }.disabled(!canAdd || busy)
                     }
                     Button("Files", systemImage: "doc") { files = true }.disabled(!canAdd || busy)
-                    PasteButton(supportedContentTypes: [.image]) { providers in
-                        guard let provider = providers.first,
-                              let type = provider.registeredTypeIdentifiers.first(where: { UTType($0)?.conforms(to: .image) == true }) else { return }
-                        busy = true
-                        provider.loadDataRepresentation(forTypeIdentifier: type) { data, failure in
-                            Task { @MainActor in
-                                defer { busy = false }
-                                do {
-                                    if let failure { throw failure }
-                                    guard let data else { throw PhrenKitError.validation("No image was found on the clipboard.") }
-                                    add(try await ChatAttachmentPreparation.preparedImage(data, name: "Clipboard")); dismiss()
-                                } catch { self.error = error.localizedDescription }
-                            }
-                        }
-                    }.disabled(!canAdd || busy).accessibilityLabel("Paste image")
+                    Button(action: pasteImage) {
+                        PhrenRow(icon: "clipboard", title: "Paste image", chevron: false)
+                    }
+                    .buttonStyle(.plain).disabled(!canAdd || busy || !clipboardHasImage)
+                    .accessibilityLabel("Paste image").phrenIdentifier("attachment-paste-image")
                     #if DEBUG && targetEnvironment(simulator)
                     if AgentChatFixture.enabled {
                         Button("Add test image") { add(AgentChatFixture.image); dismiss() }
@@ -177,6 +168,29 @@ struct ChatAttachmentPicker: View {
                         if !items.isEmpty { dismiss() }
                     } catch { self.error = error.localizedDescription }
                 }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIPasteboard.changedNotification)) { _ in
+            clipboardHasImage = UIPasteboard.general.hasImages
+        }
+    }
+
+    private func pasteImage() {
+        guard canAdd, !busy,
+              let provider = UIPasteboard.general.itemProviders.first(where: { provider in
+                  provider.registeredTypeIdentifiers.contains { UTType($0)?.conforms(to: .image) == true }
+              }),
+              let type = provider.registeredTypeIdentifiers.first(where: { UTType($0)?.conforms(to: .image) == true }) else { return }
+        busy = true
+        provider.loadDataRepresentation(forTypeIdentifier: type) { data, failure in
+            Task { @MainActor in
+                defer { busy = false }
+                do {
+                    if let failure { throw failure }
+                    guard let data else { throw PhrenKitError.validation("No image was found on the clipboard.") }
+                    add(try await ChatAttachmentPreparation.preparedImage(data, name: "Clipboard"))
+                    dismiss()
+                } catch { self.error = error.localizedDescription }
             }
         }
     }

@@ -19,6 +19,7 @@ struct LiveHostEditor: View {
     @State private var saved = false
     @State private var removing = false
     @State private var copied = false
+    @State private var showingColor = false
 
     private let colorNames = ["Blue", "Teal", "Green", "Amber", "Orange", "Pink", "Lavender", "Slate"]
     private var displayedColor: String { selectedColor ?? existing?.color ?? LiveHost.defaultColor(for: id) }
@@ -51,14 +52,9 @@ struct LiveHostEditor: View {
                     }
                 }
                 HStack(spacing: 12) {
-                    ColorPicker("Custom", selection: Binding(get: {
-                        PhrenTheme.hostColor(displayedColor)
-                    }, set: { color in
-                        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
-                        guard UIColor(color).getRed(&red, green: &green, blue: &blue, alpha: &alpha) else { return }
-                        func channel(_ component: CGFloat) -> Int { Int((min(1, max(0, component)) * 255).rounded()) }
-                        chooseColor(String(format: "#%02X%02X%02X", channel(red), channel(green), channel(blue)))
-                    }), supportsOpacity: false)
+                    PhrenColorButton(title: "Custom", color: PhrenTheme.hostColor(displayedColor),
+                                     identifier: "host-color-custom") { showingColor = true }
+                    Spacer(minLength: PhrenTheme.Space.small)
                     HStack(spacing: 1) {
                         Text("#").foregroundStyle(PhrenTheme.textDim)
                         TextField("RRGGBB", text: $colorHex)
@@ -124,6 +120,14 @@ struct LiveHostEditor: View {
             }
         }
         .phrenScreen()
+        .phrenColorSheet(isPresented: $showingColor, title: "Computer color", selection: Binding(get: {
+            PhrenTheme.hostColor(displayedColor)
+        }, set: { color in
+            var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+            guard UIColor(color).getRed(&red, green: &green, blue: &blue, alpha: &alpha) else { return }
+            func channel(_ component: CGFloat) -> Int { Int((min(1, max(0, component)) * 255).rounded()) }
+            chooseColor(String(format: "#%02X%02X%02X", channel(red), channel(green), channel(blue)))
+        }), identifier: "host-color-editor")
         .onAppear {
             if let existing {
                 id = existing.id; name = existing.name; address = existing.address

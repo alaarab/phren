@@ -28,6 +28,7 @@ struct ProjectKnobsView: View {
     /// as its conflict check.
     @State private var expectedContent: String?
     @State private var confirmingReset = false
+    @State private var showingNameColor = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -62,6 +63,14 @@ struct ProjectKnobsView: View {
         }
         .background(PhrenTheme.bg.ignoresSafeArea())
         .phrenContainerMarker("project-knobs", label: "Project knobs")
+        .phrenColorSheet(isPresented: $showingNameColor, title: "Name color", selection: Binding(get: {
+            nameColour.color
+        }, set: { color in
+            var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+            guard UIColor(color).getRed(&red, green: &green, blue: &blue, alpha: &alpha) else { return }
+            func channel(_ component: CGFloat) -> Int { Int((min(1, max(0, component)) * 255).rounded()) }
+            chooseNameColour(.hex(String(format: "#%02X%02X%02X", channel(red), channel(green), channel(blue))))
+        }), identifier: "knob-name-color-editor")
         .phrenDialog(isPresented: $confirmingReset, title: "Reset all knobs?",
                      message: "Clear every override so the project follows your global settings, and restore the default name color.",
                      actions: resetActions, identifier: "knobs-reset-dialog")
@@ -154,15 +163,9 @@ struct ProjectKnobsView: View {
             }
             .accessibilityIdentifier("knob:nameColour")
             HStack(spacing: PhrenTheme.Space.medium) {
-                ColorPicker("Custom", selection: Binding(get: { nameColour.color }, set: { color in
-                    var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
-                    guard UIColor(color).getRed(&red, green: &green, blue: &blue, alpha: &alpha) else { return }
-                    func channel(_ component: CGFloat) -> Int { Int((min(1, max(0, component)) * 255).rounded()) }
-                    chooseNameColour(.hex(String(format: "#%02X%02X%02X", channel(red), channel(green), channel(blue))))
-                }), supportsOpacity: false)
-                    .font(PhrenTypography.subheadline).foregroundStyle(PhrenTheme.textMuted)
-                    .fixedSize()
-                    .accessibilityIdentifier("knob:nameColour:custom")
+                PhrenColorButton(title: "Custom", color: nameColour.color, identifier: "knob:nameColour:custom") {
+                    showingNameColor = true
+                }
                 HStack(spacing: 1) {
                     Text("#").foregroundStyle(PhrenTheme.textDim)
                     TextField("RRGGBB", text: $nameColourHex)

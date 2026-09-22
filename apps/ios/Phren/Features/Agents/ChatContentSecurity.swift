@@ -43,14 +43,21 @@ private struct WebLinkConfirmation: ViewModifier {
     @Binding var url: URL?
     let open: (URL) -> Void
     func body(content: Content) -> some View {
-        content.alert("Open website?", isPresented: Binding(get: { url != nil }, set: { if !$0 { url = nil } }), presenting: url) { destination in
-            Button("Open website") {
-                guard ExternalLinkPolicy.host(for: destination) != nil else { return }
-                open(destination); url = nil
-            }.accessibilityIdentifier("external-link-open")
-            Button("Cancel", role: .cancel) { url = nil }
-        } message: { destination in
-            Text(ExternalLinkPolicy.host(for: destination) ?? "")
-        }
+        // The dialog dismisses before its handler runs, so capture the URL
+        // before dismissal clears the binding.
+        let destination = url
+        content.phrenDialog(
+            isPresented: Binding(get: { url != nil }, set: { if !$0 { url = nil } }),
+            title: "Open website?",
+            message: destination.flatMap { ExternalLinkPolicy.host(for: $0) } ?? "",
+            actions: [
+                .init(id: "open", title: "Open website", accessibilityIdentifier: "external-link-open") {
+                    guard let destination, ExternalLinkPolicy.host(for: destination) != nil else { return }
+                    open(destination)
+                },
+                .init(id: "cancel", title: "Cancel", role: .cancel) {},
+            ],
+            identifier: "external-link-dialog"
+        )
     }
 }

@@ -295,35 +295,56 @@ private struct LocalCommandRow: View {
     let command: AgentChatMessage.LocalCommand
     let id: String
     @Environment(\.openToolOutput) private var openOutput
+    @Environment(ChatMessageMenu.self) private var messageMenu: ChatMessageMenu?
+    @State private var menuAnchor = ChatMessageMenuAnchor()
     var body: some View {
         if command.kind == .output && command.text.isEmpty {
             EmptyView()
         } else {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Group {
-                    switch command.kind {
-                    case .command: Image(systemName: "command")
-                    case .shell: Image(systemName: "terminal")
-                    case .output: Image(systemName: "arrow.turn.down.right")
-                    }
-                }
-                .font(.system(size: 10, weight: .semibold)).foregroundStyle(PhrenTheme.chatNeutralDim).frame(width: 14)
-                .accessibilityHidden(true)
-                Text(ToolOutputPreview(command.text, lines: 12, characters: 2_000).text)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(command.kind == .output ? PhrenTheme.textMuted : PhrenTheme.textSecondary)
-                    .lineLimit(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(alignment: .top, spacing: PhrenTheme.Space.small) {
+                commandContent
+                PhrenIconButton(icon: "ellipsis", label: "Command actions", action: openActions)
+                    .phrenIdentifier("chat-command:\(id):actions")
             }
-            .padding(.vertical, 2)
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel(command.kind == .output ? "Command output: \(command.text)" : "Command: \(command.text)")
-            .accessibilityIdentifier("chat-command:\(id)")
-            .contextMenu {
-                Button("View full output") { openOutput(.init(title: "Command output", text: command.text)) }
-                Button("Copy", systemImage: "doc.on.doc") { ChatClipboard.copy(command.text) }
-            }
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { menuAnchor.frame = $0 }
+            .onLongPressGesture(minimumDuration: 0.4, perform: openActions)
+            .accessibilityAction(named: "Command actions", openActions)
+            .opacity(messageMenu?.request?.owner == "command:\(id)" ? 0 : 1)
         }
+    }
+
+    private func openActions() {
+        guard menuAnchor.frame.width > 0 else { return }
+        messageMenu?.present(.init(owner: "command:\(id)", frame: menuAnchor.frame,
+                                  preview: AnyView(commandContent), paragraph: nil, actions: [
+            .init(id: "view-output", title: "View full output", icon: "text.alignleft") {
+                openOutput(.init(title: "Command output", text: command.text))
+            },
+            .init(id: "copy", title: "Copy", icon: "doc.on.doc") { ChatClipboard.copy(command.text) },
+        ]))
+    }
+
+    private var commandContent: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Group {
+                switch command.kind {
+                case .command: Image(systemName: "command")
+                case .shell: Image(systemName: "terminal")
+                case .output: Image(systemName: "arrow.turn.down.right")
+                }
+            }
+            .font(.system(size: 10, weight: .semibold)).foregroundStyle(PhrenTheme.chatNeutralDim).frame(width: 14)
+            .accessibilityHidden(true)
+            Text(ToolOutputPreview(command.text, lines: 12, characters: 2_000).text)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(command.kind == .output ? PhrenTheme.textMuted : PhrenTheme.textSecondary)
+                .lineLimit(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(command.kind == .output ? "Command output: \(command.text)" : "Command: \(command.text)")
+        .accessibilityIdentifier("chat-command:\(id)")
     }
 }
 

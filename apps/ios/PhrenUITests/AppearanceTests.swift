@@ -45,9 +45,28 @@ final class AppearanceTests: XCTestCase {
         app.buttons["theme-create"].tap()
         let name = app.textFields["theme-name"]
         XCTAssertTrue(name.waitForExistence(timeout: 5))
+        let swatch = app.buttons["theme-color-swatch-background"]
+        XCTAssertTrue(swatch.waitForExistence(timeout: 3))
+        for _ in 0..<4 where !swatch.isHittable { app.swipeUp() }
+        let background = app.textFields["theme-color-background"]
+        let originalHex = background.value as? String ?? ""
+        guard let originalValue = UInt32(originalHex, radix: 16) else {
+            XCTFail("The color field should contain a valid hex value"); return
+        }
+        swatch.tap()
+        let decreaseRed = app.buttons["theme-color-editor:red:minus"]
+        let increaseRed = app.buttons["theme-color-editor:red:plus"]
+        XCTAssertTrue(increaseRed.waitForExistence(timeout: 3))
+        let increase = increaseRed.isEnabled
+        (increase ? increaseRed : decreaseRed).tap()
+        let closeColor = app.buttons["theme-color-editor-done"]
+        closeColor.tap()
+        XCTAssertTrue(closeColor.waitForNonExistence(timeout: 3))
+        let expectedValue = increase ? originalValue + 0x010000 : originalValue - 0x010000
+        XCTAssertEqual(background.value as? String, String(format: "%06X", expectedValue))
+        for _ in 0..<4 where !name.isHittable { app.swipeDown() }
         name.tap()
         name.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: (name.value as? String ?? "").count) + "Ocean test")
-        let background = app.textFields["theme-color-background"]
         app.swipeUp()
         background.tap()
         background.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 6) + "24303B")

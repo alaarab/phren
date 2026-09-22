@@ -243,6 +243,8 @@ and untappable while presented, Close and Escape always available. Rows are
 Buttons; selected rows use the shared radio trait. Identifiers:
 `screen-sheet`, `screen-sheet:action.id`, `screen-sheet:close`,
 `screen-sheet:scroll`. Reserve `close` and `scroll` from action IDs.
+An action may supply `accessibilityIdentifier` to preserve an existing control
+identifier; otherwise the sheet or dialog derives it from its prefix and id.
 Dynamic Type: title and captions wrap, rows grow, and overflow scrolls.
 Reduce Motion eliminates both presentation motion and drag offset animation.
 This uses no UIKit sheet, detents, system grabber or menu chrome.
@@ -563,6 +565,18 @@ harness and model, the chat `/model` picker and the launch flow's computer
 chooser. Ids: `<identifier>` on the button, `<identifier>:<value>` on rows,
 and `<identifier>-loading` on the loading row unless the owner supplies its
 own `loadingIdentifier` (the chat picker's `model-loading`).
+
+## PhrenColorButton and phrenColorSheet
+
+A color swatch is a plain 44-point Button with a label and stable identifier.
+It opens `phrenColorSheet` at the screen root. The shared single-select surface
+contains a live preview and Red, Green and Blue PhrenStepperFields, each bounded
+to 0...255. Edits apply immediately, preserve every opaque RGB color, and update
+the owner's existing hex field. Close, backdrop and Escape retain those edits.
+Identifiers are the caller's button id, `<prefix>-sheet`, `<prefix>-done`, and
+`<prefix>:red`, `:green`, `:blue` with the stepper's `:minus`, `:value`, `:plus`.
+The surface and steppers retain their normal scrolling, Dynamic Type and
+Reduce Motion behavior. Existing preset swatches remain alongside hex input.
 
 ## PhrenStepSlider
 

@@ -1,13 +1,13 @@
 import SwiftUI
 
-/// How sessions open and how the composer behaves — the chat half of
+/// How sessions open and how the composer behaves: the chat half of
 /// Moshi's "Chat Mode" screen, without the mode switch (phren always has
 /// both chat and the terminal one tap apart).
 enum ChatSettings {
     static let openInKey = "chat.openSessionsIn.v1"          // "chat" | "terminal"
     static let autoSendDictationKey = "chat.autoSendDictation.v1"
     static let autocorrectionKey = "chat.autocorrection.v1"
-    /// Long lines in chat — code blocks, tool output, diff cards — wrap
+    /// Long lines in chat (code blocks, tool output, diff cards) wrap
     /// instead of scrolling sideways. Off by default: columns and stack
     /// traces read better unbroken. The full-screen diff editor has its own
     /// switch (`wrapFullDiffKey`): wanting one wrapped says nothing about the other.
@@ -23,15 +23,20 @@ struct ChatSettingsView: View {
     @AppStorage(ChatSettings.autoSendDictationKey) private var autoSend = false
     @AppStorage(ChatSettings.autocorrectionKey) private var autocorrection = true
     @AppStorage(ChatSettings.wrapKey) private var wrap = false
+    @State private var showingOpenIn = false
+
+    private let openInOptions: [PhrenOption<String>] = [
+        .init(id: "chat", value: "chat", title: "Chat"),
+        .init(id: "terminal", value: "terminal", title: "Herdr terminal"),
+    ]
 
     var body: some View {
         PhrenList {
             Section {
-                Picker(selection: $openIn) {
-                    Text("Chat").tag("chat")
-                    Text("Herdr terminal").tag("terminal")
-                } label: { Label("Open sessions in", systemImage: "bubble.left.and.text.bubble.right") }
-                    .accessibilityIdentifier("chat-open-in")
+                Label("Open sessions in", systemImage: "bubble.left.and.text.bubble.right")
+                PhrenSingleSelect(options: openInOptions, selection: $openIn,
+                                  placeholder: "Open sessions in", identifier: "chat-open-in",
+                                  isPresented: $showingOpenIn)
             } header: { Text("Sessions") } footer: {
                 Text("What a tap on a session opens. The other view is always one tap away from the header.")
             }
@@ -60,5 +65,7 @@ struct ChatSettingsView: View {
         }
         .navigationTitle("Chat").navigationBarTitleDisplayMode(.inline)
         .phrenScreen()
+        .phrenSingleSelectSheet(isPresented: $showingOpenIn, title: "Open sessions in",
+                                options: openInOptions, selection: $openIn, rowPrefix: "chat-open-in")
     }
 }

@@ -487,13 +487,13 @@ final class AgentChatTests: XCTestCase {
         app.buttons["live-chat:w7:w7:t9"].tap()
         XCTAssertTrue(app.links["Approve"].waitForExistence(timeout: 8))
         app.links["Approve"].tap()
-        XCTAssertFalse(app.alerts["Open website?"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["external-link-dialog"].firstMatch.exists)
         XCTAssertTrue(app.buttons["chat-close"].exists)
         app.links["Docs"].tap()
-        XCTAssertTrue(app.alerts["Open website?"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.alerts.staticTexts["example.com"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["external-link-dialog"].firstMatch.waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["example.com"].exists)
         capture(app, "Confirm a transcript website")
-        app.alerts.buttons["Cancel"].tap()
+        app.buttons["external-link-dialog:cancel"].tap()
         XCTAssertTrue(app.links["Docs"].exists)
     }
 
@@ -794,9 +794,9 @@ final class AgentChatTests: XCTestCase {
         let link = app.links["Open linked page"]
         XCTAssertTrue(link.waitForExistence(timeout: 5))
         link.tap()
-        XCTAssertTrue(app.alerts["Open website?"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.alerts.staticTexts["example.org"].exists)
-        app.alerts.buttons["Open website"].firstMatch.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["external-link-dialog"].firstMatch.waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["example.org"].exists)
+        app.buttons["external-link-open"].tap()
         app.buttons["chat-close"].tap()
         let captured = app.staticTexts["chat-opened-url"]
         XCTAssertTrue(captured.waitForExistence(timeout: 5))
@@ -2089,9 +2089,9 @@ final class AgentChatTests: XCTestCase {
         let linux = app.buttons["switch-session:\(linuxID)"]
         XCTAssertTrue(app.textFields["agent-drawer-search"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["Finding your agents…"].exists, "The drawer reuses the revealed overview")
-        app.segmentedControls["agent-drawer-order"].buttons["Recent"].tap()
+        app.buttons["agent-drawer-order:recent"].tap()
         capture(app, "Recent sessions drawer")
-        app.segmentedControls["agent-drawer-order"].buttons["List"].tap()
+        app.buttons["agent-drawer-order:list"].tap()
         XCTAssertTrue(linux.waitForExistence(timeout: 8)); linux.tap()
         XCTAssertTrue(app.staticTexts["chat-location"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.staticTexts["chat-location"].label.contains("Test Linux"))

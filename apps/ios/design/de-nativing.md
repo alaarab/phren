@@ -34,39 +34,53 @@ standalone `List(selection:)` in ReviewView was replaced. The Form and List
 counts therefore remain 1 and 2 until each consumer screen migrates with its
 list behaviour.
 
-The remaining counts below all sit in files owned by other workers (the
-Agents/Chat family, LiveSessionsView, ProjectsView) or in the retained
-PhrenForm/PhrenList wrappers.
+This final pass also migrated workspace order and chat destinations, website
+confirmation, the remaining command-output context menu, custom RGB color
+editors, and attachment paste. MemoryPanel, TerminalControls, SchedulesView and
+ChangesWorkingTreeTab already used phren controls when this pass started.
+The explicit external-link-open identifier is preserved on the dialog action;
+UI tests find the replacement controls by identifier.
 
-Before / after per file:
+The only remaining native controls in this audit are in LiveSessionsView,
+which belongs to another worker, and the retained PhrenForm/PhrenList wrappers.
+System photo-library, camera, document-import and sharing services retain their
+platform presentation; their launch controls are phren buttons.
+
+Before / after per file (before retains the initial audit inventory; newly
+listed files use their count at the start of this pass):
 
 | File | Toggle | alert | confirmationDialog | Menu | contextMenu | Picker | Form | List | searchable |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | DesignSystem/PhrenTheme.swift | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 1 / 1 | 2 / 2 | 0 / 0 |
-| Features/Agents/AgentChatView.swift | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 1 / 1 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| Features/Agents/AgentChatView.swift | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 1 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
 | Features/Agents/AgentsView.swift | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 1 / 0 |
 | Features/Agents/ChangesHistoryTab.swift | 0 / 0 | 1 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
 | Features/Agents/ChangesTab.swift | 0 / 0 | 1 / 0 | 1 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
-| Features/Agents/ChatAgentSwitcher.swift | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 1 / 1 | 0 / 0 | 0 / 0 | 0 / 0 |
-| Features/Agents/ChatContentSecurity.swift | 0 / 0 | 1 / 1 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
-| Features/Agents/ChatRichText.swift | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 2 / 2 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
-| Features/Agents/ChatTranscriptRows.swift | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 2 / 2 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| Features/Agents/ChangesWorkingTreeTab.swift | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| Features/Agents/ChatAgentSwitcher.swift | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 1 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| Features/Agents/ChatAttachmentPicker.swift | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| Features/Agents/ChatContentSecurity.swift | 0 / 0 | 1 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| Features/Agents/ChatRichText.swift | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 2 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| Features/Agents/ChatTranscriptRows.swift | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 2 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
 | Features/Agents/FileDiffView.swift | 1 / 0 | 0 / 0 | 0 / 0 | 1 / 0 | 0 / 0 | 1 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
 | Features/Agents/HerdrWorkspacesView.swift | 0 / 0 | 1 / 0 | 1 / 0 | 1 / 0 | 2 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 1 / 0 |
 | Features/Agents/LiveHostEditor.swift | 0 / 0 | 0 / 0 | 1 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
-| Features/Agents/LiveSessionsView.swift | 0 / 0 | 3 / 3 | 2 / 2 | 0 / 0 | 1 / 1 | 1 / 1 | 0 / 0 | 0 / 0 | 2 / 2 |
+| Features/Agents/LiveSessionsView.swift | 0 / 0 | 3 / 3 | 2 / 2 | 0 / 0 | 1 / 1 | 1 / 1 | 0 / 0 | 0 / 0 | 2 / 1 |
 | Features/Agents/SessionCardContent.swift | 0 / 0 | 1 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
 | Features/Agents/SimulatorsView.swift | 0 / 0 | 2 / 0 | 0 / 0 | 2 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
 | Features/Agents/TerminalControls.swift | 2 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 1 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
 | Features/Files/FilesView.swift | 0 / 0 | 0 / 0 | 0 / 0 | 1 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
 | Features/Graph/GraphView.swift | 0 / 0 | 2 / 0 | 1 / 0 | 4 / 0 | 0 / 0 | 1 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| Features/Memory/MemoryPanel.swift | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
 | Features/Notes/VoiceCaptureView.swift | 0 / 0 | 0 / 0 | 1 / 0 | 0 / 0 | 0 / 0 | 2 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
 | Features/Projects/AddProjectView.swift | 0 / 0 | 1 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 1 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
-| Features/Projects/ProjectsView.swift | 0 / 0 | 0 / 0 | 0 / 0 | 2 / 2 | 0 / 0 | 1 / 1 | 0 / 0 | 0 / 0 | 1 / 1 |
+| Features/Projects/ProjectKnobsView.swift | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| Features/Projects/ProjectsView.swift | 0 / 0 | 0 / 0 | 0 / 0 | 2 / 0 | 0 / 0 | 1 / 0 | 0 / 0 | 0 / 0 | 1 / 0 |
 | Features/Review/ReviewView.swift | 1 / 0 | 0 / 0 | 0 / 0 | 1 / 0 | 1 / 0 | 0 / 0 | 0 / 0 | 1 / 0 | 0 / 0 |
 | Features/Review/TriageView.swift | 0 / 0 | 0 / 0 | 1 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| Features/Schedules/SchedulesView.swift | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
 | Features/Settings/AppearanceSettingsView.swift | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 1 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
-| Features/Settings/ChatSettingsView.swift | 3 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 1 / 1 | 0 / 0 | 0 / 0 | 0 / 0 |
+| Features/Settings/ChatSettingsView.swift | 3 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 1 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
 | Features/Settings/CustomThemeEditor.swift | 0 / 0 | 0 / 0 | 0 / 0 | 1 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
 | Features/Settings/IntegrationSettingsViews.swift | 7 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 1 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
 | Features/Settings/SettingsView.swift | 0 / 0 | 0 / 0 | 2 / 0 | 0 / 0 | 0 / 0 | 1 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
@@ -81,15 +95,23 @@ Before / after per file:
 | Control | Before | After |
 | --- | ---: | ---: |
 | Toggle | 25 | 0 |
-| alert | 17 | 4 |
+| alert | 17 | 3 |
 | confirmationDialog | 13 | 2 |
-| Menu | 15 | 2 |
-| contextMenu | 12 | 6 |
-| Picker | 27 | 4 |
+| Menu | 15 | 0 |
+| contextMenu | 12 | 1 |
+| Picker | 27 | 1 |
 | Form | 1 | 1 |
 | List | 3 | 2 |
-| searchable | 6 | 3 |
+| searchable | 6 | 1 |
 
-The after counts for alert, confirmationDialog, Menu, contextMenu, Picker and
-searchable belong entirely to the files other workers own; the Form and List
-counts are the retained PhrenForm and PhrenList wrappers.
+Additional native controls omitted from the original inventory:
+
+| File | ColorPicker | PasteButton |
+| --- | --- | --- |
+| Features/Agents/ChatAttachmentPicker.swift | 0 / 0 | 1 / 0 |
+| Features/Settings/CustomThemeEditor.swift | 1 / 0 | 0 / 0 |
+| Features/Agents/LiveHostEditor.swift | 1 / 0 | 0 / 0 |
+| Features/Projects/ProjectKnobsView.swift | 1 / 0 | 0 / 0 |
+
+ColorPicker: 3 / 0. PasteButton: 1 / 0. All assigned files now have zero native
+control calls from this inventory. PhrenForm and PhrenList remain unchanged.

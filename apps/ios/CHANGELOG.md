@@ -14,6 +14,7 @@ number counts up on its own.
 - Child conversations explain where messages go: pane agents open their full chat, fan-out workers continue their own sessions or queue another round, and in-process sub-agents send a message to their parent prefixed with the sub-agent's name. Finished resumable workers remain available in the tree.
 - Phren chat cards expand and fold in place with selectable full input and output. Separate chevrons open synced tasks, finding dossiers and captured search results. Failed calls show their reason and keep raw errors in expanded details.
 
+- Workspace order, chat session destinations, website confirmations, attachment paste, and custom theme, computer and project colors use phren controls. Color edits keep live previews, exact hex values and saved preferences.
 - Selecting a graph node centers it in the open space above its details card, with room to breathe. The camera follows changes in card height, respects Reduce Motion, yields to dragging, and returns to the previous view when the card closes.
 - Multi-select filters fit their content, with dense checked rows, pinned removable chips, search for longer lists, inline All and None, and a selected count on Done.
 - Hold a project to choose a computer by name, state and project session count. Reachable and recently used computers come first, with a last-used shortcut, search for longer lists, and disabled offline computers that explain why they cannot open.

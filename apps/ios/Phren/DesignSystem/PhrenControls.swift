@@ -658,6 +658,68 @@ extension View {
     }
 }
 
+/// A color swatch opens the shared color editor at the owning screen root.
+struct PhrenColorButton: View {
+    let title: String
+    let color: Color
+    let identifier: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: PhrenTheme.Space.small) {
+                Circle().fill(color).frame(width: 28, height: 28)
+                    .overlay(Circle().strokeBorder(PhrenTheme.border, lineWidth: 1))
+                    .accessibilityHidden(true)
+                Text(title).font(PhrenTypography.body).foregroundStyle(PhrenTheme.text)
+            }
+            .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).phrenIdentifier(identifier)
+    }
+}
+
+private struct PhrenColorChannels: View {
+    @Binding var selection: Color
+    let identifier: String
+
+    private var channels: [Int] {
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+        UIColor(selection).getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        return [red, green, blue].map { Int((min(1, max(0, $0)) * 255).rounded()) }
+    }
+
+    private func channel(_ index: Int) -> Binding<Int> {
+        Binding(get: { channels[index] }, set: { value in
+            var next = channels
+            next[index] = min(255, max(0, value))
+            selection = Color(.sRGB, red: Double(next[0]) / 255,
+                              green: Double(next[1]) / 255, blue: Double(next[2]) / 255, opacity: 1)
+        })
+    }
+
+    var body: some View {
+        VStack(spacing: PhrenTheme.Space.medium) {
+            RoundedRectangle(cornerRadius: PhrenTheme.Radius.small).fill(selection)
+                .frame(height: 44).accessibilityHidden(true)
+            PhrenStepperField(title: "Red", value: channel(0), range: 0...255, identifier: "\(identifier):red")
+            PhrenStepperField(title: "Green", value: channel(1), range: 0...255, identifier: "\(identifier):green")
+            PhrenStepperField(title: "Blue", value: channel(2), range: 0...255, identifier: "\(identifier):blue")
+        }
+    }
+}
+
+extension View {
+    /// RGB edits apply immediately, like the adjacent hex field. Every opaque
+    /// color remains available without presenting system color controls.
+    func phrenColorSheet(isPresented: Binding<Bool>, title: String, selection: Binding<Color>,
+                         identifier: String) -> some View {
+        phrenSingleSelectSheet(isPresented: isPresented, title: title,
+                                options: [PhrenOption<Color>](), selection: selection, rowPrefix: identifier,
+                                footer: AnyView(PhrenColorChannels(selection: selection, identifier: identifier)))
+    }
+}
+
 struct PhrenTextSegment<Value: Hashable>: View {
     let items: [PhrenOption<Value>]
     @Binding var selection: Value
@@ -743,6 +805,8 @@ struct PhrenControlAction: Identifiable {
     var isEnabled = true
     var isSelected: Bool? = nil
     var dismisses = true
+    /// Preserve a pre-existing control identifier when migrating a native action.
+    var accessibilityIdentifier: String? = nil
     let handler: () -> Void
 
     // Dismiss before callbacks so an action can present the next surface.
@@ -825,7 +889,7 @@ struct PhrenActionSheet: View {
                                    disabled: !action.isEnabled, icon: action.icon, minimumHeight: 48) {
                         action.perform(dismiss: dismiss)
                     }
-                    .phrenIdentifier("\(identifier):\(action.id)")
+                    .phrenIdentifier(action.accessibilityIdentifier ?? "\(identifier):\(action.id)")
                 } else {
                     actionRow(action)
                 }
@@ -860,7 +924,7 @@ struct PhrenActionSheet: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain).disabled(!action.isEnabled).opacity(action.isEnabled ? 1 : 0.45)
-        .phrenIdentifier("\(identifier):\(action.id)")
+        .phrenIdentifier(action.accessibilityIdentifier ?? "\(identifier):\(action.id)")
     }
 }
 
@@ -913,7 +977,7 @@ struct PhrenDialog: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain).disabled(!action.isEnabled).opacity(action.isEnabled ? 1 : 0.45)
-                    .phrenIdentifier("\(identifier):\(action.id)")
+                    .phrenIdentifier(action.accessibilityIdentifier ?? "\(identifier):\(action.id)")
                 }
             }
         }

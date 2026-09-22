@@ -67,20 +67,18 @@ struct ChatAgentSwitcher: View {
         .safeAreaInset(edge: .top) {
             VStack(spacing: 8) {
                 HStack {
-                    HStack(spacing: 8) {
-                        Image(systemName: "magnifyingglass").foregroundStyle(PhrenTheme.textMuted)
-                        TextField("Search workspaces, tabs…", text: $query)
-                            .font(.subheadline).textInputAutocapitalization(.never).autocorrectionDisabled()
-                            .accessibilityIdentifier("agent-drawer-search")
-                    }.padding(12).phrenPanel()
+                    PhrenSearchField(text: $query, placeholder: "Search workspaces, tabs…",
+                                     identifier: "agent-drawer-search")
                     Button("Close", systemImage: "xmark") { close() }
                         .labelStyle(.iconOnly).frame(width: 44, height: 44)
                         .accessibilityIdentifier("agent-drawer-close")
                 }
-                Picker("Workspace order", selection: $recent) {
-                    Text("Recent").tag(true)
-                    Text("List").tag(false)
-                }.pickerStyle(.segmented).accessibilityIdentifier("agent-drawer-order")
+                PhrenTextSegment(items: [
+                    .init(id: "recent", value: true, title: "Recent"),
+                    .init(id: "list", value: false, title: "List"),
+                ], selection: $recent, identifier: "agent-drawer-order")
+                .phrenContainerMarker("agent-drawer-order", label: "Workspace order",
+                                      value: recent ? "Recent" : "List")
             }.padding(12).background(PhrenTheme.chatCanvas)
         }
         .task(id: PollID(hosts: hosts, active: scenePhase == .active)) {

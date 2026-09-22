@@ -7,6 +7,7 @@ struct CustomThemeEditor: View {
     @State private var paletteRevision = UUID()
     @State private var showingPresets = false
     @State private var presetSelection: PhrenAppearanceStyle = .charcoal
+    @State private var editingColor: ThemeColorField?
 
     var body: some View {
         ScrollView {
@@ -28,7 +29,7 @@ struct CustomThemeEditor: View {
                         ThemeColorRow(field: field, value: Binding(
                             get: { field.value(in: theme.palette) },
                             set: { field.apply($0, to: &theme.palette) }
-                        )) { valid in
+                        ), editColor: { editingColor = field }) { valid in
                             if valid { invalidColors.remove(field) } else { invalidColors.insert(field) }
                         }
                         if field != ThemeColorField.allCases.last { Divider().overlay(PhrenTheme.border) }
@@ -53,6 +54,20 @@ struct CustomThemeEditor: View {
         .phrenSingleSelectSheet(isPresented: $showingPresets, title: "Start from a preset",
                                 options: presetOptions, selection: $presetSelection,
                                 rowPrefix: "theme-preset", onSelect: applyPreset)
+        .phrenColorSheet(isPresented: Binding(get: { editingColor != nil }, set: { if !$0 { editingColor = nil } }),
+                         title: editingColor?.rawValue ?? "Color", selection: selectedColor,
+                         identifier: "theme-color-editor")
+    }
+
+    private var selectedColor: Binding<Color> {
+        Binding(get: { Color(hex: editingColor?.value(in: theme.palette) ?? 0) }, set: { color in
+            guard let field = editingColor else { return }
+            var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+            guard UIColor(color).getRed(&red, green: &green, blue: &blue, alpha: &alpha) else { return }
+            func channel(_ component: CGFloat) -> UInt32 { UInt32((min(1, max(0, component)) * 255).rounded()) }
+            field.apply((channel(red) << 16) | (channel(green) << 8) | channel(blue), to: &theme.palette)
+            invalidColors.remove(field)
+        })
     }
 
     private var presetOptions: [PhrenOption<PhrenAppearanceStyle>] {
@@ -69,23 +84,20 @@ struct CustomThemeEditor: View {
 private struct ThemeColorRow: View {
     let field: ThemeColorField
     @Binding var value: UInt32
+    let editColor: () -> Void
     let validated: (Bool) -> Void
     @State private var hex: String
 
-    init(field: ThemeColorField, value: Binding<UInt32>, validated: @escaping (Bool) -> Void) {
-        self.field = field; self._value = value; self.validated = validated
+    init(field: ThemeColorField, value: Binding<UInt32>, editColor: @escaping () -> Void, validated: @escaping (Bool) -> Void) {
+        self.field = field; self._value = value; self.editColor = editColor; self.validated = validated
         _hex = State(initialValue: String(format: "%06X", value.wrappedValue))
     }
 
     var body: some View {
         HStack(spacing: 12) {
-            ColorPicker(field.rawValue, selection: Binding(get: { Color(hex: value) }, set: { color in
-                var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-                guard UIColor(color).getRed(&r, green: &g, blue: &b, alpha: &a) else { return }
-                func channel(_ component: CGFloat) -> UInt32 { UInt32((min(1, max(0, component)) * 255).rounded()) }
-                value = (channel(r) << 16) | (channel(g) << 8) | channel(b)
-                hex = String(format: "%06X", value); validated(true)
-            }), supportsOpacity: false)
+            PhrenColorButton(title: field.rawValue, color: Color(hex: value),
+                             identifier: "theme-color-swatch-\(field.id)", action: editColor)
+            Spacer(minLength: PhrenTheme.Space.small)
             HStack(spacing: 1) {
                 Text("#").foregroundStyle(PhrenTheme.textDim)
                 TextField("RRGGBB", text: $hex)

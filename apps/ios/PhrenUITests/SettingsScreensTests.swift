@@ -57,7 +57,14 @@ final class SettingsScreensTests: XCTestCase {
         back()
 
         open("settings-chat", title: "Chat")
-        XCTAssertTrue(app.descendants(matching: .any)["chat-open-in"].waitForExistence(timeout: 3))
+        let openIn = app.descendants(matching: .any)["chat-open-in"].firstMatch
+        XCTAssertTrue(openIn.waitForExistence(timeout: 3))
+        openIn.tap()
+        let terminal = app.buttons["chat-open-in:terminal"]
+        XCTAssertTrue(terminal.waitForExistence(timeout: 3))
+        terminal.tap()
+        XCTAssertTrue(terminal.waitForNonExistence(timeout: 3))
+        XCTAssertEqual(openIn.value as? String, "Herdr terminal")
         turnOn("chat-auto-send")
         XCTAssertTrue(app.staticTexts["phren-agent"].exists)
         back()
@@ -95,6 +102,13 @@ final class SettingsScreensTests: XCTestCase {
         XCTAssertTrue(kept.waitForExistence(timeout: 3))
         XCTAssertTrue(isOn(kept))
         XCTAssertEqual(app.descendants(matching: .any)["terminal-cursor-style"].firstMatch.value as? String, "▁ Underline")
+        back()
+        open("settings-chat", title: "Chat")
+        XCTAssertEqual(app.descendants(matching: .any)["chat-open-in"].firstMatch.value as? String, "Herdr terminal")
+        app.buttons["chat-open-in"].tap()
+        let chat = app.buttons["chat-open-in:chat"]
+        XCTAssertTrue(chat.waitForExistence(timeout: 3))
+        chat.tap()
     }
 
     /// The Agents header's extra icons and the screens behind them, with fixture data.
