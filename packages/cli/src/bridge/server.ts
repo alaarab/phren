@@ -932,7 +932,9 @@ async function prepareConductor(kind: (typeof launchKinds)[number], effort: Laun
   await mkdir(briefDirectory, { recursive: true, mode: 0o700 });
   const briefFile = path.join(briefDirectory, "brief.md");
   if (await readFile(briefFile, "utf8").catch(() => undefined) !== brief + "\n") await atomic(briefFile, brief + "\n");
-  if (kind === "claude") return [...(model ? ["--model", model] : []), "--append-system-prompt", brief, "--effort", effort];
+  // A multi-line argument cannot be typed safely into every shell (Herdr
+  // refuses it for zsh); Claude reads the brief from its file instead.
+  if (kind === "claude") return [...(model ? ["--model", model] : []), "--append-system-prompt-file", briefFile, "--effort", effort];
   if (kind === "codex") return [...(model ? ["--model", model] : []), "-c", `model_reasoning_effort=${effort}`, "-c", `developer_instructions=${JSON.stringify(brief)}`];
   if (kind === "opencode") {
     const directory = path.join(process.env.XDG_CONFIG_HOME || path.join(homeDirectory(), ".config"), "opencode", "agents");

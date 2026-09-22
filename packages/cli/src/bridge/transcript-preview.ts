@@ -12,8 +12,10 @@ const MAX_TEXT = 32_768;
 /** Only the last Claude reply after the current prompt is eligible. A missing
  * prompt anchor is deliberately silent: scrollback could belong to an old turn. */
 export function claudePanePreview(rendered: string, prompt: string, previous = ""): string {
-  const lines = rendered.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
-    .split(/\r?\n/).map(line => line.replace(/[\u2500-\u257f]/g, "").trimEnd());
+  const raw = rendered.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "").split(/\r?\n/);
+  // The rule above the input box can carry the session title
+  // ("───── Claude sesh ─"); it ends the reply, it is never part of it.
+  const lines = raw.map(line => /[─━═]{3,}/.test(line) && !/^\s*[│┃║]/.test(line) ? "❯" : line.replace(/[\u2500-\u257f]/g, "").trimEnd());
   const firstPrompt = prompt.trim().split(/\r?\n/)[0]?.trim();
   if (!firstPrompt) return "";
   let start = -1;
@@ -28,12 +30,22 @@ export function claudePanePreview(rendered: string, prompt: string, previous = "
   if (scrolled && !previous) return "";
   const reply: string[] = [];
   let writing = scrolled;
-  for (const line of lines.slice(Math.max(0, start))) {
+  const body = lines.slice(Math.max(0, start));
+  // A "⏺" block whose next line is a "⎿" result is a tool call, collapsed
+  // ("⏺ Running 1 shell command…") or not; it lands as its own entry.
+  const toolBlock = (index: number) => {
+    for (let next = index + 1; next < body.length; next++) {
+      if (!body[next].trim()) continue;
+      return /^\s*⎿/.test(body[next]);
+    }
+    return false;
+  };
+  for (const [index, line] of body.entries()) {
     if (/^\s*[❯>]/.test(line) || /esc(?:ape)? to interrupt/i.test(line)) break;
     if (/^\s*[✻✽✶✢✳·⠁-⣿]/u.test(line)) continue;
     // A tool call ("⏺ Bash(ls)", "⏺ phren - search (MCP)(…)") is not reply
     // text; it lands as its own entry a moment later.
-    if (/^\s*[⏺●]\s*[\w.:-]+(?: - [\w.:-]+)?(?: \(MCP\))?\(/.test(line)) { writing = false; continue; }
+    if (/^\s*[⏺●]\s*[\w.:-]+(?: - [\w.:-]+)?(?: \(MCP\))?\(/.test(line) || (/^\s*[⏺●]/.test(line) && toolBlock(index))) { writing = false; continue; }
     if (/^\s*[⏺●]/.test(line)) { reply.length = 0; writing = true; }
     if (!writing) continue;
     const clean = line.replace(/^\s*[⏺●]\s?/, "").replace(/[⠁-⣿✻✽✶✢✳]/gu, "");

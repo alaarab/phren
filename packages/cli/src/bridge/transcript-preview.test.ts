@@ -53,6 +53,9 @@ describe("live reply previews", () => {
     expect(claudeSpinnerVerb("⏺ Reply\n❯")).toBeUndefined();
     expect(claudePanePreview("❯ Explain this\n⏺ Let me look.\n⏺ Bash(ls -la)\n  ⎿ file\n⏺ phren - search_knowledge (MCP)(query: \"x\")\n✻ Pondering… (3s)\n❯", "Explain this"))
       .toBe("Let me look.");
+    // Collapsed tool groups and the titled rule above the input box are chrome.
+    expect(claudePanePreview("❯ Explain this\n⏺ Reading now.\n⏺ Calling phren, running 1 shell command…\n  ⎿  $ ls\n✽ Precipitating… (49s)\n───── Claude sesh in herdr ─\n❯\n─────", "Explain this"))
+      .toBe("Reading now.");
   });
 
   it("strips chrome, prompts and spinners without showing old replies or tool output", () => {
