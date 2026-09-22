@@ -30,22 +30,25 @@ export function claudePanePreview(rendered: string, prompt: string, previous = "
   if (scrolled && !previous) return "";
   const reply: string[] = [];
   let writing = scrolled;
-  const body = lines.slice(Math.max(0, start));
+  const body = lines.slice(Math.max(0, start)), rawBody = raw.slice(Math.max(0, start));
   // A "⏺" block whose next line is a "⎿" result is a tool call, collapsed
   // ("⏺ Running 1 shell command…") or not; it lands as its own entry.
   const toolBlock = (index: number) => {
     for (let next = index + 1; next < body.length; next++) {
       if (!body[next].trim()) continue;
-      return /^\s*⎿/.test(body[next]);
+      // A result ("⎿") or a sub-agent tree ("├─ Plan · 0 tool uses") follows a tool call.
+      return /^\s*(?:│\s*)?[⎿├└]/.test(rawBody[next]);
     }
     return false;
   };
   for (const [index, line] of body.entries()) {
     if (/^\s*[❯>]/.test(line) || /esc(?:ape)? to interrupt/i.test(line)) break;
     if (/^\s*[✻✽✶✢✳·⠁-⣿]/u.test(line)) continue;
-    // A tool call ("⏺ Bash(ls)", "⏺ phren - search (MCP)(…)") is not reply
+    // A running tool group ("⏺ Running 2 agents…") and a tool call
+    // ("⏺ Bash(ls)", "⏺ phren - search (MCP)(…)") are not reply
     // text; it lands as its own entry a moment later.
-    if (/^\s*[⏺●]\s*[\w.:-]+(?: - [\w.:-]+)?(?: \(MCP\))?\(/.test(line) || (/^\s*[⏺●]/.test(line) && toolBlock(index))) { writing = false; continue; }
+    if (/^\s*[⏺●]\s*[\w.:-]+(?: - [\w.:-]+)?(?: \(MCP\))?\(/.test(line) || (/^\s*[⏺●]/.test(line) && toolBlock(index))
+      || /^\s*[⏺●]\s*(?:Running|Calling|Reading|Searching|Writing|Editing|Fetching) .*(?:…|\.\.\.)\s*$/.test(line)) { writing = false; continue; }
     if (/^\s*[⏺●]/.test(line)) { reply.length = 0; writing = true; }
     if (!writing) continue;
     const clean = line.replace(/^\s*[⏺●]\s?/, "").replace(/[⠁-⣿✻✽✶✢✳]/gu, "");
