@@ -1937,6 +1937,12 @@ schedules:
       }
     });
 
+    it("starts an agent with the chosen model and effort", async () => {
+      const launched = await api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "Worker", kind: "claude", model: "claude-opus-5-5", effort: "xhigh" });
+      expect(launched.status, JSON.stringify(launched.data)).toBe(200);
+      expect(commands.filter(c => c.method === "agent.start").at(-1)?.params.args).toEqual(["--model", "claude-opus-5-5", "--effort", "xhigh"]);
+    });
+
     it("starts a conductor with no folder in the phren store", async () => {
       const store = path.join(root, ".phren");
       await mkdir(store, { recursive: true });
