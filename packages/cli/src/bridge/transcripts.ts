@@ -476,6 +476,9 @@ export function visibleEvent(raw: Json, source: Provider, includeSidechain = fal
     return { seq: raw.seq, time: raw.time, type: raw.type, data: exported };
   }
   if (source === "codex") {
+    if (raw.type === "phren_queue_consumed" && typeof raw.key === "string" && /^[a-f0-9]{64}$/.test(raw.key)) {
+      return { type: raw.type, key: raw.key };
+    }
     const execEvent = visibleCodexExecEvent(raw); if (execEvent) return execEvent;
     const p = object(raw.payload);
     // The model answering this turn is the only field of turn_context the
