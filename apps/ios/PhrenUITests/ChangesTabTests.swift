@@ -4,6 +4,35 @@ import XCTest
 /// repository diff must draw fold bars and a numbered gutter in Diff mode.
 final class ChangesTabTests: XCTestCase {
     @MainActor
+    func testSessionCodeAndTreeSymbolsReturnNotesToTheSameAgent() {
+        let app = launchChanges(extra: ["--code-fixture"])
+        let code = app.buttons["changes-tab-code"]
+        XCTAssertTrue(code.waitForExistence(timeout: 8)); code.tap()
+        XCTAssertTrue(app.textFields["code-search"].waitForExistence(timeout: 8))
+        attachUIScreenshot(app, "Session Code tab")
+        app.buttons["changes-tab-tree"].tap()
+        let directory = app.buttons["changes-tree-entry:Sources"]
+        XCTAssertTrue(directory.waitForExistence(timeout: 8)); directory.tap()
+        let symbol = app.buttons["changes-tree-symbols:Sources/App.swift"]
+        XCTAssertTrue(symbol.waitForExistence(timeout: 8))
+        attachUIScreenshot(app, "Working tree symbol summaries")
+        app.buttons["changes-tab-history"].tap()
+        app.buttons["changes-tab-tree"].tap()
+        XCTAssertTrue(symbol.waitForExistence(timeout: 8), "Expanded branches survive tab switches")
+        app.scrollViews.firstMatch.swipeDown()
+        XCTAssertTrue(symbol.waitForExistence(timeout: 8), "Expanded branches survive refresh")
+        symbol.tap()
+        let line = app.buttons["code-line:5"]
+        XCTAssertTrue(line.waitForExistence(timeout: 8)); line.tap()
+        let note = app.descendants(matching: .any).matching(identifier: "code-note").firstMatch
+        XCTAssertTrue(note.waitForExistence(timeout: 5)); note.tap(); note.typeText("Keep coordinates stable.")
+        app.buttons["code-send"].tap()
+        XCTAssertTrue(app.staticTexts["Saved and sent to this session."].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.staticTexts["Send code note"].exists)
+        attachUIScreenshot(app, "Code note sent to originating session")
+    }
+
+    @MainActor
     func testChangesDiffModeDrawsFoldBarAndGutter() {
         let app = launchChanges()
         let diffMode = app.buttons["changes-mode-diff"]

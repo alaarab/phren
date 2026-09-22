@@ -7,6 +7,13 @@ struct MemoryMaintenanceRoute: Hashable { }
 struct ProjectsView: View {
     @Environment(AppModel.self) private var model
     @State private var projectsModel = ProjectsModel()
+    @State private var showSearch = false
+
+    @State private var showMore = false
+
+    @State private var showStores = false
+
+    @State private var agentChoice: ProjectAgentChoice?
     @State private var navigationPath = NavigationPath()
     @State private var showVoiceCapture = false
     @State private var showAddProject = false
@@ -31,18 +38,6 @@ struct ProjectsView: View {
                 LiveStatusBar()
                 ActionErrorBanner()
                 PhrenScrollScreen {
-                    PhrenSectionHeader(title: "Explore")
-                    VStack(spacing: 4) {
-                        // No graph row: the Memory tab is the graph now. The
-                        // More menu above still opens this screen, and each
-                        // session or chat keeps its own Explore graph.
-                        NavigationLink { FilesView() } label: {
-                            PhrenMenuRow(title: "Files", subtitle: "Browse the store's markdown and config",
-                                         icon: "folder", color: PhrenTheme.success, compact: true)
-                        }.accessibilityLabel("Files")
-                        .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
-                    }
-                    .padding(8).background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium))
                     PhrenSectionHeader(title: "Projects", count: projectsModel.count)
                     if projectsModel.ready && projectsModel.projects.isEmpty && !projectsModel.storeIsEmpty {
                         Text("No matching projects.").font(.footnote).foregroundStyle(PhrenTheme.textMuted)
@@ -52,7 +47,7 @@ struct ProjectsView: View {
                             NavigationLink(value: item) {
                                 VStack(alignment: .leading, spacing: 3) {
                                     HStack(spacing: 6) {
-                                        // The project's own name colour, or the theme's project colour.
+                                        // The project's own name color, or the theme's project color.
                                         Text(item.project.name).font(.headline)
                                             .foregroundStyle(PhrenTheme.projectColor(storeId: item.storeId, project: item.project.name))
                                         if model.hasMultipleStores {
@@ -84,31 +79,9 @@ struct ProjectsView: View {
                             .buttonStyle(.plain)
                             .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
                             .accessibilityIdentifier("project:\(item.storeId):\(item.project.name)")
+                            .openAgentHold { agentChoice = .project(storeID: item.storeId, name: item.project.name) }
                         }
                     }
-                    PhrenSectionHeader(title: "Agent setup")
-                    VStack(spacing: 4) {
-                        NavigationLink { LiveSessionsView() } label: {
-                            PhrenMenuRow(title: "Live sessions", subtitle: "Pick up where your agents left off",
-                                         icon: "waveform.path", compact: true)
-                        }.accessibilityLabel("Live sessions")
-                        NavigationLink { SkillsView() } label: {
-                            PhrenMenuRow(title: "Skills", icon: "wand.and.stars", color: PhrenTheme.lavender, compact: true)
-                        }
-                        NavigationLink { AgentsView() } label: {
-                            PhrenMenuRow(title: "Agent instructions", icon: "person.crop.rectangle.stack", compact: true)
-                        }
-                    }
-                    .padding(8).background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium))
-                    .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
-                    Group {
-                        NavigationLink(value: MemoryMaintenanceRoute()) {
-                            Label("Memory maintenance", systemImage: "wrench.and.screwdriver")
-                        }
-                        .foregroundStyle(.secondary)
-                    }
-                    Text("Your agents build memory as you work. Maintenance is here when you need it.")
-                        .font(.caption).foregroundStyle(PhrenTheme.textMuted)
                 }
                 .overlay {
                     // First run: the store is connected but empty, or not
@@ -130,7 +103,12 @@ struct ProjectsView: View {
                         }
                     }
                 }
-                .searchable(text: $projectsModel.filter, prompt: "Filter projects")
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    if showSearch {
+                        PhrenSearchField(text: $projectsModel.filter, placeholder: "Filter projects", identifier: "projects-search")
+                            .padding(.horizontal, 16).padding(.bottom, 8)
+                    }
+                }
                 .onChange(of: projectsKey, initial: true) { _, key in
                     projectsModel.update(key: key, merged: model.mergedProjects, writable: model.writableProjects)
                 }
@@ -145,44 +123,35 @@ struct ProjectsView: View {
                         .accessibilityIdentifier("projects-add")
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    Menu {
-                        NavigationLink { GraphView() } label: {
-                            Label("Memory graph", systemImage: "circle.hexagongrid")
-                        }
-                        Section("Agent setup") {
-                            NavigationLink { LiveSessionsView() } label: {
-                                Label("Live sessions", systemImage: "waveform.path")
-                            }
-                            NavigationLink { SkillsView() } label: {
-                                Label("Skills", systemImage: "wand.and.stars")
-                            }
-                            NavigationLink { AgentsView() } label: {
-                                Label("Agent instructions", systemImage: "person.crop.rectangle.stack")
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                    }
-                    .accessibilityLabel("More")
+                    PhrenIconButton(icon: "ellipsis", label: "More") { showMore = true }
+                        .accessibilityIdentifier("projects-more")
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    PhrenIconButton(icon: "magnifyingglass", label: "Filter projects") { showSearch.toggle() }
                 }
                 if model.hasMultipleStores {
                     ToolbarItem(placement: .topBarLeading) {
-                        Menu {
-                            Picker("Store", selection: $model.storeFilter) {
-                                Text("All stores").tag(String?.none)
-                                ForEach(model.storeDescriptors) { store in
-                                    Text(store.displayName).tag(String?.some(store.id))
-                                }
-                            }
-                        } label: {
-                            Image(systemName: model.storeFilter == nil
-                                  ? "line.3.horizontal.decrease"
-                                  : "line.3.horizontal.decrease.circle.fill")
-                        }
+                        PhrenIconButton(icon: model.storeFilter == nil ? "line.3.horizontal.decrease" : "line.3.horizontal.decrease.circle.fill",
+                                        label: "Filter stores") { showStores = true }
+                            .accessibilityIdentifier("projects-stores")
                     }
                 }
-                // Quick capture by voice comes through Siri and the capture
-                // intent, not a toolbar mic; the sheet stays for that route.
+                if !projectsModel.voiceCaptureTargets.isEmpty {
+                    ToolbarItem(placement: .primaryAction) {
+                        PhrenIconButton(icon: "mic", label: "Capture by voice") { showVoiceCapture = true }
+                            .accessibilityIdentifier("projects-mic")
+                    }
+                }
+            }
+            .navigationDestination(for: ProjectsDestination.self) { destination in
+                switch destination {
+                case .files: FilesView()
+                case .graph: GraphView()
+                case .sessions: LiveSessionsView()
+                case .skills: SkillsView()
+                case .instructions: AgentsView()
+                case .maintenance: MemoryMaintenanceView()
+                }
             }
             .navigationDestination(for: StoreProject.self) { item in
                 ProjectDetailView(storeId: item.storeId, project: item.project.name)
@@ -222,11 +191,35 @@ struct ProjectsView: View {
             }
             .sheet(isPresented: $connectingComputer) { NavigationStack { LiveHostEditor() } }
         }
+        .phrenActionSheet(isPresented: $showMore, title: "More", actions: moreActions, identifier: "projects-more-sheet")
+        .phrenActionSheet(isPresented: $showStores, title: "Store", actions: storeActions, identifier: "projects-store-sheet")
+        .projectAgentSheet(choice: $agentChoice)
     }
+
+    private enum ProjectsDestination: Hashable { case files, graph, sessions, skills, instructions, maintenance }
+
+    private var moreActions: [PhrenControlAction] {
+        let destinations: [(ProjectsDestination, String, String)] = [
+         (.files, "Files", "folder"), (.graph, "Memory graph", "circle.hexagongrid"),
+         (.sessions, "Live sessions", "waveform.path"), (.skills, "Skills", "wand.and.stars"),
+         (.instructions, "Agent instructions", "person.crop.rectangle.stack"),
+         (.maintenance, "Memory maintenance", "wrench.and.screwdriver")]
+        return destinations.map { destination, title, icon in
+            PhrenControlAction(id: String(describing: destination), title: title, icon: icon) { navigationPath.append(destination) }
+        }
+    }
+
+    private var storeActions: [PhrenControlAction] {
+        [.init(id: "all", title: "All stores", isSelected: model.storeFilter == nil) { model.storeFilter = nil }]
+        + model.storeDescriptors.map { store in
+            .init(id: store.id, title: store.displayName, isSelected: model.storeFilter == store.id) { model.storeFilter = store.id }
+        }
+    }
+
 }
 
 /// Warns that `stores.yaml` claims this project for a different, non-primary
-/// store than the one it's physically sitting in — e.g. an employer's
+/// store than the one it's physically sitting in, for example an employer's
 /// projects that leaked into a personal repo (see AppModel.claimingStoreName).
 /// A local view rather than an addition to Components.swift's `TagChip`:
 /// this branch owns ProjectsView.swift's row content only, not the shared
@@ -256,6 +249,7 @@ struct ProjectDetailView: View {
     @State private var skillsPresentationID = UUID()
     @State private var showingKnobs = false
     @State private var codeSymbols: Int?
+    @State private var agentChoice: ProjectAgentChoice?
 
     enum Tab: String, CaseIterable {
         case findings = "Findings"
@@ -271,7 +265,8 @@ struct ProjectDetailView: View {
     var body: some View {
         VStack(spacing: 0) {
             ActionErrorBanner()
-            controlBand
+            ProjectComputerRows(storeID: storeId, project: project, choice: $agentChoice)
+            controlBand.fixedSize(horizontal: false, vertical: true)
             sectionChips
             switch tab {
             case .findings: FindingsTab(storeId: storeId, project: project)
@@ -311,19 +306,18 @@ struct ProjectDetailView: View {
             ProjectKnobsView(storeId: storeId, project: project)
         }
         .task(id: project) { await loadCodeSymbols() }
+        .projectAgentSheet(choice: $agentChoice)
     }
 
-    /// One 44pt band with three equal cells: the project's controls, each a
-    /// tap into the same destination as before, its short value underneath.
+    /// Equal columns keep four destinations readable on a narrow phone.
     private var controlBand: some View {
-        HStack(spacing: 0) {
+        ProjectControlLayout {
             Button { skillsPresentationID = UUID(); showingSkills = true } label: {
                 controlCell(icon: "wand.and.stars", title: "Skills", value: "Both")
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Project skills")
             .accessibilityIdentifier("project-skills")
-            controlDivider
             Button { showingKnobs = true } label: {
                 controlCell(icon: "slider.horizontal.3", title: "Knobs", value: knobsSummary)
             }
@@ -331,7 +325,6 @@ struct ProjectDetailView: View {
             .accessibilityLabel("Project knobs")
             .accessibilityIdentifier("project-knobs-row")
             if SessionOverviewMonitor.shared.allowsSchedules() {
-                controlDivider
                 NavigationLink { SchedulesView(storeId: storeId, project: project) } label: {
                     controlCell(icon: "clock.badge.checkmark", title: "Schedules", value: schedulesSummary)
                 }
@@ -340,7 +333,6 @@ struct ProjectDetailView: View {
                 .accessibilityIdentifier("project-schedules-row")
             }
             if SessionOverviewMonitor.shared.allowsCode() {
-                controlDivider
                 NavigationLink { CodeView(storeId: storeId, project: project) } label: {
                     controlCell(icon: "chevron.left.forwardslash.chevron.right", title: "Code", value: codeSummary)
                 }
@@ -349,27 +341,36 @@ struct ProjectDetailView: View {
                 .accessibilityIdentifier("project-code-row")
             }
         }
-        .frame(minHeight: 44)
+        .frame(height: 52)
         .background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            GeometryReader { geometry in
+                let count = 2 + (SessionOverviewMonitor.shared.allowsSchedules() ? 1 : 0)
+                    + (SessionOverviewMonitor.shared.allowsCode() ? 1 : 0)
+                ForEach(1..<count, id: \.self) { index in
+                    controlDivider.position(x: geometry.size.width * CGFloat(index) / CGFloat(count), y: 26)
+                }
+            }.allowsHitTesting(false)
+        }
+        .overlay {
+            Color.clear.accessibilityElement().accessibilityIdentifier("project-control-band")
+                .allowsHitTesting(false)
+        }
         .padding(.horizontal, 16).padding(.top, 8)
     }
 
     private func controlCell(icon: String, title: String, value: String) -> some View {
-        HStack(spacing: 8) {
+        VStack(spacing: 3) {
             Image(systemName: icon)
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(PhrenTheme.textSecondary)
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title).font(PhrenTheme.Font.caption.weight(.semibold)).foregroundStyle(PhrenTheme.text)
-                Text(value).font(PhrenTheme.Font.caption2).foregroundStyle(PhrenTheme.textMuted)
-                    .lineLimit(1).truncationMode(.tail)
-            }
-            Spacer(minLength: 0)
+            Text(title).font(PhrenTheme.Font.caption.weight(.semibold)).foregroundStyle(PhrenTheme.text)
+                .lineLimit(1)
         }
-        .padding(.horizontal, 10)
-        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 52)
         .contentShape(Rectangle())
+        .accessibilityValue(value)
     }
 
     private var controlDivider: some View {
@@ -862,5 +863,19 @@ struct SummaryTab: View {
         }
         .refreshable { await model.pullToRefresh() }
         .phrenScreen()
+    }
+}
+
+
+private struct ProjectControlLayout: Layout {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        CGSize(width: proposal.width ?? 320, height: 52)
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let width = bounds.width / CGFloat(max(1, subviews.count))
+        for (index, subview) in subviews.enumerated() {
+            subview.place(at: CGPoint(x: bounds.minX + CGFloat(index) * width, y: bounds.minY),
+                          proposal: ProposedViewSize(width: width, height: bounds.height))
+        }
     }
 }

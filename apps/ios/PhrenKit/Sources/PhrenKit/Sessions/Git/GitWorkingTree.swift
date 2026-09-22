@@ -36,6 +36,7 @@ public struct GitWorkingTree: Decodable, Equatable, Sendable {
         public let path: String
         public let kind: Kind
         public let status: Status?
+        public let fileCount: Int?
         public var id: String { path }
         public var isDirectory: Bool { kind == .dir }
     }
@@ -43,6 +44,7 @@ public struct GitWorkingTree: Decodable, Equatable, Sendable {
     /// The path this level was requested for; "" is the repository root.
     public let path: String
     public let entries: [Entry]
+    public let version: String?
 
     public static func read(_ data: Data) throws -> Self {
         guard data.count <= 8_388_608 else { throw PhrenKitError.validation("The working tree listing is too large.") }

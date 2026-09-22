@@ -13,13 +13,15 @@ public struct CodeNoteRequest: Encodable, Sendable {
         public init(session: String) { self.session = session; harness = nil }
         public init(harness: String) { self.harness = harness; session = nil }
     }
+    public let store: String?
     public let project: String
     public let symbol: String
     public let file: String
     public let line: Int
     public let text: String
     public let target: Target?
-    public init(project: String, symbol: String, file: String, line: Int, text: String, target: Target? = nil) {
+    public init(project: String, symbol: String, file: String, line: Int, text: String, target: Target? = nil, store: String? = nil) {
+        self.store = store
         self.project = project; self.symbol = symbol; self.file = file
         self.line = line; self.text = text; self.target = target
     }

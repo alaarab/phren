@@ -17,7 +17,7 @@ struct ChatApprovalCard<Terminal: View>: View {
                 Text(explanation).font(.subheadline).lineLimit(4).textSelection(.enabled)
             }
             if let message = approval.message, !message.isEmpty {
-                DisclosureGroup("Action details") {
+                PhrenDisclosure(title: "Action details") {
                     ScrollView { Text(message).font(.caption.monospaced()).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.frame(maxHeight: 220)
                 }
             }
@@ -57,6 +57,94 @@ struct ChatApprovalCard<Terminal: View>: View {
         Button { answer(.approve) } label: {
             Text("Approve").lineLimit(1).frame(maxWidth: .infinity, minHeight: 32)
         }.buttonStyle(.borderedProminent).tint(PhrenTheme.cyan).accessibilityIdentifier("chat-approval-approve")
+    }
+}
+
+/// In-chat permissions use the same header and radio rows as choice questions.
+/// The compact approval card above remains available to non-chat surfaces.
+struct ChatApprovalQuestionCard: View {
+    let approval: AgentApproval
+    let providerName: String
+    let busy: Bool
+    let terminal: AnyView
+    let answerKey: (AgentAnswerKey) -> Void
+    let answer: (ApprovalDecision) -> Void
+    @State private var selected: String?
+
+    private struct Row: Identifiable {
+        let id: String
+        let label: String
+        var decision: ApprovalDecision? = nil
+        var key: AgentAnswerKey? = nil
+        var enabled = true
+    }
+
+    private var rows: [Row] {
+        var result: [Row]
+        if let choice = approval.choice, choice.prompt(id: approval.id) != nil {
+            result = choice.options.enumerated().map { index, option in
+                Row(id: option.answerKey == .escape || option.answerKey == .no || option.label.lowercased() == "no" ? "deny" : index == 0 ? "approve" : "option-\(index)",
+                    label: option.label, key: option.answerKey)
+            }
+        } else if let options = approval.options, !options.isEmpty {
+            result = options.map { Row(id: $0.decision.rawValue, label: $0.label, decision: $0.decision) }
+        } else {
+            result = [Row(id: "approve", label: "Approve", decision: .approve),
+                      Row(id: "deny", label: "Deny", decision: .deny)]
+        }
+        let supplied = approval.choice != nil || approval.options?.isEmpty == false
+        if approval.conductor != nil || !supplied {
+            let insertion = result.firstIndex { $0.id == "deny" } ?? result.endIndex
+            var grants: [Row] = []
+            if !result.contains(where: { $0.decision == .allowProject }) {
+                grants.append(Row(id: "allow-project", label: "Allow for this project", decision: .allowProject,
+                                  enabled: approval.conductor?.project != nil))
+            }
+            if !result.contains(where: { $0.decision == .allowEverywhere }) {
+                grants.append(Row(id: "allow-everywhere", label: "Allow everywhere", decision: .allowEverywhere,
+                                  enabled: approval.conductor != nil))
+            }
+            result.insert(contentsOf: grants, at: insertion)
+        }
+        return result
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                ChatQuestionHeaderLabel(title: "\(providerName) asks", systemImage: "questionmark.bubble")
+                    .accessibilityIdentifier("chat-approval")
+                Spacer(minLength: 0)
+                terminal
+            }
+            Text(approval.choice?.title ?? approval.title ?? approval.toolName ?? "Allow this action?")
+                .font(PhrenTheme.Font.body.weight(.semibold)).foregroundStyle(PhrenTheme.text)
+                .fixedSize(horizontal: false, vertical: true)
+            if let explanation = approval.explanation, explanation != approval.command {
+                Text(explanation).font(PhrenTheme.Font.body).foregroundStyle(PhrenTheme.text)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let command = approval.command {
+                Text(command).font(PhrenTheme.Font.monoFootnote).foregroundStyle(PhrenTheme.textMuted)
+                    .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("chat-approval-command")
+            }
+            ForEach(rows) { row in
+                ChatQuestionOptionRow(label: row.label, selected: selected == row.id,
+                    busy: busy || !row.enabled, radius: PhrenTheme.Radius.questionOption) {
+                    selected = row.id
+                    if let key = row.key { answerKey(key) }
+                    else if let decision = row.decision { answer(decision) }
+                }
+                .accessibilityIdentifier("chat-approval-\(row.id)")
+            }
+            if let message = approval.message, message != approval.command, message != approval.explanation {
+                PhrenDisclosure(title: "Action details") {
+                    Text(message).font(PhrenTheme.Font.monoCaption).foregroundStyle(PhrenTheme.textMuted)
+                        .textSelection(.enabled)
+                }
+            }
+        }.padding(16).phrenCard().accessibilityElement(children: .contain)
     }
 }
 

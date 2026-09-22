@@ -76,6 +76,7 @@ struct ProjectSessionsView: View {
     @State private var chatSession: LiveAgentSession?
     @State private var terminalSession: LiveAgentSession?
     @State private var launching = false
+    @State private var agentChoice: ProjectAgentChoice?
 
     private var preferences: LiveSessionPreferences? { try? LiveSessionPreferences.read(data) }
     private var target: SessionProject { SessionProject(storeID: storeID, name: project) }
@@ -89,6 +90,7 @@ struct ProjectSessionsView: View {
 
     var body: some View {
         PhrenList {
+                ProjectComputerRows(storeID: storeID, project: project, showsWorkspaces: true, choice: $agentChoice)
                 Section {
                     Text("\(project) · \(storeID)").font(.caption).foregroundStyle(.secondary)
                     if discovery.refreshing { ProgressView("Finding project sessions…") }
@@ -140,6 +142,7 @@ struct ProjectSessionsView: View {
             .navigationDestination(item: $chatSession) { AgentChatSheet(session: $0) }
             .navigationDestination(item: $terminalSession) { HerdrTerminalView(host: $0.host, session: $0) }
             .sheet(isPresented: $launching) { LaunchSessionView(storeID: storeID, project: project) }
+            .projectAgentSheet(choice: $agentChoice)
             .onAppear { visible = true }
             .onDisappear { visible = false }
             .task(id: DiscoveryIdentity(hosts: preferences?.hosts ?? [], active: visible && scenePhase == .active, refresh: refreshID)) {
@@ -162,6 +165,7 @@ struct ProjectSessionsView: View {
                                        computer: session.host, identifierPrefix: "discovered")
                 }
                 .buttonStyle(.plain)
+                .openAgentHold { agentChoice = .computer(session.host) }
                 .accessibilityHint(openChat ? (assign ? "Use for \(project) and chat" : "Chat with agent")
                                    : (assign ? "Use for \(project) and open terminal" : "Open terminal"))
                 .disabled(!fresh || (assign && session.tab.cwd == nil))

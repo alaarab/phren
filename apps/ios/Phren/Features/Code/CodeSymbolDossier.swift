@@ -10,6 +10,7 @@ struct CodeSymbolDossier: View {
     let project: String
     let symbol: String
     let hosts: [LiveHost]
+    var origin: SessionCodeContext? = nil
 
     @Environment(\.dismiss) private var dismiss
     @State private var definition: CodeDefinition?
@@ -79,7 +80,7 @@ struct CodeSymbolDossier: View {
         HStack(spacing: PhrenTheme.Space.small) {
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 6) {
-                    Text(symbol).font(PhrenTheme.Font.body.weight(.semibold)).foregroundStyle(PhrenTheme.text).lineLimit(1)
+                    Text(definition?.symbol.name ?? symbol).font(PhrenTheme.Font.body.weight(.semibold)).foregroundStyle(PhrenTheme.text).lineLimit(1)
                     if let kind = definition?.symbol.kind { PhrenChip(text: kind) }
                 }
                 if let definition {
@@ -173,6 +174,7 @@ struct CodeSymbolDossier: View {
             + [PhrenOption(id: "new", value: "new", title: "New worker"), PhrenOption(id: "save", value: "save", title: "Save note only")]
     }
     private func chooseRecipient() async {
+        if let origin { await send(to: origin.target.sessionID); return }
         sending = true
         defer { sending = false }
         noteStatus = nil
@@ -202,8 +204,15 @@ struct CodeSymbolDossier: View {
         defer { sending = false }
         let target: CodeNoteRequest.Target? = choice == "save" ? nil : choice == "new" ? .init(harness: harness) : .init(session: choice)
         do {
+            #if DEBUG && targetEnvironment(simulator)
+            if CodeFixture.enabled {
+                note = ""
+                noteStatus = origin == nil ? "Note saved." : "Saved and sent to this session."
+                return
+            }
+            #endif
             let result = try await PhrenConnection.codeNote(host: host, privateKey: DeviceSSHKey.load(host.id),
-                note: CodeNoteRequest(project: project, symbol: symbol, file: definition.symbol.file, line: selectedLine, text: note, target: target))
+                note: CodeNoteRequest(project: project, symbol: symbol, file: definition.symbol.file, line: selectedLine, text: note, target: target, store: origin?.storeID))
             guard result.saved else { noteStatus = "The computer did not confirm the note."; return }
             findings = result.findings
             note = ""
@@ -223,8 +232,8 @@ struct CodeSymbolDossier: View {
         #endif
         guard let host = hosts.first else { return }
         do {
-            async let definitionTask = PhrenConnection.codeDefinition(host: host, privateKey: DeviceSSHKey.load(host.id), project: project, symbol: symbol)
-            async let referencesTask = PhrenConnection.codeReferences(host: host, privateKey: DeviceSSHKey.load(host.id), project: project, symbol: symbol)
+            async let definitionTask = PhrenConnection.codeDefinition(host: host, privateKey: DeviceSSHKey.load(host.id), project: project, symbol: symbol, storeID: origin?.storeID)
+            async let referencesTask = PhrenConnection.codeReferences(host: host, privateKey: DeviceSSHKey.load(host.id), project: project, symbol: symbol, storeID: origin?.storeID)
             definition = try await definitionTask
             findings = definition?.findings ?? []
             references = try await referencesTask

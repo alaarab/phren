@@ -13,7 +13,7 @@ type Ref = { name: string; kind: string };
 type Commit = { sha: string; short: string; subject: string; author: string; date: string; refs: Ref[]; parents: string[] };
 type Log = { commits: Commit[]; uncommitted: { files: number; additions: number; deletions: number } };
 type Branches = { current: string | null; local: { name: string }[]; remote: { name: string }[] };
-type Tree = { path: string; entries: { name: string; path: string; kind: string; status?: string }[] };
+type Tree = { path: string; version?: string; entries: { name: string; path: string; kind: string; status?: string; fileCount?: number }[] };
 
 describe("git routes", () => {
   let created: string | undefined;
@@ -145,6 +145,42 @@ describe("git routes", () => {
     expect(await readFile(path.join(root, "untracked-dir/keep.txt"), "utf8")).toBe("keep\n");
   });
 
+  it("bounds cached directory reads in a repository with more than 3000 files", async () => {
+    const { root } = await repository();
+    await Promise.all(Array.from({ length: 32 }, async (_, index) => {
+      const directory = path.join(root, `large/group-${index}`);
+      await mkdir(directory, { recursive: true });
+      await Promise.all(Array.from({ length: 100 }, (_, file) => writeFile(path.join(directory, `file-${file}.ts`), "export const value = 1;\n")));
+    }));
+    const cold = await gitTree(root);
+    expect((cold.entries as Tree["entries"]).find(entry => entry.name === "large")?.fileCount).toBe(3200);
+    const started = performance.now();
+    const child = await gitTree(root, "large/group-12");
+    const elapsed = performance.now() - started;
+    expect(child.entries).toHaveLength(100);
+    expect(child.version).toBe(cold.version);
+    expect(elapsed).toBeLessThan(500);
+  });
+
+  it("refreshes cached children on status, mutations and HEAD changes and counts descendants", async () => {
+    const { root, git } = await repository();
+    const initial = await gitTree(root);
+    expect((initial.entries as Tree["entries"]).find(entry => entry.path === "folder").fileCount).toBe(1);
+    expect((await gitTree(root, "folder")).version).toBe(initial.version);
+    await writeFile(path.join(root, "folder/new.txt"), "new\n");
+    await gitStatus(root);
+    const refreshed = await gitTree(root, "folder");
+    expect(refreshed.version).not.toBe(initial.version);
+    expect((refreshed.entries as Tree["entries"]).map(entry => entry.path)).toContain("folder/new.txt");
+    await gitStage(root, ["folder/new.txt"]);
+    expect(((await gitTree(root, "folder")).entries as Tree["entries"]).find(entry => entry.name === "new.txt").status).toBe("A");
+    await git("commit", "-qm", "add file");
+    expect(((await gitTree(root, "folder")).entries as Tree["entries"]).find(entry => entry.name === "new.txt").status).toBeUndefined();
+    await writeFile(path.join(root, "folder/later.txt"), "later\n");
+    await new Promise(resolve => setTimeout(resolve, 2100));
+    expect(((await gitTree(root, "folder")).entries as Tree["entries"]).map(entry => entry.name)).toContain("later.txt");
+  });
+
   it("lists a tree one level deep, directories first, and marks a changed folder", async () => {
     const { root } = await repository();
     await writeFile(path.join(root, "folder/inner.txt"), "one\ntwo\n");
@@ -198,4 +234,19 @@ describe("git routes", () => {
       await expect(gitStatus(plain)).rejects.toMatchObject({ status: 409 });
     } finally { await rm(plain, { recursive: true, force: true }); }
   });
+});
+
+// The checkout benchmark also runs when the sandbox cannot open the Hook socket.
+it("measures the tree handler on the phren checkout", async () => {
+  const measure = async (run: () => Promise<unknown>) => {
+    const start = performance.now(); await run(); return performance.now() - start;
+  };
+  const statusMs = await measure(() => gitStatus(process.cwd()));
+  const coldTreeMs = await measure(() => gitTree(process.cwd()));
+  const cachedTreeMs = await measure(() => gitTree(process.cwd()));
+  const directoryMs = await measure(() => gitTree(process.cwd(), "packages/cli/src"));
+  const times = { benchmark: "phren git handlers", statusMs, coldTreeMs, cachedTreeMs, directoryMs };
+  console.log(JSON.stringify(times));
+  if (process.env.PHREN_TREE_BENCHMARK_LOG) await writeFile(process.env.PHREN_TREE_BENCHMARK_LOG, JSON.stringify(times, null, 2));
+  expect(cachedTreeMs).toBeLessThan(500);
 });

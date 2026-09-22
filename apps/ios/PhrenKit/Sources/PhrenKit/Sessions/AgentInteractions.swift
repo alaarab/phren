@@ -1,6 +1,12 @@
 import Foundation
 
 public struct AgentApproval: Decodable, Equatable, Sendable, Identifiable {
+    public struct Option: Decodable, Equatable, Sendable {
+        public let label: String
+        public let decision: ApprovalDecision
+    }
+    /// Decision rows supplied by the Hook, in the provider's order.
+    public let options: [Option]?
     public let actionId: String
     public let title: String?
     public let toolName: String?
@@ -30,6 +36,13 @@ public struct AgentApproval: Decodable, Equatable, Sendable, Identifiable {
             }
         }
         return message
+    }
+
+    public var command: String? {
+        if let body = choice?.body, !body.isEmpty { return body }
+        guard let message, !message.isEmpty else { return nil }
+        guard let input = try? JSONSerialization.jsonObject(with: Data(message.utf8)) as? [String: Any] else { return message }
+        return (input["command"] ?? input["cmd"]) as? String
     }
 
     /// Claude Code asks its questions through a permission request: the tool

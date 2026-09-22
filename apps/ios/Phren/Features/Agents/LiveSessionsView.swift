@@ -13,6 +13,8 @@ struct LiveSessionsView: View {
     @State private var scheduleOpen: ScheduleHistoryOpen?
     @State private var closeRequest: SessionCloseRequest?
     @State private var closeError: String?
+    @State private var showingMore = false
+    @State private var setupDestination: LiveSessionsModel.SetupAction?
     private struct SessionOpen: Identifiable, Hashable {
         let session: LiveAgentSession
         let destination: AgentLaunch.Destination
@@ -65,49 +67,41 @@ struct LiveSessionsView: View {
                     .accessibilityIdentifier("agents-loading")
                     .transition(.opacity)
             } else {
-            PhrenList(plain: true) {
-                sessionSections(screen)
-                Section {
-                    if screen.preferencesReadable {
-                        ForEach(screen.computers) { computer in
-                            NavigationLink { LiveHostView(hostID: computer.id) } label: {
-                                PhrenMenuRow(title: computer.host.name, subtitle: computer.connecting ? "Connecting…" : computer.slow == true ? "Slow to answer" : computer.host.address,
-                                             icon: "desktopcomputer", titleColor: PhrenTheme.hostColor(computer.host.color ?? LiveHost.defaultColor(for: computer.host.id)))
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: PhrenTheme.Space.medium) {
+                    PhrenSearchField(text: Binding(get: { sessions.query }, set: sessions.setQuery),
+                                     placeholder: "Search all sessions", identifier: "sessions-search")
+                    sessionSections(screen)
+                    PhrenGroup("Computers", identifier: "sessions-computers") {
+                        if screen.preferencesReadable {
+                            ForEach(screen.computers) { computer in
+                                // Keep this row and its identity as the computer hold-action hook.
+                                NavigationLink { LiveHostView(hostID: computer.id) } label: {
+                                    PhrenMenuRow(title: computer.host.name,
+                                                 subtitle: computer.connecting ? "Connecting…" : computer.slow == true ? "Slow to answer" : computer.host.address,
+                                                 icon: "desktopcomputer",
+                                                 titleColor: PhrenTheme.hostColor(computer.host.color ?? LiveHost.defaultColor(for: computer.host.id)))
+                                        .padding(.horizontal, 12)
+                                        .background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.questionOption))
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityIdentifier("live-host:\(computer.id)")
                             }
-                            .accessibilityIdentifier("live-host:\(computer.id)")
-                            .plainListCardRow()
+                            Button { sessions.adding = true } label: {
+                                PhrenMenuRow(title: "Add computer", icon: "plus")
+                                    .padding(.horizontal, 12)
+                                    .background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.questionOption))
+                            }
+                            .buttonStyle(.plain).accessibilityIdentifier("sessions-add-computer")
+                        } else {
+                            Text("Saved connections couldn't be read. They have been preserved; update phren before editing them.")
+                                .foregroundStyle(PhrenTheme.warning)
                         }
-                        Button("Add computer", systemImage: "plus") { sessions.adding = true }
-                            .plainListCardRow()
-                    } else {
-                        Text("Saved connections couldn't be read. They have been preserved; update phren before editing them.")
-                            .foregroundStyle(.orange).plainListCardRow()
                     }
-                } header: {
-                    Text("Computers").plainListSectionLabel()
-                } footer: {
-                    Text("Keep Tailscale connected on both devices when you're away. Phren Hook connects your existing agents.")
-                        .font(.caption).foregroundStyle(PhrenTheme.textMuted).padding(.horizontal, 14).padding(.top, 4)
-                        .listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
                 }
-                Section {
-                    if screen.memoryConnected {
-                    NavigationLink { SkillsView() } label: {
-                        PhrenMenuRow(title: "Skills", icon: "wand.and.stars", color: PhrenTheme.lavender)
-                    }.plainListCardRow()
-                    NavigationLink { AgentsView() } label: {
-                        PhrenMenuRow(title: "Agent instructions", icon: "person.crop.rectangle.stack")
-                    }.plainListCardRow()
-                    } else {
-                        Button {
-                            model.showingMemoryConnection = true
-                        } label: {
-                            Label("Connect memory for skills & instructions", systemImage: "brain")
-                        }.plainListCardRow()
-                    }
-                } header: { Text("Agent setup").plainListSectionLabel() }
+                .padding(PhrenTheme.Space.large)
             }
-            .listSectionSpacing(6)
+            .accessibilityIdentifier("sessions-scroll")
             .modifier(SessionCloseDialogs(request: $closeRequest, error: $closeError,
                                           monitor: { session in sessions.monitor(for: session.host.id) }))
                 .transition(.opacity)
@@ -122,11 +116,10 @@ struct LiveSessionsView: View {
         // Keep the title in the navigation bar rather than the collapsible
         // large-title region when this list is hosted directly by a tab.
         .navigationBarTitleDisplayMode(.inline)
-        .searchable(text: Binding(get: { sessions.query }, set: sessions.setQuery),
-                    placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search all sessions")
-        .textInputAutocapitalization(.never).autocorrectionDisabled()
         .phrenScreen()
         .toolbar {
+            Button("More", systemImage: "ellipsis") { showingMore = true }
+                .accessibilityIdentifier("sessions-more")
             AccountUsageRings(hosts: hosts)
             // Settings → Show on Agents chooses these.
             if IntegrationSettings.enabled(IntegrationSettings.showWebServersKey) {
@@ -159,6 +152,15 @@ struct LiveSessionsView: View {
             sessions.setFocusFilter(AgentFocusFilterStore.load())
         }
         .refreshable { sessions.refresh() }
+        .phrenActionSheet(isPresented: $showingMore, title: "Sessions", actions: moreActions,
+                          identifier: "sessions-more-sheet")
+        .navigationDestination(item: $setupDestination) { destination in
+            switch destination {
+            case .skills: SkillsView()
+            case .instructions: AgentsView()
+            case .connectMemory: EmptyView()
+            }
+        }
         .sheet(isPresented: $sessions.adding) { NavigationStack { LiveHostEditor() } }
         .navigationDestination(item: $selected) { selection in
             LiveSessionDetailView(sessionID: selection.id, monitor: selection.monitor)
@@ -203,6 +205,19 @@ struct LiveSessionsView: View {
                 } catch { /* Keep the verified connection unchanged when an identity conflicts. */ }
             }
         }
+    }
+
+    private var moreActions: [PhrenActionSheet.Action] {
+        var actions = sessions.setupActions.map { action in
+            PhrenActionSheet.Action(id: action.rawValue, title: action.title, icon: action.icon) {
+                if action == .connectMemory { model.showingMemoryConnection = true }
+                else { setupDestination = action }
+            }
+        }
+        if overview.screen.preferencesReadable {
+            actions.append(.init(id: "add-computer", title: "Add computer", icon: "plus") { sessions.adding = true })
+        }
+        return actions
     }
 
     /// A schedule notification lands here; the run's history opens once the
@@ -257,23 +272,20 @@ struct LiveSessionsView: View {
 
     @ViewBuilder
     private func sessionSections(_ screen: SessionOverviewMonitor.Screen) -> some View {
-        let groups = screen.groups
-        if groups.isEmpty {
-            Section {
-                if screen.computers.isEmpty {
-                    // Nothing to report yet; the caption header says what to do.
-                } else if screen.computers.contains(where: \.connecting) {
-                    HStack { ProgressView(); Text("Finding sessions…") }.font(.subheadline)
-                } else {
-                    Text(!screen.query.isEmpty ? "No matching sessions"
-                         : screen.connectedCount == 0 && screen.computers.contains(where: { $0.message != nil })
-                         ? "No computers connected" : "No sessions running on the connected computers")
-                        .font(.subheadline).foregroundStyle(PhrenTheme.textMuted)
-                }
-            } header: { caption(screen) }
+        if screen.computers.isEmpty || screen.focusFilter != nil { caption(screen) }
+        if screen.groups.isEmpty && !screen.computers.isEmpty {
+            if screen.computers.contains(where: \.connecting) {
+                HStack { ProgressView(); Text("Finding sessions…") }.font(.subheadline)
+            } else {
+                Text(!screen.query.isEmpty ? "No matching sessions"
+                     : screen.connectedCount == 0 && screen.computers.contains(where: { $0.message != nil })
+                     ? "No computers connected" : "No sessions running on the connected computers")
+                    .font(.subheadline).foregroundStyle(PhrenTheme.textMuted)
+                    .accessibilityIdentifier("sessions-empty")
+            }
         }
-        ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
-            Section {
+        ForEach(screen.groups) { group in
+            PhrenGroup("\(group.title) · \(group.sessions.count)") {
                 ForEach(group.sessions) { session in
                         let monitor = sessions.monitor(for: session.host.id)
                         LiveSessionCard(session: session, fresh: monitor?.isLive(at: .now) == true,
@@ -285,25 +297,17 @@ struct LiveSessionsView: View {
                             if confirm { closeRequest = request }
                             else { SessionCloseDialogs.perform(request, monitor: sessions.monitor(for: request.session.host.id)) { closeError = $0 } }
                         })
-                        .equatable().separatedSessionRow()
+                        .equatable()
                 }
-            } header: {
-                VStack(alignment: .leading, spacing: 6) {
-                    if index == 0 { caption(screen) }
-                    // Small, quiet, upper-case — the section label Moshi uses.
-                    Text("\(group.title) · \(group.sessions.count)")
-                        .font(.caption.weight(.semibold)).foregroundStyle(PhrenTheme.textMuted).textCase(.uppercase).tracking(0.6)
-                        .padding(.leading, 14).padding(.top, 2)
+                if group.id == "previous" {
+                    Text("These computers aren't connected. Reconnect before opening a session.")
+                        .font(.caption).foregroundStyle(PhrenTheme.textMuted)
                 }
-                .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 2, trailing: 0))
-            }
-            footer: {
-                if group.id == "previous" { Text("These computers aren't connected. Reconnect before opening a session.") }
             }
         }
         let problems = screen.computers.filter { $0.message != nil }
         if !problems.isEmpty {
-            Section("Connections") {
+            PhrenGroup("Connections") {
                 ForEach(problems) { computer in
                     NavigationLink { LiveHostView(hostID: computer.id) } label: {
                         HStack {
@@ -506,6 +510,17 @@ final class LiveHostMonitor {
                 let model = launch.kind == "claude" ? "opus" : launch.kind == "codex" ? "gpt-5" : "default"
                 let conductor = #"{"id":"w9:t1","label":"1","title":"Phone conductor","agent":"\#(launch.kind)","agentStatus":"working","cwd":"\#(launch.cwd)","model":"\#(model)","role":"conductor","runningChildren":2,"childProviders":["codex","claude"]}"#
                 return try LiveWorkspaces.read(Data((#"{"kind":"herdr","groups":[{"id":"w9","label":"Phone conductor","children":["# + conductor + #"]},{"id":"w7","label":"Phone work","children":[{"id":"w7:t9","label":"1","title":"Polish the phone app","agent":"codex","agentStatus":"working","cwd":"/work/phone/src"}]}]}"#).utf8))
+            }
+            if let countFlag = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--sessions-layout-count=") }),
+               let count = Int(countFlag.split(separator: "=").last ?? ""), [0, 1, 6].contains(count) {
+                let titles = ["Polish the phone app", "Review the changes", "Fix the tests", "Write the release notes", "Check the build", "Update the docs"]
+                let tabs = (0..<count).map { index in
+                    ["id": "w7:t\(index + 1)", "label": "\(index + 1)", "title": titles[index],
+                     "agent": index.isMultiple(of: 2) ? "codex" : "claude", "agentStatus": "working",
+                     "cwd": "/work/phone", "branch": "main"]
+                }
+                let payload: [String: Any] = ["kind": "herdr", "groups": [["id": "w7", "label": "Phone work", "children": tabs]]]
+                return try LiveWorkspaces.read(JSONSerialization.data(withJSONObject: payload))
             }
             if ProcessInfo.processInfo.arguments.contains("--session-details-fixture") {
                 if previousUpdate != nil && ProcessInfo.processInfo.arguments.contains("--session-details-removed") {
@@ -881,6 +896,7 @@ private struct LiveSessionCard: View, Equatable {
     @State private var childTarget: AgentChatTarget?
     @State private var childAgents: [AgentChild] = []
     @State private var showingChildAgents = false
+    @State private var showingCloseAction = false
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.session == rhs.session && lhs.fresh == rhs.fresh && lhs.stale == rhs.stale && lhs.showHost == rhs.showHost
@@ -922,8 +938,25 @@ private struct LiveSessionCard: View, Equatable {
             }
             SessionPinButton(session: session, pinned: resolvedPin ?? (preferences?.isPinned(session.id) == true),
                              identifierPrefix: prefix, data: $data)
+            if showHost && showingCloseAction {
+                Button(role: .destructive) {
+                    showingCloseAction = false
+                    onClose(.init(session: session, scope: .tab), false)
+                } label: {
+                    Label("Close", systemImage: "xmark").labelStyle(.iconOnly)
+                        .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).foregroundStyle(PhrenTheme.danger)
+                .accessibilityIdentifier("\(prefix)-close:\(session.accessibilityKey)")
+            }
         }
         .sessionCard()
+        // ScrollView does not host native swipe actions. Preserve the overview's
+        // swipe-to-close affordance without claiming vertical scrolling.
+        .simultaneousGesture(DragGesture(minimumDistance: 30).onEnded { value in
+            guard showHost, abs(value.translation.width) > abs(value.translation.height) else { return }
+            showingCloseAction = value.translation.width < 0
+        })
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button("Close", systemImage: "xmark", role: .destructive) { onClose(.init(session: session, scope: .tab), false) }
                 .accessibilityIdentifier("\(prefix)-close:\(session.accessibilityKey)")

@@ -9,6 +9,7 @@ import SwiftUI
 struct CodeView: View {
     let storeId: String
     let project: String
+    var origin: SessionCodeContext? = nil
 
     @AppStorage("sessions.live.preferences.v1") private var hostData = Data()
     @State private var query = ""
@@ -22,7 +23,8 @@ struct CodeView: View {
     @FocusState private var searchFocused: Bool
 
     private var hosts: [LiveHost] {
-        ((try? LiveSessionPreferences.read(hostData))?.hosts ?? []).filter { SessionOverviewMonitor.shared.allows(.code, on: $0) }
+        if let origin { return [origin.host] }
+        return ((try? LiveSessionPreferences.read(hostData))?.hosts ?? []).filter { SessionOverviewMonitor.shared.allows(.code, on: $0) }
     }
 
     var body: some View {
@@ -61,7 +63,7 @@ struct CodeView: View {
                 .accessibilityIdentifier("code-screen")
         }
         .sheet(item: $selected) { target in
-            CodeSymbolDossier(storeId: storeId, project: project, symbol: target.name, hosts: hosts)
+            CodeSymbolDossier(storeId: storeId, project: project, symbol: target.name, hosts: hosts, origin: origin)
                 .presentationDetents([.large])
         }
         .task { await loadInitial() }
@@ -157,8 +159,8 @@ struct CodeView: View {
         loading = true
         defer { loading = false }
         do {
-            async let usageTask = PhrenConnection.codeUsage(host: host, privateKey: DeviceSSHKey.load(host.id), project: project)
-            async let statusTask = PhrenConnection.codeStatus(host: host, privateKey: DeviceSSHKey.load(host.id), project: project)
+            async let usageTask = PhrenConnection.codeUsage(host: host, privateKey: DeviceSSHKey.load(host.id), project: project, storeID: origin?.storeID)
+            async let statusTask = PhrenConnection.codeStatus(host: host, privateKey: DeviceSSHKey.load(host.id), project: project, storeID: origin?.storeID)
             usage = try await usageTask
             _ = try await statusTask
         } catch {
@@ -180,7 +182,7 @@ struct CodeView: View {
         #endif
         guard let host = hosts.first else { symbols = []; return }
         do {
-            let result = try await PhrenConnection.codeSearch(host: host, privateKey: DeviceSSHKey.load(host.id), project: project, query: text)
+            let result = try await PhrenConnection.codeSearch(host: host, privateKey: DeviceSSHKey.load(host.id), project: project, query: text, storeID: origin?.storeID)
             guard !Task.isCancelled, generation == searchGeneration else { return }
             symbols = result
         } catch {

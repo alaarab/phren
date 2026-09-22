@@ -20,6 +20,7 @@ public enum LiveConnectionError: LocalizedError, Equatable {
     case authentication
     case timeout
     case disconnected
+    case ssh(String)
     case response(Int)
     case gatewayRejection(status: Int, reason: String)
     case launchConflict(reason: String, target: LiveLaunchConflictTarget?)
@@ -33,6 +34,7 @@ public enum LiveConnectionError: LocalizedError, Equatable {
         case .authentication: return "SSH did not accept this device's key. Add the public key to the selected user's authorized_keys file and enable Remote Login or SSH."
         case .timeout: return "The connection timed out. Check Tailscale and SSH, then run phren bridge doctor on the computer."
         case .disconnected: return "The connection to the computer closed."
+        case .ssh(let message): return message
         case .response(let status): return "The computer returned HTTP \(status)."
         case .gatewayRejection(let status, let reason): return "\(reason) (HTTP \(status))"
         case .launchConflict(let reason, _): return "\(reason) (HTTP 409)"
@@ -58,7 +60,7 @@ public enum PhrenConnection {
     }
 
     /// The name the computer gives itself (`os.hostname()`), as the Hook's
-    /// health reports it — the key the store's `machines.yaml` uses.
+    /// health reports it, the key the store's `machines.yaml` uses.
     public static func computerName(host: LiveHost, privateKey: Data) async throws -> String? {
         try host.validate()
         let data = try await fetchData(host: host, key: Curve25519.Signing.PrivateKey(rawRepresentation: privateKey), request: GatewayRequest(path: "/v1/health"))
@@ -104,7 +106,7 @@ public enum PhrenConnection {
             case .success: healthy = true
             case .failure(let error):
                 switch error {
-                case LiveConnectionError.timeout, LiveConnectionError.disconnected: healthy = false
+                case LiveConnectionError.timeout, LiveConnectionError.disconnected, LiveConnectionError.ssh: healthy = false
                 case is LiveConnectionError, is CancellationError, is PhrenKitError: healthy = true
                 default: healthy = false
                 }
@@ -147,7 +149,22 @@ final class Exchange: @unchecked Sendable {
     func finish(_ value: Result<Data, Error>) {
         guard !finished else { return }
         finished = true
-        result.completeWith(value)
+        if case .failure(let error as NIOSSHError) = value {
+            let message: String
+            switch error.type {
+            case .channelSetupRejected:
+                message = "The computer refused the SSH channel (\(error.type)). Check Phren Hook and available SSH sessions."
+            case .tcpShutdown, .creatingChannelAfterClosure:
+                message = "The SSH connection closed before the exchange finished (\(error.type)). Reconnect to the computer and try again."
+            case .flowControlViolation:
+                message = "The computer and phone disagreed about SSH transfer limits (\(error.type)). Reconnect to the computer and try again."
+            default:
+                message = "The SSH exchange failed (\(error.type)). Reconnect to the computer and try again."
+            }
+            result.fail(LiveConnectionError.ssh(message))
+        } else {
+            result.completeWith(value)
+        }
     }
 }
 
@@ -242,6 +259,8 @@ final class GatewayResponse: ChannelInboundHandler {
     let request: GatewayRequest
     private var body = Data()
     private var receivedHead = false
+    private var bodyOffset = 0
+    static let uploadChunkBytes = 16_384
     private var status = 200
     private var responseLimit: Int { status == 200 ? request.maximumResponseBytes : min(request.maximumResponseBytes, 32_768) }
     init(exchange: Exchange, request: GatewayRequest = .workspaces) { self.exchange = exchange; self.request = request }
@@ -253,10 +272,29 @@ final class GatewayResponse: ChannelInboundHandler {
         }
         let head = HTTPRequestHead(version: .http1_1, method: gatewayMethod(request), uri: request.path, headers: headers)
         context.write(wrapOutboundOut(.head(head)), promise: nil)
-        if let body = request.body {
-            context.write(wrapOutboundOut(.body(.byteBuffer(ByteBuffer(bytes: body)))), promise: nil)
+        writeNextChunk(context: context)
+    }
+
+    /// Keep at most one body chunk awaiting transport completion. NIOSSH also
+    /// enforces the negotiated window; this bounds its pending write queue and
+    /// lets a response finish the exchange before any later write failure.
+    private func writeNextChunk(context: ChannelHandlerContext) {
+        guard !exchange.finished else { return }
+        guard let body = request.body, bodyOffset < body.count else {
+            context.writeAndFlush(wrapOutboundOut(.end(nil))).whenFailure { [exchange] in exchange.finish(.failure($0)) }
+            return
         }
-        context.writeAndFlush(wrapOutboundOut(.end(nil))).whenFailure { [exchange] in exchange.finish(.failure($0)) }
+        let end = min(bodyOffset + Self.uploadChunkBytes, body.count)
+        let chunk = ByteBuffer(bytes: body[bodyOffset..<end])
+        bodyOffset = end
+        context.writeAndFlush(wrapOutboundOut(.body(.byteBuffer(chunk)))).whenComplete { outcome in
+            switch outcome {
+            case .failure(let error): self.exchange.finish(.failure(error))
+            case .success:
+                // Avoid recursive completion for an immediately writable channel.
+                context.eventLoop.execute { self.writeNextChunk(context: context) }
+            }
+        }
     }
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         guard !exchange.finished else { return }

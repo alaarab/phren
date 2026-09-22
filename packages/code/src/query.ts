@@ -188,8 +188,11 @@ export function pickSymbol(rows: SymbolHit[], container?: string): { chosen?: Sy
  * hit and how many symbols shared the name, exactly as `definition` does.
  */
 export function resolveSymbol(db: SqlJsDatabase, symbol: string): { chosen?: SymbolHit; candidates: number } {
-  const parsed = parseSymbolQuery(symbol);
-  return pickSymbol(symbolRowsByName(db, parsed.name), parsed.container);
+  const separator = symbol.lastIndexOf("::");
+  const file = separator < 0 ? undefined : symbol.slice(0, separator);
+  const parsed = parseSymbolQuery(separator < 0 ? symbol : symbol.slice(separator + 2));
+  const rows = symbolRowsByName(db, parsed.name).filter(row => file === undefined || row.file === file);
+  return pickSymbol(rows, parsed.container);
 }
 
 // ── SQLite plumbing ──────────────────────────────────────────────────────────
@@ -310,10 +313,8 @@ export async function definition(
   project: string,
   symbol: string,
 ): Promise<QueryResult<SymbolDefinition | undefined>> {
-  const parsed = parseSymbolQuery(symbol);
   return withCodeDb(store, project, db => {
-    const rows = symbolRowsByName(db, parsed.name);
-    const { chosen, candidates } = pickSymbol(rows, parsed.container);
+    const { chosen, candidates } = resolveSymbol(db, symbol);
     if (!chosen) return undefined;
     const repoRoot = resolveQueryRepoRoot(db, store, project);
     return {
@@ -333,10 +334,8 @@ export async function references(
   symbol: string,
   limit = 200,
 ): Promise<QueryResult<ReferenceResult | undefined>> {
-  const parsed = parseSymbolQuery(symbol);
   return withCodeDb(store, project, db => {
-    const rows = symbolRowsByName(db, parsed.name);
-    const { chosen, candidates } = pickSymbol(rows, parsed.container);
+    const { chosen, candidates } = resolveSymbol(db, symbol);
     if (!chosen) return undefined;
     const total = rowsOf(db, `SELECT COUNT(*) FROM "references" WHERE symbol_id = ?`, [chosen.id]);
     const refs = rowsOf(
@@ -448,4 +447,35 @@ export function formatSymbolLine(hit: SymbolHit): string {
   const signature = hit.signature ? ` ${hit.signature}` : "";
   const doc = hit.doc ? ` | ${hit.doc.split("\n")[0]}` : "";
   return `${hit.file}:${hit.line} ${hit.kind} ${hit.name}${signature}${doc}`;
+}
+
+
+export interface OutlineSummary {
+  path: string;
+  symbols: number;
+  kinds: Array<{ kind: string; count: number }>;
+  /** First declaration in source order, qualified to its exact file. */
+  symbol?: string;
+}
+
+/** One database open for a visible directory's grouped counts and first declarations.
+ * Directories aggregate descendants; files include every nested declaration. */
+export async function outlineSummary(store: string, project: string, paths: string[]): Promise<QueryResult<OutlineSummary[]>> {
+  const result = await withCodeDb(store, project, db => {
+    const grouped = rowsOf(db, "SELECT file, kind, COUNT(*) FROM symbols GROUP BY file, kind");
+    return paths.map(file => {
+      const kinds = new Map<string, number>();
+      for (const row of grouped) {
+        const source = stringAt(row, 0);
+        if (source !== file && !source.startsWith(file + "/")) continue;
+        const kind = stringAt(row, 1);
+        kinds.set(kind, (kinds.get(kind) ?? 0) + numberAt(row, 2));
+      }
+      const first = rowsOf(db, "SELECT name, parent FROM symbols WHERE file = ? ORDER BY line, id LIMIT 1", [file])[0];
+      return { path: file, symbols: [...kinds.values()].reduce((a, b) => a + b, 0),
+        kinds: [...kinds].map(([kind, count]) => ({ kind, count })).sort((a, b) => b.count - a.count || a.kind.localeCompare(b.kind)).slice(0, 3),
+        ...(first ? { symbol: `${file}::${stringAt(first, 1) ? stringAt(first, 1) + "." : ""}${stringAt(first, 0)}` } : {}) };
+    });
+  });
+  return { available: result.available, databasePath: result.databasePath, value: result.value ?? [] };
 }

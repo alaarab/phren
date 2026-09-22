@@ -2,7 +2,7 @@
 
 Phren owns the shape, density and interaction of its controls. Moshi is the
 reference for how much useful work fits on a phone; PhrenTheme supplies the
-colours. Controls live in `Phren/DesignSystem/PhrenControls.swift`. Swift files
+colors. Controls live in `Phren/DesignSystem/PhrenControls.swift`. Swift files
 share the app module, so moving PhrenSwitch out of PhrenChrome preserves its
 existing name and call sites. Schedule-specific fields remain in
 `Features/Schedules/ScheduleControls.swift`.
@@ -71,7 +71,7 @@ retaining its code preview and busy state.
 Geometry: 44 minimum height, 12 padding, 10 between leading slots, 22-wide
 radio/check and optional glyph slots (18-point symbols), 4 between title and caption. Radius 12;
 the chat adapter retains its existing radius 10. `glyph` accepts a custom
-view such as AgentProviderGlyph or a host colour dot; `icon` accepts an SF
+view such as AgentProviderGlyph or a host color dot; `icon` accepts an SF
 Symbol. `trailing` accepts a passive badge, and `detail` a preview. Slots must
 not contain buttons or other competing actions.
 
@@ -237,6 +237,10 @@ Buttons; selected rows use the shared radio trait. Identifiers:
 Dynamic Type: title and captions wrap, rows grow, and overflow scrolls.
 Reduce Motion eliminates both presentation motion and drag offset animation.
 This uses no UIKit sheet, detents, system grabber or menu chrome.
+
+Action rows may supply `iconColor` for a semantic glyph, such as the computer
+color dot in the Projects launch chooser. The title and caption retain their
+normal text colors; the glyph stays decorative for accessibility.
 
 ## PhrenDialog
 
@@ -411,7 +415,7 @@ grows the row; the clear target never shrinks.
 Purpose: choose exactly one of a short, flat set drawn as chips: Memory's
 scope (All, one per project) and its content filter (All, Findings, Tasks,
 Topics). Takes PhrenOption items, a selection binding and an identifier
-prefix; `tint` gives the selected chip a colour per value (the selected
+prefix; `tint` gives the selected chip a color per value (the selected
 project uses sessionProject), `raised` draws unselected chips on
 surfaceRaised for a `surface` panel, `wraps` forces wrapping.
 
@@ -549,10 +553,33 @@ own `loadingIdentifier` (the chat picker's `model-loading`).
 ## PhrenStepSlider
 
 A single choice over an ordered enumeration drawn as a slider: a 3pt track,
-one dot per option, the chosen option's title under its dot in text colour and
+one dot per option, the chosen option's title under its dot in text color and
 the rest muted, the thumb 18pt (22pt while dragging). A tap lands on the
 nearest detent; a press (120 ms) then a drag slides the thumb with a selection
 tick per detent; a plain drag is left to the list so a swipe that starts on the
 slider still scrolls. The end titles hug the edges so nothing clips. Used for
 the project knobs. Accessibility: one adjustable element whose value is the
 current title.
+
+
+## Chat prompt cards
+
+Chat approvals and questions share the provider header ("Codex asks", "Claude
+asks"), full title and explanation, a separate monospaced command line, and
+PhrenOptionRow radio choices. Provider-supplied labels and order are preserved.
+Terminal choices send their own keys; held permissions send their own decisions.
+Without supplied choices, the order is Approve, Allow for this project, Allow
+everywhere, Deny. Grant choices are disabled when the Hook cannot grant that
+scope. Conductor grants are options in the same list, before Deny.
+
+Terminal access is the small header action. Details expand through
+PhrenDisclosure, a plain 44-point Button and inline content with an expanded or
+collapsed accessibility value. Chat retains `chat-approval` and the
+`chat-approval-approve`, `chat-approval-deny`, `chat-approval-allow-project` and
+`chat-approval-allow-everywhere` row identifiers. The compact approval card used
+outside chat keeps its existing presentation.
+
+Project controls use equal columns in ProjectControlLayout: icon over one-line
+title, 52-point height, matching centered dividers, 8 points below the navigation
+bar. Values remain in each control's accessibility value. LiveSessionsTests
+checks the band frame and four equal cell widths and attaches a screenshot.

@@ -354,7 +354,7 @@ struct LaunchSessionView: View {
             for await (id, name) in group where name != nil { computerNames[id] = name }
         }
         // A better-informed choice once names are in, unless the user moved on.
-        if !folderEdited, let current = selectedHost, !knowsProject(current), let known = hosts.first(where: knowsProject) { select(known) }
+        if preferredHostID == nil, !folderEdited, let current = selectedHost, !knowsProject(current), let known = hosts.first(where: knowsProject) { select(known) }
     }
 
     private func select(_ host: LiveHost) {

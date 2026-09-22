@@ -34,15 +34,18 @@ final class WorkflowTests: XCTestCase {
         app.buttons["memory-search:clear"].tap()
         XCTAssertTrue(app.staticTexts["memory-counts"].waitForExistence(timeout: 5))
 
-        // The same launch also covers the compact Projects and Explore rows.
+        // The Projects grid leads, and Files stays reachable through More.
         app.tabBars.buttons["Projects"].tap()
         let project = app.buttons["project:sample/brain:demo"]
         XCTAssertTrue(project.waitForExistence(timeout: 8))
         XCTAssertLessThanOrEqual(project.frame.height, 60)
-        let explore = app.buttons["Files"].firstMatch
-        XCTAssertTrue(explore.exists)
-        XCTAssertLessThanOrEqual(explore.frame.height, 60)
-        attachUIScreenshot(app, "Compact grouped projects and Explore rows")
+        XCTAssertFalse(app.buttons["Files"].exists)
+        attachUIScreenshot(app, "Projects grid leads the screen")
+        app.buttons["projects-more"].tap()
+        let files = app.buttons["projects-more-sheet:files"]
+        XCTAssertTrue(files.waitForExistence(timeout: 5))
+        files.tap()
+        XCTAssertTrue(app.navigationBars["Files"].waitForExistence(timeout: 5))
     }
 
     @MainActor

@@ -334,3 +334,28 @@ public struct CodeUsageResults: Decodable, Sendable {
         catch { throw PhrenKitError.validation("The computer returned an unusable usage list. Refresh to try again.") }
     }
 }
+
+
+public struct CodeOutlineSummary: Decodable, Equatable, Sendable, Identifiable {
+    public struct Kind: Decodable, Equatable, Sendable {
+        public let kind: String
+        public let count: Int
+    }
+    public let path: String
+    public let symbols: Int
+    public let kinds: [Kind]
+    public let symbol: String?
+    public var id: String { path }
+    public var label: String { (["\(symbols)"] + kinds.map(\.kind)).joined(separator: " · ") }
+}
+public struct CodeOutlineSummaryResults: Decodable, Sendable {
+    public let entries: [CodeOutlineSummary]
+    public static func read(_ data: Data) throws -> [CodeOutlineSummary] {
+        guard data.count <= 1_048_576 else { throw PhrenKitError.validation("The outline summary is too large.") }
+        let value = try JSONDecoder().decode(Self.self, from: data)
+        guard value.entries.count <= 200, value.entries.allSatisfy({ $0.symbols >= 0 && $0.kinds.count <= 3 }) else {
+            throw PhrenKitError.validation("The outline summary is invalid.")
+        }
+        return value.entries
+    }
+}

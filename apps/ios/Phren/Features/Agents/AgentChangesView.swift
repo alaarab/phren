@@ -6,6 +6,7 @@ struct AgentChangesView: View {
     let session: LiveAgentSession
     let target: AgentChatTarget
     var child: String? = nil
+    var codeOrigin: SessionCodeContext? = nil
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -17,11 +18,13 @@ struct AgentChangesView: View {
     @State private var selection: ChangesSection = .changes
     @State private var loadTask: Task<Void, Never>?
     @State private var visible = false
+    @State private var indexedCode: SessionCodeContext?
 
-    init(session: LiveAgentSession, target: AgentChatTarget, child: String? = nil) {
+    init(session: LiveAgentSession, target: AgentChatTarget, child: String? = nil, codeOrigin: SessionCodeContext? = nil) {
         self.session = session
         self.target = target
         self.child = child
+        self.codeOrigin = codeOrigin
         _model = State(initialValue: ChangesModel(session: session, target: target, child: child))
     }
 
@@ -72,6 +75,11 @@ struct AgentChangesView: View {
         // Full height inside a tab: the tab bar would otherwise sit under the
         // last rows each section scrolls.
         .toolbar(.hidden, for: .tabBar)
+        .task(id: codeOrigin?.id) {
+            indexedCode = nil
+            guard child == nil, let origin = codeOrigin, await origin.hasIndex(), !Task.isCancelled else { return }
+            indexedCode = origin
+        }
         .onAppear { visible = true; if !changesEnabled { dismiss() }; scheduleLoad() }
         .onDisappear { visible = false; loadTask?.cancel() }
         .onChange(of: scenePhase) { _, _ in scheduleLoad() }
@@ -162,7 +170,7 @@ struct AgentChangesView: View {
     private var tabBar: some View {
         HStack(spacing: 8) {
             HStack(spacing: 4) {
-                ForEach(ChangesSection.allCases) { section in
+                ForEach(ChangesSection.allCases.filter { $0 != .code || indexedCode != nil }) { section in
                     Button { selection = section } label: {
                         Image(systemName: section.symbol)
                             .font(.system(size: 15, weight: .medium))
@@ -230,13 +238,15 @@ struct AgentChangesView: View {
         case .history: ChangesHistoryTab(session: session, target: target, child: child)
         case .branches: ChangesBranchesTab(session: session, target: target, child: child)
         case .pulls: ChangesPullRequestsTab(session: session, target: target, child: child)
-        case .tree: ChangesWorkingTreeTab(session: session, target: target, child: child)
+        case .tree: ChangesWorkingTreeTab(session: session, target: target, child: child, codeOrigin: indexedCode)
+        case .code:
+            if let origin = indexedCode { CodeView(storeId: origin.storeID, project: origin.project, origin: origin) }
         }
     }
 }
 
 enum ChangesSection: String, CaseIterable, Identifiable {
-    case changes, history, branches, pulls, tree
+    case changes, history, branches, pulls, tree, code
 
     var id: String { rawValue }
     var title: String {
@@ -246,6 +256,7 @@ enum ChangesSection: String, CaseIterable, Identifiable {
         case .branches: "Branches"
         case .pulls: "PRs"
         case .tree: "Working tree"
+        case .code: "Code"
         }
     }
     var symbol: String {
@@ -255,6 +266,7 @@ enum ChangesSection: String, CaseIterable, Identifiable {
         case .branches: "arrow.triangle.branch"
         case .pulls: "arrow.triangle.pull"
         case .tree: "list.bullet.indent"
+        case .code: "curlybraces"
         }
     }
     var accessibilityIdentifier: String { "changes-tab-\(rawValue)" }
@@ -263,6 +275,7 @@ enum ChangesSection: String, CaseIterable, Identifiable {
 /// One fetch keeps the header and file actions on the same status snapshot.
 @Observable @MainActor
 final class ChangesModel {
+    let workingTree = WorkingTreeState()
     private(set) var status: GitStatus?
     private(set) var error: String?
     /// Bumped by `reload()`; the container observes it and starts a fetch.
@@ -299,4 +312,13 @@ final class ChangesModel {
             self.error = error.localizedDescription
         }
     }
+}
+
+
+@Observable @MainActor
+final class WorkingTreeState {
+    var tree: GitWorkingTree?
+    var children: [String: GitWorkingTree] = [:]
+    var expanded: Set<String> = []
+    var summaries: [String: CodeOutlineSummary] = [:]
 }

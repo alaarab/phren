@@ -5,7 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+
+- Git tree routes share a bounded repository snapshot keyed by HEAD and a status hash, return one directory with descendant file counts, and avoid full diff statistics on folder opens. Status refresh and mutations invalidate the cache; external edits expire after two seconds.
+
 ### Added
+
+- `GET /v1/code/outline-summary?project=&paths=` batches symbol totals and leading kinds for files and directories. Code reads and notes accept a registered store selector; file-qualified symbol queries keep a tree dossier on the selected file, and notes retain their explicit session recipient.
 
 - Code dossier notes save symbol-cited findings and optionally hand off to a live session or dispatch a worker through `POST /v1/code/note`.
 
@@ -59,6 +65,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- The SSH gateway no longer forwards the client's EOF as a half-close: node's
+  HTTP server aborts a half-closed connection whose reply has not started, so a
+  large upload whose sender closed its write side right after the body came
+  back empty. The gateway now waits for the Hook to close the socket after its
+  answer. Covered by a gateway test that uploads 400 KB with and without EOF.
 - A Codex prompt drawn in the pane, such as "Would you like to run the
   following command?", reaches the phone as a choice card again: the Hook reads
   Codex's own numbered rows (including the `>` cursor marker), keeps the key in

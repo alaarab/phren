@@ -8,11 +8,22 @@ number counts up on its own.
 
 ## 1.0.3
 
+### Changed
+
+- The working tree keeps expanded folders and loaded children during refreshes and tab switches. Directory rows show file totals; indexed projects also show symbol totals and kinds, with file symbol chips opening the dossier.
+
 ### Added
+
+- Open the session project's Code index from Changes or the chat header actions. Notes from these dossiers return to the originating session without another recipient prompt.
+- Hold a project or computer for 0.4 seconds to choose where to open an agent. The chooser shows computer colors and keeps the existing harness and model launch flow, with an Open agent accessibility action.
 
 - Select a symbol line, write a note and send it to a project session or a new worker. Code rows show usage bars, and the dossier lists cited findings.
 
 ### Fixed
+
+- All four project controls use equal columns, an icon above a single-line title, and a 52-point band with space below the inline navigation title.
+- Chat permissions use the provider question header and ordered radio options, including conductor grants. Terminal access stays in the header, and action details use Phren's disclosure.
+- SSH upload errors show a readable explanation and the SSH error type. Attachment requests flush bounded chunks, and a complete response remains successful if the channel reports a later failure.
 
 - A Codex prompt drawn in its pane, like "Would you like to run the following
   command?", draws as a choice card again, so the key strip no longer covers it.
@@ -50,10 +61,16 @@ and scrolls again.
 
 ### Changed
 
+- Sessions leads with running sessions and keeps Computers below them. Skills
+  and Agent instructions move into More, which also offers Add computer. The
+  repeated Agent setup group and Tailscale footer are removed.
+
 - The Agents and Projects lists derive their rows and counts once per input
   change rather than on every draw, the graph prepares its payload off the
   main actor and keeps one web view while the selection changes, and image
   previews decode once into a shared cache.
+- Projects leads with the project grid. Files, Live sessions, Skills, Agent instructions and Memory maintenance are in More. More and store filtering use Phren controls.
+
 - Chat, tool cards and Changes are denser: the floating header sits 4 points
   under the safe area, the composer 4 above the home indicator, transcript
   rows 6 apart, and expanded tool cards use 8-point padding with 4 between

@@ -56,3 +56,41 @@ not. Delivery failure is separate from save success so the phone preserves the
 finding and reports uncertainty without automatically sending again.
 
 Hot, cold and search rows show the usage count with a small logarithmic bar.
+
+
+## Session entry points
+
+The session's Changes band includes Code when `/v1/code/status` confirms an
+index on that session's computer. Chat header actions offer the same destination.
+`SessionCodeContext` carries the store ID, project, computer and exact session
+target through CodeView and the dossier. The computer never falls back to a
+different host. Requests include the registered store selector, so projects
+with the same name in separate stores stay separate.
+
+A note opened from either session entry sends directly to that session through
+`/v1/code/note`. The project-page entry still offers its recipient chooser.
+Delivery failure preserves the saved finding and reports the failure without
+retrying or silently selecting another agent.
+
+## Working tree
+
+The Hook returns one directory at a time, with descendant file counts and a
+snapshot version. Its bounded cache checks HEAD on every request, hashes the
+file listing and porcelain status, and expires after two seconds. Explicit
+status refresh and file mutations invalidate it. Directory opens do not collect
+diff line counts or upstream history.
+
+The Changes model owns expanded paths and loaded children across tab switches.
+Refresh replaces visible children in place and prunes confirmed removed paths.
+Closed branches retain their cache and revalidate against the new version when
+opened. A single batched outline-summary request per group of up to 200 paths
+adds symbol counts and up to three leading kinds; directory counts include all
+descendants. Optional index failures leave the ordinary tree usable.
+
+A file's symbol chip opens its first declaration's dossier, using a
+`file::Container.name` query to avoid a namesake in another file. The originating
+session remains the note recipient. IDs are `changes-tab-code`,
+`chat-options-code`, and `changes-tree-symbols:<path>`.
+
+UI coverage in ChangesTabTests captures the session Code tab, enriched tree and
+direct note delivery. AgentChatTests captures the header action entry.

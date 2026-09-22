@@ -106,3 +106,29 @@ extension CodeIndexTests {
         XCTAssertEqual(response.delivery?.message, "Offline")
     }
 }
+
+
+extension CodeIndexTests {
+    func testSessionNoteRetainsStoreAndExactRecipient() throws {
+        let request = CodeNoteRequest(project: "phone", symbol: "file.ts::Point", file: "file.ts", line: 5,
+                                      text: "Keep coordinates stable.", target: .init(session: "session-one"), store: "sam/brain")
+        let data = try JSONEncoder().encode(request)
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(body["store"] as? String, "sam/brain")
+        XCTAssertEqual(body["target"] as? [String: String], ["session": "session-one"])
+    }
+    func testDecodesBatchedOutlineCountsAndRejectsInvalidCounts() throws {
+        let json = #"{"entries":[{"path":"Sources","symbols":7,"kinds":[{"kind":"method","count":4}]},{"path":"Sources/App.swift","symbols":3,"kinds":[],"symbol":"Sources/App.swift::App"}]}"#
+        let entries = try CodeOutlineSummaryResults.read(Data(json.utf8))
+        XCTAssertEqual(entries[0].symbols, 7)
+        XCTAssertEqual(entries[1].symbol, "Sources/App.swift::App")
+        XCTAssertThrowsError(try CodeOutlineSummaryResults.read(Data(json.replacingOccurrences(of: "\"symbols\":7", with: "\"symbols\":-1").utf8)))
+    }
+    func testApprovalKeepsProviderOptionOrderAndCommandSeparate() throws {
+        let data = Data(#"{"actionId":"ask","message":"{\"command\":\"pnpm test\",\"justification\":\"Check the change\"}","options":[{"label":"Yes","decision":"approve"},{"label":"Yes and allow this project","decision":"allow-project"},{"label":"No","decision":"deny"}]}"#.utf8)
+        let approval = try JSONDecoder().decode(AgentApproval.self, from: data)
+        XCTAssertEqual(approval.options?.map(\.label), ["Yes", "Yes and allow this project", "No"])
+        XCTAssertEqual(approval.command, "pnpm test")
+        XCTAssertEqual(approval.explanation, "Check the change")
+    }
+}

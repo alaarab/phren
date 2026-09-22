@@ -36,7 +36,7 @@ final class AgentsLayoutTests: XCTestCase {
         // Larger text requires scrolling to reach the computer. Navigation
         // correctly restores that offset; return to the top before checking it.
         for _ in 0..<4 where firstHeader.frame.minY < app.navigationBars.firstMatch.frame.maxY {
-            app.collectionViews.firstMatch.swipeDown()
+            app.scrollViews["sessions-scroll"].swipeDown()
         }
         // Give the pop animation a moment to settle before reading the frame.
         let settled = NSPredicate { _, _ in firstHeader.frame.minY >= app.navigationBars.firstMatch.frame.maxY }

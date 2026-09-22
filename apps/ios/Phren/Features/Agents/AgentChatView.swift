@@ -108,6 +108,7 @@ struct AgentChatView: View {
     @Binding fileprivate var requestedChild: AgentChildRequest?
     /// Opened by the Action button: start listening as soon as the chat is up.
     var startsDictation = false
+    @State private var indexedCode: SessionCodeContext?
     @State private var initialized = false
     @State private var queueHeight: CGFloat = 0
     private struct ChatQueueHeight: PreferenceKey {
@@ -295,6 +296,10 @@ struct AgentChatView: View {
         let pane = model.panes.first { $0.id == model.target?.paneID }
         let cwd = pane?.cwd ?? (model.panes.count == 1 ? session.tab.cwd : nil)
         return (try? LiveSessionPreferences.read(hostData))?.projectMatch(hostID: session.host.id, cwd: cwd, projects: appModel.sessionProjects)?.project
+    }
+    private var codeOrigin: SessionCodeContext? {
+        guard let project, let target = model.target, !target.isStarting else { return nil }
+        return SessionCodeContext(storeID: project.storeID, project: project.name, host: session.host, target: target)
     }
     private var active: Bool {
         visible && scenePhase == .active && currentHost?.hasSameConnection(as: session.host) == true
@@ -500,22 +505,11 @@ struct AgentChatView: View {
                 }
                 .id(approval.id)
                 .padding(.horizontal, 12).padding(.vertical, 6)
-            } else if let approval = model.approval, let choice = approval.choice, choice.prompt(id: approval.id) != nil {
-                // A Codex approval whose command and options the Hook read:
-                // the question card's rows answer with their own keys.
-                ChatChoiceQuestionCard(choice: choice, id: approval.id, title: "\(model.target?.providerName ?? "Agent") asks",
-                                       busy: model.answering || !active || !model.interactionConnected,
-                                       terminal: AnyView(answerTerminalLink)) { key in
-                    sendTask = Task { await model.answer(session, key: key) }
-                }
-                .id(approval.id)
-                .padding(.horizontal, 12).padding(.vertical, 6)
             } else if let approval = model.approval {
-                ChatApprovalCard(approval: approval, busy: model.answering || !active || !model.interactionConnected) {
-                    NavigationLink { HerdrTerminalView(host: session.host, session: session, target: model.target) } label: {
-                        Label("Open terminal", systemImage: "terminal").frame(maxWidth: .infinity, minHeight: 32)
-                    }.accessibilityIdentifier("chat-approval-terminal")
-                } answer: { decision in
+                ChatApprovalQuestionCard(approval: approval, providerName: model.target?.providerName ?? "Agent",
+                    busy: model.answering || !active || !model.interactionConnected,
+                    terminal: AnyView(answerTerminalLink.accessibilityIdentifier("chat-approval-terminal")),
+                    answerKey: { key in sendTask = Task { await model.answer(session, key: key) } }) { decision in
                     sendTask = Task { await model.answer(session, approval: approval, decision: decision) }
                 }
                 .id(approval.id)
@@ -703,6 +697,11 @@ struct AgentChatView: View {
             dictation.stop()
         }
         .sheet(isPresented: $showingOptions) { chatOptionsSheet }
+        .task(id: codeOrigin?.id) {
+            indexedCode = nil
+            guard let origin = codeOrigin, await origin.hasIndex(), !Task.isCancelled else { return }
+            indexedCode = origin
+        }
         .sheet(isPresented: $launchingNewThread) {
             if let project { LaunchSessionView(storeID: project.storeID, project: project.name, preferredHostID: session.host.id) }
         }
@@ -1053,7 +1052,7 @@ struct AgentChatView: View {
                 NavigationLink {
                     // Besides the pane's tree: whatever the session's commands
                     // wrote elsewhere — the phren store, a sibling checkout.
-                    AgentChangesView(session: session, target: target)
+                    AgentChangesView(session: session, target: target, codeOrigin: codeOrigin)
                 } label: {
                     Image(systemName: "arrow.triangle.branch").font(.system(size: 17)).frame(width: 40, height: 44).contentShape(Rectangle())
                         .foregroundStyle(PhrenTheme.chatText)
@@ -1075,7 +1074,7 @@ struct AgentChatView: View {
 
     private var chatOptions: some View {
         Button { showingOptions = true } label: { Image(systemName: "ellipsis").frame(width: 36, height: 44).contentShape(Rectangle()) }
-            .accessibilityLabel("Chat options")
+            .accessibilityLabel("Chat options").accessibilityIdentifier("chat-options")
     }
 
     /// Only what has no home elsewhere on this screen: the terminal,
@@ -1112,6 +1111,12 @@ struct AgentChatView: View {
                 }
                 if let project {
                     Section("Project") {
+                        if let origin = indexedCode {
+                            NavigationLink {
+                                CodeView(storeId: origin.storeID, project: origin.project, origin: origin)
+                            } label: { Label("Code", systemImage: "chevron.left.forwardslash.chevron.right") }
+                            .accessibilityIdentifier("chat-options-code")
+                        }
                         NavigationLink { ProjectDetailView(storeId: project.storeID, project: project.name) } label: { Label("Project memory", systemImage: "brain.head.profile") }
                         NavigationLink { SkillsView(project: project.name, storeId: project.storeID) } label: { Label("Project skills", systemImage: "sparkles") }
                         NavigationLink { GraphView(focusProject: project.name, initialStoreId: project.storeID) } label: { Label("Explore graph", systemImage: "point.3.connected.trianglepath.dotted") }

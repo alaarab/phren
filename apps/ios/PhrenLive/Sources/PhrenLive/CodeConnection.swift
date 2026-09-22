@@ -1,46 +1,54 @@
 import Foundation
 import PhrenKit
 
-/// The six read routes over the `code` module's local symbol index. They are
+/// Read routes over the `code` module's local symbol index. They are
 /// store-scoped, not pane-scoped: the phone names a project and the computer
 /// answers from `<store>/.runtime/code/<project>.sqlite`. A project with no
 /// index is a 404 the caller shows as "not indexed".
 extension PhrenConnection {
-    public static func codeStatus(host: LiveHost, privateKey: Data, project: String) async throws -> CodeStatus {
-        let data = try await codeGet(host: host, privateKey: privateKey, path: "/v1/code/status", project: project, fields: [:])
+    public static func codeStatus(host: LiveHost, privateKey: Data, project: String, storeID: String? = nil) async throws -> CodeStatus {
+        let data = try await codeGet(host: host, privateKey: privateKey, path: "/v1/code/status", project: project, storeID: storeID, fields: [:])
         return try CodeStatus.read(data)
     }
 
-    public static func codeSearch(host: LiveHost, privateKey: Data, project: String, query: String, kind: String? = nil, limit: Int? = nil) async throws -> [CodeSymbol] {
+    public static func codeSearch(host: LiveHost, privateKey: Data, project: String, query: String, kind: String? = nil, limit: Int? = nil, storeID: String? = nil) async throws -> [CodeSymbol] {
         guard query.utf8.count <= 500 else { throw PhrenKitError.validation("That search is too long.") }
         var fields = ["q": query]
         if let kind, !kind.isEmpty { fields["kind"] = try codeKind(kind) }
         if let limit { fields["limit"] = String(min(max(limit, 1), 100)) }
-        let data = try await codeGet(host: host, privateKey: privateKey, path: "/v1/code/search", project: project, fields: fields)
+        let data = try await codeGet(host: host, privateKey: privateKey, path: "/v1/code/search", project: project, storeID: storeID, fields: fields)
         return try CodeSearchResults.read(data)
     }
 
-    public static func codeOutline(host: LiveHost, privateKey: Data, project: String, path: String) async throws -> [CodeOutlineEntry] {
-        let data = try await codeGet(host: host, privateKey: privateKey, path: "/v1/code/outline", project: project, fields: ["path": try codePath(path)])
+    public static func codeOutline(host: LiveHost, privateKey: Data, project: String, path: String, storeID: String? = nil) async throws -> [CodeOutlineEntry] {
+        let data = try await codeGet(host: host, privateKey: privateKey, path: "/v1/code/outline", project: project, storeID: storeID, fields: ["path": try codePath(path)])
         return try CodeOutlineResults.read(data)
     }
 
-    public static func codeDefinition(host: LiveHost, privateKey: Data, project: String, symbol: String) async throws -> CodeDefinition {
-        let data = try await codeGet(host: host, privateKey: privateKey, path: "/v1/code/definition", project: project, fields: ["symbol": try codeSymbol(symbol)])
+    public static func codeOutlineSummary(host: LiveHost, privateKey: Data, project: String, paths: [String], storeID: String? = nil) async throws -> [CodeOutlineSummary] {
+        guard (1...200).contains(paths.count) else { throw PhrenKitError.validation("Choose between 1 and 200 paths.") }
+        let validated = try paths.map { try codePath($0) }
+        let encoded = String(decoding: try JSONEncoder().encode(validated), as: UTF8.self)
+        let data = try await codeGet(host: host, privateKey: privateKey, path: "/v1/code/outline-summary", project: project, storeID: storeID, fields: ["paths": encoded])
+        return try CodeOutlineSummaryResults.read(data)
+    }
+
+    public static func codeDefinition(host: LiveHost, privateKey: Data, project: String, symbol: String, storeID: String? = nil) async throws -> CodeDefinition {
+        let data = try await codeGet(host: host, privateKey: privateKey, path: "/v1/code/definition", project: project, storeID: storeID, fields: ["symbol": try codeSymbol(symbol)])
         return try CodeDefinitionResults.read(data)
     }
 
-    public static func codeReferences(host: LiveHost, privateKey: Data, project: String, symbol: String, limit: Int? = nil) async throws -> CodeReferences {
+    public static func codeReferences(host: LiveHost, privateKey: Data, project: String, symbol: String, limit: Int? = nil, storeID: String? = nil) async throws -> CodeReferences {
         var fields = ["symbol": try codeSymbol(symbol)]
         if let limit { fields["limit"] = String(min(max(limit, 1), 500)) }
-        let data = try await codeGet(host: host, privateKey: privateKey, path: "/v1/code/references", project: project, fields: fields)
+        let data = try await codeGet(host: host, privateKey: privateKey, path: "/v1/code/references", project: project, storeID: storeID, fields: fields)
         return try CodeReferencesResults.read(data)
     }
 
-    public static func codeUsage(host: LiveHost, privateKey: Data, project: String, top: Int? = nil) async throws -> CodeUsage {
+    public static func codeUsage(host: LiveHost, privateKey: Data, project: String, top: Int? = nil, storeID: String? = nil) async throws -> CodeUsage {
         var fields: [String: String] = [:]
         if let top { fields["top"] = String(min(max(top, 1), 100)) }
-        let data = try await codeGet(host: host, privateKey: privateKey, path: "/v1/code/usage", project: project, fields: fields)
+        let data = try await codeGet(host: host, privateKey: privateKey, path: "/v1/code/usage", project: project, storeID: storeID, fields: fields)
         return try CodeUsageResults.read(data)
     }
 
@@ -52,9 +60,10 @@ extension PhrenConnection {
         return try JSONDecoder().decode(CodeNoteResult.self, from: data)
     }
 
-    private static func codeGet(host: LiveHost, privateKey: Data, path: String, project: String, fields: [String: String]) async throws -> Data {
+    private static func codeGet(host: LiveHost, privateKey: Data, path: String, project: String, storeID: String?, fields: [String: String]) async throws -> Data {
         try host.validate()
         var query = ["project": try codeProject(project)]
+        if let storeID { query["store"] = storeID }
         query.merge(fields) { _, new in new }
         return try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: GatewayRequest(path: GatewayRequest.path(path, query)))
     }
@@ -68,7 +77,7 @@ extension PhrenConnection {
 
     private static func codeSymbol(_ symbol: String) throws -> String {
         let trimmed = symbol.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, trimmed.utf8.count <= 500, !trimmed.contains("\0") else {
+        guard !trimmed.isEmpty, trimmed.utf8.count <= 4600, !trimmed.contains("\0") else {
             throw PhrenKitError.validation("That symbol name is invalid.")
         }
         return trimmed

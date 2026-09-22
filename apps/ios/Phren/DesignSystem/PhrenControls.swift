@@ -625,6 +625,7 @@ struct PhrenControlAction: Identifiable {
     let id: String
     let title: String
     var icon: String? = nil
+    var iconColor: Color? = nil
     var caption: String? = nil
     var role: Role = .normal
     var isEnabled = true
@@ -708,7 +709,10 @@ struct PhrenActionSheet: View {
         Button { action.perform(dismiss: dismiss) } label: {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: action.icon ?? "circle")
-                    .resizable().scaledToFit().frame(width: 18, height: 18).frame(width: 22).opacity(action.icon == nil ? 0 : 1).accessibilityHidden(true)
+                    .resizable().scaledToFit()
+                    .foregroundStyle(action.iconColor ?? (action.role == .destructive ? PhrenTheme.danger : PhrenTheme.text))
+                    .frame(width: 18, height: 18).frame(width: 22)
+                    .opacity(action.icon == nil ? 0 : 1).accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(action.title)
                     if let caption = action.caption {
@@ -1280,5 +1284,28 @@ struct PhrenFlowLayout: Layout {
             widest = max(widest, x - spacing)
         }
         return (CGSize(width: width.isFinite ? width : widest, height: y + rowHeight), frames)
+    }
+}
+
+
+/// A Phren disclosure keeps its label a full tap target and its content inline.
+struct PhrenDisclosure<Content: View>: View {
+    let title: String
+    @ViewBuilder var content: () -> Content
+    @State private var expanded = false
+    var body: some View {
+        VStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
+            Button { expanded.toggle() } label: {
+                HStack {
+                    Text(title)
+                    Spacer(minLength: PhrenTheme.Space.small)
+                    Image(systemName: "chevron.right").rotationEffect(.degrees(expanded ? 90 : 0))
+                        .accessibilityHidden(true)
+                }
+                .font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
+                .frame(minHeight: 44).contentShape(Rectangle())
+            }.buttonStyle(.plain).accessibilityValue(expanded ? "Expanded" : "Collapsed")
+            if expanded { content() }
+        }
     }
 }

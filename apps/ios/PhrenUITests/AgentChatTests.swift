@@ -832,11 +832,32 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(header.staticTexts["work"].exists)
     }
     @MainActor
+    func testChatOptionsOpenTheSessionCodeIndex() {
+        let app = launch(extra: ["--code-fixture"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let more = app.buttons["chat-options"]
+        XCTAssertTrue(more.waitForExistence(timeout: 8)); more.tap()
+        let code = app.buttons["chat-options-code"]
+        XCTAssertTrue(code.waitForExistence(timeout: 8)); code.tap()
+        XCTAssertTrue(app.textFields["code-search"].waitForExistence(timeout: 8))
+        capture(app, "Code from chat header actions")
+    }
+
+    @MainActor
     func testInlineApprovalAndQuestionAnswers() {
         var app = launch(extra: ["--chat-approval"])
         app.buttons["live-chat:w7:w7:t9"].tap()
         XCTAssertTrue(app.buttons["Approve"].waitForExistence(timeout: 8))
-        capture(app, "Inline approval in Phren")
+        let approve = app.buttons["chat-approval-approve"]
+        let project = app.buttons["chat-approval-allow-project"]
+        let everywhere = app.buttons["chat-approval-allow-everywhere"]
+        let deny = app.buttons["chat-approval-deny"]
+        XCTAssertTrue(app.staticTexts["Codex asks"].exists)
+        XCTAssertLessThan(approve.frame.minY, project.frame.minY)
+        XCTAssertLessThan(project.frame.minY, everywhere.frame.minY)
+        XCTAssertLessThan(everywhere.frame.minY, deny.frame.minY)
+        XCTAssertFalse(app.staticTexts["Permission needed"].exists)
+        capture(app, "Chat approval uses ordered choice rows")
         app.buttons["Approve"].tap()
         XCTAssertTrue(app.staticTexts["Answer received in this conversation."].waitForExistence(timeout: 8))
         XCTAssertFalse(app.buttons["Approve"].exists)

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { lstat, readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
@@ -76,11 +77,16 @@ async function collect(root: string) {
       behind = Number(counts[0]) || 0; ahead = Number(counts[1]) || 0;
     } catch { ahead = 0; behind = 0; }
   }
-  const staged = parseNameStatus(await git(root, "diff", "--cached", "--name-status", "-z"));
-  const unstaged = parseNameStatus(await git(root, "diff", "--name-status", "-z"));
-  const stagedStats = parseNumstat(await git(root, "diff", "--cached", "--numstat", "-z"));
-  const unstagedStats = parseNumstat(await git(root, "diff", "--numstat", "-z"));
-  const untracked = (await git(root, "ls-files", "--others", "--exclude-standard", "-z")).split("\0").filter(Boolean);
+  const [stagedRaw, unstagedRaw, stagedCounts, unstagedCounts, untrackedRaw] = await Promise.all([
+    git(root, "diff", "--cached", "--name-status", "-z"),
+    git(root, "diff", "--name-status", "-z"),
+    git(root, "diff", "--cached", "--numstat", "-z"),
+    git(root, "diff", "--numstat", "-z"),
+    git(root, "ls-files", "--others", "--exclude-standard", "-z"),
+  ]);
+  const staged = parseNameStatus(stagedRaw), unstaged = parseNameStatus(unstagedRaw);
+  const stagedStats = parseNumstat(stagedCounts), unstagedStats = parseNumstat(unstagedCounts);
+  const untracked = untrackedRaw.split("\0").filter(Boolean);
   return { branch, upstream, ahead, behind, staged, unstaged, stagedStats, unstagedStats, untracked };
 }
 
@@ -100,6 +106,7 @@ async function repository(cwd: string): Promise<string> {
  * and the working tree appears once with `staged: true` and once with `false`. */
 export async function gitStatus(cwd: string): Promise<GitStatus> {
   const root = await repository(cwd);
+  treeCache.delete(root);
   const data = await collect(root);
   const files: GitStatusFile[] = [];
   for (const [file, status] of data.staged) {
@@ -231,48 +238,79 @@ async function repositoryPath(root: string, raw: unknown, allowRoot = false): Pr
   return clean;
 }
 
-/** Status letters by repo-relative path, for marking tree entries. */
-function changedByPath(data: Awaited<ReturnType<typeof collect>>): Map<string, string> {
+type TreeEntry = { name: string; path: string; kind: "dir" | "file"; status?: string; fileCount?: number };
+type TreeSnapshot = { version: string; levels: Map<string, TreeEntry[]> };
+const treeCache = new Map<string, { head: string; expires: number; snapshot: Promise<TreeSnapshot> }>();
+const TREE_TTL_MS = 2_000;
+
+/** Build directory children once, without diff hunks, line counts or upstream walks. */
+async function treeSnapshot(root: string, head: string): Promise<TreeSnapshot> {
+  const [tracked, porcelain] = await Promise.all([
+    git(root, "ls-files", "-z"),
+    git(root, "status", "--porcelain=v1", "-z", "--untracked-files=all"),
+  ]);
   const changed = new Map<string, string>();
-  for (const [file, status] of data.unstaged) changed.set(file, statusLetter(status));
-  for (const [file, status] of data.staged) if (!changed.has(file)) changed.set(file, statusLetter(status));
-  for (const file of data.untracked) changed.set(file, "?");
-  return changed;
+  const files = new Set(tracked.split("\0").filter(Boolean));
+  const tokens = porcelain.split("\0");
+  for (let i = 0; i < tokens.length; i++) {
+    const row = tokens[i];
+    if (!row) continue;
+    const xy = row.slice(0, 2), file = row.slice(3);
+    const letter = xy === "??" ? "?" : statusLetter(xy[1] !== " " ? xy[1] : xy[0]);
+    changed.set(file, letter);
+    files.add(file);
+    // Porcelain -z places the destination before the source of a rename.
+    if (/[RC]/.test(xy)) i++;
+  }
+  const levels = new Map<string, Map<string, TreeEntry>>();
+  levels.set("", new Map());
+  for (const file of files) {
+    const parts = file.split("/");
+    if (parts.includes("node_modules") || parts.includes(".git")) continue;
+    let parent = "";
+    for (let i = 0; i < parts.length; i++) {
+      const name = parts[i], full = parent ? `${parent}/${name}` : name;
+      const directory = i < parts.length - 1;
+      let siblings = levels.get(parent);
+      if (!siblings) { siblings = new Map(); levels.set(parent, siblings); }
+      let entry = siblings.get(name);
+      if (!entry) {
+        entry = { name, path: full, kind: directory ? "dir" : "file", ...(directory ? { fileCount: 0 } : {}) };
+        siblings.set(name, entry);
+      }
+      if (directory) {
+        entry.fileCount = (entry.fileCount ?? 0) + 1;
+        if (changed.has(file)) entry.status = "changed";
+      } else if (changed.has(file)) entry.status = changed.get(file);
+      parent = full;
+    }
+  }
+  const version = createHash("sha256").update(head).update(tracked).update(porcelain).digest("hex");
+  return { version, levels: new Map([...levels].map(([directory, entries]) => [directory,
+    [...entries.values()].sort((a, b) => a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === "dir" ? -1 : 1)])) };
 }
 
-/** One level of the repository's tracked and untracked files, directories first,
- * ignored files and `node_modules` never listed. */
+/** One lazy directory response from a bounded repo/HEAD/status-hash snapshot.
+ * Every request still validates the pane's repo and the requested path. A HEAD
+ * move invalidates immediately; external working-tree edits age out after 2s.
+ * Status refresh and phone mutations invalidate immediately as well. */
 export async function gitTree(cwd: string, relPath: unknown = ""): Promise<Json> {
   const root = await repository(cwd);
   const prefix = await repositoryPath(root, relPath, true);
-  const spec = prefix ? ["--", `:(literal)${prefix}`] : [];
-  const tracked = (await git(root, "ls-files", "-z", ...spec)).split("\0").filter(Boolean);
-  const untracked = (await git(root, "ls-files", "--others", "--exclude-standard", "-z", ...spec)).split("\0").filter(Boolean);
-  const data = await collect(root);
-  const changed = changedByPath(data);
-  const entries = new Map<string, { kind: "dir" | "file"; status?: string }>();
-  const consider = (file: string) => {
-    if (prefix && !file.startsWith(prefix + "/")) return;
-    const relative = prefix ? file.slice(prefix.length + 1) : file;
-    if (!relative) return;
-    const segments = relative.split("/");
-    if (segments.length === 1) {
-      if (entries.get(segments[0])?.kind === "dir") return;
-      entries.set(segments[0], { kind: "file", ...(changed.has(file) ? { status: changed.get(file) } : {}) });
-    } else {
-      const name = segments[0];
-      const dir = prefix ? `${prefix}/${name}` : name;
-      const existing = entries.get(name);
-      const status = existing?.kind === "dir" ? existing.status : undefined;
-      const under = status === "changed" || [...changed.keys()].some(changedFile => changedFile.startsWith(dir + "/"));
-      entries.set(name, { kind: "dir", ...(under ? { status: "changed" } : {}) });
-    }
-  };
-  for (const file of tracked) consider(file);
-  for (const file of untracked) consider(file);
-  const listing = [...entries.entries()].map(([name, entry]) => ({ name, path: prefix ? `${prefix}/${name}` : name, ...entry }));
-  listing.sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === "dir" ? -1 : 1));
-  return { path: prefix, entries: listing };
+  const head = await git(root, "rev-parse", "HEAD").catch(() => "unborn");
+  let cached = treeCache.get(root);
+  if (!cached || cached.head !== head || cached.expires <= Date.now()) {
+    if (treeCache.size >= 32) treeCache.delete(treeCache.keys().next().value!);
+    cached = { head, expires: Date.now() + TREE_TTL_MS, snapshot: treeSnapshot(root, head) };
+    treeCache.set(root, cached);
+  }
+  try {
+    const snapshot = await cached.snapshot;
+    return { path: prefix, version: snapshot.version, entries: snapshot.levels.get(prefix) ?? [] };
+  } catch (error) {
+    if (treeCache.get(root) === cached) treeCache.delete(root);
+    throw error;
+  }
 }
 
 /** The phone's paths are repo-relative, at most 64, and can never climb out. */
@@ -290,29 +328,38 @@ async function repositoryPaths(root: string, raw: unknown): Promise<string[]> {
 
 export async function gitStage(cwd: string, paths: unknown): Promise<Json> {
   const root = await repository(cwd);
-  await git(root, "add", "--", ...(await repositoryPaths(root, paths)).map(file => `:(literal)${file}`));
-  return { ok: true };
+  treeCache.delete(root);
+  try {
+    await git(root, "add", "--", ...(await repositoryPaths(root, paths)).map(file => `:(literal)${file}`));
+    return { ok: true };
+  } finally { treeCache.delete(root); }
 }
 
 export async function gitUnstage(cwd: string, paths: unknown): Promise<Json> {
   const root = await repository(cwd);
-  const files = (await repositoryPaths(root, paths)).map(file => `:(literal)${file}`);
-  const hasHead = await git(root, "rev-parse", "--verify", "HEAD").then(() => true, () => false);
-  if (hasHead) await git(root, "restore", "--staged", "--", ...files);
-  else await git(root, "rm", "--force", "--cached", "--", ...files);
-  return { ok: true };
+  treeCache.delete(root);
+  try {
+    const files = (await repositoryPaths(root, paths)).map(file => `:(literal)${file}`);
+    const hasHead = await git(root, "rev-parse", "--verify", "HEAD").then(() => true, () => false);
+    if (hasHead) await git(root, "restore", "--staged", "--", ...files);
+    else await git(root, "rm", "--force", "--cached", "--", ...files);
+    return { ok: true };
+  } finally { treeCache.delete(root); }
 }
 
 /** Destructive: tracked files go back to the index, untracked files are
  * removed. The phone confirms first; no `-d` (directories) and no `-x`. */
 export async function gitDiscard(cwd: string, paths: unknown): Promise<Json> {
   const root = await repository(cwd);
-  const files = await repositoryPaths(root, paths);
-  const untracked = new Set((await git(root, "ls-files", "--others", "--exclude-standard", "-z")).split("\0").filter(Boolean));
-  for (const file of files) {
-    const literal = `:(literal)${file}`;
-    if (untracked.has(file)) await git(root, "clean", "-f", "--", literal);
-    else await git(root, "checkout", "--", literal);
-  }
-  return { ok: true };
+  treeCache.delete(root);
+  try {
+    const files = await repositoryPaths(root, paths);
+    const untracked = new Set((await git(root, "ls-files", "--others", "--exclude-standard", "-z")).split("\0").filter(Boolean));
+    for (const file of files) {
+      const literal = `:(literal)${file}`;
+      if (untracked.has(file)) await git(root, "clean", "-f", "--", literal);
+      else await git(root, "checkout", "--", literal);
+    }
+    return { ok: true };
+  } finally { treeCache.delete(root); }
 }

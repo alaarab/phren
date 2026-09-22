@@ -40,13 +40,36 @@ final class LiveSessionsModel {
     private(set) var refreshID = UUID()
     var adding = false
 
+    enum SetupAction: String, Identifiable, Hashable {
+        case skills, instructions, connectMemory
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .skills: "Skills"
+            case .instructions: "Agent instructions"
+            case .connectMemory: "Connect memory for skills & instructions"
+            }
+        }
+        var icon: String {
+            switch self {
+            case .skills: "wand.and.stars"
+            case .instructions: "person.crop.rectangle.stack"
+            case .connectMemory: "brain"
+            }
+        }
+    }
+
+    var setupActions: [SetupAction] {
+        memoryConnected ? [.skills, .instructions] : [.connectMemory]
+    }
+
     @ObservationIgnored let overview: SessionOverviewMonitor
     @ObservationIgnored private var index = MonitorIndex()
     @ObservationIgnored private var lastRefreshID = UUID()
     @ObservationIgnored private var preferences: LiveSessionPreferences?
     @ObservationIgnored private var projects: [SessionProject] = []
     @ObservationIgnored private var metadataReady = true
-    @ObservationIgnored private var memoryConnected = true
+    private var memoryConnected = true
     @ObservationIgnored private var associations: [HookAssociation] = []
 
     init(overview: SessionOverviewMonitor = .shared) { self.overview = overview }

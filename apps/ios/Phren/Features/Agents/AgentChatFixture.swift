@@ -115,6 +115,13 @@ import UIKit
             return try AgentInteractionStatus.read(JSONSerialization.data(withJSONObject: ["agentStatus": ["source": target.source, "session": target.sessionID, "pendingApproval": ["actionId": "fixture-plan-action", "toolName": "ExitPlanMode", "title": "Allow ExitPlanMode?", "message": message, "expiresAt": approvalExpiry]]]), target: target)?.approval
         }
         guard flag("--chat-approval") else { return nil }
+        if grantsEnabled {
+            return try AgentInteractionStatus.read(JSONSerialization.data(withJSONObject: ["agentStatus": [
+                "source": target.source, "session": target.sessionID, "pendingApproval": [
+                    "actionId": "fixture-grant", "title": "Send work to Desk", "message": "Review the project tests.",
+                    "conductor": ["action": "dispatch", "project": "phone", "computer": "Desk"],
+                    "expiresAt": approvalExpiry]]]), target: target)?.approval
+        }
         let (title, message) = tour && !trailer ? ("Push the release branch", "git push origin release/1.0") : ("Run project tests", "npm test")
         return try AgentInteractionStatus.read(JSONSerialization.data(withJSONObject: ["agentStatus": ["source": target.source, "session": target.sessionID, "pendingApproval": ["actionId": "fixture-action", "title": title, "message": message, "expiresAt": approvalExpiry]]]), target: target)?.approval
     }
