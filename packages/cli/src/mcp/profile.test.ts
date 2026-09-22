@@ -28,7 +28,7 @@ function fakeModules(register: (name: string, config: ToolConfig, handler: ToolH
   tool("get_tasks", "List tasks.", { project: z.string().optional() });
   tool("add_task", "Add a task.", { project: z.string(), text: z.string() });
   tool("complete_task", "Complete a task.", { project: z.string(), task: z.string() });
-  tool("update_task", "Update a task.", { project: z.string(), task: z.string(), text: z.string() });
+  tool("update_task", "Update a task.", { project: z.string(), task: z.string().optional(), text: z.string().optional(), updates: z.object({ section: z.enum(["Active", "Queue", "Done"]).optional(), priority: z.enum(["high", "medium", "low"]).optional(), text: z.string().optional() }).optional() });
   tool("set_config", "Set config.", { domain: z.string(), settings: z.record(z.string(), z.unknown()), project: z.string().optional() });
   tool("session_start", "Start a session.", { project: z.string().optional() });
   tool("session_end", "End a session.", { summary: z.string().optional() });
@@ -171,5 +171,26 @@ describe("dispatch", () => {
     const broken = parse(await admin({ action: "set_config", domain: "proactivity", settings: "{level: medium" }));
     expect(broken.ok).toBe(false);
     expect(broken.issues[0].path).toBe("settings");
+  });
+
+  it("takes manage_task's updates as an object or as the JSON string a host passes through", async () => {
+    const { registered, calls } = gateWith("core");
+    const manage = registered.get("manage_task")!.handler;
+    const asObject = parse(await manage({ action: "update", project: "p", task: "t", updates: { section: "Active", priority: "high" } }));
+    expect(asObject.data.args.updates).toEqual({ section: "Active", priority: "high" });
+    const asString = parse(await manage({ action: "update", project: "p", task: "t", updates: '{"section":"Active","priority":"high"}' }));
+    expect(asString.data.args.updates).toEqual({ section: "Active", priority: "high" });
+    const doubleWrapped = parse(await manage({ action: "update", project: "p", task: "t", updates: '"{\\"section\\":\\"Active\\"}"' }));
+    expect(doubleWrapped.data.args.updates).toEqual({ section: "Active" });
+    expect(calls).toEqual(["update_task", "update_task", "update_task"]);
+  });
+
+  it("reports a JSON-string updates miss at its real inner path, not as a type error", async () => {
+    const { registered, calls } = gateWith("core");
+    const res = parse(await registered.get("manage_task")!.handler({ action: "update", project: "p", task: "t", updates: '{"priority":"urgent"}' }));
+    expect(calls).toEqual([]);
+    expect(res.ok).toBe(false);
+    expect(res.issues[0].path).toBe("updates.priority");
+    expect(res.issues[0].message).not.toMatch(/expected object, received string/);
   });
 });

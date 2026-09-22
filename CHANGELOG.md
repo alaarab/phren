@@ -229,9 +229,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 - Composite MCP tools (`manage_task`, `revise_finding`, `session`,
   `phren_admin`) accept a nested object argument that the host passed through
-  as a JSON string — Claude Code did this for `manage_task action=update`
+  as a JSON string. Claude Code did this for `manage_task action=update`
   (`updates`) and `phren_admin action=set_config` (`settings`), which then
-  failed with "expected object, received string".
+  failed with "expected object, received string". The decode also unwraps a
+  string wrapped twice, and a decoded value that misses its own schema now
+  fails at the inner field (for example `updates.priority: invalid option`)
+  instead of the misleading object-type error.
 - The prompt hook no longer files conversation as tasks: replies ("Yep
   /herdr the phren agent is there"), questions, and frames from another
   agent or the harness (`<cross-session-message>`, delivery notices,
