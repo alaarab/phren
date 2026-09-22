@@ -59,6 +59,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- A Codex prompt drawn in the pane, such as "Would you like to run the
+  following command?", reaches the phone as a choice card again: the Hook reads
+  Codex's own numbered rows (including the `>` cursor marker), keeps the key in
+  trailing parentheses (`y`, `p`, `n`, `esc`, a digit) as the option's key and
+  the row number otherwise, and joins every non-empty line above the first row
+  (the `$ command` line included) as the title. Answering sends that key through
+  `/v1/keys` and clears the card, which also clears when the pane leaves waiting.
+  The status frame flags `passwordPrompt` only when the pane's last non-empty
+  line is a password read (`Password:` or `[sudo] password for`), so the phone
+  stops offering its secret sheet for a prompt that never asked for one.
 - A store pull's union merge of `tasks.md` recognized the stable ID only in the
   short `<!-- bid:HASH -->` comment, so real lines carrying `rank:`, `created:`
   and the rest were keyed by their whole bullet: the same task came back twice
@@ -87,6 +97,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   the node gateway's own startup cost (`gatewayMs`), and the iPhone shows such a
   computer as "Slow to answer" instead of unreachable, keeping the last
   snapshot visible.
+- Codex 0.155 code-mode tool calls (one generic JS source that invokes
+  `tools.apply_patch`, `tools.shell` or `tools.read`) no longer draw as an opaque
+  Tools pill with `+0 -0`. The Hook resolves each invocation into an ordinary
+  `apply_patch`, `shell` or `read` call, unescaping the JS string and keeping the
+  original source under `input.source`; several calls in one source emit several
+  in order, and the result stays with the first.
+- Claude Code's AskUserQuestion that falls back to the terminal is now asked on
+  the phone as its own question card instead of raw JSON: the Hook remembers the
+  normalized questions and answers each one with the option's digit, advancing
+  with Tab and submitting the last with Enter. The transcript's AskUserQuestion
+  tool row is no longer drawn beside the card.
 - Codex 0.155's own subagents (a Codex thread spawning Codex threads) are back in
   the agent tree, the worker counts and hand-off targets: the thread-store
   materializer now carries the subagent activity rows and each child's parent link.

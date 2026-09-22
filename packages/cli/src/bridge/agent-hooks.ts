@@ -18,6 +18,12 @@ import { ApprovalPushService } from "./push.js";
 
 const APPROVAL_SWEEP_MS = 2_000;
 const APPROVAL_DEBOUNCE_MS = 100;
+/** How long a permission ask is held for the phone before it falls back to
+ * the terminal. Claude's own hook window is 60 s; a test shortens it. */
+const APPROVAL_HOLD_MS = (() => {
+  const value = Number(process.env.PHREN_APPROVAL_HOLD_MS);
+  return Number.isFinite(value) && value >= 50 && value <= 60_000 ? Math.floor(value) : 55_000;
+})();
 const FANOUT_SWEEP_MS = 5_000;
 const FANOUT_ARCHIVE_MS = 60 * 60 * 1000;
 
@@ -99,27 +105,43 @@ function structuredOptions(value: unknown): TerminalChoiceOption[] {
     return labeledOption(label, key) ?? [];
   });
 }
-/** Numbered options as Codex draws them: "1. Yes, proceed (y)". The line's
- * own number is the answer key when the label carries no explicit one, so a
- * plain "1. Yes, continue anyway" is still answerable. */
+/** Numbered options as Codex draws them: "1. Yes, proceed (y)", with the
+ * cursor marker ">" or "❯" in front of the highlighted row. The key in
+ * trailing parentheses (y, p, n, esc, enter, a digit) is the answer when
+ * present and is cut from the label; otherwise the line's own number answers,
+ * so a plain "1. Yes, continue anyway" is still answerable. */
 function numberedOptions(text: string): TerminalChoiceOption[] {
   return text.split(/\r?\n/).flatMap(line => {
-    const match = /^\s*(\d+)[.)]\s+(.+?)\s*$/.exec(line);
+    const match = /^\s*[>❯]?\s*(\d+)[.)]\s+(.+?)\s*$/.exec(line);
     if (!match) return [];
-    return labeledOption(match[2].trim(), match[1]) ?? labeledOption(match[2].trim(), undefined) ?? [];
+    const label = match[2].trim();
+    const trailing = /^(.+?)\s*\(([A-Za-z0-9]+)\)\s*$/.exec(label);
+    const key = trailing ? choiceKey(trailing[2]) : undefined;
+    if (key && trailing) return [{ label: trailing[1].trim(), key }];
+    return labeledOption(label, match[1]) ?? labeledOption(label, undefined) ?? [];
   });
 }
 /** The question a pane's terminal lines are asking, in the same shape a held
- * permission request carries: the sentence above the numbered rows, then one
- * option per row keyed by its number. Undefined without two answerable rows. */
+ * permission request carries: every non-empty line above the first numbered
+ * row (the "$ command" line included, the "Press enter" hint dropped), joined
+ * with newlines, then one option per row keyed by its own key. Undefined
+ * without two answerable rows and a title. */
 export function visibleTerminalChoice(text: string): TerminalChoice | undefined {
   const options = numberedOptions(text);
   if (options.length < 2) return undefined;
   const lines = text.split(/\r?\n/);
-  const firstOption = lines.findIndex(line => /^\s*\d+[.)]\s+/.test(line));
-  const title = lines.slice(0, firstOption < 0 ? 1 : firstOption).map(line => line.trim()).filter(Boolean).join(" ").trim();
-  if (!title && !options.length) return undefined;
-  return { ...(title ? { title: title.slice(0, 4_000) } : {}), options: options.slice(0, 12) };
+  const firstOption = lines.findIndex(line => /^\s*[>❯]?\s*\d+[.)]\s+/.test(line));
+  const above = firstOption < 0 ? lines.slice(0, 1) : lines.slice(0, firstOption);
+  const title = above.map(line => line.trim()).filter(line => line && !/^press enter\b/i.test(line)).join("\n").trim();
+  if (!title) return undefined;
+  return { title: title.slice(0, 4_000), options: options.slice(0, 12) };
+}
+/** The pane's last non-empty line is a password read: sudo's "[sudo] password
+ * for user", or any "… Password:" prompt. */
+function passwordLine(text: string): boolean {
+  if (text.includes("[sudo] password for")) return true;
+  const last = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean).pop() ?? "";
+  return /password[^\n]*:\s*$/i.test(last);
 }
 /** The numbered dialog Claude Code and opencode draw straight in the pane when
  * a permission ask falls back to the terminal (no PermissionRequest hook
@@ -162,6 +184,42 @@ export function terminalChoice(input: unknown): TerminalChoice | undefined {
     .find((value): value is string => typeof value === "string" && !!value.trim() && value.trim() !== command);
   if (!title && !command) return undefined;
   return { ...(title ? { title: String(title).slice(0, 4_000) } : {}), ...(command ? { body: command.slice(0, 4_000) } : {}), options: options.slice(0, 12) };
+}
+
+/** Claude Code's AskUserQuestion input, normalized to the shape the phone
+ * already decodes for a held permission request: one question per entry with
+ * its header, multi-select flag and options. Undefined when nothing parses. */
+export interface TerminalQuestion {
+  question: string;
+  header?: string;
+  multiSelect?: boolean;
+  options: { label: string; description?: string; preview?: string }[];
+}
+function terminalQuestions(input: unknown): TerminalQuestion[] | undefined {
+  const questions = objects(object(input).questions).flatMap(raw => {
+    const question = typeof raw.question === "string" ? raw.question.trim() : "";
+    if (!question || question.length > 4_000) return [];
+    const options = objects(raw.options).flatMap(option => {
+      const label = typeof option.label === "string" ? option.label.trim() : "";
+      if (!label || label.length > 2_000) return [];
+      return [{ label, ...(typeof option.description === "string" && option.description ? { description: option.description.slice(0, 4_000) } : {}),
+        ...(typeof option.preview === "string" && option.preview ? { preview: option.preview.slice(0, 4_000) } : {}) }];
+    });
+    if (!options.length || options.length > 12) return [];
+    return [{ question, ...(typeof raw.header === "string" && raw.header ? { header: raw.header.slice(0, 200) } : {}),
+      ...(raw.multiSelect === true ? { multiSelect: true } : {}), options }];
+  });
+  return questions.length >= 1 && questions.length <= 8 ? questions : undefined;
+}
+/** The current question of a released AskUserQuestion as a terminal choice:
+ * its labels keyed "1".."n", and a "Done" Enter for a multi-select question
+ * whose answers are confirmed by leaving it. */
+function questionChoice(questions: TerminalQuestion[], index: number): TerminalChoice | undefined {
+  const question = questions[index];
+  if (!question) return undefined;
+  const options = question.options.map((option, position) => ({ label: option.label, key: String(position + 1) }));
+  if (question.multiSelect) options.push({ label: "Done", key: "Enter" });
+  return { title: question.question, options: options.slice(0, 12) };
 }
 
 const localSocket = () => path.join(bridgeRoot(), "agent.sock");
@@ -274,11 +332,16 @@ export class AgentHooks {
   /** The permission request a conversation is drawing in its own terminal
    * because nobody was there to hold it: what the phone shows above its
    * answer keys until the pane stops waiting. `dialog` marks a choice parsed
-   * from the pane's own numbered lines, whose answers gain an Enter. */
-  private terminalPrompts = new Map<string, { tool: string; message: string; choice?: TerminalChoice; dialog?: boolean; at: number }>();
+   * from the pane's own numbered lines, whose answers gain an Enter, and
+   * `questions` carries a released AskUserQuestion's normalized question set
+   * with the index currently being answered. */
+  private terminalPrompts = new Map<string, { tool: string; message: string; choice?: TerminalChoice; questions?: TerminalQuestion[]; questionIndex?: number; dialog?: boolean; at: number }>();
   /** The last time each pane's terminal lines were read for a dialog, so a
    * status tick reads them at most once per three seconds per pane. */
   private dialogReads = new Map<string, number>();
+  /** Panes whose last read terminal line is a password prompt, so the status
+   * frame can offer the phone's secret sheet only when one is really asking. */
+  private passwords = new Map<string, boolean>();
   /** Conversations Claude Code is compacting, by target, until the new context
    * starts. The phone shows the state instead of the summary row's text. */
   private compactingSince = new Map<string, number>();
@@ -463,9 +526,12 @@ export class AgentHooks {
     return { decision: "block", reason: "Phren sent this message to a different conversation in this pane; it was not delivered here. Send it again from the phone." };
   }
   private rememberTerminalPrompt(target: Target, body: Json) {
-    const choice = terminalChoice(body.input);
-    this.terminalPrompts.set(JSON.stringify(target), { tool: String(body.tool || "action").slice(0, 200),
-      message: JSON.stringify(body.input || {}, null, 2).slice(0, 32_768), ...(choice ? { choice } : {}), at: Date.now() });
+    const tool = String(body.tool || "action").slice(0, 200);
+    const questions = tool === "AskUserQuestion" ? terminalQuestions(body.input) : undefined;
+    const choice = questions ? questionChoice(questions, 0) : terminalChoice(body.input);
+    this.terminalPrompts.set(JSON.stringify(target), { tool,
+      message: JSON.stringify(body.input || {}, null, 2).slice(0, 32_768), ...(choice ? { choice } : {}),
+      ...(questions ? { questions, questionIndex: 0 } : {}), at: Date.now() });
     while (this.terminalPrompts.size > 64) this.terminalPrompts.delete(this.terminalPrompts.keys().next().value!);
   }
   /** The request the agent is showing in its terminal, if one fell through
@@ -474,24 +540,42 @@ export class AgentHooks {
     const key = JSON.stringify(target), entry = this.terminalPrompts.get(key);
     if (!entry) return undefined;
     if (Date.now() - entry.at > 900_000) { this.terminalPrompts.delete(key); return undefined; }
-    return { toolName: entry.tool, message: entry.message, ...(entry.choice ? { choice: entry.choice } : {}), at: new Date(entry.at).toISOString() };
+    return { toolName: entry.tool, message: entry.message, ...(entry.choice ? { choice: entry.choice } : {}),
+      ...(entry.questions?.length ? { questions: entry.questions, questionIndex: entry.questionIndex ?? 0 } : {}), at: new Date(entry.at).toISOString() };
   }
   clearTerminalPrompt(target: Target) { this.terminalPrompts.delete(JSON.stringify(target)); }
-  /** Claude Code's auto-mode fallback (and opencode) draws a numbered dialog
-   * in the pane with no PermissionRequest hook behind it. While the pane
+  /** True while the pane's own terminal is reading a password. */
+  passwordPrompt(target: Target): boolean { return this.passwords.get(JSON.stringify(target)) === true; }
+  /** Claude Code's auto-mode fallback, opencode and Codex draw a numbered
+   * dialog in the pane with no PermissionRequest hook behind it. While the pane
    * waits with nothing else to ask, read its last lines (at most once per
    * three seconds per pane) and publish the dialog as a terminal choice; drop
    * it when the pane leaves waiting or the dialog lines vanish. A remembered
-   * permission request that is not a dialog keeps the slot untouched. */
+   * permission request that is not a dialog keeps the slot untouched. The same
+   * read notes whether the terminal is reading a password. */
   async syncTerminalDialog(target: Target, active: boolean): Promise<void> {
     const key = JSON.stringify(target), entry = this.terminalPrompts.get(key);
+    // A released AskUserQuestion is answered by its own question card, never
+    // by the pane's numbered lines; it is cleared only when the pane stops
+    // waiting for it.
+    if (entry?.questions?.length) { if (!active) { this.terminalPrompts.delete(key); this.passwords.delete(key); } return; }
     if (entry && !entry.dialog) return;
-    if (!active) { if (entry) this.terminalPrompts.delete(key); return; }
+    if (!active) {
+      if (entry) this.terminalPrompts.delete(key);
+      this.passwords.delete(key);
+      return;
+    }
     const now = Date.now();
     if (now - (this.dialogReads.get(key) ?? 0) < 3_000) return;
     this.dialogReads.set(key, now);
     while (this.dialogReads.size > 128) this.dialogReads.delete(this.dialogReads.keys().next().value!);
-    const dialog = numberedDialog(await this.paneLines(target));
+    const text = await this.paneLines(target);
+    this.passwords.set(key, passwordLine(text));
+    while (this.passwords.size > 128) this.passwords.delete(this.passwords.keys().next().value!);
+    if (entry && !entry.dialog) return;
+    // Codex draws "> 1. Yes, proceed (y)" rows; the other fallbacks number
+    // rows without a key in the label.
+    const dialog = target.source === "codex" ? visibleTerminalChoice(text) : numberedDialog(text);
     if (!dialog?.title) { if (entry) this.terminalPrompts.delete(key); return; }
     this.terminalPrompts.set(key, { tool: "Question", message: dialog.title, choice: dialog, dialog: true, at: now });
     while (this.terminalPrompts.size > 64) this.terminalPrompts.delete(this.terminalPrompts.keys().next().value!);
@@ -503,6 +587,22 @@ export class AgentHooks {
     const entry = this.terminalPrompts.get(JSON.stringify(target));
     const digit = keys.some(key => key.length === 1 && key >= "1" && key <= "9");
     return entry?.dialog && digit ? [...keys, "Enter"] : [...keys];
+  }
+  /** Answer one question of a released AskUserQuestion with the option's own
+   * digit: send the chosen digit(s), then Tab to advance to the next
+   * question or Enter after the last. The stored question index moves with
+   * them and a finished set is cleared. Undefined when the prompt is not a
+   * question, so an ordinary key falls through to the usual handling. */
+  questionAnswerKeys(target: Target, keys: readonly string[]): string[] | undefined {
+    const key = JSON.stringify(target), entry = this.terminalPrompts.get(key);
+    if (!entry?.questions?.length) return undefined;
+    const digits = keys.filter(value => /^[1-9]$/.test(value));
+    if (!digits.length) return undefined;
+    const index = Math.min(entry.questionIndex ?? 0, entry.questions.length - 1), next = index + 1;
+    if (next >= entry.questions.length) { this.terminalPrompts.delete(key); return [...digits, "Enter"]; }
+    entry.questionIndex = next;
+    entry.choice = questionChoice(entry.questions, next);
+    return [...digits, "Tab"];
   }
   private startCompacting(target: Target) {
     this.compactingSince.set(JSON.stringify(target), Date.now());
@@ -728,8 +828,8 @@ export class AgentHooks {
         const action = randomUUID();
         const conductor = body.event === "PermissionRequest" ? conductorCall(String(body.tool || "action"), body.input) : undefined;
         const locallyWatched = this.watching.has(JSON.stringify(target)) || this.overview.has(target.server);
-        const timer = setTimeout(() => { this.pending.delete(action); this.dropPushBindings(action); this.rememberTerminalPrompt(target, body); res.end("{}"); }, 55_000);
-        const expiresAt = new Date(Date.now() + 55_000).toISOString();
+        const timer = setTimeout(() => { this.pending.delete(action); this.dropPushBindings(action); this.rememberTerminalPrompt(target, body); res.end("{}"); }, APPROVAL_HOLD_MS);
+        const expiresAt = new Date(Date.now() + APPROVAL_HOLD_MS).toISOString();
         const choice = terminalChoice(body.input);
         this.pending.set(action, { target, response: res, tool: String(body.tool || "action").slice(0, 200), input: body.input,
           message: JSON.stringify(body.input || {}, null, 2).slice(0, 32_768), ...(choice ? { choice } : {}), expiresAt, timer,

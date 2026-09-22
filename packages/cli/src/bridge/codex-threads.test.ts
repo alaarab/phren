@@ -146,4 +146,52 @@ describe("Codex thread store", () => {
     expect((await readFile(file!, "utf8")).match(/Deploy as-is\?/g)).toHaveLength(1);
     expect(await queuedQuestion("not-a-uuid")).toBeUndefined();
   });
+
+  const projectedCalls = (page: { entries: { raw: any }[] }) => page.entries
+    .filter(entry => entry.raw.payload?.type === "function_call" && entry.raw.payload?.name === "apply_patch")
+    .map(entry => ({ id: entry.raw.payload.call_id, args: JSON.parse(entry.raw.payload.arguments) }));
+
+  it("projects a code-mode patch assignment into an apply_patch call with its diff", async () => {
+    const source = 'const patch = "*** Begin Patch\\n*** Update File: src/api/lib/sync-store.ts\\n@@ -10,3 +10,4 @@\\n context\\n-old\\n+new\\n*** End Patch";\ntext(await tools.apply_patch(patch));';
+    insert(1, { type: "customToolCall", id: "call-1", name: "exec", input: source, status: "completed", aggregatedOutput: "Done" });
+    const file = await materializeCodexThread(thread);
+    const page = await new TranscriptReader(file!, "codex").read();
+    const [call] = projectedCalls(page);
+    expect(call.id).toBe("call-1:1");
+    expect(call.args.patch.startsWith("*** Begin Patch")).toBe(true);
+    expect(call.args.patch).toContain("*** Update File: src/api/lib/sync-store.ts");
+    expect(call.args.source).toBe(source);
+    // One file, one added and one removed line: the counts the patch card draws.
+    expect(call.args.patch.split("\n").filter((line: string) => line.startsWith("+"))).toHaveLength(1);
+    expect(call.args.patch.split("\n").filter((line: string) => line.startsWith("-"))).toHaveLength(1);
+    // The result stays attached to the first projected call.
+    const result = page.entries.find(entry => entry.raw.payload?.type === "custom_tool_call_output");
+    expect(result?.raw.payload.call_id).toBe("call-1:1");
+  });
+
+  it("projects an inline code-mode patch literal", async () => {
+    const source = 'text(await tools.apply_patch("*** Begin Patch\\n*** Update File: a.ts\\n@@\\n-x\\n+y\\n*** End Patch"));';
+    insert(1, { type: "customToolCall", id: "call-2", name: "exec", input: source, status: "completed" });
+    const file = await materializeCodexThread(thread);
+    const page = await new TranscriptReader(file!, "codex").read();
+    const [call] = projectedCalls(page);
+    expect(call.id).toBe("call-2:1");
+    expect(call.args.patch).toContain("*** Update File: a.ts");
+  });
+
+  it("emits one block per call in a code-mode source, in the order written", async () => {
+    const source = 'const a = "*** Begin Patch\\n*** Update File: a.ts\\n@@\\n-x\\n+y\\n*** End Patch";\n'
+      + 'const b = "*** Begin Patch\\n*** Add File: b.ts\\n+z\\n*** End Patch";\n'
+      + "await tools.apply_patch(a);\nawait tools.shell('git status --short');\nawait tools.apply_patch(b);";
+    insert(1, { type: "customToolCall", id: "call-3", name: "exec", input: source, status: "completed" });
+    const file = await materializeCodexThread(thread);
+    const page = await new TranscriptReader(file!, "codex").read();
+    const calls = page.entries.filter(entry => entry.raw.payload?.type === "function_call")
+      .map(entry => [entry.raw.payload.name, entry.raw.payload.call_id, JSON.parse(entry.raw.payload.arguments)]);
+    expect(calls.map(([name, id]) => [name, id])).toEqual([
+      ["apply_patch", "call-3:1"], ["shell", "call-3:2"], ["apply_patch", "call-3:3"],
+    ]);
+    expect(calls[1][2].command).toBe("git status --short");
+    expect(calls[2][2].patch).toContain("*** Add File: b.ts");
+  });
 });

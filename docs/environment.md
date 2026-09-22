@@ -141,6 +141,8 @@ The optional iPhone helper is installed with `phren bridge install`; it uses
 `PHREN_BRIDGE_HOME` to override `~/.local/share/phren/bridge` for isolated tests,
 and `PHREN_HERDR_HOME` to override `~/.config/herdr`. Normal phone installations
 use the defaults. Transcript and callback settings respect `CODEX_HOME`,
-`CLAUDE_CONFIG_DIR`, and `COPILOT_HOME`. The installed service uses its own user
+`CLAUDE_CONFIG_DIR`, and `COPILOT_HOME`. `PHREN_APPROVAL_HOLD_MS` overrides how
+long the Hook holds a permission ask for the phone (default `55000`, the whole
+Claude window is 60000); tests shorten it. The installed service uses its own user
 session environment; keep these paths consistent with the coding agents.
 See [Phren Hook setup](phren-hook.md) and [written files](footprint.md).

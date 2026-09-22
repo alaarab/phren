@@ -552,6 +552,155 @@ export function visibleEvent(raw: Json, source: Provider, includeSidechain = fal
   return undefined;
 }
 
+/** Codex 0.155 code mode: the model calls one generic tool whose input is
+ * JavaScript, and that source invokes `tools.apply_patch`/`tools.shell`/
+ * `tools.read`. The Hook resolves each invocation into the ordinary call the
+ * phone already draws, so a patch shows a diff instead of an opaque source. */
+export interface CodeToolCall { name: "apply_patch" | "shell" | "read"; input: Json }
+const CODE_TOOL_CALL = /\btools\s*\.\s*(apply_patch|shell|read)\s*\(/g;
+const JS_ESCAPES: Record<string, string> = { n: "\n", r: "\r", t: "\t", b: "\b", f: "\f", v: "\v", "0": "\0", "'": "'", '"': '"', "\\": "\\", "/": "/" };
+
+function unescapeJs(value: string): string {
+  return value.replace(/\\(u\{[0-9a-fA-F]{1,6}\}|u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2}|[\s\S])/g, (_match, escape: string) => {
+    if (escape[0] === "u") {
+      const code = parseInt(escape[1] === "{" ? escape.slice(2, -1) : escape.slice(1), 16);
+      return Number.isSafeInteger(code) && code <= 0x10ffff ? String.fromCodePoint(code) : "";
+    }
+    if (escape[0] === "x") { const code = parseInt(escape.slice(1), 16); return Number.isFinite(code) ? String.fromCharCode(code) : ""; }
+    return JS_ESCAPES[escape] ?? escape;
+  });
+}
+
+/** The value of a string literal, or undefined when the expression is not one. */
+function literalValue(expression: string): string | undefined {
+  const text = expression.trim(), quote = text[0];
+  if (!["'", '"', "`"].includes(quote) || text.length < 2 || text[text.length - 1] !== quote) return undefined;
+  for (let index = 1; index < text.length - 1; index++) {
+    if (text[index] === "\\") { index++; continue; }
+    if (text[index] === quote) return undefined;
+  }
+  return unescapeJs(text.slice(1, -1));
+}
+
+/** Resolve a call argument: an inline literal, or an identifier assigned a
+ * string literal in the same source. Computed values stay unresolved. */
+function resolveString(expression: string, source: string): string | undefined {
+  const literal = literalValue(expression);
+  if (literal !== undefined) return literal;
+  const identifier = expression.trim();
+  if (!/^[A-Za-z_$][\w$]*$/.test(identifier)) return undefined;
+  const declaration = new RegExp(`\\b(?:const|let|var)\\s+${identifier}\\s*=\\s*("(?:\\\\.|[^"\\\\])*"|'(?:\\\\.|[^'\\\\])*'|\`(?:\\\\.|[^\`\\\\])*\`)`).exec(source);
+  return declaration ? unescapeJs(declaration[1].slice(1, -1)) : undefined;
+}
+
+/** The `(…)` text of a call, skipping parentheses inside string literals. */
+function callArguments(source: string, open: number): string | undefined {
+  let depth = 0, quote = "";
+  for (let index = open; index < source.length; index++) {
+    const character = source[index];
+    if (quote) { if (character === "\\") index++; else if (character === quote) quote = ""; continue; }
+    if (character === '"' || character === "'" || character === "`") { quote = character; continue; }
+    if (character === "(" || character === "{" || character === "[") depth++;
+    else if (character === ")" || character === "}" || character === "]") { if (--depth === 0) return source.slice(open + 1, index); }
+  }
+  return undefined;
+}
+
+function shellCommand(expression: string, source: string): string | undefined {
+  const inline = resolveString(expression, source);
+  if (inline !== undefined) return inline;
+  const inner = /^\{([\s\S]*)\}$/.exec(expression.trim())?.[1];
+  if (inner === undefined) return undefined;
+  const body = inner.trim();
+  if (/^[A-Za-z_$][\w$]*$/.test(body)) return resolveString(body, source);
+  const property = /(?:^|[,{])\s*(?:command|cmd)\s*:\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|[A-Za-z_$][\w$]*)/.exec(body);
+  return property ? resolveString(property[1], source) : undefined;
+}
+
+/** Every recognized invocation in a code-mode source, in the order written. */
+export function codeToolCalls(source: string): CodeToolCall[] | undefined {
+  const calls: CodeToolCall[] = [], original = source.slice(0, 262_144);
+  for (const match of source.matchAll(CODE_TOOL_CALL)) {
+    const args = callArguments(source, (match.index ?? 0) + match[0].length - 1);
+    if (args === undefined) continue;
+    if (match[1] === "apply_patch") {
+      const patch = resolveString(args, source);
+      if (patch?.startsWith("*** Begin Patch")) calls.push({ name: "apply_patch", input: { patch, source: original } });
+    } else if (match[1] === "shell") {
+      const command = shellCommand(args, source);
+      if (command !== undefined) calls.push({ name: "shell", input: { command, source: original } });
+    } else {
+      const file = resolveString(args, source);
+      if (file !== undefined) calls.push({ name: "read", input: { file_path: file, source: original } });
+    }
+  }
+  return calls.length ? calls : undefined;
+}
+
+/** The JS source behind a code-mode input: a raw string, or an object carrying
+ * it under a code/source/script field. JSON tool arguments are not source. */
+function codeToolSource(input: unknown): string | undefined {
+  if (typeof input === "string") {
+    const trimmed = input.trimStart();
+    if (trimmed.startsWith("{")) {
+      try {
+        const parsed = object(JSON.parse(input));
+        // A resolved call (our own projection, or ordinary JSON arguments such
+        // as `command`) is not source, even when it also carries `source`.
+        if (["patch", "command", "cmd", "file_path", "files"].some(key => parsed[key] !== undefined)) return undefined;
+        for (const key of ["code", "source", "script", "input"]) if (typeof parsed[key] === "string") return parsed[key] as string;
+        return undefined;
+      } catch { return input; }
+    }
+    return input;
+  }
+  const fields = object(input);
+  for (const key of ["code", "source", "script", "input"]) if (typeof fields[key] === "string") return fields[key] as string;
+  return undefined;
+}
+
+const projectedCodeCalls = new Set<string>();
+function rememberProjectedCodeCall(callId: string): void {
+  projectedCodeCalls.delete(callId); projectedCodeCalls.add(callId);
+  while (projectedCodeCalls.size > 4096) projectedCodeCalls.delete(projectedCodeCalls.values().next().value!);
+}
+function renameProjectedChanges(raw: Json, base: string): Json {
+  const changes = object(raw.phren_changes);
+  if (!Object.keys(changes).length) return raw;
+  return { ...raw, phren_changes: Object.fromEntries(Object.entries(changes).map(([key, value]) => [key === base ? `${base}:1` : key, value])) };
+}
+
+/** Expand one Codex row: a code-mode call becomes one ordinary call per
+ * invocation, each carrying the original source under `input.source`, and the
+ * matching result follows the first. Other rows pass through unchanged. */
+export function projectCodexRow(raw: Json): { rows: Json[]; base?: string } {
+  if (raw.type !== "response_item") return { rows: [raw] };
+  const payload = object(raw.payload), type = String(payload.type), callId = typeof payload.call_id === "string" ? payload.call_id : "";
+  if (type === "custom_tool_call" || type === "function_call") {
+    const source = codeToolSource(payload.input ?? payload.arguments);
+    const calls = source === undefined ? undefined : codeToolCalls(source);
+    if (!calls) return { rows: [raw] };
+    const rows = calls.map((call, index) => ({ type: "response_item", payload: { type: "function_call",
+      name: call.name, call_id: `${callId}:${index + 1}`, arguments: JSON.stringify(call.input) } }));
+    if (callId) rememberProjectedCodeCall(callId);
+    return { rows, ...(callId ? { base: callId } : {}) };
+  }
+  if ((type === "custom_tool_call_output" || type === "function_call_output") && callId && projectedCodeCalls.has(callId)) {
+    return { rows: [{ ...renameProjectedChanges(raw, callId), payload: { ...payload, call_id: `${callId}:1` } }], base: callId };
+  }
+  return { rows: [raw] };
+}
+
+/** The output row for a projected call is read before its call (newest row
+ * first), so an output already collected in this page follows the first. */
+function rewriteProjectedOutput(entries: Entry[], base: string): void {
+  for (const entry of entries) {
+    const payload = object(entry.raw.payload);
+    if (payload.call_id !== base) continue;
+    entry.raw = { ...renameProjectedChanges(entry.raw, base), payload: { ...payload, call_id: `${base}:1` } };
+  }
+}
+
 /** Parse only the requested page; shared byte indexes make reopening and
  * backward pagination independent of the amount of already-read history. */
 export class TranscriptReader {
@@ -590,32 +739,39 @@ export class TranscriptReader {
       let bytes = 0, cursor = end, held: number | undefined;
       for await (const row of index.rows(handle, end, lower, signal)) {
         signal?.throwIfAborted();
-        let entry: Entry | undefined;
+        let rows: Json[] = [];
         try {
           let raw = row.bytes && visibleEvent(object(JSON.parse(row.bytes.toString())), this.source, this.includeSidechain, this.cwd);
           // A child agent's transcript is the sidechain. Its rows are that
           // conversation's own turns, not something for the reader to skip.
           if (raw && this.includeSidechain && raw.isSidechain === true) { const { isSidechain: _sidechain, ...own } = raw; raw = own; }
-          if (raw) entry = { line: row.line, raw: this.imageLine === row.line ? raw : chatFrame(raw, this.source) };
+          if (raw) {
+            if (this.changes && this.imageLine === undefined) {
+              // A shell call's output carries what it changed on disk. While
+              // that diff is still being computed on the live tail, the row
+              // (and the newer rows already collected) waits for the next read.
+              const ids = outputCallIds(raw, this.source);
+              if (before === undefined && ids.some(id => this.changes!.pending(id))) { held = row.line; entries.length = 0; bytes = 0; cursor = row.line; continue; }
+              const attached: Json = {};
+              for (const id of ids) { const files = await this.changes.changes(id); if (files) attached[id] = files; }
+              // A row that already carries a worker's own diff (OpenCode edit,
+              // write or patch) keeps it; the shell lookup only fills in the rest.
+              if (Object.keys(attached).length) raw = { ...raw, phren_changes: { ...attached, ...object(raw.phren_changes) } };
+            }
+            const projected = this.source === "codex" ? projectCodexRow(raw) : { rows: [raw] as Json[] };
+            rows = this.imageLine === row.line ? projected.rows : projected.rows.map(r => chatFrame(r, this.source));
+            if (projected.base) rewriteProjectedOutput(entries, projected.base);
+          }
         } catch { /* A malformed old row cannot block the next readable page. */ }
-        if (entry && this.changes && this.imageLine === undefined) {
-          // A shell call's output carries what it changed on disk. While that
-          // diff is still being computed on the live tail, the row — and the
-          // newer rows already collected — wait for the next read.
-          const ids = outputCallIds(entry.raw, this.source);
-          if (before === undefined && ids.some(id => this.changes!.pending(id))) { held = row.line; entries.length = 0; bytes = 0; cursor = row.line; continue; }
-          const attached: Json = {};
-          for (const id of ids) { const files = await this.changes.changes(id); if (files) attached[id] = files; }
-          // A row that already carries a worker's own diff (OpenCode edit,
-          // write or patch) keeps it; the shell lookup only fills in the rest.
-          if (Object.keys(attached).length) entry.raw = { ...entry.raw, phren_changes: { ...attached, ...object(entry.raw.phren_changes) } };
-        }
-        if (entry) {
-          const size = Buffer.byteLength(JSON.stringify(entry));
+        if (rows.length) {
+          const size = Buffer.byteLength(JSON.stringify(rows));
           if (this.imageLine !== undefined || size < 2_097_152) {
             // Leave an entry that doesn't fit for the following history page.
             if (this.imageLine === undefined && bytes + size > byteBudget) break;
-            entries.push(entry); bytes += size;
+            // Rows arrive newest first; reverse a row's blocks so the page
+            // lists several calls from one source in the order they were written.
+            entries.push(...rows.slice().reverse().map(raw => ({ line: row.line, raw })));
+            bytes += size;
           }
         }
         cursor = row.line;
