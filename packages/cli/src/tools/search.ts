@@ -1,4 +1,5 @@
 import { nonInteractiveGitEnv } from "../utils-helpers.js";
+import { projectMemoryCounts } from "../content/summarize.js";
 import { moduleEnabled } from "../modules/runtime.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type McpContext, mcpResponse, resolveStoreForProject } from "./types.js";
@@ -601,6 +602,8 @@ async function handleGetProjectSummary(ctx: McpContext, { name }: { name: string
     data: {
       name,
       summary: summaryDoc?.content ?? null,
+      // What the project holds, counted the way every graph counts it.
+      counts: projectMemoryCounts(storeName ? (resolveAllStores(ctx.phrenPath).find((s) => s.name === storeName)?.path ?? ctx.phrenPath) : ctx.phrenPath, lookupName),
       agentsMdPath: claudeDoc?.path ?? null,
       claudeMdPath: claudeDoc?.path ?? null,
       truthsPath: canonicalDoc?.path ?? null,

@@ -40,13 +40,12 @@ public struct GraphPayload: Codable, Equatable, Sendable {
         public var date: String?
         public var priority: String?
         public var section: String?
+        /// On a project: everything it holds (live findings, journal notes
+        /// and the archive the CLI moved into topic files), not the slice the
+        /// graph draws. The CLI's web UI, VS Code and the shell count the same.
         public var findingCount: Int?
+        /// On a project: every open task (active and queue).
         public var taskCount: Int?
-        /// Everything the project knows: live findings, journal notes and the
-        /// archive the CLI moved into topic files (read from summary.md).
-        public var totalFindingCount: Int?
-        /// Open tasks (active and queue), not only the ones drawn.
-        public var openTaskCount: Int?
         /// The number beside a project's label for the current filter.
         public var labelCount: Int?
     }
@@ -105,7 +104,7 @@ public struct GraphPayload: Codable, Equatable, Sendable {
             // holds, not just the recent ones the graph draws.
             guard node.group == "project" else { return node }
             var labeled = node
-            labeled.labelCount = filter == .tasks ? (node.openTaskCount ?? node.taskCount) : (node.totalFindingCount ?? node.findingCount)
+            labeled.labelCount = filter == .tasks ? node.taskCount : node.findingCount
             return labeled
         }
         let ids = Set(filtered.map(\.id))
@@ -335,10 +334,8 @@ public enum GraphBuilder {
         // Fold the per-project tallies back onto the project nodes.
         for index in nodes.indices where nodes[index].group == "project" {
             let id = nodes[index].id
-            nodes[index].findingCount = findingCounts[id] ?? 0
-            nodes[index].taskCount = taskCounts[id] ?? 0
-            nodes[index].totalFindingCount = input.findingTotals[id] ?? findingCounts[id] ?? 0
-            nodes[index].openTaskCount = input.tasks[id].map { $0.items(in: .active).count + $0.items(in: .queue).count } ?? 0
+            nodes[index].findingCount = input.findingTotals[id] ?? findingCounts[id] ?? 0
+            nodes[index].taskCount = input.tasks[id].map { $0.items(in: .active).count + $0.items(in: .queue).count } ?? taskCounts[id] ?? 0
         }
 
         // Drop links pointing at projects outside the focused slice.
