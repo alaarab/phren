@@ -312,6 +312,7 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
   let helperPIDs: number[] = [];
   let paneLines = "", drawConfirmation = false;
   let paneAgent = "codex";
+  let paneCwd: string | undefined;
   let remoteHook: ChildProcess | undefined;
   function api(url: string, body?: unknown, method?: string): Promise<{ status: number; data: any }> {
     return new Promise((resolve, reject) => {
@@ -334,7 +335,7 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     });
   }
   function resetVars(): void {
-    commands = []; current = session; agentStatus = "working"; reportIdentity = true; foregroundPID = process.pid; terminalID = "term-one"; log = ""; holdSnapshot = false; releaseSnapshot = undefined;
+    paneCwd = undefined; commands = []; current = session; agentStatus = "working"; reportIdentity = true; foregroundPID = process.pid; terminalID = "term-one"; log = ""; holdSnapshot = false; releaseSnapshot = undefined;
     replaceBeforeMutation = false; deliveries = [];
     extraWorkspaces = []; extraTabs = []; extraPanes = []; failAgentStart = false; helperPIDs = []; remoteHook = undefined;
     paneLines = ""; drawConfirmation = false; paneAgent = "codex";
@@ -393,7 +394,7 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
           target.agent = req.params.kind; target.agent_name = req.params.name; target.agent_status = "idle";
         }
         const pane = { pane_id: "w1:p1", tab_id: "w1:t1", workspace_id: "w1", terminal_id: terminalID, agent: paneAgent, agent_status: agentStatus,
-          agent_session: reportIdentity ? { kind: "id", agent: paneAgent, value: current } : undefined, cwd: root };
+          agent_session: reportIdentity ? { kind: "id", agent: paneAgent, value: current } : undefined, cwd: paneCwd ?? root };
         const snapshot = { panes: [pane, ...extraPanes], workspaces: [{ workspace_id: "w1", label: "Project" }, ...extraWorkspaces],
           tabs: [{ tab_id: "w1:t1", workspace_id: "w1", label: "1" }, ...extraTabs] };
         const answer = () => socket.end(JSON.stringify({ id: req.id, result: req.method === "session.snapshot" ? { snapshot }
@@ -528,6 +529,43 @@ socket.on('close', () => process.exit(0));
       expect(Buffer.concat(chunks).toString()).toContain('"product":"phren-hook"');
       const sample = JSON.parse(await readFile(path.join(root, "bridge/gateway.json"), "utf8"));
       expect(sample.ms).toBeGreaterThanOrEqual(0);
+    });
+
+    it.each([false, true])("returns an intact upload reply through the SSH gateway (stdin EOF: %s)", async endInput => {
+      const child = spawn(process.execPath, [hookBundle, "ssh"], {
+        env: { ...process.env, PHREN_BRIDGE_HOME: path.join(root, "bridge"), PHREN_HERDR_HOME: path.join(root, "herdr"),
+          PHREN_PATH: path.join(root, ".phren"), SSH_ORIGINAL_COMMAND: "phren-hook v1 pipe" },
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      const chunks: Buffer[] = [], errors: Buffer[] = [];
+      child.stdout.on("data", bytes => chunks.push(bytes));
+      child.stderr.on("data", bytes => errors.push(bytes));
+      const closed = once(child, "close");
+      const bytes = Buffer.alloc(400 * 1024, 0x61);
+      // Keep the PNG signature that the upload validator checks.
+      Buffer.from("89504e470d0a1a0a", "hex").copy(bytes);
+      const body = Buffer.from(JSON.stringify({ target, name: "large.png", data: bytes.toString("base64") }));
+      try {
+        child.stdin.write(`POST /v1/upload HTTP/1.1\r\nHost: phren.local\r\nContent-Type: application/json\r\nContent-Length: ${body.length}\r\nConnection: close\r\n\r\n`);
+        for (let offset = 0; offset < body.length; offset += 16_384) {
+          if (!child.stdin.write(body.subarray(offset, offset + 16_384))) await once(child.stdin, "drain");
+        }
+        if (endInput) child.stdin.end();
+        const [code] = await closed;
+        expect(code, Buffer.concat(errors).toString()).toBe(0);
+        const reply = Buffer.concat(chunks).toString();
+        const boundary = reply.indexOf("\r\n\r\n");
+        expect(reply.slice(0, boundary)).toMatch(/^HTTP\/1\.1 200 /);
+        const json = reply.slice(boundary + 4);
+        const length = /content-length: (\d+)/i.exec(reply.slice(0, boundary));
+        expect(length).not.toBeNull();
+        expect(Buffer.byteLength(json)).toBe(Number(length![1]));
+        const uploaded = JSON.parse(json);
+        expect(await readFile(uploaded.path)).toEqual(bytes);
+      } finally {
+        child.stdin.destroy();
+        if (child.exitCode === null) child.kill();
+      }
     });
 
     it("lists, launches, and reports scheduled prompts", async () => {
@@ -1810,6 +1848,26 @@ schedules:
         expect(candidates.data.candidates.some((c: any) => c.directory === realpathSync.native(outside))).toBe(true);
         expect((await api("/v1/workspaces/create", { cwd: outside, label: "arbitrary label" })).status).toBe(200);
       } finally { await rm(outside, { recursive: true, force: true }); }
+    });
+
+    it("measures tree and status on the phren checkout", async () => {
+      paneCwd = process.cwd();
+      try {
+        const measure = async (route: string, directory?: string) => {
+          const started = performance.now();
+          const response = await api(`/v1/git/${route}`, { target, ...(directory ? { path: directory } : {}) });
+          expect(response.status, JSON.stringify(response.data)).toBe(200);
+          return { ms: performance.now() - started, data: response.data };
+        };
+        const status = await measure("status");
+        const cold = await measure("tree");
+        const warm = await measure("tree");
+        const directory = await measure("tree", "packages/cli/src");
+        console.log(JSON.stringify({ benchmark: "phren git routes", statusMs: status.ms,
+          coldTreeMs: cold.ms, cachedTreeMs: warm.ms, directoryMs: directory.ms }));
+        expect(warm.ms).toBeLessThan(500);
+        expect(directory.data.entries.length).toBeGreaterThan(0);
+      } finally { paneCwd = undefined; }
     });
 
     it("serves git routes for the pane's repository and refuses them outside one", async () => {

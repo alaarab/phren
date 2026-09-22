@@ -1,5 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { resolveAllStores } from "../store-registry.js";
+import { git } from "./projects.js";
 import { z } from "zod";
 import { getProjectDirs } from "../shared.js";
 import type { IndexResult, CodeStatus, OutlineEntry, ReferenceResult, SymbolDefinition, SymbolHit, UsageEntry } from "@phren/code";
@@ -17,6 +19,23 @@ export async function requireCodePackage(store?: string): Promise<typeof import(
   return code;
 }
 
+/** Resolve only registered stores. Phone IDs are repository names; no client
+ * path can select a filesystem location. Omitting the ID supports older phones. */
+export async function resolveCodeStore(base: string, value?: string | null, write = false): Promise<string> {
+  if (!value) return base;
+  const id = z.string().min(1).max(200).regex(/^[a-zA-Z0-9_.-]+(?:\/[a-zA-Z0-9_.-]+)?$/).parse(value);
+  const stores = resolveAllStores(base).filter(store => store.available !== false);
+  const matches: typeof stores = [];
+  for (const store of stores) {
+    const remote = store.remote ?? (await git(store.path, "config", "--get", "remote.origin.url").catch(() => "")).trim();
+    const repo = /github\.com[/:]([^/]+\/[^/]+?)(?:\.git)?$/.exec(remote)?.[1];
+    if (id === store.id || id === store.name || id.toLowerCase() === repo?.toLowerCase()) matches.push(store);
+  }
+  if (matches.length !== 1) throw new BridgeError(404, "That store is not uniquely registered on this computer.");
+  if (write && matches[0].role === "readonly") throw new BridgeError(403, "That store is read-only.");
+  return matches[0].path;
+}
+
 /**
  * Read routes over the `code` module's local symbol index (stage 3).
  *
@@ -32,7 +51,7 @@ const KIND_VALUES = ["function", "method", "class", "struct", "enum", "interface
 
 const projectSchema = z.string().min(1).max(100).refine(value => isValidProjectName(value), "Choose a valid project name.");
 const querySchema = z.string().max(500);
-const symbolSchema = z.string().min(1).max(500);
+const symbolSchema = z.string().min(1).max(4600);
 const pathSchema = z.string().min(1).max(4096).refine(value => !value.includes("\0") && !value.split("/").includes(".."), "Choose a valid file path.");
 const kindSchema = z.enum(KIND_VALUES);
 const limitSchema = z.coerce.number().int().min(1).max(500);
@@ -72,13 +91,25 @@ export class CodeRoutes {
     return { project, path: file, entries: result.value };
   }
 
+  async outlineSummary(projectValue: string | null, pathsValue: string | null) {
+    const project = projectSchema.parse(projectValue ?? "");
+    let raw: unknown;
+    try { raw = JSON.parse(pathsValue ?? "[]"); }
+    catch { throw new BridgeError(400, "Choose valid paths."); }
+    const paths = z.array(pathSchema.refine(value => !path.isAbsolute(value) && !path.win32.isAbsolute(value)
+      && !value.split(/[\\/]/).includes(".."))).min(1).max(200).parse(raw);
+    const result = await (await requireCodePackage(this.store)).outlineSummary(this.store, project, [...new Set(paths)]);
+    if (!result.available) throw noIndex(project);
+    return { project, entries: result.value };
+  }
+
   async definition(projectValue: string | null, symbolValue: string | null): Promise<{ project: string; definition: SymbolDefinition & { findings: import("@phren/code").CitingFinding[] } }> {
     const project = projectSchema.parse(projectValue ?? "");
     const symbol = symbolSchema.parse(symbolValue ?? "");
     const result = await (await requireCodePackage(this.store)).definition(this.store, project, symbol);
     if (!result.available) throw noIndex(project);
     if (!result.value) throw new BridgeError(404, `No symbol "${symbol}" in ${project}.`);
-    return { project, definition: { ...result.value, findings: (await requireCodePackage(this.store)).findingsCitingSymbol(this.store, project, symbol) } };
+    return { project, definition: { ...result.value, findings: (await requireCodePackage(this.store)).findingsCitingSymbol(this.store, project, (await requireCodePackage(this.store)).citationSymbolName(result.value.symbol)) } };
   }
 
   async references(projectValue: string | null, symbolValue: string | null, limitValue: string | null): Promise<{ project: string; references: ReferenceResult }> {

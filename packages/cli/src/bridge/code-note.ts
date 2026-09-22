@@ -6,7 +6,8 @@ import { BridgeError, sessionId, type Json } from "./protocol.js";
 import { projectName } from "./dispatch.js";
 
 export const codeNoteSchema = z.object({
-  project: projectName, symbol: z.string().min(1).max(500),
+  store: z.string().min(1).max(200).optional(),
+  project: projectName, symbol: z.string().min(1).max(4600),
   file: z.string().min(1).max(4096).refine(file => !path.isAbsolute(file) && !file.includes("\0") && !file.split(/[\\/]/).includes("..")),
   line: z.number().int().positive(), text: z.string().trim().min(1).max(4500).refine(text => !/[\x00-\x08\x0b-\x1f\x7f]/.test(text)),
   target: z.union([z.object({ session: sessionId }).strict(), z.object({ harness: z.enum(["codex", "claude", "opencode"]) }).strict()]).optional(),

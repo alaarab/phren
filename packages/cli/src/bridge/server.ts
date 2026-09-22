@@ -14,7 +14,7 @@ import { z } from "zod";
 import { ActivityJournal } from "./activity.js";
 import { AgentHooks } from "./agent-hooks.js";
 import { homeDirectory, startChangeRetention } from "./changes.js";
-import { CodeReindexer, CodeRoutes } from "./code-routes.js";
+import { resolveCodeStore, CodeReindexer, CodeRoutes } from "./code-routes.js";
 import { queuedQuestion, threadHealth } from "./codex-threads.js";
 import { WorkspaceContextUsage } from "./context.js";
 import { DispatchService, dispatchProjectDirectory, dispatchStatus } from "./dispatch.js";
@@ -352,18 +352,19 @@ export async function serve(version: string): Promise<void> {
             const page = await reader.read();
             result = { ...page, type: "backlog", source, session }; break;
           }
-          case "/v1/code/status": result = await codeRoutes!.status(url.searchParams.get("project")); break;
-          case "/v1/code/search": result = await codeRoutes!.search(url.searchParams.get("project"), url.searchParams.get("q"), url.searchParams.get("kind"), url.searchParams.get("limit")); break;
-          case "/v1/code/outline": result = await codeRoutes!.outline(url.searchParams.get("project"), url.searchParams.get("path")); break;
-          case "/v1/code/definition": result = await codeRoutes!.definition(url.searchParams.get("project"), url.searchParams.get("symbol")); break;
-          case "/v1/code/references": result = await codeRoutes!.references(url.searchParams.get("project"), url.searchParams.get("symbol"), url.searchParams.get("limit")); break;
-          case "/v1/code/usage": result = await codeRoutes!.usage(url.searchParams.get("project"), url.searchParams.get("top")); break;
+          case "/v1/code/status": result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, url.searchParams.get("store")))).status(url.searchParams.get("project")); break;
+          case "/v1/code/search": result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, url.searchParams.get("store")))).search(url.searchParams.get("project"), url.searchParams.get("q"), url.searchParams.get("kind"), url.searchParams.get("limit")); break;
+          case "/v1/code/outline-summary": result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, url.searchParams.get("store")))).outlineSummary(url.searchParams.get("project"), url.searchParams.get("paths")); break;
+          case "/v1/code/outline": result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, url.searchParams.get("store")))).outline(url.searchParams.get("project"), url.searchParams.get("path")); break;
+          case "/v1/code/definition": result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, url.searchParams.get("store")))).definition(url.searchParams.get("project"), url.searchParams.get("symbol")); break;
+          case "/v1/code/references": result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, url.searchParams.get("store")))).references(url.searchParams.get("project"), url.searchParams.get("symbol"), url.searchParams.get("limit")); break;
+          case "/v1/code/usage": result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, url.searchParams.get("store")))).usage(url.searchParams.get("project"), url.searchParams.get("top")); break;
           default: throw new BridgeError(404, "Unknown Phren Hook route.");
         }
       } else if (request.method === "POST") {
         const data = await body(request);
         if (url.pathname === "/v1/code/note") {
-          result = await saveCodeNote(scheduleStore, data, dispatches ? async (note, prompt) => {
+          result = await saveCodeNote(await resolveCodeStore(scheduleStore, typeof data.store === "string" ? data.store : undefined, true), data, dispatches ? async (note, prompt) => {
             if (note.target && "session" in note.target) return handOff({ session: note.target.session, project: note.project, text: prompt });
             return dispatches.dispatch({ computer: "anywhere", project: note.project,
               harness: note.target && "harness" in note.target ? note.target.harness : "codex", prompt, label: `Code note: ${note.symbol}`.slice(0, 200) });
