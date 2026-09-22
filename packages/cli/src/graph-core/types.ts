@@ -36,6 +36,8 @@ export type RawNode = {
   topicLabel?: string;
   findingCount?: number;
   taskCount?: number;
+  /** The number beside a project's label for the active filter (the phone sets it). */
+  labelCount?: number;
 };
 
 /**
