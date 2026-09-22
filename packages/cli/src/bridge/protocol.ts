@@ -8,6 +8,7 @@ export const PROTOCOL = 1;
 export const MAX_FRAME = 8 * 1024 * 1024;
 export const id = z.string().regex(/^[A-Za-z0-9_%:.-]{1,200}$/);
 export const serverName = z.string().regex(/^(?!\.\.?$)[A-Za-z0-9_][A-Za-z0-9_.-]{0,99}$/);
+export const computerName = serverName.refine(name => name !== "anywhere", "anywhere is reserved for scheduling");
 export const provider = z.enum(["codex", "claude", "copilot", "phren", "opencode"]);
 export type Provider = z.infer<typeof provider>;
 export const sessionId = z.union([

@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { computerName } from "./computers.js";
 import { hookRequest } from "./client.js";
+import { projectName } from "./dispatch.js";
+import { grantLabel, listGrants, matchGrant } from "./grants.js";
 import { hookPeers, peerRequest, type HookPeer } from "./peers.js";
 import { BridgeError, objects, sessionId, targetSchema, type Json, type Target } from "./protocol.js";
 
@@ -10,6 +12,7 @@ export const handOffSchema = z.object({
   computer: computerName.optional().describe("Enrolled computer name. Omit for this computer."),
   target: targetSchema.optional().describe("Complete live target for the existing session."),
   session: sessionId.optional().describe("Session id to resolve through the Hook workspace overview."),
+  project: projectName.optional().describe("Project slug this hand-off belongs to, for conductor grant matching."),
   text: promptText.describe("Prompt to deliver to the existing session, at most 32768 characters."),
 }).strict().superRefine((value, context) => {
   if ((value.target === undefined) === (value.session === undefined)) context.addIssue({ code: "custom", message: "Provide exactly one of target or session." });
@@ -28,7 +31,7 @@ async function targetFromOverview(request: Request, session: string, server?: st
   throw new BridgeError(404, "No live session with that id appears in the workspace overview.");
 }
 
-export async function handOff(input: unknown): Promise<{ ok: boolean; delivered: boolean; target: Target }> {
+export async function handOff(input: unknown): Promise<{ ok: boolean; delivered: boolean; target: Target; granted?: string }> {
   const data = handOffSchema.parse(input);
   let request: Request;
   let peer: HookPeer | undefined;
@@ -40,7 +43,8 @@ export async function handOff(input: unknown): Promise<{ ok: boolean; delivered:
   }
   const target = data.target ?? await targetFromOverview(request, data.session!, peer?.server);
   if (peer && target.server !== peer.server) throw new BridgeError(400, "The target belongs to a different Herdr server on that computer.");
+  const grant = matchGrant(await listGrants(), { action: "hand_off", project: data.project, computer: data.computer });
   const result = await request("/v1/prompt", { target, text: data.text });
   const delivered = result.ok === true && result.deliveryUncertain !== true;
-  return { ok: delivered, delivered, target };
+  return { ok: delivered, delivered, target, ...(grant ? { granted: grantLabel(grant) } : {}) };
 }
