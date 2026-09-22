@@ -70,7 +70,7 @@ struct ChatTimelineEntry: Identifiable, Equatable {
         for index in entries.indices {
             guard let call = entries[index].messages.first, call.role == .tool, !call.isToolResult else { continue }
             let result = entries[index].messages.first(where: \.isToolResult)
-            if PhrenToolPresentation.recognizes(call.title) {
+            if AgentToolClassification.kind(name: call.title, input: call.text) == .phren {
                 entries[index].phren = PhrenToolPresentation(name: call.title ?? "", input: call.text, result: result?.text, isError: result?.isToolError == true)
             } else if ToolCardKind.recognizes(call.title) {
                 entries[index].card = ToolCardKind(call: call, result: result, notification: call.toolCallID.flatMap { notifications[$0] })

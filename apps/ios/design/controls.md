@@ -542,7 +542,9 @@ The single-choice sibling of `PhrenMultiSelect`: the same pill button and
 sheet, one check mark, closes on choice. Rows accept a glyph, a title, a
 caption and a trailing chip. Used for the schedule editor's computer,
 harness and model, the chat `/model` picker and the launch flow's computer
-chooser. Ids: `<identifier>` on the button, `<identifier>:<value>` on rows.
+chooser. Ids: `<identifier>` on the button, `<identifier>:<value>` on rows,
+and `<identifier>-loading` on the loading row unless the owner supplies its
+own `loadingIdentifier` (the chat picker's `model-loading`).
 
 ## PhrenStepSlider
 

@@ -20,25 +20,55 @@ extension View {
 
 struct PhrenSwitch: View {
     @Binding var isOn: Bool
-    var label = "Enabled"
+    var label: String
+    private var rowContent: AnyView?
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    init(isOn: Binding<Bool>, label: String = "Enabled") {
+        _isOn = isOn; self.label = label
+    }
+
+    init(_ title: String, isOn: Binding<Bool>) {
+        _isOn = isOn; label = title; rowContent = AnyView(Text(title))
+    }
+
+    init(_ title: String, systemImage: String, isOn: Binding<Bool>) {
+        _isOn = isOn; label = title
+        rowContent = AnyView(Label(title, systemImage: systemImage))
+    }
+
+    init<Content: View>(isOn: Binding<Bool>, @ViewBuilder label: () -> Content) {
+        _isOn = isOn; self.label = ""; rowContent = AnyView(label())
+    }
+
     var body: some View {
+        if rowContent == nil { switchButton.accessibilityLabel(label) }
+        else { switchButton }
+    }
+
+    private var switchButton: some View {
         Button {
             withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { isOn.toggle() }
         } label: {
-            ZStack {
-                Capsule().fill(isOn ? PhrenTheme.accentSolid : PhrenTheme.surfaceRaised)
-                    .frame(width: 44, height: 26)
-                Circle().fill(PhrenTheme.onAccent).frame(width: 22, height: 22)
-                    .offset(x: isOn ? 9 : -9)
+            HStack(spacing: PhrenTheme.Space.medium) {
+                if let rowContent {
+                    rowContent.foregroundStyle(PhrenTheme.text)
+                    Spacer(minLength: PhrenTheme.Space.small)
+                }
+                ZStack {
+                    Capsule().fill(isOn ? PhrenTheme.accentSolid : PhrenTheme.surfaceRaised)
+                        .frame(width: 44, height: 26)
+                    Circle().fill(PhrenTheme.onAccent).frame(width: 22, height: 22)
+                        .offset(x: isOn ? 9 : -9)
+                }
+                .frame(width: 44, height: 44).accessibilityHidden(true)
             }
-            .frame(width: 44, height: 44).contentShape(Rectangle())
+            .frame(minHeight: 44).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .opacity(isEnabled ? 1 : 0.45)
-        .accessibilityLabel(label)
+        .accessibilityElement(children: .combine)
         .accessibilityValue(isOn ? "On" : "Off")
         .accessibilityAddTraits(.isToggle)
     }
@@ -381,7 +411,8 @@ struct PhrenSingleSelect<Value: Hashable>: View {
 /// true the rows are replaced by one muted row. `message` carries a listed
 /// but unavailable note (an offline computer); `footer` an owner control
 /// below the options (the chat picker's custom id field). Rows identify as
-/// `rowPrefix:option.id`; Done is `rowPrefix-done`.
+/// `rowPrefix:option.id`; Done is `rowPrefix-done`; the loading row is
+/// `loadingIdentifier` when one is given, else `rowPrefix-loading`.
 struct PhrenSingleSelectSheet<Value: Hashable>: View {
     let title: String
     let options: [PhrenOption<Value>]
@@ -389,6 +420,7 @@ struct PhrenSingleSelectSheet<Value: Hashable>: View {
     let rowPrefix: String
     var loading = false
     var loadingLabel = "Loading…"
+    var loadingIdentifier: String? = nil
     var message: String? = nil
     var footer: AnyView? = nil
     /// Runs after the selection is set, before the card dismisses.
@@ -400,11 +432,13 @@ struct PhrenSingleSelectSheet<Value: Hashable>: View {
         VStack(alignment: .leading, spacing: PhrenTheme.Space.medium) {
             Text(title).font(PhrenTypography.subheadline.weight(.semibold))
                 .accessibilityAddTraits(.isHeader).accessibilityFocused($titleFocused)
+            // Footer and Close ride inside the scroll content: at the medium
+            // detent, five rows plus Dynamic Type must never clip them away.
             ScrollView {
                 VStack(spacing: PhrenTheme.Space.small) {
                     if loading {
                         PhrenOptionRow(title: loadingLabel, disabled: true, muted: true) {}
-                            .phrenIdentifier("\(rowPrefix)-loading")
+                            .phrenIdentifier(loadingIdentifier ?? "\(rowPrefix)-loading")
                     } else {
                         if let message {
                             PhrenOptionRow(title: message, disabled: true, muted: true) {}
@@ -422,22 +456,22 @@ struct PhrenSingleSelectSheet<Value: Hashable>: View {
                             .phrenIdentifier("\(rowPrefix):\(option.id)")
                         }
                     }
+                    if let footer { footer }
+                    // A single choice needs no Done; the row itself closes the sheet.
+                    // The button stays for cancelling with nothing chosen, labelled so.
+                    Button(action: dismiss) {
+                        Text(selection == nil ? "Cancel" : "Close").font(PhrenTypography.body.weight(.medium))
+                            .foregroundStyle(PhrenTheme.accent)
+                            .padding(.horizontal, PhrenTheme.Space.medium)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .background(PhrenTheme.surfaceRaised,
+                                        in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.questionOption))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).phrenIdentifier("\(rowPrefix)-done")
                 }
             }
             .scrollBounceBehavior(.basedOnSize)
-            if let footer { footer }
-            // A single choice needs no Done; the row itself closes the sheet.
-            // The button stays for cancelling with nothing chosen, labelled so.
-            Button(action: dismiss) {
-                Text(selection == nil ? "Cancel" : "Close").font(PhrenTypography.body.weight(.medium))
-                    .foregroundStyle(PhrenTheme.accent)
-                    .padding(.horizontal, PhrenTheme.Space.medium)
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                    .background(PhrenTheme.surfaceRaised,
-                                in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.questionOption))
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain).phrenIdentifier("\(rowPrefix)-done")
         }
         .padding(PhrenTheme.Space.large)
         .frame(maxWidth: 360)

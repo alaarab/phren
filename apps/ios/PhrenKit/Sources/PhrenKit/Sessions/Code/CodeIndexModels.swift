@@ -113,13 +113,15 @@ public struct CodeDefinition: Decodable, Equatable, Sendable {
     public let symbol: CodeSymbol
     public let candidates: Int
     public let snippet: String
+    public let findings: [CodeFinding]
     public let blame: CodeBlame?
 
-    public init(symbol: CodeSymbol, candidates: Int, snippet: String, blame: CodeBlame?) {
+    public init(symbol: CodeSymbol, candidates: Int, snippet: String, blame: CodeBlame?, findings: [CodeFinding] = []) {
         self.symbol = symbol
         self.candidates = candidates
         self.snippet = snippet
         self.blame = blame
+        self.findings = findings
     }
 
     public init(from decoder: Decoder) throws {
@@ -128,9 +130,10 @@ public struct CodeDefinition: Decodable, Equatable, Sendable {
         candidates = try values.decodeIfPresent(Int.self, forKey: .candidates) ?? 1
         snippet = try values.decodeIfPresent(String.self, forKey: .snippet) ?? ""
         blame = try values.decodeIfPresent(CodeBlame.self, forKey: .blame)
+        findings = try values.decodeIfPresent([CodeFinding].self, forKey: .findings) ?? []
     }
 
-    private enum CodingKeys: String, CodingKey { case symbol, candidates, snippet, blame }
+    private enum CodingKeys: String, CodingKey { case symbol, candidates, snippet, blame, findings }
 }
 
 public struct CodeReference: Decodable, Equatable, Sendable {

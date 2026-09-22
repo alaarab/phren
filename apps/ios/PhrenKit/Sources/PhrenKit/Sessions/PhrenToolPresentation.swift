@@ -41,28 +41,27 @@ public struct PhrenToolPresentation: Equatable, Sendable {
         }
         let failed = isError || envelope["ok"] as? Bool == false || envelope["isError"] as? Bool == true
         status = result == nil ? .running : failed ? .failed : .succeeded
-        project = Self.nonempty(value("project"))
+        project = Self.nonempty(tool == "get_project_summary" ? value("project", "name") : value("project"))
         tag = tool == "add_finding" ? Self.nonempty(value("findingType", "finding_type")) : nil
         var details: [Field] = []
         let action = value("action").lowercased()
         switch tool {
-        case "add_finding": verb = "Saved a finding"; body = value("finding", "text", "content")
-        case "add_task": verb = "Added a task"; body = value("task", "item", "text")
+        case "add_finding": verb = "Save finding"; body = value("finding", "text", "content")
+        case "add_task": verb = "Add task"; body = value("task", "item", "text")
         case "complete_task": verb = "Completed a task"; body = value("item", "task", "id")
         case "manage_task":
-            verb = ["complete", "done", "finish"].contains(action) ? "Completed a task"
-                : ["remove", "delete"].contains(action) ? "Removed a task" : "Updated a task"
+            verb = "Update task"
             body = value("item", "task", "id", "text")
             if !action.isEmpty { details.append(.init(name: "Action", value: action)) }
-        case "search_knowledge": verb = "Recalled memories"; body = value("query", "q")
+        case "search_knowledge": verb = "Search memory"; body = value("query", "q")
         case "get_memory_detail": verb = "Read a memory"; body = value("id", "memoryId", "memory_id")
         case "get_tasks": verb = "Read tasks"; body = value("status", "filter")
-        case "get_project_summary": verb = "Project summary"; body = ""
+        case "get_project_summary": verb = "Read project"; body = ""
         case "session":
-            verb = ["end", "stop"].contains(action) ? "Session ended" : action == "start" ? "Session started" : "Session status"
+            verb = "Session"
             body = value("summary", "message", "name")
-        case "phren_admin": verb = action.isEmpty ? "Phren admin" : "Admin: \(action)"; body = value("message", "value", "setting")
-        case "revise_finding": verb = "Revised a finding"; body = value("newText", "new_text", "text", "finding", "content")
+        case "phren_admin": verb = action.isEmpty ? "Phren admin" : action; body = value("message", "value", "setting")
+        case "revise_finding": verb = "Revise finding"; body = value("newText", "new_text", "text", "finding", "content")
         case "set_topic_summary": verb = "Saved a topic summary"; body = value("summary", "text", "content")
         default:
             verb = tool.replacingOccurrences(of: "_", with: " ").capitalized
@@ -137,7 +136,7 @@ public struct PhrenToolPresentation: Equatable, Sendable {
     private static func plain(_ value: Any, depth: Int = 0) -> String {
         guard depth < 4 else { return "…" }
         if let text = value as? String { return String(text.prefix(1_200)).trimmingCharacters(in: .whitespacesAndNewlines) }
-        if value is NSNull { return "—" }
+        if value is NSNull { return "-" }
         if let array = value as? [Any] { return array.prefix(8).map { plain($0, depth: depth + 1) }.joined(separator: ", ") }
         if let dict = value as? [String: Any] {
             return dict.keys.sorted().prefix(8).map { "\($0): \(plain(dict[$0]!, depth: depth + 1))" }.joined(separator: " · ")

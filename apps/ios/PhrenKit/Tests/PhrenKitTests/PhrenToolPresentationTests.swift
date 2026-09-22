@@ -4,17 +4,17 @@ import XCTest
 final class PhrenToolPresentationTests: XCTestCase {
     func testFindingTaskAndSessionVerbsUseHumanInput() throws {
         let finding = try XCTUnwrap(PhrenToolPresentation(name: "mcp__phren__add_finding", input: #"{"project":"phone","finding":"Keep the real image turn","findingType":"pitfall"}"#, result: #"{"ok":true}"#))
-        XCTAssertEqual(finding.verb, "Saved a finding")
+        XCTAssertEqual(finding.verb, "Save finding")
         XCTAssertEqual(finding.body, "Keep the real image turn")
         XCTAssertEqual(finding.project, "phone"); XCTAssertEqual(finding.tag, "pitfall")
         XCTAssertEqual(finding.status, .succeeded)
         let task = try XCTUnwrap(PhrenToolPresentation(name: "functions.mcp__phren__add_task", input: #"{"task":"Verify the queue"}"#))
-        XCTAssertEqual(task.verb, "Added a task"); XCTAssertEqual(task.body, "Verify the queue")
+        XCTAssertEqual(task.verb, "Add task"); XCTAssertEqual(task.body, "Verify the queue")
         XCTAssertEqual(task.status, .running)
         let done = try XCTUnwrap(PhrenToolPresentation(name: "mcp__phren__manage_task", input: #"{"action":"complete","item":"A2"}"#))
-        XCTAssertEqual(done.verb, "Completed a task"); XCTAssertEqual(done.body, "A2")
+        XCTAssertEqual(done.verb, "Update task"); XCTAssertEqual(done.body, "A2")
         XCTAssertEqual(done.fields.first?.value, "complete")
-        for (tool, input, verb) in [("session", #"{"action":"start"}"#, "Session started"), ("session", #"{"action":"end"}"#, "Session ended"), ("phren_admin", #"{"action":"status"}"#, "Admin: status")] {
+        for (tool, input, verb) in [("session", #"{"action":"start"}"#, "Session"), ("session", #"{"action":"end"}"#, "Session"), ("phren_admin", #"{"action":"status"}"#, "status")] {
             XCTAssertEqual(PhrenToolPresentation(name: "mcp__phren__" + tool, input: input)?.verb, verb)
         }
     }
@@ -23,7 +23,7 @@ final class PhrenToolPresentationTests: XCTestCase {
         let response = #"{"ok":true,"data":{"count":7,"results":[{"title":"First"},{"snippet":"Second\nMore text"},{"filename":"Third.md"},{"title":"Hidden fourth"}]}}"#
         let wrapped = String(decoding: try JSONSerialization.data(withJSONObject: ["content": [["type": "text", "text": response]]]), as: UTF8.self)
         let search = try XCTUnwrap(PhrenToolPresentation(name: "mcp__phren__search_knowledge", input: #"{"query":"queue"}"#, result: wrapped))
-        XCTAssertEqual(search.verb, "Recalled memories"); XCTAssertEqual(search.body, "queue")
+        XCTAssertEqual(search.verb, "Search memory"); XCTAssertEqual(search.body, "queue")
         XCTAssertEqual(search.resultSummary, "7 memories found")
         XCTAssertEqual(search.titles, ["First", "Second", "Third.md"])
         let empty = PhrenToolPresentation(name: "mcp__phren__search_knowledge", input: "{}", result: #"{"ok":true,"data":{"results":[]}}"#)

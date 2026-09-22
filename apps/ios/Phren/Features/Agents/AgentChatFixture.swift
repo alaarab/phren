@@ -231,7 +231,7 @@ import UIKit
         // A session launched from a project runs the harness that was picked.
         let launchedKind = launches.last.map(\.kind).flatMap { session.workspaceID == "w9" ? $0 : nil }
         let remote = flag("--agent-work-navigation") && session.host.id.uuidString.hasSuffix("000002")
-        let agent = remote ? "codex" : launchedKind ?? (flag("--chat-opencode") ? "opencode" : flag("--chat-copilot") ? "copilot" : (trailer || flag("--chat-claude-queue") || flag("--chat-claude-image") || flag("--chat-read-images") || flag("--chat-approval-question") || flag("--chat-agent-card") || flag("--chat-todos") || flag("--chat-plan-mode") || flag("--chat-web-tools") || flag("--chat-skill-chip") || flag("--chat-mcp-card") || flag("--chat-compaction") || flag("--chat-density") || (tour && flag("--chat-phren-tools"))) ? "claude" : "codex")
+        let agent = remote ? "codex" : launchedKind ?? (flag("--chat-opencode") ? "opencode" : flag("--chat-copilot") ? "copilot" : (trailer || flag("--chat-claude-queue") || flag("--chat-claude-image") || flag("--chat-read-images") || flag("--chat-approval-question") || flag("--chat-agent-card") || flag("--chat-todos") || flag("--chat-plan-mode") || flag("--chat-web-tools") || flag("--chat-skill-chip") || flag("--chat-mcp-card") || flag("--chat-compaction") || flag("--chat-density") || flag("--chat-model-picker") || (tour && flag("--chat-phren-tools"))) ? "claude" : "codex")
         var panes: [[String: Any]] = [["id": "\(session.workspaceID):p1", "label": "1", "title": tour ? "Ship the onboarding flow" : "Polish the phone app", "agent": agent,
                                      "agentStatus": ((flag("--chat-blocked") || flag("--chat-approval") || flag("--chat-approval-question") || flag("--chat-plan-mode") || flag("--chat-question")) && !answered) ? "blocked" : (flag("--chat-queue-completion") || flag("--chat-history-stalled") || (flag("--chat-working") && !stopped) ? "working" : "idle"), "sessionId": remote ? "00000000-0000-0000-0000-000000000042" : agent == "copilot" ? "00000000-0000-0000-0000-000000000023" : agent == "opencode" ? "ses_fixtureopencode" : "fixture-\(agent)-session", "cwd": root]]
         if flag("--starting-session-fixture") {
@@ -263,13 +263,18 @@ import UIKit
         if flag("--chat-streaming") { return try streamingTranscript(target) }
         var entries: [[String: Any]] = []
         func append(_ role: String, _ text: String) {
+            var message: [String: Any] = ["role": role, "content": text]
+            // Claude Code stamps `message.model` on assistant rows; with the
+            // flag the session runs on the 1M variant, so the picker's check
+            // mark has a real id to match exactly.
+            if target.source == "claude", flag("--chat-model-1m") { message["model"] = "claude-fable-5-1[1m]" }
             let raw: [String: Any] = target.source == "copilot"
                 ? ["type": role + ".message", "data": ["content": text]]
                 : target.source == "opencode"
                 ? ["type": role == "user" ? "user/message" : "assistant/message", "data": ["message": ["role": role, "content": [["type": "text", "text": text]]]]]
                 : target.source == "codex"
                 ? ["type": "response_item", "payload": ["type": "message", "role": role, "content": [["type": "text", "text": text]]]]
-                : ["type": role, "message": ["role": role, "content": [["type": "text", "text": text]]]]
+                : ["type": role, "message": message]
             entries.append(["line": (flag("--chat-history") ? 20 : 0) + entries.count, "raw": raw])
         }
         if trailer {
@@ -681,16 +686,36 @@ import UIKit
             }
             append("assistant", "Queued instructions consumed.")
         }
+        if target.source == "opencode", let url = Bundle.main.url(forResource: "opencode-tools", withExtension: "jsonl") {
+            entries.removeAll { entry in
+                guard let raw = entry["raw"], let data = try? JSONSerialization.data(withJSONObject: raw),
+                      let text = String(data: data, encoding: .utf8) else { return false }
+                return text.contains("tool_use") || text.contains("tool_result")
+            }
+            let captured = try String(contentsOf: url, encoding: .utf8)
+            for (index, line) in captured.split(separator: "\n").enumerated() {
+                guard let tool = try JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+                      let name = tool["tool"] as? String, let input = tool["input"] as? [String: Any] else { continue }
+                let id = "opencode-captured-\(index)"
+                claudeCall(id, name, input)
+                claudeResult(id, tool["output"] as? String ?? "")
+            }
+        }
         return try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: ["type": "backlog", "source": target.source,
                                                                                     "entries": entries, "startLine": flag("--chat-history") ? 20 : 0, "totalLines": (flag("--chat-history") ? 20 : 0) + entries.count, "hasMore": flag("--chat-history")]), source: target.source)
     }
+    /// The catalogue the Hook would report for this harness: Codex's
+    /// app-server list, Claude Code's own `/model` menu with the default
+    /// first, nothing for a harness with no built-in list.
     static func models(source: String) -> [AgentModelChoice] {
-        source == "codex" ? [
-            AgentModelChoice(name: "GPT-6-Astra", argument: "gpt-6-astra", description: "Our most capable model for complex, demanding work.", isDefault: true),
-            AgentModelChoice(name: "GPT-5.6-Sol", argument: "gpt-5.6-sol", description: "Reliable agentic workhorse for everyday tasks."),
-            AgentModelChoice(name: "GPT-5.6-Terra", argument: "gpt-5.6-terra", description: "Balanced agentic coding model for everyday work."),
-        ] : [AgentModelChoice(name: "Fable", argument: "fable", description: "The latest Fable model.")]
+        AgentModelChoice.choices(source: source)
     }
+
+    /// `--chat-models-delayed` holds the picker on its loading row for a
+    /// beat, so a test can photograph the wait before the list arrives;
+    /// `--chat-models-fail` fails the route instead, for the built-in rows.
+    static var modelsDelayed: Bool { flag("--chat-models-delayed") }
+    static var modelsFailed: Bool { flag("--chat-models-fail") }
     static var answeredKeys: [String] = []
     static func answer(_ target: AgentChatTarget, key: AgentAnswerKey) async throws {
         try await Task.sleep(for: .milliseconds(150))

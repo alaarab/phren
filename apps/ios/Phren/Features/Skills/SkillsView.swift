@@ -139,7 +139,7 @@ struct SkillEditorView: View {
                 Section {
                     if let preferences = try? model.skillPreferences(in: entry.storeId) {
                         if let enabled = preferences.explicitSetting(scope: current.skill.scope.source, name: current.skill.name) {
-                            Toggle("Enabled for agents", isOn: Binding(
+                            PhrenSwitch("Enabled for agents", isOn: Binding(
                                 get: { enabled },
                                 set: { value in Task { await toggle(current, enabled: value) } }
                             ))

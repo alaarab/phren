@@ -19,7 +19,8 @@ import {
 } from "../shared.js";
 import { getCurrentActor, getMachineName } from "../machine-identity.js";
 import { type FindingProvenance } from "../content/citation.js";
-import { symbolCitationForFinding } from "../code/citations.js";
+import { loadCodePackage } from "../modules/code-package.js";
+import { moduleEnabled } from "../modules/runtime.js";
 import {
   addFindingToFile,
   addFindingsToFile,
@@ -270,7 +271,8 @@ async function handleAddFinding(
       // Memory link: auto-attach a symbol citation when the finding names one
       // unique symbol, or validate an explicit `symbol:` citation. Never rewrites
       // the finding text; only the citation comment gains the symbol.
-      const symbolCitation = await symbolCitationForFinding(phrenPath, project, taggedFinding, citation?.symbol);
+      const code = moduleEnabled(phrenPath, "code") ? await loadCodePackage() : undefined;
+      const symbolCitation = code ? await code.symbolCitationForFinding(phrenPath, project, taggedFinding, citation?.symbol) : citation?.symbol ? { symbol: citation.symbol } : {};
       const citationForWrite = (citation || symbolCitation.symbol)
         ? { ...(citation ?? {}), ...symbolCitation }
         : undefined;

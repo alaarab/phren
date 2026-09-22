@@ -82,7 +82,7 @@ descendants appear in help or dispatch.
 | Module | Default for a new store | Current contributions |
 | --- | --- | --- |
 | `memory` | Required | Findings, notes, truths, review, summaries, search, fragment graph, memory session continuity, skills, governance, project/store configuration, memory lifecycle integration and store sync |
-| `tasks` | On | Seven task handlers plus `manage_task`; `task`/`tasks`; `tasks.md`, task checkpoints and task UI |
+| `tasks` | Off | Seven task handlers plus `manage_task`; `task`/`tasks`; `tasks.md`, task checkpoints and task UI |
 | `hook` | Off | `bridge` service and phone transport, native agent chat, approvals, workspace control, transcript/subagent reading, files, web previews, usage and simulators |
 | `git` | Off | `auto_extract_findings`, `maintain extract`/`extract-memories`, repository diffs and `/v1/git/*`, change capture and Changes UI |
 | `schedules` | Off | `schedule`, project `schedules.yaml`, scheduler, run history and Schedules UI |
@@ -132,7 +132,7 @@ revise_finding    session            phren_admin
 ```
 
 Enabling tasks adds `get_tasks`, `add_task` and `manage_task`, preserving today's
-ten-tool core surface for default installations. This deliberately defines a
+ten-tool core surface for installations that enable tasks. This deliberately defines a
 seven-tool memory core rather than keeping inert task tools in memory. The
 `CORE_TOOLS` ordering remains stable; the gate intersects it with the enabled
 manifests before building the presentation.
@@ -424,3 +424,16 @@ compiler check is `pnpm exec tsc --noEmit -p packages/cli` (or the installed
 `node_modules/.bin/tsc` directly if pnpm cannot bootstrap). Before rollout the
 orchestrator must run the affected CLI suites and local PhrenKit, PhrenLive and
 simulator tests from an environment that supports them.
+
+## Memory-only default and optional code package
+
+Fresh stores enable memory only. Enable what you need with `phren modules enable <name>`.
+On upgrade, activation writes the previous effective configuration into
+`.config/modules.yaml` before applying new defaults. Existing profile overrides
+are preserved, including an explicit task opt-out.
+
+The code engine, grammars and skill ship as `@phren/code`, outside the CLI tarball.
+`phren modules enable code` installs it with `npm install -g @phren/code` if absent,
+then copies its skill into the store. MCP and Hook load the package only while
+code is enabled. Restart them after enabling it. If installation fails, run the
+printed npm command and retry enablement.

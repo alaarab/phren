@@ -60,7 +60,7 @@ struct SpeechSettingsView: View {
                     .accessibilityIdentifier("speech-language")
             }
             Section {
-                Toggle(isOn: $cleanup) {
+                PhrenSwitch(isOn: $cleanup) {
                     Label {
                         Text("Tighten agent dictation")
                         Text("Preview an on-device Apple Intelligence rewrite before using it")

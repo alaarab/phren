@@ -125,7 +125,7 @@ struct ReviewView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Menu {
-                        Toggle("Flagged only", isOn: $flaggedOnly)
+                        PhrenSwitch("Flagged only", isOn: $flaggedOnly)
                         Button("Review individually", systemImage: "square.stack") { triaging = true }
                             .disabled(triageDeck.isEmpty)
                     } label: {

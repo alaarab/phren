@@ -28,6 +28,7 @@ let cleanups: Array<() => void> = [];
 function makeStore(prefix: string, referenceDocs: number): string {
   const tmp = makeTempDir(prefix);
   cleanups.push(tmp.cleanup);
+  writeFile(path.join(tmp.path, ".config", "modules.yaml"), "version: 1\nenabled:\n  tasks: true\n");
   writeFile(
     path.join(tmp.path, "phren.root.yaml"),
     yaml.dump({ version: 1, installMode: "shared", syncMode: "managed-git" }, { lineWidth: 1000 })

@@ -3,13 +3,13 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { grantAdmin, makeTempDir } from "../test-helpers.js";
-import { parseCitationComment, validateFindingCitation, type FindingCitation } from "../content/citation.js";
+import { grantAdmin, makeTempDir } from "../../cli/src/test-helpers.js";
+import { parseCitationComment, validateFindingCitation, type FindingCitation } from "../../cli/src/content/citation.js";
 import { indexProject } from "./indexer.js";
 import { findingsCitingSymbol, symbolCandidates } from "./citations.js";
-import { register as registerCode } from "../tools/code.js";
-import { register as registerFinding } from "../tools/finding.js";
-import type { McpContext } from "../tools/types.js";
+import { register as registerCode } from "../../cli/src/tools/code.js";
+import { register as registerFinding } from "../../cli/src/tools/finding.js";
+import type { McpContext } from "../../cli/src/tools/types.js";
 
 const FIXTURES = path.join(__dirname, "__fixtures__");
 const PROJECT = "fixture";
@@ -72,6 +72,8 @@ beforeEach(async () => {
   tmp = makeTempDir("code-citations-");
   repo = path.join(tmp.path, "repo");
   store = path.join(tmp.path, "store");
+  fs.mkdirSync(path.join(store, ".config"), { recursive: true });
+  fs.writeFileSync(path.join(store, ".config", "modules.yaml"), "version: 1\nenabled:\n  code: true\n");
   fs.cpSync(FIXTURES, repo, { recursive: true });
   git("init", "-q");
   git("add", "-A");

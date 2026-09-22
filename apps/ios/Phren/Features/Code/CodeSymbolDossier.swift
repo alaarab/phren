@@ -14,6 +14,16 @@ struct CodeSymbolDossier: View {
     @Environment(\.dismiss) private var dismiss
     @State private var definition: CodeDefinition?
     @State private var references: CodeReferences?
+    @State private var selectedLine: Int?
+    @State private var note = ""
+    @State private var sending = false
+    @State private var noteStatus: String?
+    @State private var showingRecipients = false
+    @State private var recipient = ""
+    @State private var harness = "codex"
+    @State private var showingHarness = false
+    @State private var recipients: [CodeNoteRecipient] = []
+    @State private var findings: [CodeFinding] = []
     @State private var loading = true
     @State private var errorText: String?
 
@@ -34,7 +44,12 @@ struct CodeSymbolDossier: View {
                         lastChange(definition)
                     }
                     referencesSection
-                    PhrenSectionHeader(title: "Findings")
+                    PhrenSectionHeader(title: "Findings", count: findings.count)
+                    ForEach(findings) { finding in
+                        Text(finding.text).font(PhrenTheme.Font.body).foregroundStyle(PhrenTheme.text)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(PhrenTheme.Space.medium).sessionCard()
+                    }
                 }
                 .padding(.horizontal, 14)
                 .padding(.top, PhrenTheme.Space.small)
@@ -47,6 +62,17 @@ struct CodeSymbolDossier: View {
                 .accessibilityIdentifier("code-dossier")
         }
         .task { await load() }
+        .sheet(isPresented: $showingRecipients) {
+            PhrenSingleSelectSheet(title: "Send code note", options: recipientOptions, selection: $recipient,
+                rowPrefix: "code-recipient", footer: AnyView(
+                    PhrenSingleSelect(options: harnessOptions, selection: $harness, placeholder: "New worker harness",
+                                      identifier: "code-harness", isPresented: $showingHarness)
+                ), onSelect: { choice in Task { await send(to: choice) } }, dismiss: { showingRecipients = false })
+                .padding(PhrenTheme.Space.large).background(PhrenTheme.bg)
+                .phrenSingleSelectSheet(isPresented: $showingHarness, title: "Harness", options: harnessOptions,
+                                        selection: $harness, rowPrefix: "code-harness-option")
+                .presentationDetents([.large])
+        }
     }
 
     private var header: some View {
@@ -69,13 +95,38 @@ struct CodeSymbolDossier: View {
 
     @ViewBuilder private func definitionSection(_ definition: CodeDefinition) -> some View {
         if !definition.snippet.isEmpty {
-            Text(definition.snippet)
-                .font(PhrenTheme.Font.monoCaption)
-                .foregroundStyle(PhrenTheme.text)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(12)
-                .phrenPanel(tool: true)
-                .accessibilityIdentifier("code-dossier-snippet")
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(definition.snippet.components(separatedBy: "\n")
+                    .prefix(max(0, definition.symbol.endLine - definition.symbol.line + 1)).enumerated()), id: \.offset) { index, text in
+                    let line = definition.symbol.line + index
+                    Button { selectedLine = line } label: {
+                        HStack(alignment: .top, spacing: PhrenTheme.Space.small) {
+                            Rectangle().fill(selectedLine == line ? PhrenTheme.accent : .clear).frame(width: 3)
+                            Text("\(line)").foregroundStyle(PhrenTheme.textMuted).frame(minWidth: 30, alignment: .trailing)
+                            Text(text.isEmpty ? " " : text).foregroundStyle(PhrenTheme.text).frame(maxWidth: .infinity, alignment: .leading)
+                        }.font(PhrenTheme.Font.monoCaption).frame(minHeight: 44).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).accessibilityIdentifier("code-line:\(line)")
+                    .accessibilityAddTraits(selectedLine == line ? .isSelected : [])
+                }
+            }.padding(PhrenTheme.Space.small).phrenPanel(tool: true)
+                .phrenContainerMarker("code-dossier-snippet", label: "Definition")
+            if selectedLine != nil {
+                VStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
+                    TextField("Note", text: $note, axis: .vertical).lineLimit(2...8)
+                        .font(PhrenTheme.Font.body).foregroundStyle(PhrenTheme.text)
+                        .padding(PhrenTheme.Space.medium).frame(minHeight: 44)
+                        .background(PhrenTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium))
+                        .accessibilityIdentifier("code-note")
+                    HStack {
+                        if let noteStatus { Text(noteStatus).font(PhrenTheme.Font.caption).foregroundStyle(PhrenTheme.textSecondary) }
+                        Spacer()
+                        Button("Send") { Task { await chooseRecipient() } }
+                            .frame(minWidth: 44, minHeight: 44).disabled(sending || note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            .accessibilityIdentifier("code-send")
+                    }
+                }
+            }
         }
     }
 
@@ -114,6 +165,52 @@ struct CodeSymbolDossier: View {
         }
     }
 
+    private var harnessOptions: [PhrenOption<String>] {
+        ["codex", "claude", "opencode"].map { PhrenOption(id: $0, value: $0, title: $0.capitalized) }
+    }
+    private var recipientOptions: [PhrenOption<String>] {
+        recipients.map { PhrenOption(id: $0.id, value: $0.id, title: $0.title) }
+            + [PhrenOption(id: "new", value: "new", title: "New worker"), PhrenOption(id: "save", value: "save", title: "Save note only")]
+    }
+    private func chooseRecipient() async {
+        sending = true
+        defer { sending = false }
+        noteStatus = nil
+        recipients = []
+        guard let host = hosts.first else { noteStatus = "Connect a computer to save this note."; return }
+        let overview = SessionOverviewMonitor.shared.screen
+        let sessions = overview.groups.filter(\.fresh).flatMap(\.sessions)
+            .filter { $0.host.id == host.id && overview.projects[$0.id] == project }
+        for session in sessions {
+            do {
+                let panes = try await PhrenConnection.chatPanes(host: host, privateKey: DeviceSSHKey.load(host.id), workspaceID: session.workspaceID, tabID: session.tab.id)
+                for pane in panes.panes {
+                    if let target = try? pane.target(hostID: host.id, workspaceID: session.workspaceID, tabID: session.tab.id, muxID: host.muxID), !target.isStarting {
+                        if !recipients.contains(where: { $0.id == target.sessionID }) {
+                            recipients.append(CodeNoteRecipient(id: target.sessionID, title: pane.displayTitle))
+                        }
+                    }
+                }
+            } catch { noteStatus = error.localizedDescription }
+        }
+        recipient = ""
+        showingRecipients = true
+    }
+    private func send(to choice: String) async {
+        guard let host = hosts.first, let definition, let selectedLine else { return }
+        sending = true
+        defer { sending = false }
+        let target: CodeNoteRequest.Target? = choice == "save" ? nil : choice == "new" ? .init(harness: harness) : .init(session: choice)
+        do {
+            let result = try await PhrenConnection.codeNote(host: host, privateKey: DeviceSSHKey.load(host.id),
+                note: CodeNoteRequest(project: project, symbol: symbol, file: definition.symbol.file, line: selectedLine, text: note, target: target))
+            guard result.saved else { noteStatus = "The computer did not confirm the note."; return }
+            findings = result.findings
+            note = ""
+            noteStatus = result.delivery.map { $0.confirmed ? "Saved and sent." : "Saved. Delivery not confirmed: \($0.message ?? $0.error ?? "check the agent before retrying")" } ?? "Note saved."
+        } catch { noteStatus = error.localizedDescription }
+    }
+
     private func load() async {
         loading = true
         defer { loading = false }
@@ -129,9 +226,12 @@ struct CodeSymbolDossier: View {
             async let definitionTask = PhrenConnection.codeDefinition(host: host, privateKey: DeviceSSHKey.load(host.id), project: project, symbol: symbol)
             async let referencesTask = PhrenConnection.codeReferences(host: host, privateKey: DeviceSSHKey.load(host.id), project: project, symbol: symbol)
             definition = try await definitionTask
+            findings = definition?.findings ?? []
             references = try await referencesTask
         } catch {
             errorText = error.localizedDescription
         }
     }
 }
+
+private struct CodeNoteRecipient: Identifiable { let id: String; let title: String }

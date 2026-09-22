@@ -863,7 +863,7 @@ struct TaskEditSheet: View {
             PhrenForm {
                 TextField("Task", text: $text, axis: .vertical)
                     .lineLimit(2...6)
-                Toggle("Pinned", isOn: $pinned)
+                PhrenSwitch("Pinned", isOn: $pinned)
                 Picker("Priority", selection: $priority) {
                     Text("none").tag(PhrenTask.Priority?.none)
                     ForEach(PhrenTask.Priority.allCases, id: \.self) { p in

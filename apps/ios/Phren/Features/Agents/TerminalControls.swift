@@ -388,9 +388,9 @@ private struct TerminalGestureSettings: View {
     @AppStorage("terminal.closeAfterShortcut.v1") private var closeAfterShortcut = true
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Toggle("Close panel after a shortcut", isOn: $closeAfterShortcut).font(.subheadline).tint(PhrenTheme.cyan)
+            PhrenSwitch("Close panel after a shortcut", isOn: $closeAfterShortcut).font(.subheadline).tint(PhrenTheme.cyan)
                 .accessibilityIdentifier("terminal-close-after-shortcut")
-            Toggle("Two-finger gestures", isOn: $enabled).font(.subheadline).tint(PhrenTheme.cyan)
+            PhrenSwitch("Two-finger gestures", isOn: $enabled).font(.subheadline).tint(PhrenTheme.cyan)
             Text("Swipe up with two fingers for shortcuts. Swipe down with two fingers to hide the keyboard.")
             Text("Swipe with one finger to scroll. Pinch to resize. Hold to select text. Tap controls and links to open them.")
                 .foregroundStyle(PhrenTheme.textMuted)

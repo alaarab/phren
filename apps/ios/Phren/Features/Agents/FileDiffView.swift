@@ -49,7 +49,7 @@ struct FileDiffView: View {
                         Label("Inline", systemImage: "text.alignleft").tag(false)
                         Label("Side by side", systemImage: "rectangle.split.2x1").tag(true)
                     }
-                    Toggle("Wrap long lines", systemImage: "text.word.spacing", isOn: $wrap).accessibilityIdentifier("diff-wrap")
+                    PhrenSwitch("Wrap long lines", systemImage: "text.word.spacing", isOn: $wrap).accessibilityIdentifier("diff-wrap")
                     if let patch = section.patch {
                         Button("Copy patch", systemImage: "doc.on.doc") { ChatClipboard.copy(patch) }
                     }

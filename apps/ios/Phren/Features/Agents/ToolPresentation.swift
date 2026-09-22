@@ -92,7 +92,7 @@ struct ToolPresentation {
                 // Write: the whole file as it now stands, every line new.
                 body = "*** Add File: \(path!)\n"
                     + content.components(separatedBy: "\n").map { "+" + $0 }.joined(separator: "\n")
-                title = "Write"
+                title = "Patch"
             } else if name == "Read", let file = path {
                 // Claude Code's Read: the file and, when paged, the window.
                 let offset = fields["offset"] as? Int, limit = fields["limit"] as? Int

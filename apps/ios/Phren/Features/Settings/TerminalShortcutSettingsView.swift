@@ -53,7 +53,7 @@ struct TerminalShortcutSettingsView: View {
                 ForEach(preferences.panels.filter { !$0.enabled }) { panel in panelRow(panel) }
             }.disabled(storage.saved == nil)
             Section {
-                Toggle("Close panel after a shortcut", isOn: $closeAfterShortcut).tint(PhrenTheme.cyan)
+                PhrenSwitch("Close panel after a shortcut", isOn: $closeAfterShortcut).tint(PhrenTheme.cyan)
                     .accessibilityIdentifier("settings-close-after-shortcut")
             } footer: { Text("Off keeps the panel open so you can send several shortcuts in a row.") }
             Section {
@@ -236,7 +236,7 @@ struct TerminalShortcutEditor: View {
             }
             if shortcut.kind != .action {
                 Section {
-                    Toggle("Send Enter after shortcut", isOn: $shortcut.appendEnter)
+                    PhrenSwitch("Send Enter after shortcut", isOn: $shortcut.appendEnter)
                 } footer: { Text("When enabled, tapping this shortcut also submits its text or command.") }
             }
             if let message = error ?? (shortcut.value.isEmpty ? nil : validation) {

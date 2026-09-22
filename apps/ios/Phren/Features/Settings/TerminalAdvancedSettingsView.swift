@@ -39,14 +39,14 @@ struct TerminalAdvancedSettingsView: View {
                 Picker("Cursor style", selection: $cursorStyle) {
                     Text("▮ Block").tag("block"); Text("▁ Underline").tag("underline"); Text("▏Bar").tag("bar")
                 }.pickerStyle(.segmented).accessibilityIdentifier("terminal-cursor-style")
-                Toggle("Cursor blink", isOn: $cursorBlink).accessibilityIdentifier("terminal-cursor-blink")
+                PhrenSwitch("Cursor blink", isOn: $cursorBlink).accessibilityIdentifier("terminal-cursor-blink")
             }
             Section {
-                Toggle(isOn: $keepScreenOn) { Label { Text("Keep screen on"); Text("Don't sleep while a terminal is open").font(.caption).foregroundStyle(PhrenTheme.textMuted) } icon: { Image(systemName: "sun.max") } }
+                PhrenSwitch(isOn: $keepScreenOn) { Label { Text("Keep screen on"); Text("Don't sleep while a terminal is open").font(.caption).foregroundStyle(PhrenTheme.textMuted) } icon: { Image(systemName: "sun.max") } }
                     .accessibilityIdentifier("terminal-keep-screen-on")
             } header: { Text("Behaviour") }
             Section {
-                Toggle(isOn: $autocorrection) { Label("Terminal autocorrection", systemImage: "textformat.abc.dottedunderline") }
+                PhrenSwitch(isOn: $autocorrection) { Label("Terminal autocorrection", systemImage: "textformat.abc.dottedunderline") }
                     .accessibilityIdentifier("terminal-autocorrection")
             } header: { Text("Input") } footer: { Text("Off keeps the keyboard from rewriting commands. Chat has its own switch under Chat.") }
         }
@@ -66,11 +66,11 @@ struct TerminalGesturesSettingsView: View {
     var body: some View {
         PhrenList {
             Section {
-                Toggle(isOn: $pinch) { Label { Text("Pinch"); Text("Adjust the text size").font(.caption).foregroundStyle(PhrenTheme.textMuted) } icon: { Image(systemName: "arrow.up.left.and.arrow.down.right") } }
+                PhrenSwitch(isOn: $pinch) { Label { Text("Pinch"); Text("Adjust the text size").font(.caption).foregroundStyle(PhrenTheme.textMuted) } icon: { Image(systemName: "arrow.up.left.and.arrow.down.right") } }
                     .accessibilityIdentifier("gesture-pinch")
-                Toggle(isOn: $holdSelect) { Label { Text("Hold"); Text("Select text, then drag").font(.caption).foregroundStyle(PhrenTheme.textMuted) } icon: { Image(systemName: "hand.tap") } }
+                PhrenSwitch(isOn: $holdSelect) { Label { Text("Hold"); Text("Select text, then drag").font(.caption).foregroundStyle(PhrenTheme.textMuted) } icon: { Image(systemName: "hand.tap") } }
                     .accessibilityIdentifier("gesture-hold")
-                Toggle(isOn: $twoFinger) { Label { Text("Two-finger swipe"); Text("Up opens shortcuts, down hides the keyboard").font(.caption).foregroundStyle(PhrenTheme.textMuted) } icon: { Image(systemName: "hand.point.up.left.and.text") } }
+                PhrenSwitch(isOn: $twoFinger) { Label { Text("Two-finger swipe"); Text("Up opens shortcuts, down hides the keyboard").font(.caption).foregroundStyle(PhrenTheme.textMuted) } icon: { Image(systemName: "hand.point.up.left.and.text") } }
                     .accessibilityIdentifier("gesture-two-finger")
             } header: { Text("Terminal") } footer: { Text("Taps always go to the terminal: they click links, menus and buttons in the agent's own screen. Swipe with one finger to scroll.") }
         }

@@ -40,6 +40,9 @@ enum UITestFixtures {
         defaults.removeObject(forKey: AgentLaunch.pendingKey)
         defaults.removeObject(forKey: AgentLaunch.pendingProjectKey)
         defaults.removeObject(forKey: AgentFocusFilterStore.key)
+        // Each UI-test launch starts with no recently used models, so the
+        // picker's order is the catalogue's until a test picks one.
+        defaults.removeObject(forKey: ChatModelPickerSheet.recentKey)
         if arguments.contains("--session-pins-reset"), let saved = defaults.data(forKey: preferencesKey) {
             var data = saved
             for id in try LiveSessionPreferences.read(saved).pinnedSessions {

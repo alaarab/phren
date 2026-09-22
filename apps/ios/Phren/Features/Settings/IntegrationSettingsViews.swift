@@ -89,13 +89,13 @@ struct NotificationSettingsView: View {
     var body: some View {
         PhrenList {
             Section {
-                Toggle(isOn: $liveActivity) { Label { Text("Live Activity for approvals"); Text("Deny or Approve from the Lock Screen and Dynamic Island").font(.caption).foregroundStyle(PhrenTheme.textMuted) } icon: { Image(systemName: "waveform.path.ecg") } }
+                PhrenSwitch(isOn: $liveActivity) { Label { Text("Live Activity for approvals"); Text("Deny or Approve from the Lock Screen and Dynamic Island").font(.caption).foregroundStyle(PhrenTheme.textMuted) } icon: { Image(systemName: "waveform.path.ecg") } }
                     .accessibilityIdentifier("notifications-live-activity")
             } header: { Text("Permission requests") } footer: {
                 Text("Requests arrive over SSH while the app watches a session. Phren has no push server: nothing reaches this phone when the app is closed.")
             }
             Section {
-                Toggle(isOn: $keepScreenOn) { Label { Text("Keep screen on"); Text("Don't sleep while the Agents screen is open").font(.caption).foregroundStyle(PhrenTheme.textMuted) } icon: { Image(systemName: "sun.max") } }
+                PhrenSwitch(isOn: $keepScreenOn) { Label { Text("Keep screen on"); Text("Don't sleep while the Agents screen is open").font(.caption).foregroundStyle(PhrenTheme.textMuted) } icon: { Image(systemName: "sun.max") } }
                     .accessibilityIdentifier("notifications-keep-screen-on")
             } header: { Text("Agents") }
         }
@@ -112,9 +112,9 @@ struct ShowOnAgentsSettingsView: View {
     var body: some View {
         PhrenList {
             Section {
-                Toggle(isOn: $webServers) { Label("Web servers", systemImage: "globe") }.accessibilityIdentifier("home-web-servers")
-                Toggle(isOn: $simulators) { Label("Simulators", systemImage: "iphone") }.accessibilityIdentifier("home-simulators")
-                Toggle(isOn: $files) { Label("Files", systemImage: "folder") }.accessibilityIdentifier("home-files")
+                PhrenSwitch(isOn: $webServers) { Label("Web servers", systemImage: "globe") }.accessibilityIdentifier("home-web-servers")
+                PhrenSwitch(isOn: $simulators) { Label("Simulators", systemImage: "iphone") }.accessibilityIdentifier("home-simulators")
+                PhrenSwitch(isOn: $files) { Label("Files", systemImage: "folder") }.accessibilityIdentifier("home-files")
             } header: { Text("Agents header") } footer: { Text("Account usage and refresh are always there.") }
         }
         .navigationTitle("Show on Agents").navigationBarTitleDisplayMode(.inline)
@@ -130,7 +130,7 @@ struct KeyboardSettingsView: View {
     var body: some View {
         PhrenList {
             Section("Hardware keyboard") {
-                Toggle(isOn: $autoHide) { Label { Text("Auto-hide toolbar"); Text("While a hardware keyboard is connected").font(.caption).foregroundStyle(PhrenTheme.textMuted) } icon: { Image(systemName: "keyboard") } }
+                PhrenSwitch(isOn: $autoHide) { Label { Text("Auto-hide toolbar"); Text("While a hardware keyboard is connected").font(.caption).foregroundStyle(PhrenTheme.textMuted) } icon: { Image(systemName: "keyboard") } }
                     .accessibilityIdentifier("keyboard-auto-hide")
             }
             Section("Shortcuts") {
@@ -139,7 +139,7 @@ struct KeyboardSettingsView: View {
                 }
             }
             Section {
-                Toggle(isOn: $optionAsMeta) { Label("Option as Meta", systemImage: "option") }.accessibilityIdentifier("keyboard-option-meta")
+                PhrenSwitch(isOn: $optionAsMeta) { Label("Option as Meta", systemImage: "option") }.accessibilityIdentifier("keyboard-option-meta")
             } header: { Text("Modifiers") } footer: { Text("On: Option sends Meta (Alt) to the terminal, as Emacs and many TUIs expect. Off: Option types the accented character.") }
         }
         .onChange(of: optionAsMeta) { _, _ in NotificationCenter.default.post(name: TerminalSettings.changed, object: nil) }

@@ -44,6 +44,14 @@ extension PhrenConnection {
         return try CodeUsageResults.read(data)
     }
 
+    public static func codeNote(host: LiveHost, privateKey: Data, note: CodeNoteRequest) async throws -> CodeNoteResult {
+        try host.validate()
+        var request = GatewayRequest(path: "/v1/code/note", body: try JSONEncoder().encode(note))
+        request.method = "POST"
+        let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: request)
+        return try JSONDecoder().decode(CodeNoteResult.self, from: data)
+    }
+
     private static func codeGet(host: LiveHost, privateKey: Data, path: String, project: String, fields: [String: String]) async throws -> Data {
         try host.validate()
         var query = ["project": try codeProject(project)]

@@ -13,6 +13,13 @@ export function initTestPhrenRoot(
     primaryProject?: string;
   } = {},
 ): void {
+  // Most legacy integration fixtures exercise both memory and tasks. Fresh
+  // installation tests call initializeModules directly and keep memory only.
+  const modulesFile = path.join(phrenDir, ".config", "modules.yaml");
+  if (!fs.existsSync(modulesFile)) {
+    fs.mkdirSync(path.dirname(modulesFile), { recursive: true });
+    fs.writeFileSync(modulesFile, "version: 1\nenabled:\n  tasks: true\n");
+  }
   writeRootManifest(phrenDir, {
     version: 1,
     installMode: options.installMode ?? "shared",

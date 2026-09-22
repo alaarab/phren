@@ -105,6 +105,34 @@ history.
 
 ---
 
+## Model catalogue
+
+`GET /v1/models?source=<codex|claude|opencode>` on Phren Hook returns the
+`/model` menu of the agent that source names, shaped as
+`{ "models": [ { "id", "name", "description", "isDefault" } ] }`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | The argument `/model` accepts. The Hook caps Codex ids at 100 characters; OpenCode ids are not capped. |
+| `name` | string | The display name the picker shows, at most 100 characters. |
+| `description` | string? | Optional caption under the name, at most 300 characters. |
+| `isDefault` | boolean? | Present and `true` on the harness default; the picker marks it with a chip. |
+
+Per source: Codex comes from its app-server `model/list` (hidden entries
+dropped, at most 32); Claude is the Hook's maintained table of Claude Code's
+own menu with exact names and ids (Fable 5.1, default, Opus 5, Sonnet 5,
+Haiku 4.5, Fable 5.1 (1M context)); OpenCode comes from `opencode models`
+(`provider/model` ids, the Go plan first, the configured default marked, at
+most 400). An unknown source returns an empty `models` list, and answers are
+cached per source for ten minutes. The phone's chat picker shows a
+`model-loading` row until this route answers, never another harness's list,
+and falls back to its per-harness built-in names only when the route fails.
+The phone keeps at most 64 rows and only ids `/model` accepts: up to 100
+characters of letters, digits, and `. - _ [ ] : /`, one token with no
+whitespace.
+
+---
+
 ## Search and Browse
 
 ### `get_memory_detail`

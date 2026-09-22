@@ -36,24 +36,50 @@ public struct AgentModelChoice: Identifiable, Equatable, Sendable {
         ["claude", "codex"].contains(source)
     }
 
+    /// The per-harness built-in list, shown when the computer's `/v1/models`
+    /// route fails (or cannot be asked). Claude's entries mirror Claude Code's
+    /// own `/model` menu and Codex's mirror its app-server `model/list`: the
+    /// fixture and the Hook table keep the same rows, pinned by a parity test.
     public static func choices(source: String) -> [AgentModelChoice] {
         switch source {
         case "claude":
             return [
-                AgentModelChoice(name: "Fable 5.1", argument: "claude-fable-5-1"),
-                AgentModelChoice(name: "Opus 5", argument: "opus"),
-                AgentModelChoice(name: "Opus 5 (1M context)", argument: "opus[1m]"),
-                AgentModelChoice(name: "Sonnet 5", argument: "sonnet"),
-                AgentModelChoice(name: "Haiku 4.5", argument: "haiku"),
+                AgentModelChoice(name: "Fable 5.1", argument: "claude-fable-5-1", description: "Most intelligent.", isDefault: true),
+                AgentModelChoice(name: "Opus 5", argument: "claude-opus-5", description: "Most capable for long work."),
+                AgentModelChoice(name: "Sonnet 5", argument: "claude-sonnet-5", description: "Fast and capable."),
+                AgentModelChoice(name: "Haiku 4.5", argument: "claude-haiku-4-5-20251001", description: "Fastest and lightest."),
+                AgentModelChoice(name: "Fable 5.1 (1M context)", argument: "claude-fable-5-1[1m]", description: "Fable 5.1 with a 1M context window."),
             ]
         case "codex":
             return [
-                AgentModelChoice(name: "Sol", argument: "gpt-5.6-sol"),
-                AgentModelChoice(name: "Terra", argument: "gpt-5.6-terra"),
+                AgentModelChoice(name: "GPT-6-Astra", argument: "gpt-6-astra", description: "Our most capable model for complex, demanding work.", isDefault: true),
+                AgentModelChoice(name: "GPT-5.6-Sol", argument: "gpt-5.6-sol", description: "Reliable agentic workhorse for everyday tasks."),
+                AgentModelChoice(name: "GPT-5.6-Terra", argument: "gpt-5.6-terra", description: "Balanced agentic coding model for everyday work."),
             ]
         default:
             return []
         }
+    }
+
+    /// The one row the radio mark lands on for the session's reported model.
+    /// An exact id wins, so `claude-fable-5-1[1m]` never shares its mark with
+    /// `claude-fable-5-1`; then a versioned id extending the candidate, then
+    /// a recognized family alias such as `sonnet`. Context variants stay
+    /// distinct. At most one row matches; ties keep list order.
+    public static func markedChoice(current: String?, in choices: [AgentModelChoice]) -> AgentModelChoice? {
+        guard let raw = current?.lowercased(), !raw.isEmpty else { return nil }
+        var best: (choice: AgentModelChoice, score: Int)?
+        for choice in choices {
+            let id = choice.argument.lowercased()
+            guard id.hasSuffix("[1m]") == raw.hasSuffix("[1m]") else { continue }
+            let base = raw.replacingOccurrences(of: "[1m]", with: "")
+            let candidate = id.replacingOccurrences(of: "[1m]", with: "")
+            let alias = ["fable", "opus", "sonnet", "haiku"].contains(base) && candidate.hasPrefix("claude-" + base + "-")
+            let score = id == raw ? 3 : base.hasPrefix(candidate + "-") ? 2 : alias ? 1 : 0
+            guard score > 0 else { continue }
+            if best == nil || score > best!.score { best = (choice, score) }
+        }
+        return best?.choice
     }
 
     /// The command line a choice becomes; a typed id is trimmed to one token.

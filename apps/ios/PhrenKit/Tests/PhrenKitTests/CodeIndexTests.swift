@@ -92,3 +92,17 @@ final class CodeIndexTests: XCTestCase {
         XCTAssertEqual(absent?.allows(.code), false)
     }
 }
+
+extension CodeIndexTests {
+    func testCodeNoteRequestAndPartialDeliveryResponse() throws {
+        let request = CodeNoteRequest(project: "demo", symbol: "Point", file: "point.ts", line: 8, text: "Keep coordinates stable.", target: .init(harness: "codex"))
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any])
+        XCTAssertEqual(body["line"] as? Int, 8)
+        XCTAssertEqual(body["target"] as? [String: String], ["harness": "codex"])
+        let response = try JSONDecoder().decode(CodeNoteResult.self, from: Data(#"{"ok":true,"saved":true,"findings":[{"id":"L1","text":"Keep coordinates stable.","symbol":"Point"}],"delivery":{"ok":false,"message":"Offline"}}"#.utf8))
+        XCTAssertTrue(response.saved)
+        XCTAssertEqual(response.findings.first?.symbol, "Point")
+        XCTAssertEqual(response.delivery?.confirmed, false)
+        XCTAssertEqual(response.delivery?.message, "Offline")
+    }
+}

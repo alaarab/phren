@@ -8,6 +8,14 @@ number counts up on its own.
 
 ## 1.0.3
 
+### Added
+
+- Select a symbol line, write a note and send it to a project session or a new worker. Code rows show usage bars, and the dossier lists cited findings.
+
+### Fixed
+
+- OpenCode calls use phren memory, todo, patch and subagent cards, with captured tool arguments preserved.
+
 The Tasks tab filters open from done, and the Memory list shows its projects
 and scrolls again.
 
@@ -195,8 +203,13 @@ lock screen and Changes screen done properly.
   list.
 - The Projects tab's dictate button is gone; Siri and the capture shortcut
   are the way to speak a note or task.
-- The /model picker waits for the computer's list instead of flashing the
-  built-in names first; those appear only when the computer cannot answer.
+- The /model picker shows "Loading models from <computer>" until the computer's
+  catalogue arrives, then the recently used models for that harness first with
+  the default marked; the built-in names appear only when the route fails, each
+  marked "built-in" and keeping its default chip, and never another harness's
+  list. Claude's rows are Claude Code's own menu entries (Fable 5.1, Opus 5,
+  Sonnet 5, Haiku 4.5, Fable 5.1 (1M context)), a typed id joins the recents
+  like a tapped one, and the row checked is the session's exact model id.
 - Sending is faster: the phone keeps one SSH connection per computer and
   runs every request as a channel on it, and a send, a key or a password no
   longer asks the computer about the pane first (the Hook checks the

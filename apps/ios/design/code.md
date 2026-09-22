@@ -23,7 +23,7 @@ A large sheet with a header (name, kind chip, `file:line`, close), then:
 - the definition snippet in the Changes screen's monospace (`phrenPanel(tool:)`),
 - the last-change line (date and a truncated blame hash, never a name),
 - references grouped by file, each reference a row with its line and kind,
-- a `Findings` section reserved for stage 4, empty for now.
+- a `Findings` section containing the stored findings with matching symbol citations.
 
 ## States
 
@@ -38,3 +38,21 @@ A large sheet with a header (name, kind chip, `file:line`, close), then:
 `PhrenUITests/CodeTests.swift` runs against `--code-fixture`, a fixed index of a
 dozen symbols across three files, so no Hook is needed. Screenshots:
 `Code search`, `Code dossier`.
+
+## Line notes and agent delivery
+
+Every snippet line is a 44-point target identified by `code-line:<n>`.
+The selected line has an accent bar and line number. Selection reveals the
+`code-note` composer and `code-send` button. Send opens a PhrenSingleSelectSheet
+of fresh project sessions from the overview on the index computer, plus New
+worker and Save note only. New workers use the visible PhrenSingleSelect harness
+choice. Existing sessions are resolved to their live panes before selection.
+
+`POST /v1/code/note` takes project, symbol, file, line, text and optional target
+(session or harness). It validates the selected line against the indexed
+symbol, saves a symbol-cited finding, then hands off or dispatches a brief with
+the location, snippet and note. Sending requires conductor; saving alone does
+not. Delivery failure is separate from save success so the phone preserves the
+finding and reports uncertainty without automatically sending again.
+
+Hot, cold and search rows show the usage count with a small logarithmic bar.

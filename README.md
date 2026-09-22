@@ -17,7 +17,7 @@ Persistent memory for AI agents. Findings, tasks, and patterns live in markdown 
 
 ---
 
-[Modules](docs/modules.md) let you keep phren as memory alone or enable tasks, phone Hook, Git, schedules and conductor with `phren modules enable|disable <name>`.
+Fresh stores enable memory only. Enable what you need: [modules](docs/modules.md) add tasks, phone Hook, Git, schedules, conductor and the optional `@phren/code` package with `phren modules enable|disable <name>`.
 
 ## Install
 

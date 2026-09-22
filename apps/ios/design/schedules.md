@@ -252,7 +252,8 @@ long list; same goes for models; and computer."
   an iPhone 17 Pro.
 
 The same drop-down is the model picker in chat (`ChatModelPickerSheet`:
-the `/model` command opens the single-select sheet with the same rows and
-the custom-id field at the bottom; ids `chat-model:<id>` kept) and the
+the `/model` command opens the single-select sheet with the same rows, a
+`model-loading` row until the computer's catalogue answers, the custom-id
+field at the bottom; ids `model-option:<id>` kept) and the
 computer chooser in the launch flow (`LaunchSessionView`, ids
 `launch-computer:<udid>` kept).

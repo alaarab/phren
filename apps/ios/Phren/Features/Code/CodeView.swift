@@ -107,8 +107,7 @@ struct CodeView: View {
                             Text(entry.file).font(PhrenTheme.Font.monoCaption).foregroundStyle(PhrenTheme.textMuted).lineLimit(1).truncationMode(.middle)
                         }
                         Spacer(minLength: 0)
-                        Text("\(entry.uses)").font(PhrenTheme.Font.caption.weight(.semibold).monospacedDigit())
-                            .foregroundStyle(PhrenTheme.textSecondary)
+                        CodeUsageIndicator(uses: entry.uses)
                     }
                     .padding(12)
                     .frame(minHeight: 44)
@@ -135,8 +134,7 @@ struct CodeView: View {
                     }
                 }
                 Spacer(minLength: 0)
-                Text("\(symbol.uses)").font(PhrenTheme.Font.caption.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(PhrenTheme.textSecondary)
+                CodeUsageIndicator(uses: symbol.uses)
             }
             .padding(12)
             .frame(minHeight: 44)
@@ -196,4 +194,19 @@ struct CodeView: View {
 struct CodeDossierTarget: Identifiable, Hashable {
     let name: String
     var id: String { name }
+}
+
+
+struct CodeUsageIndicator: View {
+    let uses: Int
+    var body: some View {
+        VStack(alignment: .trailing, spacing: PhrenTheme.Space.xs) {
+            Text("\(uses)").font(PhrenTheme.Font.caption.weight(.semibold).monospacedDigit())
+                .foregroundStyle(PhrenTheme.textSecondary)
+            ZStack(alignment: .leading) {
+                Capsule().fill(PhrenTheme.surfaceRaised)
+                Capsule().fill(PhrenTheme.accent).frame(width: uses > 0 ? max(2, min(36, CGFloat(log2(Double(uses) + 1)) * 6)) : 0)
+            }.frame(width: 36, height: 3).accessibilityHidden(true)
+        }.accessibilityLabel("\(uses) uses")
+    }
 }

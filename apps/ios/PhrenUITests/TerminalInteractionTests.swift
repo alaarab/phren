@@ -111,7 +111,7 @@ final class TerminalInteractionTests: XCTestCase {
         app.buttons["Ctrl"].press(forDuration: 0.6)
         XCTAssertTrue(app.buttons["Close shortcuts"].waitForExistence(timeout: 3))
         app.buttons["Terminal gestures"].tap()
-        let closeAfter = app.switches["terminal-close-after-shortcut"]
+        let closeAfter = app.descendants(matching: .any)["terminal-close-after-shortcut"]
         XCTAssertTrue(closeAfter.waitForExistence(timeout: 3))
         // A SwiftUI Toggle's centre is its label; the switch sits at the trailing edge.
         closeAfter.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.5)).tap()
@@ -130,7 +130,7 @@ final class TerminalInteractionTests: XCTestCase {
         app.buttons["Claude shortcuts"].tap()
         XCTAssertTrue(app.buttons["terminal-command:claude:/help"].isHittable)
         app.buttons["Terminal gestures"].tap()
-        XCTAssertTrue(app.switches["Two-finger gestures"].isHittable)
+        XCTAssertTrue(app.descendants(matching: .any)["Two-finger gestures"].isHittable)
         capture(app, "Terminal gesture settings")
         app.buttons["Close shortcuts"].tap()
         XCTAssertEqual(app.buttons["Ctrl"].value as? String, "Off", "A hold must not also latch Ctrl")

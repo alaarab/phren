@@ -36,13 +36,13 @@ struct ChatSettingsView: View {
                 Text("What a tap on a session opens. The other view is always one tap away from the header.")
             }
             Section {
-                Toggle(isOn: $autoSend) { Label { Text("Send after dictation"); Text("Dictated text goes straight to the agent").font(.caption).foregroundStyle(PhrenTheme.textMuted) } icon: { Image(systemName: "paperplane") } }
+                PhrenSwitch(isOn: $autoSend) { Label { Text("Send after dictation"); Text("Dictated text goes straight to the agent").font(.caption).foregroundStyle(PhrenTheme.textMuted) } icon: { Image(systemName: "paperplane") } }
                     .accessibilityIdentifier("chat-auto-send")
-                Toggle(isOn: $autocorrection) { Label("Autocorrection in chat", systemImage: "textformat.abc.dottedunderline") }
+                PhrenSwitch(isOn: $autocorrection) { Label("Autocorrection in chat", systemImage: "textformat.abc.dottedunderline") }
                     .accessibilityIdentifier("chat-autocorrection")
             } header: { Text("Composer") }
             Section {
-                Toggle(isOn: $wrap) { Label { Text("Wrap long lines in chat"); Text("Code blocks, tool output and diff cards wrap instead of scrolling sideways. The full-screen diff has its own switch in its ⋯ menu.").font(.caption).foregroundStyle(PhrenTheme.textMuted) } icon: { Image(systemName: "text.word.spacing") } }
+                PhrenSwitch(isOn: $wrap) { Label { Text("Wrap long lines in chat"); Text("Code blocks, tool output and diff cards wrap instead of scrolling sideways. The full-screen diff has its own switch in its ⋯ menu.").font(.caption).foregroundStyle(PhrenTheme.textMuted) } icon: { Image(systemName: "text.word.spacing") } }
                     .accessibilityIdentifier("chat-wrap-lines")
             } header: { Text("Reading") }
             Section {

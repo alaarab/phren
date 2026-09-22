@@ -1035,9 +1035,16 @@ schedules:
     it("lists the models a computer's agents offer", async () => {
       const claude = await api("/v1/models?source=claude");
       expect(claude.status).toBe(200);
-      // Exact ids from this computer's transcripts, aliases only for the rest.
-      expect(claude.data.models.length).toBeGreaterThan(0);
-      expect(claude.data.models.every((m: any) => /^(fable|opus|sonnet|haiku|claude-)/.test(m.id))).toBe(true);
+      // The HTTP boundary pins Claude Code's own menu: five rows, exact ids
+      // and names, one default. A prefix regex would pass for aliases too.
+      expect(claude.data.models.map((m: any) => [m.id, m.name])).toEqual([
+        ["claude-fable-5-1", "Fable 5.1"],
+        ["claude-opus-5", "Opus 5"],
+        ["claude-sonnet-5", "Sonnet 5"],
+        ["claude-haiku-4-5-20251001", "Haiku 4.5"],
+        ["claude-fable-5-1[1m]", "Fable 5.1 (1M context)"],
+      ]);
+      expect(claude.data.models.filter((m: any) => m.isDefault).map((m: any) => m.id)).toEqual(["claude-fable-5-1"]);
       // OpenCode's list comes from its own binary: every id names its provider,
       // and a computer without opencode simply offers nothing.
       const opencode = (await api("/v1/models?source=opencode")).data.models;
@@ -1745,7 +1752,7 @@ describe("Hook module capabilities", () => {
     expect(() => requireRoute(on, "GET", "/v1/code/search")).not.toThrow();
     const off = snapshot(["memory"]);
     expect(capabilitiesForModules(off).code).toBeUndefined();
-    expect(() => requireRoute(off, "GET", "/v1/code/search")).toThrow("enable it with phren modules enable code");
+    expect(() => requireRoute(off, "GET", "/v1/code/search")).toThrow("run phren modules enable code");
   });
 
   it("starts the gateway snapshot despite an unknown module key in the store", async () => {

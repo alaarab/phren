@@ -24,7 +24,7 @@ const timestamp = z.string().datetime({ offset: true });
 
 const opencodeSession = z.string().regex(/^ses_[0-9A-Za-z]{1,64}$/);
 
-const manifestSchema = z.object({
+export const manifestSchema = z.object({
   schemaVersion: z.literal(1),
   id: jobID,
   parent: z.object({
@@ -45,6 +45,8 @@ const manifestSchema = z.object({
   finishedAt: timestamp.optional(),
   status: z.enum(["queued", "running", "completed", "failed", "cancelled"]),
   exitCode: z.number().int().min(0).max(255).optional(),
+  reason: z.string().max(4000).optional(),
+  resumes: sessionId.optional(),
   schedule: z.object({ id: z.string().regex(/^[a-f0-9]{8}$/), project: z.string().min(1).max(200) }).optional(),
 }).strict().superRefine((manifest, ctx) => {
   // OpenCode sessions are `ses_…`; Codex and Claude sessions are UUIDs.
