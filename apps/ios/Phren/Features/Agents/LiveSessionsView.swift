@@ -347,7 +347,7 @@ struct LiveSessionsView: View {
                         sessionCard(session, screen: screen)
                     }
                     if group.id == "previous" {
-                        Text("These computers aren't connected. Reconnect before opening a session.")
+                        Text("phren can't reach these computers right now. Their terminal still opens from Connections below.")
                             .font(.caption).foregroundStyle(PhrenTheme.textMuted)
                     }
                 }
@@ -357,15 +357,29 @@ struct LiveSessionsView: View {
         if !problems.isEmpty {
             PhrenGroup("Connections") {
                 ForEach(problems) { computer in
-                    NavigationLink { LiveHostView(hostID: computer.id) } label: {
-                        HStack {
-                            Text(computer.host.name).fontWeight(.medium)
-                                .foregroundStyle(PhrenTheme.hostColor(computer.host.color ?? LiveHost.defaultColor(for: computer.host.id)))
-                            Spacer()
-                            Text(computer.needsVerification ? "Verify connection" : "Offline")
-                                .font(.caption).foregroundStyle(PhrenTheme.warning)
+                    HStack(spacing: 8) {
+                        NavigationLink { LiveHostView(hostID: computer.id) } label: {
+                            HStack {
+                                Text(computer.host.name).fontWeight(.medium)
+                                    .foregroundStyle(PhrenTheme.hostColor(computer.host.color ?? LiveHost.defaultColor(for: computer.host.id)))
+                                Spacer()
+                                Text(computer.needsVerification ? "Verify connection" : computer.slow == true ? "Slow to answer" : "Offline")
+                                    .font(.caption).foregroundStyle(PhrenTheme.warning)
+                            }
+                        }.accessibilityIdentifier("overview-reconnect:\(computer.id)")
+                        // The terminal needs only SSH, not the Hook: when the Hook
+                        // is down or overloaded this is still the way onto the
+                        // machine, instead of leaving phren for another app.
+                        if !computer.needsVerification {
+                            NavigationLink { HerdrTerminalView(host: computer.host, route: .herdr(server: "default")) } label: {
+                                Image(systemName: "terminal").font(.system(size: 15, weight: .semibold))
+                                    .frame(width: 44, height: 44).contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain).foregroundStyle(PhrenTheme.cyan)
+                            .accessibilityLabel("Open \(computer.host.name)'s terminal")
+                            .accessibilityIdentifier("overview-terminal:\(computer.id)")
                         }
-                    }.accessibilityIdentifier("overview-reconnect:\(computer.id)")
+                    }
                 }
             }
         }
@@ -768,6 +782,18 @@ private struct LiveHostView: View {
             }
             if let message = monitor.message { Text(message).font(.footnote).foregroundStyle(PhrenTheme.warning) }
             if let localError { Text(localError).font(.footnote).foregroundStyle(PhrenTheme.warning) }
+            // Reachable over SSH even when the Hook is not answering: the
+            // terminal attaches Herdr directly, so a stuck Hook never locks
+            // the person out of their own machine.
+            if let host, monitor.message != nil, monitor.fingerprint == nil {
+                NavigationLink { HerdrTerminalView(host: host, route: .herdr(server: "default")) } label: {
+                    Label("Open terminal", systemImage: "terminal").font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.plain).foregroundStyle(PhrenTheme.cyan)
+                .background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium))
+                .accessibilityIdentifier("host-open-terminal")
+            }
             if let fingerprint = monitor.fingerprint, host?.fingerprint == nil {
                 Text(fingerprint).font(.caption.monospaced()).textSelection(.enabled)
                 Text("Compare this fingerprint with the computer's SSH host key before trusting it. On the computer, run ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub (or the matching ECDSA host key).")

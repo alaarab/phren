@@ -43,6 +43,10 @@ number counts up on its own.
 
 ### Fixed
 
+- A computer phren cannot reach still opens its terminal. The Connections
+  row and the computer's page offer a terminal that attaches Herdr straight
+  over SSH, which needs neither the Hook nor its status, so a stuck or
+  overloaded Hook no longer sends you to another app to see the machine.
 - The model picker switches through the Hook without sending chat messages. Working agents offer Switch after this turn with cancellation; verified switches appear as a small system row.
 - Extending a chat text selection keeps the keyboard and conversation still. Long drafts grow to four lines, then scroll inside the composer as selection handles move; ordinary conversation drags still dismiss the keyboard.
 
