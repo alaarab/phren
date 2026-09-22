@@ -268,7 +268,6 @@ ${NOTES_UI_STYLES}
       </div>
       <div id="graph-node-popover" style="display:none;position:absolute;left:0;top:0;z-index:12;max-width:min(440px,calc(100% - 24px));pointer-events:none">
         <div id="graph-node-popover-card" class="card" style="pointer-events:auto;position:relative;box-shadow:var(--shadow-lg);border:1px solid var(--border);background:color-mix(in srgb, var(--surface) 96%, transparent);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)">
-          <button id="graph-node-close" type="button" aria-label="Close selected node" title="Close" style="position:absolute;top:10px;right:10px;width:38px;height:38px;border-radius:999px;border:1px solid var(--border);background:var(--surface-raised);color:var(--ink);cursor:pointer;font-size:20px;line-height:1;display:grid;place-items:center">×</button>
           <div id="graph-node-content" style="padding:18px 18px 16px 18px"></div>
         </div>
       </div>

@@ -454,3 +454,35 @@ export function recomputeSearchMatches(
 export function bestSearchMatch(results: RuntimeNode[]): RuntimeNode | null {
   return results.length ? results[0] : null;
 }
+
+/**
+ * The dossier's ranked walk through one project: findings newest date first
+ * (payload order breaks ties), then tasks in payload order. That is the order
+ * the Memory list shows rows for the project, so Previous/Next and the
+ * keyboard arrows land where a reader scrolling the list would.
+ */
+export function rankedProjectIds(nodes: readonly RawNode[], project: string): string[] {
+  const findings = nodes.filter((node) => node.project === project && deriveKind(node) === "finding");
+  findings.sort((a, b) => {
+    const left = a.date || "";
+    const right = b.date || "";
+    if (left === right) return 0;
+    return left > right ? -1 : 1;
+  });
+  const tasks = nodes.filter((node) => node.project === project && deriveKind(node) === "task");
+  return [...findings, ...tasks].map((node) => node.id);
+}
+
+/**
+ * Previous/next id in a ranked list, wrapping at both ends. The list is the
+ * host's own order (the Memory list, the contents pane); `delta` is -1 or +1.
+ * Returns null for an empty list or an id that is not in it.
+ */
+export function stepRanked(rankedIds: readonly string[], currentId: string, delta: number): string | null {
+  if (rankedIds.length === 0) return null;
+  const index = rankedIds.indexOf(currentId);
+  if (index < 0) return null;
+  const total = rankedIds.length;
+  const next = (((index + delta) % total) + total) % total;
+  return rankedIds[next];
+}

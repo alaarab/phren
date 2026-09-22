@@ -4,11 +4,13 @@ import { ROOT } from "./types.js";
 import {
   baseColorForNode,
   buildFullAdjacency,
+  dossierPosition,
   ensureTopicFilters,
   nodeDetail,
   normalizeNode,
   searchTextForNode,
   state,
+  stepDossier,
 } from "./state.js";
 import { applyHighlight, refreshNodeVisual } from "./nodes.js";
 import { benchLabelTick, forgetEagerLabel, resetLabels, refreshLabels, updateEagerLabelText } from "./labels.js";
@@ -328,6 +330,9 @@ ROOT.phrenGraph = {
   walkTo,
   getNodeAt,
   getNodeDetail: nodeDetail,
+  /** Dossier navigation: prev/next in the ranked list the list mode shows. */
+  stepDossier,
+  dossierPosition,
   getData() {
     return {
       nodes: state.hostNodes.slice(),
