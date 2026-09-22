@@ -447,7 +447,11 @@ export async function serve(version: string): Promise<void> {
           result = await launches.run(async () => {
             if (data.role === "conductor" && !modules.has("conductor")) throw new BridgeError(404, disabledHint("conductor"));
             if (data.project !== undefined && data.cwd !== undefined) throw new BridgeError(400, "Choose project or cwd, not both.");
-            const cwd = data.project !== undefined ? await dispatchProjectDirectory(data.project)
+            // A conductor belongs to no one project: without a folder it starts in
+            // this computer's phren store and dispatches into any project from there.
+            const storeRooted = data.role === "conductor" && data.project === undefined && (data.cwd === undefined || data.cwd === "");
+            const cwd = storeRooted ? await launchDirectory(defaultPhrenPath(), [], [defaultPhrenPath()])
+              : data.project !== undefined ? await dispatchProjectDirectory(data.project)
               : await launchDirectory(data.cwd, await journal.recent(), locatedDirectories);
             return launchSession(selectedServer(url), { ...data, cwd });
           });
@@ -952,10 +956,10 @@ export function herdrAgentName(label: string): string {
 }
 
 export async function launchSession(server: string, data: Json): Promise<Json> {
+  const role = z.enum(["agent", "conductor"]).default("agent").parse(data.role);
   const cwd = z.string().min(1).max(4096).refine(t => path.isAbsolute(t) && !/[\x00-\x1f\x7f]/.test(t)).parse(data.cwd);
   const label = plainText(200).parse(data.label);
   const kind = z.enum(launchKinds).parse(data.kind);
-  const role = z.enum(["agent", "conductor"]).default("agent").parse(data.role);
   const effort = z.enum(["low", "medium", "high"]).default("medium").parse(data.effort);
   if (role === "conductor" && kind === "copilot") throw new BridgeError(400, "Copilot cannot run as a conductor.");
   // Herdr's agent name is a slug (lowercase, digits, - or _, 1 to 32 chars);
