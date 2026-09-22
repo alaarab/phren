@@ -113,6 +113,17 @@ describe("Phren Hook boundaries", () => {
       expect(visibleEvent(event, fixture.source)).toEqual(event);
     }
   });
+  it("recognizes a conductor by the name Herdr keeps on the pane or in its agents list", () => {
+    const base = {
+      workspaces: [{ workspace_id: "w1", label: "Conductor" }],
+      tabs: [{ workspace_id: "w1", tab_id: "w1:t1", label: "1" }],
+      panes: [{ workspace_id: "w1", tab_id: "w1:t1", pane_id: "w1:p1", agent: "claude" }],
+    };
+    const role = (s: Record<string, unknown>) => (workspaceSnapshot(s) as any).groups[0].children[0].role;
+    expect(role(base)).toBeUndefined();
+    expect(role({ ...base, agents: [{ pane_id: "w1:p1", agent: "claude", name: "conductor-conductor" }] })).toBe("conductor");
+    expect(role({ ...base, panes: [{ ...base.panes[0], agent_name: "conductor-lead" }] })).toBe("conductor");
+  });
   it("exports focus only when workspace, tab and pane belong together", () => {
     const snapshot = {
       focused_workspace_id: "w2", focused_tab_id: "w2:t1", focused_pane_id: "w2:p1",

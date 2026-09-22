@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- Hook: a conductor is recognized by the name Herdr keeps in its `agents` list as well as on the pane, so it pins to the top of Agents again and a second conductor is refused.
 - Hook: a Claude conductor reads its brief with `--append-system-prompt-file` (Herdr refuses a multi-line argument for zsh); the Claude live preview also skips collapsed tool groups (a `⏺` line followed by `⎿`) and stops at the input box's titled rule.
 - Hook: the Claude live preview skips tool-call lines and reads Claude's spinner verb, sent beside transcript frames as `activityVerb` (older phones ignore it).
 - Hook: a launch whose label matches a live agent gets its own Herdr name (`sr-requests-2`) instead of colliding; a scheduled run waits for the agent to finish starting before it sends the prompt; Herdr's own error text reaches the phone.
