@@ -29,6 +29,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Choosing Full Access under Codex's `/permissions` no longer leaves the
+  terminal sitting on "Enable full access?". The Hook's menu walk reads the
+  pane's terminal lines for that second confirmation, answers it with `1` then
+  Enter, and only then reports the menu closed; if the confirmation never
+  appears within three seconds the step is reported as still waiting with the
+  visible prompt as the phone's terminal choice card.
+- Claude's account usage numbers each name one source. The Hook now reports
+  which Claude feed produced the account (`origin`: the status-line
+  `rate_limits` payload or the OAuth usage endpoint), and a per-model weekly
+  window such as `seven_day_fable` keeps its own reset time and its own `asOf`
+  from Claude Code's usage snapshot. That window is its own allowance with its
+  own denominator, so it can show a higher percentage than `seven_day` without
+  contradicting the all-models window. `/v1/usage` documents the source of
+  every number; see `docs/api-reference.md`.
 - A `.config/modules.yaml` key for a module this Hook build does not know (a
   newer CLI enabled it) no longer makes `phren-hook ssh` and `serve` exit with
   `Unknown module`, which showed every phone Offline on every computer. The
@@ -83,8 +97,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - The Claude model list the phone shows matches Claude Code's own /model menu:
   exact models, default first, an alias only for a family with no exact id.
 - The menu window the Hook opens after a bare slash command stays open through
-  Enter, so a choice that opens a second confirmation (Codex full access) can
-  still be answered from the phone; Escape closes it.
+  Enter while the Hook walks a second confirmation in the pane; Escape still
+  closes it.
 - The periodic store pull commits uncommitted writes (a task from `add_task`,
   a new finding) before it fetches or merges, so a managed sync can no longer
   discard or block on a write that arrived moments earlier; a divergent remote

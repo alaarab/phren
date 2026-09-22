@@ -30,6 +30,10 @@ export interface AccountUsage {
   spend?: UsageSpend;
   /** Opaque key identity used only to avoid counting one OpenRouter key twice. */
   accountId?: string;
+  /** Which Claude report fed this account: the status-line rate_limits payload
+   *  or the OAuth usage endpoint. Per-model windows the status line never
+   *  carries document their own age through each window's asOf instead. */
+  origin?: "status-line" | "oauth";
 }
 const claudeFile = () => path.join(bridgeRoot(), "usage", "claude.json");
 const safeText = (v: unknown) => typeof v === "string" ? v.replace(/[\x00-\x1f\x7f]/g, "").slice(0, 100) : undefined;
@@ -430,17 +434,23 @@ function claudeWindowName(key: string): string {
   return key.split("_").filter(Boolean).map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
 }
 
+/** Claude Code's documented status-line payload: rate_limits carries the
+ *  five_hour and seven_day windows (the 5h/7d unified limits) and, when the
+ *  build emits them, per-model keys such as seven_day_fable. Every window
+ *  keeps its own reset time; a per-model window is its own weekly allowance
+ *  with its own denominator, not a subset of seven_day, so it can show a
+ *  higher percentage without contradicting the all-models window. */
 export function claudeUsage(value: unknown, now = new Date()): AccountUsage {
   const limits = object(object(value).rate_limits);
-  // Every window Claude Code reports, each on its own line — the overall
-  // ones first, then per-model windows (Fable, Opus…) in a stable order.
+  // Every window Claude Code reports, each on its own line: the overall
+  // ones first, then per-model windows (Fable, Opus...) in a stable order.
   const order = (key: string) => key === "five_hour" ? 0 : key === "seven_day" ? 1 : 2;
   const windows = Object.keys(limits).sort((a, b) => order(a) - order(b) || a.localeCompare(b)).slice(0, 16).flatMap(key => {
     const item = object(limits[key]);
     const entry = window(key, claudeWindowName(key), item.used_percentage, item.resets_at);
     return entry ? [entry] : [];
   });
-  return { source: "claude", windows, updatedAt: now.toISOString(),
+  return { source: "claude", windows, updatedAt: now.toISOString(), origin: "status-line",
     ...(!windows.length ? { message: "Usage appears after Claude Code replies with a subscription account on this computer." } : {}) };
 }
 
@@ -503,7 +513,7 @@ export function claudeOAuthUsage(value: unknown, now = new Date()): AccountUsage
       }
     }
   }
-  return { source: "claude", windows, updatedAt: now.toISOString(),
+  return { source: "claude", windows, updatedAt: now.toISOString(), origin: "oauth",
     ...(!windows.length ? { message: "Claude has not reported account limits on this computer." } : {}) };
 }
 

@@ -86,13 +86,27 @@ function structuredOptions(value: unknown): TerminalChoiceOption[] {
     return labeledOption(label, key) ?? [];
   });
 }
-/** Numbered options as Codex draws them: "1. Yes, proceed (y)". */
+/** Numbered options as Codex draws them: "1. Yes, proceed (y)". The line's
+ * own number is the answer key when the label carries no explicit one, so a
+ * plain "1. Yes, continue anyway" is still answerable. */
 function numberedOptions(text: string): TerminalChoiceOption[] {
   return text.split(/\r?\n/).flatMap(line => {
-    const match = /^\s*\d+[.)]\s+(.+?)\s*$/.exec(line);
+    const match = /^\s*(\d+)[.)]\s+(.+?)\s*$/.exec(line);
     if (!match) return [];
-    return labeledOption(match[1].trim(), undefined) ?? [];
+    return labeledOption(match[2].trim(), match[1]) ?? labeledOption(match[2].trim(), undefined) ?? [];
   });
+}
+/** The question a pane's terminal lines are asking, in the same shape a held
+ * permission request carries: the sentence above the numbered rows, then one
+ * option per row keyed by its number. Undefined without two answerable rows. */
+export function visibleTerminalChoice(text: string): TerminalChoice | undefined {
+  const options = numberedOptions(text);
+  if (options.length < 2) return undefined;
+  const lines = text.split(/\r?\n/);
+  const firstOption = lines.findIndex(line => /^\s*\d+[.)]\s+/.test(line));
+  const title = lines.slice(0, firstOption < 0 ? 1 : firstOption).map(line => line.trim()).filter(Boolean).join(" ").trim();
+  if (!title && !options.length) return undefined;
+  return { ...(title ? { title: title.slice(0, 4_000) } : {}), options: options.slice(0, 12) };
 }
 /** Read the question a terminal dialog is asking from the request it carries:
  * an explicit options list, or numbered lines inside its text. Undefined when
@@ -212,8 +226,9 @@ export class AgentHooks {
   private compactingSince = new Map<string, number>();
   /** Panes where Phren just typed a bare slash command: the agent is drawing
    * that command's menu, which Herdr reports as an idle agent, so keys are
-   * allowed there for a short while to walk and confirm it. */
-  private menus = new Map<string, number>();
+   * allowed there for a short while to walk and confirm it. The command text
+   * and a one-shot confirmation attempt ride with the window. */
+  private menus = new Map<string, { at: number; command?: string; confirmationAttempted?: boolean }>();
   private watching = new Map<string, number>();
   readonly overview = new ApprovalWatchLeases();
   private server?: Server;
@@ -397,15 +412,58 @@ export class AgentHooks {
     if (Date.now() - at > 600_000) { this.compactingSince.delete(key); return false; }
     return true;
   }
-  menuOpened(target: Target) {
-    this.menus.set(JSON.stringify(target), Date.now());
+  menuOpened(target: Target, command?: string) {
+    this.menus.set(JSON.stringify(target), { at: Date.now(), ...(command ? { command } : {}) });
     while (this.menus.size > 64) this.menus.delete(this.menus.keys().next().value!);
   }
   menuOpen(target: Target): boolean {
-    const at = this.menus.get(JSON.stringify(target));
-    return at !== undefined && Date.now() - at < 30_000;
+    const entry = this.menus.get(JSON.stringify(target));
+    return entry !== undefined && Date.now() - entry.at < 30_000;
+  }
+  /** The bare slash command that opened this pane's current menu window. */
+  menuCommand(target: Target): string | undefined {
+    const entry = this.menus.get(JSON.stringify(target));
+    return entry && Date.now() - entry.at < 30_000 ? entry.command : undefined;
   }
   menuClosed(target: Target) { this.menus.delete(JSON.stringify(target)); }
+  /** Read what the pane's terminal is currently drawing, ANSI stripped. */
+  private async paneLines(target: Target): Promise<string> {
+    try {
+      const result = object(await rpc(target.server, "agent.read",
+        { target: target.pane, source: "visible", lines: 40, strip_ansi: true }, undefined, 2_000));
+      const read = object(result.read ?? result);
+      return typeof read.text === "string" ? read.text : "";
+    } catch { return ""; }
+  }
+  /** After the phone walks Codex's /permissions menu onto Full Access, the
+   * agent draws a second "Enable full access?" confirmation. Watch the pane's
+   * terminal lines for it, answer with its own numbered choice, and only then
+   * close the menu window. A confirmation that never arrives within three
+   * seconds is left open as the visible prompt, published as the terminal
+   * choice the phone draws as a question card. Runs at most once per window. */
+  async walkMenuConfirmation(target: Target): Promise<{ menuClosed: boolean; waiting?: { message: string; choice?: TerminalChoice } }> {
+    const key = JSON.stringify(target), entry = this.menus.get(key);
+    if (!entry || entry.confirmationAttempted) return entry ? { menuClosed: false } : { menuClosed: true };
+    entry.confirmationAttempted = true;
+    const deadline = Date.now() + 3_000;
+    for (;;) {
+      const lines = await this.paneLines(target);
+      if (/\benable full access\b/i.test(lines)) {
+        await rpc(target.server, "agent.send_keys", { target: target.pane, keys: ["1", "enter"] });
+        this.clearTerminalPrompt(target);
+        this.menuClosed(target);
+        return { menuClosed: true };
+      }
+      if (Date.now() >= deadline) {
+        const message = lines.trim().slice(0, 32_768) || "The terminal is still waiting for an answer.";
+        const choice = visibleTerminalChoice(lines);
+        this.terminalPrompts.set(key, { tool: "Permissions", message, ...(choice ? { choice } : {}), at: Date.now() });
+        while (this.terminalPrompts.size > 64) this.terminalPrompts.delete(this.terminalPrompts.keys().next().value!);
+        return { menuClosed: false, waiting: { message, ...(choice ? { choice } : {}) } };
+      }
+      await new Promise(resolve => setTimeout(resolve, 150));
+    }
+  }
   approval(target: Target): Json | undefined {
     const pending = [...this.pending.entries()].find(([, p]) => JSON.stringify(p.target) === JSON.stringify(target));
     if (pending) return { actionId: pending[0], toolName: pending[1].tool, title: `Allow ${pending[1].tool}?`, message: pending[1].message,

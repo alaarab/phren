@@ -310,6 +310,7 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
   let deliveries: { method: string; session: string }[];
   let extraWorkspaces: Record<string, unknown>[] = [], extraTabs: Record<string, unknown>[] = [], extraPanes: Record<string, unknown>[] = [], failAgentStart = false;
   let helperPIDs: number[] = [];
+  let paneLines = "", drawConfirmation = false;
   let remoteHook: ChildProcess | undefined;
   function api(url: string, body?: unknown): Promise<{ status: number; data: any }> {
     return new Promise((resolve, reject) => {
@@ -334,6 +335,7 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     commands = []; current = session; agentStatus = "working"; reportIdentity = true; foregroundPID = process.pid; terminalID = "term-one"; log = ""; holdSnapshot = false; releaseSnapshot = undefined;
     replaceBeforeMutation = false; deliveries = [];
     extraWorkspaces = []; extraTabs = []; extraPanes = []; failAgentStart = false; helperPIDs = []; remoteHook = undefined;
+    paneLines = ""; drawConfirmation = false;
   }
   async function resetRecord(): Promise<void> {
     record = path.join(root, `codex/sessions/2026/09/10/rollout-2026-09-10T00-00-00-${session}.jsonl`);
@@ -364,6 +366,13 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
           // Unknown params cannot bind an expected session in that contract.
           if (replaceBeforeMutation) current = "bbbbbbbb-1111-4111-8111-111111111111";
           deliveries.push({ method: req.method, session: current });
+          const sent: string[] = Array.isArray(req.params?.keys) ? req.params.keys : [];
+          // A fake Codex pane: Enter on the permissions menu draws Full Access's
+          // second confirmation; the Hook's own 1+Enter clears it.
+          if (drawConfirmation && sent.includes("enter") && !sent.includes("1")) {
+            paneLines = "Enable full access?\n1. Yes, continue anyway\n2. Cancel\n";
+          }
+          if (sent.includes("1")) paneLines = "";
         }
         // Herdr's create calls answer {ok} and the new workspace/tab/pane show
         // up in the next snapshot; agent.start marks the pane's agent.
@@ -386,7 +395,10 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
         const snapshot = { panes: [pane, ...extraPanes], workspaces: [{ workspace_id: "w1", label: "Project" }, ...extraWorkspaces],
           tabs: [{ tab_id: "w1:t1", workspace_id: "w1", label: "1" }, ...extraTabs] };
         const answer = () => socket.end(JSON.stringify({ id: req.id, result: req.method === "session.snapshot" ? { snapshot }
-          : req.method === "pane.process_info" ? { process_info: { foreground_processes: [{ pid: foregroundPID }, ...helperPIDs.map(pid => ({ pid }))] } } : { ok: true } }) + "\n");
+          : req.method === "pane.process_info" ? { process_info: { foreground_processes: [{ pid: foregroundPID }, ...helperPIDs.map(pid => ({ pid }))] } }
+          : req.method === "agent.read" ? { type: "pane_read", read: { pane_id: "w1:p1", workspace_id: "w1", tab_id: "w1:t1",
+            source: "visible", format: "text", text: paneLines, revision: 1, truncated: false } }
+          : { ok: true } }) + "\n");
         if (holdSnapshot && req.method === "session.snapshot") { holdSnapshot = false; releaseSnapshot = answer; }
         else answer();
       });
@@ -867,15 +879,57 @@ schedules:
       expect((await api("/v1/keys", { target, keys: ["Down"] })).status).toBe(409);
       expect((await api("/v1/prompt", { target, text: "/permissions" })).status).toBe(200);
       expect((await api("/v1/keys", { target, keys: ["Down", "Down"] })).status).toBe(200);
+      // Enter runs the Hook's confirmation step once: with nothing on the pane
+      // it times out still waiting and keeps the window. Escape closes it.
       expect((await api("/v1/keys", { target, keys: ["Enter"] })).status).toBe(200);
-      // Enter keeps the window: a choice can open a second confirmation the
-      // phone still walks (Codex full access). Escape closes it.
       expect((await api("/v1/keys", { target, keys: ["Enter"] })).status).toBe(200);
       expect((await api("/v1/keys", { target, keys: ["Escape"] })).status).toBe(200);
       expect((await api("/v1/keys", { target, keys: ["Down"] })).status).toBe(409);
       // A prompt with words is a message, not a menu.
       expect((await api("/v1/prompt", { target, text: "/model gpt-5.6-terra" })).status).toBe(200);
       expect((await api("/v1/keys", { target, keys: ["Enter"] })).status).toBe(409);
+    });
+
+    it("walks Codex's Full Access confirmation from the pane's terminal lines", async () => {
+      agentStatus = "idle"; drawConfirmation = true;
+      expect((await api("/v1/prompt", { target, text: "/permissions" })).status).toBe(200);
+      const selected = await api("/v1/keys", { target, keys: ["Down", "Down", "Enter"] });
+      expect(selected.status, JSON.stringify(selected.data)).toBe(200);
+      expect(selected.data.menuClosed).toBe(true);
+      const sent = commands.filter(c => c.method === "agent.send_keys").map(c => c.params.keys);
+      expect(sent).toContainEqual(["down", "down", "enter"]);
+      // The Hook read "Enable full access?" and answered it with 1 then Enter
+      // before reporting the menu closed.
+      expect(sent).toContainEqual(["1", "enter"]);
+      expect((await api("/v1/keys", { target, keys: ["Down"] })).status).toBe(409);
+    });
+
+    it("reports a confirmation that never appears as the visible waiting prompt", async () => {
+      agentStatus = "idle"; drawConfirmation = false;
+      paneLines = "Apply the permission change?\n1. Yes, continue anyway\n2. Cancel\n";
+      expect((await api("/v1/prompt", { target, text: "/permissions" })).status).toBe(200);
+      const selected = await api("/v1/keys", { target, keys: ["Down", "Down", "Enter"] });
+      expect(selected.status, JSON.stringify(selected.data)).toBe(200);
+      expect(selected.data.menuClosed).toBeUndefined();
+      expect(selected.data.waiting).toMatchObject({
+        message: expect.stringContaining("Apply the permission change?"),
+        choice: { title: "Apply the permission change?",
+          options: [{ label: "Yes, continue anyway", key: "1" }, { label: "Cancel", key: "2" }] },
+      });
+      const sent = commands.filter(c => c.method === "agent.send_keys").map(c => c.params.keys);
+      expect(sent).not.toContainEqual(["1", "enter"]);
+      // The same choice reaches the phone as the terminal prompt question card.
+      agentStatus = "blocked";
+      const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
+      const frames: any[] = []; socket.on("message", data => frames.push(JSON.parse(data.toString())));
+      await once(socket, "open");
+      for (let i = 0; i < 80 && !frames.length; i++) await sleep(25);
+      expect(frames[0].agentStatus.terminalPrompt).toMatchObject({ toolName: "Permissions",
+        choice: { title: "Apply the permission change?",
+          options: [{ label: "Yes, continue anyway", key: "1" }, { label: "Cancel", key: "2" }] } });
+      socket.terminate();
+      // The window stays open so the card's own key still lands.
+      expect((await api("/v1/keys", { target, keys: ["1"] })).status).toBe(200);
     });
 
     it("lists the models a computer's agents offer", async () => {
