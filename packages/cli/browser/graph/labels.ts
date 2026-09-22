@@ -146,7 +146,7 @@ export function attachEagerLabel(fgNode: FGNode): void {
   el.className = `phren-label phren-label--${node.kind}`;
   if (node.kind === "project") {
     el.style.setProperty("--pc", node.baseColor);
-    const count = typeof node.findingCount === "number" ? node.findingCount : "";
+    const count = typeof node.labelCount === "number" ? node.labelCount : typeof node.findingCount === "number" ? node.findingCount : "";
     el.innerHTML = `<span class="phren-label-dot"></span>${esc(node.label)}${count !== "" ? `<span class="phren-label-meta">${esc(String(count))}</span>` : ""}`;
   } else {
     el.textContent = node.label;
@@ -167,7 +167,7 @@ export function updateEagerLabelText(fgNode: FGNode): void {
   if (!fgNode.__labelEl) return;
   const node = fgNode.raw;
   if (node.kind === "project") {
-    const count = typeof node.findingCount === "number" ? node.findingCount : "";
+    const count = typeof node.labelCount === "number" ? node.labelCount : typeof node.findingCount === "number" ? node.findingCount : "";
     fgNode.__labelEl.style.setProperty("--pc", node.baseColor);
     fgNode.__labelEl.innerHTML = `<span class="phren-label-dot"></span>${esc(node.label)}${count !== "" ? `<span class="phren-label-meta">${esc(String(count))}</span>` : ""}`;
   } else {
