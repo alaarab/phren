@@ -301,7 +301,7 @@ struct ProjectDetailView: View {
             }
             if SessionOverviewMonitor.shared.allowsCode() {
                 NavigationLink { CodeView(storeId: storeId, project: project) } label: {
-                    controlCell(icon: "chevron.left.forwardslash.chevron.right", title: "Code", value: codeSummary)
+                    controlCell(icon: "curlybraces", title: "Code", value: codeSummary)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Project code")

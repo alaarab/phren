@@ -11,6 +11,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- Code home opens on indexed files with directory counts, languages, index time and reindex. New Hook routes provide tree summaries, paged usage across every symbol and recent symbol changes; search accepts a directory scope and a type family. Symbol fingerprints retain change times across unchanged scans.
+
 - Live reply previews on the transcript socket: Claude pane text and Codex/OpenCode delta text update at most twice a second, stay out of history, and give way to the completed entry.
 
 - `GET /v1/code/outline-summary?project=&paths=` batches symbol totals and leading kinds for files and directories. Code reads and notes accept a registered store selector; file-qualified symbol queries keep a tree dossier on the selected file, and notes retain their explicit session recipient.

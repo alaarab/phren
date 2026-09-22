@@ -272,6 +272,7 @@ async function indexProjectLocked(store: string, project: string, options: Index
     // `--repo` against a path the project does not register.
     const previousRoot = getMeta(db, "repo_root");
     const rootChanged = previousRoot !== repoRoot;
+    const needsSymbolChanges = getMeta(db, "symbol_changes_version") !== "1";
     const needsReferenceNames = getMeta(db, "reference_names_version") !== "1";
     if (rootChanged) setMeta(db, "repo_root", repoRoot);
 
@@ -308,7 +309,7 @@ async function indexProjectLocked(store: string, project: string, options: Index
       }
       currentPaths.add(file);
       const hash = crypto.createHash("sha256").update(source).digest("hex");
-      if (!options.full && !rootChanged && !needsReferenceNames && existing.get(file)?.hash === hash) continue;
+      if (!options.full && !rootChanged && !needsReferenceNames && !needsSymbolChanges && existing.get(file)?.hash === hash) continue;
 
       pending.push({ file, hash, language: languageForFile(file)?.name ?? "unknown", mtime: Math.floor(stat.mtimeMs), source });
     }
@@ -347,7 +348,7 @@ async function indexProjectLocked(store: string, project: string, options: Index
           parent: symbol.parent,
           exported: symbol.exported,
         }));
-        replaceFileSymbols(db, entry.file, symbols, blameForFile(repoRoot, entry.file, symbols, blame.get(entry.file)));
+        replaceFileSymbols(db, entry.file, symbols, blameForFile(repoRoot, entry.file, symbols, blame.get(entry.file)), entry.source);
         replaceReferenceNames(db, entry.file, result.references);
         upsertFileRow(db, { path: entry.file, hash: entry.hash, language: entry.language, mtime: entry.mtime });
         parsedCount += 1;
@@ -358,16 +359,20 @@ async function indexProjectLocked(store: string, project: string, options: Index
       for (const file of vanished) purgeFile(db, file);
 
       if (parsedCount > 0 || vanished.length > 0) resolveReferences(db);
-      if (parsedCount === pending.length) setMeta(db, "reference_names_version", "1");
+      if (parsedCount === pending.length) {
+        setMeta(db, "reference_names_version", "1");
+        setMeta(db, "symbol_changes_version", "1");
+      }
       db.run("COMMIT");
     } catch (err) {
       try { db.run("ROLLBACK"); } catch { /* the transaction may already be closed */ }
       throw err;
     }
 
-    // Nothing parsed and nothing vanished means the database on disk is already
-    // current; skip the export and write.
-    if (parsedCount > 0 || vanished.length > 0 || rootChanged || needsReferenceNames) database.persist();
+    // Record successful scans even when no source changed. The Code home must
+    // distinguish a fresh empty scan from an index that has not run recently.
+    setMeta(db, "last_run_at", String(Date.now()));
+    database.persist();
     const totals = counts(db);
 
     return {

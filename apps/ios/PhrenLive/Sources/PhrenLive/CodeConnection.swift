@@ -11,9 +11,10 @@ extension PhrenConnection {
         return try CodeStatus.read(data)
     }
 
-    public static func codeSearch(host: LiveHost, privateKey: Data, project: String, query: String, kind: String? = nil, limit: Int? = nil, storeID: String? = nil) async throws -> [CodeSymbol] {
+    public static func codeSearch(host: LiveHost, privateKey: Data, project: String, query: String, kind: String? = nil, limit: Int? = nil, directory: String? = nil, storeID: String? = nil) async throws -> [CodeSymbol] {
         guard query.utf8.count <= 500 else { throw PhrenKitError.validation("That search is too long.") }
         var fields = ["q": query]
+        if let directory, !directory.isEmpty { fields["directory"] = try codePath(directory) }
         if let kind, !kind.isEmpty { fields["kind"] = try codeKind(kind) }
         if let limit { fields["limit"] = String(min(max(limit, 1), 100)) }
         let data = try await codeGet(host: host, privateKey: privateKey, path: "/v1/code/search", project: project, storeID: storeID, fields: fields)
@@ -50,6 +51,34 @@ extension PhrenConnection {
         if let top { fields["top"] = String(min(max(top, 1), 100)) }
         let data = try await codeGet(host: host, privateKey: privateKey, path: "/v1/code/usage", project: project, storeID: storeID, fields: fields)
         return try CodeUsageResults.read(data)
+    }
+
+    public static func codeTree(host: LiveHost, privateKey: Data, project: String, directory: String = "", storeID: String? = nil) async throws -> [CodeTreeEntry] {
+        let fields = directory.isEmpty ? [:] : ["directory": try codePath(directory)]
+        return try CodeTreeResults.read(await codeGet(host: host, privateKey: privateKey, path: "/v1/code/tree", project: project, storeID: storeID, fields: fields))
+    }
+
+    public static func codeUsagePage(host: LiveHost, privateKey: Data, project: String, kind: String = "", file: String = "", directory: String = "",
+                                     offset: Int = 0, end: Bool = false, storeID: String? = nil) async throws -> CodeUsagePage {
+        var fields = ["offset": String(max(0, offset)), "limit": "50", "end": end ? "1" : "0"]
+        if !kind.isEmpty { fields["kind"] = try codeKind(kind) }
+        if !file.isEmpty { fields["file"] = try codePath(file) }
+        if !directory.isEmpty { fields["directory"] = try codePath(directory) }
+        return try CodeUsagePage.read(await codeGet(host: host, privateKey: privateKey, path: "/v1/code/usage-page", project: project, storeID: storeID, fields: fields))
+    }
+
+    public static func codeRecent(host: LiveHost, privateKey: Data, project: String, directory: String = "", storeID: String? = nil) async throws -> [CodeRecentSymbol] {
+        let fields = directory.isEmpty ? [:] : ["directory": try codePath(directory)]
+        return try CodeRecentResults.read(await codeGet(host: host, privateKey: privateKey, path: "/v1/code/recent", project: project, storeID: storeID, fields: fields))
+    }
+
+    public static func codeReindex(host: LiveHost, privateKey: Data, project: String, storeID: String? = nil) async throws -> CodeStatus {
+        try host.validate()
+        var fields = ["project": try codeProject(project)]
+        if let storeID { fields["store"] = storeID }
+        var request = GatewayRequest(path: "/v1/code/reindex", body: try JSONEncoder().encode(fields))
+        request.method = "POST"
+        return try CodeStatus.read(await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: request))
     }
 
     public static func codeNote(host: LiveHost, privateKey: Data, note: CodeNoteRequest) async throws -> CodeNoteResult {
@@ -91,7 +120,7 @@ extension PhrenConnection {
     }
 
     private static func codeKind(_ kind: String) throws -> String {
-        let allowed = ["function", "method", "class", "struct", "enum", "interface", "type", "variable"]
+        let allowed = ["function", "method", "class", "struct", "enum", "interface", "type", "variable", "types"]
         guard allowed.contains(kind) else { throw PhrenKitError.validation("That symbol kind is invalid.") }
         return kind
     }

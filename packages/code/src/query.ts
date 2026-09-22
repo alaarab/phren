@@ -258,6 +258,7 @@ export async function search(
   query: string,
   kind?: string,
   limit = 20,
+  directory?: string,
 ): Promise<QueryResult<SymbolHit[]>> {
   const trimmed = query.trim();
   const result = await withCodeDb(store, project, db => {
@@ -279,10 +280,7 @@ export async function search(
       conditions.push(`(LOWER(s.name) = LOWER(?) OR LOWER(s.name) LIKE LOWER(?) ESCAPE '\\')`);
       params.push(trimmed, `${escapeLike(trimmed.toLowerCase())}%`);
     }
-    if (kind) {
-      conditions.push("s.kind = ?");
-      params.push(kind);
-    }
+    addCodeFilters(conditions, params, { kind, directory });
     const rows = rowsOf(db, `SELECT ${SYMBOL_COLUMNS} FROM symbols s WHERE ${conditions.join(" AND ")}`, params);
     const hits = rows.map(row => mapSymbol(row, ranks.get(numberAt(row, 0))));
     const lowered = trimmed.toLowerCase();
@@ -478,4 +476,96 @@ export async function outlineSummary(store: string, project: string, paths: stri
     });
   });
   return { available: result.available, databasePath: result.databasePath, value: result.value ?? [] };
+}
+
+
+export interface CodeFilters { kind?: string; file?: string; directory?: string }
+
+/** `types` is the UI family; `type` retains its existing exact-kind meaning. */
+function addCodeFilters(conditions: string[], params: SqlValue[], filters: CodeFilters): void {
+  if (filters.kind === "types") conditions.push("s.kind IN ('class', 'struct', 'enum', 'interface', 'type')");
+  else if (filters.kind) { conditions.push("s.kind = ?"); params.push(filters.kind); }
+  if (filters.file) { conditions.push("s.file = ?"); params.push(filters.file); }
+  if (filters.directory) {
+    conditions.push("substr(s.file, 1, ?) = ?");
+    params.push([...filters.directory].length + 1, filters.directory + "/");
+  }
+}
+
+export interface UsagePage {
+  entries: SymbolHit[];
+  total: number;
+  offset: number;
+  limit: number;
+  maxUses: number;
+}
+
+/** Every symbol, including locals and zero uses, in one stable ranked sequence.
+ * The database sorts and pages; the phone never downloads the full distribution.
+ * `end` addresses the final page without first fetching every preceding page. */
+export async function usagePage(store: string, project: string,
+  options: CodeFilters & { offset?: number; limit?: number; end?: boolean } = {}): Promise<QueryResult<UsagePage>> {
+  const limit = Math.max(1, Math.min(100, Math.trunc(options.limit ?? 50)));
+  const result = await withCodeDb(store, project, db => {
+    const conditions = ["1 = 1"];
+    const params: SqlValue[] = [];
+    addCodeFilters(conditions, params, options);
+    const source = `FROM symbols s WHERE ${conditions.join(" AND ")}`;
+    const total = numberAt(rowsOf(db, `SELECT COUNT(*) ${source}`, params)[0], 0);
+    const offset = options.end ? Math.max(0, total - limit) : Math.max(0, Math.trunc(options.offset ?? 0));
+    const maxUses = numberAt(rowsOf(db, `SELECT COALESCE(MAX(uses), 0) FROM (SELECT ${SYMBOL_COLUMNS} ${source})`, params)[0], 0);
+    const entries = rowsOf(db, `SELECT ${SYMBOL_COLUMNS} ${source}
+      ORDER BY uses DESC, s.name ASC, s.file ASC, s.line ASC, s.id ASC LIMIT ? OFFSET ?`, [...params, limit, offset]).map(row => mapSymbol(row));
+    return { entries, total, offset, limit, maxUses };
+  });
+  return { ...result, value: result.value ?? { entries: [], total: 0, offset: 0, limit, maxUses: 0 } };
+}
+
+export interface CodeTreeEntry {
+  path: string;
+  directory: boolean;
+  files: number;
+  symbols: number;
+  languages: string[];
+}
+
+/** Immediate indexed children only, including files with no declarations.
+ * Counts describe all descendants. Literal prefix matching treats % and _ as paths. */
+export async function treeSummary(store: string, project: string, directory = ""): Promise<QueryResult<CodeTreeEntry[]>> {
+  const result = await withCodeDb(store, project, db => {
+    const prefix = directory ? directory + "/" : "";
+    const rows = rowsOf(db, `SELECT f.path, f.language, COUNT(s.id) FROM files f
+      LEFT JOIN symbols s ON s.file = f.path WHERE substr(f.path, 1, ?) = ?
+      GROUP BY f.path, f.language ORDER BY f.path`, [[...prefix].length, prefix]);
+    const entries = new Map<string, CodeTreeEntry>();
+    for (const row of rows) {
+      const relative = stringAt(row, 0).slice(prefix.length);
+      const slash = relative.indexOf("/");
+      const path = prefix + (slash < 0 ? relative : relative.slice(0, slash));
+      const entry = entries.get(path) ?? { path, directory: slash >= 0, files: 0, symbols: 0, languages: [] };
+      entry.files++;
+      entry.symbols += numberAt(row, 2);
+      const language = stringAt(row, 1);
+      if (!entry.languages.includes(language)) entry.languages.push(language);
+      entries.set(path, entry);
+    }
+    return [...entries.values()].map(entry => ({ ...entry, languages: entry.languages.sort() }))
+      .sort((a, b) => Number(b.directory) - Number(a.directory) || a.path.localeCompare(b.path));
+  });
+  return { ...result, value: result.value ?? [] };
+}
+
+/** Symbols ordered by the last index run that observed a declaration or body
+ * change. Old indexes fall back to file observation time until their next scan. */
+export async function recentSymbols(store: string, project: string, directory?: string, limit = 30) {
+  const result = await withCodeDb(store, project, db => {
+    const conditions = ["1 = 1"];
+    const params: SqlValue[] = [];
+    addCodeFilters(conditions, params, { directory });
+    return rowsOf(db, `SELECT ${SYMBOL_COLUMNS}, COALESCE(c.indexed_at, f.indexed_at) AS changed_at FROM symbols s
+      JOIN files f ON f.path = s.file LEFT JOIN symbol_changes c ON c.symbol_id = s.id WHERE ${conditions.join(" AND ")}
+      ORDER BY changed_at DESC, s.file ASC, s.line ASC, s.id ASC LIMIT ?`, [...params, Math.max(1, Math.min(100, limit))])
+      .map(row => ({ ...mapSymbol(row), indexedAt: numberAt(row, 11) }));
+  });
+  return { ...result, value: result.value ?? [] };
 }

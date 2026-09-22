@@ -1097,7 +1097,7 @@ struct AgentChatView: View {
                         if let origin = indexedCode {
                             NavigationLink {
                                 CodeView(storeId: origin.storeID, project: origin.project, origin: origin)
-                            } label: { Label("Code", systemImage: "chevron.left.forwardslash.chevron.right") }
+                            } label: { Label("Code", systemImage: "curlybraces") }
                             .accessibilityIdentifier("chat-options-code")
                         }
                         NavigationLink { ProjectDetailView(storeId: project.storeID, project: project.name) } label: { Label("Project memory", systemImage: "brain.head.profile") }

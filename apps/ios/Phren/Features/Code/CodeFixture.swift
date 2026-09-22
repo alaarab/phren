@@ -70,6 +70,38 @@ enum CodeFixture {
             }
     }
 
+    static func tree(_ directory: String) -> [CodeTreeEntry] {
+        let prefix = directory.isEmpty ? "" : directory + "/"
+        let files = Set(symbols.map(\.file)).filter { $0.hasPrefix(prefix) }
+        let paths = Set(files.map { prefix + $0.dropFirst(prefix.count).split(separator: "/").first.map(String.init)! })
+        return paths.sorted().map { path in
+            let members = files.filter { $0 == path || $0.hasPrefix(path + "/") }
+            return CodeTreeEntry(path: path, directory: !files.contains(path), files: members.count,
+                                 symbols: symbols.filter { members.contains($0.file) }.count,
+                                 languages: Array(Set(members.map { $0.hasSuffix(".swift") ? "swift" : "typescript" })).sorted())
+        }
+    }
+
+    static func outline(_ file: String) -> [CodeOutlineEntry] {
+        func entry(_ symbol: CodeSymbol) -> CodeOutlineEntry {
+            CodeOutlineEntry(name: symbol.name, kind: symbol.kind, line: symbol.line, endLine: symbol.endLine,
+                             signature: symbol.signature, doc: symbol.doc, exported: symbol.exported, uses: symbol.uses,
+                             children: symbols.filter { $0.file == file && $0.parent == symbol.name }.map(entry))
+        }
+        return symbols.filter { $0.file == file && $0.parent == nil }.map(entry)
+    }
+
+    static func page(kind: String, file: String, directory: String, offset: Int, end: Bool) -> CodeUsagePage {
+        let rows = symbols.filter {
+            (kind.isEmpty || $0.kind == kind || (kind == "types" && ["class", "struct", "enum", "interface", "type"].contains($0.kind))) &&
+            (file.isEmpty || $0.file == file) && (directory.isEmpty || $0.file.hasPrefix(directory + "/"))
+        }.sorted { $0.uses == $1.uses ? $0.name < $1.name : $0.uses > $1.uses }
+        // Deliberately small to exercise crossing page boundaries in UI tests.
+        let limit = 5
+        let start = end ? max(0, rows.count - limit) : min(offset, rows.count)
+        return CodeUsagePage(entries: Array(rows.dropFirst(start).prefix(limit)), total: rows.count, offset: start, limit: limit, maxUses: rows.first?.uses ?? 0)
+    }
+
     static func definition(_ name: String) -> CodeDefinition? {
         guard let symbol = symbol(named: name) else { return nil }
         return CodeDefinition(symbol: symbol, candidates: 1, snippet: snippet(symbol), blame: CodeBlame(authorHash: String(repeating: "a", count: 64), at: "2026-09-20T18:30:00Z"))
@@ -85,7 +117,7 @@ enum CodeFixture {
     }
 
     private static func symbol(named name: String) -> CodeSymbol? {
-        let needle = name.lowercased()
+        let needle = name.components(separatedBy: "::").last!.lowercased()
         return symbols.first { $0.name.lowercased() == needle }
             ?? symbols.first { $0.name.lowercased() == needle.components(separatedBy: ".").last }
     }

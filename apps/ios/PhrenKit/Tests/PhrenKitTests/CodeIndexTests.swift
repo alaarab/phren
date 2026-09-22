@@ -132,3 +132,39 @@ extension CodeIndexTests {
         XCTAssertEqual(approval.explanation, "Check the change")
     }
 }
+
+extension CodeIndexTests {
+    func testDecodesIndexedTreeWithEmptyFilesAndDirectoryTotals() throws {
+        let json = #"{"project":"demo","directory":"","entries":[{"path":"src","directory":true,"files":2,"symbols":8,"languages":["swift","typescript"]},{"path":"empty.ts","directory":false,"files":1,"symbols":0,"languages":["typescript"]}]}"#
+        let tree = try CodeTreeResults.read(Data(json.utf8))
+        XCTAssertEqual(tree[0].files, 2)
+        XCTAssertEqual(tree[0].languages, ["swift", "typescript"])
+        XCTAssertTrue(tree[0].directory)
+        XCTAssertEqual(tree[1].symbols, 0)
+        XCTAssertThrowsError(try CodeTreeResults.read(Data(json.replacingOccurrences(of: "\"symbols\":8", with: "\"symbols\":-1").utf8)))
+    }
+
+    func testDecodesUsagePagesWithGlobalRanksAndBounds() throws {
+        let json = #"{"project":"demo","entries":[\#(symbol)],"total":51,"offset":50,"limit":50,"maxUses":10}"#
+        let page = try CodeUsagePage.read(Data(json.utf8))
+        XCTAssertEqual(page.entries.first?.qualifiedName, "python/helpers.py::greet")
+        XCTAssertTrue(page.hasPrevious)
+        XCTAssertFalse(page.hasNext)
+        XCTAssertEqual(page.maxUses, 10)
+        XCTAssertThrowsError(try CodeUsagePage.read(Data(json.replacingOccurrences(of: "\"offset\":50", with: "\"offset\":-1").utf8)))
+        XCTAssertThrowsError(try CodeUsagePage.read(Data(json.replacingOccurrences(of: "\"limit\":50", with: "\"limit\":101").utf8)))
+        XCTAssertThrowsError(try CodeUsagePage.read(Data(json.replacingOccurrences(of: "\"maxUses\":10", with: "\"maxUses\":1").utf8)))
+        let empty = try CodeUsagePage.read(Data(#"{"entries":[],"total":0,"offset":0,"limit":50,"maxUses":0}"#.utf8))
+        XCTAssertFalse(empty.hasNext)
+        XCTAssertFalse(empty.hasPrevious)
+    }
+
+    func testDecodesRecentObservationTimeAndQualifiedMembers() throws {
+        let recentSymbol = symbol.dropLast() + #", "indexedAt":1758460000000}"#
+        let rows = try CodeRecentResults.read(Data(#"{"entries":[\#(recentSymbol)]}"#.utf8))
+        XCTAssertEqual(rows[0].symbol.name, "greet")
+        XCTAssertEqual(rows[0].indexedAt, 1758460000000)
+        let member = try JSONDecoder().decode(CodeSymbol.self, from: Data(symbol.replacingOccurrences(of: "null", with: "\"Helpers\"").utf8))
+        XCTAssertEqual(member.qualifiedName, "python/helpers.py::Helpers.greet")
+    }
+}

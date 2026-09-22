@@ -1,5 +1,6 @@
 import { isValidProjectName } from "@phren/cli/code-host/utils-paths";
 import * as fs from "node:fs";
+import { createHash } from "node:crypto";
 import * as path from "node:path";
 import type { SqlJsDatabase, SqlValue } from "@phren/cli/code-host/index-query";
 import { bootstrapSqlJs } from "@phren/cli/code-host/shared/sqljs";
@@ -104,6 +105,7 @@ function createSchema(db: SqlJsDatabase): void {
   db.run(`CREATE INDEX IF NOT EXISTS reference_names_file ON reference_names(file)`);
   db.run(`CREATE INDEX IF NOT EXISTS symbols_name_nocase ON symbols(name COLLATE NOCASE)`);
   db.run(`CREATE INDEX IF NOT EXISTS symbols_file_name ON symbols(file, name)`);
+  db.run(`CREATE TABLE IF NOT EXISTS symbol_changes (symbol_id INTEGER PRIMARY KEY, hash TEXT NOT NULL, indexed_at INTEGER NOT NULL)`);
   db.run(`CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
   db.run(`CREATE INDEX IF NOT EXISTS symbols_file ON symbols(file)`);
   db.run(`CREATE INDEX IF NOT EXISTS symbols_name ON symbols(name)`);
@@ -185,6 +187,7 @@ export function deleteFileRow(db: SqlJsDatabase, file: string): void {
 export function purgeFile(db: SqlJsDatabase, file: string): void {
   const ids = rowsOf(db, `SELECT id FROM symbols WHERE file = ?`, [file]).map(row => numberAt(row, 0));
   for (const id of ids) {
+    db.run(`DELETE FROM symbol_changes WHERE symbol_id = ?`, [id]);
     db.run(`DELETE FROM symbols_fts WHERE rowid = ?`, [id]);
     db.run(`DELETE FROM "references" WHERE symbol_id = ?`, [id]);
   }
@@ -227,6 +230,7 @@ export function replaceFileSymbols(
   file: string,
   symbols: SymbolInput[],
   blame: BlameInput[],
+  source?: string,
 ): Map<string, number> {
   const oldSymbols: OldSymbol[] = rowsOf(db, `SELECT id, name, line FROM symbols WHERE file = ?`, [file]).map(row => ({
     id: numberAt(row, 0), key: symbolKey(stringAt(row, 1), numberAt(row, 2)),
@@ -238,6 +242,8 @@ export function replaceFileSymbols(
   db.run(`DELETE FROM blame WHERE file = ?`, [file]);
   db.run(`DELETE FROM "references" WHERE file = ?`, [file]);
 
+  const sourceLines = source?.split("\n");
+  const observedAt = Date.now();
   const newIdsByKey = new Map<string, number>();
   const insert = db.prepare(`INSERT INTO symbols (id, file, name, kind, line, end_line, signature, doc, parent, exported) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const fts = db.prepare(`INSERT INTO symbols_fts (rowid, name, signature, doc) VALUES (?, ?, ?, ?)`);
@@ -249,6 +255,11 @@ export function replaceFileSymbols(
       oldIds.delete(key);
       insert.run([id, file, symbol.name, symbol.kind, symbol.line, symbol.endLine, symbol.signature, symbol.doc, symbol.parent, symbol.exported ? 1 : 0]);
       fts.run([id, symbol.name, symbol.signature, symbol.doc]);
+      const hash = createHash("sha256").update(JSON.stringify(symbol))
+        .update(sourceLines?.slice(Math.max(0, symbol.line - 1), symbol.endLine).join("\n") ?? "").digest("hex");
+      db.run(`INSERT INTO symbol_changes (symbol_id, hash, indexed_at) VALUES (?, ?, ?)
+        ON CONFLICT(symbol_id) DO UPDATE SET hash = excluded.hash,
+        indexed_at = CASE WHEN symbol_changes.hash = excluded.hash THEN symbol_changes.indexed_at ELSE excluded.indexed_at END`, [id, hash, observedAt]);
       newIdsByKey.set(key, id);
     }
     for (const entry of blame) insertBlame.run([file, entry.line, entry.authorHash, entry.at]);
@@ -257,7 +268,10 @@ export function replaceFileSymbols(
     fts.free();
     insertBlame.free();
   }
-  for (const id of oldIds.values()) db.run(`DELETE FROM "references" WHERE symbol_id = ?`, [id]);
+  for (const id of oldIds.values()) {
+    db.run(`DELETE FROM "references" WHERE symbol_id = ?`, [id]);
+    db.run(`DELETE FROM symbol_changes WHERE symbol_id = ?`, [id]);
+  }
   return newIdsByKey;
 }
 
@@ -310,6 +324,8 @@ export function counts(db: SqlJsDatabase): CodeCounts {
 }
 
 export function lastIndexedAt(db: SqlJsDatabase): number | null {
+  const run = Number(getMeta(db, "last_run_at"));
+  if (Number.isFinite(run) && run > 0) return run;
   const row = rowsOf(db, `SELECT MAX(indexed_at) FROM files`)[0];
   if (!row || row[0] === null || row[0] === undefined) return null;
   return numberAt(row, 0);
