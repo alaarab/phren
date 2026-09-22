@@ -12,6 +12,7 @@ final class TouchTerminalView: TerminalView, UIGestureRecognizerDelegate, UIEdit
     var onShortcutGesture: (() -> Void)?
     var onOpenChat: (() -> Void)?
     var onDictate: (() -> Void)?
+    var onPasteImage: ((UIImage) -> Void)?
 
     var onBoundsChanged: (() -> Void)?
     private var lastTerminalSize = CGSize.zero
@@ -78,14 +79,21 @@ final class TouchTerminalView: TerminalView, UIGestureRecognizerDelegate, UIEdit
         wheel.require(toFail: hold)
         addGestureRecognizer(wheel)
         wheelPan = wheel
+        let doubleTap = UITapGestureRecognizer(target: self, action: #selector(pasteAtCursor(_:)))
+        doubleTap.numberOfTapsRequired = 2
+        doubleTap.require(toFail: hold)
+        doubleTap.require(toFail: wheel)
+        doubleTap.require(toFail: pinch)
+        addGestureRecognizer(doubleTap)
         let tap = UITapGestureRecognizer(target: self, action: #selector(tapTerminal(_:)))
+        tap.require(toFail: doubleTap)
         tap.require(toFail: hold)
         tap.require(toFail: wheel)
         tap.require(toFail: pinch)
         addGestureRecognizer(tap)
         addInteraction(editMenu)
         updateScrollGestures()
-        accessibilityHint = "Tap controls and links. Swipe to scroll. Pinch to resize text. Hold to select. Use the keyboard button to type."
+        accessibilityHint = "Tap controls and links. Double tap to paste text or an image. Swipe to scroll. Pinch to resize text. Hold to select. Use the keyboard button to type."
     }
 
     func toggleKeyboard() {
@@ -154,9 +162,19 @@ final class TouchTerminalView: TerminalView, UIGestureRecognizerDelegate, UIEdit
         wheelPan?.isEnabled = getTerminal().mouseMode != .off || hasActiveSelection
     }
 
+    @objc private func pasteAtCursor(_ gesture: UITapGestureRecognizer) {
+        guard gesture.state == .ended, !hasActiveSelection else { return }
+        paste(nil)
+    }
+
     override func paste(_ sender: Any?) {
-        super.paste(sender)
+        if let image = UIPasteboard.general.image, let onPasteImage {
+            onPasteImage(image)
+        } else {
+            super.paste(sender)
+        }
         clearSelection()
+        editMenu.dismissMenu()
     }
 
     override func copy(_ sender: Any?) {

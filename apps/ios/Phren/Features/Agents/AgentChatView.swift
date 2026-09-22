@@ -127,7 +127,6 @@ struct AgentChatView: View {
     @State private var showingContext = false
     @State private var commandDestination: CommandDestination?
     @State private var showingAttachments = false
-    @State private var pasteAvailable = false
     /// Dictation writes straight into the composer: the words land in the
     /// message as they are recognised, no separate box to review.
     @State private var dictation = DictationSession(recognizer: SpeechTranscriber(), transform: SpeechSettings.apply)
@@ -251,19 +250,6 @@ struct AgentChatView: View {
         if ChatSettings.autoSendsDictation,
            !model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             sendDraft(handoffCommands: false)
-        }
-    }
-
-    /// A screenshot on the clipboard attaches with one tap: SwiftUI text fields
-    /// cannot paste images, so the composer offers the paste when one is there.
-    private func pasteClipboardImage() {
-        guard let image = UIPasteboard.general.image, let data = image.pngData() else {
-            model.deliveryError = "No image was found on the clipboard."
-            return
-        }
-        Task { @MainActor in
-            do { model.add(try await ChatAttachmentPreparation.preparedImage(data, name: "Clipboard")) }
-            catch { model.deliveryError = error.localizedDescription }
         }
     }
 
@@ -689,8 +675,6 @@ struct AgentChatView: View {
                 })
             }
         }
-        .onAppear { pasteAvailable = UIPasteboard.general.hasImages }
-        .onChange(of: composing) { _, focused in if focused { pasteAvailable = UIPasteboard.general.hasImages } }
         .onChange(of: scenePhase) { _, phase in if phase != .active { stopDictation() } }
         .onDisappear {
             dictationTask?.cancel(); cleanupTask?.cancel()
@@ -1316,14 +1300,6 @@ struct AgentChatView: View {
                         Image(systemName: "plus").font(.system(size: 17, weight: .light)).frame(width: 40, height: 40)
                             .contentShape(Rectangle().inset(by: -2))
                     }.accessibilityLabel("Add attachment").disabled(model.target == nil || model.sending)
-                    if pasteAvailable {
-                        // The clipboard holds a picture: one tap attaches it.
-                        Button { pasteClipboardImage() } label: {
-                            Image(systemName: "doc.on.clipboard").font(.system(size: 17)).frame(width: 40, height: 40)
-                                .contentShape(Rectangle().inset(by: -2))
-                        }.accessibilityLabel("Paste image").accessibilityIdentifier("chat-paste-image")
-                            .disabled(model.target == nil || model.sending)
-                    }
                     NavigationLink {
                         HerdrTerminalView(host: session.host, session: session, target: model.target)
                     } label: {

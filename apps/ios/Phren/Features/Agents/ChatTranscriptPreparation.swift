@@ -10,6 +10,8 @@ struct ChatTranscriptPreparation {
     private(set) var currentToolDetail: String?
     private(set) var revision = 0
     private var keys: [Key] = []
+    private var baseEntries: [ChatTimelineEntry] = []
+    private var activityContext = ChatActivityContext()
     private var firstSeen: [String: Date] = [:]
     private var finishedSeen: [String: Date] = [:]
     /// Read-run rows are expensive to build (a second grouping pass plus a
@@ -22,12 +24,16 @@ struct ChatTranscriptPreparation {
         let images: [Int]; let results: [AgentChatMessage.ImageRef]; let call: String?
     }
 
-    mutating func update(_ messages: [AgentChatMessage], at now: Date = .now) {
+    mutating func update(_ messages: [AgentChatMessage], activity: ChatActivityContext = .init(), at now: Date = .now) {
         let incoming = messages.map { Key(content: $0.renderKey, timestamp: $0.timestamp, failed: $0.isToolError, queued: $0.isQueued, queueKey: $0.queueKey, images: $0.imageBlocks, results: $0.resultImages, call: $0.toolCallID) }
+        guard incoming != keys || activity != activityContext else { return }
+        revision += 1
+        activityContext = activity
+        defer { entries = Self.attachingActivity(to: baseEntries, messages: messages, context: activity) }
         guard incoming != keys else { return }
         let started = ChatPerformance.begin()
         defer { ChatPerformance.end("transcript preparation", started) }
-        keys = incoming; revision += 1
+        keys = incoming
         entries = ChatTimelineEntry.group(messages)
         // Derived row work that must not run in a view body: the folded run's
         // inner cards, whether a folded patch needs the bounded accessibility
@@ -79,6 +85,7 @@ struct ChatTranscriptPreparation {
                 break
             }
         }
+        baseEntries = entries
     }
 
     /// The content revision of a folded run: its first message id and the last

@@ -108,6 +108,54 @@ final class AgentChatProgressTests: XCTestCase {
         XCTAssertEqual(status?.activity, "working"); XCTAssertEqual(status?.modelName, "Example model")
     }
 
+    func testElapsedUsesSourceStartAndFreezesOnFinishOrStop() throws {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        var progress = AgentChatProgress()
+        XCTAssertNil(progress.elapsed(at: start))
+        progress.receive(try frame("append", [row(0, "task_started", ["started_at": start.timeIntervalSince1970])], total: 1))
+        XCTAssertEqual(progress.elapsed(at: start.addingTimeInterval(27)), 27)
+        XCTAssertEqual(progress.elapsed(at: start.addingTimeInterval(-1)), 0)
+        progress.receive(try frame("append", [row(1, "task_complete", ["completed_at": start.addingTimeInterval(72).timeIntervalSince1970])], total: 2))
+        XCTAssertEqual(progress.elapsed(at: start.addingTimeInterval(900)), 72)
+        XCTAssertEqual(progress.turns.first?.elapsed(at: start), 72)
+
+        let stopped: [String: Any] = ["line": 3, "raw": ["type": "event_msg", "timestamp": start.addingTimeInterval(112).ISO8601Format(),
+            "payload": ["type": "turn_aborted"]]]
+        let rows = [row(2, "task_started", ["started_at": start.addingTimeInterval(100).timeIntervalSince1970]), stopped]
+        progress.receive(try frame("append", rows, total: 4))
+        XCTAssertEqual(progress.phase, .stopped)
+        XCTAssertEqual(progress.elapsed(at: start.addingTimeInterval(900)), 12)
+        var reopened = AgentChatProgress()
+        reopened.receive(try frame("backlog", rows, total: 4))
+        XCTAssertEqual(reopened.elapsed(at: start.addingTimeInterval(900)), 12)
+        XCTAssertEqual(reopened.finishedAt, start.addingTimeInterval(112))
+        XCTAssertEqual(progress.turns.count, 2)
+    }
+
+    func testMissingStartOrEndNeverInventsAnElapsedDuration() throws {
+        for ending in ["task_complete", "turn_aborted"] {
+            var progress = AgentChatProgress()
+            progress.receive(try frame("backlog", [row(0, "task_started"), row(1, ending, ["completed_at": 1000])], total: 2))
+            XCTAssertNil(progress.elapsed())
+            XCTAssertNil(progress.turns.first?.elapsed())
+        }
+        var progress = AgentChatProgress()
+        progress.receive(try frame("backlog", [row(0, "task_started", ["started_at": 1000]), row(1, "turn_aborted")], total: 2))
+        XCTAssertNil(progress.elapsed(), "A stop with no source timestamp must not keep counting")
+    }
+
+    func testClaudeFinalUsageAndLifecycleAreBothRetained() throws {
+        let rows: [[String: Any]] = [
+            ["line": 0, "raw": ["type": "user", "timestamp": "2026-09-22T10:00:00Z", "message": ["role": "user", "content": "Hello"]]],
+            ["line": 1, "raw": ["type": "assistant", "timestamp": "2026-09-22T10:00:27Z", "message": ["role": "assistant", "content": "Hello back", "stop_reason": "end_turn", "usage": ["input_tokens": 10, "output_tokens": 5]]]]
+        ]
+        var progress = AgentChatProgress()
+        progress.receive(try frame("backlog", rows, total: 2, source: "claude"))
+        XCTAssertEqual(progress.phase, .finished)
+        XCTAssertEqual(progress.elapsed(), 27)
+        XCTAssertEqual(progress.usage?.output, 5)
+    }
+
     private func row(_ line: Int, _ type: String, _ fields: [String: Any] = [:]) -> [String: Any] {
         var payload = fields; payload["type"] = type
         return ["line": line, "raw": ["type": "event_msg", "payload": payload]]

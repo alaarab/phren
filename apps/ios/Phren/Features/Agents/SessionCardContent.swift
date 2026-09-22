@@ -212,7 +212,7 @@ private struct SessionActivityIndicator: View {
 
 /// Animate only the arc's transform, without a per-frame timeline or a 20 Hz cap.
 /// Ordinary snapshot/context updates preserve the ongoing rotation.
-private struct SessionActivityArc: View {
+struct SessionActivityArc: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @State private var visible = false

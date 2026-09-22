@@ -39,10 +39,15 @@ final class PhrenAgentTranscriptTests: XCTestCase {
         XCTAssertEqual(value.messages[3].title, "Tool result"); XCTAssertEqual(value.messages[3].toolCallID, "call_1")
         let grouped = ChatTimelineGrouping.pairs(value.messages)
         XCTAssertEqual(grouped, [["1:0"], ["2:1"], ["2:2", "3:0"], ["4:0"]])
-        XCTAssertEqual(value.progressEvents.map(\.line), [1, 2, 4])
+        XCTAssertEqual(value.progressEvents.map(\.line), [1, 2, 4, 4])
         if case .started = value.progressEvents[0].value {} else { XCTFail("a user turn starts work") }
         if case .usage(let usage) = value.progressEvents[1].value { XCTAssertEqual(usage.input, 120); XCTAssertEqual(usage.output, 40) } else { XCTFail("usage rides the assistant message") }
         if case .usage(let usage) = value.progressEvents[2].value { XCTAssertEqual(usage.input, 200) } else { XCTFail("usage rides the assistant message") }
+        if case .finished = value.progressEvents[3].value {} else { XCTFail("the final response also finishes the turn") }
+        var progress = AgentChatProgress(); progress.receive(value)
+        XCTAssertEqual(progress.phase, .finished)
+        XCTAssertEqual(progress.elapsed(), 180)
+        XCTAssertEqual(progress.usage?.input, 200)
     }
 
     func testEndOfTurnWithoutUsageFinishesAndBlanksAreDropped() throws {

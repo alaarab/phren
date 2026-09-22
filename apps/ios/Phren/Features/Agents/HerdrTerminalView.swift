@@ -458,10 +458,14 @@ struct HerdrTerminalView: View {
         .onAppear {
             // Settings → Advanced: no auto-lock while a terminal is up.
             if TerminalSettings.keepsScreenOn { UIApplication.shared.isIdleTimerDisabled = true }
+            #if DEBUG && targetEnvironment(simulator)
+            if AgentChatFixture.enabled { AgentChatFixture.prepareClipboard() }
+            #endif
             visible = true
             model.terminal.onShortcutGesture = { shortcuts = true }
             model.terminal.onOpenChat = openChat
             model.terminal.onDictate = { showingDictation = true }
+            model.terminal.onPasteImage = pasteImageIntoTerminal
         }.onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
             visible = false
@@ -469,6 +473,7 @@ struct HerdrTerminalView: View {
             model.terminal.onShortcutGesture = nil
             model.terminal.onOpenChat = nil
             model.terminal.onDictate = nil
+            model.terminal.onPasteImage = nil
         }
         .task(id: Run(active: active, reconnect: reconnect)) {
             if active { await model.run(host: host, session: session, target: target, paneID: paneID, route: route, commandMenu: commandMenu) }
@@ -529,6 +534,21 @@ struct HerdrTerminalView: View {
 }
 
 extension HerdrTerminalView {
+    private func pasteImageIntoTerminal(_ image: UIImage) {
+        guard model.connected && active else { return }
+        guard let data = image.pngData() else {
+            uploadStatus = "The clipboard image could not be read."
+            return
+        }
+        Task { @MainActor in
+            do {
+                let attachment = try await ChatAttachmentPreparation.preparedImage(data, name: "Clipboard")
+                guard model.connected && active else { return }
+                uploadIntoTerminal([attachment])
+            } catch { uploadStatus = error.localizedDescription }
+        }
+    }
+
     /// An image picked from the terminal stays in the terminal: it is stored
     /// on the computer through the Hook and its path is typed at the cursor,
     /// which is what a pasted screenshot means to an agent reading a prompt.

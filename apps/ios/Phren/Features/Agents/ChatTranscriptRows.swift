@@ -107,7 +107,7 @@ private struct ChatTranscriptRow: View, Equatable {
             && lhs.distantHeight == rhs.distantHeight
     }
     var body: some View {
-        if let distantHeight, !entry.placeholderIdentifier.isEmpty {
+        if let distantHeight, entry.turnActivity?.isLive != true, !entry.placeholderIdentifier.isEmpty {
             ChatRowPlaceholder(identifier: entry.placeholderIdentifier, label: entry.placeholderLabel)
                 .frame(height: distantHeight)
         } else {
@@ -118,7 +118,9 @@ private struct ChatTranscriptRow: View, Equatable {
         #if DEBUG
         let _ = ChatPerformance.enabled ? Self._printChanges() : ()
         #endif
-        if let compaction = entry.messages.first, compaction.isCompaction {
+        if let activity = entry.turnActivity {
+            ChatTurnActivityRow(activity: activity)
+        } else if let compaction = entry.messages.first, compaction.isCompaction {
             ChatCompactionRow(message: compaction).equatable()
         } else if let phren = entry.phren {
             PhrenToolCard(presentation: phren, messages: entry.messages).equatable()

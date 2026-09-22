@@ -25,6 +25,38 @@ final class AgentQueuedQuestionTests: XCTestCase {
         let keys = [AgentAnswerKey.altUp, choice.answerKey(selections: [0])].compactMap { $0 }
         XCTAssertEqual(keys.map(\.rawValue), ["AltUp", "1"])
     }
+    func testMCPApprovalKeepsArgumentsOutOfTheQuestionAndDecodesOptionDescriptions() throws {
+        let data = Data(#"""
+        {"actionId":"mcp-ask","toolName":"mcp__phren__phren_admin",
+         "title":"Allow the phren MCP server to run tool phren_admin?",
+         "message":"{\"action\":\"read_skill\",\"name\":\"m4l-improve\"}",
+         "details":"{\"action\":\"read_skill\",\"name\":\"m4l-improve\"}","terminalOnly":false,
+         "choice":{"title":"Allow the phren MCP server to run tool phren_admin?","options":[
+           {"label":"Allow","description":"Run the tool and continue.","key":"1"},
+           {"label":"Allow for this session","description":"Keep this permission for this session.","key":"2"},
+           {"label":"Deny","key":"3"}]}}
+        """#.utf8)
+        let approval = try JSONDecoder().decode(AgentApproval.self, from: data)
+        XCTAssertNil(approval.explanation)
+        XCTAssertNil(approval.command)
+        XCTAssertEqual(approval.details, approval.message)
+        XCTAssertEqual(approval.terminalOnly, false)
+        let choice = try XCTUnwrap(approval.choice)
+        let prompt = try XCTUnwrap(choice.prompt(id: approval.id))
+        XCTAssertEqual(prompt.questions[0].question, approval.title)
+        XCTAssertEqual(prompt.questions[0].options[0].label, "Allow")
+        XCTAssertEqual(prompt.questions[0].options[0].description, "Run the tool and continue.")
+        XCTAssertNil(prompt.questions[0].options[2].description)
+        XCTAssertEqual(choice.answerKey(selections: [1]), .two)
+    }
+
+    func testUnresolvedHeldApprovalDecodesTerminalFallback() throws {
+        let approval = try JSONDecoder().decode(AgentApproval.self, from: Data(#"{"actionId":"unresolved","message":"{}","terminalOnly":true}"#.utf8))
+        XCTAssertEqual(approval.terminalOnly, true)
+        XCTAssertNil(approval.explanation)
+        XCTAssertNil(approval.choice)
+    }
+
     func testUnsupportedTerminalChoiceFallsBackToTerminal() {
         let choice = AgentPromptChoice(title: "Choose", options: [
             .init(label: "Continue", key: "1"), .init(label: "Unsupported", key: "F20"),

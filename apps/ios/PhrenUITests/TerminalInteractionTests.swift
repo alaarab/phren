@@ -2,6 +2,39 @@ import XCTest
 
 final class TerminalInteractionTests: XCTestCase {
     @MainActor
+    func testDoubleTapPastesTextWithoutMouseClicksOrReturn() throws {
+        let app = launch("--terminal-mouse-fixture", extra: ["--clipboard-text-fixture"])
+        let terminal = app.descendants(matching: .any).matching(identifier: "herdr-terminal").firstMatch
+        XCTAssertTrue(terminal.waitForExistence(timeout: 5))
+        terminal.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).doubleTap()
+        XCTAssertEqual(try state(app).input, "clipboard fixture text")
+        XCTAssertFalse(app.keyboards.firstMatch.exists)
+    }
+
+    @MainActor
+    func testTerminalImagePasteUploadsAndInsertsPathFromButtonAndDoubleTap() throws {
+        let app = launch("--terminal-mouse-fixture", extra: ["--clipboard-image-fixture"])
+        let terminal = app.descendants(matching: .any).matching(identifier: "herdr-terminal").firstMatch
+        XCTAssertTrue(terminal.waitForExistence(timeout: 5))
+        app.buttons["Paste into terminal"].tap()
+        let inserted = NSPredicate { _, _ in
+            (try? self.state(app).input.contains("/bridge/uploads/files/")) == true
+        }
+        expectation(for: inserted, evaluatedWith: app)
+        waitForExpectations(timeout: 8)
+        let first = try state(app).input
+        XCTAssertTrue(first.hasSuffix(" "))
+        XCTAssertFalse(first.contains("\n"))
+        terminal.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).doubleTap()
+        expectation(for: NSPredicate { _, _ in (try? self.state(app).input.count) ?? 0 > first.count }, evaluatedWith: app)
+        waitForExpectations(timeout: 8)
+        let second = try state(app).input
+        XCTAssertTrue(second.hasPrefix(first))
+        XCTAssertFalse(second.contains("\u{1B}[<0;"), "Double tap does not also click the remote pane")
+        XCTAssertFalse(second.contains("\n"))
+    }
+
+    @MainActor
     func testTerminalGridFillsViewportAfterRotationAndKeyboardChanges() throws {
         let app = launch("--terminal-controls-fixture")
         defer { XCUIDevice.shared.orientation = .portrait }
@@ -391,8 +424,8 @@ final class TerminalInteractionTests: XCTestCase {
     }
 
     @MainActor
-    private func launch(_ fixture: String) -> XCUIApplication {
-        let app = launchToHost(fixture)
+    private func launch(_ fixture: String, extra: [String] = []) -> XCUIApplication {
+        let app = launchToHost(fixture, extra: extra)
         XCTAssertTrue(app.buttons["Herdr workspaces & terminal"].waitForExistence(timeout: 5))
         app.buttons["Herdr workspaces & terminal"].tap()
         app.buttons["Open Herdr terminal"].tap()
@@ -401,9 +434,9 @@ final class TerminalInteractionTests: XCTestCase {
     }
     /// The fixture computer's details, where its sessions and terminal are.
     @MainActor
-    private func launchToHost(_ fixture: String) -> XCUIApplication {
+    private func launchToHost(_ fixture: String, extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--session-details-fixture", "--native-chat-fixture", fixture]
+        app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--session-details-fixture", "--native-chat-fixture", fixture] + extra
         let host = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Test Mac,")).firstMatch
         // The first launch after a simulator reset can come up before the
         // fixture bootstrap finishes; a relaunch always lands.

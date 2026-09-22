@@ -412,7 +412,7 @@ private struct TerminalGestureSettings: View {
                 .accessibilityIdentifier("terminal-close-after-shortcut")
             PhrenSwitch("Two-finger gestures", isOn: $enabled).font(.subheadline).tint(PhrenTheme.cyan)
                 .accessibilityIdentifier("terminal-two-finger-gestures")
-            Text("Swipe up with two fingers for shortcuts. Swipe down with two fingers to hide the keyboard.")
+            Text("Double tap the terminal to paste text or an image. Swipe up with two fingers for shortcuts. Swipe down with two fingers to hide the keyboard.")
             Text("Swipe with one finger to scroll. Pinch to resize. Hold to select text. Tap controls and links to open them.")
                 .foregroundStyle(PhrenTheme.textMuted)
         }.font(.caption).padding(8).fixedSize(horizontal: false, vertical: true)

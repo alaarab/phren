@@ -74,7 +74,7 @@ struct TerminalGesturesSettingsView: View {
                     .accessibilityIdentifier("gesture-hold")
                 PhrenSwitch(isOn: $twoFinger) { Label { Text("Two-finger swipe"); Text("Up opens shortcuts, down hides the keyboard").font(.caption).foregroundStyle(PhrenTheme.textMuted) } icon: { Image(systemName: "hand.point.up.left.and.text") } }
                     .accessibilityIdentifier("gesture-two-finger")
-            } header: { Text("Terminal") } footer: { Text("Taps always go to the terminal: they click links, menus and buttons in the agent's own screen. Swipe with one finger to scroll.") }
+            } header: { Text("Terminal") } footer: { Text("Tap to click links, menus and buttons. Double tap to paste text or upload a clipboard image and insert its path at the cursor. Swipe with one finger to scroll.") }
         }
         .navigationTitle("Gestures").navigationBarTitleDisplayMode(.inline)
         .phrenScreen()

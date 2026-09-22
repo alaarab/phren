@@ -35,6 +35,7 @@ public struct AgentChatProgressEvent: Equatable, Sendable {
     }
     public let line: Int
     public let value: Value
+    public var timestamp: Date? = nil
 
     static func read(_ raw: [String: Any], source: String, line: Int) -> Self? {
         if source == "codex", raw["type"] as? String == "event_msg", let payload = raw["payload"] as? [String: Any] {
@@ -87,7 +88,30 @@ public struct AgentChatProgressEvent: Equatable, Sendable {
 /// Absolute transcript lines prevent older pages/reconnects from replaying
 /// turn starts or replacing current usage with an older response's counters.
 public struct AgentChatProgress: Sendable {
-    public enum Phase: Sendable { case working, finished, stopped }
+    public enum Phase: Equatable, Sendable { case working, finished, stopped }
+    /// One source-stamped turn. Lines bind timing to transcript rows across reconnects.
+    public struct Turn: Equatable, Sendable {
+        public let startLine: Int
+        public var endLine: Int?
+        public var phase: Phase
+        public let startedAt: Date?
+        public var finishedAt: Date?
+
+        public func elapsed(at now: Date = .now) -> TimeInterval? {
+            AgentChatProgress.elapsed(startedAt: startedAt, finishedAt: finishedAt, phase: phase, at: now)
+        }
+    }
+    public private(set) var turns: [Turn] = []
+
+    public func elapsed(at now: Date = .now) -> TimeInterval? {
+        Self.elapsed(startedAt: startedAt, finishedAt: finishedAt, phase: phase, at: now)
+    }
+
+    public static func elapsed(startedAt: Date?, finishedAt: Date?, phase: Phase?, at now: Date) -> TimeInterval? {
+        guard let startedAt, let phase else { return nil }
+        guard let end = phase == .working ? now : finishedAt else { return nil }
+        return max(0, end.timeIntervalSince(startedAt))
+    }
     public private(set) var phase: Phase?
     public private(set) var startedAt: Date?
     public private(set) var finishedAt: Date?
@@ -97,17 +121,40 @@ public struct AgentChatProgress: Sendable {
     public init() {}
 
     public mutating func receive(_ frame: AgentChatTranscript) {
-        guard frame.kind != .older else { return }
+        if frame.kind == .older {
+            // An older page can restore finished rows without replaying current activity.
+            var history = Self(); history.receiveCurrent(frame)
+            let known = Set(turns.map(\.startLine))
+            turns = (turns + history.turns.filter { $0.phase != .working && !known.contains($0.startLine) })
+                .sorted { $0.startLine < $1.startLine }
+            return
+        }
+        receiveCurrent(frame)
+    }
+
+    private mutating func receiveCurrent(_ frame: AgentChatTranscript) {
         // Progress follows the same explicit replacement contract as chat rows.
         if frame.replacesConversation { self = Self() }
-        for event in frame.progressEvents.sorted(by: { $0.line < $1.line }) where event.line > latestLine {
+        let previousLine = latestLine
+        for event in frame.progressEvents.sorted(by: { $0.line < $1.line }) where event.line > previousLine {
             latestLine = event.line
             switch event.value {
-            case .started(let date): phase = .working; startedAt = date; finishedAt = nil; usage = nil; activityLine = event.line
-            case .finished(let date): phase = .finished; finishedAt = date; activityLine = event.line
-            case .stopped: phase = .stopped; activityLine = event.line
+            case .started(let date):
+                phase = .working; startedAt = date; finishedAt = nil; usage = nil; activityLine = event.line
+                turns.append(.init(startLine: event.line, phase: .working, startedAt: date))
+            case .finished(let date):
+                phase = .finished; finishedAt = date; activityLine = event.line
+                finishTurn(at: date, line: event.line, phase: .finished)
+            case .stopped:
+                phase = .stopped; finishedAt = event.timestamp; activityLine = event.line
+                finishTurn(at: event.timestamp, line: event.line, phase: .stopped)
             case .usage(let value): usage = value
             }
         }
+    }
+
+    private mutating func finishTurn(at date: Date?, line: Int, phase: Phase) {
+        guard let index = turns.indices.last, turns[index].phase == .working else { return }
+        turns[index].phase = phase; turns[index].finishedAt = date; turns[index].endLine = line
     }
 }

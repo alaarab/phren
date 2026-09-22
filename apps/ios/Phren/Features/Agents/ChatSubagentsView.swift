@@ -9,14 +9,20 @@ struct ChatSubagentsView: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage("sessions.live.preferences.v1") private var hostData = Data()
     @State private var selected: AgentWorkNavigation?
+    @AppStorage("agent-work.history.v1") private var historyData = Data()
+    @State private var now = Date.now
+    private var scope: String { target.id }
+    private var history: AgentWorkHistory {
+        (try? JSONDecoder().decode(AgentWorkHistory.self, from: historyData)) ?? AgentWorkHistory()
+    }
     private var overview: SessionOverviewMonitor { .shared }
 
-    /// Finished agents are out of scope here: the sheet is about work in
-    /// progress, and a finished worker's result lives in the transcript. A
-    /// refused worker is the exception: the refusal is what the person needs.
-    private var rows: [AgentTreeRow] { AgentTreeRow.rows(agents, includeCompleted: false) }
+    private var rows: [AgentTreeRow] {
+        AgentTreeRow.project(history.rows(agents, scope: scope, now: now))
+    }
     private var running: Int { rows.filter { $0.agent.displayState == .running }.count }
     private var refused: Int { rows.filter(\.agent.permissionRefused).count }
+    private var failed: Int { rows.filter { $0.agent.displayState == .failed && !$0.agent.permissionRefused }.count }
     private var providers: [String] { Array(Set(rows.map { $0.agent.providerName })).sorted() }
 
     var body: some View {
@@ -43,11 +49,25 @@ struct ChatSubagentsView: View {
                     } else {
                         ForEach(rows) { row in
                             let navigation = navigation(for: row.agent)
-                            Button { selected = navigation } label: {
-                                AgentTreeRowView(row: row, resolution: navigation?.resolution)
+                            HStack(spacing: 4) {
+                                Button { selected = navigation } label: {
+                                    AgentTreeRowView(row: row, resolution: navigation?.resolution,
+                                        age: row.agent.displayState == .failed ? history.age(row.agent, scope: scope, now: now) : nil)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityIdentifier("child-agent:\(row.agent.computer == nil ? row.agent.id : row.agent.navigationID)")
+                                if row.agent.displayState == .failed {
+                                    Button {
+                                        var next = history
+                                        next.dismissed.insert(scope + "/" + row.agent.navigationID)
+                                        historyData = (try? JSONEncoder().encode(next)) ?? historyData
+                                    } label: {
+                                        Image(systemName: "xmark").frame(width: 44, height: 44)
+                                    }.buttonStyle(.plain).foregroundStyle(PhrenTheme.textMuted)
+                                        .accessibilityLabel("Dismiss failed worker")
+                                        .accessibilityIdentifier("dismiss-child-agent:\(row.agent.id)")
+                                }
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityIdentifier("child-agent:\(row.agent.computer == nil ? row.agent.id : row.agent.navigationID)")
                         }
                     }
                     }.padding(.horizontal, 16).padding(.vertical, 8)
@@ -56,6 +76,17 @@ struct ChatSubagentsView: View {
             .background(PhrenTheme.chatCanvas)
             .navigationDestination(item: $selected) { AgentWorkDestinationView(navigation: $0) }
             .toolbar(.hidden, for: .navigationBar)
+        }
+        .onChange(of: agents, initial: true) { _, fresh in
+            var next = history
+            next.observe(fresh, scope: scope, now: .now)
+            historyData = (try? JSONEncoder().encode(next)) ?? historyData
+        }
+        .task {
+            while !Task.isCancelled {
+                now = .now
+                try? await Task.sleep(for: .seconds(30))
+            }
         }
     }
 
@@ -80,7 +111,7 @@ struct ChatSubagentsView: View {
             .accessibilityIdentifier("chat-subagents-back")
             VStack(alignment: .leading, spacing: 1) {
                 Text("Agent work").font(.subheadline.weight(.medium)).foregroundStyle(PhrenTheme.text)
-                Text(refused > 0 ? "\(running) running · \(refused) refused" : "\(running) running")
+                Text("\(running) running" + (refused > 0 ? " · \(refused) refused" : "") + (failed > 0 ? " · \(failed) failed" : ""))
                     .font(.caption).foregroundStyle(refused > 0 ? PhrenTheme.warning : PhrenTheme.textMuted)
             }
             Spacer(minLength: 8)
@@ -110,7 +141,11 @@ struct AgentTreeRow: Identifiable, Equatable {
     static func rows(_ agents: [AgentChild], includeCompleted: Bool) -> [Self] {
         let childRows = includeCompleted ? AgentChild.rows(agents, includeCompleted: true)
                                          : AgentChild.runningRows(agents)
-        return childRows.indices.map { index in
+        return project(childRows)
+    }
+
+    static func project(_ childRows: [AgentChildTreeRow]) -> [Self] {
+        childRows.indices.map { index in
             let row = childRows[index]
             let following = childRows.dropFirst(index + 1).first { $0.depth <= row.depth }
             return Self(agent: row.agent, depth: row.depth,
@@ -147,6 +182,7 @@ private extension AgentChild {
 private struct AgentTreeRowView: View {
     let row: AgentTreeRow
     let resolution: AgentDestinationResolution?
+    var age: String? = nil
     private var stateName: String {
         switch row.agent.displayState {
         case .running: return "Running"
@@ -195,6 +231,9 @@ private struct AgentTreeRowView: View {
                             PhrenChip(text: "FAILED", icon: "exclamationmark", color: PhrenTheme.warning)
                         }
                     }
+                    if let age {
+                        Text(age).font(.caption).foregroundStyle(PhrenTheme.textMuted)
+                    }
                     if let detail = row.agent.refusedDetail {
                         Text(detail).font(.caption).foregroundStyle(PhrenTheme.warning).lineLimit(2)
                     }
@@ -214,6 +253,7 @@ private struct AgentTreeRowView: View {
         var parts: [String] = [row.agent.displayName, row.agent.providerName]
         if let model = row.agent.model { parts.append(model) }
         parts.append(stateName)
+        if let age { parts.append(age) }
         if let detail = row.agent.refusedDetail { parts.append(detail) }
         if let computer = row.agent.computer { parts.append(computer.name) }
         if unavailable { parts.append("unavailable") }

@@ -10,9 +10,13 @@ number counts up on its own.
 
 ### Changed
 
+- Agent work puts running jobs first, shows failures for one hour with their age, and remembers dismissed failures. Header counts match the visible rows.
+
 - The working tree keeps expanded folders and loaded children during refreshes and tab switches. Directory rows show file totals; indexed projects also show symbol totals and kinds, with file symbol chips opening the dossier.
 
 ### Added
+
+- Chat shows live thinking and tool activity with elapsed time, then keeps a quiet duration above the reply, including stopped turns.
 
 - Open the session project's Code index from Changes or the chat header actions. Notes from these dossiers return to the originating session without another recipient prompt.
 - Hold a project or computer for 0.4 seconds to choose where to open an agent. The chooser shows computer colors and keeps the existing harness and model launch flow, with an Open agent accessibility action.
@@ -20,6 +24,10 @@ number counts up on its own.
 - Select a symbol line, write a note and send it to a project session or a new worker. Code rows show usage bars, and the dossier lists cited findings.
 
 ### Fixed
+
+- Codex prompt options show their labels and wrapping descriptions separately. Long question text expands without fading or covering the options.
+- MCP approvals ask the tool's sentence, keep arguments in folded details, and use the terminal's actual choices and keys. Unresolved requests offer Open terminal.
+- Terminal paste uploads clipboard images and inserts their paths at the cursor. Double tap also pastes text or images. Chat keeps system image paste and removes the extra clipboard button.
 
 - A horizontal session swipe cancels the card tap instead of opening chat; vertical scrolling stays available.
 - Task fold controls retain their button trait alongside the section heading trait.

@@ -23,7 +23,8 @@ struct ChatTimelineEntry: Identifiable, Equatable {
     /// to draw as a fixed-height placeholder. Empty stays fully drawn.
     var placeholderIdentifier = ""
     var placeholderLabel = ""
-    var id: String { messages[0].id }
+    var turnActivity: ChatTurnActivity? = nil
+    var id: String { turnActivity.map { "activity:\($0.ownerID)" } ?? messages[0].id }
     var isActivity: Bool { kind != .message }
     var isReadRun: Bool { kind == .readRun }
 

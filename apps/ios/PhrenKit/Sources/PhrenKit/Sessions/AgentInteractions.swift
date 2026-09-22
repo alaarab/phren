@@ -12,6 +12,8 @@ public struct AgentApproval: Decodable, Equatable, Sendable, Identifiable {
     public let toolName: String?
     public let message: String?
     public let expiresAt: String?
+    public let details: String?
+    public let terminalOnly: Bool?
     /// A Codex approval that is really a terminal dialog: the Hook read the
     /// command and its option list, so the phone can ask it as a question.
     public let choice: AgentPromptChoice?
@@ -31,9 +33,10 @@ public struct AgentApproval: Decodable, Equatable, Sendable, Identifiable {
     public var explanation: String? {
         guard let message, !message.isEmpty else { return nil }
         if let input = try? JSONSerialization.jsonObject(with: Data(message.utf8)) as? [String: Any] {
-            for key in ["justification", "description", "command", "cmd", "plan"] {
+            for key in ["question", "prompt", "justification", "description", "command", "cmd", "plan"] {
                 if let text = input[key] as? String, !text.isEmpty { return text }
             }
+            return nil
         }
         return message
     }
@@ -67,10 +70,12 @@ public struct AgentPromptChoice: Decodable, Equatable, Sendable {
     public struct Option: Decodable, Equatable, Sendable {
         public let label: String
         public let key: String
+        public let description: String?
 
-        public init(label: String, key: String) {
+        public init(label: String, key: String, description: String? = nil) {
             self.label = label
             self.key = key
+            self.description = description
         }
 
         /// The answer key this option names: `y`, `p`, `esc`, and so on.
@@ -104,7 +109,7 @@ public struct AgentPromptChoice: Decodable, Equatable, Sendable {
         guard (2...12).contains(options.count), !text.isEmpty, text.utf8.count <= 32_768,
               options.allSatisfy({ !$0.label.isEmpty && $0.label.utf8.count <= 2_000 && $0.answerKey != nil }) else { return nil }
         return AgentQuestionPrompt(toolUseId: id, questions: [
-            .init(question: text, options: options.map { .init(label: $0.label) }),
+            .init(question: text, options: options.map { .init(label: $0.label, description: $0.description) }),
         ])
     }
 

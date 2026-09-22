@@ -43,6 +43,15 @@ struct ToolPresentation {
     }
     private static let pathLiteral = try! NSRegularExpression(pattern: #"(?<![\w@:/])(?:~/|\./|/)[\w.@+~-]+(?:/[\w.@+~-]+)*"#)
 
+    /// Activity uses the same decoded title as the tool card, including wrappers.
+    var activityVerb: String {
+        switch title {
+        case "Read": return "Reading"
+        case "Patch", "Write": return "Editing"
+        default: return "Running \(title)"
+        }
+    }
+
     var preview: String {
         if let previewOverride { return previewOverride }
         // The file, not its whole absolute path: the last two components

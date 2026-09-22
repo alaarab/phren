@@ -10,7 +10,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
-import { ApprovalWatchLeases } from "./agent-hooks.js";
+import { ApprovalWatchLeases, permissionPrompt, terminalChoice, visibleTerminalChoice } from "./agent-hooks.js";
 import { capturesChanges, namedPaths, outputCallIds, ToolChanges } from "./changes.js";
 import { workspaceSnapshot } from "./herdr.js";
 import { planAgentHooks, upgradeKeys } from "./install.js";
@@ -30,6 +30,40 @@ const row = (text: string) => ({ type: "response_item", payload: { type: "messag
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 describe("Phren Hook boundaries", () => {
+  it("splits numbered option descriptions without changing labels or answer keys", () => {
+    const choice = visibleTerminalChoice("Older output\n\nAllow the tool?\n"
+      + "1. Allow            Run the tool and continue.\n"
+      + "2. Allow for this session (p)  Keep this permission until the session ends.\n"
+      + "3. No (esc)\n");
+    expect(choice).toEqual({ title: "Allow the tool?", options: [
+      { label: "Allow", description: "Run the tool and continue.", key: "1" },
+      { label: "Allow for this session", description: "Keep this permission until the session ends.", key: "p" },
+      { label: "No", key: "Escape" },
+    ] });
+    expect(visibleTerminalChoice("Continue?\n1. Allow  Run the tool.  Then continue. (y)\n2. No (esc)")?.options[0])
+      .toEqual({ label: "Allow", description: "Run the tool.  Then continue.", key: "y" });
+    expect(terminalChoice({ question: "Allow?", options: [
+      { label: "Allow", description: "Run it.", key: "1" }, { label: "Decline", key: "2" },
+    ] })?.options).toEqual([{ label: "Allow", description: "Run it.", key: "1" }, { label: "Decline", key: "2" }]);
+  });
+
+  it("normalizes MCP arguments and only resolves choices for the matching permission", () => {
+    const input = { action: "read_skill", name: "m4l-improve" };
+    const sentence = "Allow the phren MCP server to run tool phren_admin?";
+    const options = "\n1. Allow  Run the tool and continue.\n2. Allow for this session  Keep it until the session ends.\n3. Deny";
+    const prompt = permissionPrompt("mcp__phren__phren_admin", input, sentence + options);
+    expect(prompt.title).toBe(sentence);
+    expect(JSON.parse(prompt.details)).toEqual(input);
+    expect(prompt.terminalOnly).toBe(false);
+    expect(prompt.choice?.options.map(option => option.key)).toEqual(["1", "2", "3"]);
+    expect(prompt.choice?.options[0]).toEqual({ label: "Allow", description: "Run the tool and continue.", key: "1" });
+    // A provider may report only the bare tool name; prefer its pane's sentence.
+    expect(permissionPrompt("phren_admin", input, sentence + options).title).toBe(sentence);
+    expect(permissionPrompt("mcp__phren__phren_admin", input, "Allow a different tool?" + options).terminalOnly).toBe(true);
+    expect(permissionPrompt("mcp__phren__phren_admin", input).choice).toBeUndefined();
+    expect(permissionPrompt("action", input)).toEqual({ details: JSON.stringify(input, null, 2), title: undefined, terminalOnly: true });
+  });
+
   it("derives a Herdr agent name from a human label", () => {
     expect(herdrAgentName("Conductor smoke 4")).toBe("conductor-smoke-4");
     expect(herdrAgentName("  42 fix the queue strip, remove & send now  ")).toBe("fix-the-queue-strip-remove-send");
@@ -1488,6 +1522,40 @@ schedules:
       expect((await api("/v1/approvals/answer", { target, actionId: approval.actionId, decision: "deny" })).status).toBe(200);
       expect((await reply).hookSpecificOutput.decision.behavior).toBe("deny");
       expect((await api("/v1/approvals/answer", { target, actionId: approval.actionId, decision: "approve" })).status).toBe(409);
+      socket.close(); await once(socket, "close");
+    });
+
+    it("holds MCP arguments as details and answers the matching terminal choices with their own keys", async () => {
+      agentStatus = "waiting";
+      const sentence = "Allow the phren MCP server to run tool phren_admin?";
+      paneLines = sentence + "\n1. Allow            Run the tool and continue.\n"
+        + "2. Allow for this session  Keep this permission for this session.\n3. Deny  Do not run the tool.\n";
+      const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
+      const frames: any[] = []; socket.on("message", bytes => frames.push(JSON.parse(bytes.toString())));
+      await once(socket, "open");
+      for (let i = 0; i < 60 && !frames.length; i++) await sleep(25);
+      const input = { action: "read_skill", name: "m4l-improve" };
+      const reply = new Promise<any>((resolve, reject) => {
+        const payload = JSON.stringify({ target, event: "PermissionRequest", tool: "mcp__phren__phren_admin", input });
+        const req = request({ socketPath: path.join(root, "bridge/agent.sock"), path: "/hook", method: "POST",
+          headers: { "Content-Length": Buffer.byteLength(payload) } }, res => {
+          let data = ""; res.on("data", bytes => data += bytes); res.on("end", () => resolve(JSON.parse(data)));
+        }); req.on("error", reject); req.end(payload);
+      });
+      for (let i = 0; i < 100 && !frames.some(f => f.agentStatus.pendingApproval?.choice); i++) await sleep(25);
+      const approval = frames.find(f => f.agentStatus.pendingApproval?.choice)?.agentStatus.pendingApproval;
+      expect(approval?.title).toBe(sentence);
+      expect(JSON.parse(approval.details)).toEqual(input);
+      expect(approval.terminalOnly).toBe(false);
+      expect(approval.choice.title).toBe(sentence);
+      expect(approval.choice.options).toEqual([
+        { label: "Allow", description: "Run the tool and continue.", key: "1" },
+        { label: "Allow for this session", description: "Keep this permission for this session.", key: "2" },
+        { label: "Deny", description: "Do not run the tool.", key: "3" },
+      ]);
+      expect((await api("/v1/keys", { target, keys: ["2"] })).status).toBe(200);
+      expect(commands.filter(c => c.method === "agent.send_keys").map(c => c.params.keys)).toEqual([["2", "enter"]]);
+      expect(await reply).toEqual({});
       socket.close(); await once(socket, "close");
     });
 

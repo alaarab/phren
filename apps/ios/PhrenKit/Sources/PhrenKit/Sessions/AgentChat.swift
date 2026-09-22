@@ -149,6 +149,9 @@ public struct AgentChild: Codable, Equatable, Sendable, Identifiable {
     /// `blocked: <type> <pattern>`. The wire still carries `completed` for
     /// older clients, so this reason is what marks the worker refused.
     public let reason: String?
+    public let finishedAt: String?
+    public let failed: Bool?
+    public var finishedDate: Date? { ISO8601Dates.parse(finishedAt) }
     public let worktreeName: String?
     public let branch: String?
     public let computer: AgentComputer?
@@ -177,7 +180,7 @@ public struct AgentChild: Codable, Equatable, Sendable, Identifiable {
     }
     /// The state a row draws. A refused worker is failed whatever the wire
     /// state says, so an old completed badge can never hide a refusal.
-    public var displayState: State { permissionRefused ? .failed : state }
+    public var displayState: State { permissionRefused || failed == true ? .failed : state }
     /// A refused worker names the refusal rather than its task.
     public var displayName: String { permissionRefused ? "Permission refused" : name }
     public var agentCount: Int { 1 + children.reduce(0) { $0 + $1.agentCount } }
@@ -185,7 +188,7 @@ public struct AgentChild: Codable, Equatable, Sendable, Identifiable {
     public var refusedCount: Int { (permissionRefused ? 1 : 0) + children.reduce(0) { $0 + $1.refusedCount } }
 
     private enum CodingKeys: String, CodingKey {
-        case id, provider, model, path, callId, state, reason, worktreeName, branch, computer, remote, children
+        case id, provider, model, path, callId, state, reason, finishedAt, failed, worktreeName, branch, computer, remote, children
     }
 
     public init(from decoder: Decoder) throws {
@@ -197,6 +200,8 @@ public struct AgentChild: Codable, Equatable, Sendable, Identifiable {
         callId = try values.decode(String.self, forKey: .callId)
         state = try values.decode(State.self, forKey: .state)
         reason = try values.decodeIfPresent(String.self, forKey: .reason)
+        finishedAt = try values.decodeIfPresent(String.self, forKey: .finishedAt)
+        failed = try values.decodeIfPresent(Bool.self, forKey: .failed)
         worktreeName = try values.decodeIfPresent(String.self, forKey: .worktreeName)
         branch = try values.decodeIfPresent(String.self, forKey: .branch)
         computer = try values.decodeIfPresent(AgentComputer.self, forKey: .computer)
@@ -469,7 +474,29 @@ public struct AgentChatTranscript: Equatable, Sendable {
             parts = mergedUserParts(withUploadImages(parts))
             parts += changes(raw, after: parts)
             questionEvents += AgentQuestionEvent.read(raw, source: source)
-            if let event = AgentChatProgressEvent.read(raw, source: source, line: line) { progressEvents.append(event) }
+            if var event = AgentChatProgressEvent.read(raw, source: source, line: line) {
+                event.timestamp = Self.timestamp(raw)
+                progressEvents.append(event)
+            }
+            // Claude's real user messages start turns; tool results, queued
+            // input and compaction summaries do not. Its final stop reason
+            // ends the turn, even when the same row also carries usage.
+            if source == "claude" {
+                if raw["phrenQueued"] as? Bool != true,
+                   parts.contains(where: { $0.role == .user && AgentChatMessage.LocalCommand($0.text) == nil }) {
+                    progressEvents.append(.init(line: line, value: .started(Self.timestamp(raw))))
+                }
+                if let message = raw["message"] as? [String: Any],
+                   message["stop_reason"] as? String == "end_turn",
+                   raw["isMeta"] as? Bool != true, raw["isSidechain"] as? Bool != true {
+                    progressEvents.append(.init(line: line, value: .finished(Self.timestamp(raw))))
+                }
+            } else if source == "phren" || source == "opencode",
+                      raw["type"] as? String == "assistant/message",
+                      let data = raw["data"] as? [String: Any], data["usage"] != nil,
+                      data["stop_reason"] as? String == "end_turn" {
+                progressEvents.append(.init(line: line, value: .finished(ISO8601Dates.parse(raw["time"] as? String))))
+            }
             for (index, part) in parts.enumerated() {
                 let id = "\(line):\(part.idIndex ?? index)"
                 guard (!part.text.isEmpty || part.role == .tool), seen.insert(id).inserted else { continue }

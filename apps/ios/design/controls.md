@@ -583,3 +583,17 @@ Project controls use equal columns in ProjectControlLayout: icon over one-line
 title, 52-point height, matching centered dividers, 8 points below the navigation
 bar. Values remain in each control's accessibility value. LiveSessionsTests
 checks the band frame and four equal cell widths and attaches a screenshot.
+
+## Terminal prompt cards
+
+A terminal choice uses the provider's asking sentence and actual answer keys.
+Option labels and descriptions are separate Text elements: the label uses the
+row's body weight, and the description wraps below it in the supporting color.
+The options retain their full height. Only long question text may fade and
+show Show all; that control stays above the first option. Expansion preserves
+the selected answer. Multi-question forms retain their full-sheet reading flow.
+
+A held permission keeps structured arguments in a folded PhrenDisclosure named
+Action details. JSON is never the asking sentence. A matching terminal dialog
+supplies its own options and keys; an unresolved terminal permission offers
+Open terminal instead of invented Yes/No answers.

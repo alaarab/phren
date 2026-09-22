@@ -26,7 +26,15 @@ import UIKit
     static var streamStarts: [String: Date] = [:]
     static var streamed: Set<String> = []
     static var lastStreamLine: [String: Int] = [:]
+    static func prepareClipboard() {
+        if flag("--clipboard-image-fixture"), let image = UIImage(data: image.data) {
+            UIPasteboard.general.image = image
+        } else if flag("--clipboard-text-fixture") {
+            UIPasteboard.general.string = "clipboard fixture text"
+        }
+    }
     static func beginStream(_ target: AgentChatTarget) {
+        prepareClipboard()
         streamed.remove(target.id)
         lastStreamLine.removeValue(forKey: target.id)
     }
@@ -83,10 +91,10 @@ import UIKit
     static func terminalPrompt(_ target: AgentChatTarget) -> AgentTerminalPrompt? {
         guard flag("--chat-blocked"), !flag("--chat-password"), !answered else { return nil }
         let input: [String: Any] = ["command": "xcrun simctl list runtimes", "justification": "May I inspect the installed simulator runtimes to resolve the Watch target test failure?"]
-        let choice = flag("--chat-terminal-choices") ? AgentPromptChoice(title: "Would you like to run the following command?", body: "xcrun simctl list runtimes",
-            options: [.init(label: "Yes, proceed (y)", key: "y"),
-                      .init(label: "Yes, and don't ask again for commands that start with xcrun simctl (p)", key: "p"),
-                      .init(label: "No, and tell Codex what to do differently (esc)", key: "Escape")]) : nil
+        let choice = flag("--chat-terminal-choices") ? AgentPromptChoice(title: flag("--chat-terminal-long-question") ? String(repeating: "Review the requested action and its effect on this project before choosing an answer. ", count: 12) + "Would you like to run the following command?" : "Would you like to run the following command?", body: "xcrun simctl list runtimes",
+            options: [.init(label: "Yes, proceed", key: "y", description: "Run the tool and continue."),
+                      .init(label: "Yes, and don't ask again", key: "p", description: "Allow commands that start with xcrun simctl for this session."),
+                      .init(label: "No", key: "Escape", description: "Tell Codex what to do differently.")]) : nil
         return AgentTerminalPrompt(toolName: "Shell", message: String(decoding: (try? JSONSerialization.data(withJSONObject: input, options: [.prettyPrinted, .sortedKeys])) ?? Data(), as: UTF8.self), choice: choice)
     }
     static func status(_ target: AgentChatTarget) throws -> AgentInteractionStatus {
@@ -104,6 +112,20 @@ import UIKit
     }
     static func approval(_ target: AgentChatTarget) throws -> AgentApproval? {
         guard !answered else { return nil }
+        if flag("--chat-mcp-approval") || flag("--chat-unresolved-approval") {
+            let sentence = "Allow the phren MCP server to run tool phren_admin?"
+            let details = "{ \"action\": \"read_skill\", \"name\": \"m4l-improve\" }"
+            var value: [String: Any] = ["actionId": "fixture-mcp", "toolName": "mcp__phren__phren_admin",
+                "title": sentence, "message": details, "details": details, "expiresAt": approvalExpiry,
+                "terminalOnly": flag("--chat-unresolved-approval")]
+            if !flag("--chat-unresolved-approval") {
+                value["choice"] = ["title": sentence, "options": [
+                    ["label": "Allow", "description": "Run the tool and continue.", "key": "1"],
+                    ["label": "Allow for this session", "description": "Keep this permission for this session.", "key": "2"],
+                    ["label": "Deny", "key": "3"]]]
+            }
+            return try JSONDecoder().decode(AgentApproval.self, from: JSONSerialization.data(withJSONObject: value))
+        }
         if flag("--chat-approval-question") {
             let input = flag("--chat-approval-question-long") ? longQuestionInput : questionInput
             let message = String(decoding: try JSONSerialization.data(withJSONObject: input, options: .prettyPrinted), as: UTF8.self)
@@ -207,6 +229,13 @@ import UIKit
                                    "remote": ["target": ["server": "default", "workspace": "w4", "tab": "w4:t1", "pane": "w4:p1",
                                                                  "source": "opencode", "session": "ses_fixture42"]], "children": [] as [Any]])
                 }
+            }
+        }
+        if flag("--agent-work-failures") {
+            for (id, age) in [("recent-refusal", 120.0), ("old-refusal", 7_200.0)] {
+                agents.insert(["id": id, "provider": "codex", "path": id, "callId": "fanout:" + id,
+                    "state": "completed", "failed": true, "reason": "blocked: external_directory /home/sam/project",
+                    "finishedAt": Date.now.addingTimeInterval(-age).formatted(.iso8601), "children": [] as [Any]], at: 0)
             }
         }
         let tree: [String: Any] = ["agents": agents]
@@ -795,11 +824,12 @@ import UIKit
                 event(2, ["type": "task_started", "started_at": start.timeIntervalSince1970])
                 event(3, ["type": "token_count", "info": ["last_token_usage": ["input_tokens": 128, "output_tokens": 0]]])
             }
-            if elapsed >= 5 {
-                message(4, "assistant", streamingReply)
+            if elapsed >= (flag("--chat-activity-fixture") ? 10 : 5) {
+                message(4, "assistant", flag("--chat-activity-fixture") ? "The activity fixture reply is ready." : streamingReply)
                 event(5, ["type": "token_count", "info": ["last_token_usage": ["input_tokens": 128, "output_tokens": 85]]])
             }
-            if elapsed >= 9 { event(6, ["type": "task_complete", "completed_at": start.addingTimeInterval(9).timeIntervalSince1970]) }
+            let duration: TimeInterval = flag("--chat-activity-fixture") ? 12 : 9
+            if elapsed >= duration { event(6, ["type": "task_complete", "completed_at": start.addingTimeInterval(duration).timeIntervalSince1970]) }
         }
         let totalLines = entries.count
         let previousLine = lastStreamLine[target.id] ?? -1

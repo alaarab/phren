@@ -115,7 +115,7 @@ describe("fan-out manifests", () => {
       pattern: "/private/tmp/elsewhere", message: "external_directory: /private/tmp/elsewhere", at: "2026-09-19T19:00:03.000Z" }));
     const found = await fanoutChildren("codex", parent, env);
     expect(found).toHaveLength(1);
-    expect(found[0]).toMatchObject({ state: "failed", reason: "blocked: external_directory /private/tmp/elsewhere" });
+    expect(found[0]).toMatchObject({ state: "failed", reason: "blocked: external_directory /private/tmp/elsewhere", finishedAt: "2026-09-19T19:00:03.000Z" });
   });
 
   it("reads OpenCode's own refusal from stderr.log when blocked.json is absent", async () => {

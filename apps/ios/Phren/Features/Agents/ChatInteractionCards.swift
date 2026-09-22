@@ -74,6 +74,7 @@ struct ChatApprovalQuestionCard: View {
     private struct Row: Identifiable {
         let id: String
         let label: String
+        var description: String? = nil
         var decision: ApprovalDecision? = nil
         var key: AgentAnswerKey? = nil
         var enabled = true
@@ -84,7 +85,7 @@ struct ChatApprovalQuestionCard: View {
         if let choice = approval.choice, choice.prompt(id: approval.id) != nil {
             result = choice.options.enumerated().map { index, option in
                 Row(id: option.answerKey == .escape || option.answerKey == .no || option.label.lowercased() == "no" ? "deny" : index == 0 ? "approve" : "option-\(index)",
-                    label: option.label, key: option.answerKey)
+                    label: option.label, description: option.description, key: option.answerKey)
             }
         } else if let options = approval.options, !options.isEmpty {
             result = options.map { Row(id: $0.decision.rawValue, label: $0.label, decision: $0.decision) }
@@ -110,41 +111,46 @@ struct ChatApprovalQuestionCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                ChatQuestionHeaderLabel(title: "\(providerName) asks", systemImage: "questionmark.bubble")
-                    .accessibilityIdentifier("chat-approval")
-                Spacer(minLength: 0)
-                terminal
-            }
-            Text(approval.choice?.title ?? approval.title ?? approval.toolName ?? "Allow this action?")
-                .font(PhrenTheme.Font.body.weight(.semibold)).foregroundStyle(PhrenTheme.text)
-                .fixedSize(horizontal: false, vertical: true)
-            if let explanation = approval.explanation, explanation != approval.command {
-                Text(explanation).font(PhrenTheme.Font.body).foregroundStyle(PhrenTheme.text)
+        if approval.terminalOnly == true || (approval.choice != nil && approval.choice?.prompt(id: approval.id) == nil) {
+            terminal
+        } else {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 8) {
+                    ChatQuestionHeaderLabel(title: "\(providerName) asks", systemImage: "questionmark.bubble")
+                        .accessibilityIdentifier("chat-approval")
+                    Spacer(minLength: 0)
+                    terminal
+                }
+                Text(approval.choice?.title ?? approval.title ?? approval.toolName ?? "Allow this action?")
+                    .font(PhrenTheme.Font.body.weight(.semibold)).foregroundStyle(PhrenTheme.text)
                     .fixedSize(horizontal: false, vertical: true)
-            }
-            if let command = approval.command {
-                Text(command).font(PhrenTheme.Font.monoFootnote).foregroundStyle(PhrenTheme.textMuted)
-                    .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("chat-approval-command")
-            }
-            ForEach(rows) { row in
-                ChatQuestionOptionRow(label: row.label, selected: selected == row.id,
-                    busy: busy || !row.enabled, radius: PhrenTheme.Radius.questionOption) {
-                    selected = row.id
-                    if let key = row.key { answerKey(key) }
-                    else if let decision = row.decision { answer(decision) }
+                if let explanation = approval.explanation, explanation != approval.command,
+                   explanation != approval.title, explanation != approval.choice?.title {
+                    Text(explanation).font(PhrenTheme.Font.body).foregroundStyle(PhrenTheme.text)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .accessibilityIdentifier("chat-approval-\(row.id)")
-            }
-            if let message = approval.message, message != approval.command, message != approval.explanation {
-                PhrenDisclosure(title: "Action details") {
-                    Text(message).font(PhrenTheme.Font.monoCaption).foregroundStyle(PhrenTheme.textMuted)
-                        .textSelection(.enabled)
+                if let command = approval.command {
+                    Text(command).font(PhrenTheme.Font.monoFootnote).foregroundStyle(PhrenTheme.textMuted)
+                        .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("chat-approval-command")
                 }
-            }
-        }.padding(16).phrenCard().accessibilityElement(children: .contain)
+                ForEach(rows) { row in
+                    ChatQuestionOptionRow(label: row.label, detail: row.description, selected: selected == row.id,
+                        busy: busy || !row.enabled, radius: PhrenTheme.Radius.questionOption) {
+                        selected = row.id
+                        if let key = row.key { answerKey(key) }
+                        else if let decision = row.decision { answer(decision) }
+                    }
+                    .accessibilityIdentifier("chat-approval-\(row.id)")
+                }
+                if let message = approval.details ?? approval.message, message != approval.command, message != approval.explanation {
+                    PhrenDisclosure(title: "Action details") {
+                        Text(message).font(PhrenTheme.Font.monoCaption).foregroundStyle(PhrenTheme.textMuted)
+                            .textSelection(.enabled)
+                    }
+                }
+            }.padding(16).phrenCard().accessibilityElement(children: .contain)
+        }
     }
 }
 
@@ -238,15 +244,15 @@ struct ChatQuestionOptionRow: View {
 /// its own section; one Send answers them all, since the agent takes them in
 /// a single reply.
 ///
-/// Above the composer the card is a window: past the cap the questions scroll
-/// inside it and a fade shows there is more. "Expand" opens the same questions
-/// and the same draft answers as a full sheet, where nothing is cut.
+/// Terminal choices fold only long question text and keep options at full height.
+/// Multi-question forms open the same questions and drafts in a full sheet.
 struct ChatQuestionCard: View {
     let prompt: AgentQuestionPrompt
     let busy: Bool
     var title = "Your input"
     /// Claude and asynchronous Codex prompts accept a typed answer beside options.
     var allowsTyping = false
+    var keepsOptionsVisible = false
     /// Decline to answer (Claude: the permission is denied and the agent
     /// carries on without an answer).
     var skip: (() -> Void)? = nil
@@ -254,15 +260,15 @@ struct ChatQuestionCard: View {
     var headerAccessory: AnyView? = nil
     let answer: ([AgentQuestionAnswer]) -> Void
     @State private var answers: [Int: AgentQuestionAnswer] = [:]
-    @State private var questionsHeight: CGFloat = 0
     @State private var expanded = false
+    @State private var questionsHeight: CGFloat = 0
+    private static let scrollCap: CGFloat = 360
+    private var overflows: Bool { questionsHeight > Self.scrollCap }
     @Environment(\.dynamicTypeSize) private var typeSize
     @FocusState private var typing: Int?
-    private static let scrollCap: CGFloat = 360
 
     private var current: [AgentQuestionAnswer] { prompt.questions.indices.map { answers[$0] ?? .init() } }
     private var answeredCount: Int { zip(prompt.questions, current).filter { $0.0.isFreeText ? !$0.1.text.isEmpty : !$0.1.selections.isEmpty || !$0.1.text.isEmpty }.count }
-    private var overflows: Bool { questionsHeight > Self.scrollCap }
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -275,29 +281,33 @@ struct ChatQuestionCard: View {
                 if let headerAccessory { headerAccessory }
                 ChatQuestionExpandButton { expanded = true }
             }
-            let questions = questionList(inline: true).background(GeometryReader { geometry in
-                Color.clear.preference(key: ChatQuestionsHeight.self, value: geometry.size.height)
-            })
-            Group {
-                if overflows {
-                    ScrollView(showsIndicators: true) { questions }.frame(height: Self.scrollCap)
-                        .mask(
-                            // Fade the last rows out so the cut reads as "more below", not as the end.
-                            VStack(spacing: 0) {
-                                Color.black
-                                LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: 36)
-                            })
-                        .overlay(alignment: .bottom) {
-                            Button { expanded = true } label: {
-                                Label("Show all", systemImage: "chevron.down").font(.caption.weight(.semibold))
-                                    .padding(.horizontal, 10).padding(.vertical, 5)
-                                    .background(PhrenTheme.surfaceRaised, in: Capsule())
-                                    .overlay(Capsule().stroke(PhrenTheme.border, lineWidth: 1))
-                            }.buttonStyle(.plain).foregroundStyle(PhrenTheme.text).padding(.bottom, 4)
-                                .accessibilityIdentifier("chat-question-show-all")
-                        }
-                } else { questions }
-            }.onPreferenceChange(ChatQuestionsHeight.self) { questionsHeight = $0 }
+            if keepsOptionsVisible {
+                questionList(inline: true)
+            } else {
+                let questions = questionList(inline: true).background(GeometryReader { geometry in
+                    Color.clear.preference(key: ChatQuestionsHeight.self, value: geometry.size.height)
+                })
+                Group {
+                    if overflows {
+                        ScrollView(showsIndicators: true) { questions }.frame(height: Self.scrollCap)
+                            .mask(
+                                // Fade the last rows out so the cut reads as "more below", not as the end.
+                                VStack(spacing: 0) {
+                                    Color.black
+                                    LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: 36)
+                                })
+                            .overlay(alignment: .bottom) {
+                                Button { expanded = true } label: {
+                                    Label("Show all", systemImage: "chevron.down").font(.caption.weight(.semibold))
+                                        .padding(.horizontal, 10).padding(.vertical, 5)
+                                        .background(PhrenTheme.surfaceRaised, in: Capsule())
+                                        .overlay(Capsule().stroke(PhrenTheme.border, lineWidth: 1))
+                                }.buttonStyle(.plain).foregroundStyle(PhrenTheme.text).padding(.bottom, 4)
+                                    .accessibilityIdentifier("chat-question-show-all")
+                            }
+                    } else { questions }
+                }.onPreferenceChange(ChatQuestionsHeight.self) { questionsHeight = $0 }
+            }
             sendRow
         }.padding(16).phrenCard()
             .overlay(alignment: .topLeading) {
@@ -362,9 +372,12 @@ struct ChatQuestionCard: View {
                         Text("Question \(index + 1)").font(.caption2).foregroundStyle(PhrenTheme.textMuted)
                     }
                 }
-                // Full text always: a question is never truncated, in either mode.
-                Text(question.question).font(.headline).foregroundStyle(PhrenTheme.text).textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
+                if keepsOptionsVisible {
+                    ChatQuestionText(text: question.question, inline: inline) { expanded = true }
+                } else {
+                    Text(question.question).font(.headline).foregroundStyle(PhrenTheme.text).textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 if question.isFreeText {
                     typedRow(index, question: question, placeholder: question.kind == "number" ? "Enter a number" : "Type your answer")
                 } else {
@@ -409,6 +422,40 @@ struct ChatQuestionCard: View {
                 .accessibilityIdentifier("chat-question-typed-\(index)")
         }.padding(12).background(active ? PhrenTheme.cyan.opacity(0.1) : PhrenTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.small, style: .continuous))
             .disabled(busy)
+    }
+}
+
+/// The fade and expansion belong to the asking text, never to the answers.
+private struct ChatQuestionText: View {
+    let text: String
+    let inline: Bool
+    let expand: () -> Void
+    @State private var height: CGFloat = 0
+    private let cap: CGFloat = 180
+    private var folds: Bool { inline && height > cap }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(text).font(.headline).foregroundStyle(PhrenTheme.text).textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .background(GeometryReader { geometry in
+                    Color.clear.preference(key: ChatQuestionsHeight.self, value: geometry.size.height)
+                })
+                .frame(height: folds ? cap : nil, alignment: .top).clipped()
+                .mask {
+                    VStack(spacing: 0) {
+                        Color.black
+                        if folds { LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: 24) }
+                    }
+                }
+            if folds {
+                Button(action: expand) {
+                    Label("Show all", systemImage: "chevron.down").font(.caption.weight(.semibold))
+                        .frame(minHeight: 44)
+                }.buttonStyle(.plain).foregroundStyle(PhrenTheme.text)
+                    .accessibilityIdentifier("chat-question-show-all")
+            }
+        }.onPreferenceChange(ChatQuestionsHeight.self) { height = $0 }
     }
 }
 
@@ -530,7 +577,7 @@ struct ChatChoiceQuestionCard: View {
 
     var body: some View {
         if let prompt = choice.prompt(id: id) {
-            ChatQuestionCard(prompt: prompt, busy: busy, title: title, headerAccessory: terminal) { answers in
+            ChatQuestionCard(prompt: prompt, busy: busy, title: title, keepsOptionsVisible: true, headerAccessory: terminal) { answers in
                 guard let key = choice.answerKey(selections: answers.first?.selections ?? []) else { return }
                 answer(key)
             }

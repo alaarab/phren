@@ -87,16 +87,17 @@ final class AgentChatModel {
         preparationTask?.cancel()
         let id = UUID(); preparationID = id
         let messages = history.messages
-        if messages.isEmpty {
-            preparation = .init(); timeline = []; backgroundJobs = []; currentToolName = nil; currentToolDetail = nil
-            timelineRevision += 1; imagesByMessage = [:]; return
-        }
+        let activity = ChatActivityContext(turns: progress.turns, submittedAt: sentAt,
+            submittedAfterLine: submittedAfterLine, busy: isBusy,
+            waiting: needsAnswer || approval != nil || question != nil || terminalPrompt != nil || passwordPrompt
+                || ["waiting", "blocked"].contains(liveActivity ?? ""))
         let previous = preparation
         preparationTask = Task {
             let value = await Task.detached(priority: .userInitiated) {
-                var value = previous; value.update(messages); return value
+                var value = previous; value.update(messages, activity: activity); return value
             }.value
             guard !Task.isCancelled, preparationID == id else { return }
+            guard value.revision != preparation.revision else { return }
             preparation = value; timeline = value.entries; backgroundJobs = value.jobs
             currentToolName = value.currentToolName; currentToolDetail = value.currentToolDetail; timelineRevision += 1
             matchSentImages()
@@ -112,20 +113,20 @@ final class AgentChatModel {
         }
         imagesByMessage = matches
     }
-    var progress = AgentChatProgress()
+    var progress = AgentChatProgress() { didSet { if progress.turns != oldValue.turns { prepareTranscript() } } }
     let reveal = ChatTextReveal()
     var animateReplies = true
     private var hasTranscript = false
-    private(set) var awaitingReply = false
-    private(set) var sentAt: Date?
+    private(set) var awaitingReply = false { didSet { if awaitingReply != oldValue { prepareTranscript() } } }
+    private(set) var sentAt: Date? { didSet { if sentAt != oldValue { prepareTranscript() } } }
     private var submittedAfterLine = -1
-    var liveActivity: String?
+    var liveActivity: String? { didSet { if liveActivity != oldValue { prepareTranscript() } } }
     /// The agent is summarizing the conversation to reclaim context; the
     /// header says so and the turn stays busy until it finishes.
-    var isCompacting = false
+    var isCompacting = false { didSet { if isCompacting != oldValue { prepareTranscript() } } }
     var historyStalled = false
     var historyStalledSince: Date?
-    private var preferProgressActivity = false
+    private var preferProgressActivity = false { didSet { if preferProgressActivity != oldValue { prepareTranscript() } } }
     var activityPhase: AgentChatProgress.Phase? {
         if preferProgressActivity { return progress.phase }
         switch liveActivity {
@@ -170,17 +171,17 @@ final class AgentChatModel {
     var sending = false
     var loadingHistory = false
     var stopping = false
-    var needsAnswer = false
-    var approval: AgentApproval?
-    private var questionState = AgentQuestionState()
+    var needsAnswer = false { didSet { if needsAnswer != oldValue { prepareTranscript() } } }
+    var approval: AgentApproval? { didSet { if approval != oldValue { prepareTranscript() } } }
+    private var questionState = AgentQuestionState() { didSet { if questionState.pending != oldValue.pending { prepareTranscript() } } }
     var question: AgentQuestionPrompt? { questionState.pending.first }
     var pendingQuestionCount: Int { questionState.pending.count }
     var interactionConnected = false
     var answering = false
     /// What the agent is asking in its terminal, when the Hook saw the request go by.
-    var terminalPrompt: AgentTerminalPrompt?
+    var terminalPrompt: AgentTerminalPrompt? { didSet { if terminalPrompt != oldValue { prepareTranscript() } } }
     /// True while the pane's own terminal is reading a password.
-    var passwordPrompt = false
+    var passwordPrompt = false { didSet { if passwordPrompt != oldValue { prepareTranscript() } } }
     private var statusTask: Task<Void, Never>?
     private var progressTask: Task<Void, Never>?
     private var progressConnected = false
@@ -442,7 +443,7 @@ final class AgentChatModel {
         if frame.kind != .older { questionState.receive(frame.questionEvents, reset: frame.replacesConversation) }
         reveal.receive(frame, previous: messages, animated: animateReplies && hasTranscript)
         if frame.messages.contains(where: { $0.line > submittedAfterLine && $0.role != .user }) { awaitingReply = false }
-        if !progressConnected, !frame.progressEvents.isEmpty { acceptProgress(frame) }
+        if !progressConnected, !frame.progressEvents.isEmpty || frame.replacesConversation { acceptProgress(frame) }
         acceptContext(frame)
         // A backlog after the transcript was already showing is a reconnect
         // (the phone slept, the link dropped). The rows are re-laid out from
@@ -690,6 +691,7 @@ final class AgentChatModel {
             page = try await PhrenConnection.chatHistory(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, beforeLine: before)
             #endif
             guard !Task.isCancelled, self.target == target else { return }
+            progress.receive(page)
             mergeHistory(page)
             await preparationTask?.value
         } catch is CancellationError {
