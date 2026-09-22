@@ -1098,11 +1098,16 @@ schedules:
 
     it("publishes a Codex terminal choice from the pane's numbered dialog and answers it with the option's key", async () => {
       agentStatus = "waiting";
-      paneLines = "Would you like to run the following command?\n"
+      // Scrollback above the question must not become part of it.
+      paneLines = "ence\n"
+        + "Utility Live 12 ...\n"
+        + "Field 1/1\n"
+        + "\n"
+        + "Would you like to run the following command?\n"
         + "Environment: local\n"
         + "Reason: Allow final headless rendering of the revised terminal hint hierarchy?\n"
         + "$ bun /tmp/atlas-shell-review.ts\n"
-        + "> 1. Yes, proceed (y)\n"
+        + "› 1. Yes, proceed (y)\n"
         + "  2. Yes, and don't ask again for commands that start with 'bun /tmp/atlas-shell-review.ts' (p)\n"
         + "  3. No, and tell Codex what to do differently (esc)\n"
         + "Press enter to confirm or esc to cancel\n";
@@ -1118,6 +1123,9 @@ schedules:
       // the pane's own numbered rows and keys them by their trailing letters.
       const first = await status();
       expect(first.terminalPrompt).toMatchObject({ toolName: "Question", choice: {
+        title: "Would you like to run the following command?\nEnvironment: local\n"
+          + "Reason: Allow final headless rendering of the revised terminal hint hierarchy?\n"
+          + "$ bun /tmp/atlas-shell-review.ts",
         options: [
           { label: "Yes, proceed", key: "y" },
           { label: "Yes, and don't ask again for commands that start with 'bun /tmp/atlas-shell-review.ts'", key: "p" },

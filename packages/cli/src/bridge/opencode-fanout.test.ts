@@ -47,7 +47,7 @@ describe("opencode fan-out permissions", () => {
     process.env.PHREN_FANOUT_JOB = "job-allow";
     process.env.PHREN_FANOUT_DIR = directory;
     const handlers = await loadPlugin();
-    for (const type of ["edit", "bash", "webfetch"]) {
+    for (const type of ["edit", "bash", "webfetch", "doom_loop"]) {
       const output: { status?: string } = {};
       await handlers["permission.ask"]({ type }, output);
       expect(output.status).toBe("allow");
@@ -55,7 +55,7 @@ describe("opencode fan-out permissions", () => {
     await expect(readFile(path.join(directory, "blocked.json"), "utf8")).rejects.toThrow();
   });
 
-  it("allows external_directory only under the worktree's scratch root", async () => {
+  it("allows external_directory under the scratch root and this machine's own trees", async () => {
     const scratch = await mkdtemp(path.join(tmpdir(), "phren-scratch-")); roots.push(scratch);
     const job = path.join(scratch, "job"), worktree = path.join(job, "worktree");
     await mkdir(worktree, { recursive: true });
@@ -68,11 +68,17 @@ describe("opencode fan-out permissions", () => {
     const scratchRoot = path.dirname(path.dirname(process.cwd()));
     await handlers["permission.ask"]({ type: "external_directory", pattern: path.join(scratchRoot, "shared") }, inside);
     expect(inside.status).toBe("allow");
+    // A worktree links its node_modules into the main checkout and a build
+    // shells out to the toolchain, so the machine's own trees are readable.
+    const machine: { status?: string } = {};
+    await handlers["permission.ask"](
+      { type: "external_directory", pattern: path.join(process.env.HOME ?? "", "Projects/app/node_modules") }, machine);
+    expect(machine.status).toBe("allow");
     const outside: { status?: string } = {};
-    await handlers["permission.ask"]({ type: "external_directory", pattern: "/private/tmp/elsewhere" }, outside);
+    await handlers["permission.ask"]({ type: "external_directory", pattern: "/etc/ssh" }, outside);
     expect(outside.status).toBe("deny");
     const blocked = JSON.parse(await readFile(path.join(job, "blocked.json"), "utf8"));
-    expect(blocked).toMatchObject({ type: "external_directory", pattern: "/private/tmp/elsewhere" });
+    expect(blocked).toMatchObject({ type: "external_directory", pattern: "/etc/ssh" });
   });
 
   it("falls back to the store's agent-fanouts directory", async () => {
