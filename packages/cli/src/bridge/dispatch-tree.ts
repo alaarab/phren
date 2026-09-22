@@ -184,7 +184,8 @@ function projectAgents(
       provider: source.data,
       path,
       callId,
-      state: childState,
+      state: raw.failed === true ? "failed" : childState,
+      ...(typeof raw.finishedAt === "string" && Number.isFinite(Date.parse(raw.finishedAt)) ? { finishedAt: raw.finishedAt } : {}),
       ...(typeof raw.reason === "string" && raw.reason.length > 0 && raw.reason.length <= 500 ? { reason: raw.reason } : {}),
       ...(typeof raw.model === "string" && raw.model.length > 0 && raw.model.length <= 200 ? { model: raw.model } : {}),
       ...(typeof raw.worktreeName === "string" && raw.worktreeName.length > 0 && raw.worktreeName.length <= 200
