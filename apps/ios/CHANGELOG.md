@@ -45,6 +45,13 @@ number counts up on its own.
 
 ### Fixed
 
+- Project numbers tell the truth. The number beside a project in the Memory
+  graph counted only the recent findings the graph drew (the CLI keeps 20 live
+  and archives the rest, so many projects read exactly 20) and ignored the
+  filter. It now counts what the filter shows, all of it: every finding
+  including the archive (read from the project's summary.md, so nothing extra
+  is downloaded), or open tasks under Tasks. Project cards and the widget use
+  the same total.
 - A computer phren cannot reach still opens its terminal. The Connections
   row and the computer's page offer a terminal that attaches Herdr straight
   over SSH, which needs neither the Hook nor its status, so a stuck or

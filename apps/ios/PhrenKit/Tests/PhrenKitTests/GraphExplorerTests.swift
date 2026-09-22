@@ -107,3 +107,23 @@ final class GraphExplorerTests: XCTestCase {
         }
     }
 }
+
+final class GraphProjectCountTests: XCTestCase {
+    func testArchivedCountComesFromTheSummaryLine() {
+        XCTAssertEqual(LocalStore.archivedFindingCount("## What phren knows\n\n- 20 active findings, 1,600 archived across 17 topics, 3 open tasks."), 1600)
+        XCTAssertEqual(LocalStore.archivedFindingCount("- 5 active findings, 0 archived across 0 topics."), 0)
+        XCTAssertNil(LocalStore.archivedFindingCount("A project without the generated block."))
+    }
+
+    func testProjectLabelsCountWhatTheFilterShowsInFull() {
+        let tasks = TasksFile(project: "api", content: "# t\n\n## Active\n\n- [ ] one\n\n## Queue\n\n- [ ] two\n- [ ] three\n\n## Done\n\n- [x] old\n").doc
+        let input = GraphBuilder.Input(findingsMarkdown: ["api": "## 2026-09-22\n- [pattern] recent finding that is long enough to count"],
+                                       tasks: ["api": tasks], projects: ["api"], storeName: "s",
+                                       findingTotals: ["api": 925])
+        let payload = GraphBuilder.build(input)
+        let project = { (p: GraphPayload) in p.nodes.first { $0.group == "project" && $0.id == "api" } }
+        XCTAssertEqual(project(payload.filtered(by: .findings))?.labelCount, 925, "every finding, archive included")
+        XCTAssertEqual(project(payload.filtered(by: .all))?.labelCount, 925)
+        XCTAssertEqual(project(payload.filtered(by: .tasks))?.labelCount, 3, "open tasks, done ones excluded")
+    }
+}

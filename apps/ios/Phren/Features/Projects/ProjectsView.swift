@@ -58,7 +58,7 @@ struct ProjectsView: View {
                                         }
                                     }
                                     HStack(spacing: 10) {
-                                        Label("\(item.project.findingCount)", systemImage: "lightbulb")
+                                        Label("\(item.project.totalFindingCount)", systemImage: "lightbulb")
                                         Label("\(item.project.taskCount)", systemImage: "checklist")
                                         Label("\(item.project.noteCount)", systemImage: "note.text")
                                     }

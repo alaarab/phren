@@ -559,7 +559,8 @@ public actor LocalStore {
                 findingCount: findings[name]?.count ?? 0,
                 taskCount: tasks[name].map { $0.active.count + $0.queue.count } ?? 0,
                 noteCount: notes[name]?.count ?? 0,
-                reviewCount: reviewCounts[name] ?? 0
+                reviewCount: reviewCounts[name] ?? 0,
+                archivedCount: summaries[name].flatMap(Self.archivedFindingCount) ?? 0
             )
         }
 
@@ -601,11 +602,27 @@ public actor LocalStore {
                 .map { "## \($0.date)\n\($0.rawLine)" }.joined(separator: "\n")
         }
 
+        // The CLI's summary.md says how many findings it archived ("20 active
+        // findings, 925 archived across 17 topics"); the archive itself is
+        // never downloaded, so this line is how its size reaches the phone.
+        var findingTotals: [String: Int] = [:]
+        for project in snapshot.projects.map(\.name) {
+            let live = (snapshot.findings[project] ?? []).filter { !$0.archived }.count
+            findingTotals[project] = live + (snapshot.summaries[project].flatMap(Self.archivedFindingCount) ?? 0)
+        }
         return GraphBuilder.Input(
             findingsMarkdown: findingsMarkdown, tasks: snapshot.tasks,
             projects: snapshot.projects.map(\.name).sorted(), storeName: storeName,
-            journalFindings: snapshot.findings.mapValues { $0.filter(\.isJournalEntry) }
+            journalFindings: snapshot.findings.mapValues { $0.filter(\.isJournalEntry) },
+            findingTotals: findingTotals
         )
+    }
+
+    /// "…, 925 archived across 17 topics…" in a project's summary.md → 925.
+    public static func archivedFindingCount(_ summary: String) -> Int? {
+        guard let match = summary.range(of: #"([0-9][0-9,]*) archived across"#, options: .regularExpression) else { return nil }
+        let digits = summary[match].prefix { $0.isNumber || $0 == "," }.filter(\.isNumber)
+        return Int(digits)
     }
 
     /// Resolves a graph node's score key to the FINDINGS.md bullet it was

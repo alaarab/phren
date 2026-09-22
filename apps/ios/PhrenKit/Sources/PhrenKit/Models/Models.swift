@@ -240,14 +240,31 @@ public struct Project: Codable, Equatable, Identifiable, Sendable {
     public var taskCount: Int
     public var noteCount: Int
     public var reviewCount: Int
+    /// Findings the CLI archived into topic files, as summary.md reports them.
+    public var archivedCount: Int
     public var id: String { name }
+    /// Everything the project knows: live findings plus the archive.
+    public var totalFindingCount: Int { findingCount + archivedCount }
 
-    public init(name: String, findingCount: Int = 0, taskCount: Int = 0, noteCount: Int = 0, reviewCount: Int = 0) {
+    public init(name: String, findingCount: Int = 0, taskCount: Int = 0, noteCount: Int = 0, reviewCount: Int = 0, archivedCount: Int = 0) {
         self.name = name
         self.findingCount = findingCount
         self.taskCount = taskCount
         self.noteCount = noteCount
         self.reviewCount = reviewCount
+        self.archivedCount = archivedCount
+    }
+
+    private enum CodingKeys: String, CodingKey { case name, findingCount, taskCount, noteCount, reviewCount, archivedCount }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decode(String.self, forKey: .name)
+        findingCount = try c.decode(Int.self, forKey: .findingCount)
+        taskCount = try c.decode(Int.self, forKey: .taskCount)
+        noteCount = try c.decode(Int.self, forKey: .noteCount)
+        reviewCount = try c.decode(Int.self, forKey: .reviewCount)
+        // Snapshots cached by older builds have no archive count.
+        archivedCount = try c.decodeIfPresent(Int.self, forKey: .archivedCount) ?? 0
     }
 }
 

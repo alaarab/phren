@@ -42,6 +42,13 @@ public struct GraphPayload: Codable, Equatable, Sendable {
         public var section: String?
         public var findingCount: Int?
         public var taskCount: Int?
+        /// Everything the project knows: live findings, journal notes and the
+        /// archive the CLI moved into topic files (read from summary.md).
+        public var totalFindingCount: Int?
+        /// Open tasks (active and queue), not only the ones drawn.
+        public var openTaskCount: Int?
+        /// The number beside a project's label for the current filter.
+        public var labelCount: Int?
     }
 
     public struct RefDoc: Codable, Equatable, Sendable {
@@ -92,6 +99,14 @@ public struct GraphPayload: Codable, Equatable, Sendable {
             filter == .all || node.group == "project"
                 || (filter == .findings && node.group.hasPrefix("topic:"))
                 || (filter == .tasks && node.group.hasPrefix("task-"))
+        }.map { node -> Node in
+            // A project's number counts what the filter shows, and all of it:
+            // with Tasks it is open tasks, otherwise every finding the project
+            // holds, not just the recent ones the graph draws.
+            guard node.group == "project" else { return node }
+            var labeled = node
+            labeled.labelCount = filter == .tasks ? (node.openTaskCount ?? node.taskCount) : (node.totalFindingCount ?? node.findingCount)
+            return labeled
         }
         let ids = Set(filtered.map(\.id))
         return GraphPayload(nodes: filtered, links: links.filter { ids.contains($0.source) && ids.contains($0.target) },
@@ -174,14 +189,19 @@ public enum GraphBuilder {
         public var projects: [String]
         public var storeName: String
         public var journalFindings: [String: [Finding]]
+        /// project → every finding it holds, archive included; absent when
+        /// the project has no summary to say how many are archived.
+        public var findingTotals: [String: Int]
 
         public init(findingsMarkdown: [String: String], tasks: [String: TaskDoc],
-                    projects: [String], storeName: String, journalFindings: [String: [Finding]] = [:]) {
+                    projects: [String], storeName: String, journalFindings: [String: [Finding]] = [:],
+                    findingTotals: [String: Int] = [:]) {
             self.findingsMarkdown = findingsMarkdown
             self.tasks = tasks
             self.projects = projects
             self.storeName = storeName
             self.journalFindings = journalFindings
+            self.findingTotals = findingTotals
         }
     }
 
@@ -314,8 +334,11 @@ public enum GraphBuilder {
 
         // Fold the per-project tallies back onto the project nodes.
         for index in nodes.indices where nodes[index].group == "project" {
-            nodes[index].findingCount = findingCounts[nodes[index].id] ?? 0
-            nodes[index].taskCount = taskCounts[nodes[index].id] ?? 0
+            let id = nodes[index].id
+            nodes[index].findingCount = findingCounts[id] ?? 0
+            nodes[index].taskCount = taskCounts[id] ?? 0
+            nodes[index].totalFindingCount = input.findingTotals[id] ?? findingCounts[id] ?? 0
+            nodes[index].openTaskCount = input.tasks[id].map { $0.items(in: .active).count + $0.items(in: .queue).count } ?? 0
         }
 
         // Drop links pointing at projects outside the focused slice.

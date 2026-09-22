@@ -78,7 +78,7 @@ enum WidgetBridge {
 
     private static func buildSnapshot(from model: AppModel) -> WidgetSnapshot {
         WidgetSnapshot(
-            memoryCount: model.storeContexts.reduce(0) { $0 + $1.snapshot.projects.reduce(0) { $0 + $1.findingCount } },
+            memoryCount: model.storeContexts.reduce(0) { $0 + $1.snapshot.projects.reduce(0) { $0 + $1.totalFindingCount } },
             projectCount: model.storeContexts.reduce(0) { $0 + $1.snapshot.projects.filter { $0.name != "global" }.count },
             topTask: topActiveTask(model: model),
             lastSyncedAt: model.syncStatus.lastSyncedAt
