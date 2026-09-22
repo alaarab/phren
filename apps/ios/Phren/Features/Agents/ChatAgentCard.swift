@@ -21,15 +21,22 @@ struct ChatAgentCard: View {
         return (agent, childAgents.target)
     }
 
+    /// The spawn call says "running" until its own result arrives; a Codex
+    /// child that the computer has already seen finish is done before that.
+    private var state: AgentSubagentPresentation.State {
+        if agent.state == .running, child?.agent.state == .completed { return .done }
+        return agent.state
+    }
+
     private var status: ToolCardStatus {
-        switch agent.state {
+        switch state {
         case .running: return .running
         case .done: return .done
         case .failed: return .failed
         }
     }
     private var stateLabel: String {
-        switch agent.state {
+        switch state {
         case .running: return "running"
         case .done: return "done"
         case .failed: return "failed"
@@ -63,7 +70,7 @@ struct ChatAgentCard: View {
             }
             if let summary = agent.summary {
                 Text(summary).font(.caption.weight(.medium)).lineLimit(2)
-                    .foregroundStyle(agent.state == .failed ? PhrenTheme.danger : PhrenTheme.phrenCardAccent)
+                    .foregroundStyle(state == .failed ? PhrenTheme.danger : PhrenTheme.phrenCardAccent)
             }
             if let preview = entry.card?.markdownPreview {
                 ChatRichText(text: preview.text, cacheKey: entry.cardMarkdownKey).equatable()
@@ -72,7 +79,7 @@ struct ChatAgentCard: View {
                         .font(.caption).foregroundStyle(PhrenTheme.accent)
                         .accessibilityIdentifier("chat-agent-report:\(entry.callID)")
                 }
-            } else if agent.state == .running {
+            } else if state == .running {
                 Text(agent.background ? "Working in the background…" : "Working…")
                     .font(.caption).foregroundStyle(PhrenTheme.textMuted)
             }

@@ -29,6 +29,8 @@ and scrolls again.
 
 ### Fixed
 
+- A Codex subagent card stops saying "Working in the background" once the computer
+  has seen that child finish, even before the spawn call's own result arrives.
 - Task rows, project groups and counts refresh only when their inputs change;
   unchanged rows do not redraw on unrelated updates.
 - Code searches ignore late results from superseded queries. Failed grant
