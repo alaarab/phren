@@ -3,11 +3,12 @@ import SwiftUI
 
 /// Claude Code's plan review in the timeline: the plan as it was written,
 /// the first screenful with the rest in the reader, and how it was answered.
-struct ChatPlanCard: View {
+struct ChatPlanCard: View, Equatable {
     let plan: AgentPlanPresentation
     let entry: ChatTimelineEntry
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var opened = false
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.plan == rhs.plan && lhs.entry == rhs.entry }
     /// While the answer is pending the review card below carries the plan
     /// and the buttons; this row folds to its header so the plan is not on
     /// screen twice. A tap opens it — the review may have gone elsewhere.

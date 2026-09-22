@@ -4,6 +4,17 @@ import XCTest
 @testable import Phren
 
 final class ChatTranscriptPerformanceTests: XCTestCase {
+    func testHeavyTranscriptPreparationPerformance() throws {
+        let frame = try AgentChatTranscript.read(ChatHeavyFixture.data(), source: "codex")
+        measure {
+            var prepared = ChatTranscriptPreparation()
+            prepared.update(frame.messages)
+            XCTAssertEqual(prepared.entries.count, 40)
+            for _ in 0..<60 { prepared.update(frame.messages) }
+            XCTAssertEqual(prepared.revision, 1)
+        }
+    }
+
     func testHeavyPagePreparationIsReusedAcrossUnchangedFrames() throws {
         let data = try ChatHeavyFixture.data()
         let frame = try AgentChatTranscript.read(data, source: "codex")
@@ -26,6 +37,22 @@ final class ChatTranscriptPerformanceTests: XCTestCase {
         XCTAssertEqual(prepared.revision, revision)
         XCTAssertEqual(prepared.entries.count, 40)
         XCTAssertTrue(prepared.jobs.isEmpty, "Foreground output must not produce background jobs")
+    }
+
+    func testPreparedRowsCarryPlaceholderIdentityAndLargeChangeFlag() throws {
+        let data = try ChatHeavyFixture.data()
+        let frame = try AgentChatTranscript.read(data, source: "codex")
+        var prepared = ChatTranscriptPreparation()
+        prepared.update(frame.messages)
+        XCTAssertFalse(prepared.entries.isEmpty)
+        for entry in prepared.entries {
+            XCTAssertFalse(entry.placeholderIdentifier.isEmpty, "every row keeps an identifier when folded off screen")
+            XCTAssertFalse(entry.placeholderLabel.isEmpty, "every row keeps a label when folded off screen")
+        }
+        let withChanges = prepared.entries.filter { $0.messages.contains(where: \.isChange) }
+        XCTAssertFalse(withChanges.isEmpty)
+        XCTAssertTrue(withChanges.allSatisfy(\.hasLargeCollapsedChange),
+                      "the heavy fixture's folded patches use the bounded path")
     }
 
     func testContentKeyChangesForEqualLengthEditsAndMarkdownKeepsLinksAndTables() throws {

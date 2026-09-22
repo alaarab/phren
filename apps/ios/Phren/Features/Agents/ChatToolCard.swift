@@ -11,9 +11,9 @@ struct ChatToolCard: View, Equatable {
     }
     @ViewBuilder private var content: some View {
         switch entry.card {
-        case .agent(let agent): ChatAgentCard(agent: agent, entry: entry)
-        case .todos(let list): ChatTodoCard(list: list, entry: entry)
-        case .plan(let plan): ChatPlanCard(plan: plan, entry: entry)
+        case .agent(let agent): ChatAgentCard(agent: agent, entry: entry).equatable()
+        case .todos(let list): ChatTodoCard(list: list, entry: entry).equatable()
+        case .plan(let plan): ChatPlanCard(plan: plan, entry: entry).equatable()
         case .planMode: ChatPlanModeChip(id: entry.callID)
         case .web(let web): WebToolCard(presentation: web, messages: entry.messages, markdownKey: entry.cardMarkdownKey)
         case .skill(let skill): SkillChip(presentation: skill, messages: entry.messages)

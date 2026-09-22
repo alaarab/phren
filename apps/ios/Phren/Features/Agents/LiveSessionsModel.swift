@@ -1,0 +1,116 @@
+import Foundation
+import Observation
+import PhrenKit
+import PhrenLive
+
+/// The Agents overview's derived state: the one configuration the shared
+/// monitor polls with, the host-to-monitor index the rows resolve through,
+/// and the search, Focus and refresh state the toolbar owns. The view draws;
+/// the model decides what changes, so a second of freshness ticks never
+/// rescans every computer for every row.
+@Observable @MainActor
+final class LiveSessionsModel {
+    /// One computer's identity as the overview resolved it, so the pin write
+    /// can compare without walking the computer list again.
+    struct HookAssociation: Equatable, Hashable {
+        let hostID: UUID
+        let computerID: UUID
+    }
+
+    /// The monitor index: rebuilt only when the set of computers changes, so
+    /// the per-row lookup is a dictionary hit, not a linear scan. The count
+    /// is the test hook for the derived-list cache.
+    struct MonitorIndex {
+        private(set) var ids: [UUID] = []
+        private(set) var byHost: [UUID: LiveHostMonitor] = [:]
+        private(set) var computations = 0
+
+        mutating func resolve(_ computers: [SessionOverviewMonitor.Computer]) -> [UUID: LiveHostMonitor] {
+            let ids = computers.map(\.id).sorted { $0.uuidString < $1.uuidString }
+            guard ids != self.ids else { return byHost }
+            self.ids = ids
+            byHost = Dictionary(computers.map { ($0.id, $0.monitor) }, uniquingKeysWith: { first, _ in first })
+            computations += 1
+            return byHost
+        }
+    }
+
+    private(set) var query = ""
+    private(set) var focusFilter = AgentFocusFilterStore.load()
+    private(set) var refreshID = UUID()
+    var adding = false
+
+    @ObservationIgnored let overview: SessionOverviewMonitor
+    @ObservationIgnored private var index = MonitorIndex()
+    @ObservationIgnored private var lastRefreshID = UUID()
+    @ObservationIgnored private var preferences: LiveSessionPreferences?
+    @ObservationIgnored private var projects: [SessionProject] = []
+    @ObservationIgnored private var metadataReady = true
+    @ObservationIgnored private var memoryConnected = true
+    @ObservationIgnored private var associations: [HookAssociation] = []
+
+    init(overview: SessionOverviewMonitor = .shared) { self.overview = overview }
+
+    var hosts: [LiveHost] { preferences?.hosts ?? [] }
+
+    var configuration: SessionOverviewMonitor.Configuration {
+        .init(query: query, preferences: preferences, projects: projects, focusFilter: focusFilter,
+              metadataReady: metadataReady, memoryConnected: memoryConnected)
+    }
+
+    /// The overview's one published value for the whole screen.
+    var screen: SessionOverviewMonitor.Screen { overview.screen }
+
+    /// The monitor for a session's host, through the cached index.
+    func monitor(for hostID: UUID) -> LiveHostMonitor? {
+        index.resolve(overview.computers)[hostID]
+    }
+
+    var hookAssociations: [HookAssociation] {
+        let next = overview.computers.compactMap { computer in
+            computer.monitor.snapshot?.computer.map { HookAssociation(hostID: computer.host.id, computerID: $0.id) }
+        }.sorted { $0.hostID.uuidString < $1.hostID.uuidString }
+        if next != associations { associations = next }
+        return next
+    }
+
+    /// The store's metadata the monitor needs; the shared monitor guards its
+    /// own equality, so an unchanged input never reconfigures it.
+    func update(preferences: LiveSessionPreferences?, projects: [SessionProject],
+                metadataReady: Bool, memoryConnected: Bool) {
+        self.preferences = preferences
+        self.projects = projects
+        self.metadataReady = metadataReady
+        self.memoryConnected = memoryConnected
+        overview.configure(configuration)
+    }
+
+    func setQuery(_ value: String) {
+        guard value != query else { return }
+        query = value
+        overview.configure(configuration)
+    }
+
+    func setFocusFilter(_ value: AgentFocusFilter?) {
+        guard value != focusFilter else { return }
+        focusFilter = value
+        overview.configure(configuration)
+    }
+
+    func refresh() { refreshID = UUID() }
+
+    /// Start or keep polling from the task the monitor owns. A manual refresh
+    /// restarts the run; otherwise the going run keeps going.
+    func syncPolling(hosts: [LiveHost], active: Bool) {
+        guard active else { overview.stopRunning(); return }
+        overview.configure(configuration)
+        let currentHosts = hosts
+        Task {
+            await Task.yield()
+            SpotlightIndex.shared.reconcileHosts(currentHosts)
+            await WidgetBridge.reconcileSessionHosts(currentHosts)
+        }
+        if refreshID != lastRefreshID { lastRefreshID = refreshID; overview.stopRunning() }
+        overview.ensureRunning(hosts: currentHosts)
+    }
+}

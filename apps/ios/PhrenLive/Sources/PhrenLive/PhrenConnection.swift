@@ -74,12 +74,7 @@ public enum PhrenConnection {
         try host.validate()
         let data = try await fetchData(host: host, key: Curve25519.Signing.PrivateKey(rawRepresentation: privateKey))
         try Task.checkCancellation()
-        guard let response = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let helper = response["phren"] as? [String: Any], helper["product"] as? String == "phren-hook",
-              helper["protocol"] as? Int == 1 else {
-            throw PhrenKitError.validation("Install Phren Hook on this computer with phren bridge install.")
-        }
-        return try LiveWorkspaces.read(data)
+        return try LiveWorkspaces.read(data, requiringHook: true)
     }
 
     static func fetchData(host: LiveHost, key: Curve25519.Signing.PrivateKey, request: GatewayRequest = .workspaces,

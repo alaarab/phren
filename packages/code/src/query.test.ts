@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeTempDir } from "../../cli/src/test-helpers.js";
 import { indexProject } from "./indexer.js";
 import { definition, outline, references, search, usage } from "./query.js";
+import { openCodeDatabase, rowsOf } from "./store.js";
 
 const FIXTURES = path.join(__dirname, "__fixtures__");
 
@@ -42,6 +43,21 @@ describe("code search", () => {
     expect(result.value.length).toBeGreaterThan(0);
     expect(result.value[0].name).toBe("add");
     expect(result.value[0].kind).toBe("function");
+  });
+
+  it("preserves bm25 scores when scoring matches in one pass", async () => {
+    const database = (await openCodeDatabase(store, "fixture", false))!;
+    try {
+      const fts = '"point"*';
+      const reference = rowsOf(database.db, `SELECT s.id,
+        (SELECT bm25(symbols_fts) FROM symbols_fts WHERE symbols_fts.rowid = s.id AND symbols_fts MATCH ?)
+        FROM symbols s WHERE s.id IN (SELECT rowid FROM symbols_fts WHERE symbols_fts MATCH ?)`, [fts, fts]);
+      const result = await search(store, "fixture", "point");
+      expect(reference.length).toBeGreaterThan(0);
+      for (const [id, score] of reference) {
+        expect(result.value.find(hit => hit.id === id)?.rank).toBe(score);
+      }
+    } finally { database.close(); }
   });
 
   it("matches by prefix", async () => {

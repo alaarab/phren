@@ -475,7 +475,7 @@ public struct AgentChatTranscript: Equatable, Sendable {
                 guard (!part.text.isEmpty || part.role == .tool), seen.insert(id).inserted else { continue }
                 let toolCallID = part.toolCallID.flatMap { !$0.isEmpty && $0.utf8.count <= 512 ? $0 : nil }
                 var message = AgentChatMessage(id: id, line: line, role: part.role, title: part.title,
-                                               text: String(part.text.prefix(64_000)), imageBlocks: part.imageBlocks, resultImages: part.resultImages,
+                                               text: boundedMessageText(part.text), imageBlocks: part.imageBlocks, resultImages: part.resultImages,
                                                uploadImages: part.uploadImages, toolCallID: toolCallID)
                 message.timestamp = Self.timestamp(raw)
                 message.isToolError = part.isToolError
@@ -495,6 +495,15 @@ public struct AgentChatTranscript: Equatable, Sendable {
                     startLine: frame["startLine"] as? Int ?? entries.compactMap { $0["line"] as? Int }.min(),
                     reset: frame["reset"] as? Bool ?? false, questionEvents: questionEvents,
                     progressEvents: progressEvents, queueEvents: queueEvents, context: context)
+    }
+
+    /// Foundation JSON strings can retain NSString storage. Walking a long
+    /// bridged string by Character repeatedly crosses that boundary; make its
+    /// UTF-8 contiguous once before applying the existing grapheme limit.
+    static func boundedMessageText(_ value: String) -> String {
+        var text = value
+        text.makeContiguousUTF8()
+        return text.utf8.count <= 64_000 ? text : String(text.prefix(64_000))
     }
 
     /// A compaction boundary and its summary arrive as adjacent rows. Draw

@@ -1,3 +1,4 @@
+import PhrenKit
 import SwiftUI
 import WebKit
 
@@ -20,8 +21,11 @@ enum GraphAction: Equatable {
 }
 
 /// Local renderer only. Native controls issue a small set of typed commands.
+/// One `WKWebView` is created per host view and kept for its lifetime; a new
+/// payload or command is sent through JavaScript, never by rebuilding the
+/// web view, so selecting a node never reloads the page.
 struct GraphWebView: UIViewRepresentable {
-    let payloadJSON: String
+    let payload: GraphPayload
     let command: GraphCommand?
     let onSelect: (GraphNodeRef?) -> Void
     let onAction: (GraphAction) -> Void
@@ -65,7 +69,7 @@ struct GraphWebView: UIViewRepresentable {
         context.coordinator.onSelect = onSelect
         context.coordinator.onAction = onAction
         context.coordinator.onError = onError
-        context.coordinator.pendingPayload = payloadJSON
+        context.coordinator.pendingPayload = payload
         context.coordinator.pendingCommand = command
         context.coordinator.renderIfReady()
     }
@@ -83,7 +87,7 @@ struct GraphWebView: UIViewRepresentable {
         static let handlers = ["graphReady", "graphSelect", "graphAction", "graphError"]
         weak var webView: WKWebView?
         var resourceRoot: URL?
-        var pendingPayload: String?
+        var pendingPayload: GraphPayload?
         var pendingCommand: GraphCommand?
         var onSelect: (GraphNodeRef?) -> Void
         var onAction: (GraphAction) -> Void
@@ -91,7 +95,7 @@ struct GraphWebView: UIViewRepresentable {
         var timeout: DispatchWorkItem?
         private var isReady = false
         private var isRendering = false
-        private var lastRendered: String?
+        private var lastRenderedPayload: GraphPayload?
         private var lastCommand: UUID?
 
         init(onSelect: @escaping (GraphNodeRef?) -> Void,
@@ -111,24 +115,39 @@ struct GraphWebView: UIViewRepresentable {
             DispatchQueue.main.asyncAfter(deadline: .now() + 20, execute: task)
         }
 
+        /// Serialize and parse the payload off the main actor, then send it
+        /// through JavaScript on the one web view this host keeps. An
+        /// unchanged payload only re-runs the pending command.
         func renderIfReady() {
-            guard isReady, !isRendering, let webView, let json = pendingPayload else { return }
-            guard json != lastRendered else { runCommand(); return }
-            guard let payload = try? JSONSerialization.jsonObject(with: Data(json.utf8)) else {
-                onError("The graph data couldn't be read.")
-                return
-            }
+            guard isReady, !isRendering, let payload = pendingPayload else { return }
+            if payload == lastRenderedPayload { runCommand(); return }
             isRendering = true
-            webView.callAsyncJavaScript("window.phrenHost.render(payload); return true;",
-                                       arguments: ["payload": payload], in: nil, in: .page) { [weak self] result in
-                guard let self else { return }
-                self.isRendering = false
-                switch result {
-                case .success:
-                    self.lastRendered = json
-                    self.renderIfReady()
-                case .failure:
-                    self.onError("The graph couldn't be drawn. Try opening it again.")
+            Task.detached(priority: .userInitiated) {
+                let json = try? payload.jsonString()
+                let object = json.flatMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) }
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    guard let webView = self.webView else {
+                        self.isRendering = false
+                        return
+                    }
+                    guard let object else {
+                        self.isRendering = false
+                        self.onError("The graph data couldn't be read.")
+                        return
+                    }
+                    webView.callAsyncJavaScript("window.phrenHost.render(payload); return true;",
+                                                arguments: ["payload": object], in: nil, in: .page) { [weak self] result in
+                        guard let self else { return }
+                        self.isRendering = false
+                        switch result {
+                        case .success:
+                            self.lastRenderedPayload = payload
+                            self.renderIfReady()
+                        case .failure:
+                            self.onError("The graph couldn't be drawn. Try opening it again.")
+                        }
+                    }
                 }
             }
         }

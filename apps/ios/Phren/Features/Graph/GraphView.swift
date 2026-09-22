@@ -16,7 +16,6 @@ struct GraphView: View {
     @State private var payloadRevision = UUID()
     @State private var filtered: GraphPayload?
     @State private var visible: GraphPayload?
-    @State private var payloadJSON: String?
     @State private var error: String?
     @State private var selection: GraphNodeRef?
     @State private var editingNode: GraphNodeRef?
@@ -63,8 +62,8 @@ struct GraphView: View {
                 LiveStatusBar()
                 controls
                 ZStack(alignment: .bottomTrailing) {
-                    if let visible, let json = payloadJSON, !visible.nodes.isEmpty {
-                        GraphWebView(payloadJSON: json, command: command,
+                    if let visible, !visible.nodes.isEmpty {
+                        GraphWebView(payload: visible, command: command,
                                      onSelect: receiveSelection,
                                      onAction: handleGraphAction,
                                      onError: { error = $0 })
@@ -142,7 +141,7 @@ struct GraphView: View {
         }
         .task(id: refreshKey) { await rebuild() }
         #if DEBUG && targetEnvironment(simulator)
-        .task(id: payloadJSON == nil) { await revealForRecording() }
+        .task(id: visible == nil) { await revealForRecording() }
         #endif
         .task(id: PresentationKey(revision: payloadRevision, filter: filter, focus: focusedNodeID, steps: connectionSteps)) {
             guard let payload else { return }
@@ -151,10 +150,10 @@ struct GraphView: View {
                 let presentation = try await Task.detached(priority: .userInitiated) {
                     let filtered = payload.filtered(by: filter)
                     let visible = focus.map { filtered.neighborhood(of: $0, steps: steps) } ?? filtered
-                    return (filtered, visible, try visible.jsonString())
+                    return (filtered, visible)
                 }.value
                 try Task.checkCancellation()
-                filtered = presentation.0; visible = presentation.1; payloadJSON = presentation.2
+                filtered = presentation.0; visible = presentation.1
             } catch is CancellationError {} catch { self.error = error.localizedDescription }
         }
         .onChange(of: selection?.id) { previous, current in
@@ -495,7 +494,7 @@ struct GraphView: View {
     /// names where the layout put it.
     private func revealForRecording() async {
         let arguments = ProcessInfo.processInfo.arguments
-        guard AppModel.isUITesting, payloadJSON != nil,
+        guard AppModel.isUITesting, visible != nil,
               let index = arguments.firstIndex(of: "--graph-reveal"), index + 1 < arguments.count else { return }
         let text = arguments[index + 1]
         let delay = arguments.firstIndex(of: "--graph-reveal-after").flatMap { $0 + 1 < arguments.count ? Double(arguments[$0 + 1]) : nil } ?? 8

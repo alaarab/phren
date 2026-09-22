@@ -57,28 +57,20 @@ struct ChatReadRun: View, Equatable {
     let messages: [AgentChatMessage]
     var resultImages: ((AgentChatMessage) -> AnyView)? = nil
     var imageContext = ""
+    /// The folded run's summary and inner cards, precomputed in preparation.
+    let presentation: ChatReadRunPresentation
     @State private var expanded = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    static func == (lhs: Self, rhs: Self) -> Bool { lhs.messages == rhs.messages && lhs.imageContext == rhs.imageContext }
-    private let groups: [ChatTimelineEntry]
-    private let title: String
-    private let preview: String
-    init(messages: [AgentChatMessage], resultImages: ((AgentChatMessage) -> AnyView)? = nil, imageContext: String = "") {
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.messages == rhs.messages && lhs.imageContext == rhs.imageContext && lhs.presentation == rhs.presentation
+    }
+    private var groups: [ChatTimelineEntry] { presentation.groups }
+    private var title: String { presentation.title }
+    private var preview: String { presentation.preview }
+    init(messages: [AgentChatMessage], presentation: ChatReadRunPresentation? = nil,
+         resultImages: ((AgentChatMessage) -> AnyView)? = nil, imageContext: String = "") {
         self.messages = messages; self.resultImages = resultImages; self.imageContext = imageContext
-        // The outer grouping has already established the run. Re-grouping
-        // restores the exact call/result cards shown before it was folded.
-        groups = ChatTimelineEntry.group(messages, foldingReads: false)
-        let calls = groups.compactMap { $0.messages.first(where: { !$0.isToolResult && !$0.isChange }) }
-        // What the agent did, in the order it did it: "Shell ×4 · Read ×2".
-        var counts: [(name: String, count: Int)] = []
-        for name in calls.map({ ToolPresentationCache.value($0).title }) {
-            if let index = counts.firstIndex(where: { $0.name == name }) { counts[index].count += 1 }
-            else { counts.append((name, 1)) }
-        }
-        title = counts.prefix(3).map { $0.count > 1 ? "\($0.name) ×\($0.count)" : $0.name }.joined(separator: " · ")
-            + (counts.count > 3 ? " …" : "")
-        // The last command, so the row still says where the agent got to.
-        preview = calls.last.map { ToolPresentationCache.value($0).preview } ?? ""
+        self.presentation = presentation ?? ChatReadRunPresentation(messages)
     }
     var body: some View { ChatPerformance.measure("read-run row") { content } }
     @ViewBuilder private var content: some View {
@@ -100,7 +92,8 @@ struct ChatReadRun: View, Equatable {
                 .accessibilityIdentifier("chat-read-run:\(messages[0].id)")
             if expanded {
                 ForEach(groups) { group in
-                    ChatToolActivity(messages: group.messages, resultImages: resultImages, imageContext: imageContext).equatable()
+                    ChatToolActivity(messages: group.messages, resultImages: resultImages, imageContext: imageContext,
+                                     hasLargeCollapsedChange: group.hasLargeCollapsedChange).equatable()
                 }.padding(.horizontal, PhrenDensity.toolCardPadding)
             }
         }.padding(.bottom, expanded ? PhrenDensity.toolCardPadding : 0)
@@ -114,18 +107,18 @@ struct ChatToolActivity: View, Equatable {
     /// the live session; nil where a card is shown without one.
     var resultImages: ((AgentChatMessage) -> AnyView)? = nil
     var imageContext = ""
-    static func == (lhs: Self, rhs: Self) -> Bool { lhs.messages == rhs.messages && lhs.imageContext == rhs.imageContext }
+    /// A folded patch inside this row is big enough for the bounded
+    /// accessibility path. Decided in preparation, not while drawing.
+    var hasLargeCollapsedChange = false
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.messages == rhs.messages && lhs.imageContext == rhs.imageContext && lhs.hasLargeCollapsedChange == rhs.hasLargeCollapsedChange
+    }
     @State private var expanded = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// A very large folded patch shows only summary rows on screen. Its outer
     /// button remains accessible; opening it restores the patch controls and
     /// their identifiers.
-    private var condensesCollapsedAccessibility: Bool {
-        !expanded && messages.contains { message in
-            message.isChange
-                && DiffDocumentSummaryCache.value(for: message.text, key: message.renderKey).rowCount > 120
-        }
-    }
+    private var condensesCollapsedAccessibility: Bool { !expanded && hasLargeCollapsedChange }
     var body: some View {
         ChatPerformance.measure("tool row") { content }
     }
@@ -179,7 +172,7 @@ struct ChatToolActivity: View, Equatable {
             if !expanded, !changed.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(changed.prefix(4)) { change in
-                        CodeDiffView(patch: change.text, cacheKey: change.renderKey, previewLineLimit: 12, collapsible: true)
+                        CodeDiffView(patch: change.text, cacheKey: change.renderKey, previewLineLimit: 12, collapsible: true).equatable()
                     }
                     if changed.count > 4 {
                         Text("+\(changed.count - 4) more files").font(.system(.caption, design: .monospaced)).foregroundStyle(PhrenTheme.chatNeutralDim)
@@ -208,6 +201,7 @@ struct ChatToolActivity: View, Equatable {
                     let presentation = ToolPresentationCache.value(message)
                     if let patch = presentation.patch {
                         CodeDiffView(patch: patch, cacheKey: message.renderKey, previewLineLimit: 12, collapsible: true)
+                            .equatable()
                             .padding(.horizontal, 10).padding(.bottom, 10)
                     }
                 }
@@ -249,7 +243,7 @@ private struct ToolDetailView: View {
             if let patch = presentation.patch {
                 // No identifier on the container: it would be stamped onto the
                 // diff's own rows and hide their `chat-patch-file:` ids.
-                CodeDiffView(patch: patch, cacheKey: renderKey, previewLineLimit: collapsible ? 12 : 8, collapsible: collapsible)
+                CodeDiffView(patch: patch, cacheKey: renderKey, previewLineLimit: collapsible ? 12 : 8, collapsible: collapsible).equatable()
             }
             else {
                 HStack(spacing: 8) {

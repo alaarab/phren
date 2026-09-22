@@ -15,6 +15,18 @@ final class LiveSessionsTests: XCTestCase {
         XCTAssertThrowsError(try LiveWorkspaces.read(Data(#"{"kind":"herdr","groups":[{"id":"w1","label":"a","children":[]},{"id":"w1","label":"b","children":[]}]}"#.utf8)))
     }
 
+    func testGatewayEnvelopeIsValidatedDuringTheSameDecode() throws {
+        let valid = Data(#"{"kind":"herdr","groups":[],"phren":{"product":"phren-hook","protocol":1}}"#.utf8)
+        XCTAssertNoThrow(try LiveWorkspaces.read(valid, requiringHook: true))
+        XCTAssertThrowsError(try LiveWorkspaces.read(fixture, requiringHook: true))
+        for envelope in [#"{"product":"other","protocol":1}"#, #"{"product":"phren-hook","protocol":2}"#] {
+            let data = Data("{\"kind\":\"herdr\",\"groups\":[],\"phren\":\(envelope)}".utf8)
+            XCTAssertThrowsError(try LiveWorkspaces.read(data, requiringHook: true))
+        }
+        let roundTrip = try JSONEncoder().encode(LiveWorkspaces.read(valid, requiringHook: true))
+        XCTAssertEqual(try LiveWorkspaces.read(roundTrip), try LiveWorkspaces.read(valid), "Gateway validation must not change model equality or stored snapshots")
+    }
+
     func testFocusIsOptionalAndMustReferenceTheReportedWorkspaceAndTab() throws {
         XCTAssertNil(try LiveWorkspaces.read(fixture).focus)
         var raw = try XCTUnwrap(JSONSerialization.jsonObject(with: fixture) as? [String: Any])

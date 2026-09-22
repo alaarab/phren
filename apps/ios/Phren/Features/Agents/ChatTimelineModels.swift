@@ -12,9 +12,28 @@ struct ChatTimelineEntry: Identifiable, Equatable {
     /// A whole-list card (todos) that a later call replaced: shown folded
     /// to one line. Settled once in the grouping pass, never per row.
     var cardSuperseded = false
+    /// A folded patch in this row is large enough to need the bounded
+    /// accessibility path. Settled in preparation, never in a row's body.
+    var hasLargeCollapsedChange = false
+    /// The folded run's title, preview and inner groups: built once in
+    /// preparation (cached by message id and content revision), so drawing a
+    /// read-run row never re-groups or re-reads its presentations.
+    var readRun: ChatReadRunPresentation? = nil
+    /// The identifier and label a row keeps when it is far enough off screen
+    /// to draw as a fixed-height placeholder. Empty stays fully drawn.
+    var placeholderIdentifier = ""
+    var placeholderLabel = ""
     var id: String { messages[0].id }
     var isActivity: Bool { kind != .message }
     var isReadRun: Bool { kind == .readRun }
+
+    /// A folded change whose diff summary is too big to expose row by row.
+    static func largeCollapsedChange(_ messages: [AgentChatMessage]) -> Bool {
+        messages.contains { message in
+            message.isChange
+                && DiffDocumentSummaryCache.value(for: message.text, key: message.renderKey).rowCount > 120
+        }
+    }
 
     static func group(_ messages: [AgentChatMessage], foldingReads: Bool = true) -> [Self] {
         var entries: [Self] = []
@@ -111,6 +130,37 @@ struct ChatTimelineEntry: Identifiable, Equatable {
         }
         flush()
         return result
+    }
+}
+
+/// A folded read run as its row draws it: the inner call/result cards and the
+/// summary line. Built once in `ChatTranscriptPreparation`, keyed by the run's
+/// first and last content revision, so no row's body re-groups or re-reads
+/// presentations while scrolling.
+struct ChatReadRunPresentation: Equatable {
+    let groups: [ChatTimelineEntry]
+    let title: String
+    let preview: String
+
+    init(_ messages: [AgentChatMessage]) {
+        // The outer grouping has already established the run. Re-grouping
+        // restores the exact call/result cards shown before it was folded.
+        var groups = ChatTimelineEntry.group(messages, foldingReads: false)
+        for index in groups.indices {
+            groups[index].hasLargeCollapsedChange = ChatTimelineEntry.largeCollapsedChange(groups[index].messages)
+        }
+        self.groups = groups
+        let calls = groups.compactMap { $0.messages.first(where: { !$0.isToolResult && !$0.isChange }) }
+        // What the agent did, in the order it did it: "Shell ×4 · Read ×2".
+        var counts: [(name: String, count: Int)] = []
+        for name in calls.map({ ToolPresentationCache.value($0).title }) {
+            if let index = counts.firstIndex(where: { $0.name == name }) { counts[index].count += 1 }
+            else { counts.append((name, 1)) }
+        }
+        title = counts.prefix(3).map { $0.count > 1 ? "\($0.name) ×\($0.count)" : $0.name }.joined(separator: " · ")
+            + (counts.count > 3 ? " …" : "")
+        // The last command, so the row still says where the agent got to.
+        preview = calls.last.map { ToolPresentationCache.value($0).preview } ?? ""
     }
 }
 
@@ -234,6 +284,20 @@ enum ToolCardKind: Equatable {
         case .plan(let plan): return plan.plan.isEmpty ? nil : ToolOutputPreview(plan.plan, lines: 14, characters: 2_000)
         case .web(let web): return web.resultMarkdown.map { ToolOutputPreview($0, lines: WebToolPresentation.previewLines, characters: 4_000) }
         default: return nil
+        }
+    }
+
+    /// The short label the card keeps when its row is far enough off screen to
+    /// draw as a placeholder.
+    func offScreenLabel(callID: String) -> String {
+        switch self {
+        case .agent(let agent): return "\(agent.name), \(agent.description), \(agent.state.rawValue)"
+        case .todos(let list): return "\(list.title), \(list.summary)"
+        case .plan: return "Plan ready for review"
+        case .planMode: return "Entered plan mode"
+        case .web(let web): return "\(web.title), \(web.location)"
+        case .skill(let skill): return "Skill \(skill.command)" + (skill.args.map { ", \($0)" } ?? "")
+        case .mcp(let mcp): return "\(mcp.server) · \(mcp.verb)"
         }
     }
 }

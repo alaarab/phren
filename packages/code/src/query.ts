@@ -246,7 +246,7 @@ function escapeLike(value: string): string {
  * Ranked symbol search.
  *
  * Order is exact name, then prefix, then FTS5 bm25 over name/signature/doc,
- * then usage count, exactly as docs/code-index.md specifies. The bm25 subquery
+ * then usage count, exactly as docs/code-index.md specifies. FTS scoring
  * is optional so a query with no usable tokens still matches by name.
  */
 export async function search(
@@ -261,11 +261,15 @@ export async function search(
     if (!trimmed) return [] as SymbolHit[];
     const fts = ftsQuery(trimmed);
     const params: SqlValue[] = [];
-    let rankSelect = "NULL AS rank";
+    // Score the FTS result set once. A correlated bm25 subquery repeats
+    // the match work for every candidate, quadratic on broad prefixes.
+    // Keep final locale-aware ordering below, including non-ASCII names.
+    const ranks = new Map<number, number>();
     const conditions: string[] = [];
     if (fts) {
-      rankSelect = `(SELECT bm25(symbols_fts) FROM symbols_fts WHERE symbols_fts.rowid = s.id AND symbols_fts MATCH ?) AS rank`;
-      params.push(fts);
+      for (const row of rowsOf(db, "SELECT rowid, bm25(symbols_fts) FROM symbols_fts WHERE symbols_fts MATCH ?", [fts])) {
+        ranks.set(numberAt(row, 0), numberAt(row, 1));
+      }
       conditions.push(`(LOWER(s.name) = LOWER(?) OR LOWER(s.name) LIKE LOWER(?) ESCAPE '\\' OR s.id IN (SELECT rowid FROM symbols_fts WHERE symbols_fts MATCH ?))`);
       params.push(trimmed, `${escapeLike(trimmed.toLowerCase())}%`, fts);
     } else {
@@ -276,8 +280,8 @@ export async function search(
       conditions.push("s.kind = ?");
       params.push(kind);
     }
-    const rows = rowsOf(db, `SELECT ${SYMBOL_COLUMNS}, ${rankSelect} FROM symbols s WHERE ${conditions.join(" AND ")}`, params);
-    const hits = rows.map(row => mapSymbol(row, row[11] === null || row[11] === undefined ? undefined : numberAt(row, 11)));
+    const rows = rowsOf(db, `SELECT ${SYMBOL_COLUMNS} FROM symbols s WHERE ${conditions.join(" AND ")}`, params);
+    const hits = rows.map(row => mapSymbol(row, ranks.get(numberAt(row, 0))));
     const lowered = trimmed.toLowerCase();
     hits.sort((a, b) => {
       const aExact = a.name.toLowerCase() === lowered ? 1 : 0;

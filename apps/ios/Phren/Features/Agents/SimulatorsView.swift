@@ -87,7 +87,10 @@ struct SimulatorScreen: View {
                     if AgentChatFixture.enabled { image = Self.fixtureImage; try await Task.sleep(for: .seconds(interval)); continue }
                     #endif
                     let data = try await PhrenConnection.simulatorScreenshot(host: host, privateKey: DeviceSSHKey.load(host.id), udid: simulator.udid)
-                    if let decoded = UIImage(data: data) { image = decoded; failed = false } else { failed = true }
+                    let decoded = await Task.detached(priority: .userInitiated) {
+                        UIImage(data: data)?.preparingForDisplay()
+                    }.value
+                    if let decoded { image = decoded; failed = false } else { failed = true }
                 } catch { if !Task.isCancelled { failed = image == nil } }
                 try? await Task.sleep(for: .seconds(interval))
             }

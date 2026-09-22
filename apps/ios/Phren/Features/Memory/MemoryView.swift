@@ -18,7 +18,6 @@ struct MemoryView: View {
     @State private var payload: GraphPayload?
     @State private var payloadRevision = UUID()
     @State private var visible: GraphPayload?
-    @State private var payloadJSON: String?
     @State private var nodes = MemoryBrowsing.NodeIndex(payload: nil)
     @State private var nodesRevision = UUID()
     @State private var contents: [MemoryItem] = []
@@ -235,7 +234,6 @@ struct MemoryView: View {
         projectsRaw = ""
         payload = nil
         visible = nil
-        payloadJSON = nil
         error = nil
     }
 
@@ -251,8 +249,8 @@ struct MemoryView: View {
     private var map: some View {
         ZStack(alignment: .topTrailing) {
             PhrenTheme.bg
-            if let visible, let json = payloadJSON, !visible.nodes.isEmpty {
-                GraphWebView(payloadJSON: json, command: command,
+            if let visible, !visible.nodes.isEmpty {
+                GraphWebView(payload: visible, command: command,
                              onSelect: receiveSelection, onAction: handleGraphAction,
                              onError: { error = $0 })
                     .id(rendererID)
@@ -619,12 +617,11 @@ struct MemoryView: View {
                 let scoped = chosen.isEmpty ? payload : payload.keeping(projects: chosen)
                 let filtered = scoped.filtered(by: filter)
                 let visible = focus.map { filtered.neighborhood(of: $0, steps: 1) } ?? filtered
-                return (visible, try visible.jsonString(), MemoryBrowsing.NodeIndex(payload: visible))
+                return (visible, MemoryBrowsing.NodeIndex(payload: visible))
             }.value
             try Task.checkCancellation()
             visible = presentation.0
-            payloadJSON = presentation.1
-            nodes = presentation.2
+            nodes = presentation.1
             nodesRevision = UUID()
         } catch is CancellationError {
         } catch {

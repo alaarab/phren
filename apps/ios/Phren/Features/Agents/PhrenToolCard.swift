@@ -1,10 +1,11 @@
 import PhrenKit
 import SwiftUI
 
-struct PhrenToolCard: View {
+struct PhrenToolCard: View, Equatable {
     let presentation: PhrenToolPresentation
     let messages: [AgentChatMessage]
     @Environment(\.openToolOutput) private var openOutput
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.presentation == rhs.presentation && lhs.messages == rhs.messages }
 
     var body: some View {
         Button {
@@ -55,9 +56,7 @@ struct PhrenToolCard: View {
                     Text("· \(title)").font(.caption).foregroundStyle(PhrenTheme.textSecondary).lineLimit(1)
                 }
             }
-            .padding(PhrenDensity.toolCardPadding).frame(maxWidth: .infinity, alignment: .leading)
-            .background(PhrenTheme.phrenCardSurface, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium))
-            .overlay(RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium).strokeBorder(PhrenTheme.phrenCardBorder, lineWidth: 0.5))
+            .toolCard()
             .contentShape(RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium))
         }
         .buttonStyle(.plain)

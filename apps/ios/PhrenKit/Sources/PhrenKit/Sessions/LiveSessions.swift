@@ -230,8 +230,11 @@ public struct LiveWorkspaces: Codable, Equatable, Sendable {
         return Self(kind: kind, groups: groups, focus: focus, computer: computer, phren: phren)
     }
 
+    private static let requiringHookKey = CodingUserInfoKey(rawValue: "Phren.requiresHookEnvelope")!
     private enum CodingKeys: String, CodingKey { case kind, groups, focus, phren }
     private struct PhrenInfo: Codable {
+        var product: String? = nil
+        var `protocol`: Int? = nil
         let computer: Computer?
         let capabilities: LiveCapabilities?
         let modules: [String: String]?
@@ -252,6 +255,11 @@ public struct LiveWorkspaces: Codable, Equatable, Sendable {
         groups = try values.decode([Group].self, forKey: .groups)
         focus = try values.decodeIfPresent(Focus.self, forKey: .focus)
         let info = try values.decodeIfPresent(PhrenInfo.self, forKey: .phren)
+        if decoder.userInfo[Self.requiringHookKey] as? Bool == true {
+            guard info?.product == "phren-hook", info?.protocol == 1 else {
+                throw PhrenKitError.validation("Install Phren Hook on this computer with phren bridge install.")
+            }
+        }
         computer = info?.computer
         phren = info.map { LiveHookInfo(capabilities: $0.capabilities, modules: $0.modules, store: $0.store, profile: $0.profile, generation: $0.generation, load: $0.load, gatewayMs: $0.gatewayMs) }
     }
@@ -268,9 +276,11 @@ public struct LiveWorkspaces: Codable, Equatable, Sendable {
         }
     }
 
-    public static func read(_ data: Data) throws -> Self {
+    public static func read(_ data: Data, requiringHook: Bool = false) throws -> Self {
         guard data.count <= 1_048_576 else { throw PhrenKitError.validation("The session response is too large.") }
-        let result = try JSONDecoder().decode(Self.self, from: data)
+        let decoder = JSONDecoder()
+        if requiringHook { decoder.userInfo[requiringHookKey] = true }
+        let result = try decoder.decode(Self.self, from: data)
         guard result.kind == "herdr" else {
             throw PhrenKitError.validation("Phren Hook returned an unsupported session provider.")
         }

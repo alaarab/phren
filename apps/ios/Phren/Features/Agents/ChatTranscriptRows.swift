@@ -1,6 +1,29 @@
 import PhrenKit
 import SwiftUI
 
+/// Every materialized row's frame in the transcript's scroll space, so the
+/// stack can tell which rows still sit near the viewport.
+private struct ChatRowFramesKey: PreferenceKey {
+    static let defaultValue: [String: CGRect] = [:]
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue()) { _, new in new }
+    }
+}
+
+/// A far-off screen row: its identifier and label only, at the height it last
+/// measured, so its rich subtree is never laid out and scrolling does not jump.
+private struct ChatRowPlaceholder: View {
+    let identifier: String
+    let label: String
+    var body: some View {
+        Color.clear
+            .frame(maxWidth: .infinity)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(label)
+            .accessibilityIdentifier(identifier)
+    }
+}
+
 /// Plain values isolate transcript layout from connection, composer, usage,
 /// and scroll-position changes in the observable chat model.
 struct ChatTranscriptRows: View, Equatable {
@@ -12,22 +35,55 @@ struct ChatTranscriptRows: View, Equatable {
     let session: LiveAgentSession
     let target: AgentChatTarget?
     let active: Bool
+    /// The scroll viewport's height, from the chat screen; zero disables
+    /// placeholder folding (the child-agent transcript stays fully drawn).
+    var viewportHeight: CGFloat = 0
     let preview: (ChatAttachmentDraft) -> Void
+    /// Rows more than two screens away that have a measured height draw as
+    /// placeholders; heights are learnt as rows pass near the viewport.
+    @State private var distant: Set<String> = []
+    @State private var heights: [String: CGFloat] = [:]
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.revision == rhs.revision && lhs.revealRevision == rhs.revealRevision
             && lhs.images == rhs.images && lhs.session.id == rhs.session.id
-            && lhs.target == rhs.target && lhs.active == rhs.active
+            && lhs.target == rhs.target && lhs.active == rhs.active && lhs.viewportHeight == rhs.viewportHeight
     }
     var body: some View {
         ChatPerformance.measure("transcript rows") {
             LazyVStack(alignment: .leading, spacing: PhrenDensity.transcriptRowSpacing) {
                 ForEach(entries) { entry in
                     ChatTranscriptRow(entry: entry, revealedText: revealed[entry.id], images: images[entry.id] ?? [],
-                                      session: session, target: target, active: active, preview: preview)
+                                      session: session, target: target, active: active, preview: preview,
+                                      distantHeight: distant.contains(entry.id) ? heights[entry.id] : nil)
                         .equatable().id(entry.id)
+                        .background {
+                            GeometryReader { geometry in
+                                Color.clear.preference(key: ChatRowFramesKey.self,
+                                                       value: [entry.id: geometry.frame(in: .named("chat-scroll"))])
+                            }
+                        }
                 }
             }
+            .onPreferenceChange(ChatRowFramesKey.self) { measure($0) }
         }
+    }
+
+    /// Fold a row once it is two screens beyond the viewport and its height is
+    /// known from an earlier pass; a row coming back inside is drawn in full
+    /// again. Heights only update while a row is near, so a placeholder never
+    /// feeds its own height back in.
+    private func measure(_ frames: [String: CGRect]) {
+        guard viewportHeight > 0 else { return }
+        let slack = viewportHeight * 2
+        var nextHeights = heights.filter { frames[$0.key] != nil }
+        var nextDistant = Set<String>()
+        for (id, frame) in frames where !frame.isNull && frame.height > 0 {
+            let far = frame.maxY < -slack || frame.minY > viewportHeight + slack
+            if far, nextHeights[id] != nil { nextDistant.insert(id) }
+            else if !far { nextHeights[id] = frame.height }
+        }
+        if nextHeights != heights { heights = nextHeights }
+        if nextDistant != distant { distant = nextDistant }
     }
 }
 
@@ -39,24 +95,38 @@ private struct ChatTranscriptRow: View, Equatable {
     let target: AgentChatTarget?
     let active: Bool
     let preview: (ChatAttachmentDraft) -> Void
+    /// The measured height to use while the row is far off screen; nil draws
+    /// the row in full.
+    var distantHeight: CGFloat? = nil
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.entry == rhs.entry && lhs.revealedText == rhs.revealedText && lhs.images == rhs.images
             && lhs.session.id == rhs.session.id && lhs.target == rhs.target && lhs.active == rhs.active
+            && lhs.distantHeight == rhs.distantHeight
     }
     var body: some View {
+        if let distantHeight, !entry.placeholderIdentifier.isEmpty {
+            ChatRowPlaceholder(identifier: entry.placeholderIdentifier, label: entry.placeholderLabel)
+                .frame(height: distantHeight)
+        } else {
+            row
+        }
+    }
+    @ViewBuilder private var row: some View {
         #if DEBUG
         let _ = ChatPerformance.enabled ? Self._printChanges() : ()
         #endif
         if let compaction = entry.messages.first, compaction.isCompaction {
-            ChatCompactionRow(message: compaction)
+            ChatCompactionRow(message: compaction).equatable()
         } else if let phren = entry.phren {
-            PhrenToolCard(presentation: phren, messages: entry.messages)
+            PhrenToolCard(presentation: phren, messages: entry.messages).equatable()
         } else if entry.card != nil {
             ChatToolCard(entry: entry)
         } else if entry.isReadRun {
-            ChatReadRun(messages: entry.messages, resultImages: resultImages, imageContext: "\(target?.id ?? "")|\(active)")
+            ChatReadRun(messages: entry.messages, presentation: entry.readRun, resultImages: resultImages,
+                        imageContext: "\(target?.id ?? "")|\(active)")
         } else if entry.isActivity {
-            ChatToolActivity(messages: entry.messages, resultImages: resultImages, imageContext: "\(target?.id ?? "")|\(active)")
+            ChatToolActivity(messages: entry.messages, resultImages: resultImages, imageContext: "\(target?.id ?? "")|\(active)",
+                             hasLargeCollapsedChange: entry.hasLargeCollapsedChange)
         } else if let message = entry.messages.first {
             ChatMessageRow(message: message, revealedText: revealedText, images: images, preview: preview) {
                 if let target {
@@ -240,9 +310,10 @@ private struct LocalCommandRow: View {
 /// Claude Code summarizing the conversation: one small centered system line.
 /// The summary's words stay behind a tap, so a 25 KB summary can never draw
 /// a giant bubble or throw the scroll position.
-private struct ChatCompactionRow: View {
+private struct ChatCompactionRow: View, Equatable {
     let message: AgentChatMessage
     @State private var showing = false
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.message == rhs.message }
     private var hasText: Bool { !message.text.isEmpty }
     var body: some View {
         if hasText {

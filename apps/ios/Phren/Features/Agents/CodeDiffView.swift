@@ -7,7 +7,7 @@ import SwiftUI
 /// characters tinted harder). It stays a preview: a bounded number of lines
 /// until expanded, then 120-line pages so a 2,000-line patch never lays out
 /// at once inside the timeline.
-struct CodeDiffView: View {
+struct CodeDiffView: View, Equatable {
     let patch: String
     let previewLineLimit: Int
     /// A file under a shell call starts as its title bar alone: tap it for
@@ -22,6 +22,10 @@ struct CodeDiffView: View {
     /// scroller instead of stopping where the longest line ends.
     @State private var width: CGFloat = 0
     private let cacheKey: String?
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.patch == rhs.patch && lhs.previewLineLimit == rhs.previewLineLimit
+            && lhs.collapsible == rhs.collapsible && lhs.cacheKey == rhs.cacheKey
+    }
     init(patch: String, cacheKey: String? = nil, previewLineLimit: Int = 36, collapsible: Bool = false) {
         self.patch = patch
         self.previewLineLimit = previewLineLimit

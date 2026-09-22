@@ -9,12 +9,12 @@
 // Run from apps/ios after changing anything under packages/cli/browser/:
 //   node scripts/bundle-graph.mjs
 //
-// The output is gitignored — regenerate it rather than committing 2 MB of
+// The output is gitignored , regenerate it rather than committing 2 MB of
 // minified JS, exactly as PhrenKit's fixtures are regenerated.
 import { build } from "esbuild";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const iosRoot = path.resolve(here, "..");
@@ -28,19 +28,27 @@ if (!fs.existsSync(entry)) {
   process.exit(1);
 }
 
-fs.mkdirSync(outDir, { recursive: true });
+// The app uses WebGL and its postprocessing composer. three-render-objects
+// also imports an optional WebGPU backend, which would otherwise be retained.
+export async function bundleGraph(write = true) {
+  if (write) fs.mkdirSync(outDir, { recursive: true });
+  return build({
+    bundle: true,
+    entryPoints: [entry],
+    format: "iife",
+    legalComments: "none",
+    minify: true,
+    outfile: path.join(outDir, "phren-graph.js"),
+    platform: "browser",
+    target: ["safari17"],
+    alias: { "three/webgpu": path.join(browserRoot, "graph/webgl-only.ts") },
+    metafile: true,
+    write,
+  });
+}
 
-await build({
-  bundle: true,
-  entryPoints: [entry],
-  format: "iife",
-  legalComments: "none",
-  minify: true,
-  outfile: path.join(outDir, "phren-graph.js"),
-  platform: "browser",
-  // Safari on iOS 17 — the app's deployment target.
-  target: ["safari17"],
-});
-
-const bytes = fs.statSync(path.join(outDir, "phren-graph.js")).size;
-console.log(`Wrote Phren/Resources/graph/phren-graph.js (${(bytes / 1024 / 1024).toFixed(2)} MB)`);
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  await bundleGraph();
+  const bytes = fs.statSync(path.join(outDir, "phren-graph.js")).size;
+  console.log(`Wrote Phren/Resources/graph/phren-graph.js (${bytes} bytes)`);
+}

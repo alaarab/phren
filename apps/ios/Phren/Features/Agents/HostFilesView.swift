@@ -86,6 +86,7 @@ private struct HostFileThumbnail: View {
     let host: LiveHost
     let file: HostFile
     @State private var image: UIImage?
+    private var cacheKey: String { "\(host.id)/\(file.path)" }
     var body: some View {
         Group {
             if let image { Image(uiImage: image).resizable().scaledToFill() }
@@ -96,14 +97,21 @@ private struct HostFileThumbnail: View {
             .accessibilityHidden(true)
             .task(id: file.path) {
                 guard ["png", "jpg", "jpeg", "gif", "webp"].contains((file.name as NSString).pathExtension.lowercased()), file.size <= 8_388_608 else { return }
+                if let cached = ImageRasterCache.image(for: cacheKey) { image = cached; return }
                 guard let bytes = try? await PhrenConnection.uploadedImage(host: host, privateKey: DeviceSSHKey.load(host.id), path: file.path), !Task.isCancelled else { return }
-                guard let source = CGImageSourceCreateWithData(bytes as CFData, nil),
-                      let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, [
-                        kCGImageSourceCreateThumbnailFromImageAlways: true,
-                        kCGImageSourceCreateThumbnailWithTransform: true,
-                        kCGImageSourceThumbnailMaxPixelSize: 132,
-                      ] as CFDictionary) else { return }
-                image = UIImage(cgImage: thumbnail)
+                let decoded = await Task.detached(priority: .userInitiated) {
+                    guard let source = CGImageSourceCreateWithData(bytes as CFData, nil),
+                          let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                            kCGImageSourceCreateThumbnailFromImageAlways: true,
+                            kCGImageSourceCreateThumbnailWithTransform: true,
+                            kCGImageSourceShouldCacheImmediately: true,
+                            kCGImageSourceThumbnailMaxPixelSize: 132,
+                          ] as CFDictionary) else { return UIImage?.none }
+                    return UIImage(cgImage: thumbnail).preparingForDisplay()
+                }.value
+                guard !Task.isCancelled, let decoded else { return }
+                ImageRasterCache.store(decoded, for: cacheKey)
+                image = decoded
             }
     }
 }

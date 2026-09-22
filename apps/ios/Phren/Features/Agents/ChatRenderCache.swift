@@ -31,7 +31,7 @@ enum DiffDocumentCache {
         let cache = NSCache<NSString, Box>(); cache.countLimit = 250; cache.totalCostLimit = 32 * 1_024 * 1_024; return cache
     }()
     static func value(for patch: String, key suppliedKey: String? = nil) -> DiffDocument {
-        let key = (suppliedKey ?? "\(patch.utf8.count)|\(patch.hashValue)") as NSString
+        let key = (suppliedKey ?? "patch|" + ChatRenderKey.text(patch)) as NSString
         if let cached = values.object(forKey: key) {
             ChatRenderCacheMetrics.record("diff", hit: true)
             return cached.value
@@ -55,7 +55,7 @@ enum DiffDocumentSummaryCache {
         let cache = NSCache<NSString, Box>(); cache.countLimit = 500; cache.totalCostLimit = 8 * 1_024 * 1_024; return cache
     }()
     static func value(for patch: String, key suppliedKey: String? = nil) -> DiffDocumentSummary {
-        let key = (suppliedKey ?? "\(patch.utf8.count)|\(patch.hashValue)") as NSString
+        let key = (suppliedKey ?? "patch|" + ChatRenderKey.text(patch)) as NSString
         if let cached = values.object(forKey: key) { return cached.value }
         let summary = DiffDocumentSummary(patch: patch)
         values.setObject(Box(summary), forKey: key, cost: patch.utf8.count)

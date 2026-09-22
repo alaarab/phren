@@ -50,11 +50,20 @@ and scrolls again.
 
 ### Changed
 
+- The Agents and Projects lists derive their rows and counts once per input
+  change rather than on every draw, the graph prepares its payload off the
+  main actor and keeps one web view while the selection changes, and image
+  previews decode once into a shared cache.
 - Chat, tool cards and Changes are denser: the floating header sits 4 points
   under the safe area, the composer 4 above the home indicator, transcript
   rows 6 apart, and expanded tool cards use 8-point padding with 4 between
   rows. Changes list rows are 44 points, Working tree rows 40 with a 12-point
   indent per level, and the section band is 40 with 32-point icon tabs.
+- A heavy transcript stays quick to swipe: rows more than two screens from the
+  viewport keep only their identifier and label at their measured height
+  instead of laying out their rich content, a folded tool card's body is never
+  built, and folded read runs and large patch checks are computed once in
+  preparation rather than while drawing.
 - A project's name color comes from the same eight-color palette a computer
   gets, plus the custom color wheel and a hex field; the row previews the name.
 - Knobs are sliders: every stop is visible under its own dot, the current value

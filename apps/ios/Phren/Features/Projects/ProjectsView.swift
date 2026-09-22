@@ -6,7 +6,7 @@ struct MemoryMaintenanceRoute: Hashable { }
 
 struct ProjectsView: View {
     @Environment(AppModel.self) private var model
-    @State private var filter = ""
+    @State private var projectsModel = ProjectsModel()
     @State private var navigationPath = NavigationPath()
     @State private var showVoiceCapture = false
     @State private var showAddProject = false
@@ -14,21 +14,18 @@ struct ProjectsView: View {
     @AppStorage("sessions.live.preferences.v1") private var livePreferences = Data()
     private var hasComputer: Bool { !((try? LiveSessionPreferences.read(livePreferences))?.hosts.isEmpty ?? true) }
 
-    private var projects: [StoreProject] {
-        guard !filter.isEmpty else { return model.mergedProjects }
-        return model.mergedProjects.filter { $0.project.name.localizedCaseInsensitiveContains(filter) }
-    }
-
-    /// Every writable (store, project) pair — the global quick-capture mic
-    /// is hidden entirely when none exist, same reasoning as TasksView's
-    /// addTargets-gated + button.
-    private var voiceCaptureTargets: [VoiceCaptureTarget] {
-        model.writableProjects
-            .map { VoiceCaptureTarget(storeId: $0.storeId, storeName: $0.storeName, project: $0.project.name) }
+    /// The derived list's inputs, one value so the filter, a store revision
+    /// or a permission change recomputes it once and nothing else does.
+    private var projectsKey: ProjectsModel.Key {
+        ProjectsModel.Key(stores: model.storeContexts.map {
+            ProjectsModel.StoreRevision(id: $0.id, revision: $0.snapshot.revision, name: $0.descriptor.displayName)
+        }, storeFilter: model.storeFilter, filter: projectsModel.filter,
+           writable: model.writableProjects.map(\.id))
     }
 
     var body: some View {
         @Bindable var model = model
+        @Bindable var projectsModel = projectsModel
         PhrenNavigationStack(path: $navigationPath) {
             VStack(spacing: 0) {
                 LiveStatusBar()
@@ -46,12 +43,12 @@ struct ProjectsView: View {
                         .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
                     }
                     .padding(8).background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium))
-                    PhrenSectionHeader(title: "Projects", count: projects.count)
-                    if projects.isEmpty && !model.mergedProjects.isEmpty {
+                    PhrenSectionHeader(title: "Projects", count: projectsModel.count)
+                    if projectsModel.ready && projectsModel.projects.isEmpty && !projectsModel.storeIsEmpty {
                         Text("No matching projects.").font(.footnote).foregroundStyle(PhrenTheme.textMuted)
                     }
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 10)], spacing: 10) {
-                        ForEach(projects) { item in
+                        ForEach(projectsModel.projects) { item in
                             NavigationLink(value: item) {
                                 VStack(alignment: .leading, spacing: 3) {
                                     HStack(spacing: 6) {
@@ -117,7 +114,7 @@ struct ProjectsView: View {
                     // First run: the store is connected but empty, or not
                     // connected at all. Either way the next step is a computer
                     // with a repository on it, so say so and offer it.
-                    if model.mergedProjects.isEmpty {
+                    if projectsModel.ready && projectsModel.storeIsEmpty {
                         PhrenEmptyState(title: "Add your first project",
                                         message: hasComputer
                                             ? "Pick a repository on your computer, or clone one from GitHub. Phren adds it and your agents start remembering."
@@ -133,7 +130,10 @@ struct ProjectsView: View {
                         }
                     }
                 }
-                .searchable(text: $filter, prompt: "Filter projects")
+                .searchable(text: $projectsModel.filter, prompt: "Filter projects")
+                .onChange(of: projectsKey, initial: true) { _, key in
+                    projectsModel.update(key: key, merged: model.mergedProjects, writable: model.writableProjects)
+                }
                 .refreshable { await model.pullToRefresh() }
                 .phrenScreen()
             }
@@ -209,7 +209,7 @@ struct ProjectsView: View {
                 navigationPath.append(target)
             }
             .sheet(isPresented: $showVoiceCapture) {
-                VoiceCaptureView(targets: voiceCaptureTargets)
+                VoiceCaptureView(targets: projectsModel.voiceCaptureTargets)
             }
             .sheet(isPresented: $showAddProject) {
                 AddProjectView { project in

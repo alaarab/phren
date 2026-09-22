@@ -354,7 +354,8 @@ struct AgentChatView: View {
                             ChatTranscriptRows(revision: model.timelineRevision, entries: model.timeline,
                                                revealed: model.reveal.visible, revealRevision: model.reveal.revision,
                                                images: model.imagesByMessage, session: session, target: model.target,
-                                               active: active, preview: { previewImage = $0 }).equatable()
+                                               active: active, viewportHeight: scrollHeight,
+                                               preview: { previewImage = $0 }).equatable()
                             if model.target?.isStarting == true {
                                 Text("Starting \(model.target?.providerName ?? "agent") in \(session.projectDisplayName(project?.name))…")
                                     .foregroundStyle(PhrenTheme.textMuted).padding(.top, 24)

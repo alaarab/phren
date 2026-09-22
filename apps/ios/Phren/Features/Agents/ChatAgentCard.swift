@@ -5,7 +5,7 @@ import SwiftUI
 /// line, the model, whether it is still out there, and its report — the
 /// first screenful, the rest in the reader. The prompt can be enormous, so it
 /// stays behind Show prompt.
-struct ChatAgentCard: View {
+struct ChatAgentCard: View, Equatable {
     let agent: AgentSubagentPresentation
     let entry: ChatTimelineEntry
     @Environment(\.openToolOutput) private var openOutput
@@ -13,6 +13,7 @@ struct ChatAgentCard: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage("sessions.live.preferences.v1") private var hostData = Data()
     @State private var showPrompt = false
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.agent == rhs.agent && lhs.entry == rhs.entry }
 
     /// The child conversation this card launched, once the computer has
     /// matched its transcript to the call.

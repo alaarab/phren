@@ -5,11 +5,12 @@ import SwiftUI
 /// items struck through. A list a later call replaced folds to one line —
 /// "Todos · 2 of 5 done" — and opens on a tap, so the history stays and the
 /// newest list is the one that reads in full.
-struct ChatTodoCard: View {
+struct ChatTodoCard: View, Equatable {
     let list: AgentTodoPresentation
     let entry: ChatTimelineEntry
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var expanded = false
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.list == rhs.list && lhs.entry == rhs.entry }
     /// Items shown before "more"; a long list stays a card, not a page.
     private static let visibleItems = 12
 

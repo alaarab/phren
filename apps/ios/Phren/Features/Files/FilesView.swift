@@ -234,8 +234,10 @@ private struct RepositoryBrowserView: View {
     let directory: String
     var path = ""
     @State private var response: PhrenConnection.RepositoryFileResponse?
+    @State private var image: UIImage?
     @State private var error: String?
     @State private var refresh = UUID()
+    private var imageKey: String { "\(host.id)/\(project)/\(directory)/\(path)" }
     var body: some View {
         Group {
             if let response {
@@ -254,7 +256,7 @@ private struct RepositoryBrowserView: View {
                         if response.truncated == true { Text("Showing the first 500 entries.").foregroundStyle(PhrenTheme.textMuted) }
                     }
                 } else if let encoded = response.data, let bytes = Data(base64Encoded: encoded) {
-                    if let image = UIImage(data: bytes) {
+                    if let image {
                         ScrollView([.horizontal, .vertical]) { Image(uiImage: image).resizable().scaledToFit().frame(maxWidth: 800) }
                     } else if let text = String(data: bytes, encoding: .utf8), !text.contains("\0") {
                         DocumentContentView(path: path, content: text)
@@ -266,10 +268,27 @@ private struct RepositoryBrowserView: View {
             .navigationBarTitleDisplayMode(.inline).phrenScreen()
             .toolbar { Button("Refresh", systemImage: "arrow.clockwise") { refresh = UUID() } }
             .task(id: refresh) {
-                response = nil; error = nil
-                do { response = try await PhrenConnection.repositoryFiles(host: host, privateKey: DeviceSSHKey.load(host.id), project: project, directory: directory, path: path) }
-                catch { if !Task.isCancelled { self.error = error.localizedDescription } }
+                response = nil; image = nil; error = nil
+                do {
+                    let next = try await PhrenConnection.repositoryFiles(host: host, privateKey: DeviceSSHKey.load(host.id), project: project, directory: directory, path: path)
+                    image = await Self.decodedImage(next, key: imageKey)
+                    response = next
+                } catch { if !Task.isCancelled { self.error = error.localizedDescription } }
             }
+    }
+
+    /// Decode an image response once, off the main actor, and remember it by
+    /// path so revisiting the file never decodes again.
+    @MainActor
+    private static func decodedImage(_ response: PhrenConnection.RepositoryFileResponse, key: String) async -> UIImage? {
+        guard response.kind != "directory", let encoded = response.data,
+              let bytes = Data(base64Encoded: encoded) else { return nil }
+        if let cached = ImageRasterCache.image(for: key) { return cached }
+        let decoded = await Task.detached(priority: .userInitiated) {
+            UIImage(data: bytes)?.preparingForDisplay()
+        }.value
+        if let decoded { ImageRasterCache.store(decoded, for: key) }
+        return decoded
     }
 }
 

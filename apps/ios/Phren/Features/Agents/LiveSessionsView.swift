@@ -6,17 +6,13 @@ struct LiveSessionsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("sessions.live.preferences.v1") private var data = Data()
-    @State private var adding = false
-    @State private var lastRefreshID = UUID()
-    @State private var query = ""
-    @State private var refreshID = UUID()
-    private var overview: SessionOverviewMonitor { .shared }
+    @State private var sessions = LiveSessionsModel()
+    private var overview: SessionOverviewMonitor { sessions.overview }
     @State private var selected: OverviewSelection?
     @State private var sessionOpen: SessionOpen?
     @State private var scheduleOpen: ScheduleHistoryOpen?
     @State private var closeRequest: SessionCloseRequest?
     @State private var closeError: String?
-    @State private var focusFilter = AgentFocusFilterStore.load()
     private struct SessionOpen: Identifiable, Hashable {
         let session: LiveAgentSession
         let destination: AgentLaunch.Destination
@@ -45,20 +41,18 @@ struct LiveSessionsView: View {
         func hash(into hasher: inout Hasher) { hasher.combine(id) }
     }
     private struct PollID: Equatable { let hosts: [LiveHost]; let active: Bool; let refresh: UUID }
-    private struct HookAssociation: Equatable {
-        let hostID: UUID
-        let computerID: UUID
+    /// The store metadata the model needs, as one value so an unchanged input
+    /// never reconfigures the shared monitor.
+    private struct ModelInputs: Equatable {
+        let preferences: LiveSessionPreferences?
+        let projects: [SessionProject]
+        let metadataReady: Bool
+        let memoryConnected: Bool
     }
-    private var hookAssociations: [HookAssociation] {
-        overview.computers.compactMap { computer in
-            computer.monitor.snapshot?.computer.map {
-                HookAssociation(hostID: computer.host.id, computerID: $0.id)
-            }
-        }.sorted { $0.hostID.uuidString < $1.hostID.uuidString }
-    }
-    private var configuration: SessionOverviewMonitor.Configuration {
-        .init(query: query, preferences: preferences, projects: model.sessionProjects, focusFilter: focusFilter,
-              metadataReady: model.phase != .loading && model.phase != .initialSync, memoryConnected: model.phase == .ready)
+    private var modelInputs: ModelInputs {
+        ModelInputs(preferences: preferences, projects: model.sessionProjects,
+                    metadataReady: model.phase != .loading && model.phase != .initialSync,
+                    memoryConnected: model.phase == .ready)
     }
 
     var body: some View {
@@ -83,7 +77,7 @@ struct LiveSessionsView: View {
                             .accessibilityIdentifier("live-host:\(computer.id)")
                             .plainListCardRow()
                         }
-                        Button("Add computer", systemImage: "plus") { adding = true }
+                        Button("Add computer", systemImage: "plus") { sessions.adding = true }
                             .plainListCardRow()
                     } else {
                         Text("Saved connections couldn't be read. They have been preserved; update phren before editing them.")
@@ -115,17 +109,21 @@ struct LiveSessionsView: View {
             }
             .listSectionSpacing(6)
             .modifier(SessionCloseDialogs(request: $closeRequest, error: $closeError,
-                                          monitor: { session in overview.computers.first { $0.id == session.host.id }?.monitor }))
+                                          monitor: { session in sessions.monitor(for: session.host.id) }))
                 .transition(.opacity)
             }
         }
         .animation(.easeOut(duration: 0.2), value: overview.ready)
-        .onChange(of: configuration, initial: true) { _, value in overview.configure(value) }
+        .onChange(of: modelInputs, initial: true) { _, value in
+            sessions.update(preferences: value.preferences, projects: value.projects,
+                            metadataReady: value.metadataReady, memoryConnected: value.memoryConnected)
+        }
         .navigationTitle("Live sessions")
         // Keep the title in the navigation bar rather than the collapsible
         // large-title region when this list is hosted directly by a tab.
         .navigationBarTitleDisplayMode(.inline)
-        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search all sessions")
+        .searchable(text: Binding(get: { sessions.query }, set: sessions.setQuery),
+                    placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search all sessions")
         .textInputAutocapitalization(.never).autocorrectionDisabled()
         .phrenScreen()
         .toolbar {
@@ -143,7 +141,7 @@ struct LiveSessionsView: View {
                 NavigationLink { HostFilesView() } label: { Label("Files", systemImage: "folder") }
                     .accessibilityIdentifier("all-files")
             }
-            Button("Refresh all sessions", systemImage: "arrow.clockwise") { refreshID = UUID() }
+            Button("Refresh all sessions", systemImage: "arrow.clockwise") { sessions.refresh() }
             if SessionOverviewMonitor.shared.allowsSchedules(),
                let storeId = model.storeDescriptors.first(where: { model.storeFilter == nil || $0.id == model.storeFilter })?.id {
                 NavigationLink { SchedulesView(storeId: storeId, project: nil) } label: {
@@ -155,13 +153,13 @@ struct LiveSessionsView: View {
         .onAppear { if IntegrationSettings.enabled(IntegrationSettings.agentsKeepScreenOnKey, default: false) { UIApplication.shared.isIdleTimerDisabled = true } }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
         .task(id: scenePhase) {
-            if scenePhase == .active { focusFilter = await AgentFocusFilterStore.refreshFromSystem() }
+            if scenePhase == .active { sessions.setFocusFilter(await AgentFocusFilterStore.refreshFromSystem()) }
         }
         .onReceive(NotificationCenter.default.publisher(for: AgentFocusFilterStore.changed)) { _ in
-            focusFilter = AgentFocusFilterStore.load()
+            sessions.setFocusFilter(AgentFocusFilterStore.load())
         }
-        .refreshable { refreshID = UUID() }
-        .sheet(isPresented: $adding) { NavigationStack { LiveHostEditor() } }
+        .refreshable { sessions.refresh() }
+        .sheet(isPresented: $sessions.adding) { NavigationStack { LiveHostEditor() } }
         .navigationDestination(item: $selected) { selection in
             LiveSessionDetailView(sessionID: selection.id, monitor: selection.monitor)
         }
@@ -188,25 +186,15 @@ struct LiveSessionsView: View {
         // sessions behind an open chat. It runs while the app is active and
         // this list has appeared at least once; only leaving the foreground,
         // changing computers, or editing them restarts it.
-        .onChange(of: PollID(hosts: hosts, active: scenePhase == .active && !adding, refresh: refreshID), initial: true) { _, id in
-            guard id.active else { overview.stopRunning(); return }
-            overview.configure(configuration)
-            let currentHosts = hosts
-            Task {
-                await Task.yield()
-                SpotlightIndex.shared.reconcileHosts(currentHosts)
-                await WidgetBridge.reconcileSessionHosts(currentHosts)
-            }
-            // A manual refresh restarts the run; otherwise keep the one that's going.
-            if id.refresh != lastRefreshID { lastRefreshID = id.refresh; overview.stopRunning() }
-            overview.ensureRunning(hosts: currentHosts)
+        .onChange(of: PollID(hosts: hosts, active: scenePhase == .active && !sessions.adding, refresh: sessions.refreshID), initial: true) { _, id in
+            sessions.syncPolling(hosts: hosts, active: id.active)
         }
         // Once the sessions are known, Siri can name them ("message phren on mini in phren").
         .onChange(of: overview.ready, initial: true) { _, ready in
             guard ready else { return }
             PhrenAppShortcuts.donateSessions(overview.computers.flatMap { computer in computer.monitor.snapshot?.sessions(on: computer.host) ?? [] })
         }
-        .onChange(of: hookAssociations, initial: true) { _, associations in
+        .onChange(of: sessions.hookAssociations, initial: true) { _, associations in
             for association in associations where preferences?.hosts.first(where: { $0.id == association.hostID })?.hookComputerID != association.computerID {
                 do {
                     data = try LiveSessionPreferences.associating(hostID: association.hostID,
@@ -260,7 +248,7 @@ struct LiveSessionsView: View {
                 HStack(spacing: 5) {
                     Text("Filtered by Focus · \(focusFilter.label)").accessibilityIdentifier("agents-focus-filter")
                     Button("Clear Focus filter", systemImage: "xmark.circle.fill") {
-                        AgentFocusFilterStore.save(nil); self.focusFilter = nil
+                        AgentFocusFilterStore.save(nil); sessions.setFocusFilter(nil)
                     }.labelStyle(.iconOnly).accessibilityIdentifier("agents-focus-clear")
                 }
             }
@@ -287,16 +275,15 @@ struct LiveSessionsView: View {
         ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
             Section {
                 ForEach(group.sessions) { session in
-                        LiveSessionCard(session: session, fresh: overview.computers.first { $0.id == session.host.id }?.monitor.isLive(at: .now) == true,
-                                        stale: overview.computers.first { $0.id == session.host.id }?.monitor.isStale(at: .now) == true,
+                        let monitor = sessions.monitor(for: session.host.id)
+                        LiveSessionCard(session: session, fresh: monitor?.isLive(at: .now) == true,
+                                        stale: monitor?.isStale(at: .now) == true,
                                         showHost: true, resolvedProject: screen.projects[session.id], resolvedPin: screen.pinned.contains(session.id),
                                         onChat: { sessionOpen = SessionOpen(session: session, destination: .chat) }, onDetails: {
-                            if let computer = overview.computers.first(where: { $0.id == session.host.id }) {
-                                selected = OverviewSelection(session: session, monitor: computer.monitor)
-                            }
+                            if let monitor { selected = OverviewSelection(session: session, monitor: monitor) }
                         }, onClose: { request, confirm in
                             if confirm { closeRequest = request }
-                            else { SessionCloseDialogs.perform(request, monitor: overview.computers.first { $0.id == request.session.host.id }?.monitor) { closeError = $0 } }
+                            else { SessionCloseDialogs.perform(request, monitor: sessions.monitor(for: request.session.host.id)) { closeError = $0 } }
                         })
                         .equatable().separatedSessionRow()
                 }

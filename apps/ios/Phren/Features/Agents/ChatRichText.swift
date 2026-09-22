@@ -22,7 +22,7 @@ struct ChatRichText: View, Equatable {
         self.reply = reply ?? text
         self.messageID = messageID
         self.replyLabel = replyLabel
-        let key = cacheKey ?? "text:\(text.hashValue)"
+        let key = cacheKey ?? ChatRenderKey.text(text)
         owner = messageID ?? key
         document = ChatRichTextDocumentCache.value(text, key: key)
     }
@@ -218,7 +218,7 @@ enum ChatInlineCode {
     static func tinted(_ attributed: AttributedString) -> AttributedString {
         let color = PhrenTheme.chatInlineCode
         guard attributed.runs.contains(where: { $0.inlinePresentationIntent?.contains(.code) == true }) else { return attributed }
-        let key = "\(color.description)|\(attributed.hashValue)" as NSString
+        let key = "\(color.description)|\(ChatRenderKey.text(String(attributed.characters)))" as NSString
         if let hit = cache.object(forKey: key) { return hit.value }
         var copy = attributed
         for run in copy.runs where run.inlinePresentationIntent?.contains(.code) == true {
@@ -226,5 +226,20 @@ enum ChatInlineCode {
         }
         cache.setObject(Box(copy), forKey: key)
         return copy
+    }
+}
+
+/// Deterministic content keys for render caches. Swift's `Hasher` is seeded
+/// per process and walked on every access; an FNV-1a key is stable and cheap,
+/// so a view body that asks twice computes the same key without surprising a
+/// cache with a fresh value each launch.
+enum ChatRenderKey {
+    static func text(_ value: String) -> String {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in value.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x0000_0100_0000_01b3
+        }
+        return "\(value.utf8.count)|\(String(hash, radix: 16))"
     }
 }
