@@ -1,7 +1,7 @@
-import { mkdir, open, readFile, stat, writeFile, rename } from "node:fs/promises";
+import { mkdir, open, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
-import { bridgeRoot, object, objects, sessionId, type Json } from "./protocol.js";
+import { atomic, bridgeRoot, object, objects, sessionId, type Json } from "./protocol.js";
 
 /** Codex 0.155 keeps a thread's history in `thread_history_1.sqlite` and no
  * longer writes the rollout file its `state_5.sqlite` still names. The Hook
@@ -59,10 +59,22 @@ export async function threadHealth(session: string, agentStatus: unknown): Promi
   } catch { return { stalled: false }; } finally { history.close(); }
 }
 
+const materializations = new Map<string, Promise<string | undefined>>();
+
 /** Bring the materialized file up to date with the store. Returns the file
  * when the thread exists there, undefined otherwise. Safe to call often:
  * an unchanged thread costs one aggregate query. */
 export async function materializeCodexThread(session: string): Promise<string | undefined> {
+  if (!sessionId.safeParse(session).success) return undefined;
+  const key = materializedPath(session);
+  const pending = materializations.get(key);
+  if (pending) return pending;
+  const work = materializeThread(session);
+  materializations.set(key, work);
+  try { return await work; } finally { materializations.delete(key); }
+}
+
+async function materializeThread(session: string): Promise<string | undefined> {
   if (!sessionId.safeParse(session).success) return undefined;
   const history = await openReadOnly(path.join(codexHome(), "thread_history_1.sqlite"));
   if (!history) return undefined;
@@ -113,8 +125,7 @@ export async function materializeCodexThread(session: string): Promise<string | 
       try { await handle.appendFile(lines.join("\n") + "\n"); } finally { await handle.close(); }
     }
     state.count = Number(summary.n); state.lastOrdinal = Number(summary.last); state.maxUpdated = Number(summary.updated);
-    const temporary = stateFile + ".tmp";
-    await writeFile(temporary, JSON.stringify(state), { mode: 0o600 }); await rename(temporary, stateFile);
+    await atomic(stateFile, JSON.stringify(state));
     return file;
   } catch { return undefined; } finally { history.close(); }
 }

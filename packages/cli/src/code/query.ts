@@ -2,17 +2,17 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { SqlJsDatabase, SqlValue } from "../index-query.js";
 import { getProjectSourcePath, readProjectConfig } from "../project-config.js";
-import { blameFor, codeDatabasePath, getMeta, openCodeDatabase } from "./store.js";
+import { blameFor, codeDatabasePath, getMeta, openCodeDatabase, rowsOf, numberAt, stringAt } from "./store.js";
 
 /**
- * Read-side queries over the stage 1 code index.
+ * Read-side queries over the code index.
  *
  * Everything here opens the project's SQLite read-only and returns plain
  * objects; the MCP tools and the `phren code` subcommands are thin formatters
  * on top. Ranking and name resolution live here rather than in SQL so a query
  * is one place to change.
  *
- * Every function takes the store and the project first, matching the stage 1
+ * Every function takes the store and the project first, matching the
  * `codeIndexStatus(store, project, top)` shape. `available: false` means the
  * project has no index yet and the caller should tell the user to run
  * `phren code index`.
@@ -91,20 +91,6 @@ const MAX_SNIPPET_LINES = 40;
 
 // ── sql.js row helpers ───────────────────────────────────────────────────────
 
-function rowsOf(db: SqlJsDatabase, sql: string, params: SqlValue[] = []): SqlValue[][] {
-  return db.exec(sql, params)[0]?.values ?? [];
-}
-
-function numberAt(row: SqlValue[], index: number): number {
-  const value = row[index];
-  return typeof value === "number" ? value : Number(value);
-}
-
-function stringAt(row: SqlValue[], index: number): string {
-  const value = row[index];
-  return value === null || value === undefined ? "" : String(value);
-}
-
 function boolAt(row: SqlValue[], index: number): boolean {
   return numberAt(row, index) !== 0;
 }
@@ -180,7 +166,7 @@ export function pickSymbol(rows: SymbolHit[], container?: string): { chosen?: Sy
   let pool = rows;
   if (container) {
     const inContainer = rows.filter(row => row.parent === container);
-    if (inContainer.length > 0) pool = inContainer;
+    pool = inContainer;
   }
   const sorted = [...pool].sort((a, b) => {
     if (a.exported !== b.exported) return Number(b.exported) - Number(a.exported);
@@ -249,7 +235,7 @@ function readSnippet(repoRoot: string | undefined, file: string, line: number, e
 
 /** Split a user query into FTS5 prefix terms; returns "" when nothing usable remains. */
 function ftsQuery(text: string): string {
-  return (text.match(/[A-Za-z0-9_$]+/g) ?? []).map(token => `${token}*`).join(" ");
+  return (text.match(/[A-Za-z0-9_$]+/g) ?? []).map(token => `"${token}"*`).join(" ");
 }
 
 function escapeLike(value: string): string {

@@ -134,9 +134,6 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
     localFiles: ["<bridge>/hooks.yaml", "<bridge>/conductor.yaml", "<bridge>/dispatches/*.json"], phoneScreens: [], skills: ["conductor"],
   },
   {
-    // Stage 1 shipped the local indexer and store; stage 2 the five read tools,
-    // the matching CLI subcommands and the code skill; stage 3 the Hook routes,
-    // the change-driven re-index and the phone's Code screen.
     schemaVersion: 1, name: "code", version: VERSION, defaultEnabled: false, requires: ["memory"],
     tools: full(["code_search", "code_definition", "code_references", "code_outline", "code_usage"]),
     cliCommands: ["code index", "code status", "code search", "code outline", "code refs", "code def", "code usage"],

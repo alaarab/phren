@@ -1,8 +1,9 @@
-import { lstat, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { tryFileLock } from "../governance/locks.js";
+import { lstat, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { dump, load } from "js-yaml";
 import { z } from "zod";
-import { BridgeError, bridgeRoot, computerName } from "./protocol.js";
+import { atomic, BridgeError, bridgeRoot, computerName } from "./protocol.js";
 
 const grantAction = z.enum(["dispatch", "hand_off"]);
 const grantScope = z.union([
@@ -61,9 +62,7 @@ export async function listGrants(root = bridgeRoot()): Promise<Grant[]> {
 async function writeGrants(root: string, grants: Grant[]): Promise<void> {
   const file = grantFile(root);
   await mkdir(root, { recursive: true, mode: 0o700 });
-  const temporary = `${file}.${process.pid}.tmp`;
-  await writeFile(temporary, dump({ grants }, { lineWidth: 120 }), { mode: 0o600, flag: "wx" });
-  try { await rename(temporary, file); } finally { await unlink(temporary).catch(() => {}); }
+  await atomic(file, dump({ grants }, { lineWidth: 120 }));
 }
 
 export interface GrantQuery { action: z.infer<typeof grantAction>; project?: string; computer?: string }
@@ -94,15 +93,30 @@ export function grantLabel(grant: Grant): string {
   return grant.scope;
 }
 
+const mutations = new Map<string, Promise<unknown>>();
+async function mutateGrants<T>(root: string, action: () => Promise<T>): Promise<T> {
+  const key = path.resolve(root);
+  const previous = mutations.get(key) ?? Promise.resolve();
+  const pending = previous.catch(() => {}).then(async () => {
+    const release = tryFileLock(grantFile(key));
+    if (!release) throw new BridgeError(409, "Conductor grants are being updated. Try again.");
+    try { return await action(); } finally { release(); }
+  });
+  mutations.set(key, pending);
+  try { return await pending; } finally { if (mutations.get(key) === pending) mutations.delete(key); }
+}
+
 export async function addGrant(input: unknown, root = bridgeRoot()): Promise<Grant> {
-  const grant = grantSchema.parse(input);
-  const existing = await listGrants(root);
-  if (existing.some(item => canonicalGrant(item) === canonicalGrant(grant))) {
-    throw new BridgeError(409, "That grant is already listed.");
-  }
-  if (existing.length >= 64) throw new BridgeError(409, "conductor.yaml already holds 64 grants.");
-  await writeGrants(root, [...existing, grant]);
-  return grant;
+  return mutateGrants(root, async () => {
+    const grant = grantSchema.parse(input);
+    const existing = await listGrants(root);
+    if (existing.some(item => canonicalGrant(item) === canonicalGrant(grant))) {
+      throw new BridgeError(409, "That grant is already listed.");
+    }
+    if (existing.length >= 64) throw new BridgeError(409, "conductor.yaml already holds 64 grants.");
+    await writeGrants(root, [...existing, grant]);
+    return grant;
+  });
 }
 
 function canonicalGrant(grant: Grant): string {
@@ -111,39 +125,47 @@ function canonicalGrant(grant: Grant): string {
 
 /** Write a grant from an approval card answer: already listed is success. */
 export async function ensureGrant(input: unknown, root = bridgeRoot()): Promise<Grant> {
-  const grant = grantSchema.parse(input);
-  const existing = await listGrants(root);
-  if (existing.some(item => canonicalGrant(item) === canonicalGrant(grant))) return grant;
-  if (existing.length >= 64) throw new BridgeError(409, "conductor.yaml already holds 64 grants.");
-  await writeGrants(root, [...existing, grant]);
-  return grant;
+  return mutateGrants(root, async () => {
+    const grant = grantSchema.parse(input);
+    const existing = await listGrants(root);
+    if (existing.some(item => canonicalGrant(item) === canonicalGrant(grant))) return grant;
+    if (existing.length >= 64) throw new BridgeError(409, "conductor.yaml already holds 64 grants.");
+    await writeGrants(root, [...existing, grant]);
+    return grant;
+  });
 }
 
 export async function removeGrant(input: unknown, root = bridgeRoot()): Promise<Grant> {
-  const body = z.object({
-    index: z.number().int().min(0).max(63).optional(),
-    scope: grantScope.optional(),
-    actions: z.array(grantAction).min(1).max(2).optional(),
-    computers: z.array(computerName).min(1).max(32).optional(),
-    until: z.string().datetime({ offset: true }).optional(),
-  }).strict().refine(value => value.index !== undefined || value.scope !== undefined,
-    { message: "Provide an index or a scope to remove." }).parse(input);
-  const existing = await listGrants(root);
-  if (!existing.length) throw new BridgeError(404, "There are no conductor grants to remove.");
-  let index = body.index;
-  if (index === undefined) {
-    // Scope names the row; the optional fields refine it. They never invent a
-    // default actions list, which would miss a single-action grant.
-    const sameSet = (a: string[], b: string[]) => a.length === b.length && [...a].sort().join() === [...b].sort().join();
-    index = existing.findIndex(grant =>
-      grant.scope === body.scope
-      && (body.actions === undefined || sameSet(grant.actions, body.actions))
-      && (body.computers === undefined || (grant.computers !== undefined && sameSet(grant.computers, body.computers)))
-      && (body.until === undefined || grant.until === body.until));
-    if (index < 0) throw new BridgeError(404, "No conductor grant matches that scope.");
-  }
-  if (index >= existing.length) throw new BridgeError(404, "No conductor grant has that index.");
-  const [removed] = existing.splice(index, 1);
-  await writeGrants(root, existing);
-  return removed;
+  return mutateGrants(root, async () => {
+    const body = z.object({
+      index: z.number().int().min(0).max(63).optional(),
+      expected: grantSchema.optional(),
+      scope: grantScope.optional(),
+      actions: z.array(grantAction).min(1).max(2).optional(),
+      computers: z.array(computerName).min(1).max(32).optional(),
+      until: z.string().datetime({ offset: true }).optional(),
+    }).strict().refine(value => value.index !== undefined || value.scope !== undefined,
+      { message: "Provide an index or a scope to remove." }).parse(input);
+    const existing = await listGrants(root);
+    if (!existing.length) throw new BridgeError(404, "There are no conductor grants to remove.");
+    let index = body.index;
+    if (index === undefined) {
+      // Scope names the row; the optional fields refine it. They never invent a
+      // default actions list, which would miss a single-action grant.
+      const sameSet = (a: string[], b: string[]) => a.length === b.length && [...a].sort().join() === [...b].sort().join();
+      index = existing.findIndex(grant =>
+        grant.scope === body.scope
+        && (body.actions === undefined || sameSet(grant.actions, body.actions))
+        && (body.computers === undefined || (grant.computers !== undefined && sameSet(grant.computers, body.computers)))
+        && (body.until === undefined || grant.until === body.until));
+      if (index < 0) throw new BridgeError(404, "No conductor grant matches that scope.");
+    }
+    if (index >= existing.length) throw new BridgeError(404, "No conductor grant has that index.");
+    if (body.expected && canonicalGrant(existing[index]) !== canonicalGrant(body.expected)) {
+      throw new BridgeError(409, "The grants list changed. Refresh it before revoking this grant.");
+    }
+    const [removed] = existing.splice(index, 1);
+    await writeGrants(root, existing);
+    return removed;
+  });
 }
