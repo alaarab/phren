@@ -69,3 +69,12 @@ describe("code parser", () => {
     expect(result.references.some(reference => reference.name === "custom_helper")).toBe(true);
   });
 });
+
+it("classifies public Swift declarations after their modifiers", async () => {
+  const result = await parseFile("Types.swift", "public struct Shape {}\npublic enum Color { case red }\n");
+  expect(result.language).toBe("swift");
+  expect(result.symbols).toEqual(expect.arrayContaining([
+    expect.objectContaining({ name: "Shape", kind: "struct", exported: true }),
+    expect.objectContaining({ name: "Color", kind: "enum", exported: true }),
+  ]));
+});

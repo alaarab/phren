@@ -62,7 +62,7 @@ export interface AtomicWriteOptions {
   mode?: number;
 }
 
-export function atomicWriteText(filePath: string, content: string, opts: AtomicWriteOptions = {}): void {
+export function atomicWriteText(filePath: string, content: string | Uint8Array, opts: AtomicWriteOptions = {}): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const tmpPath = `${filePath}.tmp-${crypto.randomUUID()}`;
   fs.writeFileSync(tmpPath, content, opts.mode !== undefined ? { mode: opts.mode } : undefined);

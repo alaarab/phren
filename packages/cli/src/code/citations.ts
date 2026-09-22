@@ -6,7 +6,7 @@ import { openCodeDatabase, type CodeDatabase } from "./store.js";
 import { parseSymbolQuery, resolveSymbol, type SymbolHit } from "./query.js";
 
 /**
- * The memory link (stage 4): findings cite symbols, and a definition lists the
+ * Findings cite symbols, and a definition lists the
  * findings that cite it.
  *
  * A finding's text is scanned for symbol-shaped names; a name that resolves to

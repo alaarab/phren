@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeTempDir } from "../test-helpers.js";
 import { indexProject, resolveRepoRoot } from "./indexer.js";
+import { references } from "./query.js";
 import { codeIndexStatus } from "./status.js";
 import { codeDatabasePath, getMeta, openCodeDatabase, topSymbolsByUsage } from "./store.js";
 
@@ -141,4 +142,29 @@ describe("code indexer", () => {
     // --repo still overrides the machine resolution.
     expect(resolveRepoRoot(store, "fixture", repo)).toBe(path.resolve(repo));
   });
+});
+
+it("refreshes unchanged callers after definitions move, become ambiguous, or disappear", async () => {
+  const definition = path.join(repo, "typescript/unique.ts");
+  const caller = path.join(repo, "typescript/caller.ts");
+  fs.writeFileSync(definition, "export function uniqueCall() { return 1; }\n");
+  fs.writeFileSync(caller, "uniqueCall();\n");
+  git("add", "-A");
+  await indexProject(store, "fixture", { repoRoot: repo });
+  const calls = async () => (await references(store, "fixture", "uniqueCall")).value;
+  expect((await calls())?.total).toBe(1);
+  fs.writeFileSync(definition, "\nexport function uniqueCall() { return 2; }\n");
+  expect((await indexProject(store, "fixture", { repoRoot: repo })).parsed).toBe(1);
+  expect((await calls())?.total).toBe(1);
+  const duplicate = path.join(repo, "typescript/duplicate.ts");
+  fs.writeFileSync(duplicate, "export function uniqueCall() { return 3; }\n");
+  git("add", "-A");
+  await indexProject(store, "fixture", { repoRoot: repo });
+  expect((await calls())?.total).toBe(0);
+  fs.unlinkSync(duplicate);
+  await indexProject(store, "fixture", { repoRoot: repo });
+  expect((await calls())?.total).toBe(1);
+  fs.writeFileSync(definition, "export function unrelated() { return 4; }\n");
+  await indexProject(store, "fixture", { repoRoot: repo });
+  expect((await references(store, "fixture", "unrelated")).value?.total).toBe(0);
 });

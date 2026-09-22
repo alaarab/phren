@@ -48,6 +48,7 @@ export async function runBridge(args: string[], version: string): Promise<number
         herdrRunning: muxes.length > 0, terminal: "SSH PTY; authorize the Phren device key with pty",
         shell: muxes.length > 0 ? "available" : "Herdr is not running: chat is unavailable, project shells and agents still open over SSH",
       } }, null, 2));
+      break;
     }
     default: throw new Error("Usage: phren bridge <install|status|doctor|usage|update|rollback|uninstall|enroll-computer|fanouts archive>");
   }

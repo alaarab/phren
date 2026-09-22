@@ -3,8 +3,8 @@ import { disabledHint } from "../modules/registry.js";
 import { activateModules as moduleSnapshot, type ModuleSnapshot } from "../modules/runtime.js";
 import { logger } from "../logger.js";
 import { request, createServer, type Server, type ServerResponse } from "node:http";
-import { mkdir, writeFile, readFile, readdir, rename, chmod, unlink, lstat } from "node:fs/promises";
-import { readFileSync, watch, type FSWatcher } from "node:fs";
+import { mkdir, writeFile, readFile, opendir, rename, chmod, unlink, lstat } from "node:fs/promises";
+import { lstatSync, readFileSync, watch, type FSWatcher } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -26,13 +26,25 @@ function opencodeApprovalFile(session: string, kind: "request" | "answer"): stri
   if (!opencodeSession.test(session)) return undefined;
   return path.join(phrenStoreRoot(), ".runtime", "approvals", `opencode-${session}.${kind}.json`);
 }
+async function* directoryNames(directory: string, limit: number): AsyncGenerator<string> {
+  const entries = await opendir(directory).catch(() => undefined);
+  if (!entries) return;
+  let count = 0;
+  for await (const entry of entries) {
+    if (count++ >= limit) break;
+    yield entry.name;
+  }
+}
+
 function opencodeRequest(session: string): Json | undefined {
   const file = opencodeApprovalFile(session, "request");
   if (!file) return undefined;
   try {
+    const info = lstatSync(file);
+    if (!info.isFile() || info.size > 65_536) return undefined;
     const value = object(JSON.parse(readFileSync(file, "utf8")));
     if (typeof value.id !== "string" || !value.id || value.sessionID !== session) return undefined;
-    if (typeof value.expiresAt === "string" && Date.parse(value.expiresAt) <= Date.now()) return undefined;
+    if (typeof value.expiresAt !== "string" || !Number.isFinite(Date.parse(value.expiresAt)) || Date.parse(value.expiresAt) <= Date.now()) return undefined;
     return value;
   } catch { return undefined; }
 }
@@ -166,15 +178,15 @@ interface Pending { target: Target; response: ServerResponse; tool: string; inpu
 
 /** A conductor `dispatch` or `hand_off` permission ask the Hook can answer
  * itself under a standing grant, or offer the phone two grant-writing answers. */
-function conductorCall(tool: string, input: unknown): Pending["conductor"] | undefined {
+export function conductorCall(tool: string, input: unknown): Pending["conductor"] | undefined {
   // MCP tool names vary by harness: `dispatch`, `phren.dispatch`,
   // `mcp__phren__dispatch`; phren_admin carries the action in its fields.
-  const tail = tool.split(/[._:/]/).pop() ?? tool;
+  const tail = /(?:^|[.:/]|__)(dispatch|hand_off|phren_admin)$/.exec(tool)?.[1];
   const fields = object(input);
   let action: "dispatch" | "hand_off" | undefined;
   if (tail === "dispatch") action = "dispatch";
   else if (tail === "hand_off") action = "hand_off";
-  else if (tail === "admin" && (fields.action === "dispatch" || fields.action === "hand_off")) action = fields.action;
+  else if (tail === "phren_admin" && (fields.action === "dispatch" || fields.action === "hand_off")) action = fields.action;
   if (!action) return undefined;
   const project = typeof fields.project === "string" ? fields.project : undefined;
   const computer = typeof fields.computer === "string" ? fields.computer : undefined;
@@ -281,6 +293,11 @@ export class AgentHooks {
   private pushBindings = new PushBindingStore();
   /** opencode permission asks seen on disk, by request id. */
   private opencode = new Map<string, OpencodeHeld>();
+  private closed = false;
+  private opencodeSweep?: Promise<void>;
+  private opencodeLive = new Set<string>();
+  private fanoutLive = new Set<string>();
+  private fanoutSweeping = false;
   private opencodeWatcher?: FSWatcher;
   private opencodePoll?: NodeJS.Timeout;
   private opencodeDebounce?: NodeJS.Timeout;
@@ -291,8 +308,8 @@ export class AgentHooks {
   constructor(readonly push = new ApprovalPushService(), private modules?: ModuleSnapshot) {}
   private approvalsDirectory(): string { return path.join(phrenStoreRoot(), ".runtime", "approvals"); }
   private scheduleOpencodeSweep() {
-    if (this.opencodeDebounce) return;
-    this.opencodeDebounce = setTimeout(() => { this.opencodeDebounce = undefined; void this.sweepOpencodeApprovals(); }, APPROVAL_DEBOUNCE_MS);
+    if (this.closed || this.opencodeDebounce) return;
+    this.opencodeDebounce = setTimeout(() => { this.opencodeDebounce = undefined; void this.sweepOpencodeApprovals().catch(() => {}); }, APPROVAL_DEBOUNCE_MS);
     this.opencodeDebounce.unref?.();
   }
   /** Read every live opencode request file, map it to a target through the
@@ -300,11 +317,18 @@ export class AgentHooks {
    * for a push and a push-binding answer. A file that vanished or expired is
    * forgotten. */
   async sweepOpencodeApprovals(): Promise<void> {
+    if (this.closed) return;
+    if (this.opencodeSweep) return this.opencodeSweep;
+    const sweep = this.readOpencodeApprovals();
+    this.opencodeSweep = sweep;
+    try { await sweep; } finally { this.opencodeSweep = undefined; }
+  }
+  private async readOpencodeApprovals(): Promise<void> {
     const directory = this.approvalsDirectory();
-    let entries: string[] = [];
-    try { entries = await readdir(directory); } catch { /* Nothing to watch yet. */ }
-    const live = new Set<string>();
-    for (const name of entries) {
+    const live = this.opencodeLive;
+    live.clear();
+    for await (const name of directoryNames(directory, 1024)) {
+      if (this.closed) return;
       const match = /^opencode-(ses_[0-9A-Za-z]{1,64})\.request\.json$/.exec(name);
       if (!match) continue;
       const request = opencodeRequest(match[1]);
@@ -313,6 +337,7 @@ export class AgentHooks {
       live.add(id);
       if (this.opencode.has(id)) continue;
       const target = await this.resolveOpencodeTarget(match[1]);
+      if (this.closed) return;
       if (!target) continue;
       const expiresAt = typeof request.expiresAt === "string" ? Date.parse(request.expiresAt) : NaN;
       if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) continue;
@@ -336,15 +361,15 @@ export class AgentHooks {
    * there is none, Herdr's explicit `ses_` identity names the pane. */
   private async resolveOpencodeTarget(session: string): Promise<Target | undefined> {
     const root = path.join(bridgeRoot(), "bindings");
-    let folders: string[] = [];
-    try { folders = await readdir(root); } catch { /* No bindings yet. */ }
-    for (const folder of folders) {
-      let names: string[] = [];
-      try { names = await readdir(path.join(root, folder)); } catch { continue; }
-      for (const name of names) {
+    for await (const folder of directoryNames(root, 64)) {
+      for await (const name of directoryNames(path.join(root, folder), 1024)) {
         if (!name.endsWith(".json")) continue;
         let value: Json;
-        try { value = object(JSON.parse(await readFile(path.join(root, folder, name), "utf8"))); } catch { continue; }
+        try {
+          const file = path.join(root, folder, name), info = await lstat(file);
+          if (!info.isFile() || info.size > 65_536) continue;
+          value = object(JSON.parse(await readFile(file, "utf8")));
+        } catch { continue; }
         if (value.source !== "opencode" || value.session !== session) continue;
         if (typeof value.workspace !== "string" || typeof value.tab !== "string") continue;
         const parsed = targetSchema.safeParse({ server: decodeURIComponent(folder), workspace: value.workspace, tab: value.tab,
@@ -370,16 +395,23 @@ export class AgentHooks {
   }
   /** Push once for each fan-out job whose blocked.json the plugin wrote. */
   private async sweepBlockedFanouts(): Promise<void> {
-    const jobs = await blockedFanouts().catch(() => []);
-    const live = new Set<string>();
-    for (const job of jobs) {
-      live.add(job.id);
-      const stamp = job.at ? Date.parse(job.at) : 0;
-      if (this.fanoutSeen.get(job.id) === stamp) continue;
-      this.fanoutSeen.set(job.id, stamp);
-      void this.push.notifyFanoutBlocked({ job: job.id, label: job.label, provider: job.provider, reason: job.reason }).catch(() => {});
-    }
-    for (const id of this.fanoutSeen.keys()) if (!live.has(id)) this.fanoutSeen.delete(id);
+    if (this.closed || this.fanoutSweeping) return;
+    this.fanoutSweeping = true;
+    try {
+      const jobs = await blockedFanouts().catch(() => []);
+      if (this.closed) return;
+      const live = this.fanoutLive;
+      live.clear();
+      for (const job of jobs) {
+        live.add(job.id);
+        const parsed = job.at ? Date.parse(job.at) : 0;
+        const stamp = Number.isFinite(parsed) ? parsed : 0;
+        if (this.fanoutSeen.get(job.id) === stamp) continue;
+        this.fanoutSeen.set(job.id, stamp);
+        void this.push.notifyFanoutBlocked({ job: job.id, label: job.label, provider: job.provider, reason: job.reason }).catch(() => {});
+      }
+      for (const id of this.fanoutSeen.keys()) if (!live.has(id)) this.fanoutSeen.delete(id);
+    } finally { this.fanoutSweeping = false; }
   }
   /** Move finished fan-out folders older than a day into the archive; one log
    * line records a sweep that moved or deleted anything, and a sweep that
@@ -570,6 +602,7 @@ export class AgentHooks {
       const file = opencodeApprovalFile(target.session, "answer");
       if (!file) throw new BridgeError(400, "Invalid conversation identity.");
       await validateTarget(target);
+      if (opencodeRequest(target.session)?.id !== id) throw new BridgeError(409, "This approval is no longer pending.");
       await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
       const temporary = file + "." + randomUUID();
       await writeFile(temporary, JSON.stringify({ id, decision }), { mode: 0o600, flag: "wx" });
@@ -585,6 +618,8 @@ export class AgentHooks {
     if (!["approve", "deny"].includes(String(effective))) throw new BridgeError(409, "This approval is no longer pending.");
     if (updatedInput !== undefined && effective !== "approve") throw new BridgeError(400, "Answers go with an approval.");
     const answered = updatedInput === undefined ? undefined : answeredQuestionInput(entry.tool, entry.input, updatedInput);
+    await validateTarget(target);
+    if (this.pending.get(id) !== entry || entry.response.destroyed) throw new BridgeError(409, "This approval is no longer pending.");
     if (grantAnswer) {
       const conductor = entry.conductor!;
       if (grantAnswer === "allow-project" && !conductor.project) throw new BridgeError(400, "This call has no project to scope a grant to.");
@@ -594,7 +629,6 @@ export class AgentHooks {
         ...(conductor.computer && conductor.computer !== "anywhere" ? { computers: [conductor.computer] } : {}),
       });
     }
-    await validateTarget(target);
     if (this.pending.get(id) !== entry || entry.response.destroyed) throw new BridgeError(409, "This approval is no longer pending.");
     this.pending.delete(id); this.dropPushBindings(id); clearTimeout(entry.timer);
     entry.response.end(JSON.stringify({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: {
@@ -704,7 +738,7 @@ export class AgentHooks {
         if (this.push.available) {
           const binding = randomUUID();
           this.pushBindings.add(binding, { action, expiresAt: Date.parse(expiresAt) });
-          void this.push.notify({ binding, provider: target.source, question: body.tool === "AskUserQuestion", expiresAt }).then(delivered => {
+          void this.push.notify({ binding, provider: target.source, question: body.tool === "AskUserQuestion", expiresAt }).catch(() => false).then(delivered => {
             if (!delivered) {
               this.pushBindings.consume(binding);
               const pending = this.pending.get(action);
@@ -738,6 +772,7 @@ export class AgentHooks {
     void this.sweepBlockedFanouts();
   }
   close() {
+    this.closed = true;
     void this.changes.close().catch(() => {});
     for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.response.end("{}"); }
     this.pending.clear(); this.server?.close(); this.server?.closeAllConnections();

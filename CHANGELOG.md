@@ -7,28 +7,125 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
-- Finished fan-out jobs archive themselves. The Hook sweeps the store's
-  `.runtime/agent-fanouts` at start and then hourly, moving a folder whose
-  manifest status is completed, failed or cancelled and whose `finishedAt`
-  (or `exit.txt` mtime when there is none) is more than 24 hours old into
-  `.runtime/agent-fanouts-archive/<job id>`. A folder with no manifest goes
-  there too once its `exit.txt` is that old, gaining a synthesized manifest
-  `{ "status": "failed", "reason": "no manifest" }`. A folder without
-  `exit.txt` is still running and is never touched. The archive keeps at most
-  500 folders, deleting the oldest beyond that, and one log line records each
-  sweep that moved anything. Run the sweep by hand with
-  `phren bridge fanouts archive [--dry-run]`. See `docs/fanout.md`.
-- The `code` module now serves its symbol index to the phone. Phren Hook adds
-  `GET /v1/code/status`, `/v1/code/search`, `/v1/code/outline`,
-  `/v1/code/definition`, `/v1/code/references` and `/v1/code/usage`, gated by the
-  module like the other routes and advertised as the `code` capability. The Hook
-  re-indexes a project after the git module records a file change, debounced 500
-  ms, and runs a full re-index when the repository's HEAD moves. The iPhone adds
-  a Code cell to the project page, symbol search and a symbol dossier. See
-  `docs/code-index.md`.
+- Finished fan-out jobs archive after 24 hours when an exit code and terminal
+  state are present. The archive keeps 500 folders; missing manifests gain a
+  failure record. Run `phren bridge fanouts archive [--dry-run]` manually.
+  See `docs/fanout.md`.
+- The `code` module provides a per-project SQLite symbol and reference index
+  for TypeScript, TSX, JavaScript, Swift, Python, Rust, Go, Ruby and Bash, with
+  a line-based fallback for other files. `phren code index|status` maintains
+  it; five MCP tools and `search|def|refs|outline|usage` commands query it.
+  Six `/v1/code/*` Hook routes expose it to clients. File changes trigger a
+  500 ms debounced reindex and HEAD changes trigger a full scan.
+  See `docs/code-index.md`.
+- Conductor sessions can be launched from the phone with a chosen Claude,
+  Codex or OpenCode harness and effort, are marked in workspace overviews, and
+  are limited to one running conductor per store. The new `hand_off` MCP tool,
+  `phren_admin` action and `phren hand-off` command send work to an existing
+  local or enrolled-computer session.
+- Code findings can carry `symbol:` citations. An unambiguous symbol name
+  attaches automatically; explicit unresolved citations remain marked for
+  review. Definitions list citing findings and memory tools return citations.
+- Schedule notifications: a schedule's optional `notify` list (`start`, `finish`,
+  `failure`; finish and failure when absent) makes the Hook push each run's
+  start, finish or failure to registered phones through the approvals' APNs
+  configuration, one collapse id per run and notification kind. A run records `notified` and, when
+  nothing was sent, `notifyReason`; a missing push configuration is logged and
+  never interrupts the scheduled agent.
+- Modules: phren's features are switchable per store and profile. Memory and
+  tasks stay on; conductor, schedules and the rest can be turned off, the MCP
+  and CLI surfaces shrink to match, the Hook reports its capabilities so the
+  phone hides what a computer does not run, and `phren modules list` shows
+  what is on and why. Existing installs migrate once.
+- Internal conductor adapters cover headless workers, question relay and a
+  durable report outbox. They are not connected to dispatch placement yet;
+  see `docs/conductor.md` for the current integration boundary.
+- The workspace overview reports each pane's running fan-out workers and
+  their providers, so the phone can count them.
+- Phren Hook records OpenCode Go spend per model over 5 hours, 7 days and
+  30 days, with limits when the plan reports them.
+- Conductor dispatch receipts can retain a validated local conversation parent
+  and durable remote computer identity, while `/v1/subagents` projects remote
+  leads and their bounded local fan-out trees without exporting checkout paths.
+- Computer enrollment for Phren Hook with reusable private ed25519 keys and
+  restricted public-key acceptance, pinned peers in `hooks.yaml`, and remote
+  placement through `/v1/dispatch`, `phren dispatch` and the `dispatch` MCP
+  tool. Placement resolves projects on the receiving computer and keeps
+  uncertain deliveries in `phren dispatch status` without retrying.
+- Scheduled prompts: project `schedules.yaml` files, local-time interval,
+  daily, weekly, once and cron evaluation, Herdr or headless execution, Hook
+  list/run/history routes, and `phren schedule` management commands.
+- Phren Hook reports a Codex thread whose history stopped persisting.
+- Phren Hook accepts answer keys for a prompt it remembered (a permission
+  request it could not hold) even while Herdr still reads the pane as working;
+  the phone no longer gets 'This agent is not waiting for an answer'.
+- Phren Hook serves git status, log, branches, pull requests, a working tree
+  listing and stage, unstage and discard for the phone's Changes screen,
+  bound to the pane's repository.
+- Phren Hook reports each agent pane's model in the workspace overview and
+  keeps temp paths and shell variable prefixes out of the lock screen step.
+- OpenCode worker transcripts keep MCP tool inputs and show changed-file
+  diffs under edit, write and patch calls.
+- The Hook model catalogue lists OpenCode Go models first and marks the
+  configured default for OpenCode sessions.
+- Phren Hook reports a compacting Claude Code conversation to the phone and
+  exports compaction as a marker row instead of the full summary.
+- Phren Hook follows a spawned agent's transcript live: `WS /v1/transcripts`
+  and `GET /v1/transcripts/history` take `child=<id>` from `/v1/subagents`,
+  bound to the parent conversation. Child rows are served as that
+  conversation's own turns, so a completed Claude Code subagent's transcript
+  no longer arrives as sidechain rows the phone hides; a launch whose file
+  has not been written yet is rechecked instead of cached as missing.
+- Direct APNs delivery for agent permission requests while the iPhone app is
+  suspended. Phones register over the authenticated SSH gateway; notification
+  actions use one-time expiring bindings and never expose commands or provider
+  action identities to APNs.
+- opencode joins Codex, Claude Code, and Copilot as a supported agent. Phren
+  Hook can launch it, and `phren bridge install` writes an opencode plugin that
+  mirrors sessions into the store's `.runtime/sessions` so the iOS app can read
+  them. Identity needs `herdr integration install opencode` on the computer.
+- Codex CLI fan-outs now appear as child agents beside OpenCode ones: a
+  `provider: "codex"` manifest with a `codex exec --json` event log is read as
+  a child transcript.
+- `/v1/diff` takes `child=<id>` from `/v1/subagents` to return that spawned
+  agent's whole repository diff: its own worktree for a fan-out, the parent's
+  checkout otherwise.
+
+### Changed
+
+- The phone Hook bundle carries only what the Hook runs: `phren init`, the agent hooks
+  installer, governance policy, the doctor and the FTS indexer left it (86 source files
+  and the glob package), 1.5 MB down to 1.25 MB. One definition each for the git, path,
+  atomic-write and task-text helpers that had two or three copies.
+- Codex fan-out child transcripts export the shell command, a bounded output
+  tail, and the changed paths, and `/v1/subagents` reports a fan-out's model
+  when its manifest names one.
+- Fan-out children returned by `/v1/subagents` report their worktree folder
+  name and attached branch without exposing the filesystem path.
+- `phren config proactivity <level> --scope findings|tasks` sets the
+  findings-only or task-only auto-capture level; `proactivity.findings` and
+  `proactivity.tasks` now appear in `phren config --help` and the command
+  registry. `set_config` domain `proactivity` already took `scope`.
+- Tasks the prompt hook picks up on its own go to Queue, not Active, with a
+  `Queued task` notice. A prompt that asks to be tracked ("add this to
+  task"), or one matching a task already in Active, still goes to Active.
+- iOS CI runs only by manual dispatch; the full native UI suite requires an
+  additional opt-in. Bound job/test runtime, cancel superseded runs, and retain
+  native UI artifacts for three days. Regular CI jobs have 10-minute limits.
 
 ### Fixed
 
+- Incremental code indexing retains references from unchanged callers when
+  definitions move, become ambiguous or disappear. Prepared inserts run in
+  one transaction; concurrent writers cannot overwrite another index.
+  Qualified lookups reject other containers and `$` identifiers are searchable.
+- Hook approval and fan-out notification sweeps no longer overlap. Approval
+  records are bounded and validated; simultaneous grant writes are serialized
+  and stale grant revocations fail instead of deleting another row.
+- Concurrent Codex history reads share one materialization. Scheduled-run
+  completion errors and closed child input streams are handled, long run IDs
+  preserve notification-kind collapse keys, and `bridge doctor` stops after
+  printing its result.
 - Claude Code's own terminal dialogs no longer show up on the phone as a bare
   "Waiting for your answer" key strip. When a claude or opencode pane waits
   with no held approval, no model question, and no remembered prompt, the Hook
@@ -39,9 +136,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   `Cancel`/`Escape` when a line offers "Esc to cancel". The choice clears when
   the pane leaves waiting or the dialog lines vanish, and answering a dialog
   digit from the phone now sends Enter after it so the selection submits.
-- A fan-out worker that OpenCode itself refused a permission for (headless runs reject
-  external_directory and doom_loop before any plugin runs) is reported as failed with
-  the reason read from the job's stderr, instead of completed.
+- Fan-out permission refusals from the plugin (`blocked.json`) or OpenCode
+  itself (`stderr.log`) retain a blocked failure reason even with exit code 0.
+  The Hook pushes the reason and inspects only the final 16 KiB of stderr.
 - Choosing Full Access under Codex's `/permissions` no longer leaves the
   terminal sitting on "Enable full access?". The Hook's menu walk reads the
   pane's terminal lines for that second confirmation, answers it with `1` then
@@ -93,11 +190,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   answer file when the phone approves or denies it. The alert carries the ask's
   title and message, so an external_directory ask reads
   `external_directory: <pattern>`.
-- A fan-out worker whose permission the plugin refused no longer looks
-  finished. The plugin writes `blocked.json` when it denies under
-  `PHREN_FANOUT_JOB`, and the Hook reports the child as failed with the reason
-  `blocked: <type> <pattern>` even when `exit.txt` says 0, carries the reason on
-  the child row, and pushes a notification naming the blocked worker.
 - The phone's agent tree lists the newest fan-out workers first, so a computer with more
   than 128 finished jobs on disk no longer hides the ones running now.
 - A Codex approval or terminal dialog whose command and options the Hook could
@@ -114,8 +206,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   no credential helper used to make the session-start sync ask for a GitHub username
   in the agent's pane, so Codex and OpenCode never reached their first prompt on that
   computer and every launch from the phone or a dispatch reported a failure.
-- Account usage no longer breaks a phone that predates OpenCode Go: the phone names the
-  sources it understands and an older one keeps getting the original four.
+- `/v1/usage` filters sources to those a client understands, preserving the
+  original four sources for clients that do not send a source list.
 - A Claude subagent the orchestrator stopped leaves the phone's running count; its
   "killed" notification now counts as finished like a completed one.
 - A store that was never set up stays that way: the modules migration no longer creates
@@ -132,9 +224,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   plugin and anything else is refused at once instead of timing out after 50 seconds.
 - The Claude model list the phone shows matches Claude Code's own /model menu:
   exact models, default first, an alias only for a family with no exact id.
-- The menu window the Hook opens after a bare slash command stays open through
-  Enter while the Hook walks a second confirmation in the pane; Escape still
-  closes it.
 - The periodic store pull commits uncommitted writes (a task from `add_task`,
   a new finding) before it fetches or merges, so a managed sync can no longer
   discard or block on a write that arrived moments earlier; a divergent remote
@@ -147,136 +236,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   Hook locates a project's checkout: this machine's registered path first, then
   the store's sourcePath, with `--repo` still overriding, and the index records
   the checkout it used in `repo_root` when it differs.
-
-### Added
-
-- Conductor sessions can be launched from the phone with a chosen Claude,
-  Codex or OpenCode harness and effort, are marked in workspace overviews, and
-  are limited to one running conductor per store. The new `hand_off` MCP tool,
-  `phren_admin` action and `phren hand-off` command send work to an existing
-  local or enrolled-computer session.
-- Code index, stage 1: the `code` module gains a local, per-project index of
-  symbols and references for TypeScript, TSX, JavaScript, Swift, Python, Rust,
-  Go, Ruby and Bash, built with `web-tree-sitter` and a line-based fallback for
-  every other file. `phren code index <project>` walks the project's tracked
-  files and stores the result in `<store>/.runtime/code/<project>.sqlite`
-  (files, symbols, references, FTS5 over name/signature/doc, and a hashed
-  blame); `phren code status <project>` prints the counts. Incremental indexing
-  re-parses only files whose hash changed.
-- Code index, stage 2: five MCP tools over that index, `code_search`,
-  `code_definition`, `code_references`, `code_outline` and `code_usage`, each in
-  the `code` module and returning compact text. `code_search` ranks exact name,
-  then prefix, then FTS5 relevance, then usage count; `code_definition` accepts
-  `Foo`, `Foo.bar` and `bar()`, prefers exported non-variable symbols when a
-  common name has several candidates, and returns the lines, signature, doc,
-  last change and a source snippet; `code_references` groups resolved
-  references by file; `code_outline` nests a file's symbols by parent; and
-  `code_usage` returns the hottest and coldest symbols, excluding one- and
-  two-character variables from the hot list. The matching `phren code
-  search|outline|refs|def|usage` subcommands and a `code` skill ship with them,
-  and the index now records its `repo_root` so a `--repo` index can still
-  return source snippets.
-- Code index, stage 4: the memory link. `add_finding` attaches a `symbol:`
-  citation when a finding names exactly one symbol the project's index resolves
-  (four or more characters, and not a local variable unless exported), and an
-  explicit `symbol:` citation is validated against the index and stored even
-  when it does not resolve, marked `symbol_unresolved`. `code_definition` and
-  `phren code def` list the findings that cite the symbol after the snippet, and
-  `get_findings` and `search_knowledge` return the symbol citation so the phone
-  can show it.
-- Schedule notifications: a schedule's optional `notify` list (`start`, `finish`,
-  `failure`; finish and failure when absent) makes the Hook push each run's
-  start, finish or failure to registered phones through the approvals' APNs
-  configuration, one collapse id per run. A run records `notified` and, when
-  nothing was sent, `notifyReason`; a missing push configuration is logged and
-  never interrupts the scheduled agent.
-- Modules: phren's features are switchable per store and profile. Memory and
-  tasks stay on; conductor, schedules and the rest can be turned off, the MCP
-  and CLI surfaces shrink to match, the Hook reports its capabilities so the
-  phone hides what a computer does not run, and `phren modules list` shows
-  what is on and why. Existing installs migrate once.
-- Conductor: a headless receiver launches the fan-out wrappers in isolated
-  worktrees with durable dispatch handles and a bounded number of leads,
-  relays remote questions without duplicates, and returns each lead's report
-  to the exact parent conversation through an at-most-once outbox that
-  survives a restart.
-- The workspace overview reports each pane's running fan-out workers and
-  their providers, so the phone can count them.
-- Phren Hook records OpenCode Go spend per model over 5 hours, 7 days and
-  30 days, with limits when the plan reports them.
-- Conductor dispatch receipts can retain a validated local conversation parent
-  and durable remote computer identity, while `/v1/subagents` projects remote
-  leads and their bounded local fan-out trees without exporting checkout paths.
-- Modules design, built-in manifests and store/profile configuration resolution,
-  plus `phren modules list` to inspect configured enablement without changing
-  runtime registration.
-- Conductor design and independent worker briefs for remote reports, agent
-  ancestry, phone navigation, headless workers and question relay, plus a
-  shipped `conductor` skill with a concise dispatcher voice.
-- Computer enrollment for Phren Hook with reusable private ed25519 keys and
-  restricted public-key acceptance, pinned peers in `hooks.yaml`, and remote
-  placement through `/v1/dispatch`, `phren dispatch` and the `dispatch` MCP
-  tool. Placement resolves projects on the receiving computer and keeps
-  uncertain deliveries in `phren dispatch status` without retrying.
-- Scheduled prompts: project `schedules.yaml` files, local-time interval,
-  daily, weekly, once and cron evaluation, Herdr or headless execution, Hook
-  list/run/history routes, and `phren schedule` management commands.
-- Phren Hook reports a Codex thread whose history stopped persisting.
-- Phren Hook transcript streams resume after the iPhone's last received line,
-  and reconnect backlogs no longer roll a longer local chat back to an older
-  bounded page after the app has been idle.
-- Phren Hook accepts answer keys for a prompt it remembered (a permission
-  request it could not hold) even while Herdr still reads the pane as working;
-  the phone no longer gets 'This agent is not waiting for an answer'.
-- Phren Hook serves git status, log, branches, pull requests, a working tree
-  listing and stage, unstage and discard for the phone's Changes screen,
-  bound to the pane's repository.
-- Phren Hook reports each agent pane's model in the workspace overview and
-  keeps temp paths and shell variable prefixes out of the lock screen step.
-- OpenCode worker transcripts keep MCP tool inputs and show changed-file
-  diffs under edit, write and patch calls.
-- The chat's model picker lists OpenCode's models for an opencode pane, the
-  OpenCode Go plan's first, with the configured default marked.
-
-- Phren Hook reports a compacting Claude Code conversation to the phone and
-  exports compaction as a marker row instead of the full summary.
-
-- Phren Hook follows a spawned agent's transcript live: `WS /v1/transcripts`
-  and `GET /v1/transcripts/history` take `child=<id>` from `/v1/subagents`,
-  bound to the parent conversation. Child rows are served as that
-  conversation's own turns, so a completed Claude Code subagent's transcript
-  no longer arrives as sidechain rows the phone hides; a launch whose file
-  has not been written yet is rechecked instead of cached as missing.
-
-- Direct APNs delivery for agent permission requests while the iPhone app is
-  suspended. Phones register over the authenticated SSH gateway; notification
-  actions use one-time expiring bindings and never expose commands or provider
-  action identities to APNs.
-- opencode joins Codex, Claude Code, and Copilot as a supported agent. Phren
-  Hook can launch it, and `phren bridge install` writes an opencode plugin that
-  mirrors sessions into the store's `.runtime/sessions` so the iOS app can read
-  them. Identity needs `herdr integration install opencode` on the computer.
-- Codex CLI fan-outs now appear as child agents beside OpenCode ones: a
-  `provider: "codex"` manifest with a `codex exec --json` event log is read as
-  a child transcript.
-- `/v1/diff` takes `child=<id>` from `/v1/subagents` to return that spawned
-  agent's whole repository diff: its own worktree for a fan-out, the parent's
-  checkout otherwise.
-
-### Changed
-
-- The phone Hook bundle carries only what the Hook runs: `phren init`, the agent hooks
-  installer, governance policy, the doctor and the FTS indexer left it (86 source files
-  and the glob package), 1.5 MB down to 1.25 MB. One definition each for the git, path,
-  atomic-write and task-text helpers that had two or three copies.
-- Codex fan-out child transcripts export the shell command, a bounded output
-  tail, and the changed paths, and `/v1/subagents` reports a fan-out's model
-  when its manifest names one.
-- Fan-out children returned by `/v1/subagents` report their worktree folder
-  name and attached branch without exposing the filesystem path.
-
-### Fixed
-
 - Composite MCP tools (`manage_task`, `revise_finding`, `session`,
   `phren_admin`) accept a nested object argument that the host passed through
   as a JSON string. Claude Code did this for `manage_task action=update`
@@ -291,21 +250,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   `<task-notification>`, `<system-reminder>`) are skipped, and the
   `<pasted_content>` wrapper Claude Code puts around pasted or phone input is
   read through instead of landing verbatim in the task.
-
-### Changed
-
-- `phren config proactivity <level> --scope findings|tasks` sets the
-  findings-only or task-only auto-capture level; `proactivity.findings` and
-  `proactivity.tasks` now appear in `phren config --help` and the command
-  registry. `set_config` domain `proactivity` already took `scope`.
-- Tasks the prompt hook picks up on its own go to Queue, not Active, with a
-  `Queued task` notice. A prompt that asks to be tracked ("add this to
-  task"), or one matching a task already in Active, still goes to Active.
-- Swipe down on the chat message box, its icon row, or the Herdr shortcut row
-  to dismiss the keyboard while keeping the draft.
-- iOS CI runs only by manual dispatch; the full native UI suite requires an
-  additional opt-in. Bound job/test runtime, cancel superseded runs, and retain
-  native UI artifacts for three days. Regular CI jobs have 10-minute limits.
 
 ## [0.2.14] - 2026-09-10
 

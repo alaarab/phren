@@ -57,6 +57,12 @@ Outside the pnpm workspace:
 | `packages/cli/src/graph-core/` | Host-agnostic graph model shared by the browser viewer and the terminal graph view: payload types, palette, kind/health derivation, filters, ranking, search. Must not import node builtins or anything outside itself (it is bundled for the browser). |
 | `packages/cli/src/shell/graph/` | The shell's Graph view: deterministic force layout, braille canvas, controller (data/camera/selection/keys), view renderer, watch mode (tails the lookup log), agents overlay |
 | `packages/cli/src/agents/` | Discovering coding agents running on this machine (`PHREN_FEATURE_AGENTS`). Host-agnostic `AgentRecord` contract plus `providers/` (herdr, phren-agent spawner). Nothing host-specific may leak outside `providers/`. |
+| `packages/cli/src/code/` | Per-project SQLite code index: tree-sitter parsing, incremental transactions, persisted identifier references, symbol queries and finding citations. `phren code index` resolves this machine's checkout. |
+| `packages/cli/src/bridge/code-routes.ts` | Validated code query routes plus per-project debounced reindexing after file changes and HEAD polling. |
+| `packages/cli/src/bridge/grants.ts` | Standing conductor dispatch/hand-off grants, scope matching, locked atomic updates and stale-row revocation checks. |
+| `packages/cli/src/bridge/hand-off.ts` | Delivers one prompt to an existing local or verified-peer session, with live target validation. |
+| `apps/ios/Phren/Features/Memory/MemoryListModel.swift` | Cached Memory list filtering, counts and sections, with content-based row identity. |
+| `apps/ios/Phren/Features/Tasks/TasksModel.swift` | Cached task rows, project groups and counts, refreshed when inputs change. |
 | `packages/cli/src/bridge/schedules.ts` | Scheduled prompts: the `schedules.yaml` store format and its five timing forms evaluated in the assigned computer's local time, plus the Hook's `Scheduler` that records a run before launching through Herdr or a headless wrapper. Backs `phren schedule` and the `/v1/schedules` routes. |
 | `packages/cli/src/bridge/git.ts` | Read-only Git data for the phone's Changes screen (`status`, `log`, `branches`, `pulls`, `tree`) plus stage/unstage/discard, all bound to the pane's repository or a spawned child's worktree. |
 | `packages/cli/src/bridge/dispatch.ts` | Conductor placement: the `dispatch` MCP tool schema and `DispatchService`, which validates verified peers, picks a named or least-busy `anywhere` computer, launches over pinned SSH, sends one prompt, and stores durable receipts. |
@@ -100,6 +106,9 @@ Developer docs live in `docs/` (also published to the GitHub Pages site):
 - `feature-flags.md` -- optional features and their env flags
 - `performance.md` -- indexing and search performance notes
 - `shell.md` -- the interactive `phren` shell
+- `code-index.md` -- local symbol index, queries, phone routes and finding citations
+- `conductor.md` -- launch roles, placement, hand-off, standing grants and adapter boundaries
+- `fanout.md` -- worker manifests, permission failures, notification and archive lifecycle
 - `graph-viewer.md` -- the 3D memory viewer (web UI Graph tab + VS Code webview)
 
 Note: `reference/topics/` is a *runtime* location inside a user's `.phren/<project>/`

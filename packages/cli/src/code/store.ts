@@ -1,8 +1,9 @@
+import { isValidProjectName } from "../utils-paths.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { SqlJsDatabase, SqlValue } from "../index-query.js";
 import { bootstrapSqlJs } from "../shared/sqljs.js";
-import { ensurePrivateDir, runtimeDir } from "../phren-paths.js";
+import { atomicWriteText, ensurePrivateDir, runtimeDir } from "../phren-paths.js";
 
 /**
  * On-disk shape of the code index.
@@ -15,8 +16,12 @@ import { ensurePrivateDir, runtimeDir } from "../phren-paths.js";
  * because both are SQL keywords.
  */
 
+export interface CodeSqlDatabase extends SqlJsDatabase {
+  prepare(sql: string): { run(params: SqlValue[]): void; free(): boolean };
+}
+
 export interface CodeDatabase {
-  db: SqlJsDatabase;
+  db: CodeSqlDatabase;
   path: string;
   /** Flush the in-memory database back to the `.sqlite` file. */
   persist(): void;
@@ -24,7 +29,7 @@ export interface CodeDatabase {
 }
 
 interface SqlJsStatic {
-  Database: new (data?: ArrayLike<number>) => SqlJsDatabase;
+  Database: new (data?: ArrayLike<number>) => CodeSqlDatabase;
 }
 
 // sql.js initialises its WASM module per call. The code index opens the
@@ -59,6 +64,7 @@ export function codeRuntimeDir(store: string): string {
 }
 
 export function codeDatabasePath(store: string, project: string): string {
+  if (!isValidProjectName(project)) throw new Error("Choose a valid project name.");
   return path.join(codeRuntimeDir(store), `${project}.sqlite`);
 }
 
@@ -94,6 +100,10 @@ function createSchema(db: SqlJsDatabase): void {
        tokenize = "porter unicode61"
      )`,
   );
+  db.run(`CREATE TABLE IF NOT EXISTS reference_names (file TEXT NOT NULL, name TEXT NOT NULL, line INTEGER NOT NULL, kind TEXT NOT NULL)`);
+  db.run(`CREATE INDEX IF NOT EXISTS reference_names_file ON reference_names(file)`);
+  db.run(`CREATE INDEX IF NOT EXISTS symbols_name_nocase ON symbols(name COLLATE NOCASE)`);
+  db.run(`CREATE INDEX IF NOT EXISTS symbols_file_name ON symbols(file, name)`);
   db.run(`CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
   db.run(`CREATE INDEX IF NOT EXISTS symbols_file ON symbols(file)`);
   db.run(`CREATE INDEX IF NOT EXISTS symbols_name ON symbols(name)`);
@@ -105,7 +115,7 @@ function createSchema(db: SqlJsDatabase): void {
 export async function openCodeDatabase(store: string, project: string, create = true): Promise<CodeDatabase | undefined> {
   const SQL = await loadSqlJs();
   const filePath = codeDatabasePath(store, project);
-  let db: SqlJsDatabase;
+  let db: CodeSqlDatabase;
   if (fs.existsSync(filePath)) {
     db = new SQL.Database(fs.readFileSync(filePath));
   } else if (create) {
@@ -120,7 +130,7 @@ export async function openCodeDatabase(store: string, project: string, create = 
     path: filePath,
     persist(): void {
       ensurePrivateDir(path.dirname(filePath));
-      fs.writeFileSync(filePath, Buffer.from(db.export()));
+      atomicWriteText(filePath, db.export(), { mode: 0o600 });
     },
     close(): void {
       db.close();
@@ -128,17 +138,17 @@ export async function openCodeDatabase(store: string, project: string, create = 
   };
 }
 
-function rowsOf(db: SqlJsDatabase, sql: string, params: SqlValue[] = []): SqlValue[][] {
+export function rowsOf(db: SqlJsDatabase, sql: string, params: SqlValue[] = []): SqlValue[][] {
   const result = db.exec(sql, params);
   return result[0]?.values ?? [];
 }
 
-function numberAt(row: SqlValue[], index: number): number {
+export function numberAt(row: SqlValue[], index: number): number {
   const value = row[index];
   return typeof value === "number" ? value : Number(value);
 }
 
-function stringAt(row: SqlValue[], index: number): string {
+export function stringAt(row: SqlValue[], index: number): string {
   const value = row[index];
   return value === null || value === undefined ? "" : String(value);
 }
@@ -168,6 +178,7 @@ export function upsertFileRow(db: SqlJsDatabase, file: CodeFileRow, indexedAt = 
 
 export function deleteFileRow(db: SqlJsDatabase, file: string): void {
   db.run(`DELETE FROM files WHERE path = ?`, [file]);
+  db.run(`DELETE FROM reference_names WHERE file = ?`, [file]);
 }
 
 /** Remove a file that vanished from the working tree: its rows and every reference to it. */
@@ -181,6 +192,7 @@ export function purgeFile(db: SqlJsDatabase, file: string): void {
   db.run(`DELETE FROM blame WHERE file = ?`, [file]);
   db.run(`DELETE FROM "references" WHERE file = ?`, [file]);
   db.run(`DELETE FROM files WHERE path = ?`, [file]);
+  db.run(`DELETE FROM reference_names WHERE file = ?`, [file]);
 }
 
 interface OldSymbol {
@@ -209,91 +221,71 @@ export interface BlameInput {
   at: string;
 }
 
-/**
- * Replace one file's symbols, keeping ids stable for symbols that survive.
- *
- * References from other files point at symbol ids, so a rename must re-point
- * them rather than drop them: a symbol whose (name, line) survives keeps its
- * id, and references to a vanished symbol are removed.
- */
+/** Replace a file's symbols while preserving surviving (name, line) IDs. */
 export function replaceFileSymbols(
-  db: SqlJsDatabase,
+  db: CodeSqlDatabase,
   file: string,
   symbols: SymbolInput[],
   blame: BlameInput[],
 ): Map<string, number> {
   const oldSymbols: OldSymbol[] = rowsOf(db, `SELECT id, name, line FROM symbols WHERE file = ?`, [file]).map(row => ({
-    id: numberAt(row, 0),
-    key: symbolKey(stringAt(row, 1), numberAt(row, 2)),
+    id: numberAt(row, 0), key: symbolKey(stringAt(row, 1), numberAt(row, 2)),
   }));
-
-  for (const old of oldSymbols) {
-    db.run(`DELETE FROM symbols_fts WHERE rowid = ?`, [old.id]);
-  }
+  const oldIds = new Map(oldSymbols.map(old => [old.key, old.id]));
+  let nextId = numberAt(rowsOf(db, `SELECT COALESCE(MAX(id), 0) FROM symbols`)[0], 0) + 1;
+  db.run(`DELETE FROM symbols_fts WHERE rowid IN (SELECT id FROM symbols WHERE file = ?)`, [file]);
   db.run(`DELETE FROM symbols WHERE file = ?`, [file]);
   db.run(`DELETE FROM blame WHERE file = ?`, [file]);
   db.run(`DELETE FROM "references" WHERE file = ?`, [file]);
 
   const newIdsByKey = new Map<string, number>();
-  for (const symbol of symbols) {
-    db.run(
-      `INSERT INTO symbols (file, name, kind, line, end_line, signature, doc, parent, exported)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [file, symbol.name, symbol.kind, symbol.line, symbol.endLine, symbol.signature, symbol.doc, symbol.parent, symbol.exported ? 1 : 0],
-    );
-    const id = numberAt(rowsOf(db, `SELECT last_insert_rowid()`)[0] ?? [0], 0);
-    db.run(`INSERT INTO symbols_fts (rowid, name, signature, doc) VALUES (?, ?, ?, ?)`, [id, symbol.name, symbol.signature, symbol.doc]);
-    newIdsByKey.set(symbolKey(symbol.name, symbol.line), id);
-  }
-
-  for (const old of oldSymbols) {
-    const replacement = newIdsByKey.get(old.key);
-    if (replacement !== undefined) {
-      db.run(`UPDATE "references" SET symbol_id = ? WHERE symbol_id = ?`, [replacement, old.id]);
-    } else {
-      db.run(`DELETE FROM "references" WHERE symbol_id = ?`, [old.id]);
+  const insert = db.prepare(`INSERT INTO symbols (id, file, name, kind, line, end_line, signature, doc, parent, exported) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const fts = db.prepare(`INSERT INTO symbols_fts (rowid, name, signature, doc) VALUES (?, ?, ?, ?)`);
+  const insertBlame = db.prepare(`INSERT OR REPLACE INTO blame (file, line, author_hash, at) VALUES (?, ?, ?, ?)`);
+  try {
+    for (const symbol of symbols) {
+      const key = symbolKey(symbol.name, symbol.line);
+      const id = oldIds.get(key) ?? nextId++;
+      oldIds.delete(key);
+      insert.run([id, file, symbol.name, symbol.kind, symbol.line, symbol.endLine, symbol.signature, symbol.doc, symbol.parent, symbol.exported ? 1 : 0]);
+      fts.run([id, symbol.name, symbol.signature, symbol.doc]);
+      newIdsByKey.set(key, id);
     }
+    for (const entry of blame) insertBlame.run([file, entry.line, entry.authorHash, entry.at]);
+  } finally {
+    insert.free();
+    fts.free();
+    insertBlame.free();
   }
-
-  for (const entry of blame) {
-    db.run(`INSERT OR REPLACE INTO blame (file, line, author_hash, at) VALUES (?, ?, ?, ?)`, [file, entry.line, entry.authorHash, entry.at]);
-  }
-
+  for (const id of oldIds.values()) db.run(`DELETE FROM "references" WHERE symbol_id = ?`, [id]);
   return newIdsByKey;
 }
 
-/** Every symbol id keyed by name; used to resolve references project-wide. */
-export function loadSymbolIdsByName(db: SqlJsDatabase): Map<string, number[]> {
-  const byName = new Map<string, number[]>();
-  for (const row of rowsOf(db, `SELECT id, name FROM symbols`)) {
-    const name = stringAt(row, 1);
-    const ids = byName.get(name);
-    if (ids) ids.push(numberAt(row, 0));
-    else byName.set(name, [numberAt(row, 0)]);
-  }
-  return byName;
+/** Keep unresolved names so edits to definitions also refresh unchanged callers. */
+export function replaceReferenceNames(db: CodeSqlDatabase, file: string, references: Array<{ name: string; line: number; kind: string }>): void {
+  db.run(`DELETE FROM reference_names WHERE file = ?`, [file]);
+  const insert = db.prepare(`INSERT INTO reference_names (file, name, line, kind) VALUES (?, ?, ?, ?)`);
+  try {
+    for (const reference of references) insert.run([file, reference.name, reference.line, reference.kind]);
+  } finally { insert.free(); }
 }
 
-export interface ResolvedReference {
-  symbolId: number;
-  line: number;
-  kind: string;
-}
-
-export function insertReferences(db: SqlJsDatabase, file: string, references: ResolvedReference[]): void {
-  for (const reference of references) {
-    db.run(`INSERT INTO "references" (symbol_id, file, line, kind) VALUES (?, ?, ?, ?)`, [
-      reference.symbolId,
-      file,
-      reference.line,
-      reference.kind,
-    ]);
-  }
+/** Aggregate names once, including ambiguous common names, before resolving callers. */
+export function resolveReferences(db: SqlJsDatabase): void {
+  db.run(`DELETE FROM "references"`);
+  db.run(`INSERT INTO "references" (symbol_id, file, line, kind)
+    WITH local AS (SELECT file, name, MIN(id) AS id, COUNT(*) AS n FROM symbols GROUP BY file, name),
+         global AS (SELECT name, MIN(id) AS id, COUNT(*) AS n FROM symbols GROUP BY name)
+    SELECT CASE WHEN local.n = 1 THEN local.id ELSE global.id END, r.file, r.line, r.kind
+    FROM reference_names r
+    LEFT JOIN local ON local.file = r.file AND local.name = r.name
+    LEFT JOIN global ON global.name = r.name
+    WHERE local.n = 1 OR (local.n IS NULL AND global.n = 1)`);
 }
 
 /**
  * Small key/value side table. It carries facts about the index itself rather
- * than its contents; stage 2 records `repo_root` so definition queries can read
+ * than its contents; `repo_root` lets definition queries read
  * the source snippet after an index built with `--repo`.
  */
 export function setMeta(db: SqlJsDatabase, key: string, value: string): void {

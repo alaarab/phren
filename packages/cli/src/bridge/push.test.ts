@@ -66,6 +66,7 @@ describe("schedule push payload", () => {
     expect(scheduleCollapseId("scheduleFinished", "run-1")).toBe("run-1-scheduleFinished");
     expect(scheduleCollapseId("scheduleBlocked", "run-1")).not.toBe(scheduleCollapseId("scheduleFinished", "run-1"));
     expect(scheduleCollapseId("scheduleBlocked", "a".repeat(64))).toHaveLength(64);
+    expect(scheduleCollapseId("scheduleBlocked", "a".repeat(64))).not.toBe(scheduleCollapseId("scheduleFinished", "a".repeat(64)));
   });
 });
 

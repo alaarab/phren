@@ -10,7 +10,7 @@ import { z } from "zod";
 import { fanoutRoot } from "./fanouts.js";
 import { paneIdentity, rpc, servers, snapshot } from "./herdr.js";
 import type { SchedulePush, SchedulePushKind, SchedulePushResult } from "./push.js";
-import { BridgeError, bridgeRoot, object, objects, type Json } from "./protocol.js";
+import { atomic, BridgeError, bridgeRoot, object, objects, type Json } from "./protocol.js";
 import { transcriptPath } from "./transcripts.js";
 import { getProjectSourcePath } from "../project-config.js";
 import { defaultPhrenPath, getProjectDirs } from "../shared.js";
@@ -197,9 +197,7 @@ export async function writeScheduleDocument(projectDir: string, schedules: Sched
 
 async function atomicWrite(file: string, text: string): Promise<void> {
   await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
-  const temporary = `${file}.tmp-${randomUUID()}`;
-  await writeFile(temporary, text, { mode: 0o600 });
-  try { await rename(temporary, file); } finally { await unlink(temporary).catch(() => {}); }
+  await atomic(file, text);
 }
 
 export function canonicalComputer(value: string): string {
@@ -426,7 +424,7 @@ export class Scheduler {
       }).catch(async error => {
         await this.finishRun(prepared.run.id, prepared.schedule, "failed",
           error instanceof Error ? error.message : "The scheduled agent failed.", notified);
-      });
+      }).catch(error => this.log(`[schedule] Could not finish run ${prepared.run.id}: ${String(error)}`));
       await notified;
       return running;
     } catch (error) {
@@ -653,6 +651,7 @@ async function launchHeadless(context: ScheduleLaunchContext, store: string, sta
   const output = createWriteStream(path.join(jobDir, eventLog), { flags: "a", mode: 0o600 });
   const errors = createWriteStream(path.join(jobDir, "stderr.log"), { flags: "a", mode: 0o600 });
   const streamsFinished = Promise.all([streamFinished(output), streamFinished(errors)]).then(() => undefined).catch(() => undefined);
+  child.stdin?.on("error", () => { /* A child that exits before reading is reported by close. */ });
   child.stdout?.pipe(output); child.stderr?.pipe(errors); child.stdin?.end(context.schedule.prompt);
   await new Promise<void>((resolve, reject) => {
     child.once("spawn", resolve);

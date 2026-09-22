@@ -130,6 +130,7 @@ export class CodeReindexer {
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly pendingFull = new Set<string>();
   private readonly running = new Set<string>();
+  private readonly rerun = new Set<string>();
   private readonly heads = new Map<string, string>();
   private closed = false;
 
@@ -158,6 +159,8 @@ export class CodeReindexer {
     this.closed = true;
     for (const timer of this.timers.values()) clearTimeout(timer);
     this.timers.clear();
+    this.rerun.clear();
+    this.pendingFull.clear();
   }
 
   private indexedProjects(): Array<{ project: string; root: string }> {
@@ -185,7 +188,7 @@ export class CodeReindexer {
   private async run(project: string): Promise<void> {
     if (this.closed) return;
     // A run already in flight: let it finish, then take the newest event.
-    if (this.running.has(project)) { this.schedule(project, false); return; }
+    if (this.running.has(project)) { this.rerun.add(project); return; }
     const full = this.pendingFull.delete(project);
     this.running.add(project);
     try {
@@ -195,6 +198,7 @@ export class CodeReindexer {
       this.log(`re-index of ${project} failed: ${errorMessage(error)}`);
     } finally {
       this.running.delete(project);
+      if (this.rerun.delete(project)) this.schedule(project, false);
     }
   }
 }

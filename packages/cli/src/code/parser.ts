@@ -173,10 +173,12 @@ async function parseWithGrammar(spec: LanguageSpec, source: string): Promise<Par
     const query = compileQuery(spec, language);
     if (!query) return undefined;
     const parser = new Parser();
+    try {
     parser.setLanguage(language);
     const tree = parser.parse(source);
     if (!tree) return undefined;
 
+    try {
     const symbols: ParsedSymbol[] = [];
     const nameIndexes = new Set<number>();
     for (const match of query.matches(tree.rootNode)) {
@@ -191,10 +193,11 @@ async function parseWithGrammar(spec: LanguageSpec, source: string): Promise<Par
       const symbol = buildSymbol(spec, def, name, source);
       if (symbol) symbols.push(symbol);
     }
-    parser.delete();
 
     const references = collectReferences(tree.rootNode, spec, nameIndexes);
     return { language: spec.name, symbols, references };
+    } finally { tree.delete(); }
+    } finally { parser.delete(); }
   } catch (err: unknown) {
     logger.debug("code", `parse failed for ${spec.name}: ${errorMessage(err)}`);
     return undefined;

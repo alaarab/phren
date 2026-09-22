@@ -1,7 +1,7 @@
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { addGrant, ensureGrant, listGrants, matchGrant, removeGrant, type Grant } from "./grants.js";
 import { BridgeError } from "./protocol.js";
 
@@ -15,8 +15,22 @@ function grant(overrides: Partial<Grant> = {}): Grant {
 
 describe("conductor grants", () => {
   let root: string;
-  beforeEach(async () => { root = await mkdtemp(path.join(tmpdir(), "phren-grants-")); });
-  afterEach(async () => { await rm(root, { recursive: true, force: true }); });
+  beforeEach(async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(now);
+    root = await mkdtemp(path.join(tmpdir(), "phren-grants-"));
+  });
+  afterEach(async () => { vi.useRealTimers(); await rm(root, { recursive: true, force: true }); });
+
+  it("preserves concurrent additions and rejects stale revoke indexes", async () => {
+    const first = { scope: "project:first", actions: ["dispatch"] };
+    const second = { scope: "project:second", actions: ["hand_off"] };
+    await Promise.all([addGrant(first, root), addGrant(second, root)]);
+    expect(await listGrants(root)).toHaveLength(2);
+    await removeGrant({ index: 0, expected: first }, root);
+    await expect(removeGrant({ index: 0, expected: first }, root)).rejects.toMatchObject({ status: 409 });
+    expect(await listGrants(root)).toEqual([second]);
+  });
 
   it("matches by specificity: project beats global, named computers beat any, most specific wins", () => {
     const globalAny = grant();

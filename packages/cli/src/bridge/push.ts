@@ -42,7 +42,7 @@ export interface SchedulePush {
 export interface SchedulePushResult { notified: boolean; reason?: string }
 
 export function scheduleCollapseId(kind: SchedulePushKind, runId: string): string {
-  return `${runId}-${kind}`.slice(0, 64);
+  return `${runId.slice(0, 63 - kind.length)}-${kind}`;
 }
 
 export function approvalPushPayload(value: ApprovalPush, host?: string): Record<string, unknown> {
