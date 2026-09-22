@@ -14,6 +14,8 @@ struct ChatRichText: View, Equatable {
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.text == rhs.text && lhs.reply == rhs.reply && lhs.messageID == rhs.messageID }
     @ScaledMetric(relativeTo: .body) private var textSize = 14.5
     @ScaledMetric(relativeTo: .headline) private var headingSize = 15.5
+    @Environment(\.chatMessageMenuSource) private var menuSource
+    @Environment(ChatMessageMenu.self) private var messageMenu: ChatMessageMenu?
     private let document: ChatRichTextDocument
     /// Keys this message's selection state; the message id when there is one.
     private let owner: String
@@ -39,7 +41,7 @@ struct ChatRichText: View, Equatable {
         VStack(alignment: .leading, spacing: 12) {
             ForEach(document.blocks) { block in
                 if let language = block.language {
-                    ChatCodeBlock(text: block.text, language: language)
+                    ChatCodeBlock(text: block.text, language: language).id(block.id)
                 } else if !block.rows.isEmpty {
                     ScrollView(.horizontal) {
                         Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
@@ -58,13 +60,16 @@ struct ChatRichText: View, Equatable {
                     }
                     .padding(12).background(PhrenTheme.chatPanel, in: RoundedRectangle(cornerRadius: 14))
                     .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(PhrenTheme.border, lineWidth: 1))
-                    .contextMenu {
-                        Button("Copy table", systemImage: "tablecells") {
-                            ChatClipboard.copy(block.rows.map { $0.joined(separator: " | ") }.joined(separator: "\n"))
-                        }
-                        Button(replyLabel, systemImage: "doc.on.doc") { ChatClipboard.copy(reply) }
-                        ShareLink(item: reply)
+                    .onLongPressGesture(minimumDuration: 0.4) {
+                        menuSource?.open(block.id, [
+                            PhrenControlAction(id: "copy-table", title: "Copy table", icon: "tablecells") {
+                                ChatClipboard.copy(block.rows.map { $0.joined(separator: " | ") }.joined(separator: "\n"))
+                            },
+                            PhrenControlAction(id: "copy-message", title: "Copy message", icon: "doc.on.doc") { ChatClipboard.copy(reply) },
+                            PhrenControlAction(id: "share", title: "Share", icon: "square.and.arrow.up") { messageMenu?.sharedText = reply }
+                        ])
                     }
+                    .id(block.id)
                 } else {
                     ChatParagraph(block: block, owner: owner, messageID: messageID, reply: reply, replyLabel: replyLabel,
                                   size: block.heading ? headingSize : textSize)
@@ -86,6 +91,8 @@ private struct ChatParagraph: View {
     let replyLabel: String
     let size: CGFloat
     @Environment(ChatTextSelection.self) private var selection: ChatTextSelection?
+    @Environment(ChatMessageMenu.self) private var messageMenu: ChatMessageMenu?
+    @Environment(\.chatMessageMenuSource) private var menuSource
     var body: some View {
         let selecting = selection?.target(owner, block.id)
         Text(ChatInlineCode.tinted(block.attributed))
@@ -98,12 +105,9 @@ private struct ChatParagraph: View {
             .accessibilityHidden(selecting != nil)
             // A double-tap alone: single taps on links inside keep their speed.
             .onTapGesture(count: 2) { point in selection?.begin(owner: owner, block: block.id, at: point) }
-            .contextMenu {
-                Button("Copy paragraph", systemImage: "text.quote") { ChatClipboard.copy(block.text) }
-                Button("Select text", systemImage: "character.cursor.ibeam") { selection?.begin(owner: owner, block: block.id, at: nil) }
-                Button(replyLabel, systemImage: "doc.on.doc") { ChatClipboard.copy(reply) }
-                ShareLink(item: reply)
-            }
+            .onLongPressGesture(minimumDuration: 0.4) { openMenu() }
+            .accessibilityAction(named: "Message actions") { openMenu() }
+            .id(block.id)
             .overlay {
                 if let selecting {
                     ChatSelectableText(attributed: ChatInlineCode.tinted(block.attributed), heading: block.heading, size: size,
@@ -137,6 +141,16 @@ private struct ChatParagraph: View {
                         .accessibilityIdentifier("chat-paragraph:\(messageID):\(block.id)")
                 }
             }
+    }
+    private func openMenu() {
+        menuSource?.open(block.id, [
+            PhrenControlAction(id: "copy-paragraph", title: "Copy paragraph", icon: "text.quote") { ChatClipboard.copy(block.text) },
+            PhrenControlAction(id: "select-text", title: "Select text", icon: "character.cursor.ibeam") {
+                selection?.begin(owner: owner, block: block.id, at: nil)
+            },
+            PhrenControlAction(id: "copy-message", title: "Copy message", icon: "doc.on.doc") { ChatClipboard.copy(reply) },
+            PhrenControlAction(id: "share", title: "Share", icon: "square.and.arrow.up") { messageMenu?.sharedText = reply }
+        ])
     }
     // These transparent hit targets exist only for the paragraph interaction
     // fixture. Adding one for every paragraph in every UI test makes an

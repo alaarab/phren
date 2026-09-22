@@ -165,6 +165,8 @@ private struct ChatMessageRow<Historical: View>: View {
     /// A long reply unfolds in place, rendered like the rest of the bubble;
     /// the monospace pager is for tool output, not for prose (owner, Sep 21).
     @State private var expanded = false
+    @State private var menuAnchor = ChatMessageMenuAnchor()
+    @Environment(ChatMessageMenu.self) private var messageMenu: ChatMessageMenu?
     let images: [ChatAttachmentDraft]
     let preview: (ChatAttachmentDraft) -> Void
     @ViewBuilder let historical: () -> Historical
@@ -200,6 +202,26 @@ private struct ChatMessageRow<Historical: View>: View {
         }
     }
     private var bubble: some View {
+        bubbleSurface
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { menuAnchor.frame = $0 }
+            .environment(\.chatMessageMenuSource, ChatMessageMenuSource { paragraph, actions in
+                openMenu(paragraph: paragraph, actions: actions)
+            })
+            .opacity(messageMenu?.request?.owner == message.id ? 0 : 1)
+            .onLongPressGesture(minimumDuration: 0.4) { openMenu(paragraph: nil, actions: messageActions) }
+            .accessibilityAction(named: "Message actions") { openMenu(paragraph: nil, actions: messageActions) }
+    }
+    private var messageActions: [PhrenControlAction] {
+        [PhrenControlAction(id: "copy-message", title: "Copy message", icon: "doc.on.doc") { ChatClipboard.copy(message.text) },
+         PhrenControlAction(id: "share", title: "Share", icon: "square.and.arrow.up") { messageMenu?.sharedText = message.text }]
+    }
+    private func openMenu(paragraph: Int?, actions: [PhrenControlAction]) {
+        guard menuAnchor.frame.width > 0 else { return }
+        messageMenu?.present(.init(owner: message.id, frame: menuAnchor.frame,
+                                  preview: AnyView(bubbleSurface.environment(\.chatMessageMenuSource, nil)),
+                                  paragraph: paragraph, actions: actions))
+    }
+    private var bubbleSurface: some View {
         HStack(alignment: .top, spacing: 0) {
             if message.role == .user { Spacer(minLength: 30) }
             VStack(alignment: .leading, spacing: 8) {
@@ -227,11 +249,9 @@ private struct ChatMessageRow<Historical: View>: View {
                 if revealedText != nil {
                     Capsule().fill(PhrenTheme.chatText).frame(width: 4, height: 13).accessibilityHidden(true)
                 }
-            }
-            .overlay(alignment: .topLeading) {
                 if message.isQueued {
-                    Color.clear.frame(width: 1, height: 1).accessibilityElement()
-                        .accessibilityLabel("Pending message")
+                    Text("Queued in the agent").font(PhrenTypography.caption)
+                        .foregroundStyle(PhrenTheme.textMuted)
                         .accessibilityIdentifier("chat-queued-tag:\(message.id)")
                 }
             }
@@ -245,12 +265,7 @@ private struct ChatMessageRow<Historical: View>: View {
             identifier: "chat-message:\(message.id)",
             condensedText: condensedAccessibilityText
         ))
-        // The bubble's menu: pictures, padding, anything that is not a
-        // block. Each block of text has its own, nearer menu that wins.
-        .contextMenu {
-            Button("Copy message", systemImage: "doc.on.doc") { ChatClipboard.copy(message.text) }
-            ShareLink(item: message.text)
-        }
+
     }
 }
 

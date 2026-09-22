@@ -701,7 +701,7 @@ import UIKit
             append("assistant", "Answer received — all 128 tests pass. The onboarding flow is ready to ship.")
         } else if answered { append("assistant", "Answer received in this conversation.") }
         if denied { append("assistant", "Permission denied in this conversation.") }
-        if !flag("--chat-claude-queue"), stopped { append("assistant", "Turn stopped in the selected pane.") }
+        if !flag("--chat-claude-queue") && !flag("--chat-codex-queue"), stopped { append("assistant", "Turn stopped in the selected pane.") }
         if flag("--chat-compaction"), target.source == "claude" {
             // Claude Code's compaction boundary and the summary that follows,
             // as Phren Hook reports them: the summary's 6,000 characters must
@@ -715,12 +715,16 @@ import UIKit
                 let key = String(repeating: "a", count: 64)
                 entries.append(["line": firstLine + entries.count, "raw": ["type": "user", "phrenQueued": true, "phrenQueueKey": key,
                     "message": ["role": "user", "content": text]]])
+            } else if flag("--chat-codex-queue") {
+                entries.append(["line": firstLine + entries.count, "raw": ["type": "response_item", "phrenQueued": true,
+                    "phrenQueueKey": String(repeating: "a", count: 64),
+                    "payload": ["type": "message", "role": "user", "content": [["type": "input_text", "text": text]]]]])
             } else {
                 append("user", text)
                 append("assistant", "Received in \(target.source) on \(target.paneID): \(text)")
             }
         }
-        if flag("--chat-claude-queue"), stopped {
+        if flag("--chat-claude-queue") || flag("--chat-codex-queue"), stopped {
             for (id, _) in sent where id == target.id {
                 entries.append(["line": firstLine + entries.count, "raw": ["type": "phren_queue_consumed", "key": String(repeating: "a", count: 64)]])
             }

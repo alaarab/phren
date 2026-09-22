@@ -485,7 +485,7 @@ public struct AgentChatTranscript: Equatable, Sendable {
         for entry in entries {
             guard let line = entry["line"] as? Int, line >= 0, var raw = entry["raw"] as? [String: Any] else { continue }
             if sidechain, raw["isSidechain"] as? Bool == true { raw.removeValue(forKey: "isSidechain") }
-            if source == "claude", raw["type"] as? String == "phren_queue_consumed",
+            if ["claude", "codex"].contains(source), raw["type"] as? String == "phren_queue_consumed",
                let key = raw["key"] as? String, Self.validQueueKey(key) {
                 queueEvents.append(.init(line: line, key: key)); continue
             }
@@ -530,7 +530,7 @@ public struct AgentChatTranscript: Equatable, Sendable {
                 if part.role == .user {
                     message.queueKey = (raw["phrenQueueKey"] as? String).flatMap { Self.validQueueKey($0) ? $0 : nil }
                 }
-                if source == "claude", part.role == .user, raw["phrenQueued"] as? Bool == true {
+                if ["claude", "codex"].contains(source), part.role == .user, raw["phrenQueued"] as? Bool == true {
                     message.wasQueued = true; message.isQueued = true
                     message.queueKey = (raw["phrenQueueKey"] as? String).flatMap { Self.validQueueKey($0) ? $0 : nil }
                 }

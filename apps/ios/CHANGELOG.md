@@ -14,6 +14,7 @@ number counts up on its own.
 - Multi-select filters fit their content, with dense checked rows, pinned removable chips, search for longer lists, inline All and None, and a selected count on Done.
 - Hold a project to choose a computer by name, state and project session count. Reachable and recently used computers come first, with a last-used shortcut, search for longer lists, and disabled offline computers that explain why they cannot open.
 - Code opens on the indexed codebase, with file symbol counts, languages, index time and Reindex. Search supports kind and directory filters. Usage shows the full paged ranking with bars, kind and file filters, and Hot/Cold jumps within the same list. Recent shows symbols the index last saw change. Code entries share the curly braces icon.
+- Chat sends steering messages straight to working harnesses and reads queued state from their transcripts. Local pending messages name the connection, startup or prompt that prevents delivery.
 
 - Tasks: Start opens the agent launch sheet with the task and its project. Backlog work moves to Active after the agent receives the task; cancel leaves it in place. Move to Active is a separate action, and moves out of the current filter show their destination with a View action. Selecting several tasks offers moves only.
 - Projects uses the same inline header as Agents, Tasks and Memory, with add, search and voice capture beside the title. Its More menu is removed. Memory owns the graph, Files and Memory maintenance; Agents owns Live sessions, Skills and Agent instructions.
@@ -36,6 +37,8 @@ number counts up on its own.
 - Select a symbol line, write a note and send it to a project session or a new worker. Code rows show usage bars, and the dossier lists cited findings.
 
 ### Fixed
+
+- Long-press message actions lift the message above a dimmed screen, cover the composer, and fit above or below the message without overlapping it. Dismissal restores the conversation in one animation.
 
 - Codex prompt options show their labels and wrapping descriptions separately. Long question text expands without fading or covering the options.
 - MCP approvals ask the tool's sentence, keep arguments in folded details, and use the terminal's actual choices and keys. Unresolved requests offer Open terminal.

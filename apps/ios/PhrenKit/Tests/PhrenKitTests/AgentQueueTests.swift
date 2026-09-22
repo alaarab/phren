@@ -45,6 +45,25 @@ final class AgentQueueTests: XCTestCase {
         XCTAssertTrue(history.messages[0].wasQueued)
     }
 
+    func testCodexHarnessQueueIsReadFromTranscriptAndConsumedOnlyOnce() throws {
+        let queued: [String: Any] = ["line": 1, "raw": ["type": "response_item", "phrenQueued": true,
+            "phrenQueueKey": key, "payload": ["type": "message", "role": "user", "content": "Run tests"]]]
+        func codex(_ kind: String, _ entries: [[String: Any]]) throws -> AgentChatTranscript {
+            try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: ["type": kind, "source": "codex",
+                "entries": entries, "totalLines": 3]), source: "codex")
+        }
+        var history = AgentChatHistory()
+        let backlog = try codex("backlog", [queued])
+        history.receive(backlog)
+        XCTAssertEqual(history.messages.map(\.isQueued), [true])
+        let consumed = try codex("append", [["line": 2, "raw": ["type": "phren_queue_consumed", "key": key]]])
+        history.receive(consumed)
+        history.receive(backlog)
+        history.receive(consumed)
+        XCTAssertEqual(history.messages.map(\.isQueued), [false])
+        XCTAssertEqual(history.messages.map(\.text), ["Run tests"])
+    }
+
     private func user(_ line: Int, text: String = "Run tests", images: Bool = false, key: String? = nil) -> [String: Any] {
         var raw: [String: Any] = ["type": "user", "message": ["role": "user", "content": images
             ? [["type": "text", "text": text], ["type": "image", "source": ["type": "base64", "media_type": "image/png", "data": "aGVsbG8="]]] as Any : text as Any]]

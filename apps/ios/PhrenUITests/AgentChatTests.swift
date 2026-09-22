@@ -1483,8 +1483,8 @@ final class AgentChatTests: XCTestCase {
         let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
         for text in ["First", "Second"] {
             composer.tap(); composer.typeText(text)
-            XCTAssertTrue(app.buttons["chat-queue"].waitForExistence(timeout: 3))
-            app.buttons["chat-queue"].tap()
+            XCTAssertTrue(app.buttons["chat-send"].waitForExistence(timeout: 3))
+            app.buttons["chat-send"].tap()
         }
         // Finish the fixture's active turn once both messages are queued;
         // its status snapshots deliberately keep saying working.
@@ -1498,18 +1498,18 @@ final class AgentChatTests: XCTestCase {
     }
 
     @MainActor
-    func testRejectedAutomaticQueueDeliveryWaitsForExplicitRetry() {
-        let app = launch(extra: ["--chat-working", "--chat-queue-completion", "--chat-send-rejected"])
+    func testRejectedSteeringWaitsForExplicitRetry() {
+        let app = launch(extra: ["--chat-working", "--chat-send-rejected"])
         app.buttons["live-chat:w7:w7:t9"].tap()
-        XCTAssertTrue(app.staticTexts["Working after the terminal answer."].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["chat-stop"].waitForExistence(timeout: 8))
         let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
         composer.tap(); composer.typeText("Retry explicitly")
-        app.buttons["chat-queue"].tap()
-        app.buttons["chat-stop"].tap()
+        app.buttons["chat-send"].tap()
         XCTAssertTrue(app.staticTexts["chat-delivery-error"].waitForExistence(timeout: 8))
-        XCTAssertFalse(app.staticTexts["Received: Retry explicitly"].waitForExistence(timeout: 2), "Repeated status ticks must not retry a failed send")
-        app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-queued-send:")).firstMatch.tap()
-        XCTAssertTrue(app.staticTexts["Received: Retry explicitly"].waitForExistence(timeout: 8))
+        XCTAssertEqual(composer.value as? String, "Retry explicitly")
+        XCTAssertFalse(app.staticTexts["Received in codex on w7:p1: Retry explicitly"].waitForExistence(timeout: 2))
+        app.buttons["chat-send"].tap()
+        XCTAssertTrue(app.staticTexts["Received in codex on w7:p1: Retry explicitly"].waitForExistence(timeout: 8))
     }
 
     @MainActor
@@ -1945,8 +1945,8 @@ final class AgentChatTests: XCTestCase {
         let copyParagraph = app.buttons["Copy paragraph"]
         XCTAssertTrue(copyParagraph.waitForExistence(timeout: 5), "The paragraph's menu, above the bubble's")
         XCTAssertTrue(app.buttons["Select text"].exists)
-        XCTAssertTrue(app.buttons["Copy reply"].exists)
-        XCTAssertFalse(app.buttons["Copy message"].exists, "The bubble's menu does not show for a paragraph")
+        XCTAssertTrue(app.buttons["chat-message-menu:copy-message"].exists)
+        XCTAssertTrue(app.buttons["chat-message-menu:share"].exists)
         capture(app, "Paragraph menu")
         copyParagraph.tap()
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
@@ -2051,32 +2051,22 @@ final class AgentChatTests: XCTestCase {
     }
 
     @MainActor
-    func testRejectedSendKeepsTheMessageQueuedAndAllowsExplicitRetry() {
+    func testRejectedSteeringSurvivesReactivationWithoutAnAutomaticRetry() {
         let app = launch(extra: ["--chat-send-rejected", "--chat-working"])
         app.buttons["live-chat:w7:w7:t9"].tap()
-        XCTAssertTrue(app.staticTexts["The project screen is ready. What would you like to change?"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["chat-stop"].waitForExistence(timeout: 8))
         let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
         composer.tap(); composer.typeText("Keep it up")
-        // The agent is working: the control queues rather than interrupts.
-        XCTAssertTrue(app.buttons["chat-queue"].waitForExistence(timeout: 3))
-        app.buttons["chat-queue"].tap()
-        let queued = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-queued-remove:")).firstMatch
-        XCTAssertTrue(queued.waitForExistence(timeout: 3))
-        XCTAssertFalse(app.staticTexts["Queued · 1"].exists, "Pending bubbles have no queued caption")
-        XCTAssertEqual(composer.value as? String, "", "The composer is clear once the message is queued")
-        let sendNow = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-queued-send:")).firstMatch
-        sendNow.tap()
+        app.buttons["chat-send"].tap()
         let error = app.staticTexts["chat-delivery-error"]
         XCTAssertTrue(error.waitForExistence(timeout: 5))
         XCTAssertTrue(error.label.contains("The selected terminal is unavailable."))
-        XCTAssertTrue(queued.exists, "A rejected message stays queued")
+        XCTAssertEqual(composer.value as? String, "Keep it up")
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-queued-remove:")).firstMatch.exists)
         XCUIDevice.shared.press(.home); app.activate()
-        XCTAssertFalse(app.staticTexts["Received in codex on w7:p1: Keep it up"].exists, "Nothing retries on its own while the agent works")
-        XCTAssertTrue(queued.waitForExistence(timeout: 5))
-        capture(app, "Rejected message stays queued")
-        sendNow.tap()
+        XCTAssertFalse(app.staticTexts["Received in codex on w7:p1: Keep it up"].exists)
+        app.buttons["chat-send"].tap()
         XCTAssertTrue(app.staticTexts["Received in codex on w7:p1: Keep it up"].waitForExistence(timeout: 8))
-        XCTAssertFalse(queued.exists)
         XCTAssertFalse(error.exists)
     }
 
@@ -2087,7 +2077,7 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(app.buttons["chat-stop"].waitForExistence(timeout: 8))
         let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
         composer.tap(); composer.typeText("Run the queued checks")
-        app.buttons["chat-queue"].tap()
+        app.buttons["chat-send"].tap()
         XCTAssertTrue(app.staticTexts["Run the queued checks"].waitForExistence(timeout: 8))
         let tag = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-queued-tag:")).firstMatch
         XCTAssertTrue(tag.waitForExistence(timeout: 5))
@@ -2100,45 +2090,73 @@ final class AgentChatTests: XCTestCase {
     }
 
     @MainActor
-    func testQueuedMessagesCanBeEditedRemovedAndDeliverWhenTheTurnEnds() {
-        let app = launch(extra: ["--chat-working"])
+    func testCodexSteeringGoesStraightToTheHarnessWhileWorking() {
+        let app = launch(extra: ["--chat-working", "--chat-codex-queue"])
         app.buttons["live-chat:w7:w7:t9"].tap()
-        XCTAssertTrue(app.buttons["chat-stop"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["chat-stop"].waitForExistence(timeout: 8))
         let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
         composer.tap(); composer.typeText("First follow-up")
-        app.buttons["chat-queue"].tap()
-        // One short steer is one short strip, sitting on the composer — not a
-        // 190pt box with the row floating in the middle of it.
-        let strip = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "identifier == %@ AND elementType != %d", "chat-queue", XCUIElement.ElementType.button.rawValue)).firstMatch
-        XCTAssertTrue(strip.waitForExistence(timeout: 3))
-        XCTAssertLessThan(strip.frame.height, 90, "One queued row must not stretch to the cap")
-        XCTAssertLessThan(composer.frame.minY - strip.frame.maxY, 40, "The queue strip hugs the composer")
-        composer.tap(); composer.typeText("Second follow-up")
-        app.buttons["chat-queue"].tap()
-        let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-queued-remove:"))
-        XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 3))
-        XCTAssertEqual(rows.count, 2)
-        XCTAssertFalse(app.staticTexts["Queued · 2"].exists, "Pending bubbles have no queued caption")
-        capture(app, "Two queued messages under the transcript")
-        // Edit pulls the message back into the composer.
-        app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-queued-edit:")).element(boundBy: 1).tap()
-        XCTAssertEqual(rows.count, 1)
-        XCTAssertEqual(composer.value as? String, "Second follow-up")
-        composer.tap(); composer.typeText(" (revised)")
-        app.buttons["chat-queue"].tap()
-        XCTAssertEqual(rows.count, 2)
-        // Remove drops one without sending it.
-        app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-queued-remove:")).element(boundBy: 1).tap()
-        XCTAssertEqual(rows.count, 1)
-        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Second follow-up")).firstMatch.exists)
-        // Stopping the turn frees the agent; the queue delivers itself.
-        XCTAssertTrue(app.buttons["chat-stop"].exists, "An empty composer shows Stop while working")
+        app.buttons["chat-send"].tap()
+        XCTAssertTrue(app.staticTexts["First follow-up"].waitForExistence(timeout: 8))
+        let tag = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-queued-tag:")).firstMatch
+        XCTAssertTrue(tag.waitForExistence(timeout: 5), "Only the harness transcript supplies queued state")
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-queued-remove:")).firstMatch.exists)
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-queued-send:")).firstMatch.exists)
         app.buttons["chat-stop"].tap()
-        XCTAssertTrue(app.staticTexts["Received in codex on w7:p1: First follow-up"].waitForExistence(timeout: 10))
-        XCTAssertEqual(rows.count, 0)
-        XCTAssertFalse(app.staticTexts["Queued · 1"].exists)
-        capture(app, "Queue delivered after the turn ended")
+        XCTAssertTrue(app.staticTexts["Queued instructions consumed."].waitForExistence(timeout: 10))
+        XCTAssertFalse(tag.exists)
+        XCTAssertTrue(app.staticTexts["First follow-up"].exists)
+    }
+
+    @MainActor
+    func testHeldPromptLabelsLocalPendingMessagesAndAllowsEditAndRemove() {
+        let app = launch(extra: ["--chat-question"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
+        XCTAssertTrue(composer.waitForExistence(timeout: 8))
+        composer.tap(); composer.typeText("Check the colors")
+        let pending = app.buttons["chat-queue"]
+        XCTAssertTrue(pending.waitForExistence(timeout: 5))
+        pending.tap()
+        XCTAssertTrue(app.staticTexts["Holding a prompt"].waitForExistence(timeout: 5))
+        let edit = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-queued-edit:")).firstMatch
+        XCTAssertTrue(edit.exists)
+        edit.tap()
+        XCTAssertEqual(composer.value as? String, "Check the colors")
+        pending.tap()
+        let remove = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-queued-remove:")).firstMatch
+        XCTAssertTrue(remove.waitForExistence(timeout: 5))
+        remove.tap()
+        XCTAssertTrue(remove.waitForNonExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testMessageMenuCoversComposerAndKeepsPressedMessageAboveItsBackdrop() {
+        let app = launch(extra: ["--chat-paragraphs"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let any = app.descendants(matching: .any)
+        let paragraph = any["chat-paragraph:2:0:1"]
+        XCTAssertTrue(paragraph.waitForExistence(timeout: 8))
+        let composer = any.matching(identifier: "chat-composer").firstMatch
+        let composerFrame = composer.frame
+        paragraph.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 5, dy: 5)).press(forDuration: 0.6)
+        let backdrop = any["chat-message-menu-backdrop"]
+        let preview = any["chat-message-menu-preview"]
+        XCTAssertTrue(backdrop.waitForExistence(timeout: 5))
+        XCTAssertTrue(preview.exists)
+        XCTAssertTrue(backdrop.frame.contains(composerFrame), "The dimmed backdrop covers the entire composer")
+        XCTAssertFalse(composer.exists && composer.isHittable, "Input is blocked behind the menu")
+        XCTAssertTrue(preview.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Bravo paragraph")).firstMatch.exists)
+        for id in ["copy-paragraph", "select-text", "copy-message", "share"] {
+            let action = app.buttons["chat-message-menu:" + id]
+            XCTAssertTrue(action.isHittable)
+            XCTAssertFalse(action.frame.intersects(preview.frame), "Actions never cover the lifted message")
+        }
+        capture(app, "Message lifted above composer backdrop")
+        app.buttons["chat-message-menu:close"].tap()
+        XCTAssertTrue(backdrop.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(composer.isHittable)
+        XCTAssertTrue(paragraph.exists)
     }
 
     @MainActor

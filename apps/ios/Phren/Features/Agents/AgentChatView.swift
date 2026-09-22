@@ -111,6 +111,7 @@ struct AgentChatView: View {
     @State private var indexedCode: SessionCodeContext?
     @State private var initialized = false
     @State private var queueHeight: CGFloat = 0
+    @State private var messageMenu = ChatMessageMenu()
     private struct ChatQueueHeight: PreferenceKey {
         static let defaultValue: CGFloat = 0
         static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
@@ -312,7 +313,9 @@ struct AgentChatView: View {
     }
     private var hasAgentPanes: Bool { model.panes.contains(where: isAgent) }
 
-    var body: some View { ChatPerformance.measure("chat container") { chatSheets(content) } }
+    var body: some View { ChatPerformance.measure("chat container") {
+        chatSheets(content).modifier(ChatMessageMenuPresenter(menu: messageMenu))
+    } }
     private var content: some View {
         VStack(spacing: 0) {
             chatHeader
@@ -521,9 +524,8 @@ struct AgentChatView: View {
             if !model.backgroundJobs.isEmpty {
                 ChatBackgroundJobsView(jobs: model.backgroundJobs)
             }
-            // Between the transcript and the input, where Claude Code keeps
-            // its queue; outside the lazy stack so the rows are always laid out.
-            if !model.queue.isEmpty {
+            // Readiness holds stay above the input until the harness can receive them.
+            if !model.localPendingMessages.isEmpty {
                 // Exactly as tall as its rows, and a scroller only once they
                 // pass the cap. (`frame(maxHeight:)` around a ViewThatFits
                 // stretched to the cap and centred the rows in it — the hole
@@ -560,6 +562,9 @@ struct AgentChatView: View {
         .environment(\.openToolOutput) { fullToolOutput = $0 }
         .environment(\.chatChildAgents, model.target.flatMap { target in childAgents.isEmpty ? nil : ChatChildAgents(session: session, target: target, agents: childAgents) })
         .environment(textSelection)
+        .onChange(of: messageMenu.request?.id) { _, id in
+            if id != nil { composing = false; textSelection.end() }
+        }
         #if DEBUG && targetEnvironment(simulator)
         .overlay(alignment: .topLeading) { if AgentChatFixture.enabled { ChatFixtureReport() } }
         #endif
@@ -1372,7 +1377,7 @@ struct AgentChatView: View {
                         .frame(width: 40, height: 40).contentShape(Rectangle().inset(by: -2))
                     }
                     .disabled(!primaryActionEnabled)
-                    .accessibilityLabel(showsStop ? "Stop" : showsQueue ? "Queue message" : "Send message")
+                    .accessibilityLabel(showsStop ? "Stop" : showsQueue ? "Keep pending" : "Send message")
                     .accessibilityIdentifier(showsStop ? "chat-stop" : showsQueue ? "chat-queue" : "chat-send")
                     .accessibilityValue(model.deliveryStatus ?? "")
                     .keyboardShortcut(.return, modifiers: .command)
@@ -1446,21 +1451,21 @@ struct AgentChatView: View {
     private var showsStop: Bool {
         model.target?.isStarting != true && model.isBusy && model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.attachments.isEmpty
     }
-    /// A message typed while the agent is busy joins the queue instead of
-    /// interrupting; the control says so.
+    /// Pending means the harness cannot currently receive input.
     private var showsQueue: Bool {
-        model.isBusy && !showsStop && !AgentSlashCommand.isCommand(model.draft)
+        model.target != nil && model.pendingReason != nil && !showsStop
+            && (!model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !model.attachments.isEmpty)
     }
 
-    /// Only messages still waiting to go out — the steers typed while the
-    /// agent is mid-turn. A message that has been delivered leaves the strip:
-    /// the transcript carries it, first as its own greyed pending bubble and
-    /// then as a real turn, so it never appears in two places at once.
+    /// Unsent readiness holds only. Harness queue items live in the transcript.
     private var queuedMessages: some View {
         VStack(alignment: .leading, spacing: 6) {
-            ForEach(model.queue.filter { $0.submittedAfterLine == nil }) { item in
+            ForEach(model.localPendingMessages) { item in
                 HStack(alignment: .top, spacing: 8) {
                     VStack(alignment: .leading, spacing: 4) {
+                        Text(model.pendingLabel(item)).font(PhrenTypography.caption)
+                            .foregroundStyle(PhrenTheme.textMuted)
+                            .accessibilityIdentifier("chat-pending-reason:\(item.id)")
                         if !item.text.isEmpty {
                             Text(item.text).font(.system(size: 14, design: .monospaced)).foregroundStyle(PhrenTheme.chatText)
                                 .lineLimit(3).textSelection(.enabled)
@@ -1470,20 +1475,16 @@ struct AgentChatView: View {
                                 .font(.caption2).foregroundStyle(PhrenTheme.chatNeutralDim)
                         }
                     }.frame(maxWidth: .infinity, alignment: .leading)
-                    .contextMenu {
-                        if !item.text.isEmpty { Button("Copy message", systemImage: "doc.on.doc") { ChatClipboard.copy(item.text) } }
-                    }
+
                     HStack(spacing: 0) {
-                        Button { sendTask = Task { await model.sendNow(item, session) } } label: {
-                            Image(systemName: "arrow.up.circle").frame(width: 36, height: 36).contentShape(Rectangle())
-                        }.accessibilityLabel("Send now").accessibilityIdentifier("chat-queued-send:\(item.id)")
-                            .disabled(!active || !model.connected || model.sending)
-                        Button { model.edit(item); composing = true } label: {
-                            Image(systemName: "pencil").frame(width: 36, height: 36).contentShape(Rectangle())
-                        }.accessibilityLabel("Edit").accessibilityIdentifier("chat-queued-edit:\(item.id)")
-                        Button { model.remove(item) } label: {
-                            Image(systemName: "xmark").frame(width: 36, height: 36).contentShape(Rectangle())
-                        }.accessibilityLabel("Remove from queue").accessibilityIdentifier("chat-queued-remove:\(item.id)")
+                        PhrenIconButton(icon: "arrow.up", label: "Send now") {
+                            sendTask = Task { await model.sendNow(item, session) }
+                        }.accessibilityIdentifier("chat-queued-send:\(item.id)")
+                            .disabled(!active || model.pendingReason != nil || model.sending)
+                        PhrenIconButton(icon: "pencil", label: "Edit") { model.edit(item); composing = true }
+                            .accessibilityIdentifier("chat-queued-edit:\(item.id)")
+                        PhrenIconButton(icon: "xmark", label: "Remove pending message") { model.remove(item) }
+                            .accessibilityIdentifier("chat-queued-remove:\(item.id)")
                     }.font(.system(size: 15)).foregroundStyle(PhrenTheme.chatNeutral).buttonStyle(.plain)
                 }
                 .padding(.leading, 12).padding(.trailing, 4).padding(.vertical, 6)
@@ -1510,8 +1511,7 @@ struct AgentChatView: View {
         model.needsAnswer && model.approval == nil && model.question == nil
     }
     private var canSend: Bool {
-        active && model.connected && !model.sending && !model.stopping && !model.answering && model.approval == nil && model.question == nil
-            && (!model.needsAnswer || answersInComposer)
+        active && model.target != nil && !model.sending && !model.stopping && !model.answering
             && (!model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !model.attachments.isEmpty)
     }
 }

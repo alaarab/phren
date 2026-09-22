@@ -35,6 +35,60 @@ final class ChatQueueHandoffTests: XCTestCase {
         XCTAssertEqual(model.queue.map(\.id), [words.id], "A picture with no words is matched by the landed image turn, and only that")
     }
 
+    func testEveryHarnessDeliversMidTurnAndOnlyReadinessBlocksIt() throws {
+        for source in AgentChatTarget.sources {
+            let model = AgentChatModel()
+            model.target = try AgentChatTarget(hostID: UUID(), workspaceID: "w", tabID: "w:t", paneID: "w:p",
+                source: source, sessionID: source == "opencode" ? "ses_fixture" : "00000000-0000-0000-0000-000000000042")
+            model.connected = true
+            model.acceptActivity("working")
+            XCTAssertTrue(model.isBusy, source)
+            XCTAssertNil(model.pendingReason, "\(source) must send during a working turn")
+            model.isCompacting = true
+            XCTAssertNil(model.pendingReason, "Compaction does not create a phone queue for \(source)")
+            model.connected = false
+            XCTAssertEqual(model.pendingReason, "Disconnected", source)
+            model.connected = true
+            model.passwordPrompt = true
+            XCTAssertEqual(model.pendingReason, "Holding a prompt", source)
+            model.passwordPrompt = false
+            model.needsAnswer = true
+            XCTAssertNil(model.pendingReason, "A plain composer answer remains sendable for \(source)")
+            model.acceptActivity("unknown")
+            XCTAssertEqual(model.pendingReason, "Disconnected", source)
+        }
+    }
+
+    func testQueuedCodexQuestionDoesNotHoldSteeringWhileTheHarnessWorks() throws {
+        let model = AgentChatModel()
+        let target = try AgentChatTarget(hostID: UUID(), workspaceID: "w", tabID: "w:t", paneID: "w:p",
+            source: "codex", sessionID: "test-session")
+        model.target = target; model.connected = true; model.acceptActivity("working")
+        let status = try XCTUnwrap(AgentInteractionStatus.read(Data(#"{"agentStatus":{"source":"codex","session":"test-session","status":"working","terminalPrompt":{"toolName":"Question","message":"Deploy?","queued":true}}}"#.utf8), target: target))
+        model.terminalPrompt = try XCTUnwrap(status.terminalPrompt)
+        XCTAssertNil(model.pendingReason)
+        model.acceptActivity("waiting")
+        XCTAssertEqual(model.pendingReason, "Holding a prompt")
+    }
+
+    func testStartingAllowsFirstPromptAndHoldsFollowUpUntilAttached() throws {
+        let model = AgentChatModel(), host = UUID()
+        model.target = try AgentChatTarget(hostID: host, workspaceID: "w", tabID: "w:t", paneID: "w:p",
+            source: "codex", sessionID: "", startingToken: String(repeating: "a", count: 64))
+        model.connected = true
+        XCTAssertNil(model.pendingReason, "A verified starting pane needs the first prompt to create its transcript")
+        model.queue = [QueuedMessage(text: "First", attachments: [], submittedAfterLine: -1, submittedText: "First"),
+                       QueuedMessage(text: "Follow-up", attachments: [])]
+        XCTAssertEqual(model.pendingReason, "Starting")
+        XCTAssertEqual(model.localPendingMessages.map(\.text), ["Follow-up"], "Submitted receipts never appear in the strip")
+        model.edit(model.localPendingMessages[0])
+        XCTAssertEqual(model.draft, "Follow-up")
+        XCTAssertTrue(model.localPendingMessages.isEmpty)
+        model.attachStartingTarget(try AgentChatTarget(hostID: host, workspaceID: "w", tabID: "w:t", paneID: "w:p",
+            source: "codex", sessionID: "first-session"))
+        XCTAssertNil(model.pendingReason)
+    }
+
     private func frame(line: Int) throws -> AgentChatTranscript {
         try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: ["type": "backlog", "source": "claude",
             "totalLines": line + 1, "entries": [["line": line, "raw": ["type": "user", "phrenQueued": true,

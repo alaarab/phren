@@ -8,8 +8,8 @@ struct ChatAttachmentDraft: Identifiable, Equatable {
     var id: UUID { attachment.id }
 }
 
-/// A message typed while the agent was busy: held in the app, listed under
-/// the transcript, delivered when the turn ends — or now, on request.
+/// An unsent message blocked by connection or input readiness, or a receipt
+/// awaiting its transcript acknowledgement. Submitted receipts never replay.
 struct QueuedMessage: Identifiable, Equatable {
     let id = UUID()
     var text: String
@@ -204,12 +204,24 @@ final class AgentChatModel {
     var draft = "" { didSet { if !restoringDraft, let target { AgentChatDrafts.text[target.id] = draft; persistDraft() } } }
     var attachments: [ChatAttachmentDraft] = [] { didSet { if !restoringDraft, let target { AgentChatDrafts.attachments[target.id] = attachments; persistDraft() } } }
     var sentImages: [ChatAttachmentDraft] = [] { didSet { matchSentImages() } }
-    /// Messages waiting for the agent to finish its turn; the first goes out
-    /// the moment it does.
+    /// Only readiness blockers hold messages locally. Submitted entries are receipts.
     var queue: [QueuedMessage] = [] { didSet { if let target, !restoringDraft { AgentChatQueues.items[target.id] = queue } } }
-    /// True while a send would interrupt the agent: it is working, or a reply
-    /// is still on its way, and nothing is waiting on the person.
+    /// Working activity drives Stop and the timer, never prompt delivery.
     var isBusy: Bool { !needsAnswer && approval == nil && (awaitingReply || isCompacting || (target?.isStarting != true && activityPhase == .working)) }
+    var pendingReason: String? {
+        if !connected || liveActivity == "unknown" { return "Disconnected" }
+        let heldQuestion = question.map { $0.isAsync != true } ?? false
+        let heldTerminalPrompt = terminalPrompt.map { !$0.queued || liveActivity != "working" } ?? false
+        if approval != nil || heldQuestion || heldTerminalPrompt || passwordPrompt { return "Holding a prompt" }
+        // A verified starting pane can receive its first prompt. Further input
+        // waits for that prompt to create the real conversation binding.
+        if target?.isStarting == true && queue.contains(where: { $0.submittedAfterLine != nil }) { return "Starting" }
+        return nil
+    }
+    var localPendingMessages: [QueuedMessage] { queue.filter { $0.submittedAfterLine == nil } }
+    func pendingLabel(_ item: QueuedMessage) -> String {
+        pendingReason ?? (item.id == failedQueueItem ? "Not sent. Retry or edit." : "Sending…")
+    }
     private var drainTask: Task<Void, Never>?
     private var failedQueueItem: UUID?
     private var lastSession: LiveAgentSession?
@@ -740,11 +752,10 @@ final class AgentChatModel {
 
     // MARK: - Queue
 
-    /// Delivers a queued message now, ahead of the agent finishing — the
-    /// "steer" case. On failure the item stays queued with the error shown.
+    /// Delivers as soon as the harness can receive input, including mid turn.
     @discardableResult
     func sendNow(_ item: QueuedMessage, _ session: LiveAgentSession) async -> Bool {
-        guard !sending, connected, !needsAnswer, approval == nil, question == nil,
+        guard !sending, pendingReason == nil,
               let index = queue.firstIndex(where: { $0.id == item.id }), queue[index].submittedAfterLine == nil else { return false }
         let sendingTarget = target
         let result = await deliver(item.text, attachments: queue[index].attachments, session: session) { text in
@@ -776,38 +787,36 @@ final class AgentChatModel {
         attachments += item.attachments.filter { queued in !attachments.contains { $0.id == queued.id } }
     }
 
-    /// Sends the next queued message once the agent is free. Debounced: the
-    /// status stream and the transcript both report the turn ending, and a
-    /// reply's last frames arrive a beat after the status flips.
+    /// Flush readiness holds as soon as their blocker clears. A working turn
+    /// is not a blocker. Receipts and uncertain deliveries never hold up a
+    /// later unsent message, and never become eligible for automatic replay.
     private func scheduleDrain() {
-        guard let next = queue.first, next.submittedAfterLine == nil, next.id != failedQueueItem,
-              !needsAnswer, approval == nil, question == nil, !isBusy, !sending, connected,
-              drainTask == nil, let session = lastSession else { return }
+        guard let next = localPendingMessages.first, next.id != failedQueueItem,
+              pendingReason == nil, !sending, drainTask == nil, let session = lastSession else { return }
         drainTask = Task { @MainActor [weak self] in
             var delivered = false
             defer {
                 self?.drainTask = nil
                 if delivered { self?.scheduleDrain() }
             }
-            do { try await Task.sleep(for: .milliseconds(400)) } catch { return }
-            guard let self, let next = queue.first, next.id != failedQueueItem,
-                  !needsAnswer, approval == nil, question == nil, !isBusy, !sending, connected, lastSession == session else { return }
+            guard let self, let next = localPendingMessages.first, next.id != failedQueueItem,
+                  pendingReason == nil, !sending, lastSession == session else { return }
             delivered = await sendNow(next, session)
         }
     }
 
     /// Uploads can be reused after failure; prompt delivery is never replayed.
     func send(_ session: LiveAgentSession, consumeDraft: (() -> Void)? = nil) async {
-        guard !sending, connected, approval == nil, question == nil, target != nil,
+        guard !sending, target != nil,
               !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty else { return }
         guard !AgentSlashCommand.isCommand(draft) || attachments.isEmpty else {
             deliveryError = "Remove attachments before running a slash command."; return
         }
         lastSession = session
         let submitted = draft, items = attachments
-        // Claude Code owns its mid-turn queue through the normal prompt RPC.
-        // Other harnesses keep an unsent local draft until they finish.
-        if isBusy, target?.source != "claude", !AgentSlashCommand.isCommand(submitted) {
+        // All bridge harnesses accept working-turn input through agent.prompt.
+        // Hold only when the connection or a real input prompt prevents it.
+        if pendingReason != nil {
             queue.append(QueuedMessage(text: submitted, attachments: items))
             deliveryError = nil
             if let consumeDraft { consumeDraft() } else { draft = "" }
