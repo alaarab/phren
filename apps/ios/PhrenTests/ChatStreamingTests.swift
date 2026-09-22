@@ -4,6 +4,38 @@ import PhrenKit
 
 @MainActor
 final class ChatStreamingTests: XCTestCase {
+    func testPreviewIsReplacedWithPreparedRealRowWithoutDuplicateOrRevealRestart() async throws {
+        let model = AgentChatModel()
+        model.accept(try frame("backlog", text: "History", line: 0))
+        let preview = try AgentChatTranscript.read(Data(#"{"type":"preview","source":"codex","preview":{"turnStartedAt":"2026-09-22T10:00:00Z","text":"One two three"}}"#.utf8), source: "codex")
+        model.accept(preview)
+        XCTAssertEqual(model.replyPreview?.text, "One two three")
+        XCTAssertFalse(model.messages.contains { $0.text == "One two three" })
+        let real = try AgentChatTranscript.read(Data(#"{"type":"append","source":"codex","preview":null,"totalLines":2,"entries":[{"line":1,"raw":{"type":"response_item","payload":{"type":"message","role":"assistant","content":"One two three four"}}}]}"#.utf8), source: "codex")
+        model.accept(real)
+        XCTAssertFalse(model.reveal.isRevealing)
+        for _ in 0..<200 {
+            let realRows = model.timeline.flatMap(\.messages).filter { $0.text == "One two three four" }
+            XCTAssertFalse(model.replyPreview != nil && !realRows.isEmpty, "No render frame can contain both rows")
+            if !realRows.isEmpty { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertNil(model.replyPreview)
+        XCTAssertEqual(model.timeline.flatMap(\.messages).filter { $0.text == "One two three four" }.count, 1)
+        XCTAssertTrue(model.reveal.visible.isEmpty)
+    }
+
+    func testPreviewClearsWhenStoppedDisconnectedOrChangingConversation() throws {
+        let model = AgentChatModel()
+        let preview = try AgentChatTranscript.read(Data(#"{"type":"preview","source":"claude","preview":{"turnStartedAt":"2026-09-22T10:00:00Z","text":"Partial words"}}"#.utf8), source: "claude")
+        model.accept(preview); model.acceptActivity("idle")
+        XCTAssertNil(model.replyPreview)
+        model.accept(preview); model.handleConnectionFailure(CancellationError())
+        XCTAssertNil(model.replyPreview)
+        model.accept(preview); model.chooseAnother()
+        XCTAssertNil(model.replyPreview)
+    }
+
     func testCancelledDeliveryExplainsUncertainReceiptWithoutSwiftJargon() {
         let message = AgentDeliveryMessage.sendFailure(CancellationError(), rejected: false)
         XCTAssertEqual(message, "The connection closed before Phren received confirmation. Check the conversation before sending again. Phren did not retry.")

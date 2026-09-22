@@ -69,7 +69,7 @@ enum TaskStatus: String, CaseIterable {
         }
     }
 
-    /// The status a bulk move lands on, so the list follows the moved rows.
+    /// The destination filter offered by a move's inline notice.
     init(_ section: PhrenTask.Section) {
         switch section {
         case .active: self = .active
@@ -83,8 +83,8 @@ enum TaskStatus: String, CaseIterable {
 /// header, and the per-section counts its chips show.
 struct TaskSectionGroup: Identifiable {
     let project: String
-    /// A store that carries this project, for its name colour. Merged groups
-    /// pick the alphabetically first store so the colour is stable.
+    /// A store that carries this project, for its name color. Merged groups
+    /// pick the alphabetically first store so the color is stable.
     let storeId: String
     let rows: [TaskListRow]
     let activeCount: Int
@@ -184,7 +184,7 @@ final class TasksModel {
     /// with ties by name. Counts ignore the search and filters, so a header
     /// still reports how much work the project really carries.
     /// `storeIdByProject` comes from the store list, never from the filtered
-    /// rows, so a project's colour cannot flip when a search drops one
+    /// rows, so a project's color cannot flip when a search drops one
     /// store's rows.
     func groups(visible: [TaskListRow], scope: TaskListView.Scope, model: AppModel,
                 status: TaskStatus) -> [TaskSectionGroup] {
@@ -200,7 +200,7 @@ final class TasksModel {
 
     /// Pure grouping over prepared rows: order by the chosen status's count
     /// (open under Open, queue under Backlog, and so on), tie-break by name,
-    /// colour store from the store list.
+    /// color store from the store list.
     nonisolated static func groups(visible: [TaskListRow],
                                    activeCounts: [String: Int],
                                    queueCounts: [String: Int],

@@ -70,21 +70,42 @@ enum TaskBrowsing {
 
 /// Moves existing tasks using stable IDs, retaining dates, text, and priority.
 enum TaskMove: String, CaseIterable {
-    case start = "Start"
+    case active = "Move to Active"
     case backlog = "Backlog"
     case done = "Done"
 
     var section: PhrenTask.Section {
-        switch self { case .start: return .active; case .backlog: return .queue; case .done: return .done }
+        switch self { case .active: return .active; case .backlog: return .queue; case .done: return .done }
     }
 
     var symbol: String {
-        switch self { case .start: return "play"; case .backlog: return "tray"; case .done: return "checkmark" }
+        switch self { case .active: return "arrow.right"; case .backlog: return "tray"; case .done: return "checkmark" }
+    }
+
+    var id: String {
+        switch self { case .active: return "move-active"; case .backlog: return "backlog"; case .done: return "done" }
     }
 
     func operation(for row: TaskListRow) -> PendingOp {
         let match = row.task.stableId ?? row.task.line
         if self == .done { return .completeTask(project: row.project, match: match) }
         return .updateTask(project: row.project, match: match, text: nil, priority: nil, section: section.rawValue)
+    }
+}
+
+/// A successful move that took rows out of the list's current status filter.
+struct TaskMoveNotice: Identifiable {
+    let id = UUID()
+    let destination: TaskStatus
+    let projects: Set<String>
+    let message: String
+
+    init?(rows: [TaskListRow], to section: PhrenTask.Section, from status: TaskStatus) {
+        let moved = rows.filter { $0.task.section != section }
+        guard !moved.isEmpty, !status.sections.contains(section) else { return nil }
+        destination = TaskStatus(section)
+        projects = Set(moved.map(\.project))
+        message = moved.count == 1 ? "Moved to \(destination.title)"
+            : "\(moved.count) tasks moved to \(destination.title)"
     }
 }

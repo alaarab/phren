@@ -23,6 +23,7 @@ public struct AgentChatHistory: Equatable, Sendable {
     public func acknowledgementID(for messageID: String) -> String { acknowledgementIDs[messageID] ?? messageID }
 
     public mutating func receive(_ frame: AgentChatTranscript) {
+        guard frame.kind != .preview else { return }
         // Only an explicit conversation replacement clears what the phone
         // retained. A reconnect page that lags those rows — a stale backlog,
         // an empty placeholder while the file is missing — merges instead.

@@ -6,6 +6,159 @@ import XCTest
 /// and the existing filters still running inside the sections.
 final class TasksTests: XCTestCase {
     @MainActor
+    func testRowAndSwipeStartOpenLaunchSheetAndCancelKeepsBacklog() {
+        let app = launchTaskFixture()
+        let task = app.buttons["task-detail:sample/brain/demo/dead0001"]
+        XCTAssertTrue(task.waitForExistence(timeout: 5))
+
+        app.buttons["task-actions:sample/brain/demo/dead0001"].tap()
+        let start = app.buttons["task-actions-sheet:start"]
+        XCTAssertTrue(start.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["task-actions-sheet:move-active"].exists)
+        start.tap()
+        assertTaskLaunchAndCancel(in: app)
+        XCTAssertEqual(app.buttons["tasks-status"].value as? String, "Backlog")
+        XCTAssertTrue(task.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["task-move-notice"].exists)
+
+        task.swipeRight()
+        let swipeStart = app.buttons["task-swipe-start:sample/brain/demo/dead0001"]
+        XCTAssertTrue(swipeStart.waitForExistence(timeout: 5))
+        swipeStart.tap()
+        assertTaskLaunchAndCancel(in: app)
+        XCTAssertEqual(app.buttons["tasks-status"].value as? String, "Backlog")
+        XCTAssertTrue(task.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["task-move-notice"].exists)
+        chooseTaskStatus("active", in: app)
+        XCTAssertTrue(task.waitForNonExistence(timeout: 5), "Cancel must never move the task to Active")
+    }
+
+    @MainActor
+    func testMoveToActiveAndDoneExplainWhereTheTaskWentAndOfferFollow() {
+        let app = launchTaskFixture()
+        let task = app.buttons["task-detail:sample/brain/demo/dead0001"]
+        XCTAssertTrue(task.waitForExistence(timeout: 5))
+        app.buttons["task-actions:sample/brain/demo/dead0001"].tap()
+        let move = app.buttons["task-actions-sheet:move-active"]
+        XCTAssertTrue(move.waitForExistence(timeout: 5))
+        XCTAssertEqual(move.label, "Move to Active")
+        move.tap()
+
+        let notice = app.staticTexts["task-move-notice"]
+        let follow = app.buttons["task-move-follow"]
+        XCTAssertTrue(notice.waitForExistence(timeout: 5))
+        XCTAssertEqual(notice.label, "Moved to Active")
+        XCTAssertEqual(app.buttons["tasks-status"].value as? String, "Backlog")
+        XCTAssertTrue(task.waitForNonExistence(timeout: 3))
+        XCTAssertFalse(app.buttons["launch-cancel"].exists, "Bookkeeping does not open an agent")
+        XCTAssertEqual(follow.label, "View Active")
+        attachUIScreenshot(app, "Task moved to Active with a way to follow")
+        follow.tap()
+        XCTAssertEqual(app.buttons["tasks-status"].value as? String, "Active")
+        revealByScrolling(task, in: app)
+        XCTAssertTrue(task.waitForExistence(timeout: 5))
+
+        app.buttons["task-select:sample/brain/demo/dead0001"].tap()
+        XCTAssertTrue(notice.waitForExistence(timeout: 5))
+        XCTAssertEqual(notice.label, "Moved to Done")
+        XCTAssertEqual(app.buttons["tasks-status"].value as? String, "Active")
+        XCTAssertTrue(task.waitForNonExistence(timeout: 3))
+        XCTAssertEqual(follow.label, "View Done")
+        follow.tap()
+        XCTAssertEqual(app.buttons["tasks-status"].value as? String, "Done")
+        XCTAssertTrue(task.waitForExistence(timeout: 5))
+        XCTAssertFalse(notice.exists)
+        app.buttons["task-actions:sample/brain/demo/dead0001"].tap()
+        XCTAssertTrue(app.buttons["task-actions-sheet:move-active"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["task-actions-sheet:start"].exists, "Reopen completed work with a move")
+    }
+
+    @MainActor
+    func testStartIsAvailableForOneSelectedTaskAndAbsentForSeveral() {
+        let app = launchTaskFixture()
+        let first = app.buttons["task-detail:sample/brain/demo/dead0001"]
+        let second = app.buttons["task-detail:sample/brain/demo/dead0002"]
+        XCTAssertTrue(first.waitForExistence(timeout: 5))
+        app.buttons["task-selection-mode"].tap()
+        first.tap()
+        let start = app.buttons["task-bulk-Start"]
+        XCTAssertTrue(start.waitForExistence(timeout: 5))
+        start.tap()
+        assertTaskLaunchAndCancel(in: app)
+        XCTAssertTrue(first.waitForExistence(timeout: 5))
+        XCTAssertTrue(start.waitForExistence(timeout: 5), "Cancel preserves the single selection")
+        revealByScrolling(second, in: app)
+        second.tap()
+        XCTAssertTrue(start.waitForNonExistence(timeout: 3))
+        XCTAssertFalse(app.buttons["task-actions:sample/brain/demo/dead0001"].exists)
+        XCTAssertTrue(app.buttons["task-bulk-Move to Active"].isEnabled)
+        XCTAssertTrue(app.buttons["task-bulk-Done"].isEnabled)
+        XCTAssertTrue(app.buttons["task-bulk-Backlog"].exists)
+        attachUIScreenshot(app, "Several selected tasks offer moves only")
+        app.buttons["task-bulk-Move to Active"].tap()
+        XCTAssertTrue(app.staticTexts["task-move-notice"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["task-move-notice"].label, "2 tasks moved to Active")
+        app.buttons["task-move-follow"].tap()
+        revealByScrolling(first, in: app)
+        XCTAssertTrue(first.waitForExistence(timeout: 5))
+        revealByScrolling(second, in: app)
+        XCTAssertTrue(second.waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testRowStartDeliversTaskThenMovesItToActive() {
+        let app = launchTaskFixture()
+        let task = app.buttons["task-detail:sample/brain/demo/dead0001"]
+        XCTAssertTrue(task.waitForExistence(timeout: 5))
+        app.buttons["task-actions:sample/brain/demo/dead0001"].tap()
+        XCTAssertTrue(app.buttons["task-actions-sheet:start"].waitForExistence(timeout: 5))
+        app.buttons["task-actions-sheet:start"].tap()
+        XCTAssertTrue(app.buttons["launch-harness:codex"].waitForExistence(timeout: 5))
+        app.buttons["launch-harness:codex"].tap()
+        let launch = app.buttons["launch-open"]
+        for _ in 0..<6 where !launch.isHittable { app.swipeUp() }
+        XCTAssertTrue(launch.isEnabled)
+        launch.tap()
+        let close = app.buttons["chat-close"]
+        XCTAssertTrue(close.waitForExistence(timeout: 12))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Work on this Phren task")).firstMatch.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Store: sample/brain")).firstMatch.exists)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Project: demo")).firstMatch.exists)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Keep the full plan available from task details.")).firstMatch.exists)
+        close.tap()
+        XCTAssertTrue(app.buttons["launch-cancel"].waitForExistence(timeout: 5))
+        app.buttons["launch-cancel"].tap()
+        XCTAssertTrue(app.staticTexts["task-move-notice"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["task-move-notice"].label, "Moved to Active")
+        XCTAssertEqual(app.buttons["tasks-status"].value as? String, "Backlog")
+        XCTAssertTrue(task.waitForNonExistence(timeout: 3))
+        app.buttons["task-move-follow"].tap()
+        revealByScrolling(task, in: app)
+        XCTAssertTrue(task.waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    private func launchTaskFixture() -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--workflow-fixture", "--automatic-sessions-fixture", "--native-chat-fixture"]
+        app.launch()
+        waitForWorkflowStore(in: app)
+        XCTAssertTrue(app.tabBars.buttons["Tasks"].waitForExistence(timeout: 8))
+        app.tabBars.buttons["Tasks"].tap()
+        chooseTaskStatus("backlog", in: app)
+        return app
+    }
+
+    @MainActor
+    private func assertTaskLaunchAndCancel(in app: XCUIApplication) {
+        XCTAssertTrue(app.navigationBars["Open demo"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["launch-computer"].exists)
+        XCTAssertTrue(app.buttons["launch-harness:codex"].exists)
+        XCTAssertTrue(app.buttons["launch-cancel"].exists)
+        app.buttons["launch-cancel"].tap()
+    }
+
+    @MainActor
     func testGroupingOrderCountsAndCollapse() {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--workflow-fixture"]
@@ -130,6 +283,6 @@ final class TasksTests: XCTestCase {
 
     @MainActor
     private func revealByScrolling(_ element: XCUIElement, in app: XCUIApplication) {
-        for _ in 0..<8 where !element.exists { app.swipeUp(velocity: .slow) }
+        for _ in 0..<8 where !element.isHittable { app.swipeUp(velocity: .slow) }
     }
 }

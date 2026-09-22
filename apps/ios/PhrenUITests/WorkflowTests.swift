@@ -219,7 +219,7 @@ final class WorkflowTests: XCTestCase {
     }
 
     @MainActor
-    func testMoveSelectedTasksTogetherAndStartOneWithSwipe() {
+    func testMoveSelectedTasksTogetherAndMoveOneToActive() {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--workflow-fixture"]
         app.launch()
@@ -233,7 +233,12 @@ final class WorkflowTests: XCTestCase {
         first.tap()
         if !second.isHittable { app.swipeUp() }
         second.tap()
-        app.buttons["task-bulk-Start"].tap()
+        XCTAssertFalse(app.buttons["task-bulk-Start"].exists, "Several tasks can move together, but cannot start agents together")
+        app.buttons["task-bulk-Move to Active"].tap()
+        XCTAssertTrue(app.staticTexts["task-move-notice"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["task-move-notice"].label, "2 tasks moved to Active")
+        XCTAssertEqual(app.buttons["tasks-status"].value as? String, "Backlog")
+        app.buttons["task-move-follow"].tap()
         reveal(first, in: app)
         XCTAssertTrue(first.waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["task-bulk-Start"].exists)
@@ -242,24 +247,32 @@ final class WorkflowTests: XCTestCase {
         app.buttons["task-selection-mode"].tap()
         app.buttons["Select all"].tap()
         app.buttons["task-bulk-Done"].tap()
+        XCTAssertTrue(app.buttons["task-move-follow"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons["task-move-follow"].label, "View Done")
+        app.buttons["task-move-follow"].tap()
         reveal(first, in: app)
         XCTAssertTrue(first.waitForExistence(timeout: 5))
         XCTAssertEqual(app.buttons["tasks-status"].value as? String, "Done")
         app.buttons["task-selection-mode"].tap()
         app.buttons["Select all"].tap()
         app.buttons["task-bulk-Backlog"].tap()
+        XCTAssertTrue(app.buttons["task-move-follow"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons["task-move-follow"].label, "View Backlog")
+        app.buttons["task-move-follow"].tap()
         reveal(first, in: app)
         XCTAssertTrue(first.waitForExistence(timeout: 5))
         XCTAssertEqual(app.buttons["tasks-status"].value as? String, "Backlog")
-        first.swipeRight()
-        app.buttons["Start"].firstMatch.tap()
-        app.buttons["tasks-status"].tap()
-        app.buttons["tasks-status:active"].tap()
+        app.buttons["task-actions:sample/brain/demo/dead0001"].tap()
+        XCTAssertTrue(app.buttons["task-actions-sheet:move-active"].waitForExistence(timeout: 5))
+        app.buttons["task-actions-sheet:move-active"].tap()
+        XCTAssertTrue(app.staticTexts["task-move-notice"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["task-move-notice"].label, "Moved to Active")
+        app.buttons["task-move-follow"].tap()
         reveal(first, in: app)
         XCTAssertTrue(first.waitForExistence(timeout: 5))
         XCTAssertFalse(second.exists)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Created Jan 1, 2026")).firstMatch.exists)
-        attachUIScreenshot(app, "Compact active workload after bulk moves and quick Start")
+        attachUIScreenshot(app, "Compact active workload after bulk moves and Move to Active")
     }
 
     @MainActor

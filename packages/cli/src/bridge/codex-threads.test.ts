@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { materializeCodexThread, materializedPath, queuedQuestion, threadHealth } from "./codex-threads.js";
+import { codexThreadPreview, materializeCodexThread, materializedPath, queuedQuestion, threadHealth } from "./codex-threads.js";
 import { childAgentTree, TranscriptReader, transcriptPath } from "./transcripts.js";
 import { currentStep } from "./steps.js";
 
@@ -39,6 +39,25 @@ describe("Codex thread store", () => {
     await utimes(materializedPath(thread) + ".state.json", date, date);
     return date;
   };
+
+  it("keeps growing agent-message deltas out of history until the turn finishes", async () => {
+    turn("inProgress");
+    insert(1, { type: "userMessage", id: "u1", content: [{ type: "text", text: "Hello" }] });
+    insert(2, { type: "agentMessage", id: "a1", text: "First words" });
+    const file = (await materializeCodexThread(thread))!;
+    expect(await codexThreadPreview(thread)).toEqual({ turnStartedAt: "1970-01-01T00:00:01.000Z", text: "First words" });
+    expect(await readFile(file, "utf8")).not.toContain("First words");
+    insert(2, { type: "agentMessage", id: "a1", text: "First words grow" }, 3);
+    await materializeCodexThread(thread);
+    expect((await codexThreadPreview(thread))?.text).toBe("First words grow");
+    expect(await readFile(file, "utf8")).not.toContain("First words");
+    // Completion can update just the turn table, without changing any item.
+    turn("completed", 4);
+    await materializeCodexThread(thread);
+    expect(await codexThreadPreview(thread)).toBeUndefined();
+    expect((await new TranscriptReader(file, "codex").read()).entries.filter(e => (e.raw as any).payload?.role === "assistant")).toHaveLength(1);
+    expect(await readFile(file, "utf8")).toContain("First words grow");
+  });
 
   it("materializes a thread as an append-only rollout and follows its updates", async () => {
     insert(1, { type: "userMessage", id: "u1", content: [{ type: "text", text: "Fix the build" }] });

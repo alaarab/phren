@@ -75,6 +75,8 @@ final class AgentChatModel {
     }
     private(set) var timeline: [ChatTimelineEntry] = []
     private(set) var timelineRevision = 0
+    private(set) var replyPreview: AgentChatPreview?
+    @ObservationIgnored private var pendingPreview: AgentChatPreview?
     private(set) var backgroundJobs: [ChatBackgroundJob] = []
     private(set) var currentToolName: String?
     private(set) var currentToolDetail: String?
@@ -87,8 +89,9 @@ final class AgentChatModel {
         preparationTask?.cancel()
         let id = UUID(); preparationID = id
         let messages = history.messages
-        let activity = ChatActivityContext(turns: progress.turns, submittedAt: sentAt,
-            submittedAfterLine: submittedAfterLine, busy: isBusy,
+        let preview = pendingPreview
+        let activity = ChatActivityContext(turns: progress.turns, submittedAt: sentAt ?? preview?.turnStartedAt,
+            submittedAfterLine: submittedAfterLine, busy: isBusy || preview != nil,
             waiting: needsAnswer || approval != nil || question != nil || terminalPrompt != nil || passwordPrompt
                 || ["waiting", "blocked"].contains(liveActivity ?? ""))
         let previous = preparation
@@ -97,6 +100,8 @@ final class AgentChatModel {
                 var value = previous; value.update(messages, activity: activity); return value
             }.value
             guard !Task.isCancelled, preparationID == id else { return }
+            // Publish the prepared real row and retire its preview together.
+            replyPreview = pendingPreview
             guard value.revision != preparation.revision else { return }
             preparation = value; timeline = value.entries; backgroundJobs = value.jobs
             currentToolName = value.currentToolName; currentToolDetail = value.currentToolDetail; timelineRevision += 1
@@ -139,6 +144,7 @@ final class AgentChatModel {
     }
     func acceptActivity(_ activity: String?) {
         guard let activity else { return }
+        if ["idle", "done", "waiting", "blocked"].contains(activity) { pendingPreview = nil; replyPreview = nil }
         // A repeated terminal snapshot must not overwrite a newer transcript
         // completion. Only an actual status transition changes precedence.
         if liveActivity != activity {
@@ -252,6 +258,7 @@ final class AgentChatModel {
             attachments = AgentChatDrafts.attachments[chosen.id] ?? saved.attachments.map { .init(attachment: $0) }
             restoringDraft = false
         }
+        pendingPreview = nil; replyPreview = nil
         history = .init(); progress = .init(); reveal.finish(); hasTranscript = false
         awaitingReply = false; sentAt = nil; liveActivity = nil; isCompacting = false; historyStalled = false; historyStalledSince = nil
         modelName = nil; preferProgressActivity = false
@@ -295,6 +302,7 @@ final class AgentChatModel {
         }
     }
     func chooseAnother() {
+        pendingPreview = nil; replyPreview = nil
         persistDraft(immediately: true)
         draftLoadTask?.cancel(); draftGeneration = UUID(); restoringDraft = false
         progressTask?.cancel(); progressTask = nil
@@ -383,6 +391,7 @@ final class AgentChatModel {
         !target.isStarting && streamTarget != target && rejectedStreamTarget != target
     }
     func handleConnectionFailure(_ error: Error) {
+        pendingPreview = nil; replyPreview = nil
         progressTask?.cancel(); progressTask = nil
         streamTask?.cancel(); streamTask = nil; streamTarget = nil
         statusTask?.cancel(); statusTask = nil; interactionConnected = false; approval = nil; isCompacting = false
@@ -393,6 +402,7 @@ final class AgentChatModel {
         if !automaticReconnectSuspended { self.error = error.localizedDescription }
     }
     func handleStreamFailure(_ error: Error, target: AgentChatTarget) {
+        pendingPreview = nil; replyPreview = nil
         connected = false
         if error is AgentChatTranscript.LimitError {
             rejectedStreamTarget = target
@@ -437,11 +447,21 @@ final class AgentChatModel {
         }
     }
     func accept(_ frame: AgentChatTranscript) {
+        let hadPreview = replyPreview != nil
+        if frame.updatesPreview { pendingPreview = frame.preview }
+        else if frame.kind == .backlog || (frame.kind == .append && !frame.messages.isEmpty) { pendingPreview = nil }
+        if frame.kind == .preview {
+            let changedTurn = replyPreview?.turnStartedAt != pendingPreview?.turnStartedAt
+            replyPreview = pendingPreview
+            if changedTurn { prepareTranscript() }
+            return
+        }
+        let previousMessages = messages
         // Older history must not resurrect a prompt whose answer fell outside
         // that page. A full snapshot or replacement carries the current
         // question lifecycle; a reconnect delta is partial and leaves it alone.
         if frame.kind != .older { questionState.receive(frame.questionEvents, reset: frame.replacesConversation) }
-        reveal.receive(frame, previous: messages, animated: animateReplies && hasTranscript)
+        reveal.receive(frame, previous: messages, animated: animateReplies && hasTranscript && !hadPreview)
         if frame.messages.contains(where: { $0.line > submittedAfterLine && $0.role != .user }) { awaitingReply = false }
         if !progressConnected, !frame.progressEvents.isEmpty || frame.replacesConversation { acceptProgress(frame) }
         acceptContext(frame)
@@ -451,6 +471,7 @@ final class AgentChatModel {
         // in the conversation; the view re-pins if it was following the end.
         if frame.kind == .backlog, hasTranscript { reconnectRevision &+= 1 }
         mergeHistory(frame); hasTranscript = true; connected = true; receivedAt = .now; error = nil; loading = false
+        if messages == previousMessages { replyPreview = pendingPreview }
         reconcileHandedOffQueue()
         scheduleDrain()
     }

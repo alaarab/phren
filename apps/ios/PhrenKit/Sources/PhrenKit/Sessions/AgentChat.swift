@@ -410,8 +410,13 @@ public struct AgentQueueConsumption: Hashable, Sendable {
 
 /// Normalize only visible conversation content. Encrypted reasoning, system
 /// prompts, hook metadata, and terminal escape sequences are never rendered.
+public struct AgentChatPreview: Equatable, Sendable {
+    public let turnStartedAt: Date
+    public let text: String
+}
+
 public struct AgentChatTranscript: Equatable, Sendable {
-    public enum Kind: String, Sendable { case backlog, append, older }
+    public enum Kind: String, Sendable { case backlog, append, older, preview }
     public enum LimitError: Error, LocalizedError, Sendable {
         case tooManyMessages
         public var errorDescription: String? {
@@ -440,6 +445,8 @@ public struct AgentChatTranscript: Equatable, Sendable {
     /// What the newest rows say about the session itself: the model
     /// answering and the branch the agent was on.
     public var context = AgentSessionContext()
+    public var preview: AgentChatPreview? = nil
+    public var updatesPreview = false
 
     /// `sidechain` reads a child agent's own transcript, where Claude marks
     /// every row `isSidechain`: those are that conversation's turns, not the
@@ -454,6 +461,20 @@ public struct AgentChatTranscript: Equatable, Sendable {
         }
         // The helper omits entries when a new conversation has only metadata.
         let entries = frame["entries"] as? [[String: Any]] ?? []
+        var preview: AgentChatPreview?
+        let updatesPreview = kind != .older && frame.keys.contains("preview")
+        if updatesPreview, !(frame["preview"] is NSNull) {
+            guard let value = frame["preview"] as? [String: Any],
+                  let start = ISO8601Dates.parse(value["turnStartedAt"] as? String),
+                  let text = value["text"] as? String, !text.isEmpty, text.utf8.count <= 131_072 else {
+                throw PhrenKitError.validation("The computer returned an invalid reply preview.")
+            }
+            preview = .init(turnStartedAt: start, text: text)
+        }
+        if kind == .preview {
+            guard updatesPreview, entries.isEmpty else { throw PhrenKitError.validation("A reply preview cannot contain messages.") }
+            return Self(kind: kind, messages: [], hasMore: false, totalLines: 0, startLine: nil, preview: preview, updatesPreview: true)
+        }
         guard entries.count <= 2_000 else { throw PhrenKitError.validation("The chat transcript is too large.") }
         var messages: [AgentChatMessage] = []
         var questionEvents: [AgentQuestionEvent] = []
@@ -521,7 +542,8 @@ public struct AgentChatTranscript: Equatable, Sendable {
                     totalLines: frame["totalLines"] as? Int ?? 0,
                     startLine: frame["startLine"] as? Int ?? entries.compactMap { $0["line"] as? Int }.min(),
                     reset: frame["reset"] as? Bool ?? false, questionEvents: questionEvents,
-                    progressEvents: progressEvents, queueEvents: queueEvents, context: context)
+                    progressEvents: progressEvents, queueEvents: queueEvents, context: context,
+                    preview: preview, updatesPreview: updatesPreview)
     }
 
     /// Foundation JSON strings can retain NSString storage. Walking a long

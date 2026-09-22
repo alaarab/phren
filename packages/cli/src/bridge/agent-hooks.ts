@@ -60,11 +60,12 @@ function opencodeRequest(session: string): Json | undefined {
 const choiceKeys = new Set(["Escape", "Enter", "Up", "Down", "Tab", "y", "n", "p", "1", "2", "3", "4", "5", "6", "7", "8", "9"]);
 /** A question asks in a few lines; more than this is scrollback above it. */
 const QUESTION_LINES = 12;
-interface TerminalChoiceOption { label: string; description?: string; key: string }
+interface TerminalChoiceOption { label: string; description?: string; key: string; hasKey?: boolean }
 /** The actual question a terminal dialog is asking, when its command and
  * options are visible to the Hook: a title, the command it is about, and one
- * row per choice carrying the key that answers it. */
-export interface TerminalChoice { title?: string; body?: string; options: TerminalChoiceOption[] }
+ * row per choice. For keyless rows, key identifies the option to the phone;
+ * the Hook navigates from highlightedIndex instead of typing that number. */
+export interface TerminalChoice { title?: string; body?: string; options: TerminalChoiceOption[]; highlightedIndex?: number }
 
 function choiceKey(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -113,32 +114,37 @@ function structuredOptions(value: unknown): TerminalChoiceOption[] {
  * with whatever glyph they like (Codex uses "›"), and missing one costs
  * the option twice over: the row is dropped and its text joins the question. The key in
  * trailing parentheses (y, p, n, esc, enter, a digit) is the answer when
- * present and is cut from the label; otherwise the line's own number answers,
- * so a plain "1. Yes, continue anyway" is still answerable. */
-function numberedOptions(text: string): TerminalChoiceOption[] {
+ * present and is cut from the label. A row number alone is an identifier,
+ * not evidence that the terminal accepts it as a shortcut. */
+function numberedOptions(text: string): (TerminalChoiceOption & { highlighted: boolean; hasKey: boolean })[] {
   return text.split(/\r?\n/).flatMap(line => {
-    const match = /^\s*[>❯›▸▶»•*]?\s*(\d+)[.)]\s+(.+?)\s*$/.exec(line);
+    const match = /^\s*([>❯›▸▶»•*])?\s*(\d+)[.)]\s+(.+?)\s*$/.exec(line);
     if (!match) return [];
-    const columns = /^(.+?)\s{2,}(.+)$/.exec(match[2].trim());
-    const label = columns?.[1] ?? match[2].trim();
+    const columns = /^(.+?)\s{2,}(.+)$/.exec(match[3].trim());
+    const label = columns?.[1] ?? match[3].trim();
     const description = columns?.[2].trim();
     const trailing = /^(.+?)\s*\(([A-Za-z0-9]+)\)\s*$/.exec(label);
     const descriptionKey = description ? /^(.+?)\s*\(([A-Za-z0-9]+)\)\s*$/.exec(description) : null;
     const labelKey = trailing ? choiceKey(trailing[2]) : undefined;
     const endKey = descriptionKey ? choiceKey(descriptionKey[2]) : undefined;
-    const key = labelKey ?? endKey ?? choiceKey(match[1]);
+    const key = labelKey ?? endKey ?? choiceKey(match[2]);
     return key ? [{ label: labelKey && trailing ? trailing[1].trim() : label, key,
+      highlighted: !!match[1], hasKey: !!(labelKey ?? endKey),
       ...(description ? { description: endKey && descriptionKey ? descriptionKey[1].trim() : description } : {}) }] : [];
   });
 }
 /** The question a pane's terminal lines are asking, in the same shape a held
  * permission request carries: every non-empty line above the first numbered
  * row (the "$ command" line included, the "Press enter" hint dropped), joined
- * with newlines, then one option per row keyed by its own key. Undefined
- * without two answerable rows and a title. */
+ * with newlines, then one option per row. Keyless rows require exactly one
+ * readable cursor so the Hook can navigate without confirming another row. */
 export function visibleTerminalChoice(text: string): TerminalChoice | undefined {
-  const options = numberedOptions(text);
-  if (options.length < 2) return undefined;
+  const parsed = numberedOptions(text);
+  const highlights = parsed.flatMap((option, index) => option.highlighted ? [index] : []);
+  const highlightedIndex = highlights.length === 1 ? highlights[0] : undefined;
+  if (parsed.some(option => !option.hasKey) && highlightedIndex === undefined) return undefined;
+  const options = parsed.map(({ highlighted: _highlighted, ...option }) => option);
+  if (options.length < 2 || new Set(options.map(option => option.key)).size !== options.length) return undefined;
   const lines = text.split(/\r?\n/);
   const firstOption = lines.findIndex(line => /^\s*[>❯›▸▶»•*]?\s*\d+[.)]\s+/.test(line));
   const above = firstOption < 0 ? lines.slice(0, 1) : lines.slice(0, firstOption);
@@ -150,7 +156,8 @@ export function visibleTerminalChoice(text: string): TerminalChoice | undefined 
   const question = above.slice(Math.max(start, above.length - QUESTION_LINES));
   const title = question.map(line => line.trim()).filter(line => line && !/^press enter\b/i.test(line)).join("\n").trim();
   if (!title) return undefined;
-  return { title: title.slice(0, 4_000), options: options.slice(0, 12) };
+  return { title: title.slice(0, 4_000), options: options.slice(0, 12),
+    ...(highlightedIndex !== undefined ? { highlightedIndex } : {}) };
 }
 /** The pane's last non-empty line is a password read: sudo's "[sudo] password
  * for user", or any "… Password:" prompt. */
@@ -193,7 +200,7 @@ export function terminalChoice(input: unknown): TerminalChoice | undefined {
     const text = [fields.question, fields.description, fields.justification, fields.prompt, fields.message, fields.text, fields.content, fields.display]
       .filter((value): value is string => typeof value === "string").join("\n");
     const parsed = numberedOptions(text);
-    if (parsed.length >= 2) options = parsed;
+    if (parsed.length >= 2) options = parsed.map(({ highlighted: _highlighted, hasKey: _hasKey, ...option }) => option);
   }
   if (options.length < 2) return undefined;
   const title = [fields.question, fields.description, fields.justification, fields.prompt]
@@ -613,10 +620,11 @@ export class AgentHooks {
       if (now - (this.dialogReads.get(key) ?? 0) < 3_000) return;
       this.dialogReads.set(key, now);
       const prompt = permissionPrompt(held.tool, held.input, await this.paneLines(target));
-      if (prompt.choice && [...this.pending.values()].includes(held)) {
+      if ([...this.pending.values()].includes(held)) {
         held.choice = prompt.choice;
         held.title = prompt.title;
-        this.terminalPrompts.set(key, { tool: held.tool, message: held.message, choice: held.choice, dialog: true, at: now });
+        if (held.choice) this.terminalPrompts.set(key, { tool: held.tool, message: held.message, choice: held.choice, dialog: true, at: now });
+        else this.terminalPrompts.delete(key);
       }
       return;
     }
@@ -645,13 +653,44 @@ export class AgentHooks {
     this.terminalPrompts.set(key, { tool: "Question", message: dialog.title, choice: dialog, dialog: true, at: now });
     while (this.terminalPrompts.size > 64) this.terminalPrompts.delete(this.terminalPrompts.keys().next().value!);
   }
-  /** The phone answers a parsed dialog with the option's own digit, but the
-   * pane also needs Enter to submit the selection. Only an answer whose entry
-   * came from a parsed dialog gains the extra key. */
-  dialogAnswerKeys<K extends string>(target: Target, keys: readonly K[]): (K | "Enter")[] {
+  /** Resolve a phone option identifier. Real shortcuts retain their key path;
+   * keyless rows are reached and verified before returning Enter to the route. */
+  async dialogAnswerKeys<K extends string>(target: Target, keys: readonly K[]): Promise<(K | "Enter")[]> {
     const entry = this.terminalPrompts.get(JSON.stringify(target));
+    const choice = entry?.choice;
+    const option = choice?.options.find(option => keys.includes(option.key as K));
+    if (choice && option?.hasKey === false) {
+      if (keys.length !== 1) throw new BridgeError(409, "Choose one terminal option at a time.");
+      await this.moveDialogHighlight(target, choice, option.key);
+      return ["Enter"];
+    }
     const digit = keys.some(key => key.length === 1 && key >= "1" && key <= "9");
+    if (digit && !option && choice?.options.some(option => option.hasKey === false)) {
+      throw new BridgeError(409, "That terminal option is no longer available. Open terminal to choose an option.");
+    }
     return entry?.dialog && digit ? [...keys, "Enter"] : [...keys];
+  }
+  private async moveDialogHighlight(target: Target, expected: TerminalChoice, key: string): Promise<void> {
+    const intended = expected.options.findIndex(option => option.key === key);
+    let current = visibleTerminalChoice(await this.paneLines(target));
+    // A held permission can expose just the asking sentence from the title.
+    // Anchor subsequent reads to the entire live title, including its command.
+    const title = current?.title;
+    const matches = (choice: TerminalChoice | undefined): choice is TerminalChoice & { highlightedIndex: number } => !!choice
+      && choice.highlightedIndex !== undefined && choice.title === title
+      && (title === expected.title || !!expected.title && !!title?.split("\n").includes(expected.title))
+      && JSON.stringify(choice.options) === JSON.stringify(expected.options);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (!matches(current)) break;
+      const difference = intended - current.highlightedIndex;
+      if (!difference) return;
+      await rpc(target.server, "agent.send_keys", { target: target.pane,
+        keys: Array<string>(Math.abs(difference)).fill(difference > 0 ? "down" : "up") });
+      await new Promise(resolve => setTimeout(resolve, 150));
+      current = visibleTerminalChoice(await this.paneLines(target));
+      if (matches(current) && current.highlightedIndex === intended) return;
+    }
+    throw new BridgeError(409, "Could not move and verify the terminal selection. Open terminal to choose this option.");
   }
   /** Answer one question of a released AskUserQuestion with the option's own
    * digit: send the chosen digit(s), then Tab to advance to the next
@@ -718,15 +757,18 @@ export class AgentHooks {
     const deadline = Date.now() + 3_000;
     for (;;) {
       const lines = await this.paneLines(target);
-      if (/\benable full access\b/i.test(lines)) {
-        await rpc(target.server, "agent.send_keys", { target: target.pane, keys: ["1", "enter"] });
+      const choice = visibleTerminalChoice(lines);
+      if (choice && /\benable full access\b/i.test(choice.title ?? "")) {
+        const option = choice.options[0];
+        if (option.hasKey === false) await this.moveDialogHighlight(target, choice, option.key);
+        await rpc(target.server, "agent.send_keys", { target: target.pane,
+          keys: option.hasKey === false ? ["enter"] : [option.key.toLowerCase(), "enter"] });
         this.clearTerminalPrompt(target);
         this.menuClosed(target);
         return { menuClosed: true };
       }
       if (Date.now() >= deadline) {
         const message = lines.trim().slice(0, 32_768) || "The terminal is still waiting for an answer.";
-        const choice = visibleTerminalChoice(lines);
         this.terminalPrompts.set(key, { tool: "Permissions", message, ...(choice ? { choice } : {}), at: Date.now() });
         while (this.terminalPrompts.size > 64) this.terminalPrompts.delete(this.terminalPrompts.keys().next().value!);
         return { menuClosed: false, waiting: { message, ...(choice ? { choice } : {}) } };

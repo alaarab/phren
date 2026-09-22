@@ -10,11 +10,15 @@ number counts up on its own.
 
 ### Changed
 
+- Tasks: Start opens the agent launch sheet with the task and its project. Backlog work moves to Active after the agent receives the task; cancel leaves it in place. Move to Active is a separate action, and moves out of the current filter show their destination with a View action. Selecting several tasks offers moves only.
+
 - Agent work puts running jobs first, shows failures for one hour with their age, and remembers dismissed failures. Header counts match the visible rows.
 
 - The working tree keeps expanded folders and loaded children during refreshes and tab switches. Directory rows show file totals; indexed projects also show symbol totals and kinds, with file symbol chips opening the dossier.
 
 ### Added
+
+- Replies appear as they are written below the activity row. Live previews become the finished reply without duplicate text or restarting the reveal animation.
 
 - Chat shows live thinking and tool activity with elapsed time, then keeps a quiet duration above the reply, including stopped turns.
 

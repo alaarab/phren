@@ -27,3 +27,20 @@ startedAt and finishedAt supply the duration on reopening. A missing start or
 end gives no completed line. A local submit timestamp only fills the live gap
 before the harness acknowledges the turn; it never invents a saved duration.
 Completed placeholders retain the same identifier and label.
+
+## Live reply preview
+
+While a turn is working, show its unfinished reply below the activity row.
+Claude supplies rendered pane text until the first assistant entry lands;
+strip box drawing, prompt and composer lines, interrupt footers and spinners.
+Codex uses accumulated thread-store text or public rollout deltas. OpenCode
+uses its message part events. Those delta sources never fall back to the pane.
+Publish changed text at most once every 500 ms and carry the turn start time.
+
+The preview uses reply typography and color, with no card, selection, links,
+menus or tool affordances. It is one accessibility element with children ignored
+and identifier chat-reply-preview. Updating its text does not rebuild or unfold
+history rows. The preview has no message identity and never enters history,
+paging, copying or action counts. Publish the prepared real row and remove its
+preview together without replaying the word-reveal animation. Clear previews
+when a turn stops, needs input, disconnects or changes conversation.

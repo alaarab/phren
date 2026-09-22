@@ -12,6 +12,7 @@ struct LaunchSessionView: View {
     let project: String
     var taskRequest: TaskAgentRequest? = nil
     var preferredHostID: UUID? = nil
+    var onTaskMoved: ((TaskListRow, PhrenTask.Section) -> Void)? = nil
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @AppStorage("sessions.live.preferences.v1") private var data = Data()
@@ -94,7 +95,7 @@ struct LaunchSessionView: View {
     /// Where the project lives on that computer: a folder the user already
     /// matched to it on this iPhone, else what the computer itself reports
     /// (an agent worked there, Herdr saved it, phren registered it), else the
-    /// folder the project was added to phren from — which may be another
+    /// folder the project was added to phren from, which may be another
     /// machine's path, so it comes last.
     private func suggestedFolder(_ host: LiveHost) -> String {
         if let saved = preferences?.mappings.first(where: { $0.hostID == host.id && $0.storeID == storeID && $0.project == project }) {
@@ -161,7 +162,7 @@ struct LaunchSessionView: View {
                         }
                     }
                 } header: { Text("Folder on that computer") } footer: {
-                    Text(selectedHost.flatMap { located[$0.id]?.isEmpty == false ? "Found on the computer itself — where an agent last worked on it, a saved Herdr workspace, or phren's registration." : nil }
+                    Text(selectedHost.flatMap { located[$0.id]?.isEmpty == false ? "Found on the computer itself: where an agent last worked on it, a saved Herdr workspace, or phren's registration." : nil }
                          ?? (folderEdited || selectedHost.map(suggestedFolder)?.isEmpty != false
                              ? "The workspace opens here; the agent starts in it."
                              : "From where the project was added to phren. Change it if this computer keeps it elsewhere."))
@@ -252,13 +253,19 @@ struct LaunchSessionView: View {
                         .disabled(!canOpen)
                         .accessibilityIdentifier("launch-terminal")
                     } footer: {
-                        Text("Runs \(harness?.title ?? kind) straight over SSH in that folder — no Herdr needed. Terminal only: it ends when you leave, and it has no chat or approvals.")
+                        Text("Runs \(harness?.title ?? kind) straight over SSH in that folder. No Herdr needed. Terminal only: it ends when you leave, and it has no chat or approvals.")
                     }
                 }
             }
             .listSectionSpacing(12)
             .navigationTitle("Open \(project)").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(launching) } }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                        .disabled(launching)
+                        .phrenIdentifier("launch-cancel")
+                }
+            }
             .phrenScreen()
             .modifier(SessionLaunchAlert(error: $error))
             .navigationDestination(item: $chatSession) { AgentChatSheet(session: $0) }
@@ -400,8 +407,9 @@ struct LaunchSessionView: View {
                 if request.row.task.section == .queue {
                     status = "Marking task active…"
                     do {
-                        try await model.enqueue(TaskMove.start.operation(for: request.row), in: request.row.storeId)
+                        try await model.enqueue(TaskMove.active.operation(for: request.row), in: request.row.storeId)
                         await model.refresh()
+                        onTaskMoved?(request.row, .active)
                     } catch {
                         model.lastActionError = "The agent is working, but the task couldn't move to Active. \(error.localizedDescription)"
                     }

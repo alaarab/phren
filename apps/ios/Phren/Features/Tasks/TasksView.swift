@@ -69,6 +69,8 @@ struct TaskListView: View {
     @State private var actionRow: TaskListRow?
     @State private var editing: TaskListRow?
     @State private var reading: TaskListRow?
+    @State private var launchingAgent: TaskListRow?
+    @State private var moveNotice: TaskMoveNotice?
     @AppStorage("tasks.status") private var status: TaskStatus = .open
     @AppStorage("tasks.sort.v1") private var sort: TaskSort = .manual
     /// Projects the person folded in the cross-project list, encoded into
@@ -128,7 +130,7 @@ struct TaskListView: View {
 
     /// Add targets: every writable (store, project) pair. Derived from the
     /// project list (not just existing task docs) so a project can receive
-    /// its first task — the write path creates tasks.md if missing.
+    /// its first task; the write path creates tasks.md if missing.
     private var addTargets: [(storeId: String, storeName: String, project: String)] {
         model.writableProjects.map { ($0.storeId, $0.storeName, $0.project.name) }
     }
@@ -140,6 +142,7 @@ struct TaskListView: View {
         VStack(spacing: 0) {
             controls(visibleCount: visibleRows.count,
                      writableCount: writableRows.filter { !collapsedProjects.contains($0.project) }.count)
+            if let moveNotice { moveNoticeLine(moveNotice) }
             if tasks.showSearch && !tasks.isSelecting {
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass").foregroundStyle(PhrenTheme.textMuted)
@@ -210,7 +213,17 @@ struct TaskListView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if tasks.isSelecting { selectionActions }
         }
-        .onChange(of: status) { _, _ in tasks.selectedIDs.removeAll() }
+        .onChange(of: status) { _, newStatus in
+            tasks.selectedIDs.removeAll()
+            if let moveNotice, moveNotice.destination.sections.allSatisfy(newStatus.sections.contains) {
+                self.moveNotice = nil
+            }
+        }
+        .task(id: noticeTimerID) {
+            guard let id = noticeTimerID else { return }
+            do { try await Task.sleep(for: .seconds(10)) } catch { return }
+            if moveNotice?.id == id { moveNotice = nil }
+        }
         .onChange(of: rowsKey, initial: true) { _, _ in
             tasks.update(status: status, sort: sort, scope: scope, model: model)
         }
@@ -237,10 +250,14 @@ struct TaskListView: View {
             AddTaskSheet(scope: scope, targets: addTargets)
         }
         .sheet(item: $editing) { row in
-            TaskEditSheet(row: row)
+            TaskEditSheet(row: row, onMoved: taskMoved)
         }
         .navigationDestination(item: $reading) { row in
-            TaskDetailsSheet(row: row)
+            TaskDetailsSheet(row: row, onMoved: taskMoved)
+        }
+        .sheet(item: $launchingAgent) { row in
+            LaunchSessionView(storeID: row.storeId, project: row.project,
+                              taskRequest: TaskAgentRequest(row: row), onTaskMoved: taskMoved)
         }
         .phrenSingleSelectSheet(isPresented: $showStatus, title: "Task status",
                                 options: statusOptions, selection: $status,
@@ -297,8 +314,13 @@ struct TaskListView: View {
     private var rowActions: [PhrenControlAction] {
         guard let row = actionRow, !tasks.isSelecting,
               !tasks.isMoving, model.canWrite(storeId: row.storeId, project: row.project) else { return [] }
-        var actions = TaskMove.allCases.filter { $0.section != row.task.section }.map { action in
-            PhrenControlAction(id: action.rawValue.lowercased(), title: action.rawValue, icon: action.symbol) {
+        var actions: [PhrenControlAction] = []
+        if !row.task.checked {
+            actions.append(PhrenControlAction(id: "start", title: "Start", icon: "play",
+                                              caption: "Start an agent on this task") { start(row) })
+        }
+        actions += TaskMove.allCases.filter { $0.section != row.task.section }.map { action in
+            PhrenControlAction(id: action.id, title: action.rawValue, icon: action.symbol) {
                 move([row], using: action)
             }
         }
@@ -322,7 +344,7 @@ struct TaskListView: View {
         }
     }
 
-    /// One section header: the project name in its own colour, Active and
+    /// One section header: the project name in its own color, Active and
     /// Queue chips, and a chevron. The whole row is the fold target, at
     /// least 44 points tall; at accessibility sizes the name leads and the
     /// chips wrap beneath it.
@@ -491,11 +513,11 @@ struct TaskListView: View {
     }
 
     /// The + button is disabled cross-store when no (store, project) pair is
-    /// writable — explain why, rather than leaving the empty state silent
+    /// writable; explain why, rather than leaving the empty state silent
     /// about a control the user can see but can't press.
     private var emptyMessage: String {
         if !isProjectScoped && addTargets.isEmpty {
-            return "No writable store yet — your GitHub token needs Contents: Read and write on the store repo before you can add tasks."
+            return "No writable store yet. Your GitHub token needs Contents: Read and write on the store repo before you can add tasks."
         }
         return "Add a task with the + button."
     }
@@ -508,19 +530,32 @@ struct TaskListView: View {
     }
 
     private var selectionActions: some View {
-        HStack(spacing: 8) {
-            ForEach(TaskMove.allCases, id: \.self) { action in
-                Button {
-                    move(currentWritableRows().filter { tasks.selectedIDs.contains($0.id) }, using: action)
-                } label: {
-                    Label(action.rawValue, systemImage: action.symbol)
-                        .font(.subheadline.weight(.medium))
-                        .frame(maxWidth: .infinity, minHeight: 44)
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
+        return VStack(spacing: 0) {
+            if tasks.selectedIDs.count == 1,
+               let row = tasks.visibleRows.first(where: { tasks.selectedIDs.contains($0.id) }), !row.task.checked {
+                Button { start(row) } label: {
+                    PhrenRow(icon: "play", title: "Start", chevron: false)
                 }
-                .accessibilityIdentifier("task-bulk-\(action.rawValue)")
-                .disabled(tasks.selectedIDs.isEmpty || tasks.isMoving || status.sections == [action.section])
+                .phrenIdentifier("task-bulk-Start")
+                .disabled(tasks.isMoving)
+            }
+            layout {
+                ForEach(TaskMove.allCases, id: \.self) { action in
+                    Button {
+                        move(currentWritableRows().filter { tasks.selectedIDs.contains($0.id) }, using: action)
+                    } label: {
+                        Label(action.rawValue, systemImage: action.symbol)
+                            .font(.subheadline.weight(.medium))
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    .accessibilityIdentifier("task-bulk-\(action.rawValue)")
+                    .disabled(tasks.selectedIDs.isEmpty || tasks.isMoving || status.sections == [action.section])
+                }
             }
         }
+        .buttonStyle(.plain)
         .padding(.horizontal, 12)
         .background(PhrenTheme.surface)
         .tint(PhrenTheme.accent)
@@ -543,7 +578,7 @@ struct TaskListView: View {
                 onRead: { if tasks.isSelecting { select(row) } else { reading = row } }
             ) {
                 if tasks.isSelecting { select(row) }
-                else { move([row], using: row.task.checked ? .start : .done) }
+                else { move([row], using: row.task.checked ? .active : .done) }
             }
             .equatable()
             .padding(.horizontal, 12).padding(.vertical, 8)
@@ -556,9 +591,10 @@ struct TaskListView: View {
             .separatedSessionRow()
             .swipeActions(edge: .leading, allowsFullSwipe: false) {
                 if canWrite && !tasks.isSelecting {
-                    if row.task.section != .active {
-                        Button { move([row], using: .start) } label: { Label("Start", systemImage: "play") }
+                    if !row.task.checked {
+                        Button { start(row) } label: { Label("Start", systemImage: "play") }
                             .tint(PhrenTheme.accent)
+                            .phrenIdentifier("task-swipe-start:\(row.id)")
                     }
                     if row.task.section != .done {
                         Button { move([row], using: .done) } label: { Label("Done", systemImage: "checkmark") }
@@ -588,6 +624,7 @@ struct TaskListView: View {
     }
 
     private func move(_ rows: [TaskListRow], using action: TaskMove) {
+        let rows = rows.filter { $0.task.section != action.section }
         guard !tasks.isMoving, !rows.isEmpty else { return }
         tasks.isMoving = true
         let wasSelecting = tasks.isSelecting
@@ -609,11 +646,61 @@ struct TaskListView: View {
             tasks.selectedIDs = failed
             model.lastActionError = failureMessage.map { "\(failed.count) task(s) couldn't move. \($0)" }
             tasks.isMoving = false
+            showMoveNotice(rows.filter { !failed.contains($0.id) }, to: action.section)
             if wasSelecting && failed.isEmpty {
                 tasks.isSelecting = false
-                status = TaskStatus(action.section)
             }
         }
+    }
+
+    private func start(_ row: TaskListRow) {
+        guard !tasks.isMoving, tasks.selectedIDs.count <= 1,
+              let current = currentWritableRows().first(where: { $0.id == row.id }), !current.task.checked else { return }
+        launchingAgent = current
+    }
+
+    private func taskMoved(_ row: TaskListRow, to section: PhrenTask.Section) {
+        showMoveNotice([row], to: section)
+    }
+
+    private func showMoveNotice(_ rows: [TaskListRow], to section: PhrenTask.Section) {
+        moveNotice = TaskMoveNotice(rows: rows, to: section, from: status)
+    }
+
+    /// Let the person see the notice after returning from an editor or chat.
+    private var noticeTimerID: UUID? {
+        reading == nil && editing == nil && launchingAgent == nil ? moveNotice?.id : nil
+    }
+
+    private func moveNoticeLine(_ notice: TaskMoveNotice) -> some View {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+            : AnyLayout(HStackLayout(spacing: 8))
+        return layout {
+            Text(notice.message)
+                .font(PhrenTypography.caption)
+                .foregroundStyle(PhrenTheme.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .phrenIdentifier("task-move-notice")
+            Button {
+                status = notice.destination
+                setCollapsed(collapsedProjects.subtracting(notice.projects))
+                tasks.selectedIDs.removeAll()
+                tasks.isSelecting = false
+                moveNotice = nil
+            } label: {
+                Text("View \(notice.destination.title)")
+                    .font(PhrenTypography.subheadline)
+                    .foregroundStyle(PhrenTheme.accent)
+                    .padding(.horizontal, 12)
+                    .frame(minHeight: 44)
+                    .background(PhrenTheme.surfaceRaised, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .phrenIdentifier("task-move-follow")
+        }
+        .padding(.horizontal, 16)
+        .background(PhrenTheme.surface)
     }
 
     private func delete(_ row: TaskListRow) {
@@ -819,6 +906,7 @@ struct TaskDetailsSheet: View {
     @State private var editing = false
     @State private var launchingAgent = false
     let row: TaskListRow
+    var onMoved: ((TaskListRow, PhrenTask.Section) -> Void)? = nil
 
     private var currentRow: TaskListRow {
         let task = model.snapshot(for: row.storeId).tasks[row.project]?.allItems.first {
@@ -874,16 +962,17 @@ struct TaskDetailsSheet: View {
                 }
             }
             .phrenScreen()
-            .sheet(isPresented: $editing) { TaskEditSheet(row: row) }
+            .sheet(isPresented: $editing) { TaskEditSheet(row: row, onMoved: onMoved) }
             .sheet(isPresented: $launchingAgent) {
                 LaunchSessionView(storeID: row.storeId, project: row.project,
-                                  taskRequest: TaskAgentRequest(row: row))
+                                  taskRequest: TaskAgentRequest(row: row), onTaskMoved: onMoved)
             }
     }
 }
 
 struct TaskEditSheet: View {
     let row: TaskListRow
+    var onMoved: ((TaskListRow, PhrenTask.Section) -> Void)?
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -893,8 +982,9 @@ struct TaskEditSheet: View {
     @State private var pinned: Bool
     @State private var showingSection = false
 
-    init(row: TaskListRow) {
+    init(row: TaskListRow, onMoved: ((TaskListRow, PhrenTask.Section) -> Void)? = nil) {
         self.row = row
+        self.onMoved = onMoved
         _text = State(initialValue: TasksFile.stripPinnedTag(TasksFile.stripPriorityTag(row.task.line)))
         _priority = State(initialValue: row.task.priority)
         _section = State(initialValue: row.task.section)
@@ -921,7 +1011,7 @@ struct TaskEditSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         // TasksFile.update recomputes `pinned` from the text
-                        // it's given, so the tag has to be re-appended here —
+                        // it's given, so the tag has to be re-appended here;
                         // otherwise saving silently unpins the task.
                         var newText = text.trimmingCharacters(in: .whitespacesAndNewlines)
                         if pinned {
@@ -930,13 +1020,20 @@ struct TaskEditSheet: View {
                         let newPriority = priority
                         let newSection = section != row.task.section ? section : nil
                         Task {
-                            await model.perform(.updateTask(
-                                project: row.project,
-                                match: row.task.stableId ?? row.task.line,
-                                text: newText,
-                                priority: newPriority?.rawValue,
-                                section: newSection?.rawValue
-                            ), in: row.storeId)
+                            do {
+                                try await model.enqueue(.updateTask(
+                                    project: row.project,
+                                    match: row.task.stableId ?? row.task.line,
+                                    text: newText,
+                                    priority: newPriority?.rawValue,
+                                    section: newSection?.rawValue
+                                ), in: row.storeId)
+                                model.lastActionError = nil
+                                await model.refresh()
+                                if let newSection { onMoved?(row, newSection) }
+                            } catch {
+                                model.lastActionError = error.localizedDescription
+                            }
                         }
                         dismiss()
                     }

@@ -48,9 +48,25 @@ final class TaskBrowsingTests: XCTestCase {
 
     func testMovesUseStableTaskIDsAndPreserveFields() {
         let item = row("deadbeef", tags: "[high]", store: "team")
-        XCTAssertEqual(TaskMove.start.operation(for: item), .updateTask(project: "demo", match: "deadbeef", text: nil, priority: nil, section: "Active"))
+        XCTAssertEqual(TaskMove.active.operation(for: item), .updateTask(project: "demo", match: "deadbeef", text: nil, priority: nil, section: "Active"))
         XCTAssertEqual(TaskMove.backlog.operation(for: item), .updateTask(project: "demo", match: "deadbeef", text: nil, priority: nil, section: "Queue"))
         XCTAssertEqual(TaskMove.done.operation(for: item), .completeTask(project: "demo", match: "deadbeef"))
+    }
+
+    func testMoveNoticeOnlyFollowsTasksThatLeaveTheStatusFilter() throws {
+        let item = row("deadbeef")
+        let active = try XCTUnwrap(TaskMoveNotice(rows: [item], to: .active, from: .backlog))
+        XCTAssertEqual(active.destination, .active)
+        XCTAssertEqual(active.message, "Moved to Active")
+        XCTAssertEqual(active.projects, ["demo"])
+        XCTAssertNil(TaskMoveNotice(rows: [item], to: .active, from: .open))
+        XCTAssertNil(TaskMoveNotice(rows: [item], to: .queue, from: .backlog))
+        XCTAssertNil(TaskMoveNotice(rows: [], to: .done, from: .open))
+        XCTAssertNil(TaskMoveNotice(rows: [item], to: .done, from: .all))
+
+        let done = try XCTUnwrap(TaskMoveNotice(rows: [item, row("feedbeef")], to: .done, from: .open))
+        XCTAssertEqual(done.destination, .done)
+        XCTAssertEqual(done.message, "2 tasks moved to Done")
     }
 
     func testTaskAgentRequestIncludesExactVisibleTaskContextAndIdentity() {
