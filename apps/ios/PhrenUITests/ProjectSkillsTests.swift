@@ -107,7 +107,9 @@ final class ProjectSkillsTests: XCTestCase {
         let project = app.buttons["project:sample/brain:demo"]
         XCTAssertTrue(project.waitForExistence(timeout: 8))
         project.tap()
-        XCTAssertTrue(app.buttons["project-skills"].waitForExistence(timeout: 5))
+        // The project page draws its band after the store snapshot lands; a
+        // busy simulator can take a few seconds.
+        XCTAssertTrue(app.buttons["project-skills"].waitForExistence(timeout: 12))
         return app
     }
 

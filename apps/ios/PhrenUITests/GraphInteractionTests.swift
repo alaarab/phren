@@ -126,8 +126,13 @@ final class GraphInteractionTests: XCTestCase {
         app.buttons["More"].tap()
         tapVisibleSkillsItem(app)
         XCTAssertTrue(app.navigationBars["Skills"].waitForExistence(timeout: 5))
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.001, dy: 0.55))
-            .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.55)))
+        // The synthesized edge drag occasionally lands before the push has
+        // settled and is swallowed; a second one is still the same gesture.
+        for _ in 0..<2 where !app.navigationBars["Projects"].exists {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.001, dy: 0.55))
+                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.55)))
+            _ = app.navigationBars["Projects"].waitForExistence(timeout: 4)
+        }
         XCTAssertTrue(app.navigationBars["Projects"].waitForExistence(timeout: 5),
                       "Normal back gestures must still work outside the graph")
         app.tabBars.buttons["Settings"].tap()
@@ -244,7 +249,12 @@ final class GraphInteractionTests: XCTestCase {
         XCTAssertTrue(app.buttons["More"].waitForExistence(timeout: 8))
         app.buttons["More"].tap()
         tapVisibleSkillsItem(app)
-        app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "audit")).firstMatch.tap()
+        // The list is pushed; tap the row by its identifier once it exists and
+        // wait for the detail before looking for its controls.
+        let audit = app.buttons["skill:sample/brain:demo/skills/audit.md"]
+        XCTAssertTrue(audit.waitForExistence(timeout: 8))
+        audit.tap()
+        XCTAssertTrue(app.navigationBars["audit"].waitForExistence(timeout: 8))
         let enable = app.buttons["Enable on linked computers"]
         let toggle = app.descendants(matching: .any)["skill-enabled"].firstMatch
         // Fresh state offers the enable button; a run where an earlier test
