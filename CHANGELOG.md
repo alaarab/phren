@@ -11,6 +11,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- Live reply previews on the transcript socket: Claude pane text and Codex/OpenCode delta text update at most twice a second, stay out of history, and give way to the completed entry.
+
 - `GET /v1/code/outline-summary?project=&paths=` batches symbol totals and leading kinds for files and directories. Code reads and notes accept a registered store selector; file-qualified symbol queries keep a tree dossier on the selected file, and notes retain their explicit session recipient.
 
 - Code dossier notes save symbol-cited findings and optionally hand off to a live session or dispatch a worker through `POST /v1/code/note`.
@@ -64,6 +66,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   aliases. Codex and OpenCode keep their live catalogues in the same shape.
 
 ### Fixed
+
+- Codex terminal menus without shortcut keys use Up or Down from the live highlighted row, verify the target before Enter, and retry movement once. Unreadable selections offer Open terminal; failed verification reports an error without confirming a different option.
 
 - The Hook separates numbered terminal option labels from descriptions, including structured option descriptions. Held Codex MCP approvals keep arguments in details, resolve matching terminal choices and keys, and flag unresolved prompts for terminal access.
 - Worker rows include finish timestamps and a failure flag so phone lists can age out failures without changing the Hook's 24-hour archive policy.
