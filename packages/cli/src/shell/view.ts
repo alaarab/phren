@@ -4,6 +4,7 @@ import { moduleEnabled } from "../modules/runtime.js";
  * Extracted from shell.ts to keep the orchestrator under 300 lines.
  */
 
+import { projectMemoryCounts } from "../content/summarize.js";
 import * as fs from "fs";
 import * as path from "path";
 import {
@@ -196,7 +197,8 @@ function collectProjectDashboardEntries(ctx: ViewContext): ProjectDashboardEntry
       ...card,
       activeCount: task.ok ? task.data.items.Active.length : 0,
       queueCount: task.ok ? task.data.items.Queue.length : 0,
-      findingCount: findings.ok ? findings.data.length : 0,
+      // Everything the project holds, archive included, as every graph shows it.
+      findingCount: findings.ok ? projectMemoryCounts(storePath, card.name).findings : 0,
       reviewCount: review.ok ? review.data.length : 0,
     };
   });

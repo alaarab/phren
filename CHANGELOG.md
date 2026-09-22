@@ -72,6 +72,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Project counts mean the same thing on every surface: everything a project
+  holds (live findings, team journal findings and the whole archive) and every
+  open task, from one shared count (`projectMemoryCounts`). The web UI graph,
+  its project list, VS Code's graph (through a new `counts` field on
+  `get_project_summary`), the shell's graph and projects dashboard all showed
+  only the findings they happened to draw, so most projects read 20. The
+  `summary.md` archived count now includes the older halves of split topic
+  files (`<topic>.older.md`), which it skipped.
 - Claude's narration now reaches the phone. Opus 5.5 writes its short progress
   notes (the lines Claude Code's terminal shows between tool calls) as thinking
   blocks marked as narration, and the Hook dropped every thinking block, so
