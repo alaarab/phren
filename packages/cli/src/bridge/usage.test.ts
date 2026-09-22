@@ -67,6 +67,30 @@ describe("account usage", () => {
     expect(value.windows[0].resetsAt).toBe("2026-09-12T09:00:00.000Z");
     expect(JSON.stringify(value)).not.toContain("private");
   });
+  it("reproduces a 40/16/18 status-line report with one label and its own reset per number", () => {
+    const week = 1789848000, fableWeek = week + 1800;
+    const report = claudeUsage({ rate_limits: {
+      five_hour: { used_percentage: 40, resets_at: 1789514400 },
+      seven_day: { used_percentage: 16, resets_at: week },
+      seven_day_fable: { used_percentage: 18, resets_at: fableWeek },
+    } }, now);
+    expect(report.origin).toBe("status-line");
+    expect(report.updatedAt).toBe(now.toISOString());
+    expect(report.windows.map(w => [w.id, w.name, w.usedPercent])).toEqual([
+      ["five_hour", "5-hour limit", 40],
+      ["seven_day", "7-day, all models", 16],
+      ["seven_day_fable", "7-day, Fable", 18],
+    ]);
+    // Each window is labelled with its own reset time: the per-model Fable
+    // window keeps its own bucket's reset, not the all-models one, and its
+    // higher percentage is a separate allowance rather than a subset.
+    expect(report.windows.map(w => w.resetsAt)).toEqual([
+      new Date(1789514400 * 1000).toISOString(),
+      new Date(week * 1000).toISOString(),
+      new Date(fableWeek * 1000).toISOString(),
+    ]);
+    expect(report.windows[2].resetsAt).not.toBe(report.windows[1].resetsAt);
+  });
   it("preserves, wraps once, and restores an existing status-line command and options", () => {
     const previous = { type: "command", command: "printf 'custom status'; cat", padding: 2, refreshInterval: 10 };
     const program = "/tmp/phren's helper/bridge-hook.mjs";
@@ -189,6 +213,7 @@ describe("account usage", () => {
       ["seven_day_fable", "7-day, Fable", 100],
       ["seven_day_opus_5", "7-day, Opus 5", 7],
     ]);
+    expect(value.origin).toBe("oauth");
     expect(JSON.stringify(value)).not.toContain("private");
     expect(value.updatedAt).toBe(now.toISOString());
   });
@@ -217,6 +242,7 @@ describe("account usage", () => {
     }) as unknown as typeof fetch;
     const live = await fetchClaudeUsage("secret-token", fetchImpl, now);
     expect(live.windows.map(w => [w.id, w.usedPercent])).toEqual([["five_hour", 5]]);
+    expect(live.origin).toBe("oauth");
     expect(seen?.url).toBe("https://api.anthropic.com/api/oauth/usage");
     expect(seen?.auth).toBe("Bearer secret-token");
     expect(JSON.stringify(live)).not.toContain("secret-token");
@@ -226,6 +252,7 @@ describe("account usage", () => {
       async () => { claudeCalls++; return claudeUsage({ rate_limits: { five_hour: { used_percentage: 42 } } }, now); }, openCode, noOpenRouter, noOpenCodeGo);
     const first = await reader.read();
     expect(first.accounts[1].windows[0].usedPercent).toBe(42);
+    expect(first.accounts[1].origin).toBe("status-line");
     await reader.read(); expect(claudeCalls).toBe(1);
 
     const fallback = new AccountUsageReader(async () => codexUsage({ rateLimits: limits }, now), () => 0,
