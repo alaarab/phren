@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -31,20 +31,38 @@ describe("model catalogue", () => {
     expect(claudeName("sonnet")).toBe("Sonnet");
   });
 
-  it("lists Claude's menu exactly the way Claude Code shows it, the default first", async () => {
-    const models = await readClaudeModels();
+  it("falls back to the built-in menu when Claude Code has no catalogue on this computer", async () => {
+    const empty = await mkdtemp(path.join(tmpdir(), "phren-claude-"));
+    const models = await readClaudeModels(empty, null);
     expect(models.map(model => [model.id, model.name])).toEqual(CLAUDE_MENU.map(model => [model.id, model.name]));
-    expect(models.map(model => [model.id, model.name])).toEqual([
-      ["claude-fable-5-1", "Fable 5.1"],
-      ["claude-opus-5", "Opus 5"],
-      ["claude-sonnet-5", "Sonnet 5"],
-      ["claude-haiku-4-5-20251001", "Haiku 4.5"],
-      ["claude-fable-5-1[1m]", "Fable 5.1 (1M context)"],
-    ]);
     expect(models.filter(model => model.isDefault).map(model => model.id)).toEqual(["claude-fable-5-1"]);
     // The table is a fresh copy each call, so a caller cannot corrupt it.
     models[0].name = "Changed";
-    expect((await readClaudeModels())[0].name).toBe("Fable 5.1");
+    expect((await readClaudeModels(empty, null))[0].name).toBe("Fable 5.1");
+  });
+
+  it("reads Claude Code's own cached catalogue: its order, its default, a 1M row for the default, and nothing the client is too old for", async () => {
+    const config = await mkdtemp(path.join(tmpdir(), "phren-claude-"));
+    await mkdir(path.join(config, "cache/model-catalog"), { recursive: true });
+    const row = (id: string, name: string, extra: Record<string, unknown> = {}) => ({ id, name, section: "main", ...extra });
+    await writeFile(path.join(config, "cache/model-catalog/account-abc-cc.json"), JSON.stringify({ version: 2, catalog: {
+      surface: "cc",
+      config: { id: "cc", models: [
+        row("claude-opus-5-5", "Opus 5.5", { description: "For complex tasks", min_claude_code_version: "2.1.280" }),
+        row("claude-sonnet-5", "Sonnet 5", { description: "Most efficient for everyday tasks" }),
+        row("claude-future-9", "Future 9", { min_claude_code_version: "9.0.0" }),
+        row("claude-opus-4-8", "Opus 4.8", { section: "overflow" }),
+      ] },
+      state: { id: "cc", model: "claude-opus-5-5" },
+    } }));
+    expect((await readClaudeModels(config, "2.1.280")).map(model => [model.id, model.name, !!model.isDefault])).toEqual([
+      ["claude-opus-5-5", "Opus 5.5", true],
+      ["claude-sonnet-5", "Sonnet 5", false],
+      ["claude-opus-5-5[1m]", "Opus 5.5 (1M context)", false],
+      ["claude-opus-4-8", "Opus 4.8", false],
+    ]);
+    // A client older than a row's minimum does not see that row.
+    expect((await readClaudeModels(config, "2.1.279")).map(model => model.id)).not.toContain("claude-opus-5-5");
   });
 
   it("keeps the phone's built-in fallbacks and the chat fixture in step with the menu", async () => {

@@ -69,6 +69,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- The phone's Claude model picker reads Claude Code's own cached `/model`
+  catalogue (`~/.claude/cache/model-catalog/*-cc.json`), so a new model such as
+  Opus 5.5 appears as soon as the terminal knows it, with the terminal's names,
+  order and default, a 1M row for the default, and nothing the installed client
+  is too old for. The built-in table is only the fallback when no catalogue is
+  cached on that computer.
 - Codex terminal menus without shortcut keys use Up or Down from the live highlighted row, verify the target before Enter, and retry movement once. Unreadable selections offer Open terminal; failed verification reports an error without confirming a different option.
 
 - The Hook separates numbered terminal option labels from descriptions, including structured option descriptions. Held Codex MCP approvals keep arguments in details, resolve matching terminal choices and keys, and flag unresolved prompts for terminal access.

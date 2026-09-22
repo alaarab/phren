@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { object, objects, type Json } from "./protocol.js";
@@ -59,11 +59,11 @@ function codexModels(result: Json): AgentModel[] {
   }));
 }
 
-/** Claude Code's own `/model` menu, kept here as a maintained table: Claude
- * publishes no catalogue, and the phone must show the exact display names
- * and ids the terminal shows. The default leads; the 1M context variant of
- * the same model follows the rest of the family. Exported so a parity test
- * can hold the phone's built-in fallback and the chat fixture to it. */
+/** The menu used only when Claude Code's own catalogue cannot be read (it has
+ * never run on this computer, or the cache is unreadable). Normally the phone
+ * shows the live catalogue below, so a new model appears without anyone
+ * editing this table. Exported so a parity test can hold the phone's built-in
+ * offline fallback and the chat fixture to it. */
 export const CLAUDE_MENU: readonly AgentModel[] = [
   { id: "claude-fable-5-1", name: "Fable 5.1", description: "Most intelligent.", isDefault: true },
   { id: "claude-opus-5", name: "Opus 5", description: "Most capable for long work." },
@@ -72,9 +72,81 @@ export const CLAUDE_MENU: readonly AgentModel[] = [
   { id: "claude-fable-5-1[1m]", name: "Fable 5.1 (1M context)", description: "Fable 5.1 with a 1M context window." },
 ];
 
-/** The maintained Claude menu, copied per call so a caller cannot mutate it. */
-export function readClaudeModels(): Promise<AgentModel[]> {
-  return Promise.resolve(CLAUDE_MENU.map(model => ({ ...model })));
+/** Claude Code fetches its `/model` catalogue from Anthropic and caches it as
+ * `<config>/cache/model-catalog/<account>-...-cc.json`, refreshing it itself:
+ * `catalog.config.models` is the menu in the terminal's order (`section`
+ * "main" first, older models under "overflow"), each row gated by
+ * `min_claude_code_version`, and `catalog.state.model` is the selected
+ * default. Reading that file keeps the phone's picker identical to the
+ * terminal's with nothing to maintain here. */
+export async function readClaudeCatalog(configDir = claudeConfigDir(), installed?: string): Promise<AgentModel[]> {
+  const directory = path.join(configDir, "cache", "model-catalog");
+  let newest: { file: string; at: number } | undefined;
+  try {
+    for (const name of await readdir(directory)) {
+      if (!name.endsWith("-cc.json")) continue;
+      const file = path.join(directory, name), at = (await stat(file)).mtimeMs;
+      if (!newest || at > newest.at) newest = { file, at };
+    }
+  } catch { return []; }
+  if (!newest) return [];
+  let parsed: Json;
+  try { parsed = JSON.parse(await readFile(newest.file, "utf8")) as Json; } catch { return []; }
+  const catalog = object(object(parsed).catalog);
+  const selected = typeof object(catalog.state).model === "string" ? String(object(catalog.state).model) : undefined;
+  const rows = objects(object(catalog.config).models).filter(row => typeof row.id === "string" && /^[a-z0-9.[\]-]{1,100}$/i.test(row.id));
+  const usable = rows.filter(row => !installed || typeof row.min_claude_code_version !== "string" || !olderVersion(installed, row.min_claude_code_version));
+  const ordered = [...usable.filter(row => row.section !== "overflow"), ...usable.filter(row => row.section === "overflow")];
+  const models: AgentModel[] = ordered.map(row => ({
+    id: String(row.id),
+    name: typeof row.name === "string" && row.name.trim() ? row.name.trim().slice(0, 100) : claudeName(String(row.id)),
+    ...(typeof row.description === "string" && row.description.trim() ? { description: row.description.trim().slice(0, 300) } : {}),
+    ...(String(row.id) === selected ? { isDefault: true } : {}),
+  }));
+  // The terminal offers the selected model with a 1M context window as its
+  // own row; the catalogue does not list that variant, so add it after the
+  // main section the way the menu draws it.
+  const chosen = models.find(model => model.isDefault);
+  if (chosen && !models.some(model => model.id === `${chosen.id}[1m]`)) {
+    const main = models.filter(model => ordered.find(row => row.id === model.id)?.section !== "overflow").length;
+    models.splice(main, 0, { id: `${chosen.id}[1m]`, name: `${chosen.name} (1M context)`, description: `${chosen.name} with a 1M context window.` });
+  }
+  return models;
+}
+
+function claudeConfigDir(): string {
+  const configured = process.env.CLAUDE_CONFIG_DIR?.trim();
+  return configured ? path.resolve(configured) : path.join(homedir(), ".claude");
+}
+
+/** "2.1.279" is older than "2.1.280"; anything unparseable is not. */
+function olderVersion(installed: string, required: string): boolean {
+  const parse = (value: string) => /^(\d+)\.(\d+)\.(\d+)/.exec(value.trim())?.slice(1).map(Number);
+  const have = parse(installed), need = parse(required);
+  if (!have || !need) return false;
+  for (let index = 0; index < 3; index++) if (have[index] !== need[index]) return have[index] < need[index];
+  return false;
+}
+
+/** The installed client's version, so a model it cannot run is not offered. */
+function claudeVersion(executable = "claude"): Promise<string | undefined> {
+  return new Promise(resolve => {
+    const child = spawn(executable, ["--version"], { cwd: homedir(), stdio: ["ignore", "pipe", "ignore"] });
+    let out = "";
+    const timer = setTimeout(() => { child.kill("SIGTERM"); resolve(undefined); }, 5_000);
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => { if (out.length < 4_096) out += chunk; });
+    child.on("error", () => { clearTimeout(timer); resolve(undefined); });
+    child.on("exit", () => { clearTimeout(timer); resolve(/\d+\.\d+\.\d+/.exec(out)?.[0]); });
+  });
+}
+
+/** The live catalogue when Claude Code has one cached on this computer,
+ * otherwise the offline fallback, copied per call so a caller cannot mutate it. */
+export async function readClaudeModels(configDir?: string, installed?: string | null): Promise<AgentModel[]> {
+  const version = installed === null ? undefined : installed ?? await claudeVersion();
+  const live = await readClaudeCatalog(configDir, version).catch(() => [] as AgentModel[]);
+  return live.length ? live : CLAUDE_MENU.map(model => ({ ...model }));
 }
 
 /** `opencode models` prints one `provider/model` id per line. The Go plan's
