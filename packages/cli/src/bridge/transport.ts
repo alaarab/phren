@@ -42,7 +42,10 @@ export async function health(): Promise<Json> {
   });
 }
 
-async function pipe(destination: NetConnectOpts, timing?: string): Promise<void> {
+/** `keepWriteOpen` suppresses the client's EOF: the Hook answers one HTTP
+ * request and closes the socket itself, while a raw relay (the web preview)
+ * needs the EOF forwarded or the far end waits forever. */
+async function pipe(destination: NetConnectOpts, timing?: string, keepWriteOpen = false): Promise<void> {
   // The gateway's own cost, from process start to the first byte the Hook
   // answers with. A loaded machine makes this large even while it is healthy.
   const started = Date.now() - process.uptime() * 1000;
@@ -52,19 +55,21 @@ async function pipe(destination: NetConnectOpts, timing?: string): Promise<void>
     if (timing) socket.once("data", () => {
       atomic(timing, { ms: Math.round(Date.now() - started), at: new Date().toISOString() }).catch(() => {});
     });
-    // The client's EOF is not forwarded as a FIN: node's HTTP server aborts a
-    // half-closed connection whose response has not started yet, which
-    // dropped the reply to a large upload whenever the SSH client closed its
-    // write side right after the body. The Hook closes the socket itself once
-    // it has answered (every request is Connection: close), and that close
-    // ends this process.
-    socket.on("connect", () => { process.stdin.pipe(socket, { end: false }); socket.pipe(process.stdout); });
+    // With keepWriteOpen the client's EOF is not forwarded as a FIN: node's
+    // HTTP server aborts a half-closed connection whose response has not
+    // started yet, which dropped the reply to a large upload whenever the SSH
+    // client closed its write side right after the body. The Hook closes the
+    // socket itself once it has answered (every request is Connection: close),
+    // and that close ends this process.
+    const end = () => socket.end();
+    socket.on("connect", () => { process.stdin.pipe(socket, { end: !keepWriteOpen }); socket.pipe(process.stdout); });
     socket.on("error", reject);
     socket.on("close", () => {
       process.stdin.unpipe(socket); process.stdin.pause();
-      process.stdout.removeListener("error", stop);
+      process.stdin.removeListener("end", end); process.stdout.removeListener("error", stop);
       resolve();
     });
+    if (keepWriteOpen) process.stdin.once("end", () => {}); else process.stdin.once("end", end);
     process.stdout.once("error", stop);
   });
 }
@@ -75,7 +80,7 @@ export async function dispatch(command: string): Promise<void> {
     if (!moduleSnapshot(defaultPhrenPath(), undefined, true).has("hook")) throw new BridgeError(404, disabledHint("hook"));
   };
   if (command === "phren-hook v1 pipe") { requireHook();
-    await pipe({ path: socketPath() }, path.join(bridgeRoot(), "gateway.json"));
+    await pipe({ path: socketPath() }, path.join(bridgeRoot(), "gateway.json"), true);
     return;
   }
   // SSH port-forwarding also permits Unix sockets, bypassing the callback and
