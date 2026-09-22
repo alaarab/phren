@@ -48,19 +48,24 @@ async function pipe(destination: NetConnectOpts, timing?: string): Promise<void>
   const started = Date.now() - process.uptime() * 1000;
   await new Promise<void>((resolve, reject) => {
     const socket = connect(destination);
-    const end = () => socket.end();
     const stop = () => socket.destroy();
     if (timing) socket.once("data", () => {
       atomic(timing, { ms: Math.round(Date.now() - started), at: new Date().toISOString() }).catch(() => {});
     });
-    socket.on("connect", () => { process.stdin.pipe(socket); socket.pipe(process.stdout); });
+    // The client's EOF is not forwarded as a FIN: node's HTTP server aborts a
+    // half-closed connection whose response has not started yet, which
+    // dropped the reply to a large upload whenever the SSH client closed its
+    // write side right after the body. The Hook closes the socket itself once
+    // it has answered (every request is Connection: close), and that close
+    // ends this process.
+    socket.on("connect", () => { process.stdin.pipe(socket, { end: false }); socket.pipe(process.stdout); });
     socket.on("error", reject);
     socket.on("close", () => {
       process.stdin.unpipe(socket); process.stdin.pause();
-      process.stdin.removeListener("end", end); process.stdout.removeListener("error", stop);
+      process.stdout.removeListener("error", stop);
       resolve();
     });
-    process.stdin.once("end", end); process.stdout.once("error", stop);
+    process.stdout.once("error", stop);
   });
 }
 

@@ -7,7 +7,7 @@ import { makeTempDir } from "../test-helpers.js";
 import { indexProject } from "../../../code/src/indexer.js";
 import { search } from "../../../code/src/query.js";
 import { BUILTIN_MODULES } from "../modules/registry.js";
-import { CodeReindexer, CodeRoutes } from "./code-routes.js";
+import { CodeReindexer, CodeRoutes, resolveCodeStore } from "./code-routes.js";
 import { capabilitiesForModules, requireRoute } from "./server.js";
 
 const FIXTURES = path.join(__dirname, "../../../code/src/__fixtures__");
@@ -177,4 +177,58 @@ it("preserves a saved note when agent delivery fails", async () => {
   const result = await saveCodeNote(store, { project: "fixture", symbol: "Point", file: hit.file, line: hit.line,
     text: "Point distance calculations need stable coordinate values throughout the operation.", target: { harness: "codex" } }, async () => { throw new Error("Session went offline"); });
   expect(result).toMatchObject({ saved: true, delivery: { ok: false, message: "Session went offline" } });
+});
+
+
+it("batches file and directory symbol summaries and resolves exact file declarations", async () => {
+  const result = await routes.outlineSummary("fixture", JSON.stringify(["typescript", "typescript/app.ts", "typescript/util.ts", "typescript-neighbor", "missing.ts"]));
+  const entry = (name: string) => result.entries.find(row => row.path === name)!;
+  expect(entry("typescript").symbols).toBe(entry("typescript/app.ts").symbols + entry("typescript/util.ts").symbols);
+  expect(entry("typescript/app.ts").symbols).toBeGreaterThan(1);
+  expect(entry("typescript/app.ts").kinds.map(row => row.kind)).toContain("method");
+  expect(entry("typescript-neighbor").symbols).toBe(0);
+  expect(entry("missing.ts").symbols).toBe(0);
+  const symbol = entry("typescript/app.ts").symbol!;
+  expect((await routes.definition("fixture", symbol)).definition.symbol.file).toBe("typescript/app.ts");
+  expect((await routes.references("fixture", symbol, null)).references.symbol.file).toBe("typescript/app.ts");
+  await expect(routes.definition("fixture", "wrong.ts::add")).rejects.toMatchObject({ status: 404 });
+  for (const paths of [["../escape"], ["/absolute"], ["..\\escape"], [], Array(201).fill("file.ts")]) {
+    await expect(routes.outlineSummary("fixture", JSON.stringify(paths))).rejects.toThrow();
+  }
+  await expect(routes.outlineSummary("fixture", "not json")).rejects.toMatchObject({ status: 400 });
+  await expect(routes.outlineSummary("missing", '["file.ts"]')).rejects.toMatchObject({ status: 404 });
+});
+
+it("keeps a code note addressed to the originating session", async () => {
+  const symbol = (await routes.definition("fixture", "typescript/app.ts::Point")).definition.symbol;
+  const session = "aaaaaaaa-1111-4111-8111-111111111111";
+  let recipient: unknown;
+  const result = await saveCodeNote(store, { project: "fixture", symbol: "typescript/app.ts::Point", file: symbol.file,
+    line: symbol.line, text: "Point coordinates must stay stable during distance calculations.", target: { session } },
+    async note => { recipient = note.target; return { delivered: true }; });
+  expect(result.saved).toBe(true);
+  expect(recipient).toEqual({ session });
+});
+
+it("selects only registered stores and prevents writes to read-only stores", async () => {
+  const team = path.join(tmp.path, "team");
+  fs.mkdirSync(team);
+  fs.writeFileSync(path.join(store, "stores.yaml"), `version: 1
+stores:
+  - id: "11223344"
+    name: primary
+    path: ${store}
+    role: primary
+    sync: managed-git
+  - id: aabbccdd
+    name: team
+    path: ${team}
+    role: readonly
+    sync: pull-only
+    remote: https://github.com/sam/brain.git
+`);
+  expect(await resolveCodeStore(store, "sam/brain")).toBe(team);
+  await expect(resolveCodeStore(store, "sam/brain", true)).rejects.toMatchObject({ status: 403 });
+  await expect(resolveCodeStore(store, "sam/missing")).rejects.toMatchObject({ status: 404 });
+  await expect(resolveCodeStore(store, "../escape")).rejects.toThrow();
 });
