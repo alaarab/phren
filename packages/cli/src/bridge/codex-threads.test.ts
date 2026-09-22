@@ -59,6 +59,21 @@ describe("Codex thread store", () => {
     expect(await readFile(file, "utf8")).toContain("First words grow");
   });
 
+  it("exports the harness queued user item and consumes its identity without duplicating the message", async () => {
+    const item = { type: "userMessage", id: "queued-user", status: "queued", content: [{ type: "text", text: "Run checks" }] };
+    insert(1, item);
+    const file = await transcriptPath("codex", thread);
+    const queued = (await new TranscriptReader(file, "codex").read()).entries.map(e => e.raw as any).find(e => e.phrenQueued);
+    expect(queued).toMatchObject({ phrenQueued: true, payload: { role: "user", content: [{ type: "input_text", text: "Run checks" }] } });
+    expect(queued.phrenQueueKey).toMatch(/^[a-f0-9]{64}$/);
+    insert(1, { ...item, status: "completed" }, 2);
+    await materializeCodexThread(thread);
+    await materializeCodexThread(thread);
+    const entries = (await new TranscriptReader(file, "codex").read()).entries.map(e => e.raw as any);
+    expect(entries.filter(e => e.payload?.role === "user")).toHaveLength(1);
+    expect(entries.filter(e => e.type === "phren_queue_consumed")).toEqual([{ type: "phren_queue_consumed", key: queued.phrenQueueKey }]);
+  });
+
   it("materializes a thread as an append-only rollout and follows its updates", async () => {
     insert(1, { type: "userMessage", id: "u1", content: [{ type: "text", text: "Fix the build" }] });
     insert(2, { type: "reasoning", id: "r1", summary: [] });

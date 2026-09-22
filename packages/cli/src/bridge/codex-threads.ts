@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, open, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -10,7 +11,7 @@ import { atomic, bridgeRoot, object, objects, sessionId, type Json } from "./pro
 const MAX_ITEMS = 20_000, OUTPUT_TAIL = 4_000;
 const STALLED_AFTER_MS = 10 * 60 * 1_000;
 
-interface Emitted { lastOrdinal: number; maxUpdated: number; count: number; turnSignature?: string; done: Record<string, "call" | "done"> }
+interface Emitted { lastOrdinal: number; maxUpdated: number; count: number; turnSignature?: string; done: Record<string, "call" | "queued" | "done"> }
 
 export function codexHome(): string { return process.env.CODEX_HOME || path.join(homedir(), ".codex"); }
 export function materializedRoot(): string { return path.join(bridgeRoot(), "codex-threads"); }
@@ -131,6 +132,14 @@ async function materializeThread(session: string): Promise<string | undefined> {
       const id = String(item.id ?? `ordinal-${row.rollout_ordinal}`), emitted = state.done[id];
       if (item.type === "agentMessage" && id === pending?.id) continue;
       const calls = callRows(item), output = outputRow(item);
+      // Preserve only queue state actually recorded by the harness. The
+      // append-only transcript pairs the queued user row with a content-free
+      // consumption marker when that same item leaves the queue.
+      if (emitted === "queued" && item.type === "userMessage" && item.status !== "queued") {
+        lines.push(JSON.stringify({ type: "phren_queue_consumed", key: queueKey(session, id) }));
+        state.done[id] = "done";
+        continue;
+      }
       if (!emitted) {
         if (calls) { for (const call of calls) lines.push(JSON.stringify(call)); state.done[id] = "call"; }
         else if (subAgentRow(item)) {
@@ -141,12 +150,14 @@ async function materializeThread(session: string): Promise<string | undefined> {
           state.done[id] = "done"; continue;
         }
         else if (messageRow(item)) {
-          lines.push(JSON.stringify(messageRow(item)));
+          const message = messageRow(item)!;
+          const queued = item.type === "userMessage" && item.status === "queued";
+          lines.push(JSON.stringify(queued ? { ...message, phrenQueued: true, phrenQueueKey: queueKey(session, id) } : message));
           // A question the agent asked (delivered async) rides along as the
           // same event the rollout would carry, so the pending scan sees it.
           const asked = questionEvent(item);
           if (asked) lines.push(JSON.stringify(asked));
-          state.done[id] = "done"; continue;
+          state.done[id] = queued ? "queued" : "done"; continue;
         }
         else if (isQueuedQuestionItem(item)) {
           // The queued follow-up question reads in the transcript as the
@@ -202,6 +213,10 @@ async function threadMeta(session: string): Promise<{ model?: string; cwd?: stri
 }
 
 function finished(item: Json): boolean { return ["completed", "failed", "declined", "error"].includes(String(item.status)) || item.exitCode !== undefined && item.exitCode !== null; }
+
+function queueKey(session: string, id: string): string {
+  return createHash("sha256").update(`${session}\0${id}`).digest("hex");
+}
 
 /** A message row, for the two message kinds. */
 function messageRow(item: Json): Json | undefined {
