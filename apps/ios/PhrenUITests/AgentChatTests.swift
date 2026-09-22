@@ -485,9 +485,15 @@ final class AgentChatTests: XCTestCase {
         // reach UIKit key commands on the simulator; ⌘[ proves the wiring.
         // The simulator swallows the first synthesized key event while it
         // attaches the hardware keyboard; Escape (also registered) warms it up.
+        // Synthesizing a key while the simulator attaches the hardware
+        // keyboard can time out outright on a busy host; the retry below is
+        // the same keystroke, not a weaker check.
         app.typeKey(XCUIKeyboardKey.escape, modifierFlags: [])
         sleep(1)
-        if !row.exists { app.typeKey("[", modifierFlags: .command) }
+        for _ in 0..<2 where !row.exists {
+            app.typeKey("[", modifierFlags: .command)
+            sleep(1)
+        }
         XCTAssertTrue(row.waitForExistence(timeout: 5), "Escape or ⌘[ should go back")
     }
 

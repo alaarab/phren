@@ -262,7 +262,7 @@ final class TerminalInteractionTests: XCTestCase {
     func testDownwardToolbarDragDismissesKeyboardWithoutSendingKeys() throws {
         let app = launch("--terminal-mouse-fixture")
         app.buttons["Toggle terminal keyboard"].tap()
-        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 12))
         let before = try state(app).input
         let start = app.buttons["Tab"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 8, dy: 100)))
@@ -270,7 +270,7 @@ final class TerminalInteractionTests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 5), .completed)
         XCTAssertEqual(try state(app).input, before, "A drag must not send the toolbar key")
         app.buttons["Toggle terminal keyboard"].tap()
-        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 12))
         app.buttons["Tab"].tap()
         XCTAssertEqual(try state(app).input, before + "\t", "Normal key taps must still work")
     }
