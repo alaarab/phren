@@ -8,8 +8,8 @@ import SwiftUI
 ///
 /// The screen is one plain list: `plainListSectionLabel()` headers over
 /// `sessionCard()` rows, every knob a row with a one-line caption and its own
-/// control (a PhrenSingleSelect drop-down for the enumerations, colour dots
-/// for the phone-local name colour), and a Reset row at the bottom that
+/// control (a PhrenStepSlider across the enumerations so every stop is visible,
+/// colour dots for the phone-local name colour), and a Reset row at the bottom that
 /// clears every override behind a PhrenDialog confirmation.
 struct ProjectKnobsView: View {
     let storeId: String
@@ -26,11 +26,6 @@ struct ProjectKnobsView: View {
     /// The raw `phren.project.yaml` the screen opened, carried into each write
     /// as its conflict check.
     @State private var expectedContent: String?
-    @State private var showFindingSensitivity = false
-    @State private var showProactivity = false
-    @State private var showProactivityFindings = false
-    @State private var showProactivityTask = false
-    @State private var showTaskMode = false
     @State private var confirmingReset = false
 
     var body: some View {
@@ -39,39 +34,20 @@ struct ProjectKnobsView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 6) {
                     sectionLabel("Findings", id: "findings")
-                    knobRow(title: "Finding sensitivity", caption: "How readily new findings are kept") {
-                        PhrenSingleSelect(options: findingSensitivityOptions,
-                                          selection: $knobs.findingSensitivity,
-                                          placeholder: "Finding sensitivity",
-                                          identifier: "knob:findingSensitivity",
-                                          isPresented: $showFindingSensitivity)
-                    }
+                    knobSlider(title: "Finding sensitivity", caption: "How readily new findings are kept", options: findingSensitivityOptions,
+                               selection: $knobs.findingSensitivity, key: "findingSensitivity")
 
                     sectionLabel("Proactivity", id: "proactivity")
-                    knobRow(title: "Proactivity", caption: "The base auto-capture level") {
-                        PhrenSingleSelect(options: proactivityOptions, selection: $knobs.proactivity,
-                                          placeholder: "Proactivity", identifier: "knob:proactivity",
-                                          isPresented: $showProactivity)
-                    }
-                    knobRow(title: "Proactivity for findings", caption: "Auto-capture for findings only") {
-                        PhrenSingleSelect(options: proactivityFindingsOptions, selection: $knobs.proactivityFindings,
-                                          placeholder: "Proactivity for findings",
-                                          identifier: "knob:proactivityFindings",
-                                          isPresented: $showProactivityFindings)
-                    }
-                    knobRow(title: "Proactivity for tasks", caption: "Auto-capture for tasks only") {
-                        PhrenSingleSelect(options: proactivityTaskOptions, selection: $knobs.proactivityTask,
-                                          placeholder: "Proactivity for tasks",
-                                          identifier: "knob:proactivityTask",
-                                          isPresented: $showProactivityTask)
-                    }
+                    knobSlider(title: "Proactivity", caption: "The base auto-capture level", options: proactivityOptions,
+                               selection: $knobs.proactivity, key: "proactivity")
+                    knobSlider(title: "Proactivity for findings", caption: "Auto-capture for findings only", options: proactivityFindingsOptions,
+                               selection: $knobs.proactivityFindings, key: "proactivityFindings")
+                    knobSlider(title: "Proactivity for tasks", caption: "Auto-capture for tasks only", options: proactivityTaskOptions,
+                               selection: $knobs.proactivityTask, key: "proactivityTask")
 
                     sectionLabel("Tasks", id: "tasks")
-                    knobRow(title: "Task mode", caption: "How new tasks are filed") {
-                        PhrenSingleSelect(options: taskModeOptions, selection: $knobs.taskMode,
-                                          placeholder: "Task mode", identifier: "knob:taskMode",
-                                          isPresented: $showTaskMode)
-                    }
+                    knobSlider(title: "Task mode", caption: "How new tasks are filed", options: taskModeOptions,
+                               selection: $knobs.taskMode, key: "taskMode")
 
                     sectionLabel("Appearance", id: "appearance")
                     nameColourRow
@@ -85,21 +61,6 @@ struct ProjectKnobsView: View {
         }
         .background(PhrenTheme.bg.ignoresSafeArea())
         .phrenContainerMarker("project-knobs", label: "Project knobs")
-        .phrenSingleSelectSheet(isPresented: $showFindingSensitivity, title: "Finding sensitivity",
-                                options: findingSensitivityOptions, selection: $knobs.findingSensitivity,
-                                rowPrefix: "knob:findingSensitivity")
-        .phrenSingleSelectSheet(isPresented: $showProactivity, title: "Proactivity",
-                                options: proactivityOptions, selection: $knobs.proactivity,
-                                rowPrefix: "knob:proactivity")
-        .phrenSingleSelectSheet(isPresented: $showProactivityFindings, title: "Proactivity for findings",
-                                options: proactivityFindingsOptions, selection: $knobs.proactivityFindings,
-                                rowPrefix: "knob:proactivityFindings")
-        .phrenSingleSelectSheet(isPresented: $showProactivityTask, title: "Proactivity for tasks",
-                                options: proactivityTaskOptions, selection: $knobs.proactivityTask,
-                                rowPrefix: "knob:proactivityTask")
-        .phrenSingleSelectSheet(isPresented: $showTaskMode, title: "Task mode",
-                                options: taskModeOptions, selection: $knobs.taskMode,
-                                rowPrefix: "knob:taskMode")
         .phrenDialog(isPresented: $confirmingReset, title: "Reset all knobs?",
                      message: "Clear every override so the project follows your global settings, and restore the default name colour.",
                      actions: resetActions, identifier: "knobs-reset-dialog")
@@ -119,32 +80,41 @@ struct ProjectKnobsView: View {
             .accessibilityIdentifier("knobs-section:\(id)")
     }
 
-    /// One knob per card: the title and a one-line caption of what it
-    /// affects beside the control, with the control below the text at
-    /// accessibility sizes.
-    private func knobRow<Control: View>(title: String, caption: String,
-                                        @ViewBuilder control: () -> Control) -> some View {
-        let text = VStack(alignment: .leading, spacing: PhrenTheme.Space.xs) {
-            Text(title).font(PhrenTypography.body).foregroundStyle(PhrenTheme.text)
-            Text(caption).font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
-                .lineLimit(1).fixedSize(horizontal: false, vertical: true)
-        }
-        return Group {
-            if dynamicTypeSize.isAccessibilitySize {
-                VStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
-                    text
-                    control().frame(maxWidth: .infinity, alignment: .leading)
-                }
-            } else {
-                HStack(spacing: PhrenTheme.Space.small) {
-                    text.frame(maxWidth: .infinity, alignment: .leading)
-                    control().fixedSize(horizontal: true, vertical: false)
+    /// One knob per card, dense: the title and the current value on one
+    /// line (a reset glyph beside it when the project overrides the global
+    /// value), the slider under it with every stop labelled. What the knob
+    /// affects is the accessibility hint, not a second line.
+    private func knobSlider<Value: Hashable>(title: String, caption: String, options: [PhrenOption<Value?>],
+                                             selection: Binding<Value?>, key: String) -> some View {
+        let current = options.first { $0.value == selection.wrappedValue }?.title ?? ""
+        return VStack(alignment: .leading, spacing: PhrenTheme.Space.xs) {
+            HStack(spacing: PhrenTheme.Space.small) {
+                Text(title).font(PhrenTypography.body).foregroundStyle(PhrenTheme.text).lineLimit(1)
+                Spacer(minLength: PhrenTheme.Space.small)
+                Text(current).font(PhrenTypography.subheadline.weight(.medium))
+                    .foregroundStyle(selection.wrappedValue == nil ? PhrenTheme.textMuted : PhrenTheme.accent)
+                    .lineLimit(1)
+                    .accessibilityIdentifier("knob-value:\(key)")
+                if selection.wrappedValue != nil {
+                    Button { selection.wrappedValue = nil } label: {
+                        Image(systemName: "arrow.counterclockwise")
+                            .font(PhrenTypography.icon(13, weight: .semibold))
+                            .foregroundStyle(PhrenTheme.textMuted)
+                            .frame(width: 32, height: 32).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Inherit global \(title.lowercased())")
+                    .accessibilityIdentifier("knob-reset:\(key)")
                 }
             }
+            .frame(minHeight: 32)
+            PhrenStepSlider(options: options, selection: selection, identifier: "knob:\(key)")
+                .accessibilityLabel(title)
+                .accessibilityHint(caption)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(PhrenTheme.Space.medium)
-        .frame(minHeight: 44, alignment: .leading)
+        .padding(.horizontal, PhrenTheme.Space.medium)
+        .padding(.vertical, PhrenTheme.Space.small)
         .sessionCard()
     }
 
@@ -205,17 +175,14 @@ struct ProjectKnobsView: View {
         inheritedOptions(ProjectKnobs.FindingSensitivity.allCases)
     }
 
+    /// Sliders ascend: low on the left, high on the right.
     private var proactivityOptions: [PhrenOption<ProjectKnobs.Proactivity?>] {
-        inheritedOptions(ProjectKnobs.Proactivity.allCases)
+        inheritedOptions(ProjectKnobs.Proactivity.allCases.reversed())
     }
 
-    private var proactivityFindingsOptions: [PhrenOption<ProjectKnobs.Proactivity?>] {
-        inheritedOptions(ProjectKnobs.Proactivity.allCases)
-    }
+    private var proactivityFindingsOptions: [PhrenOption<ProjectKnobs.Proactivity?>] { proactivityOptions }
 
-    private var proactivityTaskOptions: [PhrenOption<ProjectKnobs.Proactivity?>] {
-        inheritedOptions(ProjectKnobs.Proactivity.allCases)
-    }
+    private var proactivityTaskOptions: [PhrenOption<ProjectKnobs.Proactivity?>] { proactivityOptions }
 
     private var taskModeOptions: [PhrenOption<ProjectKnobs.TaskMode?>] {
         inheritedOptions(ProjectKnobs.TaskMode.allCases)

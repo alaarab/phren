@@ -543,3 +543,14 @@ sheet, one check mark, closes on choice. Rows accept a glyph, a title, a
 caption and a trailing chip. Used for the schedule editor's computer,
 harness and model, the chat `/model` picker and the launch flow's computer
 chooser. Ids: `<identifier>` on the button, `<identifier>:<value>` on rows.
+
+## PhrenStepSlider
+
+A single choice over an ordered enumeration drawn as a slider: a 3pt track,
+one dot per option, the chosen option's title under its dot in text colour and
+the rest muted, the thumb 18pt (22pt while dragging). A tap lands on the
+nearest detent; a press (120 ms) then a drag slides the thumb with a selection
+tick per detent; a plain drag is left to the list so a swipe that starts on the
+slider still scrolls. The end titles hug the edges so nothing clips. Used for
+the project knobs. Accessibility: one adjustable element whose value is the
+current title.

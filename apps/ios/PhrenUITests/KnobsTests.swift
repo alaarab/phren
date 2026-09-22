@@ -19,17 +19,14 @@ final class KnobsTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["knobs-section:proactivity"].exists)
         XCTAssertTrue(app.staticTexts["knobs-section:appearance"].exists)
 
-        // Enumeration: the row's drop-down opens a sheet of check rows and
-        // the chosen value lands back on the pill. Every knob on this screen
-        // is an enumeration, so there is no number or boolean row to change.
+        // Enumeration: the row is a slider with one detent per value; a tap
+        // at the far right lands on the last option, and the row's reset glyph
+        // appears once the project overrides the global value.
         let sensitivity = app.buttons["knob:findingSensitivity"]
         reveal(sensitivity, in: app)
-        sensitivity.tap()
-        let aggressive = app.buttons["knob:findingSensitivity:aggressive"]
-        XCTAssertTrue(aggressive.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["knob:findingSensitivity:inherit"].exists)
-        aggressive.tap()
+        sensitivity.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap()
         waitUntil(sensitivity, hasValue: "Aggressive")
+        XCTAssertTrue(app.buttons["knob-reset:findingSensitivity"].waitForExistence(timeout: 3))
 
         attachUIScreenshot(app, "Knobs")
 
@@ -68,6 +65,7 @@ final class KnobsTests: XCTestCase {
         let scroll = app.scrollViews["knobs-scroll"]
         XCTAssertTrue(element.waitForExistence(timeout: 5))
         for _ in 0..<12 where !element.isHittable { scroll.swipeUp(velocity: .slow) }
+        if !element.isHittable { attachUIScreenshot(app, "Knobs reveal failed") }
         XCTAssertTrue(element.isHittable)
     }
 

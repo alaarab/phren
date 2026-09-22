@@ -1045,6 +1045,124 @@ struct PhrenChipRow<Value: Hashable>: View {
     }
 }
 
+/// A single choice drawn as a slider with one detent per option: a thin
+/// track with the filled part up to the thumb, a tick under each option and
+/// its title beneath, the chosen title in body weight above the thumb. Drag
+/// or tap snaps to the nearest detent with a selection tick. This is the
+/// control for a setting someone tunes (sensitivity, proactivity), where the
+/// whole range should be visible at once rather than behind a drop-down.
+struct PhrenStepSlider<Value: Hashable>: View {
+    let options: [PhrenOption<Value>]
+    @Binding var selection: Value
+    let identifier: String
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var dragIndex: Int? = nil
+
+    private var selectedIndex: Int { options.firstIndex { $0.value == selection } ?? 0 }
+    private var shownIndex: Int { dragIndex ?? selectedIndex }
+    private var steps: Int { max(options.count - 1, 1) }
+    private static var trackHeight: CGFloat { 28 }
+
+    /// Detent for a horizontal position along a track of `width`.
+    static func detent(at x: CGFloat, width: CGFloat, count: Int) -> Int {
+        guard count > 1, width > 0 else { return 0 }
+        let fraction = min(max(x / width, 0), 1)
+        return Int((fraction * CGFloat(count - 1)).rounded())
+    }
+
+    /// First word when the labels would crowd the track.
+    static func shortTitle(_ title: String, crowded: Bool) -> String {
+        guard crowded, let first = title.split(separator: " ").first else { return title }
+        return String(first)
+    }
+
+    private func choose(_ index: Int) {
+        guard options.indices.contains(index), options[index].value != selection else { return }
+        UISelectionFeedbackGenerator().selectionChanged()
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { selection = options[index].value }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            GeometryReader { geometry in
+                let width = geometry.size.width
+                let x = width * CGFloat(shownIndex) / CGFloat(steps)
+                let mid = Self.trackHeight / 2
+                ZStack(alignment: .leading) {
+                    Capsule().fill(PhrenTheme.surfaceRaised).frame(height: 3)
+                    Capsule().fill(PhrenTheme.accent).frame(width: max(x, 3), height: 3)
+                    ForEach(options.indices, id: \.self) { index in
+                        Circle()
+                            .fill(index <= shownIndex ? PhrenTheme.accent : PhrenTheme.textDim)
+                            .frame(width: 5, height: 5)
+                            .position(x: width * CGFloat(index) / CGFloat(steps), y: mid)
+                    }
+                    Circle()
+                        .fill(PhrenTheme.accent)
+                        .overlay(Circle().strokeBorder(PhrenTheme.bg, lineWidth: 2))
+                        .frame(width: dragIndex == nil ? 18 : 22, height: dragIndex == nil ? 18 : 22)
+                        .position(x: x, y: mid)
+                }
+                .contentShape(Rectangle())
+                // A tap lands on the nearest detent. A press then a drag slides
+                // the thumb; a plain drag stays with the list, so the screen
+                // keeps scrolling when a swipe starts on a slider.
+                .onTapGesture(coordinateSpace: .local) { location in
+                    guard isEnabled else { return }
+                    choose(Self.detent(at: location.x, width: width, count: options.count))
+                }
+                .gesture(
+                    LongPressGesture(minimumDuration: 0.12)
+                        .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
+                        .onChanged { value in
+                            guard isEnabled, case .second(true, let drag?) = value else { return }
+                            let next = Self.detent(at: drag.location.x, width: width, count: options.count)
+                            if next != dragIndex {
+                                if dragIndex != nil { UISelectionFeedbackGenerator().selectionChanged() }
+                                dragIndex = next
+                            }
+                        }
+                        .onEnded { value in
+                            defer { dragIndex = nil }
+                            guard isEnabled, case .second(true, let drag?) = value else { return }
+                            choose(Self.detent(at: drag.location.x, width: width, count: options.count))
+                        }
+                )
+            }
+            .frame(height: Self.trackHeight)
+            // Each title sits under its own dot; the end titles hug the edges
+            // so nothing clips, the rest centre on the dot.
+            GeometryReader { geometry in
+                let width = geometry.size.width
+                ForEach(options.indices, id: \.self) { index in
+                    let x = width * CGFloat(index) / CGFloat(steps)
+                    let edge: CGFloat = 96
+                    Text(Self.shortTitle(options[index].title, crowded: options.count > 4))
+                        .font(PhrenTypography.caption2)
+                        .foregroundStyle(index == shownIndex ? PhrenTheme.text : PhrenTheme.textMuted)
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                        .frame(width: index == 0 || index == options.count - 1 ? edge : max(width / CGFloat(steps) - 4, 40),
+                               alignment: index == 0 ? .leading : index == options.count - 1 ? .trailing : .center)
+                        .position(x: index == 0 ? edge / 2 : index == options.count - 1 ? width - edge / 2 : x, y: 7)
+                }
+            }
+            .frame(height: 14)
+            .accessibilityHidden(true)
+        }
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityValue(options.indices.contains(selectedIndex) ? options[selectedIndex].title : "")
+        .accessibilityAdjustableAction { direction in
+            let next = selectedIndex + (direction == .increment ? 1 : -1)
+            guard options.indices.contains(next) else { return }
+            selection = options[next].value
+        }
+        .accessibilityIdentifier(identifier)
+    }
+}
+
 /// A single choice drawn as a row of 32-point colour dots, each inside a
 /// 44-point target. The dot carries a check when selected; the spoken label
 /// comes from the option, never the colour. Wraps at accessibility sizes.

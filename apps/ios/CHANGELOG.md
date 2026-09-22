@@ -19,6 +19,12 @@ and scrolls again.
   the choice, both Select all and the bulk moves work on the filtered rows,
   and done rows draw muted with a checkmark and their done date.
 
+### Changed
+
+- Knobs are sliders: every stop is visible under its own dot, the current value
+  sits beside the title, a tap or a press-and-drag sets it, and a knob that
+  overrides the global value shows a reset glyph. The whole screen fits at once.
+
 ### Fixed
 
 - Memory list rows: the project chip is back whenever the filter is not a single
