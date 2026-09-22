@@ -277,6 +277,8 @@ struct MemoryView: View {
                              onSelect: receiveSelection, onAction: handleGraphAction,
                              onError: { error = $0 })
                     .id(rendererID)
+                    // Keep the canvas inside the tab bar's safe area. The web
+                    // dossier measures the remaining space in this viewport.
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .accessibilityLabel("Interactive memory graph")
                 cameraControls.padding(PhrenTheme.Space.medium)

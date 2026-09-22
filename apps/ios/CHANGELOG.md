@@ -10,6 +10,8 @@ number counts up on its own.
 
 ### Changed
 
+- Selecting a graph node centers it in the open space above its details card, with room to breathe. The camera follows changes in card height, respects Reduce Motion, yields to dragging, and returns to the previous view when the card closes.
+
 - Tasks: Start opens the agent launch sheet with the task and its project. Backlog work moves to Active after the agent receives the task; cancel leaves it in place. Move to Active is a separate action, and moves out of the current filter show their destination with a View action. Selecting several tasks offers moves only.
 - Projects uses the same inline header as Agents, Tasks and Memory, with add, search and voice capture beside the title. Its More menu is removed. Memory owns the graph, Files and Memory maintenance; Agents owns Live sessions, Skills and Agent instructions.
 

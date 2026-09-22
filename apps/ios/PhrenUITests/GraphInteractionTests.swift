@@ -2,6 +2,34 @@ import XCTest
 
 final class GraphInteractionTests: XCTestCase {
     @MainActor
+    func testSelectedNodeCentersAboveDossierAtDifferentZooms() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing"]
+        app.launch()
+        _ = openDossier(in: app)
+        let dossier = nodeDetails(in: app)
+        let projectedNode = app.webViews.descendants(matching: .any)["memory-selected-node"].firstMatch
+        XCTAssertTrue(dossier.waitForExistence(timeout: 5))
+        XCTAssertTrue(projectedNode.waitForExistence(timeout: 5), "selected sprite exposes its projected frame")
+        let canvas = app.webViews.firstMatch
+        let actions: [String?] = [nil, "Zoom in", "Zoom out", "Next node", "Next node"]
+        for action in actions {
+            if let action { app.buttons[action].tap() }
+            let centered = NSPredicate { _, _ in
+                guard projectedNode.exists, dossier.exists else { return false }
+                let freeCenter = (canvas.frame.minY + dossier.frame.minY - 24) / 2
+                return abs(projectedNode.frame.midY - freeCenter) < 6
+                    && abs(projectedNode.frame.midX - canvas.frame.midX) < 6
+                    && projectedNode.frame.maxY <= dossier.frame.minY - 24
+            }
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: centered, object: nil)], timeout: 5), .completed,
+                           "selected node centers in the free space with a gap above the dossier")
+            XCTAssertLessThanOrEqual(dossier.frame.maxY, app.tabBars.firstMatch.frame.minY + 1)
+        }
+        capture(app, name: "Selected node above dossier")
+    }
+
+    @MainActor
     func testNodeDossierKeepsGraphVisibleAndCloses() {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing"]

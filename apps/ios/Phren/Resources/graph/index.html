@@ -41,6 +41,12 @@
     pointer-events: none; transition: opacity 200ms ease;
   }
   #graph-status[hidden] { display: none; }
+  /* Accessibility geometry for the selected WebGL sprite, at its actual
+     projected center. No extra visual or touch target covers the graph. */
+  #memory-selected-node {
+    position: absolute; width: 12px; height: 12px;
+    transform: translate(-50%, -50%); pointer-events: none;
+  }
 
   #graph-dossier {
     position: absolute;
@@ -194,6 +200,7 @@
 <body>
   <div id="graph-canvas" data-fx="off"></div>
   <div id="graph-status">Loading graph…</div>
+  <span id="memory-selected-node" role="img" aria-label="Selected graph node" hidden></span>
   <aside id="graph-dossier" role="dialog" aria-label="Node details" aria-hidden="true" hidden>
     <div class="dossier-header">
       <div class="dossier-eyebrow">
@@ -252,6 +259,34 @@
     var dossierStepCounter = document.getElementById("dossier-step-counter");
     var payloadNodes = [];
     var selectedNode = null;
+    var selectedProjection = document.getElementById("memory-selected-node");
+    var projectionFrame = 0;
+    var canvas = document.getElementById("graph-canvas");
+
+    function measureFreeSpace() {
+      if (!window.phrenGraph) return;
+      var bounds = canvas.getBoundingClientRect();
+      // SwiftUI sizes this viewport above the tab bar. The measured inset
+      // includes the card and its bottom safe area exactly once.
+      var bottomInset = dossier.hidden ? 0 : Math.max(0, bounds.bottom - dossier.getBoundingClientRect().top);
+      window.phrenGraph.setSelectionViewport({ bottomInset: bottomInset, gap: 24 });
+    }
+
+    function trackSelectionProjection() {
+      cancelAnimationFrame(projectionFrame);
+      if (!selectedNode) { selectedProjection.hidden = true; return; }
+      var position = window.phrenGraph.screenPosFor(selectedNode.id);
+      selectedProjection.hidden = !position;
+      if (position) {
+        selectedProjection.style.left = position.x + "px";
+        selectedProjection.style.top = position.y + "px";
+      }
+      projectionFrame = requestAnimationFrame(trackSelectionProjection);
+    }
+
+    var dossierObserver = new ResizeObserver(measureFreeSpace);
+    dossierObserver.observe(dossier);
+    dossierObserver.observe(canvas);
     function setStatus(text) {
       if (!text) { status.hidden = true; return; }
       status.hidden = false;
@@ -282,6 +317,7 @@
         }
         try {
           wire();
+          measureFreeSpace();
           payloadNodes = payload && Array.isArray(payload.nodes) ? payload.nodes : [];
           window.phrenGraph.mount(payload);
           setStatus(payload && payload.nodes && payload.nodes.length ? "" : "Nothing to show yet");
@@ -295,10 +331,8 @@
         if (!window.phrenGraph || !window.phrenGraph.focusNode) return;
         var node = payloadNodes.find(function (candidate) { return candidate.id === id; });
         var alreadySelected = selectedNode && selectedNode.id === id;
-        // Host-driven selection owns the dossier immediately. The renderer
-        // still handles camera movement and reports its normalized node later.
-        if (node) showDossier(node);
-        if (!alreadySelected) window.phrenGraph.focusNode(id);
+        if (alreadySelected && node) showDossier(node);
+        else window.phrenGraph.focusNode(id);
       },
       revealNode: function (id) {
         window.phrenGraph.clearSelection();
@@ -311,6 +345,7 @@
 
     function showDossier(node) {
       selectedNode = node;
+      selectedProjection.setAttribute("aria-label", "Selected " + kindTitle(node).toLowerCase() + ": " + (node.fullLabel || node.label || node.id));
       var id = String(node.id || "");
       // Only findings written to FINDINGS.md and tasks have a line to rewrite;
       // journal findings and projects do not.
@@ -325,6 +360,8 @@
       dossierText.textContent = node.fullLabel || node.label || node.text || node.id;
       updateStepControls(node);
       document.body.classList.add("dossier-open");
+      measureFreeSpace();
+      trackSelectionProjection();
     }
 
     function hideDossier() {
@@ -340,6 +377,8 @@
       dossierText.textContent = "";
       dossierStepCounter.textContent = "";
       document.body.classList.remove("dossier-open");
+      trackSelectionProjection();
+      measureFreeSpace();
     }
 
     function kindTitle(node) {
@@ -381,7 +420,7 @@
         stepSelection(action === "previous" ? -1 : 1);
         return;
       }
-      if (action === "close") hideDossier();
+      if (action === "close") window.phrenGraph.clearSelection();
       post("graphAction", { action: action, id: id });
     });
 

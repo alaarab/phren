@@ -5,6 +5,7 @@ import { applyHighlight, startIntroStagger } from "./nodes.js";
 import { mascotMoveTo, spawnLookupPulse } from "./mascot.js";
 import { syncProjectNavActive } from "./project-nav.js";
 import { refreshProjectPanel } from "./project-panel.js";
+import { frameSelection, moveCamera, restoreSelectionCamera } from "./selection-camera.js";
 
 let projectPaneTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -39,11 +40,7 @@ export function flyToNode(fgNode: FGNode, duration: number): void {
   if (dir.lengthSq() < 1) dir.set(0.4, 0.35, 1);
   dir.normalize().multiplyScalar(distance);
   const camPos = nodePos.clone().add(dir);
-  state.fg.cameraPosition(
-    { x: camPos.x, y: camPos.y, z: camPos.z },
-    { x: nodePos.x, y: nodePos.y, z: nodePos.z },
-    duration,
-  );
+  moveCamera(camPos, nodePos, duration);
 }
 
 export function screenPosFor(nodeId: string): { x: number; y: number } | null {
@@ -67,6 +64,7 @@ export function notifySelection(nodeId: string): void {
 }
 
 export function notifyClear(): void {
+  restoreSelectionCamera();
   state.selectionClearCallbacks.forEach((callback) => callback());
 }
 
@@ -117,7 +115,8 @@ export function selectNode(nodeId: string): boolean {
     // persisted collapsed state.
     cancelProjectPaneReveal();
     refreshProjectPanel({ transitioning: true });
-    flyToNode(fgNode, 900);
+    const framed = frameSelection(nodeId);
+    if (!framed) flyToNode(fgNode, 900);
     projectPaneTimer = setTimeout(() => {
       projectPaneTimer = null;
       if (state.focusedProjectId === nodeId) refreshProjectPanel({ forceOpen: true });
@@ -125,7 +124,10 @@ export function selectNode(nodeId: string): boolean {
     // Notify hosts right away — the docked dossier doesn't wait on the
     // camera, and delaying was a flake source under load. The short defer
     // just lets the fly-to start before the host re-renders.
-    setTimeout(() => notifySelection(nodeId), 120);
+    if (framed) notifySelection(nodeId);
+    else setTimeout(() => {
+      if (state.focusedProjectId === nodeId) notifySelection(nodeId);
+    }, 120);
     mascotMoveTo(nodeId, true);
     return true;
   }
@@ -137,6 +139,11 @@ export function selectNode(nodeId: string): boolean {
   applyHighlight();
   syncProjectNavActive();
   refreshProjectPanel();
+  if (frameSelection(nodeId)) {
+    notifySelection(nodeId);
+    mascotMoveTo(nodeId, true);
+    return true;
+  }
   flyToNode(fgNode, 800);
   // The node's screen position changes throughout the camera flight. Re-anchor
   // the contextual pane after the camera settles so it cannot end up covering
@@ -236,11 +243,7 @@ export function fitCameraToGraph(duration: number): void {
     fg.zoomToFit(duration, FIT_PADDING);
     return;
   }
-  fg.cameraPosition(
-    { x: fit.pos.x, y: fit.pos.y, z: fit.pos.z },
-    { x: fit.target.x, y: fit.target.y, z: fit.target.z },
-    duration,
-  );
+  moveCamera(fit.pos, fit.target, duration);
 }
 
 export function runIntro(): void {
@@ -270,8 +273,9 @@ export function runIntro(): void {
   // case node objects finished syncing after the first call.
   fitCameraToGraph(0);
   startIntroStagger();
+  const interactionAt = state.lastInteractionAt;
   requestAnimationFrame(() => {
-    fitCameraToGraph(1400);
+    if (!state.selectedNodeId && !state.focusedProjectId && state.lastInteractionAt === interactionAt) fitCameraToGraph(1400);
     cover.style.opacity = "0";
   });
   setTimeout(() => cover.remove(), 900);
