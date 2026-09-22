@@ -1,3 +1,4 @@
+import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
@@ -500,6 +501,7 @@ export function autoMergeConflicts(phrenPath: string): boolean {
   let conflictedFiles: string[];
   try {
     const out = execFileSync("git", ["diff", "--name-only", "--diff-filter=U"], {
+      env: nonInteractiveGitEnv(),
       cwd: phrenPath,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
@@ -538,7 +540,7 @@ export function autoMergeConflicts(phrenPath: string): boolean {
       const tmpMergePath = fullPath + `.tmp-${crypto.randomUUID()}`;
       fs.writeFileSync(tmpMergePath, merged);
       fs.renameSync(tmpMergePath, fullPath);
-      execFileSync("git", ["add", "--", relFile], { cwd: phrenPath, stdio: ["ignore", "ignore", "ignore"], timeout: EXEC_TIMEOUT_MS });
+      execFileSync("git", ["add", "--", relFile], { env: nonInteractiveGitEnv(), cwd: phrenPath, stdio: ["ignore", "ignore", "ignore"], timeout: EXEC_TIMEOUT_MS });
       debugLog(`Auto-merged: ${relFile}`);
     } catch (err: unknown) {
       debugLog(`Failed to auto-merge ${relFile}: ${errorMessage(err)}`);

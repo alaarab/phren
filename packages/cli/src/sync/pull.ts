@@ -11,6 +11,8 @@ import { atomicWriteText, readRootManifest, runtimeFile } from "../phren-paths.j
 import { debugLog } from "../shared.js";
 import { getNonPrimaryStores } from "../store-registry.js";
 import { errorMessage } from "../utils.js";
+import { nonInteractiveGitEnv } from "../utils-helpers.js";
+import { activeStoreAuthFailure, authBackoffActive, storeAuthDetail, withStoreAuthBackoff } from "./auth.js";
 import { inProgressGitOperation } from "./git-state.js";
 import { mergeStoreUpstream, type GitResult, type RunStoreGit } from "./store-merge.js";
 
@@ -48,7 +50,7 @@ export const runPollGit: RunGit = async (cwd, args) => {
   try {
     const { stdout } = await execAsync("git", args, {
       cwd, encoding: "utf8", timeout: 10_000, maxBuffer: 1024 * 1024,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never", GIT_OPTIONAL_LOCKS: "0" },
+      env: nonInteractiveGitEnv({ ...process.env, GIT_OPTIONAL_LOCKS: "0" }),
     });
     return { ok: true, output: stdout.trim() };
   } catch (err: unknown) {
@@ -91,6 +93,9 @@ export async function pollStore(phrenPath: string, seconds: number, git: RunGit 
   const releasePoll = tryFileLock(runtimeFile(phrenPath, "pull-poll"));
   if (!releasePoll) return skipped;
   try {
+    const auth = activeStoreAuthFailure(phrenPath);
+    if (authBackoffActive(auth, now)) return { status: "not-due", detail: storeAuthDetail(auth!) };
+    git = withStoreAuthBackoff(git, () => now);
     const previous = readPollState(phrenPath);
     const failures = Math.min(10, Math.max(0, Number(previous.failures) || 0));
     const delay = Math.min(seconds * 2 ** failures, Math.max(seconds, 1800)) * 1000;

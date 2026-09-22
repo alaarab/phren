@@ -11,6 +11,7 @@ import {
 import { log as structuredLog, logger } from "./logger.js";
 import type { McpContext } from "./tools/types.js";
 import { errorMessage } from "./utils.js";
+import { nonInteractiveGitEnv } from "./utils-helpers.js";
 import {
   printIntegratedHelp,
   printIntegratedVersion,
@@ -23,6 +24,8 @@ import {
 // --version, --help — which never reach main() do not pay its ~1.8s cold-start cost.
 // This matters most for the PostToolUse `hook-tool`, which spawns per tool call.
 
+// Covers inherited Git subprocesses, including commands launched by plugins.
+Object.assign(process.env, nonInteractiveGitEnv());
 const invocation = resolveTopLevelInvocation(process.argv.slice(2));
 
 if (invocation.kind === "help") {

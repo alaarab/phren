@@ -1,3 +1,4 @@
+import { nonInteractiveGitEnv } from "../utils-helpers.js";
 /**
  * Team store CLI commands: init, join, add-project.
  * Creates and manages shared phren stores for team collaboration.
@@ -101,14 +102,16 @@ async function handleTeamInit(args: string[]): Promise<void> {
 
   // Initialize git repo
   execFileSync("git", ["init"], {
+    env: nonInteractiveGitEnv(),
     cwd: storePath,
     stdio: "pipe",
     timeout: EXEC_TIMEOUT_MS,
   });
 
   // Initial commit
-  execFileSync("git", ["add", "-A"], { cwd: storePath, stdio: "pipe", timeout: EXEC_TIMEOUT_MS });
+  execFileSync("git", ["add", "-A"], { env: nonInteractiveGitEnv(), cwd: storePath, stdio: "pipe", timeout: EXEC_TIMEOUT_MS });
   execFileSync("git", ["commit", "-m", "phren: initialize team store"], {
+    env: nonInteractiveGitEnv(),
     cwd: storePath,
     stdio: "pipe",
     timeout: EXEC_TIMEOUT_MS,
@@ -117,12 +120,14 @@ async function handleTeamInit(args: string[]): Promise<void> {
   // Add remote if provided
   if (remote) {
     execFileSync("git", ["remote", "add", "origin", remote], {
+      env: nonInteractiveGitEnv(),
       cwd: storePath,
       stdio: "pipe",
       timeout: EXEC_TIMEOUT_MS,
     });
     try {
       execFileSync("git", ["push", "-u", "origin", "main"], {
+        env: nonInteractiveGitEnv(),
         cwd: storePath,
         stdio: "pipe",
         timeout: EXEC_TIMEOUT_MS,
@@ -132,6 +137,7 @@ async function handleTeamInit(args: string[]): Promise<void> {
       // Try HEAD branch name
       try {
         execFileSync("git", ["push", "-u", "origin", "HEAD"], {
+          env: nonInteractiveGitEnv(),
           cwd: storePath,
           stdio: "pipe",
           timeout: EXEC_TIMEOUT_MS,
@@ -209,6 +215,7 @@ async function handleTeamJoin(args: string[]): Promise<void> {
   console.log(`Cloning ${remote}...`);
   fs.mkdirSync(storesDir, { recursive: true });
   execFileSync("git", ["clone", "--", remote, storePath], {
+    env: nonInteractiveGitEnv(),
     stdio: "inherit",
     timeout: 60_000,
   });

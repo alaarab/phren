@@ -1,3 +1,4 @@
+import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import { execFile } from "node:child_process";
 import { appendFile, copyFile, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, unlink, utimes } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -54,7 +55,7 @@ export function namedPaths(command: string, input: Json = {}): string[] {
 
 async function git(cwd: string, args: string[], extra: NodeJS.ProcessEnv = {}, signal?: AbortSignal): Promise<string> {
   return gitPool.run(signal, async () => (await exec("git", ["-C", cwd, "--no-pager", ...args], {
-    signal, timeout: 10_000, maxBuffer: 8_388_608, env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_CONFIG_NOSYSTEM: "1", ...extra },
+    signal, timeout: 10_000, maxBuffer: 8_388_608, env: nonInteractiveGitEnv({ ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_CONFIG_NOSYSTEM: "1", ...extra }),
   })).stdout);
 }
 

@@ -1,3 +1,4 @@
+import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type McpContext, mcpResponse, resolveStoreForProject } from "./types.js";
 import { z } from "zod";
@@ -179,6 +180,7 @@ async function handleHealthCheck(
   try {
     const { execFileSync } = await import("child_process");
     const remote = execFileSync("git", ["-C", phrenPath, "remote", "get-url", "origin"], {
+      env: nonInteractiveGitEnv(),
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: 5_000,
@@ -186,6 +188,7 @@ async function handleHealthCheck(
     if (remote) {
       try {
         execFileSync("git", ["-C", phrenPath, "ls-remote", "--exit-code", "origin"], {
+          env: nonInteractiveGitEnv(),
           stdio: ["ignore", "ignore", "ignore"],
           timeout: 10_000,
         });

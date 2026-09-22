@@ -10,6 +10,7 @@ import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import { withFileLock } from "../governance/locks.js";
 import { runtimeFile } from "../phren-paths.js";
 import { mergeStoreUpstream, type RunStoreGit } from "../sync/store-merge.js";
+import { activeStoreAuthFailure, authBackoffActive, isGitAuthFailure, storeAuthDetail, withStoreAuthBackoff } from "../sync/auth.js";
 
 // ── Git context ─────────────────────────────────────────────────────────────
 
@@ -49,7 +50,7 @@ function shouldRetryGitCommand(args: string[]): boolean {
   return cmd === "push" || cmd === "pull" || cmd === "fetch";
 }
 
-export async function runBestEffortGit(args: string[], cwd: string): Promise<{ ok: boolean; output?: string; error?: string }> {
+async function runBestEffortGitCommand(args: string[], cwd: string): Promise<{ ok: boolean; output: string; error?: string }> {
   const retries = shouldRetryGitCommand(args) ? 2 : 0;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
@@ -63,15 +64,20 @@ export async function runBestEffortGit(args: string[], cwd: string): Promise<{ o
       return { ok: true, output };
     } catch (err: unknown) {
       const message = errorMessage(err);
-      if (attempt < retries && isTransientGitError(message)) {
+      if (attempt < retries && !isGitAuthFailure(message) && isTransientGitError(message)) {
         const delayMs = 500 * (attempt + 1);
         await new Promise((resolve) => setTimeout(resolve, delayMs));
         continue;
       }
-      return { ok: false, error: message };
+      return { ok: false, output: "", error: message };
     }
   }
-  return { ok: false, error: "git command failed" };
+  return { ok: false, output: "", error: "git command failed" };
+}
+
+const guardedSessionGit = withStoreAuthBackoff((cwd, args) => runBestEffortGitCommand(args, cwd));
+export async function runBestEffortGit(args: string[], cwd: string): Promise<{ ok: boolean; output?: string; error?: string }> {
+  return guardedSessionGit(cwd, args);
 }
 
 /**
@@ -139,16 +145,18 @@ export async function countUnsyncedCommits(cwd: string): Promise<number> {
 }
 
 const runSessionStoreGit: RunStoreGit = async (cwd, args) => {
-  const result = await runBestEffortGit(args, cwd);
+  const result = await runBestEffortGitCommand(args, cwd);
   return { ok: result.ok, output: result.output ?? "", error: result.error };
 };
 
 /** Startup pulls share the store's Git lock and never rewrite local commits. */
-export async function pullAtSessionStart(cwd: string): Promise<{ ok: boolean; output?: string; error?: string }> {
+export async function pullAtSessionStart(cwd: string, git: RunStoreGit = runSessionStoreGit, now = Date.now()): Promise<{ ok: boolean; output?: string; error?: string }> {
   try {
     return await withFileLock(runtimeFile(cwd, "git-op"), async () => {
+      const auth = activeStoreAuthFailure(cwd);
+      if (authBackoffActive(auth, now)) return { ok: false, error: storeAuthDetail(auth!) };
       const result = await mergeStoreUpstream(cwd, {
-        git: runSessionStoreGit,
+        git: withStoreAuthBackoff(git, () => now),
         commitMessage: "auto-save phren (session start)",
       });
       return result.status === "updated" || result.status === "unchanged"
@@ -159,7 +167,7 @@ export async function pullAtSessionStart(cwd: string): Promise<{ ok: boolean; ou
 }
 
 export async function recoverPushConflict(cwd: string): Promise<{ ok: boolean; detail: string; pullStatus: "ok" | "error"; pullDetail: string }> {
-  const merged = await mergeStoreUpstream(cwd, { git: runSessionStoreGit, commitLocalWrites: false });
+  const merged = await mergeStoreUpstream(cwd, { git: withStoreAuthBackoff(runSessionStoreGit), commitLocalWrites: false });
   if (merged.status !== "updated" && merged.status !== "unchanged") {
     return { ok: false, detail: merged.detail, pullStatus: "error", pullDetail: merged.detail };
   }

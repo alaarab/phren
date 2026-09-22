@@ -1,3 +1,4 @@
+import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import {
   appendAuditLog,
   qualityMarkers,
@@ -215,7 +216,7 @@ async function handleGcMaintain(args: string[] = []): Promise<void> {
     console.log("[dry-run] Would run: git gc --aggressive");
   } else {
     try {
-      execFileSync("git", ["gc", "--aggressive", "--quiet"], { cwd: phrenPath, stdio: "pipe" });
+      execFileSync("git", ["gc", "--aggressive", "--quiet"], { env: nonInteractiveGitEnv(), cwd: phrenPath, stdio: "pipe" });
       report.gitGcRan = true;
       console.log("git gc --aggressive: done");
     } catch (err: unknown) {
@@ -228,6 +229,7 @@ async function handleGcMaintain(args: string[] = []): Promise<void> {
   let oldCommits: string[] = [];
   try {
     const raw = execFileSync("git", ["log", `--before=${sevenDaysAgo}`, "--format=%H %ci %s"], {
+      env: nonInteractiveGitEnv(),
       cwd: phrenPath,
       encoding: "utf8",
     }).trim();
@@ -267,6 +269,7 @@ async function handleGcMaintain(args: string[] = []): Promise<void> {
         const newest = hashes[0];
         // Use git rev-parse to get the parent of the oldest commit
         const parentOfOldest = execFileSync("git", ["rev-parse", `${oldest}^`], {
+          env: nonInteractiveGitEnv(),
           cwd: phrenPath,
           encoding: "utf8",
         }).trim();
@@ -281,7 +284,7 @@ async function handleGcMaintain(args: string[] = []): Promise<void> {
         execFileSync("git", ["rebase", "-i", parentOfOldest], {
           cwd: phrenPath,
           stdio: "pipe",
-          env: { ...process.env, GIT_SEQUENCE_EDITOR: `cat ${scriptPath} >` },
+          env: nonInteractiveGitEnv({ ...process.env, GIT_SEQUENCE_EDITOR: `cat ${scriptPath} >` }),
         });
         fs.unlinkSync(scriptPath);
         report.commitsSquashed += hashes.length - 1;

@@ -1,3 +1,4 @@
+import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import { moduleEnabled, moduleSnapshot } from "../modules/runtime.js";
 import { skillEnabled, reconcileStarterSkills, starterInstructions } from "../modules/provision.js";
 /**
@@ -532,6 +533,7 @@ export function getHookEntrypointCheck(deps: HookEntrypointCheckDeps = {}): Post
 function gitRemoteStatus(phrenPath: string): { ok: boolean; detail: string } {
   try {
     execFileSync("git", ["-C", phrenPath, "rev-parse", "--is-inside-work-tree"], {
+      env: nonInteractiveGitEnv(),
       stdio: ["ignore", "ignore", "ignore"],
       timeout: EXEC_TIMEOUT_QUICK_MS,
     });
@@ -541,6 +543,7 @@ function gitRemoteStatus(phrenPath: string): { ok: boolean; detail: string } {
   let remote: string;
   try {
     remote = execFileSync("git", ["-C", phrenPath, "remote", "get-url", "origin"], {
+      env: nonInteractiveGitEnv(),
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: EXEC_TIMEOUT_QUICK_MS,
@@ -553,6 +556,7 @@ function gitRemoteStatus(phrenPath: string): { ok: boolean; detail: string } {
   // Connectivity test: verify the remote is reachable (10s timeout)
   try {
     execFileSync("git", ["-C", phrenPath, "ls-remote", "--exit-code", "origin"], {
+      env: nonInteractiveGitEnv(),
       stdio: ["ignore", "ignore", "ignore"],
       timeout: 10_000,
     });
@@ -738,6 +742,7 @@ export function ensureLocalGitRepo(phrenPath: string): LocalGitRepoStatus {
   // Check if phrenPath already has its own git repo (not just being inside a parent)
   try {
     const topLevel = execFileSync("git", ["-C", phrenPath, "rev-parse", "--show-toplevel"], {
+      env: nonInteractiveGitEnv(),
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: EXEC_TIMEOUT_QUICK_MS,
@@ -765,16 +770,19 @@ export function ensureLocalGitRepo(phrenPath: string): LocalGitRepoStatus {
   try {
     try {
       execFileSync("git", ["-C", phrenPath, "init", "--initial-branch=main"], {
+        env: nonInteractiveGitEnv(),
         stdio: ["ignore", "ignore", "ignore"],
         timeout: EXEC_TIMEOUT_QUICK_MS,
       });
     } catch {
       execFileSync("git", ["-C", phrenPath, "init"], {
+        env: nonInteractiveGitEnv(),
         stdio: ["ignore", "ignore", "ignore"],
         timeout: EXEC_TIMEOUT_QUICK_MS,
       });
       try {
         execFileSync("git", ["-C", phrenPath, "branch", "-M", "main"], {
+          env: nonInteractiveGitEnv(),
           stdio: ["ignore", "ignore", "ignore"],
           timeout: EXEC_TIMEOUT_QUICK_MS,
         });

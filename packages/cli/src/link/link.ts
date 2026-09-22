@@ -1,3 +1,4 @@
+import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import { reconcileModuleHooks } from "../bridge/install.js";
 import * as fs from "fs";
 import * as path from "path";
@@ -186,7 +187,7 @@ async function registerMachine(phrenPath: string): Promise<{ machine: string; pr
 
 function setupSparseCheckout(phrenPath: string, projects: string[]) {
   try {
-    execFileSync("git", ["rev-parse", "--git-dir"], { cwd: phrenPath, stdio: "ignore", timeout: EXEC_TIMEOUT_QUICK_MS });
+    execFileSync("git", ["rev-parse", "--git-dir"], { env: nonInteractiveGitEnv(), cwd: phrenPath, stdio: "ignore", timeout: EXEC_TIMEOUT_QUICK_MS });
   } catch (err: unknown) {
     logger.debug("link", `setupSparseCheckout notAGitRepo: ${errorMessage(err)}`);
     return;
@@ -209,8 +210,8 @@ function setupSparseCheckout(phrenPath: string, projects: string[]) {
   ];
   const paths = [...alwaysInclude, ...projects];
   try {
-    execFileSync("git", ["sparse-checkout", "set", ...paths], { cwd: phrenPath, stdio: "ignore", timeout: EXEC_TIMEOUT_MS });
-    execFileSync("git", ["pull", "--ff-only"], { cwd: phrenPath, stdio: "ignore", timeout: EXEC_TIMEOUT_MS });
+    execFileSync("git", ["sparse-checkout", "set", ...paths], { env: nonInteractiveGitEnv(), cwd: phrenPath, stdio: "ignore", timeout: EXEC_TIMEOUT_MS });
+    execFileSync("git", ["pull", "--ff-only"], { env: nonInteractiveGitEnv(), cwd: phrenPath, stdio: "ignore", timeout: EXEC_TIMEOUT_MS });
   } catch (err: unknown) {
     debugLog(`setupSparseCheckout: git sparse-checkout or pull failed: ${errorMessage(err)}`);
   }
@@ -229,6 +230,7 @@ function addGitExcludes(projectDir: string, entries: string[]): void {
     let tracked: Set<string>;
     try {
       const out = execFileSync("git", ["ls-files", "--", ...entries], {
+        env: nonInteractiveGitEnv(),
         cwd: projectDir,
         timeout: EXEC_TIMEOUT_QUICK_MS,
         encoding: "utf8",

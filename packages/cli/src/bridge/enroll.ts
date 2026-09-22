@@ -1,3 +1,4 @@
+import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { realpathSync } from "node:fs";
@@ -83,7 +84,7 @@ export async function candidateRepos(activity: Json[], env: NodeJS.ProcessEnv = 
       const parent = path.dirname(existing); if (parent === existing) return undefined;
       existing = parent;
     }
-    try { return (await exec("git", ["-C", existing, "rev-parse", "--show-toplevel"], { timeout: 5_000 })).stdout.trim() || undefined; } catch { return undefined; }
+    try { return (await exec("git", ["-C", existing, "rev-parse", "--show-toplevel"], { env: nonInteractiveGitEnv(), timeout: 5_000 })).stdout.trim() || undefined; } catch { return undefined; }
   };
   for (const event of [...activity].reverse()) {
     const directory = typeof event.directory === "string" ? event.directory : undefined;
@@ -157,7 +158,7 @@ export async function enrollProject(input: EnrollInput, env: NodeJS.ProcessEnv =
     try { await stat(directory); throw new BridgeError(409, `${directory} already exists on this computer. Add that folder instead.`); }
     catch (error) { if (error instanceof BridgeError) throw error; }
     try {
-      await exec("git", ["clone", "--", url, directory], { timeout: 180_000, maxBuffer: 4_194_304, env: { ...env, GIT_TERMINAL_PROMPT: "0" } });
+      await exec("git", ["clone", "--", url, directory], { timeout: 180_000, maxBuffer: 4_194_304, env: nonInteractiveGitEnv(env) });
     } catch (error) {
       const detail = error instanceof Error && "stderr" in error ? String((error as { stderr?: string }).stderr ?? "").trim().split("\n").pop() : undefined;
       throw new BridgeError(502, `git clone failed${detail ? `: ${detail}` : ""}.`);

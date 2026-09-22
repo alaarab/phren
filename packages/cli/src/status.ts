@@ -25,6 +25,7 @@ import { resolveRuntimeProfile } from "./runtime-profile.js";
 import { renderPhrenArt } from "./phren-art.js";
 import { RESET, BOLD, DIM, GREEN, YELLOW, RED, CYAN } from "./shell/render.js";
 import { storeWeight } from "./store-weight.js";
+import { activeStoreAuthFailure, storeAuthDetail } from "./sync/auth.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -319,7 +320,9 @@ export async function runStatus() {
       for (const store of stores) {
         const exists = store.available !== false;
         const existsLabel = exists ? `${GREEN}yes${RESET}` : `${RED}no${RESET}`;
-        console.log(`    ${store.name} ${DIM}(${store.role}, ${store.sync})${RESET} path=${existsLabel}${store.remote ? ` remote=${DIM}${store.remote}${RESET}` : ""}`);
+        const auth = exists ? activeStoreAuthFailure(store.path) : undefined;
+        const syncDetail = auth ? ` ${YELLOW}${storeAuthDetail(auth)}${RESET}` : store.remote ? ` remote=${DIM}${store.remote}${RESET}` : "";
+        console.log(`    ${store.name} ${DIM}(${store.role}, ${store.sync})${RESET} path=${existsLabel}${syncDetail}`);
       }
       // A store declared in stores.yaml but absent here is not cosmetic: any
       // project it claims cannot be written until it is attached.
@@ -370,7 +373,7 @@ export async function runStatus() {
     if (runtime.lastSync?.lastSuccessfulPushAt) {
       console.log(`           last successful push ${runtime.lastSync.lastSuccessfulPushAt}`);
     }
-    if (runtime.lastSync?.lastPushDetail) {
+    if (runtime.lastSync?.lastPushDetail && !activeStoreAuthFailure(phrenPath)) {
       console.log(`           push detail ${runtime.lastSync.lastPushDetail}`);
     }
     const outage = assessSyncOutage(runtime.lastSync);

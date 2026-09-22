@@ -6,13 +6,13 @@ Phren exposes 68 MCP tools across 16 modules in the bundled implementation catal
 
 | Tool | Does | Stands for (full-profile names) |
 |------|------|--------------------------------|
-| `search_knowledge` | Search the store | — |
-| `get_memory_detail` | Fetch one memory entry in full | — |
-| `get_project_summary` | A project's summary and counts | — |
+| `search_knowledge` | Search the store | None |
+| `get_memory_detail` | Fetch one memory entry in full | None |
+| `get_project_summary` | A project's summary and counts | None |
 | `add_finding` | Save a finding; `kind: "note"` saves a daily note instead | `add_note` |
 | `revise_finding` | `action`: supersede, retract, edit, remove, link, resolve_contradiction, pin, feedback | `supersede_finding`, `retract_finding`, `edit_finding`, `remove_finding`, `link_findings`, `resolve_contradiction`, `pin_memory`, `memory_feedback` |
-| `get_tasks` | List tasks | — |
-| `add_task` | Add a task | — |
+| `get_tasks` | List tasks | None |
+| `add_task` | Add a task | None |
 | `manage_task` | `action`: complete, update, remove, pin, tidy | `complete_task`, `update_task`, `remove_task`, `pin_task`, `tidy_done_tasks` |
 | `session` | `action`: start, end, context, history | `session_start`, `session_end`, `session_context`, `session_history` |
 | `phren_admin` | `action`: any remaining tool by name, or `list_actions` | skills, hooks, config, notes, review queue, export/import, doctor, health, stores, projects, fragment graph, extraction, topic summaries (`get_topic_summaries`, `set_topic_summary`), code index (`code_search`, `code_definition`, `code_references`, `code_outline`, `code_usage`), dispatch and hand-off |
@@ -121,9 +121,12 @@ history.
 | `supportedReasoningEfforts` | string[]? | Codex's supported effort identifiers. |
 
 Per source: Codex comes from its app-server `model/list` (hidden entries
-dropped, at most 32); Claude is the Hook's maintained table of Claude Code's
-own menu with exact names and ids (Fable 5.1, default, Opus 5, Sonnet 5,
-Haiku 4.5, Fable 5.1 (1M context)); OpenCode comes from `opencode models`
+dropped, at most 32). Claude reads the newest
+`<CLAUDE_CONFIG_DIR>/cache/model-catalog/*-cc.json`, defaulting to `~/.claude`.
+It preserves the terminal's names, main/overflow order and default, filters
+minimum client versions against `claude --version`, and adds a 1M context row
+for the default. The built-in menu is used only when no usable cached catalogue
+is available. OpenCode comes from `opencode models`
 (`provider/model` ids, the Go plan first, the configured default marked, at
 most 400). An unknown source returns an empty `models` list, and answers are
 cached per source for ten minutes. The phone's chat picker shows a
@@ -777,7 +780,7 @@ There is not sufficient usage evidence to remove the working queue safely.
 
 ### `manage_review_item`
 
-Manage a review queue item: approve (**promotes** the queued line into FINDINGS.md through the same path a direct add uses — dedup, fid assignment, citation metadata, and the findings-cap auto-archive all apply; if the finding is already live or already archived to `reference/topics/`, approve just dequeues it), reject (removes from queue AND from FINDINGS.md), or edit (updates text in both).
+Manage a review queue item: approve (**promotes** the queued line into FINDINGS.md through the same path a direct add uses, dedup, fid assignment, citation metadata, and the findings-cap auto-archive all apply; if the finding is already live or already archived to `reference/topics/`, approve just dequeues it), reject (removes from queue AND from FINDINGS.md), or edit (updates text in both).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -798,7 +801,7 @@ Run doctor self-heal checks and apply fixes (missing files, broken symlinks, sta
 
 List all registered phren stores and their sync status. Shows the primary store plus any team or readonly stores from the store registry.
 
-*No parameters — accepts an empty input.*
+*No parameters. Accepts an empty input.*
 
 ---
 
@@ -961,7 +964,94 @@ CLI equivalents: `phren code search <project> <query> [--kind k] [--limit n]`, `
 
 ### Hook routes
 
-When the `code` module is enabled, Phren Hook serves the same index to the phone over its private HTTP pipe: `GET /v1/code/status?project=`, `/v1/code/search?project=&q=&kind=&limit=`, `/v1/code/outline?project=&path=`, `/v1/code/definition?project=&symbol=`, `/v1/code/references?project=&symbol=&limit=` and `/v1/code/usage?project=&top=`. Each returns JSON shaped from the corresponding query; a project with no index is a 404 naming `phren code index`. See [phren-hook.md](phren-hook.md) and the canonical route table in `packages/cli/src/bridge/AGENT_CONNECTIONS.md`.
+The `code` module exposes these routes through Hook's private HTTP pipe. All
+require `project`; GET routes accept optional `store` in the query, and POST
+routes accept it in the JSON body. The selector must resolve uniquely to an
+available registered store by ID, name or GitHub repository name. Omitting it
+uses the Hook's base store. A selected read-only store rejects note and reindex
+writes. A missing index returns 404 with the `phren code index` command.
+
+| Method and path | Other inputs | Result |
+| --- | --- | --- |
+| `GET /v1/code/status` | None | File, symbol and reference counts, languages, kinds, last index time and top symbols. |
+| `GET /v1/code/tree` | `directory`, optional relative directory | `{project, directory, entries}`; immediate indexed children with `path`, `directory`, descendant `files`, `symbols` and `languages`. |
+| `GET /v1/code/search` | `q`, optional `kind`, `directory`, `limit` (1-500, default 20) | `{project, query, symbols}` ranked by exact name, prefix, full-text relevance and usage. |
+| `GET /v1/code/outline` | `path`, relative file path | `{project, path, entries}` in source order with nested members. |
+| `GET /v1/code/outline-summary` | `paths`, a JSON array of 1-200 relative paths | `{project, entries}` with symbol totals and up to three leading kinds per file or directory, including descendants. Duplicate paths are collapsed. |
+| `GET /v1/code/definition` | `symbol` | `{project, definition}` with declaration, snippet, last Git change and `findings` citing the symbol. |
+| `GET /v1/code/references` | `symbol`, optional `limit` (1-500, default 200) | `{project, references}` with resolved references grouped by file. |
+| `GET /v1/code/usage` | `top` (1-100, default 10) | `{project, usage: {hot, cold}}`, the older compact ranking. |
+| `GET /v1/code/usage-page` | Optional `kind`, `file`, `directory`, `offset` (default 0), `limit` (1-100, default 50), `end=0\|1` | `{project, entries, total, offset, limit, maxUses}` across all symbols, including variables and zero uses. `end=1` selects the last page. |
+| `GET /v1/code/recent` | Optional `directory` | `{project, entries}` for the 30 most recently changed symbols; `indexedAt` is the millisecond time the index observed the change. |
+| `POST /v1/code/reindex` | None beyond `project` and optional `store` | Runs an incremental scan and returns status. |
+| `POST /v1/code/note` | `symbol`, `file`, `line`, `text`, optional `target` | Saves a symbol-cited finding, then optionally delivers it to an agent. See below. |
+
+Hook `kind` accepts the individual symbol kinds above plus `types`, the family
+of class, struct, enum, interface and type declarations. Directory scopes match
+descendants by literal path boundary. Definition and reference queries accept
+`Name`, `Type.member`, `name()` and `file::Type.member` to stay in one file.
+Usage pages sort by descending reference count, then name, file, line and ID;
+`maxUses` covers the filtered distribution, not only the current page.
+
+#### Code notes
+
+`POST /v1/code/note` takes this JSON shape:
+
+```json
+{
+  "store": "personal",
+  "project": "demo",
+  "symbol": "src/parser.ts::Parser.parse",
+  "file": "src/parser.ts",
+  "line": 42,
+  "text": "Keep this empty-input case in the regression tests.",
+  "target": { "session": "<session-id>" }
+}
+```
+
+Omit `target` to save only, or use `{ "harness": "codex" }` to dispatch a new
+worker (`codex`, `claude`, `opencode`). A session target hands off locally;
+a new worker uses conductor placement with `computer: "anywhere"`. Sending
+requires the conductor module. The selected line must still belong to the
+indexed symbol and its returned snippet; otherwise the route returns 409 and
+asks the caller to refresh. Text is trimmed, nonempty and at most 4500 characters.
+
+The result is `{ok: true, saved: true, findings, delivery?}`. Save happens before
+delivery. A delivery error is returned inside `delivery` without undoing the
+finding; callers must not treat `saved: true` as proof of delivery or retry an
+uncertain send automatically. Session Code entry points keep their explicit
+recipient instead of presenting another chooser.
+
+See [Code index](code-index.md), [Phren Hook](phren-hook.md) and the
+[connection contract](../packages/cli/src/bridge/AGENT_CONNECTIONS.md).
+
+### Repository files and tree
+
+`GET /v1/projects/files?project=&directory=&path=` browses a checkout discovered
+by Hook. Optional `directory` must exactly match a discovered checkout; omitted,
+the first candidate is used. `path` is relative and defaults to its root.
+Directories return `{path, kind: "directory", truncated, entries}` with at most
+500 entries, directories first. Files return `{path, kind: "file", size, data}`
+with up to 2 MiB of file content encoded as base64. Symlinks, `.git`, traversal and paths
+outside the selected checkout are refused. This route is read-only.
+
+`POST /v1/git/tree` takes the session's full target, optional `child` and relative
+`path`. It returns one directory with descendant file counts and a snapshot
+version. The bounded repository cache is keyed by HEAD and a file/status hash;
+it expires after two seconds and is invalidated by status refresh and mutations.
+Opening a directory does not collect diff statistics or upstream history.
+
+### Live transcript previews
+
+The transcript WebSocket includes `preview: {turnStartedAt, text}` or
+`preview: null` on backlog/append frames, or sends a standalone `type: "preview"`
+frame with the same conversation identity. Claude previews come from pane text anchored to the current
+prompt; Codex and OpenCode use their delta text. Updates arrive at most twice
+a second. Preview text stays out of history and never advances the transcript
+cursor. A completed entry clears the preview without the throttle delay. The
+phone replaces it in place and keeps the reveal progress, avoiding duplicate
+text. Reconnect history retains existing rows unless Hook explicitly resets
+the conversation.
 
 ### `GET /v1/usage`
 

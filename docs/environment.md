@@ -39,7 +39,7 @@ Polling covers the primary and registered secondary Git stores while an MCP serv
 | `PHREN_PROFILE` | string | (empty) | Active profile name. Filters which projects are indexed. When empty, all projects are indexed. |
 | `PHREN_DEBUG` | `0` or `1` | `0` | Set to `1` to enable debug logging to `~/.phren/debug.log`. |
 | `PHREN_ACTOR` | string | `$USER` or `$USERNAME` | Identifies who performed a governance action. Used in audit logs and access control checks. |
-| `PHREN_SKIP_GLOBAL_NPM_UNINSTALL` | `0` or `1` | `0` | Set to `1` to make `phren uninstall` leave the global npm package (`@phren/cli`) installed. `npm uninstall -g` targets the machine's real npm prefix, which `PHREN_PATH`/`HOME` cannot redirect — set this whenever you run `phren uninstall` against a sandboxed store you don't want affecting the machine. The test helpers set it for every spawned CLI. |
+| `PHREN_SKIP_GLOBAL_NPM_UNINSTALL` | `0` or `1` | `0` | Set to `1` to make `phren uninstall` leave the global npm package (`@phren/cli`) installed. `npm uninstall -g` targets the machine's real npm prefix, which `PHREN_PATH`/`HOME` cannot redirect, set this whenever you run `phren uninstall` against a sandboxed store you don't want affecting the machine. The test helpers set it for every spawned CLI. |
 
 ## Context Injection (hook-prompt)
 
@@ -146,3 +146,38 @@ long the Hook holds a permission ask for the phone (default `55000`, the whole
 Claude window is 60000); tests shorten it. The installed service uses its own user
 session environment; keep these paths consistent with the coding agents.
 See [Phren Hook setup](phren-hook.md) and [written files](footprint.md).
+
+The Claude model menu reads the newest
+`<CLAUDE_CONFIG_DIR>/cache/model-catalog/*-cc.json` (default config directory
+`~/.claude`). The Hook checks the installed client's version before offering
+version-gated rows, preserves the catalogue's names and order, and adds the
+default model's 1M option. An unreadable or empty catalogue uses the built-in
+fallback. The result is cached in memory for ten minutes. No new environment
+variable is needed for this menu.
+
+OpenCode reply previews use a `.preview.json` sidecar beside the mirrored
+session event log under `<store>/.runtime/sessions`. Hook reads this temporary
+turn text for the live socket; it does not add it to transcript history.
+
+### Code and worker files
+
+| Variable | Default | Use |
+| --- | --- | --- |
+| `PHREN_CODE_PACKAGE` | unset | Explicit optional code-package location, checked before the bridge and store package directories. |
+| `PROJECTS_DIR` | unset | Additional checkout root used when resolving a project's code index source. |
+| `PHREN_FANOUT_JOB` | set by the launcher | Worker job ID; tells the OpenCode plugin that the worker is headless. |
+| `PHREN_FANOUT_DIR` | `<store>/.runtime/agent-fanouts/<job id>` | Worker directory; a refused permission is recorded in `blocked.json` here. |
+
+Code indexes live in `<store>/.runtime/code/<project>.sqlite`. Their symbol
+fingerprints and last-observed change times stay local. The optional package
+can live under `<store>/.runtime/packages/node_modules/@phren/code`.
+
+Workers write manifests, event logs, stderr and exit records under
+`<store>/.runtime/agent-fanouts`. Finished jobs move after 24 hours to
+`.runtime/agent-fanouts-archive`, capped at 500 folders. See
+[Code index](code-index.md) and [Fan-out workers](fanout.md).
+
+Phone-local notification switches, the approval dedupe ledger and pending
+schedule reminders live on the iPhone. They require no Hook environment
+setting, APNs key or relay. Optional direct APNs remains separate; see
+[phone notifications](../apps/ios/design/notifications.md).

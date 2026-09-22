@@ -10,8 +10,15 @@ import { bootstrapPhrenDotEnv } from "./phren-dotenv.js";
  * "Username for 'https://github.com':" from the controlling terminal, which
  * inside an agent's pane stalls the agent before its first prompt.
  */
-export const nonInteractiveGitEnv = (): NodeJS.ProcessEnv => ({
-  ...process.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never", GIT_ASKPASS: "", SSH_ASKPASS: "",
+export const nonInteractiveGitEnv = (env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv => ({
+  ...env,
+  GIT_TERMINAL_PROMPT: "0",
+  GCM_INTERACTIVE: "never",
+  // A nonempty command overrides core.askPass and inherited GUI helpers.
+  // Git for Windows also executes askpass commands through its bundled sh.
+  GIT_ASKPASS: "false",
+  SSH_ASKPASS: "false",
+  SSH_ASKPASS_REQUIRE: "force",
 });
 
 export function runGitOrThrow(cwd: string, args: string[], timeoutMs: number): string {

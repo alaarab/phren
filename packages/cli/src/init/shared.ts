@@ -7,6 +7,7 @@ import * as path from "path";
 import { execFileSync } from "child_process";
 import { homePath, EXEC_TIMEOUT_QUICK_MS, debugLog } from "../shared.js";
 import { errorMessage } from "../utils.js";
+import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import { ROOT as PACKAGE_ROOT, VERSION } from "../package-metadata.js";
 export const ROOT = PACKAGE_ROOT;
 export { VERSION };
@@ -25,6 +26,7 @@ export function commandVersion(cmd: string, args: string[] = ["--version"]): str
   const effectiveCmd = process.platform === "win32" && (cmd === "npm" || cmd === "npx") ? `${cmd}.cmd` : cmd;
   try {
     return execFileSync(effectiveCmd, args, {
+      env: cmd === "git" ? nonInteractiveGitEnv() : process.env,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       shell: process.platform === "win32" && effectiveCmd.endsWith(".cmd"),

@@ -1,3 +1,4 @@
+import { nonInteractiveGitEnv } from "../utils-helpers.js";
 /**
  * Command palette and input handling for the phren interactive shell.
  * Extracted from shell.ts to keep the orchestrator under 300 lines.
@@ -407,6 +408,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
       const lines: string[] = [];
       try {
         const conflicted = execFileSync("git", ["diff", "--name-only", "--diff-filter=U"], {
+          env: nonInteractiveGitEnv(),
           cwd: host.phrenPath, encoding: "utf8", timeout: 10_000,
           stdio: ["ignore", "pipe", "ignore"],
         }).trim();
@@ -462,11 +464,13 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
     try {
       const projectDir = path.join(host.phrenPath, project);
       const diff = execFileSync("git", ["diff", "--no-color", "--", projectDir], {
+        env: nonInteractiveGitEnv(),
         cwd: host.phrenPath, encoding: "utf8", timeout: 10_000,
         stdio: ["ignore", "pipe", "ignore"],
       }).trim();
       if (!diff) {
         const staged = execFileSync("git", ["diff", "--cached", "--no-color", "--", projectDir], {
+          env: nonInteractiveGitEnv(),
           cwd: host.phrenPath, encoding: "utf8", timeout: 10_000,
           stdio: ["ignore", "pipe", "ignore"],
         }).trim();

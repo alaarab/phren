@@ -11,7 +11,7 @@
   <link rel="icon" type="image/svg+xml" href="phren-icon-64.svg">
   <link rel="stylesheet" href="style.css">
   <style>
-    /* ─── Phren Motion Lab — inspired poses (writing / running / celebrate) ─── */
+    /* ─── Phren Motion Lab, inspired poses (writing / running / celebrate) ─── */
     .phren-motion { --body-purple:#9c8ff8; --cyan:#28D3F2; --navy:#12122a; }
 
     /* Shared typewriter + pencil keyframes (used by mini writing scene) ---- */
@@ -28,7 +28,7 @@
     }
     @keyframes phren-caret { 50% { border-right-color: transparent; } }
 
-    /* Mini writing scene — sits next to the Skills header text ------------ */
+    /* Mini writing scene, sits next to the Skills header text ------------ */
     .skills-intro {
       display: flex; align-items: center; gap: 32px;
       margin-bottom: 56px;
@@ -278,7 +278,7 @@
     <div class="hero-content">
       <div class="hero-icon-wrap">
         <div class="hero-scene" aria-label="Phren browsing through a filing cabinet">
-          <!-- Phren character — small, cute, right next to cabinet -->
+          <!-- Phren character, small, cute, right next to cabinet -->
           <div class="hero-phren-actor">
             <img src="phren-hero.svg" alt="phren" width="100" height="116" style="image-rendering: pixelated">
             <!-- Lightbulb eureka moment (appears after phren grabs the doc) -->
@@ -496,7 +496,7 @@
     </div>
   </section>
 
-  <!-- HOOKS + CONFIG — two-column: trace left, knobs right -->
+  <!-- HOOKS + CONFIG, two-column: trace left, knobs right -->
   <section class="trace-section" id="hooks" style="position:relative;">
     <!-- phren sneaks across the bottom of the hooks section (absolute, no extra height) -->
     <div class="run-strip phren-motion run-strip--overlay" aria-hidden="true">
@@ -704,23 +704,23 @@
               <circle class="fun-heart-glow-anim" cx="262" cy="136" r="40" fill="url(#fun-heartGlow)"/>
 
               <!-- ======================== -->
-              <!-- Claw'd — Claude's crab mascot -->
+              <!-- Claw'd, Claude's crab mascot -->
               <!-- One solid connected shape, no gaps -->
               <!-- ======================== -->
               <g class="fun-claude-group" shape-rendering="crispEdges">
-                <!-- HEAD — 7w × 4h -->
+                <!-- HEAD, 7w × 4h -->
                 <rect x="1" y="0" width="7" height="4" fill="#E8A0A0"/>
-                <!-- CLAWS — 1w × 1h nubs on each side -->
+                <!-- CLAWS, 1w × 1h nubs on each side -->
                 <rect x="0" y="2" width="1" height="1" fill="#E8A0A0"/>
                 <rect x="8" y="2" width="1" height="1" fill="#E8A0A0"/>
-                <!-- BODY — 7w × 1h (trimmed) -->
+                <!-- BODY, 7w × 1h (trimmed) -->
                 <rect x="1" y="4" width="7" height="1" fill="#E8A0A0"/>
                 <!-- 4 LEGS -->
                 <rect x="1" y="5" width="1" height="1" fill="#E8A0A0"/>
                 <rect x="3" y="5" width="1" height="1" fill="#E8A0A0"/>
                 <rect x="5" y="5" width="1" height="1" fill="#E8A0A0"/>
                 <rect x="7" y="5" width="1" height="1" fill="#E8A0A0"/>
-                <!-- EYES — spread apart -->
+                <!-- EYES, spread apart -->
                 <rect x="2" y="1" width="1" height="1" fill="#442222"/>
                 <rect x="6" y="1" width="1" height="1" fill="#442222"/>
               </g>
@@ -828,7 +828,7 @@
           <div class="surface-copy">
             <div class="surface-badge">In the terminal</div>
             <h3>Walk the knowledge graph without leaving the shell.</h3>
-            <p>The same graph as the web viewer, drawn on a braille canvas. <span class="kw-memory">Projects</span> cluster, <span class="kw-finding">findings</span> take their topic colour, <span class="kw-fragment">fragments</span> bridge projects. The layout is deterministic, so the same store always draws the same map. Press <kbd>v</kbd> and it becomes a sphere you can drag around; in watch mode, every recall lights its node and phren walks over to it.</p>
+            <p>The same graph as the web viewer, drawn on a braille canvas. <span class="kw-memory">Projects</span> cluster, <span class="kw-finding">findings</span> take their topic color, <span class="kw-fragment">fragments</span> bridge projects. The layout is deterministic, so the same store always draws the same map. Press <kbd>v</kbd> and it becomes a sphere you can drag around; in watch mode, every recall lights its node and phren walks over to it.</p>
             <div class="surface-cmd">phren shell --view graph</div>
             <div class="surface-keys">
               <span><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd></span><span>walk to the connected node that way</span>
@@ -836,7 +836,7 @@
               <span><kbd>space</kbd></span><span>read the whole node in a bubble</span>
               <span><kbd>/</kbd> <kbd>n</kbd></span><span>search, fly to the best hit, cycle hits</span>
               <span><kbd>[</kbd> <kbd>]</kbd> <kbd>f</kbd></span><span>focus a project, cycle filter presets</span>
-              <span><kbd>v</kbd></span><span>orbit: the graph in 3D — drag to turn, wheel to zoom, click to select</span>
+              <span><kbd>v</kbd></span><span>orbit: the graph in 3D, drag to turn, wheel to zoom, click to select</span>
               <span><kbd>w</kbd></span><span>watch: recalls land live, with a bubble at the node</span>
             </div>
             <a class="surface-link" href="https://github.com/alaarab/phren/blob/main/docs/shell.md#graph-g">Graph keys →</a>
@@ -866,7 +866,7 @@
             <div class="surface-badge">In your editor</div>
             <h3>Browse phren without leaving VS Code.</h3>
             <p><span class="kw-memory">Projects</span>, <span class="kw-finding">findings</span>, <span class="kw-task">tasks</span>, <span class="kw-fragment">fragments</span>, <span class="kw-skill">skills</span>, <span class="kw-hook">hooks</span> and <span class="kw-session">sessions</span> in the activity bar, and <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>K</kbd> to search. Add, review and push without leaving the editor.</p>
-            <p class="surface-note">The graph panel runs the same viewer as the web UI — one renderer, two hosts.</p>
+            <p class="surface-note">The graph panel, web UI and iPhone Memory map share one renderer.</p>
             <div class="surface-cmd">ext install phren-vscode</div>
             <a class="surface-link" href="https://github.com/alaarab/phren/tree/main/packages/vscode">Extension →</a>
           </div>
@@ -901,7 +901,7 @@
           <div class="surface-copy">
             <div class="surface-badge">On your phone</div>
             <h3>Your agents and their memory, together.</h3>
-            <p>A native SwiftUI app. Sign in with GitHub, pick your store repo, and the <span class="kw-finding">findings</span>, notes, <span class="kw-task">tasks</span> and review queue appear within seconds of a hook pushing a commit. Approve, edit, or throw out what is wrong. Widgets for the Home and Lock Screen, and “Hey Siri, add a task to phren”.</p>
+            <p>Steer agents on your computers, read their changes, and browse indexed code from your phone. Send a note from a symbol to its session, or ask your conductor through Siri and the Action button. GitHub sync keeps <span class="kw-finding">findings</span>, notes and <span class="kw-task">tasks</span> in Memory, with map and list views. Local schedule and approval notifications need no relay.</p>
             <p class="surface-note">Memory syncs directly with GitHub. Phren Hook connects your running agents over SSH: native chat, Herdr terminals, project context, and web previews. Your keys stay in the iPhone Keychain.</p>
             <a class="surface-link" href="phren-hook.html">Set up Phren Hook →</a>
             <a class="surface-link" href="https://github.com/alaarab/phren/tree/main/apps/ios">phren for iOS →</a>
@@ -1050,7 +1050,7 @@
     </div>
   </section>
 
-  <!-- ALSO: the app, the orchestrator, the agent — memory stays the story above -->
+  <!-- ALSO: the app, the orchestrator, the agent, memory stays the story above -->
   <section class="bento-section" id="also">
     <div class="container">
       <div class="bento-header reveal" style="text-align:center;">
@@ -1073,7 +1073,7 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
           </div>
           <div class="step-title">Orchestrator</div>
-          <p class="step-desc">Phren Hook runs on each computer beside Herdr. Every Codex, Claude Code and Copilot <span class="kw-session">session</span> becomes something you can steer, queue messages for, and approve from the phone — over your own SSH.</p>
+          <p class="step-desc">Phren Hook runs on each computer beside Herdr. Steer Codex, Claude Code, Copilot and OpenCode <span class="kw-session">sessions</span>, answer their questions, and read their code and changes from the phone over your own SSH.</p>
         </a>
         <a class="step reveal reveal-delay-3" href="agent.md" style="text-decoration:none;color:inherit;display:block;">
           <div class="step-num">Agent</div>

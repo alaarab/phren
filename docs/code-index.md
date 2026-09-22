@@ -47,6 +47,11 @@ Last-change metadata is the last non-merge commit touching the file, applied
 to its declarations. It contains an author hash and date, not a person's name;
 it is not line-level blame.
 
+Recent uses a separate observation time: a persisted fingerprint of each
+declaration's metadata and body records when the index last saw it change.
+Unchanged scans preserve that time, including full scans. Older indexes use
+file parse time until their next scan records symbol fingerprints.
+
 ## Query surfaces
 
 | CLI | MCP tool | Result |
@@ -57,28 +62,45 @@ it is not line-level blame.
 | `phren code outline demo <path>` | `code_outline` | Source order with members nested under parents |
 | `phren code usage demo` | `code_usage` | Hot and cold non-variable symbols |
 
-Symbols accept `Name`, `Type.member` and `name()`. A qualified lookup must match
+Symbols accept `Name`, `Type.member`, `name()` and `file::Type.member`. A file
+qualifier keeps the lookup in that file. A container-qualified lookup must match
 its container. Unqualified ambiguous lookups prefer exported declarations and
 non-variables and report the candidate count. Search accepts `--kind` and
 `--limit`; usage accepts `--top`.
 
 MCP results are compact text. The full profile exposes the five tools directly;
-the core profile reaches enabled tools through `phren_admin`. Hook exposes six
-JSON read routes under `/v1/code/`: `status`, `search`, `outline`, `definition`,
-`references` and `usage`. See [API reference](api-reference.md#code-index).
+the core profile reaches enabled tools through `phren_admin`. Hook adds JSON
+routes for indexed files, scoped search, paged usage, recent changes, batched
+outline counts, reindexing and notes. See the complete
+[route table](api-reference.md#hook-routes).
 
 ## Refresh and phone
 
 Hook observes recorded tool/git changes and debounces affected projects for
-500 ms. A change arriving during a refresh queues one trailing refresh. Its
-HEAD poll requests a full refresh when an already indexed checkout changes
-HEAD. This is not a general filesystem watcher; edits outside recorded changes
-may require `phren code index`.
+500 ms. A change arriving during a refresh queues one trailing refresh.
+Recorded changes also check HEAD; a change to it requests a full refresh of
+that indexed checkout. This is not a general filesystem watcher; edits outside
+recorded changes may require `phren code index`.
 
-The phone's project Code cell opens search and hot/cold usage lists. Selecting
-a symbol opens its definition, source snippet, last change and references.
-File-outline browsing, graph symbol nodes and populated dossier Findings are
-not implemented in this screen.
+The phone's Code screen opens on indexed files. Its header shows file and symbol
+counts, languages, index time and Reindex. Folders show descendant file and
+symbol totals; files open their source-ordered outlines. Search accepts a
+directory scope and a kind filter, including Type for classes, structs, enums,
+interfaces and aliases.
+
+Usage is the full paged ranking, including variables and symbols with no
+resolved references. Kind, directory and file filters apply to the same list;
+Hot and Cold jump to its first and last pages. Bars share the filtered list's
+maximum. Recent lists the 30 symbols the index last saw change. A symbol opens
+its definition, source snippet, last Git change, references and cited findings.
+
+Code also opens from a session's Changes band and chat header actions when its
+computer has an index. These entries retain that computer, store, project and
+session as the note recipient. The Working tree keeps expanded folders and
+loaded children across refreshes and tab switches. Batched outline summaries
+add symbol counts and leading kinds; a file's symbol chip opens its first
+declaration's file-qualified dossier. A missing index leaves the ordinary tree
+usable.
 
 ## Findings linked to code
 
@@ -90,8 +112,22 @@ symbol. Local unexported variables are excluded from automatic attachment.
 
 `code_definition` and `phren code def` append citing findings from FINDINGS.md
 and archived topic files. `get_findings` and `search_knowledge` expose stored
-symbol citations. The Hook definition route currently returns the code
-payload without these findings.
+symbol citations. The Hook definition route includes them in
+`definition.findings` too.
+
+Select a snippet line in the phone's dossier to write a note. The project entry
+offers a live project session, a new worker or Save note only. A session entry
+sends directly to the originating session. `POST /v1/code/note` validates the
+line against the indexed snippet and saves a finding with its file, line and
+symbol citation before attempting delivery. Sending requires `conductor`;
+saving alone requires only `code`. Delivery errors leave the saved finding in
+place and are reported separately. The phone does not automatically resend.
+
+All Code routes accept an optional registered store selector. The phone sends
+its store ID so projects with the same name in different stores stay separate.
+The Hook resolves the selector through its store registry; it does not accept
+an arbitrary store path. Note and reindex requests reject a selected read-only
+store.
 
 ## Optional installation
 
