@@ -40,14 +40,22 @@ final class AgentChatTests: XCTestCase {
         let app = launch(extra: ["--chat-phren-tools"])
         app.buttons["live-chat:w7:w7:t9"].tap()
         XCTAssertTrue(app.scrollViews["chat-transcript"].waitForExistence(timeout: 8))
-        for (id, verb) in [("search", "Recalled memories"), ("complete", "Completed a task"), ("task", "Added a task"), ("finding", "Saved a finding")] {
+        for (id, verb) in [("search", "Search memory"), ("complete", "Update task"), ("task", "Add task"), ("finding", "Save finding")] {
             let card = app.buttons["chat-phren-card:phren-" + id]
             for _ in 0..<8 where !card.isHittable { app.scrollViews["chat-transcript"].swipeDown() }
-            XCTAssertTrue(card.waitForExistence(timeout: 5)); XCTAssertTrue(card.label.contains(verb))
+            XCTAssertTrue(card.waitForExistence(timeout: 5), "The phren \(id) call has its own card")
+            XCTAssertTrue(card.label.contains(verb), "Expected \(verb) in \(card.label)")
+            XCTAssertTrue(card.label.contains("Completed"), "The result status remains visible")
+            if id == "complete" {
+                XCTAssertTrue(card.label.contains("complete"), "The task card identifies its completion action")
+            }
         }
         XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-read-run:")).firstMatch.exists)
         capture(app, "Phren memory and task cards")
-        app.buttons["chat-phren-card:phren-search"].tap()
+        let search = app.buttons["chat-phren-card:phren-search"]
+        for _ in 0..<8 where !search.isHittable { app.scrollViews["chat-transcript"].swipeUp() }
+        XCTAssertTrue(search.isHittable)
+        search.tap()
         XCTAssertTrue(app.buttons["chat-tool-output-wrap"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["chat-tool-output-done"].exists, "Back is the only way out of a pushed detail")
         // Recalled memories wrap by default: the whole line fits the screen instead of running off it.
@@ -62,7 +70,10 @@ final class AgentChatTests: XCTestCase {
         XCTAssertGreaterThan(text.frame.maxX, app.frame.maxX, "Long lines mode lets the line run past the screen")
         wrapToggle.tap()
         app.navigationBars.buttons.firstMatch.tap()
-        app.buttons["chat-phren-card:phren-finding"].tap()
+        let finding = app.buttons["chat-phren-card:phren-finding"]
+        for _ in 0..<8 where !finding.isHittable { app.scrollViews["chat-transcript"].swipeDown() }
+        XCTAssertTrue(finding.isHittable)
+        finding.tap()
         XCTAssertTrue(app.buttons["chat-tool-output-wrap"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "findingType")).firstMatch.exists)
         app.navigationBars.buttons.firstMatch.tap()
@@ -1283,10 +1294,10 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(app.buttons["diff-options"].exists)
         // Long lines can wrap instead of scrolling; the switch lives in ⋯ and persists.
         app.buttons["diff-options"].tap()
-        let wrap = app.buttons["Wrap long lines"]
+        let wrap = app.buttons["diff-options-sheet:wrap"]
         XCTAssertTrue(wrap.waitForExistence(timeout: 3)); wrap.tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "+let accent = purple")).firstMatch.waitForExistence(timeout: 3))
-        app.buttons["diff-options"].tap(); app.buttons["Wrap long lines"].tap()
+        app.buttons["diff-options"].tap(); app.buttons["diff-options-sheet:wrap"].tap()
         app.navigationBars["Theme.swift"].buttons.element(boundBy: 0).tap()
         XCTAssertTrue(theme.waitForExistence(timeout: 5)); theme.tap()
         XCTAssertFalse(purple.waitForExistence(timeout: 1))
@@ -1310,7 +1321,7 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label == %@", "Sources/App.swift")).firstMatch.waitForExistence(timeout: 5))
         app.buttons["changes-mode-diff"].tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "+let accent = purple")).firstMatch.waitForExistence(timeout: 5))
-        capture(app, "Repository changes from a shell edit, syntax coloured")
+        capture(app, "Repository changes from a shell edit, syntax colored")
     }
 
     @MainActor
@@ -1526,16 +1537,20 @@ final class AgentChatTests: XCTestCase {
 
     @MainActor
     func testPasswordPromptIsAnsweredFromTheChat() {
-        let app = launch(extra: ["--chat-blocked"])
+        let app = launch(extra: ["--chat-password"])
         app.buttons["live-chat:w7:w7:t9"].tap()
-        let keys = app.otherElements["chat-answer-keys"]
-        XCTAssertTrue(keys.waitForExistence(timeout: 10))
-        app.buttons["chat-answer-secret"].tap()
+        let prompt = app.descendants(matching: .any)["chat-password-prompt"].firstMatch
+        XCTAssertTrue(prompt.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["The terminal is asking for a password"].exists)
+        let secret = app.buttons["chat-answer-secret"]
+        XCTAssertEqual(secret.label, "Enter password")
+        secret.tap()
         let field = app.secureTextFields["chat-secret-field"]
         XCTAssertTrue(field.waitForExistence(timeout: 5), "The lock opens a password field")
         field.tap(); field.typeText("hunter2")
         app.buttons["chat-secret-send"].tap()
-        XCTAssertTrue(keys.waitForNonExistence(timeout: 10), "Once the agent stops waiting the row goes")
+        XCTAssertTrue(prompt.waitForNonExistence(timeout: 10), "Once the agent stops waiting the password row goes")
+        XCTAssertFalse(secret.exists)
         XCTAssertFalse(app.staticTexts["chat-delivery-error"].exists)
     }
 
@@ -2051,6 +2066,7 @@ final class AgentChatTests: XCTestCase {
         let app = launch(extra: ["--chat-blocked"])
         app.buttons["live-chat:w7:w7:t9"].tap()
         XCTAssertTrue(app.buttons["chat-answer-terminal"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["chat-answer-secret"].exists, "Ordinary blocked prompts do not request a password")
         let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
         composer.tap(); composer.typeText("Keep this for later")
         XCTAssertTrue(app.buttons["chat-send"].isEnabled, "A blocked agent can be answered from the composer")

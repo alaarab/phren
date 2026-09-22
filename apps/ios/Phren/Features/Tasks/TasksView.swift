@@ -328,16 +328,20 @@ struct TaskListView: View {
     /// chips wrap beneath it.
     private func sectionHeader(_ group: TaskSectionGroup) -> some View {
         let folded = collapsedProjects.contains(group.project)
-        return Button {
-            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { toggleSection(group.project) }
-        } label: {
-            sectionHeaderLabel(group, folded: folded)
-                .frame(minHeight: 44).contentShape(Rectangle())
+        return ZStack(alignment: .topLeading) {
+            Button {
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { toggleSection(group.project) }
+            } label: {
+                sectionHeaderLabel(group, folded: folded)
+                    .frame(minHeight: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(group.project), \(countPhrase(group))")
+            .accessibilityAddTraits([.isButton, .isHeader])
+            .accessibilityIdentifier("tasks-section-toggle:\(group.project)")
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(group.project), \(countPhrase(group))")
-        .accessibilityAddTraits(.isHeader)
-        .accessibilityIdentifier("tasks-section-toggle:\(group.project)")
+        .accessibilityElement(children: .contain)
         .phrenContainerMarker("tasks-section:\(group.project)", label: group.project,
                               value: countPhrase(group))
         .listRowInsets(EdgeInsets()).listRowSeparator(.hidden).listRowBackground(Color.clear)

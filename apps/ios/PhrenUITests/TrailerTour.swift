@@ -95,7 +95,7 @@ final class TrailerTour: XCTestCase {
 
     @MainActor
     func testTour3GraphAndProjects() {
-        let app = launch(extra: ["--graph-reveal", "Idempotency keys", "--graph-reveal-after", "10"])
+        let app = launch(extra: [])
         app.tabBars.buttons["Projects"].tap()
         XCTAssertTrue(app.buttons["project:alaarab/memory:ledger"].waitForExistence(timeout: 10))
         settle(3.5)
@@ -107,19 +107,29 @@ final class TrailerTour: XCTestCase {
         drag(canvas, from: 0.3, to: 0.7, velocity: 260, horizontal: true)
         settle(1.2)
         canvas.pinch(withScale: 1.3, velocity: 0.5)
-        // By now the rig has flown the camera to the finding; it sits at the
-        // centre of the canvas. Tap it.
-        settle(5)
-        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-        let finding = app.navigationBars["Finding"]
+        // Select the finding through the same search route as the Memory
+        // dossier. A camera reveal does not guarantee a node at the center.
+        app.buttons["Search graph"].tap()
+        let search = app.textFields["Search findings, tasks, projects"]
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap(); search.typeText("Idempotency keys")
+        let result = app.buttons.matching(NSPredicate(
+            format: "label CONTAINS %@", "Idempotency keys must be scoped per merchant")).firstMatch
+        XCTAssertTrue(result.waitForExistence(timeout: 5)); result.tap()
+        // WebKit exposes the dossier as its dialog role and label ("Node
+        // details, web dialog"), not by DOM id, and its host can be Other, so
+        // match the label from the whole tree rather than through app.webViews.
+        let finding = app.descendants(matching: .any).matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Node details")).firstMatch
         XCTAssertTrue(finding.waitForExistence(timeout: 10))
+        XCTAssertTrue(finding.staticTexts.matching(NSPredicate(
+            format: "label CONTAINS %@", "Idempotency keys must be scoped per merchant")).firstMatch.exists)
+        XCTAssertTrue(finding.buttons["Previous node"].exists)
+        XCTAssertTrue(finding.buttons["Next node"].exists)
         settle(4.5)
-        // Pull the sheet down by its bar; a swipe on the canvas would only
-        // turn the graph.
-        finding.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-            .press(forDuration: 0.15, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)),
-                   withVelocity: XCUIGestureVelocity(rawValue: 900), thenHoldForDuration: 0.1)
-        _ = finding.waitForNonExistence(timeout: 5)
+        let close = finding.buttons["Close"]
+        XCTAssertTrue(close.isHittable); close.tap()
+        XCTAssertTrue(finding.waitForNonExistence(timeout: 5))
         settle(1)
         app.buttons["graph-back"].tap()
         XCTAssertTrue(app.navigationBars["Projects"].waitForExistence(timeout: 5))

@@ -8,7 +8,7 @@ final class AutomaticSessionTests: XCTestCase {
         let row = app.buttons["overview-chat:A1000000-0000-0000-0000-000000000001:herdr:default:w7:w7:t9"]
         XCTAssertTrue(row.waitForExistence(timeout: 15))
         XCTAssertFalse(app.buttons["chat-close"].exists)
-        app.buttons["Refresh all sessions"].tap()
+        openSessionsAction("refresh", in: app)
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         row.tap()
         XCTAssertTrue(app.buttons["chat-close"].waitForExistence(timeout: 8))

@@ -41,9 +41,9 @@ muted text, chevron). Trailing text: "None" when empty; "2" plus a middle
 dot plus the soonest next run in words ("2 · 07:30", "3 · in 4h", "1 · paused")
 otherwise. Identifier `project-schedules-row`.
 
-**Agents tab.** A toolbar button `clock.badge.checkmark` at the trailing end
-of the Agents navigation bar opens the all-projects list. Identifier
-`schedules-all`.
+**Agents tab.** More opens a Phren action sheet. Its Schedules action opens
+the all-projects list. Identifiers: `sessions-more`, then
+`sessions-more-sheet:schedules`.
 
 ## 2. Schedules list (`SchedulesView`)
 

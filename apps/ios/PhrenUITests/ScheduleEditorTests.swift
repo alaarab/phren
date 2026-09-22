@@ -121,9 +121,7 @@ final class ScheduleEditorTests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 8))
         app.tabBars.buttons["Agents"].tap()
-        let schedules = app.buttons["schedules-all"]
-        XCTAssertTrue(schedules.waitForExistence(timeout: 10))
-        schedules.tap()
+        openSessionsAction("schedules", in: app)
         XCTAssertTrue(app.navigationBars["Schedules"].waitForExistence(timeout: 5))
         return app
     }

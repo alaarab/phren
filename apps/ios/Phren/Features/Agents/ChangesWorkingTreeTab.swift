@@ -303,7 +303,8 @@ private struct WorkingTreeRow: View {
             if let summary = summaries[entry.path], summary.symbols > 0 {
                 if let symbol = summary.symbol, !entry.isDirectory {
                     Button { onSymbol(symbol) } label: {
-                        PhrenChip(text: summary.label).frame(minWidth: 44, minHeight: 44)
+                        PhrenChip(text: summary.label).frame(minWidth: 44, minHeight: PhrenDensity.treeRowHeight)
+                            .contentShape(Rectangle().inset(by: -6))
                     }.buttonStyle(.plain)
                         .accessibilityLabel("\(summary.symbols) symbols, \(summary.kinds.map(\.kind).joined(separator: ", "))")
                         .accessibilityIdentifier("changes-tree-symbols:\(entry.path)")

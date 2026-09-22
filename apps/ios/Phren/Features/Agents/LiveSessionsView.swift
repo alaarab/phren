@@ -14,6 +14,7 @@ struct LiveSessionsView: View {
     @State private var closeRequest: SessionCloseRequest?
     @State private var closeError: String?
     @State private var showingMore = false
+    @State private var schedulesStoreID: String?
     @State private var setupDestination: LiveSessionsModel.SetupAction?
     private struct SessionOpen: Identifiable, Hashable {
         let session: LiveAgentSession
@@ -134,14 +135,6 @@ struct LiveSessionsView: View {
                 NavigationLink { HostFilesView() } label: { Label("Files", systemImage: "folder") }
                     .accessibilityIdentifier("all-files")
             }
-            Button("Refresh all sessions", systemImage: "arrow.clockwise") { sessions.refresh() }
-            if SessionOverviewMonitor.shared.allowsSchedules(),
-               let storeId = model.storeDescriptors.first(where: { model.storeFilter == nil || $0.id == model.storeFilter })?.id {
-                NavigationLink { SchedulesView(storeId: storeId, project: nil) } label: {
-                    Label("Schedules", systemImage: "clock.badge.checkmark")
-                }
-                .accessibilityIdentifier("schedules-all")
-            }
         }
         .onAppear { if IntegrationSettings.enabled(IntegrationSettings.agentsKeepScreenOnKey, default: false) { UIApplication.shared.isIdleTimerDisabled = true } }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
@@ -154,6 +147,9 @@ struct LiveSessionsView: View {
         .refreshable { sessions.refresh() }
         .phrenActionSheet(isPresented: $showingMore, title: "Sessions", actions: moreActions,
                           identifier: "sessions-more-sheet")
+        .navigationDestination(item: $schedulesStoreID) { storeID in
+            SchedulesView(storeId: storeID, project: nil)
+        }
         .navigationDestination(item: $setupDestination) { destination in
             switch destination {
             case .skills: SkillsView()
@@ -216,6 +212,11 @@ struct LiveSessionsView: View {
         }
         if overview.screen.preferencesReadable {
             actions.append(.init(id: "add-computer", title: "Add computer", icon: "plus") { sessions.adding = true })
+        }
+        actions.append(.init(id: "refresh", title: "Refresh all sessions", icon: "arrow.clockwise") { sessions.refresh() })
+        if SessionOverviewMonitor.shared.allowsSchedules(),
+           let storeID = model.storeDescriptors.first(where: { model.storeFilter == nil || $0.id == model.storeFilter })?.id {
+            actions.append(.init(id: "schedules", title: "Schedules", icon: "clock.badge.checkmark") { schedulesStoreID = storeID })
         }
         return actions
     }
@@ -953,9 +954,9 @@ private struct LiveSessionCard: View, Equatable {
         .sessionCard()
         // ScrollView does not host native swipe actions. Preserve the overview's
         // swipe-to-close affordance without claiming vertical scrolling.
-        .simultaneousGesture(DragGesture(minimumDistance: 30).onEnded { value in
-            guard showHost, abs(value.translation.width) > abs(value.translation.height) else { return }
-            showingCloseAction = value.translation.width < 0
+        .contentShape(Rectangle())
+        .modifier(SessionCardSwipe(isEnabled: showHost) { reveal in
+            if showHost { showingCloseAction = reveal }
         })
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button("Close", systemImage: "xmark", role: .destructive) { onClose(.init(session: session, scope: .tab), false) }

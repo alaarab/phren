@@ -20,13 +20,41 @@ extension XCTestCase {
     /// now), so these tests go through the toolbar's More menu instead.
     @MainActor
     func openMemoryGraph(from app: XCUIApplication) {
-        let more = app.buttons["More"]
+        let more = app.buttons["projects-more"]
         XCTAssertTrue(more.waitForExistence(timeout: 8), "Projects toolbar offers More")
         more.tap()
-        // iOS exposes both the menu action and the obscured list shortcut.
-        let item = app.buttons.matching(NSPredicate(format: "label == %@", "Memory graph"))
-            .allElementsBoundByIndex.first { $0.isHittable }
-        XCTAssertNotNil(item, "More menu offers Memory graph")
-        item?.tap()
+        let graph = app.buttons["projects-more-sheet:graph"]
+        XCTAssertTrue(graph.waitForExistence(timeout: 5), "More offers Memory graph")
+        graph.tap()
+    }
+
+    @MainActor
+    func openSessionsAction(_ action: String, in app: XCUIApplication) {
+        let more = app.buttons["sessions-more"]
+        XCTAssertTrue(more.waitForExistence(timeout: 5))
+        more.tap()
+        let item = app.buttons["sessions-more-sheet:\(action)"]
+        XCTAssertTrue(item.waitForExistence(timeout: 5))
+        item.tap()
+    }
+
+    @MainActor
+    func waitForWorkflowStore(in app: XCUIApplication) {
+        let projects = app.tabBars.buttons["Projects"]
+        XCTAssertTrue(projects.waitForExistence(timeout: 8))
+        projects.tap()
+        XCTAssertTrue(app.buttons["project:sample/brain:demo"].waitForExistence(timeout: 15),
+                      "The workflow store must finish bootstrapping before testing Tasks")
+    }
+
+    @MainActor
+    func chooseTaskStatus(_ status: String, in app: XCUIApplication) {
+        let picker = app.descendants(matching: .any).matching(identifier: "tasks-status").firstMatch
+        XCTAssertTrue(picker.waitForExistence(timeout: 5))
+        picker.tap()
+        let option = app.buttons["tasks-status:\(status)"]
+        XCTAssertTrue(option.waitForExistence(timeout: 5))
+        option.tap()
+        XCTAssertTrue(option.waitForNonExistence(timeout: 5))
     }
 }

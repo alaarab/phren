@@ -40,7 +40,7 @@ struct ChatTranscriptRows: View, Equatable {
     var viewportHeight: CGFloat = 0
     let preview: (ChatAttachmentDraft) -> Void
     /// Rows more than two screens away that have a measured height draw as
-    /// placeholders; heights are learnt as rows pass near the viewport.
+    /// placeholders; the first layout measures every loaded row.
     @State private var distant: Set<String> = []
     @State private var heights: [String: CGFloat] = [:]
     static func == (lhs: Self, rhs: Self) -> Bool {
@@ -50,7 +50,10 @@ struct ChatTranscriptRows: View, Equatable {
     }
     var body: some View {
         ChatPerformance.measure("transcript rows") {
-            LazyVStack(alignment: .leading, spacing: PhrenDensity.transcriptRowSpacing) {
+            // Measure every loaded row before folding it. LazyVStack estimates
+            // unseen rows from the visible ones, which puts an uneven chat's
+            // bottom beyond its actual last reply.
+            VStack(alignment: .leading, spacing: PhrenDensity.transcriptRowSpacing) {
                 ForEach(entries) { entry in
                     ChatTranscriptRow(entry: entry, revealedText: revealed[entry.id], images: images[entry.id] ?? [],
                                       session: session, target: target, active: active, preview: preview,
@@ -70,8 +73,8 @@ struct ChatTranscriptRows: View, Equatable {
 
     /// Fold a row once it is two screens beyond the viewport and its height is
     /// known from an earlier pass; a row coming back inside is drawn in full
-    /// again. Heights only update while a row is near, so a placeholder never
-    /// feeds its own height back in.
+    /// again. Only materialized rows update their measurements, so a
+    /// placeholder never feeds its own height back in.
     private func measure(_ frames: [String: CGRect]) {
         guard viewportHeight > 0 else { return }
         let slack = viewportHeight * 2
@@ -79,8 +82,8 @@ struct ChatTranscriptRows: View, Equatable {
         var nextDistant = Set<String>()
         for (id, frame) in frames where !frame.isNull && frame.height > 0 {
             let far = frame.maxY < -slack || frame.minY > viewportHeight + slack
+            if !distant.contains(id) { nextHeights[id] = frame.height }
             if far, nextHeights[id] != nil { nextDistant.insert(id) }
-            else if !far { nextHeights[id] = frame.height }
         }
         if nextHeights != heights { heights = nextHeights }
         if nextDistant != distant { distant = nextDistant }

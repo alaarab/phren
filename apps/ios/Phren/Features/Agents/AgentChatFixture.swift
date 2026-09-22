@@ -81,7 +81,7 @@ import UIKit
     /// With `--chat-terminal-choices` the Hook read the command and option
     /// list, so the same prompt is asked as the question card.
     static func terminalPrompt(_ target: AgentChatTarget) -> AgentTerminalPrompt? {
-        guard flag("--chat-blocked"), !answered else { return nil }
+        guard flag("--chat-blocked"), !flag("--chat-password"), !answered else { return nil }
         let input: [String: Any] = ["command": "xcrun simctl list runtimes", "justification": "May I inspect the installed simulator runtimes to resolve the Watch target test failure?"]
         let choice = flag("--chat-terminal-choices") ? AgentPromptChoice(title: "Would you like to run the following command?", body: "xcrun simctl list runtimes",
             options: [.init(label: "Yes, proceed (y)", key: "y"),
@@ -90,7 +90,8 @@ import UIKit
         return AgentTerminalPrompt(toolName: "Shell", message: String(decoding: (try? JSONSerialization.data(withJSONObject: input, options: [.prettyPrinted, .sortedKeys])) ?? Data(), as: UTF8.self), choice: choice)
     }
     static func status(_ target: AgentChatTarget) throws -> AgentInteractionStatus {
-        var value: [String: Any] = ["source": target.source, "session": target.sessionID]
+        var value: [String: Any] = ["source": target.source, "session": target.sessionID,
+                                    "passwordPrompt": flag("--chat-password") && !answered]
         if flag("--chat-history-stalled") {
             value["historyStalled"] = true
             value["historyStalledSince"] = Date.now.addingTimeInterval(-2 * 3_600)
@@ -240,7 +241,7 @@ import UIKit
         let remote = flag("--agent-work-navigation") && session.host.id.uuidString.hasSuffix("000002")
         let agent = remote ? "codex" : launchedKind ?? (flag("--chat-opencode") ? "opencode" : flag("--chat-copilot") ? "copilot" : (trailer || flag("--chat-claude-queue") || flag("--chat-claude-image") || flag("--chat-read-images") || flag("--chat-approval-question") || flag("--chat-agent-card") || flag("--chat-todos") || flag("--chat-plan-mode") || flag("--chat-web-tools") || flag("--chat-skill-chip") || flag("--chat-mcp-card") || flag("--chat-compaction") || flag("--chat-density") || flag("--chat-model-picker") || (tour && flag("--chat-phren-tools"))) ? "claude" : "codex")
         var panes: [[String: Any]] = [["id": "\(session.workspaceID):p1", "label": "1", "title": tour ? "Ship the onboarding flow" : "Polish the phone app", "agent": agent,
-                                     "agentStatus": ((flag("--chat-blocked") || flag("--chat-approval") || flag("--chat-approval-question") || flag("--chat-plan-mode") || flag("--chat-question")) && !answered) ? "blocked" : (flag("--chat-queue-completion") || flag("--chat-history-stalled") || (flag("--chat-working") && !stopped) ? "working" : "idle"), "sessionId": remote ? "00000000-0000-0000-0000-000000000042" : agent == "copilot" ? "00000000-0000-0000-0000-000000000023" : agent == "opencode" ? "ses_fixtureopencode" : "fixture-\(agent)-session", "cwd": root]]
+                                     "agentStatus": ((flag("--chat-blocked") || flag("--chat-password") || flag("--chat-approval") || flag("--chat-approval-question") || flag("--chat-plan-mode") || flag("--chat-question")) && !answered) ? "blocked" : (flag("--chat-queue-completion") || flag("--chat-history-stalled") || (flag("--chat-working") && !stopped) ? "working" : "idle"), "sessionId": remote ? "00000000-0000-0000-0000-000000000042" : agent == "copilot" ? "00000000-0000-0000-0000-000000000023" : agent == "opencode" ? "ses_fixtureopencode" : "fixture-\(agent)-session", "cwd": root]]
         if flag("--starting-session-fixture") {
             panes[0]["startingToken"] = startingToken
             if startingAttachedAt == nil || Date.now < startingAttachedAt! {

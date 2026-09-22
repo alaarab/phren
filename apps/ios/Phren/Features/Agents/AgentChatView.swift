@@ -1664,11 +1664,6 @@ private struct ModernChatFollowScroll<Content: View>: View {
     /// the keyboard changes the container over several frames, and a pin
     /// resolved against the first of them lands short of, or past, the end.
     @State private var settlingUntil: Date?
-    /// The metrics a pin started from. An estimate jump is measured against
-    /// this, not the previous frame, so a run of small lazy-stack corrections
-    /// cannot add up to a target that was never real.
-    @State private var settlingBase: ChatScrollMetrics?
-
     var body: some View {
         content
             .scrollPosition($position)
@@ -1689,14 +1684,7 @@ private struct ModernChatFollowScroll<Content: View>: View {
                     // corrective check above already scrolled to it. Here the
                     // only question is whether the bottom just moved because
                     // the transcript grew.
-                    var target = ChatScrollMetrics.clamp(new.bottomOffset, in: new)
-                    if let base = settlingBase, ChatScrollMetrics.isEstimateJump(old: base, new: new) {
-                        // A lazy stack that suddenly claims many viewports more
-                        // than it had has not laid those rows out yet. Stop one
-                        // viewport past the bottom trusted before the jump and
-                        // let the corrected geometry pull the view down.
-                        target = ChatScrollMetrics.clamp(base.bottomOffset + new.viewportHeight, in: new)
-                    }
+                    let target = ChatScrollMetrics.clamp(new.bottomOffset, in: new)
                     if target > 0.5, abs(new.offsetY - target) > 0.5 { position.scrollTo(y: target) }
                     return
                 }
@@ -1717,13 +1705,11 @@ private struct ModernChatFollowScroll<Content: View>: View {
     private func apply(_ request: ChatPinRequest, to metrics: ChatScrollMetrics) {
         guard handledPinID != request.id, metrics.viewportHeight > 0.5 else { return }
         handledPinID = request.id
-        // A numeric target avoids ScrollViewReader resolving an estimated
-        // lazy-stack anchor beyond the real content; clamping holds it there
-        // even when the estimate is already too tall.
+        // Loaded rows and distant placeholders both have measured heights.
+        // Clamp the numeric target to that real end as the viewport changes.
         let target = ChatScrollMetrics.clamp(metrics.bottomOffset, in: metrics)
         guard target > 0.5 else { return }
         settlingUntil = .now + (request.animated ? 0.6 : 0.3)
-        settlingBase = metrics
         if request.animated {
             withAnimation { position.scrollTo(y: target) }
         } else {

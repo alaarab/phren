@@ -5,7 +5,7 @@ final class WorkflowTests: XCTestCase {
     /// it is in the tree. Never swipe down: the list pulls to refresh at the
     /// top.
     private func reveal(_ element: XCUIElement, in app: XCUIApplication, attempts: Int = 8) {
-        for _ in 0..<attempts where !element.exists { app.swipeUp() }
+        for _ in 0..<attempts where !element.isHittable { app.swipeUp() }
     }
 
     @MainActor
@@ -53,13 +53,14 @@ final class WorkflowTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--workflow-fixture"]
         app.launch()
+        waitForWorkflowStore(in: app)
         XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 8))
         XCTAssertFalse(app.tabBars.buttons["Review"].exists)
         app.tabBars.buttons["Tasks"].tap()
         app.buttons["tasks-status"].tap()
         app.buttons["tasks-status:active"].tap()
         // Active work lives in api; demo's backlog rows stay out of the way.
-        XCTAssertTrue(app.buttons["tasks-section-toggle:api"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "tasks-section-toggle:api").firstMatch.waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["task-detail:sample/brain/demo/dead0001"].exists)
         attachUIScreenshot(app, "Calm active tasks state")
         app.buttons["tasks-status"].tap()
@@ -70,10 +71,17 @@ final class WorkflowTests: XCTestCase {
         let all = app.buttons["tasks-section-all"]
         XCTAssertTrue(all.exists)
         XCTAssertLessThan(all.frame.minY - app.buttons["tasks-status"].frame.maxY, 32)
-        let group = app.buttons["tasks-section-toggle:demo"]
+        let group = app.descendants(matching: .any).matching(identifier: "tasks-section-toggle:demo").firstMatch
         XCTAssertTrue(group.exists)
-        XCTAssertLessThan(group.frame.minY, app.buttons["tasks-section-toggle:api"].frame.minY,
+        // Compare both headers on screen, without asking an off-screen
+        // List row for a frame. Folding does not change project order.
+        group.tap()
+        let api = app.descendants(matching: .any).matching(identifier: "tasks-section-toggle:api").firstMatch
+        XCTAssertTrue(api.waitForExistence(timeout: 5))
+        XCTAssertLessThan(group.frame.minY, api.frame.minY,
                           "Backlog orders sections by queue count (demo 6, api 2)")
+        group.tap()
+        XCTAssertTrue(long.waitForExistence(timeout: 5))
         XCTAssertLessThan(group.frame.minY, long.frame.minY)
         XCTAssertLessThan(long.frame.minY - group.frame.maxY, 32)
         attachUIScreenshot(app, "Scannable backlog with full task details on demand")
@@ -83,11 +91,11 @@ final class WorkflowTests: XCTestCase {
         app.navigationBars["Task details"].buttons.element(boundBy: 0).tap()
         app.buttons["tasks-status"].tap()
         app.buttons["tasks-status:active"].tap()
-        XCTAssertTrue(app.buttons["tasks-section-toggle:api"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "tasks-section-toggle:api").firstMatch.waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["task-detail:sample/brain/demo/dead0001"].exists)
         app.tabBars.buttons["Settings"].tap()
         app.tabBars.buttons["Tasks"].tap()
-        XCTAssertTrue(app.buttons["tasks-section-toggle:api"].waitForExistence(timeout: 5),
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "tasks-section-toggle:api").firstMatch.waitForExistence(timeout: 5),
                       "Tasks remembers the chosen workload view")
     }
 
@@ -98,6 +106,7 @@ final class WorkflowTests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.tabBars.buttons["Tasks"].waitForExistence(timeout: 8))
         app.tabBars.buttons["Tasks"].tap()
+        chooseTaskStatus("backlog", in: app)
         let task = app.buttons["task-detail:sample/brain/demo/dead0001"]
         XCTAssertTrue(task.waitForExistence(timeout: 8)); task.tap()
         XCTAssertTrue(app.navigationBars["Task details"].waitForExistence(timeout: 5))
@@ -131,6 +140,7 @@ final class WorkflowTests: XCTestCase {
         app.launchArguments = ["--ui-testing", "--workflow-fixture", "--automatic-sessions-fixture", "--native-chat-fixture", "--chat-send-fails"]
         app.launch()
         XCTAssertTrue(app.tabBars.buttons["Tasks"].waitForExistence(timeout: 8)); app.tabBars.buttons["Tasks"].tap()
+        chooseTaskStatus("backlog", in: app)
         let task = app.buttons["task-detail:sample/brain/demo/dead0001"]
         XCTAssertTrue(task.waitForExistence(timeout: 8)); task.tap()
         XCTAssertTrue(app.navigationBars["Task details"].waitForExistence(timeout: 5))
@@ -156,6 +166,7 @@ final class WorkflowTests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.tabBars.buttons["Tasks"].waitForExistence(timeout: 8))
         app.tabBars.buttons["Tasks"].tap()
+        chooseTaskStatus("backlog", in: app)
         XCTAssertFalse(app.segmentedControls.buttons["Backlog"].exists)
         XCTAssertFalse(app.textFields["task-search-field"].exists)
         let status = app.buttons["tasks-status"]
@@ -181,8 +192,11 @@ final class WorkflowTests: XCTestCase {
         XCTAssertFalse(search.exists)
 
         app.buttons["task-filters"].tap()
-        if app.buttons["Created"].exists { app.buttons["Created"].tap() }
-        app.buttons["Date unknown"].tap()
+        let unknownDate = app.buttons["task-filters-sheet:age-Date unknown"]
+        let filters = app.scrollViews["task-filters-sheet:scroll"]
+        for _ in 0..<8 where !unknownDate.isHittable { filters.swipeUp() }
+        XCTAssertTrue(unknownDate.isHittable)
+        unknownDate.tap()
         let unknown = app.buttons["task-detail:sample/brain/demo/dead0003"]
         XCTAssertTrue(unknown.waitForExistence(timeout: 5))
         XCTAssertFalse(recent.exists)
@@ -192,15 +206,14 @@ final class WorkflowTests: XCTestCase {
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Date unknown")).firstMatch.waitForExistence(timeout: 3))
         app.navigationBars["Task details"].buttons.element(boundBy: 0).tap()
         app.buttons["task-filters"].tap()
-        app.buttons["Clear filters"].tap()
+        tapTaskFilter("clear", in: app)
         app.buttons["task-filters"].tap()
-        if app.buttons["Priority"].exists { app.buttons["Priority"].tap() }
-        app.buttons["High"].tap()
+        tapTaskFilter("priority-high", in: app)
         XCTAssertTrue(old.waitForExistence(timeout: 5))
         XCTAssertFalse(recent.exists)
         attachUIScreenshot(app, "Compact task controls, creation dates and priority filtering")
         app.buttons["task-filters"].tap()
-        app.buttons["Clear filters"].tap()
+        tapTaskFilter("clear", in: app)
         app.buttons["task-sort"].tap()
         app.buttons["Task order"].tap()
     }
@@ -212,6 +225,7 @@ final class WorkflowTests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.tabBars.buttons["Tasks"].waitForExistence(timeout: 8))
         app.tabBars.buttons["Tasks"].tap()
+        chooseTaskStatus("backlog", in: app)
         let first = app.buttons["task-detail:sample/brain/demo/dead0001"]
         let second = app.buttons["task-detail:team/brain/demo/dead0001"]
         XCTAssertTrue(first.waitForExistence(timeout: 5))
@@ -246,6 +260,15 @@ final class WorkflowTests: XCTestCase {
         XCTAssertFalse(second.exists)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Created Jan 1, 2026")).firstMatch.exists)
         attachUIScreenshot(app, "Compact active workload after bulk moves and quick Start")
+    }
+
+    @MainActor
+    private func tapTaskFilter(_ id: String, in app: XCUIApplication) {
+        let option = app.buttons["task-filters-sheet:\(id)"]
+        let scroll = app.scrollViews["task-filters-sheet:scroll"]
+        for _ in 0..<8 where !option.isHittable { scroll.swipeUp() }
+        XCTAssertTrue(option.isHittable)
+        option.tap()
     }
 
     @MainActor

@@ -113,7 +113,7 @@ final class AllSessionsTests: XCTestCase {
 
         let linuxIdle = row(app, host: linux, tab: "w1:t2")
         let macIdle = row(app, host: mac, tab: "w1:t2")
-        if !macIdle.isHittable { app.collectionViews.firstMatch.swipeUp() }
+        if !macIdle.isHittable { app.scrollViews["sessions-scroll"].swipeUp() }
         XCTAssertTrue(linuxIdle.exists); XCTAssertTrue(macIdle.exists)
         XCTAssertGreaterThanOrEqual(macIdle.frame.minY - linuxIdle.frame.maxY, 6,
                                    "Cards in the same section need visible space between them")
@@ -159,7 +159,7 @@ final class AllSessionsTests: XCTestCase {
         XCTAssertEqual(pin(app, host: linux).label, "Pin session")
         pin(app, host: linux).tap()
         XCTAssertTrue(section(app, title: "Pinned").waitForExistence(timeout: 5))
-        app.buttons["Refresh all sessions"].tap()
+        openSessionsAction("refresh", in: app)
         let disabled = NSPredicate(format: "enabled == false")
         expectation(for: disabled, evaluatedWith: offline)
         waitForExpectations(timeout: 15)
@@ -174,15 +174,14 @@ final class AllSessionsTests: XCTestCase {
         let app = launch(extra: ["--all-sessions-offline"])
         let first = row(app, host: mac), second = row(app, host: linux)
         XCTAssertTrue(first.waitForExistence(timeout: 10)); XCTAssertTrue(second.waitForExistence(timeout: 10))
-        let search = app.searchFields.firstMatch
-        if !search.isHittable { app.collectionViews.firstMatch.swipeDown() }
+        let search = app.textFields["sessions-search"]
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        if !search.isHittable { app.scrollViews["sessions-scroll"].swipeDown() }
         search.tap(); search.typeText("Test Linux")
         XCTAssertTrue(second.waitForExistence(timeout: 5)); XCTAssertFalse(first.exists)
-        let clear = search.buttons.firstMatch
-        if clear.exists { clear.tap() } else { search.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 10)) }
-        if app.buttons["Close"].exists { app.buttons["Close"].tap() }
-        else { app.buttons["Cancel"].tap() }
-        app.buttons["Refresh all sessions"].tap()
+        app.buttons["sessions-search:clear"].tap()
+        XCTAssertTrue(first.waitForExistence(timeout: 5))
+        openSessionsAction("refresh", in: app)
         let lastSeen = app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "Last seen")).firstMatch
         XCTAssertTrue(lastSeen.waitForExistence(timeout: 15))
         XCTAssertTrue(first.isEnabled); XCTAssertFalse(second.isEnabled)
@@ -209,7 +208,10 @@ final class AllSessionsTests: XCTestCase {
         let app = launch()
         let target = row(app, host: mac, tab: "w1:t2"), neighbour = row(app, host: mac, tab: "w1:t1"), other = row(app, host: linux, tab: "w1:t2")
         XCTAssertTrue(target.waitForExistence(timeout: 15)); XCTAssertTrue(neighbour.exists); XCTAssertTrue(other.exists)
+        for _ in 0..<6 where !target.isHittable { app.scrollViews["sessions-scroll"].swipeUp() }
+        XCTAssertTrue(target.isHittable)
         target.swipeLeft()
+        XCTAssertFalse(app.buttons["chat-close"].exists, "Swiping must not open the conversation")
         let close = app.buttons["overview-close:\(mac):herdr:default:w1:w1:t2"]
         XCTAssertTrue(close.waitForExistence(timeout: 5)); close.tap()
         XCTAssertTrue(target.waitForNonExistence(timeout: 3), "The closed card leaves without a refresh")

@@ -187,7 +187,9 @@ final class LiveSessionsTests: XCTestCase {
     func testSessionSwipeStillOffersCloseInCustomScrollLayout() {
         let app = launchLayout(count: 1)
         let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "overview-chat:")).firstMatch
+        XCTAssertTrue(card.isHittable)
         card.swipeLeft()
+        XCTAssertFalse(app.buttons["chat-close"].exists, "Swiping must not open the conversation")
         let close = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "overview-close:")).firstMatch
         XCTAssertTrue(close.waitForExistence(timeout: 5))
         capture(app, "Sessions swipe close")

@@ -528,6 +528,7 @@ final class AgentChatModel {
                         approval = try AgentChatFixture.approval(target)
                         terminalPrompt = AgentChatFixture.terminalPrompt(target)
                         let status = try AgentChatFixture.status(target)
+                        passwordPrompt = status.passwordPrompt
                         historyStalled = status.historyStalled; historyStalledSince = status.historyStalledSince
                         if !ProcessInfo.processInfo.arguments.contains("--chat-streaming") {
                             acceptActivity(try AgentChatFixture.panes(session).validate(target).agentStatus)

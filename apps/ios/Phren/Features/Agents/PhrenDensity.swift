@@ -22,7 +22,7 @@ enum PhrenDensity {
     static let changesBandHeight: CGFloat = 40
     static let changesIconTabHeight: CGFloat = 32
     /// The Working tree row and its indent per level.
-    static let treeRowHeight: CGFloat = 40
+    static let treeRowHeight: CGFloat = 32
     static let treeIndent: CGFloat = 12
 
     /// A collapsed tool row plus the transcript gap that follows it.

@@ -21,6 +21,17 @@ number counts up on its own.
 
 ### Fixed
 
+- A horizontal session swipe cancels the card tap instead of opening chat; vertical scrolling stays available.
+- Task fold controls retain their button trait alongside the section heading trait.
+- Terminal shortcut settings has a stable accessibility identifier.
+
+- Task section headers keep their fold button and count marker as separate accessibility elements.
+- Swiping a session reveals or hides Close as soon as the horizontal gesture is recognized.
+- Sessions keeps Refresh all sessions and Schedules reachable in More when the navigation bar is full.
+- Terminal shortcut commands and their actions have separate tap targets, so tapping a command sends it and honors the close-after-shortcut setting.
+- Uneven chats lay out their real end on open and retain measured heights when distant rows fold into placeholders.
+- Working tree rows return to the compact 32-point density while keeping folder counts and symbol chips.
+
 - All four project controls use equal columns, an icon above a single-line title, and a 52-point band with space below the inline navigation title.
 - Chat permissions use the provider question header and ordered radio options, including conductor grants. Terminal access stays in the header, and action details use Phren's disclosure.
 - SSH upload errors show a readable explanation and the SSH error type. Attachment requests flush bounded chunks, and a complete response remains successful if the channel reports a later failure.
@@ -74,7 +85,7 @@ and scrolls again.
 - Chat, tool cards and Changes are denser: the floating header sits 4 points
   under the safe area, the composer 4 above the home indicator, transcript
   rows 6 apart, and expanded tool cards use 8-point padding with 4 between
-  rows. Changes list rows are 44 points, Working tree rows 40 with a 12-point
+  rows. Changes list rows are 44 points, Working tree rows 32 with a 12-point
   indent per level, and the section band is 40 with 32-point icon tabs.
 - A heavy transcript stays quick to swipe: rows more than two screens from the
   viewport keep only their identifier and label at their measured height

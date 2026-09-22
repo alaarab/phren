@@ -10,8 +10,9 @@ final class WhatsNewTests: XCTestCase {
         app.launch()
         let sheet = app.navigationBars.matching(NSPredicate(format: "identifier BEGINSWITH %@", "What's new in ")).firstMatch
         XCTAssertTrue(sheet.waitForExistence(timeout: 15))
-        XCTAssertTrue(app.staticTexts["NEW"].exists)
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Grants:")).firstMatch.exists)
+        XCTAssertEqual(sheet.identifier, "What's new in 1.0.3")
+        XCTAssertTrue(app.staticTexts["CHANGED"].firstMatch.exists)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "The working tree keeps expanded folders")).firstMatch.exists)
         app.buttons["whats-new-done"].tap()
         XCTAssertFalse(sheet.waitForExistence(timeout: 1))
         app.tabBars.buttons["Settings"].tap()

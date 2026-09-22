@@ -147,6 +147,7 @@ struct SkillEditorView: View {
                                 get: { enabled },
                                 set: { value in Task { await toggle(current, enabled: value) } }
                             ))
+                            .accessibilityIdentifier("skill-enabled")
                             .disabled(busy || !model.canPush(storeId: entry.storeId))
                         } else {
                             LabeledContent("Availability", value: "Computer settings")

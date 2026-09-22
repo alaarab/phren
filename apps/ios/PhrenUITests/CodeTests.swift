@@ -26,7 +26,10 @@ final class CodeTests: XCTestCase {
         row.tap()
         let dossier = app.descendants(matching: .any).matching(identifier: "code-dossier").firstMatch
         XCTAssertTrue(dossier.waitForExistence(timeout: 8))
-        XCTAssertTrue(app.staticTexts["code-dossier-snippet"].waitForExistence(timeout: 5), "the definition snippet is shown")
+        XCTAssertTrue(app.descendants(matching: .any)["code-dossier-snippet"].firstMatch.waitForExistence(timeout: 5), "the definition snippet is shown")
+        let definition = app.buttons["code-line:5"]
+        XCTAssertTrue(definition.exists)
+        XCTAssertTrue(definition.label.contains("export class Point"), "The snippet contains the selected symbol's definition")
         XCTAssertTrue(app.staticTexts["code-dossier-blame"].exists, "the last change line is shown")
         capture(app, "Code dossier")
     }

@@ -43,9 +43,7 @@ final class SchedulesListTests: XCTestCase {
         XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 8))
         app.tabBars.buttons["Agents"].tap()
 
-        let all = app.buttons["schedules-all"]
-        XCTAssertTrue(all.waitForExistence(timeout: 5))
-        all.tap()
+        openSessionsAction("schedules", in: app)
 
         let daily = row(app, "7f3a2c1d")
         let weekly = row(app, "8a4b3c2d")

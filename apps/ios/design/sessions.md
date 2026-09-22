@@ -15,8 +15,9 @@ The screen contains:
 - Add computer below those rows and in More so a long session list does not
   bury the action.
 - A toolbar More action sheet containing Skills and Agent instructions, or
-  Connect memory when memory is disconnected. Existing usage, refresh,
-  schedules and enabled computer-tool shortcuts retain their destinations.
+  Connect memory when memory is disconnected. Refresh all sessions
+  and Schedules also live in More so a full navigation bar cannot hide them.
+  Usage and enabled computer-tool shortcuts retain their destinations.
 
 Rule: sessions lead the screen. Setup belongs in More, never in a second
 Agent setup group. Computers stay visible below sessions and open in one tap;
@@ -50,3 +51,10 @@ passed syntax parsing. Build-for-testing stopped before app compilation at
 the denied SwiftPM manifest cache write, including a retry with scratch-local
 module caches. LiveSessionsTests and LiveSessionsModelTests still need the
 iOS build and simulator run. No before or after screenshots were produced.
+
+## Card gestures
+
+A horizontal swipe reveals Close without opening chat; swiping right hides
+it. The card uses a direction-gated pan recognizer that cancels its tap.
+Vertical gestures remain with the sessions scroll view. Swipe Close still
+removes only that computer's tab immediately, without confirmation.

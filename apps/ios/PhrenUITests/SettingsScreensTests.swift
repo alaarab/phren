@@ -10,33 +10,41 @@ final class SettingsScreensTests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.tabBars.buttons["Settings"].waitForExistence(timeout: 8))
         app.tabBars.buttons["Settings"].tap()
+        func visible(_ row: XCUIElement) -> Bool {
+            // Lazy form rows can exist before they have a frame. Asking those
+            // rows for hittability raises an XCTest hit-point failure.
+            row.exists && !row.frame.isEmpty && row.isHittable
+        }
         func open(_ id: String, title: String) {
-            let row = app.descendants(matching: .any).matching(identifier: id).firstMatch
-            for _ in 0..<4 where !row.exists || !row.isHittable { app.swipeUp() }
-            XCTAssertTrue(row.waitForExistence(timeout: 5), id); row.tap()
+            let row = app.buttons[id]
+            for _ in 0..<12 {
+                if visible(row) { break }
+                app.swipeUp()
+            }
+            guard visible(row) else { XCTFail("Settings row is not visible: \(id)"); return }
+            row.tap()
             XCTAssertTrue(app.navigationBars[title].waitForExistence(timeout: 5), title)
         }
-        // The value comes back as "1" or 1 depending on the element; poll it.
         func isOn(_ element: XCUIElement) -> Bool {
-            for _ in 0..<25 { if String(describing: element.value ?? "") == "1" { return true }; Thread.sleep(forTimeInterval: 0.2) }
-            return false
+            XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "value == 'On'"), object: element
+            )], timeout: 5) == .completed
         }
-        // A SwiftUI Toggle's centre is its label; the switch sits at the trailing
-        // edge, and its value follows the animation.
         func turnOn(_ id: String) {
-            let toggle = app.switches[id]
-            XCTAssertTrue(toggle.waitForExistence(timeout: 3), id)
-            // The row is the identified switch; the control is its inner switch.
-            // The inner control usually takes the tap; when the hit lands on
-            // the row instead, a second tap at the switch's edge does.
-            let control = toggle.switches.firstMatch
-            control.tap()
-            var on = false
-            for _ in 0..<10 where !on { Thread.sleep(forTimeInterval: 0.2); on = String(describing: control.value ?? "") == "1" || String(describing: toggle.value ?? "") == "1" }
-            if !on { toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap() }
-            XCTAssertTrue(isOn(control) || isOn(toggle), id)
+            let control = app.descendants(matching: .any)[id].firstMatch
+            XCTAssertTrue(control.waitForExistence(timeout: 3), id)
+            if control.value as? String != "On" { control.tap() }
+            XCTAssertTrue(isOn(control), id)
         }
-        func back() { app.navigationBars.buttons.firstMatch.tap(); for _ in 0..<3 where !app.descendants(matching: .any)["settings-theme"].exists { app.swipeDown() } }
+        func back() {
+            app.navigationBars.buttons.firstMatch.tap()
+            let theme = app.buttons["settings-theme"]
+            for _ in 0..<12 {
+                if visible(theme) { break }
+                app.swipeDown()
+            }
+            XCTAssertTrue(visible(theme), "Back returns to the top of Settings")
+        }
 
         open("settings-fonts", title: "Fonts & Size")
         let stepper = app.steppers["font-size-stepper"]
@@ -62,9 +70,9 @@ final class SettingsScreensTests: XCTestCase {
         back()
 
         open("settings-gestures", title: "Gestures")
-        let pinch = app.switches["gesture-pinch"]
+        let pinch = app.descendants(matching: .any)["gesture-pinch"].firstMatch
         XCTAssertTrue(pinch.waitForExistence(timeout: 3))
-        XCTAssertEqual(pinch.value as? String, "1")
+        XCTAssertEqual(pinch.value as? String, "On")
         back()
 
         open("settings-speech", title: "Speech")
@@ -83,9 +91,9 @@ final class SettingsScreensTests: XCTestCase {
         app.terminate(); app.launch()
         app.tabBars.buttons["Settings"].tap()
         open("settings-terminal-advanced", title: "Advanced")
-        let kept = app.switches["terminal-keep-screen-on"]
+        let kept = app.descendants(matching: .any)["terminal-keep-screen-on"].firstMatch
         XCTAssertTrue(kept.waitForExistence(timeout: 3))
-        XCTAssertTrue(isOn(kept.switches.firstMatch))
+        XCTAssertTrue(isOn(kept))
         XCTAssertEqual(app.descendants(matching: .any)["terminal-cursor-style"].firstMatch.value as? String, "▁ Underline")
     }
 

@@ -197,7 +197,7 @@ private struct TerminalShortcutMenu: View {
     /// A tapped shortcut sends and closes the panel, the way a menu item
     /// does; turn it off to fire several in a row.
     @AppStorage("terminal.closeAfterShortcut.v1") private var closeAfterShortcut = true
-    @ScaledMetric(relativeTo: .caption) private var tileWidth = 100.0
+    @ScaledMetric(relativeTo: .caption) private var tileWidth = 88.0
     private var preferences: TerminalShortcutPreferences { storage.preferences }
     private var selected: TerminalShortcutPanel { preferences.selectedPanel(preferred: tab, source: source) }
 
@@ -214,9 +214,9 @@ private struct TerminalShortcutMenu: View {
                         Text("Add a shortcut here, or hold a shortcut in another panel to add it to Favorites.")
                             .font(.caption).foregroundStyle(PhrenTheme.textMuted).padding()
                     }
-                    // Four to a row, each the command and one short hint —
-                    // dense enough to take in at a glance; hold one to edit it.
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 4), spacing: 6) {
+                    // Fit as many tiles as the popover allows while reserving
+                    // separate 44-point targets for the command and its actions.
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: tileWidth), spacing: 6)], spacing: 6) {
                         ForEach(selected.active) { shortcut in shortcutTile(shortcut) }
                     }
                 }.frame(maxHeight: 200)
@@ -266,8 +266,10 @@ private struct TerminalShortcutMenu: View {
             Button { settings.toggle() } label: { Image(systemName: "slider.horizontal.3").frame(width: 40, height: 44) }
                 .accessibilityLabel("Terminal gestures")
                 .accessibilityHint("Gesture options and shortcut customization")
+                .accessibilityIdentifier("terminal-shortcut-settings")
             Button(action: close) { Image(systemName: "xmark").frame(width: 40, height: 44) }
                 .accessibilityLabel("Close shortcuts")
+                .accessibilityIdentifier("terminal-shortcut-close")
         }
     }
 
@@ -286,29 +288,32 @@ private struct TerminalShortcutMenu: View {
     }
 
     private func shortcutTile(_ shortcut: TerminalShortcut) -> some View {
-        Button { run(shortcut) } label: {
-            VStack(spacing: 3) {
-                HStack(spacing: 4) {
-                    if !shortcut.symbol.isEmpty { Image(systemName: shortcut.symbol).font(.caption).foregroundStyle(PhrenTheme.cyan) }
-                    Text(shortcut.displayLabel).font(.system(size: 13, weight: .medium, design: .monospaced)).lineLimit(1).minimumScaleFactor(0.7)
+        HStack(spacing: 0) {
+            Button { run(shortcut) } label: {
+                VStack(spacing: 3) {
+                    HStack(spacing: 4) {
+                        if !shortcut.symbol.isEmpty { Image(systemName: shortcut.symbol).font(.caption).foregroundStyle(PhrenTheme.cyan) }
+                        Text(shortcut.displayLabel).font(.system(size: 13, weight: .medium, design: .monospaced)).lineLimit(1).minimumScaleFactor(0.7)
+                    }
+                    if !shortcut.hint.isEmpty {
+                        Text(Self.shortHint(shortcut.hint, command: shortcut.displayLabel)).font(.caption2).foregroundStyle(PhrenTheme.textMuted).lineLimit(1)
+                    }
                 }
-                if !shortcut.hint.isEmpty {
-                    Text(Self.shortHint(shortcut.hint, command: shortcut.displayLabel)).font(.caption2).foregroundStyle(PhrenTheme.textMuted).lineLimit(1)
-                }
-            }.frame(maxWidth: .infinity, minHeight: 50).padding(.horizontal, 4).padding(.vertical, 6)
-                .padding(.trailing, 40)
+                .padding(.horizontal, 4).padding(.vertical, 6)
+                .frame(minWidth: 44, maxWidth: .infinity, minHeight: 62)
                 .background(PhrenTheme.surface.opacity(0.45), in: RoundedRectangle(cornerRadius: 12))
-        }.accessibilityIdentifier(shortcut.id.contains(":/") ? "terminal-command:" + shortcut.id : "terminal-shortcut:" + shortcut.id)
+                .contentShape(Rectangle())
+            }
+            .accessibilityIdentifier(shortcut.id.contains(":/") ? "terminal-command:" + shortcut.id : "terminal-shortcut:" + shortcut.id)
             .accessibilityLabel(shortcut.kind == .action && ["photos", "camera", "files"].contains(shortcut.value)
                                 ? "Attach from " + shortcut.displayLabel
                                 : shortcut.displayLabel + (shortcut.hint.isEmpty ? "" : ", " + shortcut.hint))
             .disabled(!enabled || sequenceTask != nil || (shortcut.kind == .action && shortcut.value == "camera" && !UIImagePickerController.isSourceTypeAvailable(.camera)))
             .disabled(storage.saved == nil)
-            .overlay(alignment: .trailing) {
-                PhrenIconButton(icon: "ellipsis", label: "Shortcut actions") { actionShortcut = shortcut }
-                    .phrenIdentifier(shortcut.id.contains(":/") ? "terminal-command-actions:" + shortcut.id : "terminal-shortcut-actions:" + shortcut.id)
-                    .disabled(storage.saved == nil)
-            }
+            PhrenIconButton(icon: "ellipsis", label: "Shortcut actions") { actionShortcut = shortcut }
+                .phrenIdentifier(shortcut.id.contains(":/") ? "terminal-command-actions:" + shortcut.id : "terminal-shortcut-actions:" + shortcut.id)
+                .disabled(storage.saved == nil)
+        }
     }
 
     private var shortcutActions: [PhrenControlAction] {
@@ -406,6 +411,7 @@ private struct TerminalGestureSettings: View {
             PhrenSwitch("Close panel after a shortcut", isOn: $closeAfterShortcut).font(.subheadline).tint(PhrenTheme.cyan)
                 .accessibilityIdentifier("terminal-close-after-shortcut")
             PhrenSwitch("Two-finger gestures", isOn: $enabled).font(.subheadline).tint(PhrenTheme.cyan)
+                .accessibilityIdentifier("terminal-two-finger-gestures")
             Text("Swipe up with two fingers for shortcuts. Swipe down with two fingers to hide the keyboard.")
             Text("Swipe with one finger to scroll. Pinch to resize. Hold to select text. Tap controls and links to open them.")
                 .foregroundStyle(PhrenTheme.textMuted)

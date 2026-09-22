@@ -21,7 +21,7 @@ final class ChatDensityTests: XCTestCase {
         XCTAssertEqual(PhrenDensity.changesRowHeight, 44)
         XCTAssertEqual(PhrenDensity.changesBandHeight, 40)
         XCTAssertEqual(PhrenDensity.changesIconTabHeight, 32)
-        XCTAssertEqual(PhrenDensity.treeRowHeight, 40)
+        XCTAssertEqual(PhrenDensity.treeRowHeight, 32)
         XCTAssertEqual(PhrenDensity.treeIndent, 12)
     }
 

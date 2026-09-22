@@ -216,7 +216,9 @@ final class GraphInteractionTests: XCTestCase {
         app.launch()
         openMemoryGraph(from: app)
         app.buttons["Store: sample/brain"].tap()
-        app.buttons["team/brain"].tap()
+        let team = app.buttons["graph-store:team/brain"]
+        XCTAssertTrue(team.waitForExistence(timeout: 5))
+        team.tap()
         XCTAssertTrue(app.buttons["Store: team/brain"].waitForExistence(timeout: 5))
         app.buttons["Graph options"].tap()
         app.buttons["Saved views"].tap()
@@ -238,13 +240,11 @@ final class GraphInteractionTests: XCTestCase {
         let enable = app.buttons["Enable on linked computers"]
         XCTAssertTrue(enable.waitForExistence(timeout: 5))
         enable.tap()
-        let toggle = app.switches["Enabled for agents"]
+        let toggle = app.descendants(matching: .any)["skill-enabled"].firstMatch
         XCTAssertTrue(toggle.waitForExistence(timeout: 5))
-        XCTAssertEqual(toggle.value as? String, "1")
-        // SwiftUI exposes the whole row and the control as separate switches.
-        // Target the visible control rather than the label's center.
-        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
-        let disabled = NSPredicate(format: "value == '0'")
+        XCTAssertEqual(toggle.value as? String, "On")
+        toggle.tap()
+        let disabled = NSPredicate(format: "value == 'Off'")
         expectation(for: disabled, evaluatedWith: toggle)
         waitForExpectations(timeout: 5)
     }
