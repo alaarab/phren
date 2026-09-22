@@ -105,7 +105,7 @@ state is not applicable.
 
 Accessibility: contained row Buttons, individual selected/disabled traits.
 `identifier` is a prefix; children are `prefix:option.id`, for example
-`knob-findingSensitivity:inherit`. A PhrenGroup header names the choice.
+`controls-single:diff`. A PhrenGroup header names the choice.
 Dynamic Type follows the wrapping row; the group grows vertically.
 
 ## PhrenMultiOptionGroup<Value: Hashable>
@@ -530,7 +530,7 @@ and presentation at Large and AX5 with Reduce Motion, and exercises selection,
 disabled rows, sheet-to-dialog handoff, drag/backdrop dismissal and 44-point
 row targets. Screenshots are retained as test attachments.
 
-The orchestrator must build and run these tests and the existing ProjectKnobs
+The orchestrator must build and run these tests and the existing Knobs
 and ScheduleEditor UI tests. Inspect the resulting screenshots on a narrow
 phone, then check VoiceOver focus/escape and keyboard-open field layouts.
 Swift, xcodebuild and simulator tests cannot be run in the implementation

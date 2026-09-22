@@ -68,6 +68,10 @@ lock screen and Changes screen done properly.
   open work first. Headers show the project's colour with Active and Queue
   counts as chips, tapping a header folds that section, and All folds or
   unfolds every section. Folds are remembered.
+- The Knobs screen is a plain list like the others: category headers over
+  session cards, each knob one row with a caption and a phren drop-down for
+  its value, and a Reset row at the bottom that clears every override after
+  a confirmation.
 - The schedule editor, the chat /model picker and the launch computer chooser pick
   from phren's own drop-down rows instead of long option lists.
 - Account usage is rebuilt around what each source means: one updated line with the
