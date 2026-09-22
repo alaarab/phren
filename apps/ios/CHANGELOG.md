@@ -6,6 +6,30 @@ Settings → About. `scripts/changelog.py` refuses to build a version that has n
 section here; the version is `MARKETING_VERSION` in `project.yml`, the build
 number counts up on its own.
 
+## 1.0.3
+
+The Tasks tab filters open from done, and the Memory list shows its projects
+and scrolls again.
+
+### New
+
+- Tasks: the filter line leads with an Open versus Done status drop-down:
+  Open (Active plus Queue, the default), Active, Backlog, Done and All,
+  remembered across launches. Project count chips and section order follow
+  the choice, both Select all and the bulk moves work on the filtered rows,
+  and done rows draw muted with a checkmark and their done date.
+
+### Fixed
+
+- Memory list rows: the project chip is back whenever the filter is not a single
+  project, tasks keep their Active/Backlog/Done chip and date, and a row with
+  nothing for the meta line no longer leaves a blank band under its text.
+- The Memory list with a few hundred rows scrolls again: filtering, grouping
+  and counts are computed only when the rows or filters change, each row
+  redraws only when its own content changes, the highlight is drawn on the
+  highlighted row alone, and scrolling to a row runs only when a new target
+  arrives.
+
 ## 1.0.2
 
 A patch with the conductor's grants, the Code screen, grouped tasks, and a

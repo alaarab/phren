@@ -70,7 +70,7 @@ enum UITestFixtures {
             if cleaned != data { defaults.set(cleaned, forKey: preferencesKey) }
         }
         if arguments.contains("--workflow-fixture") {
-            defaults.set("Queue", forKey: "tasks.section.v1")
+            defaults.set("open", forKey: "tasks.status")
             defaults.set("Task order", forKey: "tasks.sort.v1")
             // Folded task sections live in AppStorage; start each workflow
             // launch fully open unless a test relaunched to check persistence.
@@ -88,7 +88,10 @@ enum UITestFixtures {
         // Memory: the primary store carries three projects' worth of findings,
         // notes and tasks and syncs; the team store keeps the demo content
         // and never syncs, so the panel header shows one stale store.
-        let memory = arguments.contains("--memory-fixture")
+        // `--memory-fixture-large` grows it to 600 tasks across 6 projects so
+        // a long list can be exercised (and the scroll load reproduced).
+        let memory = arguments.contains("--memory-fixture") || arguments.contains("--memory-fixture-large")
+        let memoryLarge = arguments.contains("--memory-fixture-large")
         // Each UI test starts from the same map mode and unfiltered scope, so
         // the remembered Memory settings never leak between tests.
         defaults.removeObject(forKey: "memory.mode.v1")
@@ -104,7 +107,7 @@ enum UITestFixtures {
             } else if tour {
                 try await populateTour(store)
             } else if memory, owner == primary {
-                try await populateMemory(store)
+                try await populateMemory(store, large: memoryLarge)
             } else {
             try await store.write("demo/FINDINGS.md", content: "# Findings\n\n- [pattern] Cache repeated requests for offline use\n- [pattern] Retry sync after reconnecting\n- [decision] Connect the phone graph to desktop memory\n", blobSha: nil)
             try await store.write("demo/skills/audit.md", content: SkillFile.template(name: "audit", description: "Review the project", instructions: "Run the checks."), blobSha: nil)
@@ -433,8 +436,10 @@ enum UITestFixtures {
 
     /// The Memory tab's store: three projects, 40 findings over six topics
     /// with mentions that link the projects, two notes, nine tasks across
-    /// the sections, and one project with nothing saved yet.
-    private static func populateMemory(_ store: LocalStore) async throws {
+    /// the sections, and one project with nothing saved yet. With `large`,
+    /// six projects carry 100 tasks each (600 in all) for the scroll-load
+    /// fixture; those task files replace the demo ones.
+    private static func populateMemory(_ store: LocalStore, large: Bool = false) async throws {
         func finding(_ id: String, _ date: String, _ text: String) -> String {
             "- \(text) <!-- fid:\(id) --> <!-- created: \(date) --> <!-- phren:status \"active\" -->\n"
         }
@@ -536,6 +541,36 @@ enum UITestFixtures {
         - [x] Batch line items through LineItemLoader <!-- bid:90c9d0e1 created:2026-09-13T12:00:00.000Z -->
         """, blobSha: nil)
         try await store.write("hub/FINDINGS.md", content: "# hub Findings\n", blobSha: nil)
+        if large {
+            try await populateMemoryLarge(store)
+        }
+    }
+
+    /// `--memory-fixture-large`: 600 tasks across six projects, so list mode
+    /// has a few hundred rows to scroll. The three demo projects' task files
+    /// are replaced; the other three get a findings file so they count as
+    /// projects.
+    private static func populateMemoryLarge(_ store: LocalStore) async throws {
+        let names = ["phren", "ledger", "hub", "atlas", "mina", "pulse"]
+        for (nameIndex, name) in names.enumerated() {
+            if !["phren", "ledger", "hub"].contains(name) {
+                try await store.write("\(name)/FINDINGS.md", content: "# \(name) Findings\n", blobSha: nil)
+            }
+            var active = "## Active\n\n"
+            var queue = "## Queue\n\n"
+            var done = "## Done\n\n"
+            for i in 0..<100 {
+                let bid = String(format: "%02x%06x", nameIndex, i)
+                let checked = i % 5 == 4
+                let line = "- [\(checked ? "x" : " ")] Load task \(i + 1) for \(name) <!-- bid:\(bid) -->\n"
+                switch i % 5 {
+                case 0, 1: active += line
+                case 2, 3: queue += line
+                default: done += line
+                }
+            }
+            try await store.write("\(name)/tasks.md", content: "# \(name) tasks\n\n\(active)\n\(queue)\n\(done)", blobSha: nil)
+        }
     }
 
     private static func populateWorkflow(_ store: LocalStore, owner: String) async throws {

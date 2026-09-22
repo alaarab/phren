@@ -63,9 +63,10 @@ struct TaskListView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var tasks = TasksModel()
     @State private var showAdd = false
+    @State private var showStatus = false
     @State private var editing: TaskListRow?
     @State private var reading: TaskListRow?
-    @AppStorage("tasks.section.v1") private var section: PhrenTask.Section = .queue
+    @AppStorage("tasks.status") private var status: TaskStatus = .open
     @AppStorage("tasks.sort.v1") private var sort: TaskSort = .manual
     /// Projects the person folded in the cross-project list, encoded into
     /// one AppStorage string so a fold is remembered across launches. The
@@ -115,7 +116,7 @@ struct TaskListView: View {
         // Sorting and date parsing scale with the task count. Share one result
         // across this render; the next observed change computes fresh rows.
         @Bindable var tasks = tasks
-        let visibleRows = tasks.rows(in: section, sort: sort, scope: scope, model: model)
+        let visibleRows = tasks.rows(for: status, sort: sort, scope: scope, model: model)
         let writableRows = visibleRows.filter { model.canWrite(storeId: $0.storeId, project: $0.project) }
         VStack(spacing: 0) {
             controls(visibleCount: visibleRows.count,
@@ -141,21 +142,21 @@ struct TaskListView: View {
             }
             PhrenList(plain: true) {
                 if !visibleRows.isEmpty, !isProjectScoped, tasks.selectedProject == nil {
-                    // Across projects the backlog reads per project: busiest
-                    // open work first, each with its own counts, foldable to
-                    // skim the rest. The top All control folds or unfolds
-                    // every section at once.
-                    let groups = tasks.groups(visible: visibleRows, scope: scope, model: model)
+                    // Across projects the list reads per project: the chosen
+                    // status's busiest work first, each with its own counts,
+                    // foldable to skim the rest. The top All control folds or
+                    // unfolds every section at once.
+                    let groups = tasks.groups(visible: visibleRows, scope: scope, model: model, status: status)
                     allSectionsControl(groups)
                     ForEach(groups) { group in
                         sectionHeader(group)
                         if !collapsedProjects.contains(group.project) { taskRows(group.rows) }
                     }
                 } else if !visibleRows.isEmpty {
-                    Text(section == .queue ? "Backlog" : section.rawValue)
+                    Text(status.title)
                         .plainListSectionLabel()
                     taskRows(visibleRows)
-                } else if section == .active && !hasFilters {
+                } else if status == .active && !hasFilters {
                     Section {
                         VStack(alignment: .leading, spacing: 10) {
                             Image(systemName: "checkmark.circle")
@@ -168,16 +169,16 @@ struct TaskListView: View {
                         .padding(.vertical, 10)
                         let backlogCount = tasks.rows(in: .queue, sort: sort, scope: scope, model: model).count
                         if backlogCount > 0 {
-                            Button("View backlog (\(backlogCount))") { section = .queue }
+                            Button("View backlog (\(backlogCount))") { status = .backlog }
                         }
                     }
                 }
             }
             .contentMargins(.top, 8, for: .scrollContent)
             .overlay {
-                if visibleRows.isEmpty && (section != .active || hasFilters) {
+                if visibleRows.isEmpty && (status != .active || hasFilters) {
                     VStack(spacing: 8) {
-                        PhrenEmptyState(title: hasFilters ? "No matching tasks" : "No \(section == .queue ? "backlog" : "completed") tasks",
+                        PhrenEmptyState(title: hasFilters ? "No matching tasks" : status.emptyListTitle,
                                         message: hasFilters ? "Try another filter or task status." : emptyMessage)
                         if hasFilters { Button("Clear filters", action: clearFilters) }
                     }
@@ -190,7 +191,7 @@ struct TaskListView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if tasks.isSelecting { selectionActions }
         }
-        .onChange(of: section) { _, _ in tasks.selectedIDs.removeAll() }
+        .onChange(of: status) { _, _ in tasks.selectedIDs.removeAll() }
         .onChange(of: visibleRows.map(\.id)) { _, ids in tasks.selectedIDs.formIntersection(ids) }
         .toolbar {
             if !isReadOnlyScope {
@@ -220,6 +221,9 @@ struct TaskListView: View {
         .navigationDestination(item: $reading) { row in
             TaskDetailsSheet(row: row)
         }
+        .phrenSingleSelectSheet(isPresented: $showStatus, title: "Task status",
+                                options: statusOptions, selection: $status,
+                                rowPrefix: "tasks-status")
     }
 
     private var hasFilters: Bool {
@@ -250,12 +254,37 @@ struct TaskListView: View {
                 .frame(minHeight: 44).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(group.project), \(group.activeCount) active, \(group.queueCount) queue")
+        .accessibilityLabel("\(group.project), \(countPhrase(group))")
         .accessibilityAddTraits(.isHeader)
         .accessibilityIdentifier("tasks-section-toggle:\(group.project)")
         .phrenContainerMarker("tasks-section:\(group.project)", label: group.project,
-                              value: "\(group.activeCount) active, \(group.queueCount) queue")
+                              value: countPhrase(group))
         .listRowInsets(EdgeInsets()).listRowSeparator(.hidden).listRowBackground(Color.clear)
+    }
+
+    /// The counts this status's chips carry, as one spoken phrase: the
+    /// sections the filter draws, each with its project's own number.
+    private func countPhrase(_ group: TaskSectionGroup) -> String {
+        var parts: [String] = []
+        if status.sections.contains(.active) { parts.append("\(group.activeCount) active") }
+        if status.sections.contains(.queue) { parts.append("\(group.queueCount) queue") }
+        if status.sections.contains(.done) { parts.append("\(group.doneCount) done") }
+        return parts.joined(separator: ", ")
+    }
+
+    /// The chips beside a header: one per section the status draws, each
+    /// omitted when its count is zero.
+    @ViewBuilder
+    private func countChips(_ group: TaskSectionGroup) -> some View {
+        if status.sections.contains(.active), group.activeCount > 0 {
+            PhrenChip(text: "\(group.activeCount) active", color: PhrenTheme.success)
+        }
+        if status.sections.contains(.queue), group.queueCount > 0 {
+            PhrenChip(text: "\(group.queueCount) queue", color: PhrenTheme.textSecondary)
+        }
+        if status.sections.contains(.done), group.doneCount > 0 {
+            PhrenChip(text: "\(group.doneCount) done", color: PhrenTheme.textMuted)
+        }
     }
 
     @ViewBuilder
@@ -275,24 +304,14 @@ struct TaskListView: View {
                     chevron.padding(.trailing, 14)
                 }
                 PhrenFlowLayout(spacing: PhrenTheme.Space.small) {
-                    if group.activeCount > 0 {
-                        PhrenChip(text: "\(group.activeCount) active", color: PhrenTheme.success)
-                    }
-                    if group.queueCount > 0 {
-                        PhrenChip(text: "\(group.queueCount) queue", color: PhrenTheme.textSecondary)
-                    }
+                    countChips(group)
                 }
                 .padding(.leading, 14)
             }
         } else {
             HStack(spacing: 8) {
                 name
-                if group.activeCount > 0 {
-                    PhrenChip(text: "\(group.activeCount) active", color: PhrenTheme.success)
-                }
-                if group.queueCount > 0 {
-                    PhrenChip(text: "\(group.queueCount) queue", color: PhrenTheme.textSecondary)
-                }
+                countChips(group)
                 Spacer(minLength: 0)
                 chevron.padding(.trailing, 14)
             }
@@ -327,28 +346,23 @@ struct TaskListView: View {
         .listRowInsets(EdgeInsets()).listRowSeparator(.hidden).listRowBackground(Color.clear)
     }
 
+    /// The status drop-down's five rows: Open (Active plus Queue), Active,
+    /// Backlog, Done, All. Their ids become `tasks-status:<value>`.
+    private var statusOptions: [PhrenOption<TaskStatus>] {
+        TaskStatus.allCases.map { PhrenOption(id: $0.rawValue, value: $0, title: $0.title) }
+    }
+
     private func controls(visibleCount: Int, writableCount: Int) -> some View {
         @Bindable var tasks = tasks
         @Bindable var model = model
         return HStack(spacing: 0) {
-            Menu {
-                Picker("Task status", selection: $section) {
-                    Text("Active").tag(PhrenTask.Section.active)
-                    Text("Backlog").tag(PhrenTask.Section.queue)
-                    Text("Done").tag(PhrenTask.Section.done)
-                }
-            } label: {
-                HStack(spacing: 6) {
-                    Text(section == .queue ? "Backlog" : section.rawValue).fontWeight(.semibold)
-                    Image(systemName: "chevron.down").font(.caption2.weight(.semibold))
-                    Text(tasks.isSelecting ? "\(tasks.selectedIDs.count)/\(visibleCount)" : visibleCount.formatted())
-                        .foregroundStyle(PhrenTheme.textMuted)
-                }
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
-            }
-            .accessibilityIdentifier("task-status")
-            .disabled(tasks.isMoving)
+            PhrenSingleSelect(options: statusOptions, selection: $status,
+                              placeholder: "Task status", identifier: "tasks-status",
+                              isPresented: $showStatus)
+                .disabled(tasks.isMoving)
+            Text(tasks.isSelecting ? "\(tasks.selectedIDs.count)/\(visibleCount)" : visibleCount.formatted())
+                .padding(.horizontal, PhrenTheme.Space.small)
+                .foregroundStyle(PhrenTheme.textMuted)
             Spacer(minLength: 4)
             if tasks.isSelecting {
                 Button(tasks.selectedIDs.count == writableCount ? "Deselect all" : "Select all") {
@@ -432,7 +446,7 @@ struct TaskListView: View {
     /// Actions resolve the current selection at tap time, since sync or store
     /// permissions may have changed since the last render.
     private func currentWritableRows() -> [TaskListRow] {
-        tasks.rows(in: section, sort: sort, scope: scope, model: model)
+        tasks.rows(for: status, sort: sort, scope: scope, model: model)
             .filter { model.canWrite(storeId: $0.storeId, project: $0.project) }
     }
 
@@ -447,7 +461,7 @@ struct TaskListView: View {
                         .frame(maxWidth: .infinity, minHeight: 44)
                 }
                 .accessibilityIdentifier("task-bulk-\(action.rawValue)")
-                .disabled(tasks.selectedIDs.isEmpty || tasks.isMoving || section == action.section)
+                .disabled(tasks.selectedIDs.isEmpty || tasks.isMoving || status.sections == [action.section])
             }
         }
         .padding(.horizontal, 12)
@@ -541,7 +555,7 @@ struct TaskListView: View {
             tasks.isMoving = false
             if wasSelecting && failed.isEmpty {
                 tasks.isSelecting = false
-                section = action.section
+                status = TaskStatus(action.section)
             }
         }
     }
@@ -647,8 +661,8 @@ struct TaskRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             Button(action: onToggle) {
-                Image(systemName: (selection ?? row.task.checked) ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(selection != nil ? PhrenTheme.accent : (row.task.checked ? PhrenTheme.success : PhrenTheme.textMuted))
+                Image(systemName: glyphName)
+                    .foregroundStyle(glyphColor)
                     .font(.title3)
             }
             .buttonStyle(.plain)
@@ -661,6 +675,7 @@ struct TaskRow: View {
                 Text(.init(displayLine))
                     .font(.callout)
                     .strikethrough(row.task.checked)
+                    .foregroundStyle(isDone ? PhrenTheme.textMuted : PhrenTheme.text)
                     .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 HStack(spacing: 6) {
@@ -680,9 +695,7 @@ struct TaskRow: View {
                         Text("#\(issue)").font(.caption2).foregroundStyle(.secondary)
                     }
                 }
-                Text(TaskBrowsing.creationDate(row.task.createdAt).map {
-                    "Created " + $0.formatted(date: .abbreviated, time: .omitted)
-                } ?? "Date unknown")
+                Text(caption)
                     .font(.caption2)
                     .foregroundStyle(PhrenTheme.textMuted)
               }
@@ -691,6 +704,32 @@ struct TaskRow: View {
             .accessibilityIdentifier("task-detail:\(row.id)")
         }
         .padding(.vertical, 2)
+    }
+
+    private var isDone: Bool { row.task.section == .done }
+
+    /// A done row keeps an outline check, muted; selection mode still fills
+    /// the mark when this row is one of the chosen ones.
+    private var glyphName: String {
+        if let selection { return selection ? "checkmark.circle.fill" : "circle" }
+        return isDone ? "checkmark.circle" : "circle"
+    }
+
+    private var glyphColor: Color {
+        selection != nil ? PhrenTheme.accent : PhrenTheme.textMuted
+    }
+
+    /// Done rows caption their done date (last activity, falling back to the
+    /// creation date); open rows keep the creation caption.
+    private var caption: String {
+        if isDone {
+            let doneDate = TaskBrowsing.creationDate(row.task.lastActivity)
+                ?? TaskBrowsing.creationDate(row.task.createdAt)
+            return doneDate.map { "Done " + $0.formatted(date: .abbreviated, time: .omitted) } ?? "Date unknown"
+        }
+        return TaskBrowsing.creationDate(row.task.createdAt).map {
+            "Created " + $0.formatted(date: .abbreviated, time: .omitted)
+        } ?? "Date unknown"
     }
 
     private var displayLine: String {

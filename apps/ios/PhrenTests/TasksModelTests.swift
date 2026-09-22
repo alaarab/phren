@@ -84,4 +84,55 @@ final class TasksModelTests: XCTestCase {
                                        storeIdByProject: [:])
         XCTAssertEqual(groups.map(\.project), ["demo"])
     }
+
+    func testStatusFilterPartitionsRowsAndCounts() {
+        let apiActive = row("api", "a1", section: .active)
+        let apiQueue = row("api", "q1")
+        let apiDone = row("api", "d1", section: .done)
+        let demoQueue = row("demo", "q2")
+        let all = [apiActive, apiQueue, apiDone, demoQueue]
+
+        // Partition: which sections each status keeps, in row order.
+        XCTAssertEqual(TaskStatus.open.sections, [.active, .queue])
+        XCTAssertEqual(TaskStatus.active.sections, [.active])
+        XCTAssertEqual(TaskStatus.backlog.sections, [.queue])
+        XCTAssertEqual(TaskStatus.done.sections, [.done])
+        XCTAssertEqual(TaskStatus.all.sections, [.active, .queue, .done])
+        func kept(_ status: TaskStatus) -> [String] {
+            all.filter { status.sections.contains($0.task.section) }.map(\.id)
+        }
+        XCTAssertEqual(kept(.open), [apiActive.id, apiQueue.id, demoQueue.id])
+        XCTAssertEqual(kept(.active), [apiActive.id])
+        XCTAssertEqual(kept(.backlog), [apiQueue.id, demoQueue.id])
+        XCTAssertEqual(kept(.done), [apiDone.id])
+        XCTAssertEqual(kept(.all).count, 4)
+
+        // Counts: each status totals only its own sections, and the section
+        // order follows that total (Backlog flips demo above api on queue
+        // counts 4 vs 1, where Open would order api first on 4 vs 4 ties by name).
+        XCTAssertEqual(TaskStatus.open.count(active: 3, queue: 2, done: 9), 5)
+        XCTAssertEqual(TaskStatus.backlog.count(active: 3, queue: 2, done: 9), 2)
+        XCTAssertEqual(TaskStatus.all.count(active: 3, queue: 2, done: 1), 6)
+        let activeCounts = ["api": 3, "demo": 0]
+        let queueCounts = ["api": 1, "demo": 4]
+        let doneCounts = ["api": 2, "demo": 1]
+        let underBacklog = TasksModel.groups(visible: all,
+                                             activeCounts: activeCounts,
+                                             queueCounts: queueCounts,
+                                             storeIdByProject: [:],
+                                             doneCounts: doneCounts,
+                                             status: .backlog)
+        XCTAssertEqual(underBacklog.map(\.project), ["demo", "api"])
+        XCTAssertEqual(underBacklog.map(\.queueCount), [4, 1])
+        XCTAssertEqual(underBacklog.map(\.doneCount), [1, 2])
+        let underDone = TasksModel.groups(visible: all,
+                                          activeCounts: activeCounts,
+                                          queueCounts: queueCounts,
+                                          storeIdByProject: [:],
+                                          doneCounts: doneCounts,
+                                          status: .done)
+        XCTAssertEqual(underDone.map(\.project), ["api", "demo"],
+                       "Done orders by done count (2 vs 1)")
+        XCTAssertEqual(underDone.map(\.doneCount), [2, 1])
+    }
 }

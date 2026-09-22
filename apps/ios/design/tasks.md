@@ -45,6 +45,20 @@ carry the `isHeader` accessibility trait; `All` is a control with the
 Expand/Collapse label. Fold animations run only when Reduce Motion is off
 (0.18s ease, nil otherwise).
 
+## Status filter
+
+The filter line leads with a `PhrenSingleSelect` pill, `tasks-status`, whose
+sheet lists Open (Active plus Queue, the default), Active, Backlog, Done and
+All as `tasks-status:<value>` rows; the choice is remembered in AppStorage
+(`tasks.status`) and both `Select all` and the bulk moves take only the
+filtered, writable rows from unfolded sections. The status decides everything
+downstream: which sections' rows draw, which count chips each header shows
+(active and queue under Open, the one section under Active, Backlog or Done,
+all three under All), the section order (that status's per-project total,
+highest first, ties by name), and the flat label on project-scoped lists.
+Done rows draw muted with an outline `checkmark.circle` glyph and a Done-date
+caption read from the task's last activity, falling back to its created date.
+
 ## Folding
 
 Tapping a header folds or unfolds that project only. The top `All` control

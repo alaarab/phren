@@ -22,6 +22,7 @@ struct MemoryView: View {
     @State private var nodes = MemoryBrowsing.NodeIndex(payload: nil)
     @State private var nodesRevision = UUID()
     @State private var contents: [MemoryItem] = []
+    @State private var listModel = MemoryListModel()
     @State private var error: String?
     @State private var selection: GraphNodeRef?
     @State private var focusedNodeID: String?
@@ -54,8 +55,6 @@ struct MemoryView: View {
     private var kinds: Set<MemoryKind> { MemorySettings.decodeKinds(kindsRaw) }
     private var projectFilter: Set<String> { MemorySettings.decodeProjects(projectsRaw) }
     private var showsKindChips: Bool { kinds == Set(MemoryKind.allCases) }
-    /// Grouped by project unless exactly one project is chosen.
-    private var groupByProject: Bool { projectFilter.count != 1 }
 
     private var modeBinding: Binding<MemoryMode> {
         Binding(get: { mode }, set: { newValue in
@@ -86,19 +85,12 @@ struct MemoryView: View {
                       revision: model.searchRevision, nodes: nodesRevision)
     }
 
-    /// The scope's contents, narrowed to the chosen projects. Topic rows are a
-    /// derived grouping, so they stay in view whatever the project filter.
-    private var scopedContents: [MemoryItem] {
-        guard !projectFilter.isEmpty else { return contents }
-        return contents.filter { $0.kind == .topic || projectFilter.contains($0.project) }
+    /// The scope's contents, narrowed to the chosen projects. Kept for the
+    /// one-off filter check in show in list; the drawn rows come from
+    /// `listModel`.
+    private func scopedContents() -> [MemoryItem] {
+        MemoryListModel.scoped(contents, projects: projectFilter)
     }
-
-    private var displayRows: [MemoryItem] {
-        if mode == .list, !trimmedQuery.isEmpty { return results }
-        return MemoryBrowsing.filter(scopedContents, kinds: kinds)
-    }
-
-    private var counts: MemoryCounts { MemoryBrowsing.counts(displayRows) }
 
     private var selectedProjectLabel: String? {
         projectFilter.count == 1 ? projectFilter.first : nil
@@ -106,7 +98,7 @@ struct MemoryView: View {
 
     private var emptyText: String {
         if !trimmedQuery.isEmpty { return "No matches" }
-        if scopedContents.isEmpty {
+        if listModel.scopeIsEmpty {
             return selectedProjectLabel.map { "Nothing saved for \($0) yet" } ?? "Nothing saved in \(selectedStore) yet"
         }
         return "No rows for these filters"
@@ -155,11 +147,14 @@ struct MemoryView: View {
             .onChange(of: contentsKey, initial: true) { _, _ in refreshContents() }
             .onChange(of: query) { _, value in
                 if value.isEmpty, showingSearch { showingSearch = false; searchFocused = false }
+                updateList()
             }
+            .onChange(of: kindsRaw) { _, _ in updateList() }
             .onChange(of: projectsRaw) { _, _ in
                 selection = nil
                 focusedNodeID = nil
                 highlightedID = nil
+                updateList()
             }
             .onChange(of: selection?.id) { previous, current in
                 guard previous != nil, current == nil else { return }
@@ -296,8 +291,10 @@ struct MemoryView: View {
     }
 
     private var list: some View {
-        MemoryPanel(rows: displayRows, counts: counts, countKinds: kinds,
-                    groupByProject: groupByProject, showKind: showsKindChips, emptyText: emptyText,
+        MemoryPanel(rows: listModel.rows, groups: listModel.grouped ? listModel.groups : nil,
+                    counts: listModel.counts, countKinds: kinds,
+                    showKind: showsKindChips, showProject: projectFilter.count != 1,
+                    emptyText: emptyText,
                     highlightedID: highlightedID, scrollTarget: $scrollTarget,
                     onSelect: open, onActions: { actionItem = $0 })
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -337,6 +334,12 @@ struct MemoryView: View {
 
     private func refreshContents() {
         contents = MemoryBrowsing.contents(snapshot: snapshot, storeId: selectedStore, project: nil, nodes: nodes)
+        updateList()
+    }
+
+    private func updateList() {
+        listModel.update(contents: contents, kinds: kinds, projects: projectFilter,
+                         query: trimmedQuery, searchResults: results)
     }
 
     private func submitSearch() {
@@ -535,7 +538,7 @@ struct MemoryView: View {
         showingSearch = false
         focusedNodeID = nil
         guard let target = contents.first(where: { $0.nodeID == selected.id }) else { return }
-        if !MemoryBrowsing.filter(scopedContents, kinds: kinds).contains(where: { $0.id == target.id }) {
+        if !MemoryBrowsing.filter(scopedContents(), kinds: kinds).contains(where: { $0.id == target.id }) {
             kindsRaw = ""
             projectsRaw = ""
         }
@@ -634,6 +637,7 @@ struct MemoryView: View {
         guard !request.query.isEmpty else {
             results = []
             searching = false
+            updateList()
             return
         }
         searching = true
@@ -647,6 +651,7 @@ struct MemoryView: View {
             let graphMatches = visible?.search(request.query) ?? []
             results = MemoryBrowsing.results(hits: hits, graphMatches: graphMatches, contents: contents, storeId: request.store)
             searching = false
+            updateList()
         } catch {}
     }
 

@@ -2,15 +2,17 @@ import PhrenKit
 import SwiftUI
 
 /// The list-mode body of Memory: the current filters' counts line, then one
-/// row per finding, note, task or topic. Grouped by project when the project
-/// filter is not a single project. Tapping a row switches to the map with the
-/// node selected; the row's action glyph opens the same sheet as before.
+/// row per finding, note, task or topic, grouped by project when the model
+/// says so. Tapping a row switches to the map with the node selected; the
+/// row's action glyph opens the same sheet as before.
 struct MemoryPanel: View {
     let rows: [MemoryItem]
+    /// Project groups from `MemoryListModel`, or nil for a flat list.
+    let groups: [(project: String, rows: [MemoryItem])]?
     let counts: MemoryCounts
     let countKinds: Set<MemoryKind>
-    let groupByProject: Bool
     let showKind: Bool
+    let showProject: Bool
     let emptyText: String
     let highlightedID: String?
     @Binding var scrollTarget: String?
@@ -28,8 +30,8 @@ struct MemoryPanel: View {
                             .font(PhrenTypography.body).foregroundStyle(PhrenTheme.textMuted)
                             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                             .phrenIdentifier("memory-empty")
-                    } else if groupByProject {
-                        ForEach(MemoryBrowsing.grouped(rows), id: \.project) { group in
+                    } else if let groups {
+                        ForEach(groups, id: \.project) { group in
                             Text(group.project).plainListSectionLabel()
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .phrenIdentifier("memory-section:\(group.project)")
@@ -45,15 +47,23 @@ struct MemoryPanel: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .phrenIdentifier("memory-list")
-            .onChange(of: scrollTarget, initial: true) { _, target in
-                guard let target else { return }
-                // The list may have just replaced the map; let it lay out first.
-                Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(60))
-                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { proxy.scrollTo(target, anchor: .top) }
-                    scrollTarget = nil
-                }
+            .onAppear {
+                // The list may have just replaced the map with a target already set.
+                if let target = scrollTarget { scheduleScroll(target, proxy: proxy) }
             }
+            .onChange(of: scrollTarget) { _, target in
+                guard let target else { return }
+                scheduleScroll(target, proxy: proxy)
+            }
+        }
+    }
+
+    private func scheduleScroll(_ target: String, proxy: ScrollViewProxy) {
+        // The list may have just replaced the map; let it lay out first.
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(60))
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { proxy.scrollTo(target, anchor: .top) }
+            scrollTarget = nil
         }
     }
 
@@ -67,11 +77,21 @@ struct MemoryPanel: View {
 
     private func cards(_ items: [MemoryItem]) -> some View {
         ForEach(items) { item in
-            MemoryRowCard(item: item, showKind: showKind, showProject: false,
+            MemoryRowCard(item: item, showKind: showKind, showProject: showProject,
                           highlighted: highlightedID == item.id,
                           onSelect: { onSelect(item) }, onActions: { onActions(item) })
+                .equatable()
                 .id(item.id)
         }
+    }
+}
+
+extension MemoryRowCard: Equatable {
+    /// What the row draws; the tap closures are excluded, so a parent redraw
+    /// only rebuilds the rows whose item or flags actually changed.
+    static func == (lhs: MemoryRowCard, rhs: MemoryRowCard) -> Bool {
+        lhs.item == rhs.item && lhs.showKind == rhs.showKind
+            && lhs.showProject == rhs.showProject && lhs.highlighted == rhs.highlighted
     }
 }
 
@@ -88,7 +108,15 @@ struct MemoryRowCard: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        card
+        if highlighted {
+            card.overlay {
+                RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium, style: .continuous)
+                    .strokeBorder(PhrenTheme.accent, lineWidth: 2)
+                    .accessibilityHidden(true)
+            }
+        } else {
+            card
+        }
     }
 
     private var card: some View {
@@ -99,17 +127,19 @@ struct MemoryRowCard: View {
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                if dynamicTypeSize.isAccessibilitySize {
-                    PhrenFlowLayout(spacing: 6) { chips }
-                } else {
-                    HStack(spacing: 6) {
-                        chips
-                        Spacer(minLength: PhrenTheme.Space.xs)
-                        if let date = item.date {
-                            Text(date).font(PhrenTypography.caption2).foregroundStyle(PhrenTheme.textDim).monospacedDigit()
+                if hasMetaLine {
+                    if dynamicTypeSize.isAccessibilitySize {
+                        PhrenFlowLayout(spacing: 6) { chips }
+                    } else {
+                        HStack(spacing: 6) {
+                            chips
+                            Spacer(minLength: PhrenTheme.Space.xs)
+                            if let date = item.date {
+                                Text(date).font(PhrenTypography.caption2).foregroundStyle(PhrenTheme.textDim).monospacedDigit()
+                            }
                         }
+                        .frame(minHeight: 28)
                     }
-                    .frame(minHeight: 28)
                 }
             }
             .padding(.horizontal, PhrenTheme.Space.medium).padding(.vertical, PhrenTheme.Space.small)
@@ -137,19 +167,29 @@ struct MemoryRowCard: View {
             }
         }
         .sessionCard()
-        .overlay {
-            if highlighted {
-                RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium, style: .continuous)
-                    .strokeBorder(PhrenTheme.accent, lineWidth: 2)
-                    .accessibilityHidden(true)
-            }
-        }
     }
 
     private var hasActionMenu: Bool { item.kind != .topic }
 
+    /// Whether the meta line has anything to draw. When it does not, the line
+    /// is skipped outright (no 28pt spacer), so a bare row is two text lines
+    /// plus its padding.
+    private var hasMetaLine: Bool {
+        Self.hasMetaLine(item: item, showKind: showKind, showProject: showProject)
+    }
+
+    static func hasMetaLine(item: MemoryItem, showKind: Bool, showProject: Bool) -> Bool {
+        if showKind || item.kind == .task { return true }
+        if item.typeTag != nil { return true }
+        if showProject, item.kind != .project, !item.project.isEmpty { return true }
+        if item.detail != nil { return true }
+        return item.date != nil
+    }
+
     @ViewBuilder private var chips: some View {
-        if showKind {
+        // A task always shows its section chip (Active, Backlog, Done); the
+        // other kinds show their kind chip only under the all-kinds filter.
+        if showKind || item.kind == .task {
             PhrenChip(text: Self.kindTitle(for: item), color: Self.kindColor(for: item))
         }
         if let tag = item.typeTag {
