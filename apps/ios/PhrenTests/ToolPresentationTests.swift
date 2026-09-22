@@ -8,7 +8,9 @@ final class ToolPresentationTests: XCTestCase {
 
     func testWriteBecomesANewFilePatchNamedByItsShortPath() {
         let write = ToolPresentation(title: "Write", text: json(["file_path": "/Users/me/app/Sources/Theme.swift", "content": "import SwiftUI\nlet accent = purple"]))
-        XCTAssertEqual(write.title, "Write")
+        // A Write draws as the same Patch card as Edit and apply_patch; the diff
+        // row itself says "New file".
+        XCTAssertEqual(write.title, "Patch")
         XCTAssertEqual(write.patch, "*** Add File: /Users/me/app/Sources/Theme.swift\n+import SwiftUI\n+let accent = purple")
         XCTAssertEqual(write.preview, "Sources/Theme.swift")
         let document = DiffDocument(patch: write.patch!)

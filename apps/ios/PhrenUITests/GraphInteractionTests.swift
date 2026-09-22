@@ -246,9 +246,15 @@ final class GraphInteractionTests: XCTestCase {
         tapVisibleSkillsItem(app)
         app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "audit")).firstMatch.tap()
         let enable = app.buttons["Enable on linked computers"]
-        XCTAssertTrue(enable.waitForExistence(timeout: 5))
-        enable.tap()
         let toggle = app.descendants(matching: .any)["skill-enabled"].firstMatch
+        // Fresh state offers the enable button; a run where an earlier test
+        // already set the skill's availability lands on the switch directly.
+        if enable.waitForExistence(timeout: 5) {
+            enable.tap()
+        } else {
+            XCTAssertTrue(toggle.waitForExistence(timeout: 5), "an availability control is shown")
+            if toggle.value as? String != "On" { toggle.tap() }
+        }
         XCTAssertTrue(toggle.waitForExistence(timeout: 5))
         XCTAssertEqual(toggle.value as? String, "On")
         toggle.tap()

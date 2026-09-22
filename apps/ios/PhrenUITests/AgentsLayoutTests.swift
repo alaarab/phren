@@ -29,7 +29,12 @@ final class AgentsLayoutTests: XCTestCase {
         capture(app, name: "Computer sessions")
         XCUIDevice.shared.press(.home)
         app.activate()
-        XCTAssertGreaterThanOrEqual(first.frame.minY, app.navigationBars.firstMatch.frame.maxY)
+        // The bar settles a beat after activation; the end state is what counts.
+        let belowBar = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            first.frame.minY >= app.navigationBars.firstMatch.frame.maxY
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter().wait(for: [belowBar], timeout: 5), .completed,
+                       "first \(first.frame.minY) bar \(app.navigationBars.firstMatch.frame.maxY)")
         capture(app, name: "Computer sessions after returning")
         app.navigationBars.buttons.firstMatch.tap()
         XCTAssertTrue(firstHeader.waitForExistence(timeout: 5))
