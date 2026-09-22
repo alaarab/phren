@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { approvalPushPayload, schedulePushPayload, upsertPushDevice } from "./push.js";
+import { approvalPushPayload, scheduleCollapseId, schedulePushPayload, upsertPushDevice } from "./push.js";
 import { PushBindingStore } from "./agent-hooks.js";
 
 describe("approval push payload", () => {
@@ -46,6 +46,26 @@ describe("schedule push payload", () => {
       phren: { kind: "scheduleFailed", scheduleId: "7f3a2c1d", project: "demo", name: "Nightly test sweep",
         computer: "Desk", runId: "run-1", status: "failed", reason: "Tests failed", route: "phren://session?route=opaque" },
     });
+  });
+
+  it("labels a live blocked run as blocked, not failed", () => {
+    expect(schedulePushPayload({ kind: "scheduleBlocked", scheduleId: "7f3a2c1d", project: "demo",
+      name: "Nightly test sweep", computer: "Desk", runId: "run-1", status: "blocked",
+      reason: "Blocked at startup: Allow external CLAUDE.md file imports?" })).toEqual({
+      aps: { alert: { title: "Nightly test sweep blocked",
+        body: "demo on Desk. Blocked at startup: Allow external CLAUDE.md file imports?" },
+        sound: "default", category: "PHREN_SCHEDULE" },
+      phren: { kind: "scheduleBlocked", scheduleId: "7f3a2c1d", project: "demo", name: "Nightly test sweep",
+        computer: "Desk", runId: "run-1", status: "blocked",
+        reason: "Blocked at startup: Allow external CLAUDE.md file imports?" },
+    });
+  });
+
+  it("gives each notification kind its own collapse id so a later push cannot replace the blocked alert", () => {
+    expect(scheduleCollapseId("scheduleBlocked", "run-1")).toBe("run-1-scheduleBlocked");
+    expect(scheduleCollapseId("scheduleFinished", "run-1")).toBe("run-1-scheduleFinished");
+    expect(scheduleCollapseId("scheduleBlocked", "run-1")).not.toBe(scheduleCollapseId("scheduleFinished", "run-1"));
+    expect(scheduleCollapseId("scheduleBlocked", "a".repeat(64))).toHaveLength(64);
   });
 });
 

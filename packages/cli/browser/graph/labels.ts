@@ -1,25 +1,55 @@
 import * as THREE from "three";
 import { CSS2DObject, CSS2DRenderer } from "three/addons/renderers/CSS2DRenderer.js";
 import type { FGNode } from "./types.js";
-import { esc, focusMode, nodeRadius, state } from "./state.js";
+import type { LabelCandidate, LabelRect } from "../../src/graph-core/labels.js";
+import { labelDrawCap, resolveLabelOverlaps } from "../../src/graph-core/labels.js";
+import { esc, focusMode, nodeRadius, scoreForNode, state } from "./state.js";
 
 // DOM labels via CSS2DRenderer: crisp at any zoom, CSP-safe in both hosts
-// (pure DOM + CSS transforms — no workers, no eval). Projects get an eager
+// (pure DOM + CSS transforms, no workers, no eval). Projects get an eager
 // always-on label; findings/tasks/refs draw from a fixed pool assigned by
 // camera distance so "zoom in to read" is a real interaction with a hard
-// cap on live DOM nodes.
+// cap on live DOM nodes. Every frame the shared resolver in graph-core
+// projects those labels to screen space: group labels always win, leaves
+// rank by priority then stickiness then degree then recency, and hysteresis
+// stops marginal overlaps from flickering a label out.
+//
+// Rects are computed from last frame's camera/transforms: labelTick runs in
+// the ambient RAF while CSS2DRenderer writes element transforms in
+// force-graph's own render pass, so the hidden set lags the draw by one
+// frame under fast camera motion. That lag is accepted; wiring the resolver
+// into force-graph's pre-render hook would couple graph-core to the host
+// loop for a sub-frame overlap during orbit.
 
 const POOL_SIZE = 40;
 const LABEL_DIST = 400;
 const LABEL_DIST_SQ = LABEL_DIST * LABEL_DIST;
 const LOD_INTERVAL = 0.15;
+const FALLBACK_LABEL = { w: 90, h: 12 };
 
 type PoolEntry = { obj: CSS2DObject; el: HTMLDivElement; nodeId: string | null };
 
 const pool: PoolEntry[] = [];
 let lodClock = 0;
+/**
+ * Visible ids last frame (hysteresis input) and a second Set the resolver
+ * writes into so the pair can be swapped without allocating at 60fps.
+ */
+let previousVisible = new Set<string>();
+let visibleScratch = new Set<string>();
+/** Eager (forceLabel) node ids; avoids an O(all nodes) scan every frame. */
+const eagerIds = new Set<string>();
+/** Cached text metrics; reading offsetWidth every frame would thrash layout. */
+const sizeCache = new WeakMap<HTMLElement, { w: number; h: number }>();
+/** Off-DOM box used to measure a label the moment it is assigned. */
+let measurer: HTMLDivElement | null = null;
 
-// Bare floating text — no pills, no borders. The GraphRAG look: tiny mono
+// Per-frame scratch (cleared, not reallocated).
+const scratchCandidates: LabelCandidate[] = [];
+const scratchElements = new Map<string, HTMLElement>();
+const scratchRejected: HTMLElement[] = [];
+
+// Bare floating text, no pills, no borders. The GraphRAG look: tiny mono
 // labels that sit in space, readable via a dark text-shadow halo.
 const LABEL_CSS = `
 .phren-label{
@@ -73,6 +103,41 @@ function fadeIn(el: HTMLElement): void {
   requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add("in")));
 }
 
+/**
+ * Measure `el` right after its text/class changes and cache the box, so the
+ * next declutter does not force layout on a detached or zero-size element.
+ * A hidden measurer provides layout for a node CSS2DRenderer has not
+ * appended yet; a zero read still caches the fallback (one measure per
+ * assignment, not one per frame).
+ */
+function measureAndCache(el: HTMLElement): void {
+  let w = 0;
+  let h = 0;
+  if (el.isConnected) {
+    w = el.offsetWidth;
+    h = el.offsetHeight;
+  } else {
+    if (!measurer) {
+      measurer = document.createElement("div");
+      measurer.setAttribute("aria-hidden", "true");
+      measurer.style.cssText = "position:absolute;left:-99999px;top:0;visibility:hidden;pointer-events:none;";
+      document.body.appendChild(measurer);
+    }
+    measurer.appendChild(el);
+    w = el.offsetWidth;
+    h = el.offsetHeight;
+    el.remove();
+  }
+  sizeCache.set(el, w > 0 && h > 0 ? { w, h } : { ...FALLBACK_LABEL });
+}
+
+function labelSize(el: HTMLElement): { w: number; h: number } {
+  const hit = sizeCache.get(el);
+  if (hit) return hit;
+  measureAndCache(el);
+  return sizeCache.get(el) ?? { ...FALLBACK_LABEL };
+}
+
 /** Always-on label for projects (and heavily-referenced entities). */
 export function attachEagerLabel(fgNode: FGNode): void {
   const node = fgNode.raw;
@@ -92,6 +157,8 @@ export function attachEagerLabel(fgNode: FGNode): void {
   fgNode.__group.add(obj);
   fgNode.__labelObj = obj;
   fgNode.__labelEl = el;
+  eagerIds.add(fgNode.id);
+  measureAndCache(el);
   fadeIn(el);
 }
 
@@ -107,6 +174,12 @@ export function updateEagerLabelText(fgNode: FGNode): void {
     fgNode.__labelEl.textContent = node.label;
     fgNode.__labelEl.style.color = node.baseColor;
   }
+  measureAndCache(fgNode.__labelEl);
+}
+
+/** Drop an eager id when its node object is disposed (remount/delete). */
+export function forgetEagerLabel(nodeId: string): void {
+  eagerIds.delete(nodeId);
 }
 
 function poolEntry(index: number): PoolEntry {
@@ -143,6 +216,9 @@ function assignEntry(entry: PoolEntry, fgNode: FGNode): void {
   if (fgNode.raw.kind !== "finding") entry.el.style.color = fgNode.raw.baseColor;
   else entry.el.style.color = "";
   entry.el.classList.toggle("dim", (fgNode.__intTarget ?? 1) < 1);
+  // Measure before CSS2DRenderer's next pass so the first declutter after
+  // churn already has a real rect (not the 90x12 fallback for one frame).
+  measureAndCache(entry.el);
   entry.obj.position.set(0, nodeRadius(fgNode.raw) + 5, 0);
   fgNode.__group.add(entry.obj);
   entry.nodeId = fgNode.id;
@@ -213,20 +289,36 @@ function runLabelPass(): void {
     if (!entry) break;
     assignEntry(entry, fgNode);
   }
-
-  declutterLabels();
 }
 
-// ── Screen-space declutter ────────────────────────────────────────────────
-// GraphRAG shows only the handful of labels that don't collide — never a
-// wall of overlapping text. After the pool is assigned, project every live
-// label to screen space and greedily hide any whose box overlaps a
-// higher-priority one already placed (projects beat findings, near beats
-// far, focused beats everything). Occluded labels stay in the DOM at
-// opacity 0 so the pool/eager bookkeeping is untouched.
-const _proj = new THREE.Vector3();
+// ── Screen-space declutter (each frame) ──────────────────────────────────
+// GraphRAG shows only the handful of labels that do not collide. Project
+// every live label (the CSS2DObject, not the node centre: the text sits
+// above the dot) into screen space and hand the rectangles to graph-core's
+// resolver: group labels always win, leaves rank by priority, stickiness,
+// degree then recency, hysteresis keeps a shown label through a marginal
+// overlap, and the draw cap scales with the viewport. Occluded labels stay
+// in the DOM at opacity 0 so pool/eager bookkeeping is untouched.
+const _world = new THREE.Vector3();
 
-type LabelBox = { el: HTMLElement; x0: number; y0: number; x1: number; y1: number; priority: number; distSq: number };
+function recencyOf(fgNode: FGNode): number {
+  const node = fgNode.raw;
+  if (node.date) {
+    const t = Date.parse(node.date);
+    if (Number.isFinite(t)) return t;
+  }
+  const last = scoreForNode(node)?.lastUsedAt;
+  if (last) {
+    const t = Date.parse(last);
+    if (Number.isFinite(t)) return t;
+  }
+  return 0;
+}
+
+/** Degree plus modelled refCount so high-ref entities keep their rank. */
+function leafDegree(fgNode: FGNode): number {
+  return (state.fullAdjacency.get(fgNode.id)?.size ?? 0) + (fgNode.raw.refCount ?? 0);
+}
 
 function declutterLabels(): void {
   if (!state.fg) return;
@@ -235,67 +327,113 @@ function declutterLabels(): void {
   if (!camera || !container) return;
   const W = container.clientWidth || 1;
   const H = container.clientHeight || 1;
-  const cam = camera.position;
+  const mode = focusMode();
   const focus = state.hoveredNodeId || state.selectedNodeId;
   const neighbors = focus ? state.visibleAdjacency.get(focus) : null;
 
-  const boxes: LabelBox[] = [];
-  const hidden: HTMLElement[] = [];
+  scratchCandidates.length = 0;
+  scratchElements.clear();
+  scratchRejected.length = 0;
 
-  const consider = (fgNode: FGNode | undefined, el: HTMLElement, base: number): void => {
-    if (!fgNode || fgNode.x == null) { hidden.push(el); return; }
-    _proj.set(fgNode.x, fgNode.y || 0, fgNode.z || 0);
-    const dx = _proj.x - cam.x, dy = _proj.y - cam.y, dz = _proj.z - cam.z;
-    const distSq = dx * dx + dy * dy + dz * dz;
-    _proj.project(camera);
-    if (_proj.z >= 1 || _proj.x < -1.25 || _proj.x > 1.25 || _proj.y < -1.3 || _proj.y > 1.3) { hidden.push(el); return; }
-    const sx = (_proj.x * 0.5 + 0.5) * W;
-    const sy = (-_proj.y * 0.5 + 0.5) * H;
-    const w = (el.offsetWidth || 90) + 8;
-    const h = (el.offsetHeight || 12) + 5;
-    let priority = base;
-    if (fgNode.id === focus) priority += 6;
-    else if (neighbors?.has(fgNode.id)) priority += 2;
-    boxes.push({ el, x0: sx - w / 2, y0: sy - h / 2, x1: sx + w / 2, y1: sy + h / 2, priority, distSq });
+  const consider = (fgNode: FGNode | undefined, el: HTMLElement, obj: CSS2DObject): void => {
+    if (!fgNode || fgNode.x == null || !state.visibleIds.has(fgNode.id)) {
+      scratchRejected.push(el);
+      return;
+    }
+    obj.getWorldPosition(_world);
+    _world.project(camera);
+    if (_world.z < -1 || _world.z > 1) {
+      scratchRejected.push(el);
+      return;
+    }
+    const sx = (_world.x * 0.5 + 0.5) * W;
+    const sy = (-_world.y * 0.5 + 0.5) * H;
+    const { w, h } = labelSize(el);
+    const halfW = (w + 8) / 2;
+    const halfH = (h + 5) / 2;
+    const rect: LabelRect = { x0: sx - halfW, y0: sy - halfH, x1: sx + halfW, y1: sy + halfH };
+    // Cull by the full rect against the viewport, not the anchor's NDC:
+    // a 220px label half-on-screen still draws, so it still needs a slot.
+    if (rect.x1 < 0 || rect.x0 > W || rect.y1 < 0 || rect.y0 > H) {
+      scratchRejected.push(el);
+      return;
+    }
+    let priority = 0;
+    if (fgNode.id === focus) priority = 6;
+    else if (neighbors?.has(fgNode.id)) priority = 2;
+    else if (mode === "project" && state.focusedProjectId && state.visibleAdjacency.get(state.focusedProjectId)?.has(fgNode.id)) priority = 2;
+    else if (mode === "search" && state.searchMatchIds.has(fgNode.id)) priority = 2;
+    scratchCandidates.push({
+      id: fgNode.id,
+      rect,
+      isGroup: fgNode.raw.kind === "project",
+      degree: leafDegree(fgNode),
+      recency: recencyOf(fgNode),
+      priority,
+    });
+    scratchElements.set(fgNode.id, el);
   };
 
-  // Eager labels (projects = 10, high-ref entities = 5) then pooled findings (0).
-  state.fgNodeById.forEach((fgNode, id) => {
-    const el = fgNode.__labelEl;
-    if (!el || !fgNode.raw.forceLabel) return;
-    if (!state.visibleIds.has(id)) { hidden.push(el); return; }
-    consider(fgNode, el, fgNode.raw.kind === "project" ? 10 : 5);
-  });
+  // Eager labels only: O(labelled), not O(all nodes).
+  for (const id of eagerIds) {
+    const fgNode = state.fgNodeById.get(id);
+    if (!fgNode || !fgNode.__labelEl || !fgNode.__labelObj) {
+      eagerIds.delete(id);
+      continue;
+    }
+    if (!state.visibleIds.has(id)) {
+      scratchRejected.push(fgNode.__labelEl);
+      continue;
+    }
+    consider(fgNode, fgNode.__labelEl, fgNode.__labelObj);
+  }
   for (const entry of pool) {
     if (!entry || !entry.nodeId) continue;
-    consider(state.fgNodeById.get(entry.nodeId), entry.el, 0);
+    consider(state.fgNodeById.get(entry.nodeId), entry.el, entry.obj);
   }
 
-  boxes.sort((a, b) => b.priority - a.priority || a.distSq - b.distSq);
-  const placed: LabelBox[] = [];
-  for (const box of boxes) {
-    let hit = false;
-    for (const p of placed) {
-      if (box.x0 < p.x1 && box.x1 > p.x0 && box.y0 < p.y1 && box.y1 > p.y0) { hit = true; break; }
-    }
-    if (hit) hidden.push(box.el);
-    else { box.el.classList.remove("occluded"); placed.push(box); }
+  // Swap the two Sets: previous stays readable while `into` is filled.
+  const visible = resolveLabelOverlaps(scratchCandidates, {
+    cap: labelDrawCap(W, H),
+    previousVisible,
+    into: visibleScratch,
+    pad: 1,
+    hysteresisPx: 3,
+  });
+  for (const [id, el] of scratchElements) {
+    el.classList.toggle("occluded", !visible.has(id));
   }
-  for (const el of hidden) el.classList.add("occluded");
+  for (const el of scratchRejected) el.classList.add("occluded");
+  const retired = previousVisible;
+  previousVisible = visible;
+  visibleScratch = retired;
 }
 
-/** Throttled per-frame hook (ambient loop). */
+/** Per-frame hook (ambient loop): declutter always, pool reassign on LOD. */
 export function labelTick(dt: number): void {
   lodClock += dt;
-  if (lodClock < LOD_INTERVAL) return;
-  lodClock = 0;
-  runLabelPass();
+  if (lodClock >= LOD_INTERVAL) {
+    lodClock = 0;
+    runLabelPass();
+  }
+  declutterLabels();
 }
 
-/** Immediate reassign — call when focus state changes. */
+/** Immediate reassign: call when focus state changes. */
 export function refreshLabels(): void {
   lodClock = 0;
   runLabelPass();
+  declutterLabels();
+}
+
+/**
+ * Time `frames` label ticks end-to-end (pool LOD may or may not fire).
+ * Used by apps/ios/scripts/test-graph.mjs for the browser frame budget.
+ */
+export function benchLabelTick(frames = 60): number {
+  const t0 = performance.now();
+  for (let i = 0; i < frames; i++) labelTick(1 / 60);
+  return performance.now() - t0;
 }
 
 /** Drop every pooled label (mount/remount/destroy). */
@@ -303,4 +441,7 @@ export function resetLabels(): void {
   for (const entry of pool) {
     if (entry) detachEntry(entry);
   }
+  previousVisible = new Set();
+  visibleScratch = new Set();
+  eagerIds.clear();
 }

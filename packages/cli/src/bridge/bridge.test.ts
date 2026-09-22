@@ -534,6 +534,17 @@ schedules:
       const history = await api("/v1/schedules/history", { project: "demo", id: "7f3a2c1d", limit: 10 });
       expect(history.status).toBe(200);
       expect(history.data.runs[0]).toMatchObject({ scheduleId: "7f3a2c1d", project: "demo" });
+      const runsFile = path.join(root, "bridge", "schedule-runs.jsonl");
+      await appendFile(runsFile, JSON.stringify({ id: "3f0e9c2a-0000-4000-8000-000000000001", scheduleId: "7f3a2c1d", project: "demo",
+        startedAt: "2026-09-21T08:00:00.000Z", status: "blocked",
+        blockedStartupPrompt: "Allow external CLAUDE.md file imports?",
+        launch: { mode: "herdr", server: "default", workspaceId: "w1", tabId: "w1:t1", paneId: "w1:p1" } }) + "\n");
+      const blockedHistory = await api("/v1/schedules/history", { project: "demo", id: "7f3a2c1d", limit: 10 });
+      expect(blockedHistory.data.runs[0]).toMatchObject({ status: "blocked",
+        blockedStartupPrompt: "Allow external CLAUDE.md file imports?" });
+      const listingAfterBlock = await api("/v1/schedules", {});
+      expect(listingAfterBlock.data.schedules[0].lastRun).toMatchObject({ status: "blocked",
+        blockedStartupPrompt: "Allow external CLAUDE.md file imports?" });
     });
 
     it("serves the phone's own uploaded images by path and nothing outside the uploads folder", async () => {

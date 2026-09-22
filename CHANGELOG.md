@@ -50,6 +50,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   Hook version, and every known module keeps its value. `phren modules enable
   <name>` now also warns, without refusing, when the installed Hook recorded in
   `<bridge>/installed.json` is older than the module's version in the manifest.
+- A scheduled run no longer dies on an agent's own startup prompt with nothing recorded. Headless launches pass the prompt-skipping flags each harness has: Claude runs from the project directory with `--settings` pre-answers for project MCP servers (Claude has no settings key for the external CLAUDE.md import dialog; headless `-p` drops those imports instead of blocking), Codex runs with `--skip-git-repo-check` and a quoted trusted-project entry written to its config (dotted project paths included), and OpenCode needs none. When a Herdr run's first 90 seconds (open for classification until 95) show no transcript activity, where a transcript first seen after 30 seconds counts as activity, and the pane is `blocked` or `waiting` on input, the Hook reads the pane's last rows at most three times, records the run as `blocked` with the visible prompt text, and pushes a `scheduleBlocked` notification carrying `Blocked at startup: <prompt>`. Each schedule notification has its own APNs collapse id and a delivered blocked alert suppresses the later finished/failed alert, so the blocked alert is not replaced. The phone decodes the `blocked` state and `blockedStartupPrompt`, opens the session as waiting rather than idle, and shows blocked runs on the schedules list and history. Run history rows and `/v1/schedules/history` carry the state and text.
+- Finding and task labels no longer draw over project group labels on the
+  Memory map (phone, web UI, VS Code) at the default zoom. The shared 3D
+  renderer resolves label rectangles every frame: group labels always win,
+  leaves rank by focus then stickiness then node degree (including
+  `refCount`) then recency, hysteresis stops labels from flickering as the
+  camera moves, and the per-frame draw cap (groups included, floor 40)
+  scales with viewport area. See `docs/graph-viewer.md`.
 - An opencode permission ask reaches the phone as a push. The Hook watches the
   approvals directory, maps a new request to its pane through the recorded
   session binding (or Herdr's opencode session id), sends the same kind of

@@ -1,8 +1,8 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
-import { hostname } from "node:os";
+import { mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { hostname, homedir } from "node:os";
 import path from "node:path";
 import { finished as streamFinished } from "node:stream/promises";
 import * as yaml from "js-yaml";
@@ -10,7 +10,8 @@ import { z } from "zod";
 import { fanoutRoot } from "./fanouts.js";
 import { paneIdentity, rpc, servers, snapshot } from "./herdr.js";
 import type { SchedulePush, SchedulePushKind, SchedulePushResult } from "./push.js";
-import { BridgeError, bridgeRoot, objects, type Json } from "./protocol.js";
+import { BridgeError, bridgeRoot, object, objects, type Json } from "./protocol.js";
+import { transcriptPath } from "./transcripts.js";
 import { getProjectSourcePath } from "../project-config.js";
 import { defaultPhrenPath, getProjectDirs } from "../shared.js";
 
@@ -23,7 +24,7 @@ export type ScheduleEvery = typeof SCHEDULE_EVERY[number];
 export type ScheduleHarness = typeof SCHEDULE_HARNESSES[number];
 export type ScheduleNotify = typeof SCHEDULE_NOTIFY[number];
 export type Weekday = typeof WEEKDAYS[number];
-export type ScheduleRunStatus = "launched" | "running" | "finished" | "failed" | "skipped";
+export type ScheduleRunStatus = "launched" | "running" | "blocked" | "finished" | "failed" | "skipped";
 
 export interface Schedule {
   id: string;
@@ -63,6 +64,8 @@ export interface ScheduleRun {
   finishedAt?: string;
   status: ScheduleRunStatus;
   reason?: string;
+  blockedStartupPrompt?: string;
+  blockNotified?: boolean;
   notified?: boolean;
   notifyReason?: string;
   launch: ScheduleLaunchRecord;
@@ -79,6 +82,7 @@ export interface ScheduleLaunchContext {
   projectDir: string;
   cwd: string;
   runId: string;
+  blockedStartup?: (promptText: string) => void | Promise<void>;
 }
 
 export type ScheduleLauncher = ((context: ScheduleLaunchContext) => Promise<ScheduleLaunchResult>) & { close?: () => void };
@@ -104,9 +108,17 @@ const timestamp = z.string().datetime({ offset: true });
 const localTimestamp = z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/);
 const clockTime = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/);
 const schedulePath = (projectDir: string) => path.join(projectDir, "schedules.yaml");
-const runningStatuses = new Set<ScheduleRunStatus>(["launched", "running"]);
+const runningStatuses = new Set<ScheduleRunStatus>(["launched", "running", "blocked"]);
 const MAX_SCHEDULES = 64;
 const MAX_RUNS = 2000;
+export const STARTUP_BLOCK_WINDOW_MS = 90_000;
+export const STARTUP_BLOCK_WINDOW_OPEN_MS = 5_000;
+const STARTUP_LATE_TRANSCRIPT_MS = 30_000;
+const STARTUP_PANE_READ_LIMIT = 3;
+const STARTUP_PROMPT_TAIL_LINES = 12;
+const STARTUP_BLOCK_STATUSES = ["blocked", "waiting"];
+const STARTUP_PROMPT_MARKER = /[?❯]|\(y\/?n\)|^\s*\d+[.)]\s/m;
+const CLAUDE_SCHEDULE_SETTINGS = JSON.stringify({ enableAllProjectMcpServers: true });
 
 function record(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -305,7 +317,7 @@ export async function readScheduleRuns(file: string): Promise<ScheduleRun[]> {
       const raw = record(JSON.parse(line));
       const launch = record(raw.launch);
       if (typeof raw.id !== "string" || typeof raw.scheduleId !== "string" || typeof raw.project !== "string"
-          || typeof raw.startedAt !== "string" || !["launched", "running", "finished", "failed", "skipped"].includes(String(raw.status))
+          || typeof raw.startedAt !== "string" || !["launched", "running", "blocked", "finished", "failed", "skipped"].includes(String(raw.status))
           || !["herdr", "headless"].includes(String(launch.mode))) continue;
       runs.push(raw as unknown as ScheduleRun);
     } catch { /* A torn final line does not hide older history. */ }
@@ -368,7 +380,9 @@ export class Scheduler {
         const due = computerMatches(schedule.computer, computer) ? nextRun(schedule, last) : null;
         result.push({ ...schedule, project, nextRun: due?.toISOString() ?? null,
           lastRun: last ? { startedAt: last.startedAt, ...(last.finishedAt ? { finishedAt: last.finishedAt } : {}), status: last.status,
-            ...(last.reason ? { reason: last.reason } : {}), launch: last.launch } : null, running });
+            ...(last.reason ? { reason: last.reason } : {}),
+            ...(last.blockedStartupPrompt ? { blockedStartupPrompt: last.blockedStartupPrompt } : {}),
+            ...(last.blockNotified !== undefined ? { blockNotified: last.blockNotified } : {}), launch: last.launch } : null, running });
       }
     }
     return { computer, schedules: result };
@@ -403,7 +417,8 @@ export class Scheduler {
 
     try {
       const launched = await this.launch({ schedule: prepared.schedule, project: prepared.project, projectDir: prepared.projectDir,
-        cwd: prepared.cwd, runId: prepared.run.id });
+        cwd: prepared.cwd, runId: prepared.run.id,
+        blockedStartup: promptText => this.recordBlockedStartup(prepared.run.id, prepared.schedule, promptText) });
       const running = await this.updateRun(prepared.run.id, { status: "running", launch: launched.launch });
       const notified = this.notifyRun(running, prepared.schedule, "scheduleStarted");
       if (launched.completion) void launched.completion.then(async result => {
@@ -432,19 +447,33 @@ export class Scheduler {
   }
 
   private async finishRun(id: string, schedule: Schedule, status: "finished" | "failed", reason?: string,
-    previousNotification?: Promise<void>): Promise<void> {
+    previousNotification?: Promise<unknown>): Promise<void> {
     const run = await this.updateRun(id, { status, finishedAt: this.now().toISOString(), ...(reason ? { reason } : {}) });
     await previousNotification;
+    if (run.blockedStartupPrompt && run.blockNotified) return;
     await this.notifyRun(run, schedule, status === "finished" ? "scheduleFinished" : "scheduleFailed");
   }
 
-  private async notifyRun(run: ScheduleRun, schedule: Schedule, kind: SchedulePushKind): Promise<void> {
+  private async recordBlockedStartup(id: string, schedule: Schedule, promptText: string): Promise<void> {
+    try {
+      const prompt = promptText.slice(0, 4000);
+      const run = await this.updateRun(id, { status: "blocked", blockedStartupPrompt: prompt });
+      const delivered = await this.notifyRun(run, schedule, "scheduleBlocked", `Blocked at startup: ${prompt}`);
+      if (delivered) await this.updateRun(id, { blockNotified: true });
+    } catch (error) {
+      this.log(`[schedule] blocked-at-startup record for run ${id} failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    }
+  }
+
+  private async notifyRun(run: ScheduleRun, schedule: Schedule, kind: SchedulePushKind, reason?: string): Promise<boolean> {
     const preference: ScheduleNotify = kind === "scheduleStarted" ? "start" : kind === "scheduleFinished" ? "finish" : "failure";
-    if (!scheduleNotifications(schedule).has(preference)) return;
+    if (!scheduleNotifications(schedule).has(preference)) return false;
     const route = scheduleSessionRoute(schedule, run.launch);
+    const text = reason ?? run.reason;
     const value: SchedulePush = { kind, scheduleId: schedule.id, project: run.project, name: schedule.name,
-      computer: schedule.computer, runId: run.id, status: kind === "scheduleStarted" ? "running" : kind === "scheduleFinished" ? "finished" : "failed",
-      ...(run.reason ? { reason: run.reason } : {}), ...(route ? { route } : {}) };
+      computer: schedule.computer, runId: run.id,
+      status: kind === "scheduleStarted" ? "running" : kind === "scheduleFinished" ? "finished" : kind === "scheduleBlocked" ? "blocked" : "failed",
+      ...(text ? { reason: text } : {}), ...(route ? { route } : {}) };
     let result: SchedulePushResult;
     try { result = this.push ? await this.push.notify(value) : { notified: false, reason: "no push config" }; }
     catch { result = { notified: false, reason: "push delivery failed" }; }
@@ -454,6 +483,7 @@ export class Scheduler {
       this.log(`[schedule] ${kind} notification result for run ${run.id} could not be recorded: ${error instanceof Error ? error.message : "unknown error"}`);
     }
     if (!result.notified) this.log(`[schedule] ${kind} notification for run ${run.id}: ${result.reason ?? "not delivered"}`);
+    return result.notified;
   }
 
   async tick(): Promise<void> {
@@ -496,21 +526,107 @@ async function launchInHerdr(server: string, context: ScheduleLaunchContext, lau
   }
   const launch: ScheduleLaunchRecord = { mode: "herdr", server, workspaceId, tabId, paneId,
     ...(sessionId ? { sessionId } : {}) };
-  return { launch, completion: watchHerdrRun(server, { workspaceId, tabId, paneId }, signal) };
+  return { launch, completion: watchHerdrRun(server, { workspaceId, tabId, paneId }, signal,
+    { source: context.schedule.harness, startedAt: Date.now(), sessionId, onBlocked: context.blockedStartup }) };
 }
 
-async function watchHerdrRun(server: string, target: { workspaceId: string; tabId: string; paneId: string }, signal: AbortSignal): Promise<{ status: "finished" | "failed"; reason?: string }> {
+function stripTerminalEscapes(line: string): string {
+  return line.replace(/\r/g, "")
+    .replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, "")
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "");
+}
+
+export function classifyStartupBlock(input: { elapsedMs: number; transcriptActive: boolean; status: unknown; lines: readonly string[] }): string | undefined {
+  if (input.elapsedMs < STARTUP_BLOCK_WINDOW_MS || input.elapsedMs > STARTUP_BLOCK_WINDOW_MS + STARTUP_BLOCK_WINDOW_OPEN_MS) return undefined;
+  if (input.transcriptActive) return undefined;
+  if (!STARTUP_BLOCK_STATUSES.includes(String(input.status))) return undefined;
+  const lines = input.lines.map(line => stripTerminalEscapes(line).trim()).filter(Boolean);
+  const text = lines.slice(-STARTUP_PROMPT_TAIL_LINES).join("\n");
+  if (!text || !STARTUP_PROMPT_MARKER.test(text)) return undefined;
+  return text.slice(0, 4000);
+}
+
+async function paneRecentLines(server: string, paneId: string): Promise<string[]> {
+  try {
+    const value = await rpc(server, "pane.read", { pane_id: paneId, source: "recent", lines: 40 });
+    const text = String(object(object(value).read).text ?? "");
+    return text.split(/\r?\n/);
+  } catch { return []; }
+}
+
+interface StartupWatch {
+  source: ScheduleHarness;
+  startedAt: number;
+  sessionId?: string;
+  onBlocked?: (promptText: string) => void | Promise<void>;
+}
+
+export interface StartupWatchEnv {
+  now?: () => number;
+  pause?: (ms: number) => Promise<void>;
+  readPane?: (server: string, paneId: string) => Promise<string[]>;
+  resolveSession?: (server: string, pane: Json) => Promise<string | undefined>;
+  transcriptStamp?: (source: ScheduleHarness, sessionId: string | undefined) => Promise<{ size: number; mtimeMs: number } | undefined>;
+  panes?: (server: string) => Promise<Json[]>;
+}
+
+async function realTranscriptStamp(source: ScheduleHarness, sessionId: string | undefined): Promise<{ size: number; mtimeMs: number } | undefined> {
+  if (!sessionId) return undefined;
+  const file = await transcriptPath(source, sessionId).catch(() => undefined);
+  const metadata = file ? await stat(file).catch(() => undefined) : undefined;
+  return metadata ? { size: metadata.size, mtimeMs: metadata.mtimeMs } : undefined;
+}
+
+export async function watchHerdrRun(server: string, target: { workspaceId: string; tabId: string; paneId: string }, signal: AbortSignal,
+  startup: StartupWatch, env: StartupWatchEnv = {}): Promise<{ status: "finished" | "failed"; reason?: string }> {
+  const now = env.now ?? Date.now;
+  const pause = env.pause ?? ((ms: number) => new Promise<void>(resolve => { const timer = setTimeout(resolve, ms); timer.unref(); }));
+  const readPane = env.readPane ?? paneRecentLines;
+  const resolveSession = env.resolveSession ?? ((name: string, pane: Json) => paneIdentity(name, pane).catch(() => undefined));
+  const transcriptStamp = env.transcriptStamp ?? realTranscriptStamp;
+  const listPanes = env.panes ?? (async (name: string) => objects((await snapshot(name)).panes));
+  let sessionId = startup.sessionId;
+  let transcriptActive = false;
+  let stamp: { size: number; mtimeMs: number } | undefined;
+  let recordedBlock = false;
+  let paneReads = 0;
   while (!signal.aborted) {
-    await new Promise<void>(resolve => { const timer = setTimeout(resolve, 1000); timer.unref(); });
+    await pause(1000);
     if (signal.aborted) break;
     try {
-      const pane = objects((await snapshot(server)).panes).find(item => item.workspace_id === target.workspaceId
+      const pane = (await listPanes(server)).find(item => item.workspace_id === target.workspaceId
         && item.tab_id === target.tabId && item.pane_id === target.paneId);
       if (!pane) return { status: "failed", reason: "The Herdr pane closed before the scheduled prompt finished." };
       const status = String(pane.agent_status);
       if (status === "idle") return { status: "finished" };
       if (!["working", "starting", "blocked", "waiting", "unknown"].includes(status)) {
         return { status: "failed", reason: "The scheduled agent stopped before the prompt finished." };
+      }
+      const elapsedMs = now() - startup.startedAt;
+      const withinWindow = elapsedMs <= STARTUP_BLOCK_WINDOW_MS + STARTUP_BLOCK_WINDOW_OPEN_MS;
+      if (!transcriptActive && startup.onBlocked && !recordedBlock && withinWindow) {
+        if (!sessionId) sessionId = await resolveSession(server, pane);
+        const next = await transcriptStamp(startup.source, sessionId);
+        if (next) {
+          if (!stamp) {
+            stamp = next;
+            if (elapsedMs > STARTUP_LATE_TRANSCRIPT_MS) transcriptActive = true;
+          } else if (next.size !== stamp.size || next.mtimeMs !== stamp.mtimeMs) {
+            stamp = next;
+            transcriptActive = true;
+          }
+        }
+      }
+      if (!recordedBlock && startup.onBlocked && withinWindow && !transcriptActive
+          && elapsedMs >= STARTUP_BLOCK_WINDOW_MS && STARTUP_BLOCK_STATUSES.includes(status)
+          && paneReads < STARTUP_PANE_READ_LIMIT) {
+        paneReads++;
+        const lines = await readPane(server, target.paneId);
+        const prompt = classifyStartupBlock({ elapsedMs, transcriptActive, status, lines });
+        if (prompt) {
+          recordedBlock = true;
+          await Promise.resolve(startup.onBlocked(prompt)).catch(() => undefined);
+        }
       }
     } catch { return { status: "failed", reason: "Herdr disconnected while the scheduled prompt was running." }; }
   }
@@ -526,8 +642,9 @@ async function launchHeadless(context: ScheduleLaunchContext, store: string, sta
     eventLog, createdAt: now, startedAt: now, updatedAt: now, status: "queued", schedule: { id: context.schedule.id, project: context.project } };
   await writeManifest(jobDir, manifest);
   const command = headlessCommand(context.schedule, context.cwd);
+  if (context.schedule.harness === "codex") await ensureCodexDirTrusted(context.cwd).catch(() => {});
   let child: ChildProcess;
-  try { child = spawn(command.file, command.args, { cwd: context.cwd, env: process.env, stdio: ["pipe", "pipe", "pipe"] }); }
+  try { child = spawn(command.file, command.args, { cwd: command.cwd, env: process.env, stdio: ["pipe", "pipe", "pipe"] }); }
   catch (error) { await writeManifest(jobDir, { ...manifest, status: "failed", updatedAt: new Date().toISOString(), finishedAt: new Date().toISOString() }); throw error; }
   started(child);
   const closed = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(resolve => {
@@ -556,11 +673,52 @@ async function launchHeadless(context: ScheduleLaunchContext, store: string, sta
   return { launch: { mode: "headless", jobDir }, completion };
 }
 
-function headlessCommand(schedule: Schedule, cwd: string): { file: string; args: string[] } {
+export function headlessCommand(schedule: Schedule, cwd: string): { file: string; args: string[]; cwd: string } {
   const model = schedule.model ? ["--model", schedule.model] : [];
-  if (schedule.harness === "codex") return { file: "codex", args: ["exec", ...model, "--sandbox", "workspace-write", "-C", cwd, "--json", "-"] };
-  if (schedule.harness === "opencode") return { file: "opencode", args: ["run", "--format", "json", "--dir", cwd, ...model] };
-  return { file: "claude", args: ["-p", "--output-format", "stream-json", ...model] };
+  if (schedule.harness === "codex") return { file: "codex", cwd, args: ["exec", ...model, "--sandbox", "workspace-write", "-C", cwd,
+    "--skip-git-repo-check", "--json", "-"] };
+  if (schedule.harness === "opencode") return { file: "opencode", cwd, args: ["run", "--format", "json", "--dir", cwd, ...model] };
+  return { file: "claude", cwd, args: ["-p", "--output-format", "stream-json", "--settings", CLAUDE_SCHEDULE_SETTINGS, ...model] };
+}
+
+function tomlQuote(value: string): string {
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+export async function ensureCodexDirTrusted(cwd: string): Promise<void> {
+  const directory = process.env.CODEX_HOME || path.join(homedir(), ".codex");
+  const file = path.join(directory, "config.toml");
+  let text = "";
+  try { text = await readFile(file, "utf8"); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") return; }
+  const header = `[projects.${tomlQuote(cwd)}]`;
+  const trustLine = 'trust_level = "trusted"';
+  let next: string;
+  const at = text.indexOf(header);
+  if (at >= 0) {
+    const bodyStart = at + header.length;
+    const rest = text.slice(bodyStart);
+    const nextTable = rest.search(/^\s*\[/m);
+    const section = nextTable >= 0 ? rest.slice(0, nextTable) : rest;
+    if (new RegExp(`trust_level\\s*=\\s*"trusted"`).test(section)) return;
+    const existing = /^[ \t]*trust_level\s*=.*$/m.exec(section);
+    if (existing) {
+      const replaced = section.replace(existing[0], existing[0].match(/^[ \t]*/)![0] + trustLine);
+      next = text.slice(0, bodyStart) + replaced + rest.slice(section.length);
+    } else {
+      const newline = section.startsWith("\n") || section.startsWith("\r\n") ? "" : "\n";
+      next = text.slice(0, bodyStart) + newline + trustLine + (section.startsWith("\n") || section.startsWith("\r\n") ? section : "\n" + section) + rest.slice(section.length);
+    }
+  } else {
+    const separator = text && !text.endsWith("\n") ? "\n\n" : text ? "\n" : "";
+    next = text + `${separator}${header}\n${trustLine}\n`;
+  }
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  const metadata = await stat(file).catch(() => undefined);
+  const mode = metadata ? metadata.mode & 0o777 : 0o600;
+  const temporary = `${file}.${randomUUID()}`;
+  await writeFile(temporary, next, { mode, flag: "wx" });
+  try { await rename(temporary, file); } finally { await unlink(temporary).catch(() => {}); }
 }
 
 async function writeManifest(jobDir: string, manifest: Record<string, unknown>): Promise<void> {

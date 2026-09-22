@@ -9,6 +9,24 @@ The same graph is also drawn in the terminal by the interactive shell's Graph vi
 
 Beyond navigating the graph itself, the viewer is a maintenance surface: find memories, review aging ones, and edit, merge, or prune them without leaving the view.
 
+## Labels
+
+Project (group) labels always draw first: they claim slots from the
+per-frame budget before any finding or task. Finding and task labels resolve
+against screen-space rectangles every frame in `graph-core`'s collision
+resolver: a leaf whose box intersects a group label or a higher-ranked leaf
+is hidden. Leaves rank by focus/hover priority, then whether they were
+visible last frame (so a shown label holds its slot under cap pressure), then
+node degree including `refCount`, then recency. Hysteresis keeps a shown
+label through a marginal overlap so labels do not flicker as the camera
+moves. The draw cap counts groups and leaves together and scales with
+viewport area, with a floor of 40 so a full project navigator still fits on
+a phone-sized canvas. Zooming in brings more finding/task labels into the
+pool and clears collisions, so detail appears as you approach it. Rects are
+computed one frame behind the CSS2D draw (labelTick runs in the ambient RAF,
+elements are positioned in force-graph's render pass); that lag is accepted
+rather than coupling the resolver to the host loop.
+
 ## Layout
 
 | Region | What it is |

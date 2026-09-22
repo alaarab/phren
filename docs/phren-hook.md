@@ -41,7 +41,10 @@ node packages/cli/dist/index.js bridge doctor
 Install the helper on every connected computer before updating the phone app.
 The installer restarts its user service and preserves existing authorization and
 agent configuration. Review new or changed Codex hook definitions in `/hooks`;
-Phren does not bypass Codex's trust checks.
+Phren does not bypass Codex's trust checks for interactive sessions. Scheduled
+headless Codex runs are the documented exception: they pass
+`--skip-git-repo-check` and write `trust_level = "trusted"` for the project
+directory into `config.toml` (see [schedules](schedules.md)).
 
 ## What connects
 
