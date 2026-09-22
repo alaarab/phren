@@ -41,9 +41,9 @@ final class ScheduleRoutesTests: XCTestCase {
           "harness":"codex","every":"daily","at":"07:30","prompt":"Test",
           "createdAt":"2026-09-20T21:00:00Z","updatedAt":"2026-09-20T21:00:00Z",
           "project":"phone-kit","nextRun":"2026-09-21T07:30:00Z","running":true,
-          "lastRun":{"id":"run-1","scheduleId":"7f3a2c1d","project":"phone-kit",
+          "lastRun":{
             "startedAt":"2026-09-20T21:01:00Z","status":"running",
-            "launch":{"mode":"herdr","workspaceId":"w1","tabId":"w1:t1","paneId":"w1:p1"}}
+            "launch":{"mode":"herdr","server":"default","workspaceId":"w1","tabId":"w1:t1","paneId":"w1:p1"}}
         }
         """#.utf8)
         let status = try JSONDecoder().decode(ScheduleStatus.self, from: data)
@@ -51,6 +51,8 @@ final class ScheduleRoutesTests: XCTestCase {
         XCTAssertEqual(status.every, .daily(hour: 7, minute: 30))
         XCTAssertEqual(status.lastRun?.scheduleID, "7f3a2c1d")
         XCTAssertEqual(status.lastRun?.launch.paneID, "w1:p1")
+        XCTAssertEqual(status.lastRun?.launch.server, "default")
+        XCTAssertEqual(status.lastRun?.project, "phone-kit")
         XCTAssertTrue(status.running)
     }
 

@@ -119,6 +119,10 @@ targets:
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         PhrenGitHubClientID: "$(PHREN_GITHUB_CLIENT_ID)"
         NSSupportsLiveActivities: true
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.phren.ios.notifications.refresh
+        UIBackgroundModes:
+          - fetch
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
           NSExceptionDomains:

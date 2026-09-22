@@ -21,6 +21,7 @@ enum ChatAttachmentPreparation {
                 kCGImageSourceThumbnailMaxPixelSize: 768,
               ] as CFDictionary),
               let data = UIImage(cgImage: thumbnail).jpegData(compressionQuality: 0.8) else { return nil }
+        ImageViewerOriginals.remember(attachment.data, for: attachment.id)
         return try? AgentAttachment(id: attachment.id, name: attachment.name, data: data, isImage: true)
     }
 
@@ -39,7 +40,9 @@ enum ChatAttachmentPreparation {
         guard let encoded = keepPNG ? png : image.jpegData(compressionQuality: 0.85) else {
             throw PhrenKitError.validation("This image couldn't be prepared for the agent.")
         }
-        return try AgentAttachment(name: (name as NSString).deletingPathExtension + (keepPNG ? ".png" : ".jpg"), data: encoded, isImage: true)
+        let attachment = try AgentAttachment(name: (name as NSString).deletingPathExtension + (keepPNG ? ".png" : ".jpg"), data: encoded, isImage: true)
+        ImageViewerOriginals.remember(data, for: attachment.id)
+        return attachment
     }
     static func file(_ url: URL) throws -> AgentAttachment {
         let access = url.startAccessingSecurityScopedResource()

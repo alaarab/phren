@@ -13,6 +13,7 @@ struct MemoryView: View {
     @AppStorage(MemorySettings.kindsKey) private var kindsRaw = ""
     @AppStorage(MemorySettings.projectsKey) private var projectsRaw = ""
     @State private var showingSearch = false
+    @State private var navigationPath = NavigationPath()
     @State private var query = ""
     @FocusState private var searchFocused: Bool
     @State private var payload: GraphPayload?
@@ -104,7 +105,7 @@ struct MemoryView: View {
     }
 
     var body: some View {
-        PhrenNavigationStack {
+        PhrenNavigationStack(path: $navigationPath) {
             VStack(spacing: 0) {
                 ActionErrorBanner()
                 if showingSearch {
@@ -123,17 +124,37 @@ struct MemoryView: View {
             .disablesPanToGoBack()
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
+                    PhrenIconButton(icon: "folder", label: "Files") { navigationPath.append(MemoryDestination.files) }
+                        .phrenIdentifier("memory-files")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    PhrenIconButton(icon: "wrench.and.screwdriver", label: "Memory maintenance") {
+                        navigationPath.append(MemoryDestination.maintenance)
+                    }
+                    .phrenIdentifier("memory-maintenance")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    PhrenIconButton(icon: "magnifyingglass", label: showingSearch ? "Close search" : "Search memory") {
                         showingSearch.toggle()
                         if showingSearch { searchFocused = true } else { query = "" }
-                    } label: {
-                        Image(systemName: "magnifyingglass")
                     }
-                    .accessibilityLabel(showingSearch ? "Close search" : "Search memory")
                     .accessibilityIdentifier("memory-search-toggle")
                 }
             }
             .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: showingSearch)
+            .navigationDestination(for: MemoryDestination.self) { destination in
+                switch destination {
+                case .files: FilesView()
+                case .maintenance: MemoryMaintenanceView()
+                }
+            }
+            .onChange(of: model.showingMemoryMaintenance, initial: true) { _, showing in
+                guard showing else { return }
+                model.showingMemoryMaintenance = false
+                model.selectedTab = .memory
+                navigationPath = NavigationPath()
+                navigationPath.append(MemoryDestination.maintenance)
+            }
             .navigationDestination(item: $projectRoute) { route in
                 ProjectDetailView(storeId: route.storeId, project: route.project)
             }
@@ -180,6 +201,8 @@ struct MemoryView: View {
                      title: deleting?.isTask == true ? "Delete this task?" : "Delete this finding?",
                      message: deleting?.text ?? "", actions: deleteActions, identifier: "memory-delete")
     }
+
+    private enum MemoryDestination: Hashable { case files, maintenance }
 
     // MARK: - Filter line
 

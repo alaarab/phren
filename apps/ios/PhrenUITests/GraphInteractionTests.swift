@@ -82,7 +82,7 @@ final class GraphInteractionTests: XCTestCase {
         XCTAssertTrue(delete.waitForExistence(timeout: 5), "finding offers Delete")
         delete.tap()
         // The confirmation is phren's own dialog, not a system sheet.
-        XCTAssertTrue(app.buttons["graph-delete-dialog:delete"].waitForExistence(timeout: 5),
+        XCTAssertTrue(app.buttons["memory-delete:delete"].waitForExistence(timeout: 5),
                       "delete confirmation appears")
     }
 
@@ -100,53 +100,48 @@ final class GraphInteractionTests: XCTestCase {
     }
 
     @MainActor
-    func testGraphDragsStayOnMapAndBackButtonExits() {
+    func testGraphDragsStayOnMemoryAndOtherTabsKeepBackGestures() {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing"]
         app.launch()
-        XCTAssertTrue(app.buttons["More"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.tabBars.buttons["Projects"].waitForExistence(timeout: 8))
+        app.tabBars.buttons["Projects"].tap()
+        XCTAssertFalse(app.buttons["More"].exists)
         capture(app, name: "Projects design")
         openMemoryGraph(from: app)
         XCTAssertTrue(app.webViews.staticTexts["DEMO"].firstMatch.waitForExistence(timeout: 20))
         let canvas = app.webViews.firstMatch
-        let back = app.buttons["graph-back"]
+        let memory = app.navigationBars["Memory"]
         for (start, end) in [(0.05, 0.85), (0.85, 0.15), (0.35, 0.9)] {
             canvas.coordinate(withNormalizedOffset: CGVector(dx: start, dy: 0.55))
                 .press(forDuration: 0.05, thenDragTo: canvas.coordinate(withNormalizedOffset: CGVector(dx: end, dy: 0.55)))
-            XCTAssertTrue(back.exists, "Dragging the graph navigated away")
+            XCTAssertTrue(memory.exists, "Dragging the graph navigated away")
+            XCTAssertTrue(app.tabBars.buttons["Memory"].isSelected)
             XCTAssertTrue(canvas.exists)
         }
         // Exercise the navigation controller's edge gesture as well.
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.001, dy: 0.55))
             .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.55)))
-        XCTAssertTrue(back.exists)
+        XCTAssertTrue(memory.exists)
+        XCTAssertTrue(app.tabBars.buttons["Memory"].isSelected)
         capture(app, name: "Graph after canvas and edge drags")
-        back.tap()
+        app.tabBars.buttons["Projects"].tap()
         XCTAssertTrue(app.navigationBars["Projects"].waitForExistence(timeout: 5))
-        app.buttons["More"].tap()
-        tapVisibleSkillsItem(app)
+        app.tabBars.buttons["Agents"].tap()
+        openSessionsAction("skills", in: app)
         XCTAssertTrue(app.navigationBars["Skills"].waitForExistence(timeout: 5))
         // The synthesized edge drag occasionally lands before the push has
         // settled and is swallowed; a second one is still the same gesture.
-        for _ in 0..<2 where !app.navigationBars["Projects"].exists {
+        for _ in 0..<2 where !app.navigationBars["Live sessions"].exists {
             app.coordinate(withNormalizedOffset: CGVector(dx: 0.001, dy: 0.55))
                 .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.55)))
-            _ = app.navigationBars["Projects"].waitForExistence(timeout: 4)
+            _ = app.navigationBars["Live sessions"].waitForExistence(timeout: 4)
         }
-        XCTAssertTrue(app.navigationBars["Projects"].waitForExistence(timeout: 5),
+        XCTAssertTrue(app.navigationBars["Live sessions"].waitForExistence(timeout: 5),
                       "Normal back gestures must still work outside the graph")
         app.tabBars.buttons["Settings"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
         capture(app, name: "Settings design")
-    }
-
-    @MainActor
-    private func tapVisibleSkillsItem(_ app: XCUIApplication) {
-        // iOS exposes both the menu action and the obscured list shortcut.
-        let item = app.buttons.matching(NSPredicate(format: "label == %@", "Skills"))
-            .allElementsBoundByIndex.first { $0.isHittable }
-        XCTAssertNotNil(item)
-        item?.tap()
     }
 
     @MainActor
@@ -158,13 +153,11 @@ final class GraphInteractionTests: XCTestCase {
     private func openDossier(in app: XCUIApplication) -> XCUIElement {
         openMemoryGraph(from: app)
         _ = app.webViews.staticTexts["DEMO"].firstMatch.waitForExistence(timeout: 20)
-        app.buttons["Search graph"].tap()
-        let field = app.textFields["Search findings, tasks, projects"]
+        app.buttons["memory-search-toggle"].tap()
+        let field = app.textFields["memory-search"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
         field.tap()
-        field.typeText("offline")
-        let result = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Cache repeated requests")).firstMatch
-        _ = result.waitForExistence(timeout: 5)
-        result.tap()
+        field.typeText("offline\n")
         return app.webViews.staticTexts.matching(
             NSPredicate(format: "label CONTAINS %@", "Cache repeated requests for offline use")
         ).firstMatch
@@ -174,13 +167,11 @@ final class GraphInteractionTests: XCTestCase {
     private func openProjectDossier(in app: XCUIApplication) -> XCUIElement {
         openMemoryGraph(from: app)
         _ = app.webViews.staticTexts["DEMO"].firstMatch.waitForExistence(timeout: 20)
-        app.buttons["Search graph"].tap()
-        let field = app.textFields["Search findings, tasks, projects"]
+        app.buttons["memory-search-toggle"].tap()
+        let field = app.textFields["memory-search"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
         field.tap()
-        field.typeText("demo")
-        let result = app.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] %@", "demo")).firstMatch
-        _ = result.waitForExistence(timeout: 5)
-        result.tap()
+        field.typeText("demo\n")
         return nodeDetails(in: app)
     }
 
@@ -192,9 +183,9 @@ final class GraphInteractionTests: XCTestCase {
     @MainActor
     func testFocusSaveAndRestoreGraphView() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["--ui-testing"]
+        app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--session-details-fixture"]
         app.launch()
-        openMemoryGraph(from: app)
+        openSessionProjectGraph(in: app)
         // The native search is available before WKWebView has mounted its
         // graph. Wait for rendered content before issuing camera commands.
         XCTAssertTrue(app.webViews.staticTexts["DEMO"].firstMatch.waitForExistence(timeout: 20))
@@ -220,7 +211,7 @@ final class GraphInteractionTests: XCTestCase {
         app.buttons["Show full view"].tap()
         app.terminate()
         app.launch()
-        openMemoryGraph(from: app)
+        openSessionProjectGraph(in: app)
         // Right after the relaunch the graph screen is still settling; a tap
         // that lands during the push does not present the store chooser.
         let storeButton = app.buttons["graph-store"]
@@ -246,9 +237,9 @@ final class GraphInteractionTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing"]
         app.launch()
-        XCTAssertTrue(app.buttons["More"].waitForExistence(timeout: 8))
-        app.buttons["More"].tap()
-        tapVisibleSkillsItem(app)
+        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 8))
+        app.tabBars.buttons["Agents"].tap()
+        openSessionsAction("skills", in: app)
         // The list is pushed; tap the row by its identifier once it exists and
         // wait for the detail before looking for its controls.
         let audit = app.buttons["skill:sample/brain:demo/skills/audit.md"]
@@ -271,5 +262,28 @@ final class GraphInteractionTests: XCTestCase {
         let disabled = NSPredicate(format: "value == 'Off'")
         expectation(for: disabled, evaluatedWith: toggle)
         waitForExpectations(timeout: 5)
+    }
+
+    /// Named views belong to the contextual project graph. Keep their full
+    /// save/restore coverage through the session's existing Explore graph link.
+    @MainActor
+    private func openSessionProjectGraph(in app: XCUIApplication) {
+        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 8))
+        app.tabBars.buttons["Agents"].tap()
+        let computer = app.buttons["live-host:A1000000-0000-0000-0000-000000000001"]
+        XCTAssertTrue(computer.waitForExistence(timeout: 10))
+        for _ in 0..<4 where !computer.isHittable { app.scrollViews["sessions-scroll"].swipeUp() }
+        computer.tap()
+        let details = app.buttons["live-detail:w1:w1:t1"]
+        XCTAssertTrue(details.waitForExistence(timeout: 10))
+        details.tap()
+        if app.buttons["Change project link"].exists { app.buttons["Change project link"].tap() }
+        else { app.buttons["Link to project"].tap() }
+        let project = app.buttons["live-project:sample/brain:demo"]
+        XCTAssertTrue(project.waitForExistence(timeout: 5))
+        project.tap()
+        let graph = app.buttons["Explore graph"]
+        XCTAssertTrue(graph.waitForExistence(timeout: 5))
+        graph.tap()
     }
 }

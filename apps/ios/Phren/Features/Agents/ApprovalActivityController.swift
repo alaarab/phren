@@ -24,6 +24,8 @@ final class ApprovalActivityController {
         #if DEBUG && targetEnvironment(simulator)
         guard !AppRuntime.isUITesting || ProcessInfo.processInfo.arguments.contains("--approval-live-activity") else { return }
         #endif
+        await LocalNotificationMonitor.shared.approvals.sync(approval, session: session, target: target,
+            deliver: UIApplication.shared.applicationState != .active)
         guard UIApplication.shared.applicationState == .active else { return }
         handled = handled.filter { $0.value > .now }
         observed = observed.filter { $0.value.expiresAt > .now }
@@ -76,6 +78,7 @@ final class ApprovalActivityController {
     }
 
     func reconcile(host: LiveHost, sessions: [LiveAgentSession]) async {
+        LocalNotificationMonitor.shared.approvals.reconcile(host: host, sessions: sessions)
         guard !Task.isCancelled, UIApplication.shared.applicationState == .active else { return }
         await retireExpired()
         for record in (try? await store.records()) ?? [] {
@@ -88,6 +91,7 @@ final class ApprovalActivityController {
     }
 
     func answered(target: AgentChatTarget, actionID: String) async {
+        LocalNotificationMonitor.shared.approvals.answered(hostID: target.hostID, actionID: actionID)
         handled[key(target, actionID)] = Date().addingTimeInterval(60)
         observed.removeValue(forKey: target)
         await remove(target: target, actionID: actionID)
@@ -122,6 +126,7 @@ final class ApprovalActivityController {
             try await PhrenConnection.answerApproval(host: record.host, privateKey: DeviceSSHKey.load(record.host.id),
                                                     target: record.target, actionID: record.actionID, approve: approve,
                                                     decision: approve ? .approve : .deny)
+            LocalNotificationMonitor.shared.approvals.answered(hostID: record.host.id, actionID: record.actionID)
             message = approve ? "Approval sent." : "Denial sent."
         } catch {
             await end([requestID])
@@ -137,6 +142,7 @@ final class ApprovalActivityController {
         try? AgentLaunch.openIndexedSession(entity, destination: .chat)
     }
     func clear() async {
+        LocalNotificationMonitor.shared.approvals.clear()
         generation = UUID(); observed.removeAll(); handled.removeAll(); routes.removeAll()
         _ = try? await store.remove()
         await end(Activity<ApprovalActivityAttributes>.activities.map { $0.attributes.requestID })

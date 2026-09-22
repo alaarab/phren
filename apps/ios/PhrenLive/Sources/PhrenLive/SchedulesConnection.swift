@@ -16,19 +16,21 @@ public struct ScheduleRun: Decodable, Equatable, Identifiable, Sendable {
         public let paneID: String?
         public let sessionID: String?
         public let jobDir: String?
+        public let server: String?
 
         public init(mode: Mode, workspaceID: String? = nil, tabID: String? = nil,
-                    paneID: String? = nil, sessionID: String? = nil, jobDir: String? = nil) {
+                    paneID: String? = nil, sessionID: String? = nil, jobDir: String? = nil, server: String? = nil) {
             self.mode = mode
             self.workspaceID = workspaceID
             self.tabID = tabID
             self.paneID = paneID
             self.sessionID = sessionID
             self.jobDir = jobDir
+            self.server = server
         }
 
         private enum CodingKeys: String, CodingKey {
-            case mode, jobDir
+            case mode, jobDir, server
             case workspaceID = "workspaceId"
             case tabID = "tabId"
             case paneID = "paneId"
@@ -121,17 +123,50 @@ public struct ScheduleStatus: Decodable, Equatable, Identifiable, Sendable {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         project = try values.decode(String.self, forKey: .project)
         nextRun = try values.decodeIfPresent(String.self, forKey: .nextRun).map(scheduleTimestamp)
-        lastRun = try values.decodeIfPresent(ScheduleRun.self, forKey: .lastRun)
+        // /v1/schedules omits history identity fields from lastRun.
+        if let last = try values.decodeIfPresent(LastRun.self, forKey: .lastRun) {
+            lastRun = ScheduleRun(id: last.id ?? "latest-\(schedule.id)", scheduleID: schedule.id,
+                project: project, startedAt: try scheduleTimestamp(last.startedAt),
+                finishedAt: try last.finishedAt.map(scheduleTimestamp), status: last.status,
+                reason: last.reason, blockedStartupPrompt: last.blockedStartupPrompt,
+                notified: last.notified, notifyReason: last.notifyReason,
+                launch: last.launch)
+        } else { lastRun = nil }
         running = try values.decode(Bool.self, forKey: .running)
+    }
+
+    private struct LastRun: Decodable {
+        let id: String?
+        let startedAt: String
+        let finishedAt: String?
+        let status: ScheduleRun.Status
+        let reason: String?
+        let blockedStartupPrompt: String?
+        let notified: Bool?
+        let notifyReason: String?
+        let launch: ScheduleRun.Launch
+    }
+}
+
+public struct ScheduleSnapshot: Decodable, Sendable {
+    public let computer: String
+    public let timeZone: String?
+    public let schedules: [ScheduleStatus]
+
+    public init(computer: String, timeZone: String?, schedules: [ScheduleStatus]) {
+        self.computer = computer; self.timeZone = timeZone; self.schedules = schedules
     }
 }
 
 extension PhrenConnection {
     public static func schedules(host: LiveHost, privateKey: Data) async throws -> [ScheduleStatus] {
-        struct Response: Decodable { let computer: String; let schedules: [ScheduleStatus] }
+        try await scheduleSnapshot(host: host, privateKey: privateKey).schedules
+    }
+
+    public static func scheduleSnapshot(host: LiveHost, privateKey: Data) async throws -> ScheduleSnapshot {
         let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey),
                                        request: schedulesRequest())
-        return try JSONDecoder().decode(Response.self, from: data).schedules
+        return try JSONDecoder().decode(ScheduleSnapshot.self, from: data)
     }
 
     public static func runSchedule(host: LiveHost, privateKey: Data,

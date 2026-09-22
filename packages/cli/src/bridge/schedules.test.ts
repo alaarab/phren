@@ -249,6 +249,7 @@ describe("scheduled startup prompts", () => {
     expect(history[0]).toMatchObject({ id: run.id, status: "blocked", blockNotified: true });
     expect(history[0].blockedStartupPrompt).toContain("Allow external CLAUDE.md file imports?");
     const statuses = await scheduler.statuses();
+    expect(statuses.timeZone).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone);
     expect(statuses.schedules[0]).toMatchObject({ running: true, lastRun: { status: "blocked" } });
     expect(statuses.schedules[0].lastRun?.blockedStartupPrompt).toContain("Allow external CLAUDE.md file imports?");
   });

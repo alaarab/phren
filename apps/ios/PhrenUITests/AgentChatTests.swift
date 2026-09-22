@@ -1056,13 +1056,35 @@ final class AgentChatTests: XCTestCase {
     }
 
     @MainActor
+    func testConversationImageDoubleTapZoomsAndCloses() {
+        let app = launch(extra: ["--chat-historical-image", "--chat-image-zoom"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let picture = app.buttons["View conversation image"]
+        XCTAssertTrue(picture.waitForExistence(timeout: 8))
+        picture.tap()
+        let viewer = app.descendants(matching: .any).matching(identifier: "image-viewer").firstMatch
+        XCTAssertTrue(viewer.waitForExistence(timeout: 8))
+        XCTAssertEqual(viewer.value as? String, "Fit")
+        viewer.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.5)).doubleTap()
+        let zoomed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value != %@", "Fit"), object: viewer)
+        XCTAssertEqual(XCTWaiter.wait(for: [zoomed], timeout: 5), .completed)
+        capture(app, "Conversation image zoom")
+        viewer.doubleTap()
+        let fitted = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Fit"), object: viewer)
+        XCTAssertEqual(XCTWaiter.wait(for: [fitted], timeout: 5), .completed)
+        app.buttons["image-viewer-close"].tap()
+        XCTAssertTrue(viewer.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(picture.exists)
+    }
+
+    @MainActor
     func testHistoricalImageDiffAndNativeHerdrNavigation() {
         let app = launch(extra: ["--chat-historical-image"])
         app.buttons["live-chat:w7:w7:t9"].tap()
         XCTAssertTrue(app.buttons["View conversation image"].waitForExistence(timeout: 8))
         app.buttons["View conversation image"].tap()
-        XCTAssertTrue(app.navigationBars["Conversation image.jpg"].waitForExistence(timeout: 5))
-        app.navigationBars["Conversation image.jpg"].buttons["Done"].tap()
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "image-viewer").firstMatch.waitForExistence(timeout: 5))
+        app.buttons["image-viewer-close"].tap()
         app.buttons["chat-diff"].tap()
         // The header's Changes screen: staged, unstaged and untracked files
         // in List mode, the change itself in Diff mode.

@@ -41,14 +41,7 @@ struct ChatAttachmentImage: View {
                     }
                     #endif
                 }
-                guard let source = CGImageSourceCreateWithData(data as CFData, nil),
-                      let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
-                        kCGImageSourceCreateThumbnailFromImageAlways: true,
-                        kCGImageSourceCreateThumbnailWithTransform: true,
-                        kCGImageSourceShouldCacheImmediately: true,
-                        kCGImageSourceThumbnailMaxPixelSize: pixels,
-                      ] as CFDictionary) else { return UIImage?.none }
-                return UIImage(cgImage: image)
+                return ImageViewerRaster.decode(data, maximumPixels: pixels)?.image
             }.value
             guard !Task.isCancelled else { return }
             if let decoded, let raster = decoded.cgImage {

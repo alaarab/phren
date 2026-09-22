@@ -873,6 +873,7 @@ final class AppModel {
         // on the project set changing, not on every poll.
         PhrenAppShortcuts.donateProjects(from: self)
         SpotlightIndex.shared.refreshProjects(from: self)
+        await LocalNotificationMonitor.shared.updateCatalog(self)
     }
 
     /// The status-only counterpart of `refreshOnce`, for a `SyncEngine.Update`
@@ -1052,6 +1053,9 @@ final class AppModel {
             throw StoreWriteError.readOnly(context.descriptor.displayName)
         }
         try await context.engine.enqueue(op)
+        if case .saveSchedules(let project, let content, _) = op {
+            await LocalNotificationMonitor.shared.scheduleEdited(project: project, schedules: SchedulesFile.parse(content))
+        }
     }
 
     func retryFailedOps() async {

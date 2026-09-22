@@ -9,6 +9,7 @@ struct PhrenApp: App {
     @State private var appearance = PhrenAppearance.shared
     @State private var approvals = ApprovalActivityController.shared
     @Environment(\.scenePhase) private var scenePhase
+    @AppStorage("sessions.live.preferences.v1", store: AppRuntime.defaults) private var notificationHosts = Data()
     private let launchedAt = CFAbsoluteTimeGetCurrent()
 
     init() {
@@ -48,6 +49,7 @@ struct PhrenApp: App {
                     await model.bootstrap()
                     await ApprovalPushNotifications.registerSavedHosts()
                     AgentLaunch.restorePendingNavigation()
+                    if scenePhase == .active { LocalNotificationMonitor.shared.enterForeground() }
                 }
                 .safeAreaInset(edge: .top, spacing: 0) {
                     if let message = approvals.message {
@@ -76,6 +78,11 @@ struct PhrenApp: App {
                     // refreshing, never stale or disconnected, until a first
                     // answer lands or the request fails outright.
                     if phase == .active { SessionOverviewMonitor.shared.returnToForeground() }
+                    if phase == .active { LocalNotificationMonitor.shared.enterForeground() }
+                    if phase == .background { LocalNotificationMonitor.shared.enterBackground() }
+                }
+                .onChange(of: notificationHosts) { _, _ in
+                    Task { await LocalNotificationMonitor.shared.hostsChanged() }
                 }
                 // Widget taps (`widgetURL`/`Link` on `phren://…`) land here
                 // directly — no CFBundleURLTypes registration needed, that's

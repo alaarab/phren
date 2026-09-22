@@ -88,21 +88,54 @@ private struct HookStatusRow: View {
 struct NotificationSettingsView: View {
     @AppStorage(IntegrationSettings.liveActivityKey) private var liveActivity = true
     @AppStorage(IntegrationSettings.agentsKeepScreenOnKey) private var keepScreenOn = false
+    @AppStorage(LocalNotificationSettings.approvalsKey) private var approvals = true
+    @AppStorage(LocalNotificationSettings.schedulesKey) private var schedules = true
+    @State private var denied = false
+
     var body: some View {
-        PhrenList {
-            Section {
-                PhrenSwitch(isOn: $liveActivity) { Label { Text("Live Activity for approvals"); Text("Deny or Approve from the Lock Screen and Dynamic Island").font(.caption).foregroundStyle(PhrenTheme.textMuted) } icon: { Image(systemName: "waveform.path.ecg") } }
-                    .accessibilityIdentifier("notifications-live-activity")
-            } header: { Text("Permission requests") } footer: {
-                Text("Requests arrive over SSH while the app watches a session. Phren has no push server: nothing reaches this phone when the app is closed.")
+        PhrenScreen {
+            PhrenGroup("On this iPhone") {
+                PhrenSwitch("Approvals", systemImage: "hand.raised", isOn: $approvals)
+                    .phrenIdentifier("notifications-approvals")
+                PhrenSwitch("Scheduled prompts", systemImage: "clock", isOn: $schedules)
+                    .phrenIdentifier("notifications-schedules")
+                Text("Approvals alert as soon as this phone sees them during its brief background window. Later, iOS may wake Phren to check again; those alerts can arrive late or be missed.")
+                    .font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
+                Text("Schedules register the next due time ahead of time, using the computer's clock. The reminder can arrive while Phren is closed. It does not confirm a run started or finished. Open Phren to refresh later runs and remote edits.")
+                    .font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
+                Text("Immediate remote approval alerts and schedule results while Phren is suspended need an APNs key on your Hook. Local notifications need no key and no relay server.")
+                    .font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
+                if denied {
+                    Text("Notifications are off in iOS. Allow them in Settings to receive these alerts.")
+                        .font(PhrenTypography.caption).foregroundStyle(PhrenTheme.warning)
+                        .phrenIdentifier("notifications-permission-denied")
+                }
             }
-            Section {
-                PhrenSwitch(isOn: $keepScreenOn) { Label { Text("Keep screen on"); Text("Don't sleep while the Agents screen is open").font(.caption).foregroundStyle(PhrenTheme.textMuted) } icon: { Image(systemName: "sun.max") } }
-                    .accessibilityIdentifier("notifications-keep-screen-on")
-            } header: { Text("Agents") }
+            .phrenContainerMarker("notifications-local-section", label: "On this iPhone")
+            PhrenGroup("Live Activity") {
+                PhrenSwitch("Live Activity for approvals", systemImage: "waveform.path.ecg", isOn: $liveActivity)
+                    .phrenIdentifier("notifications-live-activity")
+                Text("Review requests from the Lock Screen and Dynamic Island while the phone watches a session.")
+                    .font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
+            }
+            PhrenGroup("Agents") {
+                PhrenSwitch("Keep screen on", systemImage: "sun.max", isOn: $keepScreenOn)
+                    .phrenIdentifier("notifications-keep-screen-on")
+            }
         }
         .navigationTitle("Notifications").navigationBarTitleDisplayMode(.inline)
-        .phrenScreen()
+        .task {
+            if approvals || schedules { denied = !(await LocalNotificationMonitor.shared.requestAuthorization()) }
+        }
+        .onChange(of: approvals) { _, value in changed(enabling: value) }
+        .onChange(of: schedules) { _, value in changed(enabling: value) }
+    }
+
+    private func changed(enabling: Bool) {
+        Task {
+            if enabling { denied = !(await LocalNotificationMonitor.shared.requestAuthorization()) }
+            await LocalNotificationMonitor.shared.settingsChanged()
+        }
     }
 }
 

@@ -96,7 +96,9 @@ struct ChatHistoricalImage: View {
                           let reduced = UIImage(cgImage: image).jpegData(compressionQuality: 0.9) else {
                         throw PhrenKitError.validation("The image is unavailable.")
                     }
-                    return try AgentAttachment(name: "Conversation image.jpg", data: reduced, isImage: true)
+                    let attachment = try AgentAttachment(name: "Conversation image.jpg", data: reduced, isImage: true)
+                    ImageViewerOriginals.remember(bytes, for: attachment.id)
+                    return attachment
                 }.value
                 try Task.checkCancellation()
                 TranscriptImageCache.images.setObject(.init(prepared), forKey: key, cost: prepared.data.count)

@@ -109,13 +109,10 @@ final class TrailerTour: XCTestCase {
         canvas.pinch(withScale: 1.3, velocity: 0.5)
         // Select the finding through the same search route as the Memory
         // dossier. A camera reveal does not guarantee a node at the center.
-        app.buttons["Search graph"].tap()
-        let search = app.textFields["Search findings, tasks, projects"]
+        app.buttons["memory-search-toggle"].tap()
+        let search = app.textFields["memory-search"]
         XCTAssertTrue(search.waitForExistence(timeout: 5))
-        search.tap(); search.typeText("Idempotency keys")
-        let result = app.buttons.matching(NSPredicate(
-            format: "label CONTAINS %@", "Idempotency keys must be scoped per merchant")).firstMatch
-        XCTAssertTrue(result.waitForExistence(timeout: 5)); result.tap()
+        search.tap(); search.typeText("Idempotency keys\n")
         // WebKit exposes the dossier as its dialog role and label ("Node
         // details, web dialog"), not by DOM id, and its host can be Other, so
         // match the label from the whole tree rather than through app.webViews.
@@ -131,7 +128,7 @@ final class TrailerTour: XCTestCase {
         XCTAssertTrue(close.isHittable); close.tap()
         XCTAssertTrue(finding.waitForNonExistence(timeout: 5))
         settle(1)
-        app.buttons["graph-back"].tap()
+        app.tabBars.buttons["Projects"].tap()
         XCTAssertTrue(app.navigationBars["Projects"].waitForExistence(timeout: 5))
         settle(3.5)
     }

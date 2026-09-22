@@ -2,14 +2,10 @@ import SwiftUI
 import PhrenKit
 import PhrenLive
 
-struct MemoryMaintenanceRoute: Hashable { }
-
 struct ProjectsView: View {
     @Environment(AppModel.self) private var model
     @State private var projectsModel = ProjectsModel()
     @State private var showSearch = false
-
-    @State private var showMore = false
 
     @State private var showStores = false
 
@@ -38,7 +34,6 @@ struct ProjectsView: View {
                 LiveStatusBar()
                 ActionErrorBanner()
                 PhrenScrollScreen {
-                    PhrenSectionHeader(title: "Projects", count: projectsModel.count)
                     if projectsModel.ready && projectsModel.projects.isEmpty && !projectsModel.storeIsEmpty {
                         Text("No matching projects.").font(.footnote).foregroundStyle(PhrenTheme.textMuted)
                     }
@@ -116,18 +111,15 @@ struct ProjectsView: View {
                 .phrenScreen()
             }
             .navigationTitle("Projects")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
-                    Button { showAddProject = true } label: { Image(systemName: "plus") }
-                        .accessibilityLabel("Add project")
+                    PhrenIconButton(icon: "plus", label: "Add project") { showAddProject = true }
                         .accessibilityIdentifier("projects-add")
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    PhrenIconButton(icon: "ellipsis", label: "More") { showMore = true }
-                        .accessibilityIdentifier("projects-more")
-                }
-                ToolbarItem(placement: .primaryAction) {
                     PhrenIconButton(icon: "magnifyingglass", label: "Filter projects") { showSearch.toggle() }
+                        .accessibilityIdentifier("projects-search-toggle")
                 }
                 if model.hasMultipleStores {
                     ToolbarItem(placement: .topBarLeading) {
@@ -143,28 +135,17 @@ struct ProjectsView: View {
                     }
                 }
             }
-            .navigationDestination(for: ProjectsDestination.self) { destination in
-                switch destination {
-                case .files: FilesView()
-                case .graph: GraphView()
-                case .sessions: LiveSessionsView()
-                case .skills: SkillsView()
-                case .instructions: AgentsView()
-                case .maintenance: MemoryMaintenanceView()
-                }
-            }
             .navigationDestination(for: StoreProject.self) { item in
                 ProjectDetailView(storeId: item.storeId, project: item.project.name)
             }
             .navigationDestination(for: AgentLaunch.PendingProject.self) { target in
                 ProjectDetailView(storeId: target.storeID, project: target.project)
             }
-            .navigationDestination(for: MemoryMaintenanceRoute.self) { _ in MemoryMaintenanceView() }
             .onChange(of: model.showingMemoryMaintenance, initial: true) { _, showing in
                 guard showing else { return }
-                model.showingMemoryMaintenance = false
-                navigationPath = NavigationPath()
-                navigationPath.append(MemoryMaintenanceRoute())
+                // Existing review widget links select Projects first. Memory
+                // owns and consumes the request when its tab appears.
+                model.selectedTab = .memory
             }
             .onChange(of: model.pendingProjectVersion, initial: true) { _, _ in
                 guard let target = AgentLaunch.takePendingProject() else { return }
@@ -191,22 +172,8 @@ struct ProjectsView: View {
             }
             .sheet(isPresented: $connectingComputer) { NavigationStack { LiveHostEditor() } }
         }
-        .phrenActionSheet(isPresented: $showMore, title: "More", actions: moreActions, identifier: "projects-more-sheet")
         .phrenActionSheet(isPresented: $showStores, title: "Store", actions: storeActions, identifier: "projects-store-sheet")
         .projectAgentSheet(choice: $agentChoice)
-    }
-
-    private enum ProjectsDestination: Hashable { case files, graph, sessions, skills, instructions, maintenance }
-
-    private var moreActions: [PhrenControlAction] {
-        let destinations: [(ProjectsDestination, String, String)] = [
-         (.files, "Files", "folder"), (.graph, "Memory graph", "circle.hexagongrid"),
-         (.sessions, "Live sessions", "waveform.path"), (.skills, "Skills", "wand.and.stars"),
-         (.instructions, "Agent instructions", "person.crop.rectangle.stack"),
-         (.maintenance, "Memory maintenance", "wrench.and.screwdriver")]
-        return destinations.map { destination, title, icon in
-            PhrenControlAction(id: String(describing: destination), title: title, icon: icon) { navigationPath.append(destination) }
-        }
     }
 
     private var storeActions: [PhrenControlAction] {

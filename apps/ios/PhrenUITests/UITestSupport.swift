@@ -15,17 +15,16 @@ extension XCTestCase {
         add(attachment)
     }
 
-    /// Open the pushed Memory graph screen from the Projects tab. The Explore
-    /// list no longer carries a Memory graph row (the Memory tab is the graph
-    /// now), so these tests go through the toolbar's More menu instead.
+    /// Memory owns the graph. Select its map even if a previous visit used
+    /// the list, so callers exercise the same entry point as the tab bar.
     @MainActor
     func openMemoryGraph(from app: XCUIApplication) {
-        let more = app.buttons["projects-more"]
-        XCTAssertTrue(more.waitForExistence(timeout: 8), "Projects toolbar offers More")
-        more.tap()
-        let graph = app.buttons["projects-more-sheet:graph"]
-        XCTAssertTrue(graph.waitForExistence(timeout: 5), "More offers Memory graph")
-        graph.tap()
+        let memory = app.tabBars.buttons["Memory"]
+        XCTAssertTrue(memory.waitForExistence(timeout: 8))
+        memory.tap()
+        let map = app.buttons["memory-mode:map"]
+        XCTAssertTrue(map.waitForExistence(timeout: 8))
+        map.tap()
     }
 
     @MainActor

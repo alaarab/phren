@@ -22,9 +22,13 @@ final class PhrenAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificatio
                 UNNotificationAction(identifier: "PHREN_OPEN", title: "Open in Phren", options: [.foreground]),
             ], intentIdentifiers: []),
         ])
+        NotificationBackgroundRefresh.register()
+        // Refresh an existing APNs registration without asking at launch.
         Task {
-            _ = try? await center.requestAuthorization(options: [.alert, .sound])
-            await MainActor.run { application.registerForRemoteNotifications() }
+            let status = await center.notificationSettings().authorizationStatus
+            if status == .authorized || status == .provisional || status == .ephemeral {
+                await MainActor.run { application.registerForRemoteNotifications() }
+            }
         }
         return true
     }
@@ -40,6 +44,13 @@ final class PhrenAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificatio
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
+        if response.notification.request.content.userInfo["localKind"] != nil {
+            Task { @MainActor in
+                await LocalNotificationRouting.open(response.notification.request.content.userInfo)
+                completionHandler()
+            }
+            return
+        }
         if let notification = SchedulePushNotification(userInfo: response.notification.request.content.userInfo) {
             Task { @MainActor in SchedulePushNotifications.open(notification); completionHandler() }
             return

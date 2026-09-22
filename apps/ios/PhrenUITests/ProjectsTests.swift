@@ -2,20 +2,67 @@ import XCTest
 
 final class ProjectsTests: XCTestCase {
     @MainActor
-    func testGridLeadsAndMoreKeepsFilesAndAgentSetup() {
+    func testGridLeadsWithoutMoreAndDestinationsLiveInTheirTabs() {
         let app = launch()
         XCTAssertFalse(app.buttons["Files"].exists)
         XCTAssertFalse(app.buttons["Live sessions"].exists)
+        XCTAssertFalse(app.buttons["Skills"].exists)
+        XCTAssertFalse(app.buttons["Agent instructions"].exists)
         XCTAssertFalse(app.staticTexts["Agent setup"].exists)
         XCTAssertTrue(app.buttons["projects-add"].exists)
+        XCTAssertFalse(app.buttons["projects-more"].exists)
+        XCTAssertFalse(app.buttons["More"].exists)
         capture(app, "Projects grid")
-        app.buttons["projects-more"].tap()
-        for item in ["files", "sessions", "skills", "instructions", "maintenance"] {
-            XCTAssertTrue(app.buttons["projects-more-sheet:\(item)"].exists)
-        }
-        capture(app, "Projects More destinations")
-        app.buttons["projects-more-sheet:files"].tap()
+
+        openMemoryGraph(from: app)
+        XCTAssertTrue(app.webViews.staticTexts["PHONE"].firstMatch.waitForExistence(timeout: 20))
+        XCTAssertTrue(app.buttons["memory-files"].exists)
+        XCTAssertTrue(app.buttons["memory-maintenance"].exists)
+        XCTAssertFalse(app.buttons["Skills"].exists)
+        XCTAssertFalse(app.buttons["Agent instructions"].exists)
+        capture(app, "Memory owns graph files and maintenance")
+        app.buttons["memory-files"].tap()
         XCTAssertTrue(app.navigationBars["Files"].waitForExistence(timeout: 5))
+        app.navigationBars["Files"].buttons.firstMatch.tap()
+        XCTAssertTrue(app.buttons["memory-maintenance"].waitForExistence(timeout: 5))
+        app.buttons["memory-maintenance"].tap()
+        XCTAssertTrue(app.navigationBars["Memory maintenance"].waitForExistence(timeout: 5))
+
+        app.tabBars.buttons["Agents"].tap()
+        XCTAssertTrue(app.navigationBars["Live sessions"].waitForExistence(timeout: 5))
+        openSessionsAction("skills", in: app)
+        XCTAssertTrue(app.navigationBars["Skills"].waitForExistence(timeout: 5))
+        app.navigationBars["Skills"].buttons.firstMatch.tap()
+        openSessionsAction("instructions", in: app)
+        XCTAssertTrue(app.navigationBars["Agent setup"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testProjectsTitleSharesTheOtherTabsLeadingEdgeAndToolbarLine() {
+        let app = launch()
+        let title = app.navigationBars["Projects"].staticTexts["Projects"]
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
+        let frame = title.frame
+        XCTAssertGreaterThan(frame.width, 0)
+        XCTAssertTrue(app.navigationBars["Projects"].frame.contains(frame))
+        for identifier in ["projects-add", "projects-search-toggle", "projects-mic"] {
+            let control = app.buttons[identifier]
+            XCTAssertTrue(control.exists)
+            XCTAssertGreaterThanOrEqual(control.frame.minX, frame.maxX)
+            XCTAssertEqual(control.frame.midY, frame.midY, accuracy: 2, "\(identifier) shares the title line")
+        }
+        XCTAssertFalse(app.buttons["projects-more"].exists)
+        XCTAssertFalse(app.buttons["More"].exists)
+        capture(app, "Projects inline header")
+
+        for (tab, heading) in [("Agents", "Live sessions"), ("Tasks", "Tasks"), ("Memory", "Memory")] {
+            app.tabBars.buttons[tab].tap()
+            let other = app.navigationBars[heading].staticTexts[heading]
+            XCTAssertTrue(other.waitForExistence(timeout: 5))
+            XCTAssertEqual(frame.minX, other.frame.minX, accuracy: 2, "Projects shares \(tab)'s title leading edge")
+            XCTAssertEqual(frame.midY, other.frame.midY, accuracy: 2, "Projects shares \(tab)'s title line")
+            capture(app, "\(tab) header alignment")
+        }
     }
 
     @MainActor

@@ -162,10 +162,13 @@ import UIKit
     /// card, the mascot — in a different tint per picture so four in one
     /// conversation read as four; elsewhere a plain cyan rectangle.
     static func picture(_ index: Int) -> AgentAttachment {
-        let size = tour ? CGSize(width: 360, height: 240) : CGSize(width: 120, height: 90)
+        let zoomFixture = flag("--chat-image-zoom")
+        let size = zoomFixture ? CGSize(width: 2_400, height: 1_800) : tour ? CGSize(width: 360, height: 240) : CGSize(width: 120, height: 90)
         let tints = [UIColor(red: 0.725, green: 0.58, blue: 0.957, alpha: 1), UIColor(red: 0.157, green: 0.827, blue: 0.949, alpha: 1),
                      UIColor(red: 0.878, green: 0.737, blue: 0.498, alpha: 1), UIColor(red: 0.541, green: 0.784, blue: 0.675, alpha: 1)]
-        let data = UIGraphicsImageRenderer(size: size).pngData { context in
+        let format = UIGraphicsImageRendererFormat()
+        if zoomFixture { format.scale = 1 }
+        let data = UIGraphicsImageRenderer(size: size, format: format).pngData { context in
             guard tour else { UIColor.cyan.setFill(); context.fill(CGRect(origin: .zero, size: size)); return }
             UIColor(red: 0.118, green: 0.118, blue: 0.118, alpha: 1).setFill(); context.fill(CGRect(origin: .zero, size: size))
             tints[index % tints.count].withAlphaComponent(0.22).setFill()

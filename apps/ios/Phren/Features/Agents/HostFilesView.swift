@@ -31,6 +31,7 @@ private struct HostFilesSection: View {
     @State private var importing = false
     @State private var busy = false
     @State private var copied: String?
+    @State private var preview: HostFile?
     var body: some View {
         Section {
             Button { importing = true } label: { Label(busy ? "Uploading…" : "Upload a file to \(host.name)", systemImage: "square.and.arrow.up") }
@@ -38,25 +39,37 @@ private struct HostFilesSection: View {
             if let files {
                 if files.isEmpty { Text("Nothing uploaded yet.").foregroundStyle(PhrenTheme.textMuted) }
                 ForEach(files) { file in
-                    Button {
-                        UIPasteboard.general.string = file.path; copied = file.id
-                    } label: {
-                        HStack {
-                            HostFileThumbnail(host: host, file: file)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(file.name).foregroundStyle(PhrenTheme.text).lineLimit(1)
-                                Text("\(ByteCountFormatter.string(fromByteCount: Int64(file.size), countStyle: .file)) · \(file.path)")
-                                    .font(.caption).foregroundStyle(PhrenTheme.textMuted).lineLimit(1).truncationMode(.middle)
-                            }
-                            Spacer()
-                            Image(systemName: copied == file.id ? "checkmark" : "doc.on.doc").foregroundStyle(copied == file.id ? PhrenTheme.success : PhrenTheme.textMuted)
-                        }
-                    }.accessibilityIdentifier("files-row:\(file.name)")
+                    HStack {
+                        if Self.isImage(file) {
+                            Button { preview = file } label: { HostFileThumbnail(host: host, file: file) }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("View image: \(file.name)")
+                                .accessibilityIdentifier("files-preview:\(file.name)")
+                        } else { HostFileThumbnail(host: host, file: file) }
+                        Button {
+                            UIPasteboard.general.string = file.path; copied = file.id
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(file.name).foregroundStyle(PhrenTheme.text).lineLimit(1)
+                                    Text("\(ByteCountFormatter.string(fromByteCount: Int64(file.size), countStyle: .file)) · \(file.path)")
+                                        .font(.caption).foregroundStyle(PhrenTheme.textMuted).lineLimit(1).truncationMode(.middle)
+                                }
+                                Spacer()
+                                Image(systemName: copied == file.id ? "checkmark" : "doc.on.doc").foregroundStyle(copied == file.id ? PhrenTheme.success : PhrenTheme.textMuted)
+                            }.frame(minHeight: 44).contentShape(Rectangle())
+                        }.buttonStyle(.plain).accessibilityIdentifier("files-row:\(file.name)")
+                    }
                 }
             } else if let error { Text(error).font(.footnote).foregroundStyle(PhrenTheme.warning) }
             else { ProgressView("Asking \(host.name)…") }
-        } header: { Text(host.name) } footer: { Text("Tap a file to copy its path on the computer. Uploads live under ~/.local/share/phren/bridge/uploads/files and are cleared after two weeks.") }
+        } header: { Text(host.name) } footer: { Text("Tap a file name to copy its path. Tap a picture to zoom. Uploads are cleared after two weeks.") }
         .task(id: refresh) { await load() }
+        .sheet(item: $preview) { file in
+            PhrenImageViewer(name: file.name) {
+                try await PhrenConnection.uploadedImage(host: host, privateKey: DeviceSSHKey.load(host.id), path: file.path)
+            }
+        }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             guard case .success(let urls) = result else { return }
             busy = true
@@ -72,10 +85,13 @@ private struct HostFilesSection: View {
             }
         }
     }
+    private static func isImage(_ file: HostFile) -> Bool {
+        ["png", "jpg", "jpeg", "gif", "webp", "heic", "heif", "tif", "tiff", "bmp"].contains((file.name as NSString).pathExtension.lowercased())
+    }
     private func load() async {
         do {
             #if DEBUG && targetEnvironment(simulator)
-            if AgentChatFixture.enabled { files = [HostFile(name: "design.pdf", path: "/Users/fixture/.local/share/phren/bridge/uploads/files/design.pdf", size: 120_000, modified: "2026-09-13T10:00:00Z")]; return }
+            if AgentChatFixture.enabled { files = [HostFile(name: "design.pdf", path: "/home/sam/.local/share/phren/bridge/uploads/files/design.pdf", size: 120_000, modified: "2026-09-13T10:00:00Z")]; return }
             #endif
             files = try await PhrenConnection.files(host: host, privateKey: DeviceSSHKey.load(host.id)); error = nil
         } catch { if !Task.isCancelled { self.error = error.localizedDescription } }

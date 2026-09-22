@@ -713,11 +713,7 @@ struct AgentChatView: View {
             if let target = model.target { ChatSubagentsView(session: session, target: target, agents: childAgents) }
         }
         .sheet(item: $previewImage) { item in
-            NavigationStack {
-                ChatAttachmentImage(attachment: item.attachment, maximumPixels: 2_048).padding()
-                    .navigationTitle(item.attachment.name).navigationBarTitleDisplayMode(.inline)
-                    .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { previewImage = nil } } }
-            }
+            PhrenImageViewer(attachment: item.attachment)
         }
         .sheet(isPresented: $showingContext) {
             if let project {

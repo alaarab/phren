@@ -11,6 +11,7 @@ number counts up on its own.
 ### Changed
 
 - Tasks: Start opens the agent launch sheet with the task and its project. Backlog work moves to Active after the agent receives the task; cancel leaves it in place. Move to Active is a separate action, and moves out of the current filter show their destination with a View action. Selecting several tasks offers moves only.
+- Projects uses the same inline header as Agents, Tasks and Memory, with add, search and voice capture beside the title. Its More menu is removed. Memory owns the graph, Files and Memory maintenance; Agents owns Live sessions, Skills and Agent instructions.
 
 - Agent work puts running jobs first, shows failures for one hour with their age, and remembers dismissed failures. Header counts match the visible rows.
 
@@ -19,6 +20,8 @@ number counts up on its own.
 ### Added
 
 - Replies appear as they are written below the activity row. Live previews become the finished reply without duplicate text or restarting the reveal animation.
+- Image previews support pinch zoom, double tap for actual size, and bounded panning. Chat and file previews retain full image detail, with a phren close control and a downward swipe to dismiss at fit.
+- Local notifications for the next scheduled prompt and pending approvals, with separate switches in Settings. The phone checks approvals during its brief background window and on optional iOS background refreshes; no APNs key or relay is needed.
 
 - Chat shows live thinking and tool activity with elapsed time, then keeps a quiet duration above the reply, including stopped turns.
 
@@ -92,7 +95,7 @@ and scrolls again.
   change rather than on every draw, the graph prepares its payload off the
   main actor and keeps one web view while the selection changes, and image
   previews decode once into a shared cache.
-- Projects leads with the project grid. Files, Live sessions, Skills, Agent instructions and Memory maintenance are in More. More and store filtering use Phren controls.
+- Projects leads with the project grid and keeps its Phren store filter.
 
 - Chat, tool cards and Changes are denser: the floating header sits 4 points
   under the safe area, the composer 4 above the home indicator, transcript

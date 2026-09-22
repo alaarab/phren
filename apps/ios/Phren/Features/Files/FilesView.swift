@@ -263,8 +263,8 @@ private struct RepositoryBrowserView: View {
                         if response.truncated == true { Text("Showing the first 500 entries.").foregroundStyle(PhrenTheme.textMuted) }
                     }
                 } else if let encoded = response.data, let bytes = Data(base64Encoded: encoded) {
-                    if let image {
-                        ScrollView([.horizontal, .vertical]) { Image(uiImage: image).resizable().scaledToFit().frame(maxWidth: 800) }
+                    if image != nil {
+                        PhrenImageViewer(name: (path as NSString).lastPathComponent) { bytes }
                     } else if let text = String(data: bytes, encoding: .utf8), !text.contains("\0") {
                         DocumentContentView(path: path, content: text)
                     } else { Text("This binary file cannot be previewed.").foregroundStyle(PhrenTheme.textMuted) }
@@ -273,6 +273,7 @@ private struct RepositoryBrowserView: View {
             else { ProgressView("Loading files…") }
         }.navigationTitle(path.isEmpty ? project : (path as NSString).lastPathComponent)
             .navigationBarTitleDisplayMode(.inline).phrenScreen()
+            .toolbar(image == nil ? .visible : .hidden, for: .navigationBar)
             .toolbar { Button("Refresh", systemImage: "arrow.clockwise") { refresh = UUID() } }
             .task(id: refresh) {
                 response = nil; image = nil; error = nil
@@ -291,9 +292,7 @@ private struct RepositoryBrowserView: View {
         guard response.kind != "directory", let encoded = response.data,
               let bytes = Data(base64Encoded: encoded) else { return nil }
         if let cached = ImageRasterCache.image(for: key) { return cached }
-        let decoded = await Task.detached(priority: .userInitiated) {
-            UIImage(data: bytes)?.preparingForDisplay()
-        }.value
+        let decoded = await ImageViewerRasterCache.load(bytes, fullResolution: false)?.image
         if let decoded { ImageRasterCache.store(decoded, for: key) }
         return decoded
     }

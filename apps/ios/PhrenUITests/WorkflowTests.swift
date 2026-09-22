@@ -34,15 +34,16 @@ final class WorkflowTests: XCTestCase {
         app.buttons["memory-search:clear"].tap()
         XCTAssertTrue(app.staticTexts["memory-counts"].waitForExistence(timeout: 5))
 
-        // The Projects grid leads, and Files stays reachable through More.
+        // The Projects grid leads, and Memory owns Files.
         app.tabBars.buttons["Projects"].tap()
         let project = app.buttons["project:sample/brain:demo"]
         XCTAssertTrue(project.waitForExistence(timeout: 8))
         XCTAssertLessThanOrEqual(project.frame.height, 60)
         XCTAssertFalse(app.buttons["Files"].exists)
         attachUIScreenshot(app, "Projects grid leads the screen")
-        app.buttons["projects-more"].tap()
-        let files = app.buttons["projects-more-sheet:files"]
+        XCTAssertFalse(app.buttons["projects-more"].exists)
+        app.tabBars.buttons["Memory"].tap()
+        let files = app.buttons["memory-files"]
         XCTAssertTrue(files.waitForExistence(timeout: 5))
         files.tap()
         XCTAssertTrue(app.navigationBars["Files"].waitForExistence(timeout: 5))
