@@ -1,7 +1,7 @@
 import PhrenKit
 import SwiftUI
 
-/// The colour a project's name is drawn in: the theme's own project colour
+/// The color a project's name is drawn in: the theme's own project colour
 /// (`default`), or any `#RRGGBB` chosen from the same palette and picker a
 /// computer gets. Choices are per store+project and live only on this phone,
 /// in `project.colour.<storeId>/<project>`.
@@ -9,7 +9,7 @@ enum ProjectNameColor: Hashable {
     case `default`
     case hex(String)
 
-    /// The computer palette, so projects and computers share one set of colours.
+    /// The computer palette, so projects and computers share one set of colors.
     static let palette = LiveHost.colorPalette
     static let paletteNames = ["Blue", "Teal", "Green", "Amber", "Orange", "Pink", "Lavender", "Slate"]
 
@@ -29,13 +29,13 @@ enum ProjectNameColor: Hashable {
         }
     }
 
-    /// The stored hex when the colour is not the theme's own.
+    /// The stored hex when the color is not the theme's own.
     var hexValue: String? {
         if case .hex(let value) = self { return value }
         return nil
     }
 
-    /// The swatch, and the colour the name is drawn in on the phone.
+    /// The swatch, and the color the name is drawn in on the phone.
     var color: Color {
         switch self {
         case .default: return PhrenTheme.sessionProject
@@ -43,7 +43,7 @@ enum ProjectNameColor: Hashable {
         }
     }
 
-    /// The resolved colour as a hex string, for the widget extension which
+    /// The resolved color as a hex string, for the widget extension which
     /// cannot read this app's UserDefaults or appearance.
     func widgetHex(for palette: PhrenPalette) -> String {
         switch self {

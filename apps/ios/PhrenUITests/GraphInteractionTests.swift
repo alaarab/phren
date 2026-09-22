@@ -54,17 +54,17 @@ final class GraphInteractionTests: XCTestCase {
         _ = openDossier(in: app)
 
         let webView = app.webViews.firstMatch
-        for label in ["Edit", "Delete", "Close", "Next", "Previous"] {
+        for label in ["Edit", "Delete", "Close", "Next node", "Previous node"] {
             XCTAssertTrue(webView.buttons[label].waitForExistence(timeout: 5), "finding offers \(label)")
         }
-        XCTAssertTrue(webView.staticTexts["1 of 2"].waitForExistence(timeout: 5), "finding shows its sibling position")
+        XCTAssertTrue(webView.staticTexts["1 of 3"].waitForExistence(timeout: 5), "finding shows its position in the ranked list")
 
-        webView.buttons["Next"].tap()
+        webView.buttons["Next node"].tap()
         XCTAssertTrue(
             webView.staticTexts["Retry sync after reconnecting"].waitForExistence(timeout: 5),
             "Next selects the following finding"
         )
-        XCTAssertTrue(webView.staticTexts["2 of 2"].waitForExistence(timeout: 5), "counter follows the selection")
+        XCTAssertTrue(webView.staticTexts["2 of 3"].waitForExistence(timeout: 5), "counter follows the selection")
 
         webView.buttons["Edit"].tap()
         XCTAssertTrue(app.navigationBars["Edit finding"].waitForExistence(timeout: 5),
@@ -95,7 +95,7 @@ final class GraphInteractionTests: XCTestCase {
         XCTAssertTrue(dossier.waitForExistence(timeout: 5), "project dossier appears")
         XCTAssertFalse(app.webViews.buttons["Edit"].exists, "project omits Edit")
         XCTAssertFalse(app.webViews.buttons["Delete"].exists, "project omits Delete")
-        XCTAssertFalse(app.webViews.buttons["Next"].exists, "project omits stepping")
+        XCTAssertFalse(app.webViews.buttons["Next node"].exists, "project omits stepping")
     }
 
     @MainActor

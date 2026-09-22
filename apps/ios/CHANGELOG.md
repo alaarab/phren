@@ -21,8 +21,8 @@ and scrolls again.
 
 ### Changed
 
-- A project's name colour comes from the same eight-colour palette a computer
-  gets, plus the custom colour wheel and a hex field; the row previews the name.
+- A project's name color comes from the same eight-color palette a computer
+  gets, plus the custom color wheel and a hex field; the row previews the name.
 - Knobs are sliders: every stop is visible under its own dot, the current value
   sits beside the title, a tap or a press-and-drag sets it, and a knob that
   overrides the global value shows a reset glyph. The whole screen fits at once.
@@ -62,7 +62,7 @@ cards, idle reconnects keep the transcript, and the chat header stays alone.
   symbol for its dossier: the definition, the last change, its references by
   file and a Findings section reserved for later.
 - Tasks: the backlog groups into one collapsible section per project, busiest
-  open work first. Headers show the project's colour with Active and Queue
+  open work first. Headers show the project's color with Active and Queue
   counts as chips, tapping a header folds that section, and All folds or
   unfolds every section. Folds are remembered.
 
@@ -155,6 +155,11 @@ lock screen and Changes screen done properly.
 
 ### Changed
 
+- The node dossier's Previous and Next moved into the header beside Edit,
+  Delete and Close as `Previous node` / `Next node` arrows (44pt targets), and
+  they step through the ranked list the Memory list shows for the project
+  (findings newest date first, then tasks), wrapping at both ends. The
+  keyboard arrows walk the same list.
 - The schedule editor, the chat /model picker and the launch computer chooser pick
   from phren's own drop-down rows instead of long option lists.
 - Account usage is rebuilt around what each source means: one updated line with the
@@ -184,7 +189,7 @@ lock screen and Changes screen done properly.
   is gone.
 - Tasks: across projects the backlog is grouped by project, fullest first,
   with a count on each section; tap a project name to fold it.
-- Projects: project names take the theme's project colour, as on the Agents
+- Projects: project names take the theme's project color, as on the Agents
   list.
 - The Projects tab's dictate button is gone; Siri and the capture shortcut
   are the way to speak a note or task.
@@ -216,8 +221,8 @@ lock screen and Changes screen done properly.
   marketing version alone, which every TestFlight build shares.
 - Session details: Chat and Terminal sit side by side, each half the width and
   44 points tall, instead of two stacked full-width buttons.
-- Project names take a per-project colour chosen in the project's Knobs screen
-  (a row of colour dots, phone-local); the Agents list, Memory, chat header and
+- Project names take a per-project color chosen in the project's Knobs screen
+  (a row of color dots, phone-local); the Agents list, Memory, chat header and
   lock screen follow it.
 - The lock screen line shows each agent's branch, or the worktree folder when
   it is off the main checkout, instead of the current step; running fan-out
@@ -239,7 +244,7 @@ lock screen and Changes screen done properly.
 - Sending no longer throws the transcript past its end: the scroll waits for the new
   row and the keyboard, and holds its target to the content end.
 - The project dossier in the memory graph is a dialog again for assistive tech.
-- Project cards keep their compact two-line height with the themed project colour.
+- Project cards keep their compact two-line height with the themed project color.
 - Task details keep the agent action visible above long plans.
 - Selecting a project from graph search opens its dossier again.
 - Schedule history opens older run records that have no notification result.
@@ -435,7 +440,7 @@ lock screen and Changes screen done properly.
 - Code blocks in chat lose their title bar: press and hold copies the block
   (a brief "Copied" flash), a cut-short preview opens with a tap, and the
   language sits faintly in the corner. Inline code — paths, commands,
-  identifiers — is coloured like links, with its own theme slot.
+  identifiers — is colored like links, with its own theme slot.
 - Dictation in chat survives pauses: every segment's words are banked before
   the recognizer restarts, a restart that fails ends dictation visibly, and
   the transcript stays pinned to its end when the keyboard goes away
@@ -451,7 +456,7 @@ lock screen and Changes screen done properly.
 - New agent sessions open straight into chat. Send the first prompt from
   your phone and the conversation attaches as soon as it is ready.
 - Phren memory and task calls have their own cards, with readable content,
-  project chips, search results, and customisable colours.
+  project chips, search results, and customisable colors.
 - Sent messages stay softly muted until they land, without queued captions
   or duplicate bubbles.
 - Pasted Claude Code images appear with their message; image placeholders
@@ -554,7 +559,7 @@ lock screen and Changes screen done properly.
 - Closing a session from the list closes that session and the card leaves at
   once — swipe for a direct Close, hold for Close tab / Close workspace with a
   confirmation. Cards drop the redundant state text (the section already says
-  it), keep the computer name, and colour the project name.
+  it), keep the computer name, and color the project name.
 - Simulators: every iOS simulator booted on a computer, with its live screen,
   from the Agents header or a computer's page (needs Phren Hook 0.2.15).
 - Files: put any file on a computer through Phren Hook and copy its path for
@@ -587,7 +592,7 @@ lock screen and Changes screen done properly.
 - Session cards say more at a glance: the harness's mark inside a ring
   that carries the state (spinning cyan while working, amber when it needs
   you, green when done), a state badge on the ring, the project in bold with
-  its branch, then the conversation title and a coloured state line.
+  its branch, then the conversation title and a colored state line.
 - The real agent marks everywhere: Claude's starburst, OpenAI's knot for
   Codex, GitHub Copilot's goggles.
 - Dictation types straight into the message as you speak — tap the mic, talk,
@@ -650,7 +655,7 @@ lock screen and Changes screen done properly.
 - The chat header shows the agent's glyph, then project · model · branch, with
   the diff button beside it.
 - The diff editor follows VS Code: line numbers, tinted rows, changed
-  characters, next/previous change, inline or side by side, syntax coloured.
+  characters, next/previous change, inline or side by side, syntax colored.
 - Tool cards show the full command, output that scrolls sideways, and named
   titles for Read, Grep, Glob, Fetch, Todos and Agent; Write and MultiEdit
   are drawn as diffs.

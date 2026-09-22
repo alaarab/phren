@@ -75,7 +75,7 @@
   .dossier-header-actions {
     display: flex;
     flex: 0 0 auto;
-    gap: 8px;
+    gap: 6px;
   }
   .dossier-icon-button, .dossier-step-button {
     display: grid;
@@ -97,7 +97,7 @@
     border-radius: 999px;
     background: rgba(22, 27, 52, 0.9);
   }
-  .dossier-icon-button[hidden], .dossier-step[hidden] { display: none; }
+  .dossier-icon-button[hidden], .dossier-step-button[hidden], .dossier-step[hidden] { display: none; }
   .dossier-icon-button svg, .dossier-step-button svg {
     position: relative;
     z-index: 1;
@@ -117,6 +117,7 @@
     align-items: baseline;
     gap: 9px;
     min-width: 0;
+    overflow: hidden;
     font: 700 9.5px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     letter-spacing: 0.14em;
     text-transform: uppercase;
@@ -200,6 +201,12 @@
         <span id="dossier-project"></span>
       </div>
       <div class="dossier-header-actions">
+        <button class="dossier-step-button" type="button" id="memory-dossier-prev" aria-label="Previous node" data-action="previous" hidden>
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12.5 5-5 5 5 5"></path></svg>
+        </button>
+        <button class="dossier-step-button" type="button" id="memory-dossier-next" aria-label="Next node" data-action="next" hidden>
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m7.5 5 5 5-5 5"></path></svg>
+        </button>
         <button class="dossier-icon-button" type="button" aria-label="Edit" data-action="edit" hidden>
           <svg viewBox="0 0 20 20" aria-hidden="true">
             <path d="M4 16l3.4-.8L16 6.6a1.8 1.8 0 0 0-2.6-2.6l-8.6 8.6L4 16Z"></path>
@@ -220,13 +227,7 @@
     </div>
     <div id="dossier-text"></div>
     <div class="dossier-step" hidden>
-      <button class="dossier-step-button" type="button" aria-label="Previous" data-action="previous">
-        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12.5 5-5 5 5 5"></path></svg>
-      </button>
       <span id="dossier-step-counter"></span>
-      <button class="dossier-step-button" type="button" aria-label="Next" data-action="next">
-        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m7.5 5 5 5-5 5"></path></svg>
-      </button>
     </div>
     <div class="dossier-actions">
       <button type="button" data-action="focus">Focus</button>
@@ -245,6 +246,8 @@
     var dossierText = document.getElementById("dossier-text");
     var dossierEdit = dossier.querySelector('[data-action="edit"]');
     var dossierDelete = dossier.querySelector('[data-action="delete"]');
+    var dossierPrev = document.getElementById("memory-dossier-prev");
+    var dossierNext = document.getElementById("memory-dossier-next");
     var dossierStep = dossier.querySelector(".dossier-step");
     var dossierStepCounter = document.getElementById("dossier-step-counter");
     var payloadNodes = [];
@@ -328,6 +331,8 @@
       selectedNode = null;
       dossierEdit.hidden = true;
       dossierDelete.hidden = true;
+      dossierPrev.hidden = true;
+      dossierNext.hidden = true;
       dossierStep.hidden = true;
       dossier.hidden = true;
       dossier.setAttribute("aria-hidden", "true");
@@ -343,43 +348,28 @@
       return "Project";
     }
 
-    function siblingNodes(node) {
-      var id = String(node.id || "");
-      var group = String(node.group || "");
-      var project = node.project || node.projectName || "";
-      var task = node.kind === "task" || id.indexOf(":task:") !== -1;
-      if (task) {
-        var active = [];
-        var queue = [];
-        payloadNodes.forEach(function (candidate) {
-          if (candidate.project !== project) return;
-          if (candidate.group === "task-active") active.push(candidate);
-          if (candidate.group === "task-queue") queue.push(candidate);
-        });
-        return active.concat(queue);
-      }
-      var finding = node.kind === "finding" || id.indexOf("finding:") === 0
-        || id.indexOf("journal:") === 0;
-      if (!finding || group.indexOf("topic:") !== 0) return [];
-      return payloadNodes.filter(function (candidate) {
-        return candidate.project === project && candidate.group === group;
-      });
+    // The renderer owns the ranked walk (graph-core's rankedProjectIds: the
+    // project's findings newest first, then its tasks, the order the Memory
+    // list shows) and the Left/Right keys; the page only draws the controls.
+    function stepPosition(id) {
+      var api = window.phrenGraph;
+      return api && api.dossierPosition ? api.dossierPosition(id) : null;
     }
 
     function updateStepControls(node) {
-      var siblings = siblingNodes(node);
-      var index = siblings.findIndex(function (candidate) { return candidate.id === node.id; });
-      dossierStep.hidden = index < 0;
-      dossierStepCounter.textContent = index < 0 ? "" : (index + 1) + " of " + siblings.length;
+      var pos = stepPosition(String(node.id || ""));
+      dossierPrev.hidden = !pos;
+      dossierNext.hidden = !pos;
+      dossierStep.hidden = !pos;
+      dossierStepCounter.textContent = pos ? (pos.index + 1) + " of " + pos.total : "";
     }
 
     function stepSelection(delta) {
       if (!selectedNode) return;
-      var siblings = siblingNodes(selectedNode);
-      var index = siblings.findIndex(function (candidate) { return candidate.id === selectedNode.id; });
-      if (index < 0 || siblings.length === 0) return;
-      var target = siblings[(index + delta + siblings.length) % siblings.length];
-      post("graphAction", { action: "select", id: target.id });
+      var api = window.phrenGraph;
+      var target = api && api.stepDossier ? api.stepDossier(selectedNode.id, delta) : null;
+      if (!target) return;
+      post("graphAction", { action: "select", id: target });
     }
 
     dossier.addEventListener("click", function (event) {
@@ -393,13 +383,6 @@
       }
       if (action === "close") hideDossier();
       post("graphAction", { action: action, id: id });
-    });
-
-    document.addEventListener("keydown", function (event) {
-      if (dossier.hidden || !selectedNode) return;
-      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-      event.preventDefault();
-      stepSelection(event.key === "ArrowLeft" ? -1 : 1);
     });
 
     var wired = false;

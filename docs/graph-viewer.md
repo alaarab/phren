@@ -36,9 +36,21 @@ rather than coupling the resolver to the host loop.
 | Right | **Contents pane** — scrollable index for whatever is in context (project, fragment, or the review list); drag its left edge to resize, or collapse it to a slim tab |
 | Top-right | Search, filters, node counter, zoom controls |
 
+## Dossier header
+
+The dossier's header row carries the node's kind and title on the left and
+44px icon buttons on the right, beside **Close**: **Previous node** and
+**Next node** chevrons (findings and tasks only), then **Edit** (pencil) and
+**Delete** (trash in the danger tint) for nodes that can change. Previous and
+Next step through the current ranked list, the order the list mode shows for
+that project: its findings newest date first, then its tasks, wrapping at
+both ends. The `←`/`→` keys do the same walk while a node dossier is open
+(otherwise they still cycle projects in the navigator dock). The counter under
+the body reads `n of m` for that same list.
+
 ## Project navigator
 
-Click an orb to focus that project (camera flies to it, its network highlights, the contents pane fills). Click the active orb again — or press `Esc` — to clear. `←`/`→` cycle focus through projects.
+Click an orb to focus that project (camera flies to it, its network highlights, the contents pane fills). Click the active orb again — or press `Esc` — to clear. `←`/`→` cycle focus through projects when no node dossier is open.
 
 ## Contents pane
 

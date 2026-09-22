@@ -20,6 +20,15 @@ final class MemoryTests: XCTestCase {
         XCTAssertTrue(app.webViews.staticTexts
             .matching(NSPredicate(format: "label CONTAINS %@", "Idempotency keys")).firstMatch.exists)
         capture(app, "Memory map dossier")
+
+        let next = app.webViews.buttons["memory-dossier-next"]
+        XCTAssertTrue(next.waitForExistence(timeout: 5), "the dossier header exposes Next")
+        XCTAssertTrue(app.webViews.buttons["memory-dossier-prev"].exists, "the dossier header exposes Previous")
+        next.tap()
+        XCTAssertTrue(dossier.staticTexts
+            .matching(NSPredicate(format: "label CONTAINS %@", "Invoices are generated from the ledger")).firstMatch
+            .waitForExistence(timeout: 5),
+                      "Next moves the dossier to the next node in the ranked list")
     }
 
     @MainActor

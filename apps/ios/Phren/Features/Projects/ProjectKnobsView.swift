@@ -9,7 +9,7 @@ import SwiftUI
 /// The screen is one plain list: `plainListSectionLabel()` headers over
 /// `sessionCard()` rows, every knob a row with a one-line caption and its own
 /// control (a PhrenStepSlider across the enumerations so every stop is visible,
-/// colour dots for the phone-local name colour), and a Reset row at the bottom that
+/// color dots for the phone-local name color), and a Reset row at the bottom that
 /// clears every override behind a PhrenDialog confirmation.
 struct ProjectKnobsView: View {
     let storeId: String
@@ -21,7 +21,7 @@ struct ProjectKnobsView: View {
 
     @State private var knobs = ProjectKnobs()
     @State private var baseline = ProjectKnobs()
-    /// The project's name colour, phone-local, so it is not part of `knobs`.
+    /// The project's name color, phone-local, so it is not part of `knobs`.
     @State private var nameColour: ProjectNameColor = .default
     @State private var nameColourHex = ""
     /// The raw `phren.project.yaml` the screen opened, carried into each write
@@ -63,7 +63,7 @@ struct ProjectKnobsView: View {
         .background(PhrenTheme.bg.ignoresSafeArea())
         .phrenContainerMarker("project-knobs", label: "Project knobs")
         .phrenDialog(isPresented: $confirmingReset, title: "Reset all knobs?",
-                     message: "Clear every override so the project follows your global settings, and restore the default name colour.",
+                     message: "Clear every override so the project follows your global settings, and restore the default name color.",
                      actions: resetActions, identifier: "knobs-reset-dialog")
         .task { load() }
         .onChange(of: knobs) { _, new in save(new) }
@@ -119,13 +119,13 @@ struct ProjectKnobsView: View {
         .sessionCard()
     }
 
-    /// The project name's colour everywhere it is drawn: the theme's own,
-    /// one of the computer palette's eight, or any colour from the picker or
+    /// The project name's color everywhere it is drawn: the theme's own,
+    /// one of the computer palette's eight, or any color from the picker or
     /// a hex. Phone-local, so it saves the moment it changes.
     private var nameColourRow: some View {
         VStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
             HStack(spacing: PhrenTheme.Space.small) {
-                Text("Name colour").font(PhrenTypography.body).foregroundStyle(PhrenTheme.text)
+                Text("Name color").font(PhrenTypography.body).foregroundStyle(PhrenTheme.text)
                 Spacer(minLength: PhrenTheme.Space.small)
                 Text(project).font(PhrenTypography.subheadline.weight(.semibold)).foregroundStyle(nameColour.color).lineLimit(1)
                     .accessibilityIdentifier("knob-value:nameColour")
@@ -267,7 +267,7 @@ struct ProjectKnobsView: View {
         }
     }
 
-    /// Back to "Inherit global" everywhere, plus the default name colour.
+    /// Back to "Inherit global" everywhere, plus the default name color.
     /// The `knobs` assignment rides the same per-change save path as a tap.
     private func resetAll() {
         chooseNameColour(.default)

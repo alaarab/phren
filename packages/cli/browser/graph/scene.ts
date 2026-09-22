@@ -10,6 +10,7 @@ import {
   recomputeSearchMatches,
   seeded,
   state,
+  stepDossier,
 } from "./state.js";
 import {
   applyHighlight,
@@ -32,6 +33,7 @@ import {
   onNodeClick,
   onNodeRightClick,
   runIntro,
+  selectNode,
   tickIdleResume,
 } from "./interactions.js";
 import { createLabelRenderer, injectLabelCss, labelTick } from "./labels.js";
@@ -322,9 +324,18 @@ export function setupForceGraph(): void {
       clearSelection();
       return;
     }
-    // ←/→ step through projects via the navigator dock (Alt/Ctrl/Meta reserved).
+    // ←/→ with a node dossier open walk that dossier's ranked list (the order
+    // the list mode shows, wrapping at the ends); otherwise they step projects
+    // through the navigator dock (Alt/Ctrl/Meta reserved).
     if ((event.key === "ArrowLeft" || event.key === "ArrowRight") && !event.altKey && !event.ctrlKey && !event.metaKey) {
-      stepProject(event.key === "ArrowRight" ? 1 : -1);
+      const delta = event.key === "ArrowRight" ? 1 : -1;
+      if (state.selectedNodeId) {
+        const next = stepDossier(state.selectedNodeId, delta);
+        if (next) selectNode(next);
+        event.preventDefault();
+        return;
+      }
+      stepProject(delta);
       event.preventDefault();
     }
   };
