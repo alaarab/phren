@@ -21,6 +21,8 @@ and scrolls again.
 
 ### Changed
 
+- A project's name colour comes from the same eight-colour palette a computer
+  gets, plus the custom colour wheel and a hex field; the row previews the name.
 - Knobs are sliders: every stop is visible under its own dot, the current value
   sits beside the title, a tap or a press-and-drag sets it, and a knob that
   overrides the global value shows a reset glyph. The whole screen fits at once.

@@ -23,6 +23,7 @@ struct ProjectKnobsView: View {
     @State private var baseline = ProjectKnobs()
     /// The project's name colour, phone-local, so it is not part of `knobs`.
     @State private var nameColour: ProjectNameColor = .default
+    @State private var nameColourHex = ""
     /// The raw `phren.project.yaml` the screen opened, carried into each write
     /// as its conflict check.
     @State private var expectedContent: String?
@@ -118,32 +119,60 @@ struct ProjectKnobsView: View {
         .sessionCard()
     }
 
-    /// The project name's colour everywhere it is drawn. Phone-local, so it
-    /// saves the moment a dot is chosen and never leaves this device.
+    /// The project name's colour everywhere it is drawn: the theme's own,
+    /// one of the computer palette's eight, or any colour from the picker or
+    /// a hex. Phone-local, so it saves the moment it changes.
     private var nameColourRow: some View {
         VStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
-            VStack(alignment: .leading, spacing: PhrenTheme.Space.xs) {
+            HStack(spacing: PhrenTheme.Space.small) {
                 Text("Name colour").font(PhrenTypography.body).foregroundStyle(PhrenTheme.text)
-                Text("This project's colour on lists and headers")
-                    .font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
-                    .lineLimit(1).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: PhrenTheme.Space.small)
+                Text(project).font(PhrenTypography.subheadline.weight(.semibold)).foregroundStyle(nameColour.color).lineLimit(1)
+                    .accessibilityIdentifier("knob-value:nameColour")
             }
+            .frame(minHeight: 32)
             PhrenColorDotRow(
-                items: ProjectNameColor.allCases.map {
-                    PhrenOption(id: $0.rawValue, value: $0, title: $0.title)
-                },
-                selection: Binding(get: { nameColour }, set: { value in
-                    nameColour = value
-                    ProjectNameColor.set(value, storeId: storeId, project: project)
-                }),
+                items: [PhrenOption(id: "default", value: ProjectNameColor.default, title: "Default")]
+                    + ProjectNameColor.palette.enumerated().map { index, hex in
+                        PhrenOption(id: hex, value: ProjectNameColor.hex(hex), title: ProjectNameColor.paletteNames[index])
+                    },
+                selection: Binding(get: { nameColour }, set: { chooseNameColour($0) }),
                 identifier: "knob:nameColour",
                 color: { $0.color }
             )
+            HStack(spacing: PhrenTheme.Space.medium) {
+                ColorPicker("Custom", selection: Binding(get: { nameColour.color }, set: { color in
+                    var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+                    guard UIColor(color).getRed(&red, green: &green, blue: &blue, alpha: &alpha) else { return }
+                    func channel(_ component: CGFloat) -> Int { Int((min(1, max(0, component)) * 255).rounded()) }
+                    chooseNameColour(.hex(String(format: "#%02X%02X%02X", channel(red), channel(green), channel(blue))))
+                }), supportsOpacity: false)
+                    .font(PhrenTypography.subheadline).foregroundStyle(PhrenTheme.textMuted)
+                    .fixedSize()
+                    .accessibilityIdentifier("knob:nameColour:custom")
+                HStack(spacing: 1) {
+                    Text("#").foregroundStyle(PhrenTheme.textDim)
+                    TextField("RRGGBB", text: $nameColourHex)
+                        .textInputAutocapitalization(.characters).autocorrectionDisabled()
+                        .frame(width: 72)
+                        .onSubmit { if let hex = ProjectNameColor.normalized(nameColourHex) { chooseNameColour(.hex(hex)) } }
+                        .accessibilityIdentifier("knob:nameColour:hex")
+                }
+                .font(PhrenTypography.monoCaption)
+                Spacer()
+            }
+            .frame(minHeight: 32)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(PhrenTheme.Space.medium)
-        .frame(minHeight: 44, alignment: .leading)
+        .padding(.horizontal, PhrenTheme.Space.medium)
+        .padding(.vertical, PhrenTheme.Space.small)
         .sessionCard()
+    }
+
+    private func chooseNameColour(_ value: ProjectNameColor) {
+        nameColour = value
+        nameColourHex = value.hexValue.map { String($0.dropFirst()) } ?? ""
+        ProjectNameColor.set(value, storeId: storeId, project: project)
     }
 
     private var resetRow: some View {
@@ -201,6 +230,7 @@ struct ProjectKnobsView: View {
         baseline = loaded
         expectedContent = snapshot.projectConfigs[project]
         nameColour = ProjectNameColor.stored(storeId: storeId, project: project)
+        nameColourHex = nameColour.hexValue.map { String($0.dropFirst()) } ?? ""
     }
 
     private func save(_ new: ProjectKnobs) {
@@ -220,8 +250,7 @@ struct ProjectKnobsView: View {
     /// Back to "Inherit global" everywhere, plus the default name colour.
     /// The `knobs` assignment rides the same per-change save path as a tap.
     private func resetAll() {
-        nameColour = .default
-        ProjectNameColor.set(.default, storeId: storeId, project: project)
+        chooseNameColour(.default)
         knobs = ProjectKnobs()
     }
 }
