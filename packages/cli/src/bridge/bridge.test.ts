@@ -356,7 +356,7 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
   let holdSnapshot = false, releaseSnapshot: (() => void) | undefined;
   let replaceBeforeMutation = false;
   let deliveries: { method: string; session: string }[];
-  let extraWorkspaces: Record<string, unknown>[] = [], extraTabs: Record<string, unknown>[] = [], extraPanes: Record<string, unknown>[] = [], failAgentStart = false;
+  let extraWorkspaces: Record<string, unknown>[] = [], extraTabs: Record<string, unknown>[] = [], extraPanes: Record<string, unknown>[] = [], failAgentStart = false, blockAgentStart = false;
   let helperPIDs: number[] = [];
   let paneLines = "", drawConfirmation = false;
   let confirmationHasKeys = true;
@@ -459,6 +459,10 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
         } else if (req.method === "agent.start") {
           const target = extraPanes.find(p => p.pane_id === req.params.pane_id);
           if (failAgentStart || !target) { socket.end(JSON.stringify({ id: req.id, error: { code: 1, message: "agent not detected" } }) + "\n"); return; }
+          if (blockAgentStart) {
+            target.agent = req.params.kind; target.agent_name = req.params.name; target.agent_status = "blocked";
+            socket.end(JSON.stringify({ id: req.id, error: { code: "agent_not_ready", message: `agent ${req.params.name} is blocked during startup` } }) + "\n"); return;
+          }
           target.agent = req.params.kind; target.agent_name = req.params.name; target.agent_status = "idle";
         }
         const pane = { pane_id: "w1:p1", tab_id: "w1:t1", workspace_id: "w1", terminal_id: terminalID, agent: paneAgent, agent_status: agentStatus,
@@ -798,6 +802,15 @@ schedules:
       expect(launched.data).toMatchObject({ workspaceId: "w1", tabId: "w1:t2", paneId: "w1:p2", agent: "codex" });
       expect(commands.find(c => c.method === "tab.create")?.params).toMatchObject({ workspace_id: "w1", label: "second", cwd: await realpathAsync(root) });
       expect(commands.find(c => c.method === "agent.start")?.params).toMatchObject({ name: "codex-here", pane_id: "w1:p2", timeout_ms: 3_000 });
+    });
+
+    it("hands back an agent held at a first-run screen so the chat can answer it", async () => {
+      blockAgentStart = true;
+      try {
+        const launched = await api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "Trust", kind: "claude" });
+        expect(launched.status, JSON.stringify(launched.data)).toBe(200);
+        expect(launched.data).toMatchObject({ ok: true, agent: "claude", agentStatus: "blocked" });
+      } finally { blockAgentStart = false; }
     });
 
     it("reports a failed agent start without hiding the workspace it created", async () => {

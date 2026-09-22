@@ -321,7 +321,10 @@ final class GatewayResponse: ChannelInboundHandler {
                     String($0.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) || CharacterSet.whitespacesAndNewlines.contains($0) })
                         .split(whereSeparator: \.isWhitespace).joined(separator: " ")
                 }.map { String($0.prefix(320)) }
-                if status == 409, request.path == "/v1/workspaces/launch" {
+                // Only a refusal naming the running conductor is a launch
+                // conflict; any other 409 keeps the Hook's own reason.
+                if status == 409, request.path == "/v1/workspaces/launch",
+                   object?["target"] != nil || reason?.contains("conductor is already running") == true {
                     exchange.finish(.failure(LiveConnectionError.launchConflict(
                         reason: reason?.isEmpty == false ? reason! : "A conductor is already running for this store.",
                         target: launchConflictTarget(object?["target"] as? [String: Any]))))

@@ -567,15 +567,6 @@ struct LaunchSessionView: View {
             } else {
                 self.error = "A conductor is already running for this store. Refresh Agents and open it there."
             }
-        } catch LiveConnectionError.gatewayRejection(status: 409, reason: _) where role == .conductor {
-            if let snapshot = try? await LiveHostMonitor.fetch(host),
-               let session = snapshot.sessions(on: host).first(where: { $0.tab.isConductor }) {
-                offerRunningConductor(session)
-            } else if let session = existingConductor() {
-                offerRunningConductor(session)
-            } else {
-                self.error = "A conductor is already running for this store. Refresh Agents and open it there."
-            }
         } catch {
             self.error = error.localizedDescription
         }
