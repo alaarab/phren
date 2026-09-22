@@ -87,6 +87,7 @@ export interface FanoutChild {
   state: "running" | "completed" | "failed";
   /** `blocked: <type> <pattern>` when the plugin refused a permission. */
   reason?: string;
+  finishedAt?: string;
   transcript: string;
   children: FanoutChild[];
 }
@@ -209,10 +210,13 @@ export async function fanoutChildren(parentProvider: Provider, parentSession: st
       // A denied permission aborts the turn while the launcher still records a
       // zero exit; blocked.json is the only evidence the worker did not finish.
       const blocked = await readBlocked(jobRoot);
+      const finishedAt = manifest.finishedAt ?? blocked?.at
+        ?? (ARCHIVED_STATUSES.has(manifest.status)
+          ? (await stat(path.join(jobRoot, "exit.txt")).catch(() => undefined))?.mtime.toISOString() ?? manifest.updatedAt : undefined);
       children.push({ id, provider: manifest.provider, session: manifest.session, model: manifest.model, ...worktree, cwd: manifest.worktree,
         path: manifest.taskLabel, callId: `fanout:${id}`,
         state: blocked || manifest.status === "failed" || manifest.status === "cancelled" ? "failed" : ["queued", "running"].includes(manifest.status) ? "running" : "completed",
-        ...(blocked ? { reason: blockedReason(blocked) } : {}), transcript, children: [] });
+        ...(blocked ? { reason: blockedReason(blocked) } : {}), ...(finishedAt ? { finishedAt } : {}), transcript, children: [] });
     } catch { /* Torn, old, or untrusted manifests do not become child agents. */ }
   }
   return children.sort((a, b) => a.path.localeCompare(b.path) || a.id.localeCompare(b.id));

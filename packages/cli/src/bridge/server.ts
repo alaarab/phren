@@ -685,7 +685,7 @@ export async function serve(version: string): Promise<void> {
             resumeAfterLine = undefined;
             if (first || page.entries.length || page.reset) send(client, { ...page, type: first || page.reset ? "backlog" : "append", ...conversation });
           } else {
-            const pendingApproval = agentHooks.approval(target);
+            let pendingApproval = agentHooks.approval(target);
             const pendingQuestions = target.source === "codex" ? await codexQuestions.pending(target).catch(() => undefined) : undefined;
             const cwd = await trustedDirectory(pane).catch(() => undefined);
             const branch = modules.has("git") && cwd ? await repositoryBranch(cwd) : undefined;
@@ -694,10 +694,11 @@ export async function serve(version: string): Promise<void> {
             // numbered dialog in the pane with no PermissionRequest hook
             // behind it: read the pane (at most once per three seconds) and
             // publish the dialog as the same terminal choice shape the phone
-            // answers. Codex joins in when no held approval and no structured
-            // question is already asking.
+            // answers. Codex also resolves the real terminal choices for a held
+            // approval; a structured question keeps its own answer channel.
             if (["claude", "opencode", "codex"].includes(target.source)) {
               await agentHooks.syncTerminalDialog(target, waiting && !pendingQuestions?.length);
+              pendingApproval = agentHooks.approval(target);
             }
             const hookPrompt = waiting ? agentHooks.terminalPrompt(target) : undefined;
             // Codex 0.155's queued follow-up question never becomes a held

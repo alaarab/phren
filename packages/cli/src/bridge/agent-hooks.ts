@@ -60,7 +60,7 @@ function opencodeRequest(session: string): Json | undefined {
 const choiceKeys = new Set(["Escape", "Enter", "Up", "Down", "Tab", "y", "n", "p", "1", "2", "3", "4", "5", "6", "7", "8", "9"]);
 /** A question asks in a few lines; more than this is scrollback above it. */
 const QUESTION_LINES = 12;
-interface TerminalChoiceOption { label: string; key: string }
+interface TerminalChoiceOption { label: string; description?: string; key: string }
 /** The actual question a terminal dialog is asking, when its command and
  * options are visible to the Hook: a title, the command it is about, and one
  * row per choice carrying the key that answers it. */
@@ -104,7 +104,8 @@ function structuredOptions(value: unknown): TerminalChoiceOption[] {
     if (!label) return [];
     const fields = object(item);
     const key = ["key", "shortcut", "hotkey", "accelerator", "value"].map(name => choiceKey(fields[name])).find(Boolean);
-    return labeledOption(label, key) ?? [];
+    const option = labeledOption(label, key);
+    return option ? [{ ...option, ...(typeof fields.description === "string" && fields.description.trim() ? { description: fields.description.trim().slice(0, 4_000) } : {}) }] : [];
   });
 }
 /** Numbered options as Codex draws them: "1. Yes, proceed (y)", with the
@@ -118,11 +119,16 @@ function numberedOptions(text: string): TerminalChoiceOption[] {
   return text.split(/\r?\n/).flatMap(line => {
     const match = /^\s*[>❯›▸▶»•*]?\s*(\d+)[.)]\s+(.+?)\s*$/.exec(line);
     if (!match) return [];
-    const label = match[2].trim();
+    const columns = /^(.+?)\s{2,}(.+)$/.exec(match[2].trim());
+    const label = columns?.[1] ?? match[2].trim();
+    const description = columns?.[2].trim();
     const trailing = /^(.+?)\s*\(([A-Za-z0-9]+)\)\s*$/.exec(label);
-    const key = trailing ? choiceKey(trailing[2]) : undefined;
-    if (key && trailing) return [{ label: trailing[1].trim(), key }];
-    return labeledOption(label, match[1]) ?? labeledOption(label, undefined) ?? [];
+    const descriptionKey = description ? /^(.+?)\s*\(([A-Za-z0-9]+)\)\s*$/.exec(description) : null;
+    const labelKey = trailing ? choiceKey(trailing[2]) : undefined;
+    const endKey = descriptionKey ? choiceKey(descriptionKey[2]) : undefined;
+    const key = labelKey ?? endKey ?? choiceKey(match[1]);
+    return key ? [{ label: labelKey && trailing ? trailing[1].trim() : label, key,
+      ...(description ? { description: endKey && descriptionKey ? descriptionKey[1].trim() : description } : {}) }] : [];
   });
 }
 /** The question a pane's terminal lines are asking, in the same shape a held
@@ -196,6 +202,40 @@ export function terminalChoice(input: unknown): TerminalChoice | undefined {
   return { ...(title ? { title: String(title).slice(0, 4_000) } : {}), ...(command ? { body: command.slice(0, 4_000) } : {}), options: options.slice(0, 12) };
 }
 
+/** Keep structured tool arguments in details, never in the asking sentence. */
+function permissionTitle(tool: string, input: unknown): string | undefined {
+  const fields = object(input);
+  const sentence = [fields.question, fields.prompt, fields.description, fields.justification, fields.message]
+    .find((value): value is string => typeof value === "string" && !!value.trim() && !/^[{[]/.test(value.trim()));
+  if (sentence) return sentence.trim().slice(0, 4_000);
+  const mcp = /^mcp__([^_]+)__(.+)$/.exec(tool);
+  const server = mcp?.[1] ?? fields.server;
+  const name = mcp?.[2] ?? fields.tool;
+  if (typeof server === "string" && typeof name === "string") return `Allow the ${server} MCP server to run tool ${name}?`;
+  return tool && tool !== "action" ? `Allow ${tool}?` : undefined;
+}
+function samePermission(choice: TerminalChoice, title: string | undefined, tool: string, input: unknown): boolean {
+  const text = choice.title?.toLowerCase() ?? "";
+  if (title && text.includes(title.toLowerCase())) return true;
+  const command = commandText(object(input).command ?? object(input).cmd);
+  if (command && text.includes(command.toLowerCase())) return true;
+  const name = tool.split("__").pop();
+  return !!name && name !== "action" && text.includes(name.toLowerCase());
+}
+
+/** Normalize a held permission without turning its arguments into a question. */
+export function permissionPrompt(tool: string, input: unknown, terminalText = ""): {
+  title?: string; details: string; choice?: TerminalChoice; terminalOnly: boolean;
+} {
+  const title = permissionTitle(tool, input);
+  const dialog = visibleTerminalChoice(terminalText);
+  const matched = dialog && samePermission(dialog, title, tool, input) ? dialog : undefined;
+  const sentence = matched?.title?.split("\n").find(line => /\?\s*$/.test(line) && !/^[{[]/.test(line.trim()));
+  const choice = matched ? { ...matched, title: sentence ?? title } : terminalChoice(input);
+  return { title: choice?.title ?? title, details: JSON.stringify(input ?? {}, null, 2).slice(0, 32_768),
+    ...(choice ? { choice } : {}), terminalOnly: !choice };
+}
+
 /** Claude Code's AskUserQuestion input, normalized to the shape the phone
  * already decodes for a held permission request: one question per entry with
  * its header, multi-select flag and options. Undefined when nothing parses. */
@@ -242,7 +282,7 @@ export async function recordedSession(server: string, pane: Json, pids: number[]
   } catch { return undefined; }
 }
 
-interface Pending { target: Target; response: ServerResponse; tool: string; input: unknown; message: string; choice?: TerminalChoice; expiresAt: string; timer: NodeJS.Timeout; conductor?: { action: "dispatch" | "hand_off"; project?: string; computer?: string } }
+interface Pending { target: Target; response: ServerResponse; tool: string; input: unknown; message: string; title?: string; choice?: TerminalChoice; expiresAt: string; timer: NodeJS.Timeout; conductor?: { action: "dispatch" | "hand_off"; project?: string; computer?: string } }
 
 /** A conductor `dispatch` or `hand_off` permission ask the Hook can answer
  * itself under a standing grant, or offer the phone two grant-writing answers. */
@@ -565,6 +605,21 @@ export class AgentHooks {
    * read notes whether the terminal is reading a password. */
   async syncTerminalDialog(target: Target, active: boolean): Promise<void> {
     const key = JSON.stringify(target), entry = this.terminalPrompts.get(key);
+    const held = [...this.pending.values()].find(p => JSON.stringify(p.target) === key);
+    // A held Codex permission can already have real choices in its pane.
+    // Refresh those before publishing the approval, even while it is held.
+    if (held && target.source === "codex") {
+      const now = Date.now();
+      if (now - (this.dialogReads.get(key) ?? 0) < 3_000) return;
+      this.dialogReads.set(key, now);
+      const prompt = permissionPrompt(held.tool, held.input, await this.paneLines(target));
+      if (prompt.choice && [...this.pending.values()].includes(held)) {
+        held.choice = prompt.choice;
+        held.title = prompt.title;
+        this.terminalPrompts.set(key, { tool: held.tool, message: held.message, choice: held.choice, dialog: true, at: now });
+      }
+      return;
+    }
     // A released AskUserQuestion is answered by its own question card, never
     // by the pane's numbered lines; it is cleared only when the pane stops
     // waiting for it.
@@ -681,7 +736,8 @@ export class AgentHooks {
   }
   approval(target: Target): Json | undefined {
     const pending = [...this.pending.entries()].find(([, p]) => JSON.stringify(p.target) === JSON.stringify(target));
-    if (pending) return { actionId: pending[0], toolName: pending[1].tool, title: `Allow ${pending[1].tool}?`, message: pending[1].message,
+    if (pending) return { actionId: pending[0], toolName: pending[1].tool, title: pending[1].choice?.title ?? pending[1].title, message: pending[1].message,
+      details: pending[1].message, terminalOnly: target.source === "codex" && !pending[1].choice,
       ...(pending[1].choice ? { choice: pending[1].choice } : {}), expiresAt: pending[1].expiresAt,
       ...(pending[1].conductor ? { conductor: pending[1].conductor } : {}) };
     if (target.source !== "opencode") return undefined;
@@ -836,12 +892,13 @@ export class AgentHooks {
         // Timeouts always return control to the ordinary terminal prompt.
         if (this.pending.size >= 64) { res.end("{}"); return; }
         const action = randomUUID();
+        this.dialogReads.delete(JSON.stringify(target));
         const conductor = body.event === "PermissionRequest" ? conductorCall(String(body.tool || "action"), body.input) : undefined;
         const locallyWatched = this.watching.has(JSON.stringify(target)) || this.overview.has(target.server);
         const timer = setTimeout(() => { this.pending.delete(action); this.dropPushBindings(action); this.rememberTerminalPrompt(target, body); res.end("{}"); }, APPROVAL_HOLD_MS);
         const expiresAt = new Date(Date.now() + APPROVAL_HOLD_MS).toISOString();
-        const choice = terminalChoice(body.input);
-        this.pending.set(action, { target, response: res, tool: String(body.tool || "action").slice(0, 200), input: body.input,
+        const { choice, title } = permissionPrompt(String(body.tool || "action"), body.input);
+        this.pending.set(action, { target, response: res, tool: String(body.tool || "action").slice(0, 200), input: body.input, title,
           message: JSON.stringify(body.input || {}, null, 2).slice(0, 32_768), ...(choice ? { choice } : {}), expiresAt, timer,
           ...(conductor ? { conductor } : {}) });
         res.on("close", () => { clearTimeout(timer); this.pending.delete(action); this.dropPushBindings(action); });

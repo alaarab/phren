@@ -65,6 +65,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- The Hook separates numbered terminal option labels from descriptions, including structured option descriptions. Held Codex MCP approvals keep arguments in details, resolve matching terminal choices and keys, and flag unresolved prompts for terminal access.
+- Worker rows include finish timestamps and a failure flag so phone lists can age out failures without changing the Hook's 24-hour archive policy.
+
 - The SSH gateway no longer forwards the client's EOF as a half-close: node's
   HTTP server aborts a half-closed connection whose reply has not started, so a
   large upload whose sender closed its write side right after the body came
