@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { materializeCodexThread, materializedPath, threadHealth } from "./codex-threads.js";
+import { materializeCodexThread, materializedPath, queuedQuestion, threadHealth } from "./codex-threads.js";
 import { TranscriptReader, transcriptPath } from "./transcripts.js";
 import { currentStep } from "./steps.js";
 
@@ -102,5 +102,27 @@ describe("Codex thread store", () => {
     await materializeCodexThread(thread);
     await ageCursor(11);
     await expect(threadHealth(thread, "idle")).resolves.toEqual({ stalled: false });
+  });
+
+  it("materializes a queued follow-up question and reads it back as the pane choice", async () => {
+    insert(1, { type: "userMessage", id: "u1", content: [{ type: "text", text: "Ship it" }] });
+    insert(2, { type: "question", id: "q1", status: "queued",
+      questions: [{ title: "Deploy as-is?", options: ["Yes, deploy", "Hold"] }] });
+    const file = await materializeCodexThread(thread);
+    const page = await new TranscriptReader(file!, "codex").read();
+    const texts = page.entries.map(e => (e.raw as any).payload?.content?.[0]?.text).filter(Boolean);
+    expect(texts).toContain("Deploy as-is?");
+    expect(await queuedQuestion(thread)).toEqual({
+      title: "Deploy as-is?",
+      options: [{ label: "Yes, deploy", key: "1" }, { label: "Hold", key: "2" }],
+    });
+    // Answered: the question is no longer the pane's choice, and the
+    // transcript keeps the asking sentence once.
+    insert(2, { type: "question", id: "q1", status: "answered", answers: { deploy: ["Yes, deploy"] },
+      questions: [{ title: "Deploy as-is?", options: ["Yes, deploy", "Hold"] }] }, 3);
+    expect(await queuedQuestion(thread)).toBeUndefined();
+    await materializeCodexThread(thread);
+    expect((await readFile(file!, "utf8")).match(/Deploy as-is\?/g)).toHaveLength(1);
+    expect(await queuedQuestion("not-a-uuid")).toBeUndefined();
   });
 });

@@ -43,6 +43,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   own denominator, so it can show a higher percentage than `seven_day` without
   contradicting the all-models window. `/v1/usage` documents the source of
   every number; see `docs/api-reference.md`.
+- A transcript resume whose cursor sits past a replaced (shortened) file is a
+  full snapshot flagged `reset: true` instead of an empty delta that left the
+  phone on the old conversation; an in-range resume is a delta and reports
+  `reset: false`, so only a real replacement is ever treated as one. The phone
+  merges reconnect backlogs by line and keeps the newest rows, and replaces the
+  conversation only on that explicit reset.
+- A Codex 0.155 queued follow-up question (the terminal's "Queued follow-up
+  inputs / 1 question / alt+up to answer") reaches the phone as a real question
+  card instead of a bare waiting line and key strip. The Hook reads the pending
+  `question` / `requestUserInput` thread item's text and options from
+  `thread_history_1.sqlite`, publishes them as the same choice shape a terminal
+  dialog uses, and answering sends alt+up (to open Codex's queue) followed by
+  the option's number key through `/v1/keys`. The materializer also shows the
+  asking sentence in the transcript. When no question text can be read, the
+  key row remains the fallback.
 - A `.config/modules.yaml` key for a module this Hook build does not know (a
   newer CLI enabled it) no longer makes `phren-hook ssh` and `serve` exit with
   `Unknown module`, which showed every phone Offline on every computer. The

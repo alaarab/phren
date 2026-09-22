@@ -570,12 +570,19 @@ export class TranscriptReader {
       const reset = this.revision !== index.revision;
       const end = Math.min(before ?? index.lines, index.lines);
       const resuming = before === undefined && afterLine !== undefined && this.revision === undefined;
-      const lower = this.imageLine ?? (resuming ? Math.min(afterLine + 1, index.lines) : reset || before !== undefined ? 0 : this.nextLine);
+      // The phone's cursor can sit past the end after the file was replaced
+      // (compaction, a rewritten thread). A resume into that gap is a full
+      // snapshot of the new file, flagged as the replacement it is; an
+      // in-range resume is only a delta and never claims a replacement.
+      const pastEnd = resuming && afterLine >= index.lines;
+      const lower = this.imageLine ?? (pastEnd ? 0
+        : resuming ? Math.min(afterLine + 1, index.lines)
+        : reset || before !== undefined ? 0 : this.nextLine);
       const entries: Entry[] = [];
       // The first page of a conversation is what the phone parses and lays
       // out before anything shows; keep it light and let scrolling fetch the
       // rest in fuller pages. A live tail (nextLine known) stays small too.
-      const opening = before === undefined && !resuming && (reset || this.nextLine === 0);
+      const opening = before === undefined && (pastEnd || (!resuming && (reset || this.nextLine === 0)));
       const entryBudget = opening ? 60 : 200;
       const byteBudget = opening ? 1_048_576 : 4_194_304;
       let bytes = 0, cursor = end, held: number | undefined;
@@ -613,7 +620,8 @@ export class TranscriptReader {
         if (entries.length >= entryBudget) break;
       }
       if (before === undefined) { this.revision = index.revision; this.nextLine = held ?? index.lines; }
-      return { entries: entries.reverse(), totalLines: index.lines, startLine: cursor, hasMore: cursor > 0, reset };
+      return { entries: entries.reverse(), totalLines: index.lines, startLine: cursor, hasMore: cursor > 0,
+        reset: resuming && !pastEnd ? false : reset };
     }, signal);
   }
 }
