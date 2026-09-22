@@ -72,6 +72,8 @@ export type PhrenGraphApi = {
     },
   ) => boolean;
   destroy: () => void;
+  /** Runs `frames` label ticks and returns elapsed ms (frame-budget probe). */
+  benchLabels?: (frames?: number) => number;
 };
 
 export const ROOT = window as unknown as {

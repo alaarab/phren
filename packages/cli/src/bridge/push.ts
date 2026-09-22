@@ -10,7 +10,7 @@ const deviceSchema = z.object({
   hostID: z.string().uuid(),
   token: z.string().regex(/^[0-9a-f]{64}$/),
   environment: z.enum(["development", "production"]),
-  kinds: z.array(z.enum(["approval", "scheduleStarted", "scheduleFinished", "scheduleFailed"])).max(4).default(["approval"]),
+  kinds: z.array(z.enum(["approval", "scheduleStarted", "scheduleFinished", "scheduleFailed", "scheduleBlocked"])).max(5).default(["approval"]),
 });
 export type PushDevice = z.infer<typeof deviceSchema>;
 
@@ -27,7 +27,7 @@ export interface ApprovalPush { binding: string; provider: string; question: boo
    * ask): shown in the alert so the phone can answer without opening Phren. */
   title?: string; message?: string }
 export interface FanoutBlockedPush { job: string; label: string; provider: string; reason: string }
-export type SchedulePushKind = "scheduleStarted" | "scheduleFinished" | "scheduleFailed";
+export type SchedulePushKind = "scheduleStarted" | "scheduleFinished" | "scheduleFailed" | "scheduleBlocked";
 export interface SchedulePush {
   kind: SchedulePushKind;
   scheduleId: string;
@@ -35,11 +35,15 @@ export interface SchedulePush {
   name: string;
   computer: string;
   runId: string;
-  status: "running" | "finished" | "failed";
+  status: "running" | "finished" | "failed" | "blocked";
   reason?: string;
   route?: string;
 }
 export interface SchedulePushResult { notified: boolean; reason?: string }
+
+export function scheduleCollapseId(kind: SchedulePushKind, runId: string): string {
+  return `${runId}-${kind}`.slice(0, 64);
+}
 
 export function approvalPushPayload(value: ApprovalPush, host?: string): Record<string, unknown> {
   const label = value.provider === "claude" ? "Claude" : value.provider === "codex" ? "Codex" : value.provider === "opencode" ? "opencode" : "Your agent";
@@ -62,7 +66,8 @@ export function fanoutBlockedPushPayload(value: FanoutBlockedPush): Record<strin
 }
 
 export function schedulePushPayload(value: SchedulePush): Record<string, unknown> {
-  const state = value.kind === "scheduleStarted" ? "started" : value.kind === "scheduleFinished" ? "finished" : "failed";
+  const state = value.kind === "scheduleStarted" ? "started" : value.kind === "scheduleFinished" ? "finished"
+    : value.kind === "scheduleBlocked" ? "blocked" : "failed";
   return {
     aps: {
       alert: { title: `${value.name} ${state}`, body: `${value.project} on ${value.computer}${value.reason ? `. ${value.reason}` : ""}` },
@@ -171,11 +176,12 @@ export class ApprovalPushService {
   }
   async notifySchedule(value: SchedulePush): Promise<SchedulePushResult> {
     if (!this.sender) return { notified: false, reason: "no push config" };
-    const devices = this.devices.filter(device => device.kinds.includes(value.kind));
+    let devices = this.devices.filter(device => device.kinds.includes(value.kind));
+    if (!devices.length && value.kind === "scheduleBlocked") devices = this.devices.filter(device => device.kinds.includes("scheduleFailed"));
     if (!devices.length) return { notified: false, reason: "no registered devices" };
     try {
       const notified = (await Promise.all(devices.map(device => this.sender!.send(device, schedulePushPayload(value), {
-        expiration: "0", collapseId: value.runId,
+        expiration: "0", collapseId: scheduleCollapseId(value.kind, value.runId),
       })))).some(Boolean);
       return notified ? { notified: true } : { notified: false, reason: "push delivery failed" };
     } catch {

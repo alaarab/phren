@@ -11,7 +11,7 @@ import {
   state,
 } from "./state.js";
 import { applyHighlight, refreshNodeVisual } from "./nodes.js";
-import { resetLabels, refreshLabels, updateEagerLabelText } from "./labels.js";
+import { benchLabelTick, forgetEagerLabel, resetLabels, refreshLabels, updateEagerLabelText } from "./labels.js";
 import { applyFilters, disposeScene, setupForceGraph } from "./scene.js";
 import { buildFilterBar, buildHudOverlays } from "./hud.js";
 import { clearSelection, fitCameraToGraph, getNodeAt, peekNode, runIntro, selectNode } from "./interactions.js";
@@ -84,6 +84,7 @@ function disposeNodeObject(fgNode: FGNode): void {
   // Detach the eager label's CSS2DObject from the scene graph BEFORE removing
   // its element — otherwise CSS2DRenderer re-appends the element on its next
   // pass and the label lingers as a ghost after a remount (e.g. post-delete).
+  if (fgNode.__labelObj) forgetEagerLabel(fgNode.id);
   fgNode.__labelObj?.removeFromParent();
   if (fgNode.__labelEl) fgNode.__labelEl.remove();
   fgNode.__group = undefined;
@@ -338,4 +339,6 @@ ROOT.phrenGraph = {
   removeNode,
   updateNode,
   destroy,
+  /** Browser frame-budget probe for apps/ios/scripts/test-graph.mjs. */
+  benchLabels: (frames?: number) => benchLabelTick(frames),
 };
