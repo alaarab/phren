@@ -484,25 +484,34 @@ export async function serve(version: string): Promise<void> {
             // prompt the agent is holding: a menu, a y/n, a trust question.
             if (!holding && (keys.every(key => key === "Escape") ? !["working", "blocked", "waiting", "unknown"].includes(status)
               : !["blocked", "waiting", "unknown"].includes(status))) throw new BridgeError(409, keys.every(key => key === "Escape") ? "This agent is no longer working." : "This agent is not waiting for an answer.");
-            // A digit chosen from a parsed terminal dialog also needs Enter to
-            // submit the selection; the phone only sends the option's key.
-            const answerKeys = agentHooks.dialogAnswerKeys(target, keys);
-            await rpc(target.server, "agent.send_keys", { target: target.pane, keys: answerKeys.map(key => HERDR_KEYS[key] ?? key) });
-            // A remembered prompt is answered by any key but a cursor move; the
-            // menu window stays open through Enter because some choices (Codex
-            // full access) open a second confirmation the Hook now walks itself.
-            if (keys.some(key => key !== "Up" && key !== "Down" && key !== "Tab")) { agentHooks.clearTerminalPrompt(target); agentHooks.releaseChoice(target); }
-            if (keys.includes("Escape")) agentHooks.menuClosed(target);
-            // Enter on Codex's /permissions menu may open "Enable full access?".
-            // Watch the pane's lines for it, answer with 1 then Enter, and only
-            // then close the window; a prompt that never arrives is reported as
-            // still waiting with the visible text for the phone's question card.
-            if (keys.includes("Enter") && menu && target.source === "codex"
-              && (agentHooks.menuCommand(target) ?? "").toLowerCase() === "/permissions") {
-              const walk = await agentHooks.walkMenuConfirmation(target);
-              result = { ok: true, ...(walk.menuClosed ? { menuClosed: true } : {}),
-                ...(walk.waiting ? { waiting: walk.waiting } : {}) };
-            } else result = { ok: true };
+            // A released AskUserQuestion is answered one question at a time:
+            // the Hook sends the chosen digit, then Tab to advance or Enter
+            // after the last, and clears the prompt when the set is done.
+            const question = agentHooks.questionAnswerKeys(target, keys);
+            if (question) {
+              await rpc(target.server, "agent.send_keys", { target: target.pane, keys: question.map(key => HERDR_KEYS[key as (typeof ANSWER_KEYS)[number]] ?? key) });
+              result = { ok: true };
+            } else {
+              // A digit chosen from a parsed terminal dialog also needs Enter to
+              // submit the selection; the phone only sends the option's key.
+              const answerKeys = agentHooks.dialogAnswerKeys(target, keys);
+              await rpc(target.server, "agent.send_keys", { target: target.pane, keys: answerKeys.map(key => HERDR_KEYS[key] ?? key) });
+              // A remembered prompt is answered by any key but a cursor move; the
+              // menu window stays open through Enter because some choices (Codex
+              // full access) open a second confirmation the Hook now walks itself.
+              if (keys.some(key => key !== "Up" && key !== "Down" && key !== "Tab")) { agentHooks.clearTerminalPrompt(target); agentHooks.releaseChoice(target); }
+              if (keys.includes("Escape")) agentHooks.menuClosed(target);
+              // Enter on Codex's /permissions menu may open "Enable full access?".
+              // Watch the pane's lines for it, answer with 1 then Enter, and only
+              // then close the window; a prompt that never arrives is reported as
+              // still waiting with the visible text for the phone's question card.
+              if (keys.includes("Enter") && menu && target.source === "codex"
+                && (agentHooks.menuCommand(target) ?? "").toLowerCase() === "/permissions") {
+                const walk = await agentHooks.walkMenuConfirmation(target);
+                result = { ok: true, ...(walk.menuClosed ? { menuClosed: true } : {}),
+                  ...(walk.waiting ? { waiting: walk.waiting } : {}) };
+              } else result = { ok: true };
+            }
           } else if (url.pathname === "/v1/secret") {
             // A password the terminal is reading (sudo, a login) cannot be
             // pasted: bracketed paste corrupts a tty read, so it is typed a
@@ -666,11 +675,13 @@ export async function serve(version: string): Promise<void> {
             const cwd = await trustedDirectory(pane).catch(() => undefined);
             const branch = modules.has("git") && cwd ? await repositoryBranch(cwd) : undefined;
             const waiting = !pendingApproval && ["blocked", "waiting"].includes(String(pane.agent_status));
-            // Claude Code's auto-mode fallback and opencode draw a numbered
-            // dialog in the pane with no PermissionRequest hook behind it:
-            // read the pane (at most once per three seconds) and publish the
-            // dialog as the same terminal choice shape the phone answers.
-            if (target.source === "claude" || target.source === "opencode") {
+            // Claude Code's auto-mode fallback, opencode and Codex draw a
+            // numbered dialog in the pane with no PermissionRequest hook
+            // behind it: read the pane (at most once per three seconds) and
+            // publish the dialog as the same terminal choice shape the phone
+            // answers. Codex joins in when no held approval and no structured
+            // question is already asking.
+            if (["claude", "opencode", "codex"].includes(target.source)) {
               await agentHooks.syncTerminalDialog(target, waiting && !pendingQuestions?.length);
             }
             const hookPrompt = waiting ? agentHooks.terminalPrompt(target) : undefined;
@@ -689,6 +700,7 @@ export async function serve(version: string): Promise<void> {
             const historyHealth = target.source === "codex" ? await threadHealth(target.session, pane.agent_status) : { stalled: false };
             send(client, { agentStatus: { source: target.source, session: target.session,
               status: pendingApproval ? "waiting" : pane.agent_status, pendingApproval, pendingQuestions, terminalPrompt,
+              ...(waiting && agentHooks.passwordPrompt(target) ? { passwordPrompt: true } : {}),
               compacting: agentHooks.compacting(target),
               ...(historyHealth.stalled ? { historyStalled: true, historyStalledSince: historyHealth.since } : {}),
               modules: info.modules, store: info.store, profile: info.profile, generation: info.generation,

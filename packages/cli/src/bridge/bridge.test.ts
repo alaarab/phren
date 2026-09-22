@@ -411,7 +411,8 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     await writeFile(expired, "{}\n"); await utimes(expired, 1, 1);
     hook = spawn(process.execPath, [hookBundle, "serve"], { env: { ...process.env,
       PATH: `${path.join(root, "bin")}:${process.env.PATH}`, PHREN_PATH: path.join(root, ".phren"),
-      HOME: root, PHREN_BRIDGE_HOME: path.join(root, "bridge"), PHREN_HERDR_HOME: path.join(root, "herdr"), CODEX_HOME: path.join(root, "codex") }, stdio: ["ignore", "ignore", "pipe"] });
+      HOME: root, PHREN_BRIDGE_HOME: path.join(root, "bridge"), PHREN_HERDR_HOME: path.join(root, "herdr"), CODEX_HOME: path.join(root, "codex"),
+      PHREN_APPROVAL_HOLD_MS: "2500" }, stdio: ["ignore", "ignore", "pipe"] });
     hook.stderr!.on("data", bytes => log += bytes);
     let ready = false;
     for (let i = 0; i < 80; i++) { try { ready = (await api("/v1/health")).status === 200; } catch { /* startup */ } if (ready) break; await sleep(25); }
@@ -1057,6 +1058,65 @@ schedules:
       expect((await status()).terminalPrompt).toBeUndefined();
     });
 
+    it("publishes a Codex terminal choice from the pane's numbered dialog and answers it with the option's key", async () => {
+      agentStatus = "waiting";
+      paneLines = "Would you like to run the following command?\n"
+        + "Environment: local\n"
+        + "Reason: Allow final headless rendering of the revised terminal hint hierarchy?\n"
+        + "$ bun /tmp/atlas-shell-review.ts\n"
+        + "> 1. Yes, proceed (y)\n"
+        + "  2. Yes, and don't ask again for commands that start with 'bun /tmp/atlas-shell-review.ts' (p)\n"
+        + "  3. No, and tell Codex what to do differently (esc)\n"
+        + "Press enter to confirm or esc to cancel\n";
+      const status = async () => {
+        const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
+        const frames: any[] = []; socket.on("message", data => frames.push(JSON.parse(data.toString())));
+        await once(socket, "open");
+        for (let i = 0; i < 80 && !frames.length; i++) await sleep(25);
+        socket.terminate();
+        return frames[0].agentStatus;
+      };
+      // No PermissionRequest fired and no structured question: the Hook reads
+      // the pane's own numbered rows and keys them by their trailing letters.
+      const first = await status();
+      expect(first.terminalPrompt).toMatchObject({ toolName: "Question", choice: {
+        options: [
+          { label: "Yes, proceed", key: "y" },
+          { label: "Yes, and don't ask again for commands that start with 'bun /tmp/atlas-shell-review.ts'", key: "p" },
+          { label: "No, and tell Codex what to do differently", key: "Escape" },
+        ],
+      } });
+      expect(first.terminalPrompt.choice.title).toContain("Would you like to run the following command?");
+      expect(first.terminalPrompt.choice.title).toContain("bun /tmp/atlas-shell-review.ts");
+      expect(first.terminalPrompt.choice.title).not.toContain("Press enter");
+      // The phone sends the option's own key, not its row number.
+      expect((await api("/v1/keys", { target, keys: ["p"] })).status).toBe(200);
+      expect(commands.filter(c => c.method === "agent.send_keys").map(c => c.params.keys)).toEqual([["p"]]);
+      // Answered: the prompt is gone, and stays gone once the pane works.
+      expect((await status()).terminalPrompt).toBeUndefined();
+      agentStatus = "working";
+      expect((await status()).terminalPrompt).toBeUndefined();
+    });
+
+    it("flags a terminal password prompt only while the pane is reading one", async () => {
+      agentStatus = "waiting";
+      paneLines = "This command will run with elevated privileges.\nPassword:";
+      // The previous test's pane read is inside the three second window.
+      await sleep(3_100);
+      const status = async () => {
+        const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
+        const frames: any[] = []; socket.on("message", data => frames.push(JSON.parse(data.toString())));
+        await once(socket, "open");
+        for (let i = 0; i < 80 && !frames.length; i++) await sleep(25);
+        socket.terminate();
+        return frames[0].agentStatus;
+      };
+      expect((await status()).passwordPrompt).toBe(true);
+      // The pane leaves waiting: nothing is being read any more.
+      agentStatus = "working";
+      expect((await status()).passwordPrompt).toBeUndefined();
+    });
+
     it("lists the models a computer's agents offer", async () => {
       const claude = await api("/v1/models?source=claude");
       expect(claude.status).toBe(200);
@@ -1438,6 +1498,59 @@ schedules:
       expect((await api("/v1/approvals/answer", { target, actionId: approval.actionId, decision: "approve", updatedInput: { questions, answers } })).status).toBe(409);
       socket.close(); await once(socket, "close");
     });
+
+    it("times a held AskUserQuestion out into question cards and answers it with digits, Tab and Enter", async () => {
+      agentStatus = "blocked";
+      const questions = [
+        { question: "Which accent?", header: "Design", options: [{ label: "Cyan", description: "Keep it" }, { label: "Lavender", description: "Softer" }] },
+        { question: "Which screens?", header: "Scope", multiSelect: true, options: [{ label: "Chat" }, { label: "Agents" }, { label: "Settings" }] },
+      ];
+      const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
+      const frames: any[] = []; socket.on("message", bytes => frames.push(JSON.parse(bytes.toString())));
+      await once(socket, "open");
+      for (let i = 0; i < 60 && !frames.length; i++) await sleep(25);
+      const reply = new Promise<any>((resolve, reject) => {
+        const payload = JSON.stringify({ target, event: "PermissionRequest", tool: "AskUserQuestion", input: { questions } });
+        const req = request({ socketPath: path.join(root, "bridge/agent.sock"), path: "/hook", method: "POST",
+          headers: { "Content-Length": Buffer.byteLength(payload) } }, res => {
+          let data = ""; res.on("data", bytes => data += bytes); res.on("end", () => resolve(JSON.parse(data)));
+        }); req.on("error", reject); req.end(payload);
+      });
+      // The watch holds the request; the phone sees the approval until it times out.
+      for (let i = 0; i < 120 && !frames.some(f => f.agentStatus?.pendingApproval); i++) await sleep(25);
+      expect(frames.find(f => f.agentStatus?.pendingApproval)?.agentStatus.pendingApproval.toolName).toBe("AskUserQuestion");
+      expect(await reply).toEqual({});
+      const prompt = async (after: number) => {
+        for (let i = 0; i < 200; i++) {
+          for (let index = frames.length - 1; index >= after; index--) if (frames[index].agentStatus?.terminalPrompt) return frames[index].agentStatus.terminalPrompt;
+          await sleep(25);
+        }
+        return undefined;
+      };
+      // Released: the normalized questions ride along with the first question's choice.
+      const first = await prompt(0);
+      expect(first).toMatchObject({ toolName: "AskUserQuestion", questionIndex: 0, questions,
+        choice: { title: "Which accent?", options: [{ label: "Cyan", key: "1" }, { label: "Lavender", key: "2" }] } });
+      // Answering the first question sends its digit then Tab and moves on.
+      const beforeSecond = frames.length;
+      expect((await api("/v1/keys", { target, keys: ["2"] })).status).toBe(200);
+      expect(commands.filter(c => c.method === "agent.send_keys").map(c => c.params.keys).at(-1)).toEqual(["2", "tab"]);
+      const second = await prompt(beforeSecond);
+      expect(second).toMatchObject({ questionIndex: 1,
+        choice: { title: "Which screens?", options: [{ label: "Chat", key: "1" }, { label: "Agents", key: "2" },
+          { label: "Settings", key: "3" }, { label: "Done", key: "Enter" }] } });
+      // The last question sends its digit then Enter and clears the prompt.
+      const beforeCleared = frames.length;
+      expect((await api("/v1/keys", { target, keys: ["1"] })).status).toBe(200);
+      expect(commands.filter(c => c.method === "agent.send_keys").map(c => c.params.keys).at(-1)).toEqual(["1", "enter"]);
+      let cleared = false;
+      for (let i = 0; i < 200 && !cleared; i++) {
+        cleared = frames.slice(beforeCleared).some(f => f.agentStatus && f.agentStatus.terminalPrompt === undefined);
+        await sleep(25);
+      }
+      expect(cleared).toBe(true);
+      socket.close(); await once(socket, "close");
+    }, 20_000);
 
     it("holds overview requests only with an explicit watch and lets the phone approve", async () => {
       const callback = () => new Promise<any>((resolve, reject) => {
