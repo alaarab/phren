@@ -914,7 +914,18 @@ async function conductorBrief(): Promise<string> {
   return brief;
 }
 
-async function prepareConductor(kind: (typeof launchKinds)[number], effort: "low" | "medium" | "high", model?: string): Promise<string[]> {
+const launchEfforts = ["minimal", "low", "medium", "high", "xhigh", "max"] as const;
+type LaunchEffort = (typeof launchEfforts)[number];
+
+/** How each harness takes a reasoning effort at startup. */
+function effortArgs(kind: (typeof launchKinds)[number], effort: LaunchEffort): string[] {
+  if (kind === "claude") return ["--effort", effort];
+  if (kind === "codex") return ["-c", `model_reasoning_effort=${effort}`];
+  if (kind === "opencode") return ["--variant", effort];
+  return [];
+}
+
+async function prepareConductor(kind: (typeof launchKinds)[number], effort: LaunchEffort, model?: string): Promise<string[]> {
   const brief = await conductorBrief();
   const briefDirectory = path.join(bridgeRoot(), "conductor");
   await mkdir(briefDirectory, { recursive: true, mode: 0o700 });
@@ -960,7 +971,7 @@ export async function launchSession(server: string, data: Json): Promise<Json> {
   const cwd = z.string().min(1).max(4096).refine(t => path.isAbsolute(t) && !/[\x00-\x1f\x7f]/.test(t)).parse(data.cwd);
   const label = plainText(200).parse(data.label);
   const kind = z.enum(launchKinds).parse(data.kind);
-  const effort = z.enum(["low", "medium", "high"]).default("medium").parse(data.effort);
+  const effort = z.enum(launchEfforts).default("medium").parse(data.effort);
   if (role === "conductor" && kind === "copilot") throw new BridgeError(400, "Copilot cannot run as a conductor.");
   // Herdr's agent name is a slug (lowercase, digits, - or _, 1 to 32 chars);
   // the label a person typed is not, so derive one from it.
@@ -981,7 +992,7 @@ export async function launchSession(server: string, data: Json): Promise<Json> {
     }
   }
   const args = role === "conductor" ? await prepareConductor(kind, effort, model)
-    : model && modelFlag[kind] ? [modelFlag[kind], model] : undefined;
+    : [...(model && modelFlag[kind] ? [modelFlag[kind], model] : []), ...(data.effort === undefined ? [] : effortArgs(kind, effort))];
   if (workspace && !objects(before.workspaces).some(w => w.workspace_id === workspace)) throw new BridgeError(409, "The workspace changed.");
   const knownWorkspaces = new Set(objects(before.workspaces).map(w => w.workspace_id));
   const knownTabs = new Set(objects(before.tabs).map(t => t.tab_id));
@@ -1001,7 +1012,7 @@ export async function launchSession(server: string, data: Json): Promise<Json> {
   }
   if (!created) throw new BridgeError(409, `Herdr created "${label}" but its pane did not appear. Check Herdr on the computer.`);
   try {
-    await rpc(server, "agent.start", { name, kind, pane_id: created.paneId, timeout_ms: timeout, ...(args ? { args } : {}) }, undefined, timeout + 5_000);
+    await rpc(server, "agent.start", { name, kind, pane_id: created.paneId, timeout_ms: timeout, ...(args.length ? { args } : {}) }, undefined, timeout + 5_000);
   } catch (error) {
     const reason = error instanceof BridgeError && error.status === 504 ? "it did not become ready in time" : "Herdr reported an error";
     throw new BridgeError(409, `Herdr couldn't start ${kind} in the new "${label}" pane (${reason}). The workspace was created and is still open on the computer — open it from Herdr workspaces.`);

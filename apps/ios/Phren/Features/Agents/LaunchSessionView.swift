@@ -36,12 +36,14 @@ struct LaunchSessionView: View {
     @State private var role: PhrenConnection.LaunchRole = .agent
     @State private var effort: PhrenConnection.LaunchEffort = .medium
     @State private var showRoles = false
-    @State private var showEfforts = false
     @State private var runningConductor: LiveAgentSession?
     @State private var showRunningConductor = false
     @State private var chatSession: LiveAgentSession?
     @State private var terminalRoute: TerminalDestination?
     @State private var modelName = ""
+    /// Each computer's own model list per harness, keyed "host|harness".
+    @State private var catalogs: [String: [AgentModelChoice]] = [:]
+    @State private var catalogFailed: Set<String> = []
 
     init(storeID: String, project: String, taskRequest: TaskAgentRequest? = nil,
          preferredHostID: UUID? = nil, initialRole: PhrenConnection.LaunchRole = .agent,
@@ -62,34 +64,31 @@ struct LaunchSessionView: View {
     /// Harnesses whose CLI accepts a model at startup.
     private var supportsModel: Bool { ["codex", "claude", "opencode"].contains(kind) }
     private var supportsEffort: Bool { ["codex", "claude", "opencode"].contains(kind) }
-    private var modelSuggestions: [String] {
-        switch kind {
-        case "opencode": return ["openrouter/deepseek/deepseek-v4.1-flash", "openrouter/deepseek/deepseek-v4-pro"]
-        case "claude": return ["opus", "sonnet", "haiku"]
-        case "codex": return ["gpt-5-codex", "gpt-5"]
-        default: return []
-        }
+    private var catalogKey: String { "\(hostID?.uuidString ?? "")|\(kind)" }
+    /// What the chosen computer lists for this harness; the built-in list
+    /// only when the computer could not be asked.
+    private var models: [AgentModelChoice]? {
+        if let listed = catalogs[catalogKey], !listed.isEmpty { return listed }
+        return catalogFailed.contains(catalogKey) ? AgentModelChoice.choices(source: kind) : nil
     }
-    private var modelPlaceholder: String {
-        switch kind {
-        case "opencode": return "provider/model"
-        case "claude": return "opus, sonnet, or haiku"
-        case "codex": return "e.g. gpt-5-codex"
-        default: return "model"
-        }
+    private var chosenModel: AgentModelChoice? { models?.first { $0.argument == modelName } }
+    /// The chosen model's own levels, else the three every harness takes.
+    private var efforts: [PhrenConnection.LaunchEffort] {
+        let listed = (chosenModel?.efforts ?? []).compactMap(PhrenConnection.LaunchEffort.init(rawValue:))
+        return listed.isEmpty ? [.low, .medium, .high] : listed
     }
     private func storedModel(_ kind: String) -> String { AppRuntime.defaults.string(forKey: "launch.model.\(kind)") ?? "" }
+    private func storedEffort(_ kind: String) -> PhrenConnection.LaunchEffort {
+        AppRuntime.defaults.string(forKey: "launch.effort.\(kind)").flatMap(PhrenConnection.LaunchEffort.init(rawValue:)) ?? .medium
+    }
     private var roleOptions: [PhrenOption<PhrenConnection.LaunchRole>] {
         [.init(id: "agent", value: .agent, title: "Agent"),
          .init(id: "conductor", value: .conductor, title: conductorSummary)]
     }
-    private var effortOptions: [PhrenOption<PhrenConnection.LaunchEffort>] {
-        PhrenConnection.LaunchEffort.allCases.map { .init(id: $0.rawValue, value: $0, title: $0.rawValue.capitalized) }
-    }
     private var conductorSummary: String {
         let harnessName = harness.map { $0 == .claude ? "Claude" : $0.title } ?? kind.capitalized
-        let chosenModel = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
-        return ["Conductor", [harnessName, chosenModel.isEmpty ? nil : displayModel(chosenModel)].compactMap { $0 }.joined(separator: " "), effort.rawValue]
+        let modelTitle = chosenModel?.name ?? (modelName.isEmpty ? nil : modelName)
+        return ["Conductor", [harnessName, modelTitle].compactMap { $0 }.joined(separator: " "), effort.title]
             .joined(separator: " · ")
     }
     private var preferences: LiveSessionPreferences? { try? LiveSessionPreferences.read(data) }
@@ -240,27 +239,37 @@ struct LaunchSessionView: View {
 
                 if supportsModel {
                     PhrenGroup("Model") {
-                        TextField(modelPlaceholder, text: $modelName)
-                            .font(.system(.body, design: .monospaced)).autocorrectionDisabled().textInputAutocapitalization(.never)
-                            .padding(PhrenTheme.Space.medium)
-                            .background(PhrenTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.questionOption))
-                            .accessibilityIdentifier("launch-model")
-                        ForEach(modelSuggestions, id: \.self) { suggestion in
-                            PhrenOptionRow(title: suggestion, selected: modelName == suggestion) {
-                                modelName = suggestion
+                        if let host = selectedHost {
+                            if let models {
+                                ForEach(models) { choice in
+                                    PhrenOptionRow(title: choice.name, caption: choice.description,
+                                                   selected: modelName == choice.argument) {
+                                        modelName = choice.argument
+                                    }
+                                    .accessibilityIdentifier("launch-model:\(choice.argument)")
+                                }
+                                if catalogFailed.contains(catalogKey) {
+                                    Text("\(host.name) didn't list its models; these are phren's defaults.")
+                                        .font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
+                                }
+                            } else {
+                                HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Asking \(host.name) for \(harness?.title ?? kind)'s models…") }
+                                    .font(.caption).foregroundStyle(PhrenTheme.textMuted)
+                                    .accessibilityIdentifier("launch-model-loading")
                             }
-                            .accessibilityIdentifier("launch-model-suggestion:\(suggestion)")
+                        } else {
+                            Text("Choose a computer to see its models.")
+                                .font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
                         }
-                        Text("Optional. Passed to \(harness?.title ?? kind) as --model when it starts; leave blank for its default.")
-                            .font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
                     }
                 }
 
-                if role == .conductor && supportsEffort {
+                if supportsEffort {
                     PhrenGroup("Effort") {
-                        PhrenSingleSelect(options: effortOptions, selection: $effort,
-                                          placeholder: "Effort", identifier: "launch-effort",
-                                          isPresented: $showEfforts)
+                        ForEach(efforts) { level in
+                            PhrenOptionRow(title: level.title, selected: effort == level) { effort = level }
+                                .accessibilityIdentifier("launch-effort:\(level.rawValue)")
+                        }
                     }
                 }
 
@@ -307,7 +316,7 @@ struct LaunchSessionView: View {
             }
             .buttonStyle(.plain)
             .disabled(launching)
-            .navigationTitle("Open \(project)").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle(role == .conductor ? "Start the conductor" : "Open \(project)").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -323,6 +332,7 @@ struct LaunchSessionView: View {
             .task {
                 guard !prepared else { return }
                 modelName = storedModel(kind)
+                effort = storedEffort(kind)
                 roleSelected(role)
                 prepared = true
                 await prepare()
@@ -334,6 +344,7 @@ struct LaunchSessionView: View {
                     effort = PhrenConnection.LaunchEffort(rawValue: saved.effort) ?? .medium
                 } else {
                     modelName = storedModel(newKind)
+                    effort = storedEffort(newKind)
                 }
                 rememberConductorChoice()
             }
@@ -341,7 +352,12 @@ struct LaunchSessionView: View {
                 AppRuntime.defaults.set(newValue, forKey: "launch.model.\(kind)")
                 rememberConductorChoice()
             }
-            .onChange(of: effort) { _, _ in rememberConductorChoice() }
+            .onChange(of: effort) { _, newValue in
+                AppRuntime.defaults.set(newValue.rawValue, forKey: "launch.effort.\(kind)")
+                rememberConductorChoice()
+            }
+            .onChange(of: modelName) { _, _ in fitEffort() }
+            .task(id: catalogKey) { await loadModels() }
         }
         .phrenSingleSelectSheet(isPresented: $showComputers, title: "Computer", options: computerOptions,
                                 selection: $hostID, rowPrefix: "launch-computer",
@@ -352,8 +368,6 @@ struct LaunchSessionView: View {
                                 selection: $project, rowPrefix: "launch-project", onSelect: { _ in resetFolder() })
         .phrenSingleSelectSheet(isPresented: $showRoles, title: "Role", options: roleOptions,
                                 selection: $role, rowPrefix: "launch-role", onSelect: roleSelected)
-        .phrenSingleSelectSheet(isPresented: $showEfforts, title: "Effort", options: effortOptions,
-                                selection: $effort, rowPrefix: "launch-effort")
         .phrenDialog(isPresented: $showRunningConductor, title: "Conductor already running",
                      message: "This store already has a conductor. Open its chat instead of starting another.",
                      actions: [
@@ -364,8 +378,43 @@ struct LaunchSessionView: View {
                      ], identifier: "launch-conductor-running")
     }
 
-    private func displayModel(_ value: String) -> String {
-        value.split(separator: "-").map { $0.capitalized }.joined(separator: " ")
+    /// Ask the chosen computer what this harness offers, then keep the saved
+    /// model when it is still listed, else the computer's own default.
+    private func loadModels() async {
+        guard supportsModel, let host = selectedHost else { return }
+        let key = catalogKey, source = kind
+        if catalogs[key] == nil {
+            #if DEBUG && targetEnvironment(simulator)
+            if AgentChatFixture.enabled {
+                catalogs[key] = AgentChatFixture.models(source: source)
+                if catalogs[key]?.isEmpty != false { catalogFailed.insert(key) }
+            }
+            #endif
+        }
+        if catalogs[key] == nil {
+            do {
+                let listed = try await PhrenConnection.models(host: host, privateKey: try DeviceSSHKey.load(host.id), source: source)
+                guard !Task.isCancelled else { return }
+                catalogs[key] = listed
+                if listed.isEmpty { catalogFailed.insert(key) }
+            } catch {
+                guard !Task.isCancelled else { return }
+                catalogFailed.insert(key)
+            }
+        }
+        guard key == catalogKey, let models else { return }
+        if !models.contains(where: { $0.argument == modelName }) {
+            modelName = (models.first(where: \.isDefault) ?? models.first)?.argument ?? ""
+        }
+        fitEffort()
+    }
+
+    /// Keep the effort when the model takes it; otherwise the model's own
+    /// default, then medium.
+    private func fitEffort() {
+        guard !efforts.contains(effort) else { return }
+        effort = chosenModel?.defaultEffort.flatMap(PhrenConnection.LaunchEffort.init(rawValue:)).flatMap { efforts.contains($0) ? $0 : nil }
+            ?? (efforts.contains(.medium) ? .medium : efforts[0])
     }
 
     private func roleSelected(_ selected: PhrenConnection.LaunchRole) {
@@ -390,7 +439,7 @@ struct LaunchSessionView: View {
     private func storeSelected() {
         project = LiveSessionsModel.conductorProject(storeID: storeID, projects: model.sessionProjects, registry: registry)
         modelName = storedModel(kind)
-        effort = .medium
+        effort = storedEffort(kind)
         roleSelected(role)
         hostID = nil
         resetFolder()
@@ -472,7 +521,7 @@ struct LaunchSessionView: View {
             rememberConductorChoice()
             let session = try await AgentLaunch.launch(host: host, cwd: cwd, label: label, kind: harness,
                                                        model: chosen.isEmpty ? nil : chosen, role: role,
-                                                       effort: role == .conductor && supportsEffort ? effort : nil) { status = $0 }
+                                                       effort: supportsEffort ? effort : nil) { status = $0 }
             if role == .conductor {
                 ConductorLaunchSettings.save(storeID: storeID, harness: harness, model: chosen,
                                              effort: effort, hostID: host.id, project: project)

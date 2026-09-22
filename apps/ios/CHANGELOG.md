@@ -10,6 +10,8 @@ number counts up on its own.
 
 ### Changed
 
+- Launching an agent or the conductor goes computer, harness, model, effort. The models are the chosen computer's own list for that harness (phren's defaults only when it can't be asked), with no free-text field. Effort lists that model's own levels (Claude up to Max, Codex from its catalogue), starts on Medium and is remembered per harness.
+- A failed phren call shows its reason and one line per problem instead of the raw JSON with the parameter list; a successful call shows phren's message without repeating it as JSON.
 - The agent chat's message box takes focus and raises the keyboard again; its focus flag had stayed a SwiftUI focus state that no field was bound to, so every tap was undone.
 - The conductor starts without a project: it opens in the chosen computer's phren store and works across every project from there. The launch sheet no longer asks for a project or folder.
 - Sessions and a computer's page have no search bar.

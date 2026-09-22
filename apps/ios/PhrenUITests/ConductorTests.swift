@@ -23,9 +23,16 @@ final class ConductorTests: XCTestCase {
         let codex = app.buttons["launch-harness:codex"]
         for _ in 0..<5 where !codex.isHittable { app.swipeUp() }
         XCTAssertTrue(codex.waitForExistence(timeout: 5)); codex.tap()
-        for _ in 0..<6 where !app.buttons["launch-effort"].isHittable { app.swipeUp() }
-        XCTAssertTrue(app.buttons["launch-effort"].waitForExistence(timeout: 5))
-        attachUIScreenshot(app, "Launch conductor role and effort")
+        // Models come from the computer's catalogue; effort defaults to medium.
+        let model = app.buttons["launch-model:gpt-6-astra"]
+        for _ in 0..<6 where !model.isHittable { app.swipeUp() }
+        XCTAssertTrue(model.waitForExistence(timeout: 5))
+        let medium = app.buttons["launch-effort:medium"]
+        for _ in 0..<6 where !medium.isHittable { app.swipeUp() }
+        XCTAssertTrue(medium.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.textFields["launch-model"].exists, "No free-text model field")
+        app.buttons["launch-effort:high"].tap()
+        attachUIScreenshot(app, "Launch conductor model and effort")
         let open = app.buttons["launch-open"]
         for _ in 0..<4 where !open.isHittable { app.swipeUp() }
         XCTAssertTrue(open.waitForExistence(timeout: 5)); open.tap()

@@ -55,8 +55,8 @@ extension PhrenToolPresentationTests {
         let inner = #"{"ok":true,"data":{"count":1,"results":[{"title":"Interactive back"}]},"message":"Found 1 result(s)."}"#
         let raw = #"{"content":[{"type":"text","text":"\#(inner.replacingOccurrences(of: "\"", with: "\\\""))"}]}"#
         let readable = PhrenToolPresentation.readable(raw)
-        XCTAssertTrue(readable.hasPrefix("Found 1 result(s).\n\n{"), readable)
-        XCTAssertTrue(readable.contains("\"title\" : \"Interactive back\""), readable)
+        // phren's message is the readable text; its data would only repeat it as JSON.
+        XCTAssertEqual(readable, "Found 1 result(s).")
         XCTAssertFalse(readable.contains("\\\""), "No escaped JSON-in-JSON remains")
         XCTAssertEqual(PhrenToolPresentation.readable("plain prose, not JSON"), "plain prose, not JSON")
         XCTAssertEqual(PhrenToolPresentation.readable(#"{"content":[{"type":"text","text":"just text"}]}"#), "just text")
@@ -98,5 +98,13 @@ extension PhrenToolPresentationTests {
         XCTAssertEqual(search.searchResults.count, 4)
         XCTAssertEqual(search.searchResults.last?.text, "Full recalled text")
         XCTAssertNil(PhrenToolPresentation(name: "phren_manage_task", input: #"{"action":"remove","item":"Old task"}"#, result: #"{"ok":true}"#)?.target)
+    }
+
+    func testFailedCallShowsItsIssuesNotItsParameterList() {
+        let result = #"{"ok":false,"error":"Invalid arguments for update_task","issues":[{"path":"updates","message":"Invalid input: expected object, received string"}],"params":[{"name":"project","required":true}]}"#
+        let card = PhrenToolPresentation(name: "mcp__phren__manage_task", input: #"{"action":"update","item":"bid:1"}"#, result: result)
+        XCTAssertEqual(card?.status, .failed)
+        XCTAssertEqual(card?.resultSummary, "Invalid arguments for update_task")
+        XCTAssertEqual(card?.issues, ["updates: Invalid input: expected object, received string"])
     }
 }

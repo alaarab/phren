@@ -57,8 +57,16 @@ struct PhrenToolCard: View, Equatable {
                     if presentation.body.isEmpty, presentation.titles.isEmpty, presentation.resultSummary == nil,
                        let output = presentation.fullOutput { fullText("Output", output) }
                     ForEach(messages.filter(\.isChange)) { message in fullText("Changes", message.text) }
-                    if presentation.status == .failed, let raw = presentation.rawResult {
-                        fullText("Raw error", raw)
+                    if presentation.status == .failed {
+                        ForEach(presentation.issues, id: \.self) { issue in
+                            Text(issue).font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textSecondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        // Raw text only when the failure gave no reason of its own.
+                        if presentation.issues.isEmpty, presentation.resultSummary == "Call failed",
+                           let raw = presentation.rawResult {
+                            fullText("Raw error", PhrenToolPresentation.readable(raw))
+                        }
                     }
                 }
                 .textSelection(.enabled)

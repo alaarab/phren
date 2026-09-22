@@ -48,7 +48,8 @@ describe("model catalogue", () => {
     await writeFile(path.join(config, "cache/model-catalog/account-abc-cc.json"), JSON.stringify({ version: 2, catalog: {
       surface: "cc",
       config: { id: "cc", models: [
-        row("claude-opus-5-5", "Opus 5.5", { description: "For complex tasks", min_claude_code_version: "2.1.280" }),
+        row("claude-opus-5-5", "Opus 5.5", { description: "For complex tasks", min_claude_code_version: "2.1.280",
+          thinking: { type: "effort", effort_options: [{ id: "low" }, { id: "medium", badge: { message: "Default" } }, { id: "high" }, { id: "xhigh" }, { id: "max" }] } }),
         row("claude-sonnet-5", "Sonnet 5", { description: "Most efficient for everyday tasks" }),
         row("claude-future-9", "Future 9", { min_claude_code_version: "9.0.0" }),
         row("claude-opus-4-8", "Opus 4.8", { section: "overflow" }),
@@ -61,6 +62,11 @@ describe("model catalogue", () => {
       ["claude-opus-5-5[1m]", "Opus 5.5 (1M context)", false],
       ["claude-opus-4-8", "Opus 4.8", false],
     ]);
+    // Each model carries the effort levels `--effort` takes for it, the 1M row too.
+    const models = await readClaudeModels(config, "2.1.280");
+    expect(models[0]).toMatchObject({ supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max"], defaultReasoningEffort: "medium" });
+    expect(models[2].supportedReasoningEfforts).toEqual(["low", "medium", "high", "xhigh", "max"]);
+    expect(models[1].supportedReasoningEfforts).toBeUndefined();
     // A client older than a row's minimum does not see that row.
     expect((await readClaudeModels(config, "2.1.279")).map(model => model.id)).not.toContain("claude-opus-5-5");
   });

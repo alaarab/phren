@@ -103,7 +103,7 @@ final class AgentChatTests: XCTestCase {
     }
 
     @MainActor
-    func testFailedPhrenCallShowsReasonAndExpandsRawErrorWithoutChevron() {
+    func testFailedPhrenCallShowsReasonWithoutRawJSONOrChevron() {
         let app = launch(extra: ["--chat-phren-tools"])
         app.buttons["live-chat:w7:w7:t9"].tap()
         let transcript = app.scrollViews["chat-transcript"]
@@ -118,8 +118,9 @@ final class AgentChatTests: XCTestCase {
         XCTAssertFalse(app.buttons["Retry"].exists)
         card.tap()
         XCTAssertEqual(card.value as? String, "Expanded")
-        XCTAssertTrue(app.staticTexts["Raw error"].waitForExistence(timeout: 5))
-        capture(app, "Failed phren call with raw error expanded")
+        // The reason is already on the card; no raw JSON follows it.
+        XCTAssertFalse(app.staticTexts["Raw error"].exists)
+        capture(app, "Failed phren call expanded")
     }
 
     @MainActor

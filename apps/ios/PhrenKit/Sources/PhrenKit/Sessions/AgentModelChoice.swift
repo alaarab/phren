@@ -6,13 +6,20 @@ public struct AgentModelChoice: Identifiable, Equatable, Sendable {
     public let argument: String
     public var description: String? = nil
     public var isDefault = false
+    /// Effort levels the computer says this model takes, in its own order;
+    /// empty when the harness reports none.
+    public var efforts: [String] = []
+    public var defaultEffort: String? = nil
     public var id: String { argument }
 
-    public init(name: String, argument: String, description: String? = nil, isDefault: Bool = false) {
+    public init(name: String, argument: String, description: String? = nil, isDefault: Bool = false,
+                efforts: [String] = [], defaultEffort: String? = nil) {
         self.name = name
         self.argument = argument
         self.description = description
         self.isDefault = isDefault
+        self.efforts = efforts
+        self.defaultEffort = defaultEffort
     }
 
     /// The catalogue the computer reports (`/v1/models`): what the agent's
@@ -24,7 +31,9 @@ public struct AgentModelChoice: Identifiable, Equatable, Sendable {
             guard let id = raw["id"] as? String, command(for: id) != nil else { return nil }
             let name = (raw["name"] as? String).flatMap { $0.isEmpty ? nil : String($0.prefix(100)) } ?? id
             let description = (raw["description"] as? String).flatMap { $0.isEmpty ? nil : String($0.prefix(300)) }
-            return AgentModelChoice(name: name, argument: id, description: description, isDefault: raw["isDefault"] as? Bool == true)
+            let efforts = (raw["supportedReasoningEfforts"] as? [String] ?? []).filter { $0.range(of: #"^[a-z]{1,16}$"#, options: .regularExpression) != nil }
+            return AgentModelChoice(name: name, argument: id, description: description, isDefault: raw["isDefault"] as? Bool == true,
+                                    efforts: Array(efforts.prefix(8)), defaultEffort: raw["defaultReasoningEffort"] as? String)
         }
     }
 

@@ -306,8 +306,15 @@ extension PhrenConnection {
     }
 
     public enum LaunchEffort: String, Codable, Sendable, CaseIterable, Identifiable, Hashable {
-        case low, medium, high
+        case minimal, low, medium, high, xhigh, max
         public var id: String { rawValue }
+        public var title: String {
+            switch self {
+            case .xhigh: return "Extra high"
+            case .max: return "Max"
+            default: return rawValue.capitalized
+            }
+        }
     }
 
     /// Typed input for `/v1/workspaces/launch`. Role is explicit even for an

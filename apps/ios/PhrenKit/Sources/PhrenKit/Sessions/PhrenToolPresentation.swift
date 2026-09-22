@@ -20,6 +20,8 @@ public struct PhrenToolPresentation: Equatable, Sendable {
     public let fullInput: String
     public let fullOutput: String?
     public let rawResult: String?
+    /// A failed call's own validation lines ("updates: expected object…").
+    public let issues: [String]
     public let target: Target?
     public let searchResults: [SearchResult]
 
@@ -120,6 +122,11 @@ public struct PhrenToolPresentation: Equatable, Sendable {
             summary = Self.nonempty(Self.firstLine(data["title"] ?? data["content"] ?? data["text"] ?? envelope["message"] ?? response ?? ""))
         }
         resultSummary = summary; titles = resultTitles
+        issues = failed ? (envelope["issues"] as? [[String: Any]] ?? []).prefix(6).compactMap { issue in
+            guard let message = issue["message"] as? String, !message.isEmpty else { return nil }
+            let path = Self.plain(issue["path"] ?? "")
+            return path.isEmpty ? message : "\(path): \(message)"
+        } : []
         searchResults = tool == "search_knowledge" ? (data["results"] as? [Any] ?? data["hits"] as? [Any] ?? response as? [Any] ?? []).map { hit in
             guard let item = hit as? [String: Any] else { return SearchResult(title: "", text: Self.render(hit), source: nil) }
             let title = item["title"] as? String ?? ""
@@ -210,9 +217,9 @@ public struct PhrenToolPresentation: Equatable, Sendable {
         guard JSONSerialization.isValidJSONObject(value),
               let data = try? JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]),
               let pretty = String(data: data, encoding: .utf8) else { return text }
-        // phren's `message` is the human line; put it first, then the data.
+        // phren's `message` is the human text; its data repeats it as JSON.
         if let dict = value as? [String: Any], let message = dict["message"] as? String, !message.isEmpty {
-            return message + "\n\n" + pretty
+            return message
         }
         return pretty
     }
