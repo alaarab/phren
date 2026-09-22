@@ -1,17 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { type McpContext, resolveStoreForProject } from "./types.js";
-import {
-  definition,
-  formatSymbolLine,
-  outline,
-  references,
-  search,
-  usage,
-  type OutlineEntry,
-  type UsageEntry,
-} from "../code/query.js";
-import { findingsCitingSymbol, formatCitingFinding } from "../code/citations.js";
+import type { OutlineEntry, UsageEntry } from "@phren/code";
+import { loadCodePackage, CODE_PACKAGE_HINT } from "../modules/code-package.js";
 
 /**
  * Read tools over the `code` module's local symbol index (stage 2).
@@ -74,6 +65,9 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ project: projectInput, query, kind, limit }) => {
+      const code = await loadCodePackage();
+      if (!code) return text(CODE_PACKAGE_HINT);
+      const { search, formatSymbolLine } = code;
       const target = resolveTarget(ctx, projectInput);
       if ("error" in target) return text(target.error);
       const result = await search(target.store, target.project, query, kind, limit ?? 20);
@@ -95,6 +89,9 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ project: projectInput, symbol }) => {
+      const code = await loadCodePackage();
+      if (!code) return text(CODE_PACKAGE_HINT);
+      const { definition, findingsCitingSymbol, formatCitingFinding } = code;
       const target = resolveTarget(ctx, projectInput);
       if ("error" in target) return text(target.error);
       const result = await definition(target.store, target.project, symbol);
@@ -127,6 +124,9 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ project: projectInput, symbol, limit }) => {
+      const code = await loadCodePackage();
+      if (!code) return text(CODE_PACKAGE_HINT);
+      const { references } = code;
       const target = resolveTarget(ctx, projectInput);
       if ("error" in target) return text(target.error);
       const result = await references(target.store, target.project, symbol, limit ?? 200);
@@ -153,6 +153,9 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ project: projectInput, path: filePath }) => {
+      const code = await loadCodePackage();
+      if (!code) return text(CODE_PACKAGE_HINT);
+      const { outline } = code;
       const target = resolveTarget(ctx, projectInput);
       if ("error" in target) return text(target.error);
       const result = await outline(target.store, target.project, filePath);
@@ -175,6 +178,9 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ project: projectInput, top }) => {
+      const code = await loadCodePackage();
+      if (!code) return text(CODE_PACKAGE_HINT);
+      const { usage } = code;
       const target = resolveTarget(ctx, projectInput);
       if ("error" in target) return text(target.error);
       const result = await usage(target.store, target.project, top ?? 10);

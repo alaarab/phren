@@ -366,7 +366,7 @@ export const REGISTRY: Command[] = [
       { name: "def", usage: "phren code def <project> <symbol>", summary: "A symbol's definition, doc, snippet and last change" },
       { name: "usage", usage: "phren code usage <project> [--top n]", summary: "Hottest and coldest symbols by reference count" },
     ],
-    run: async (args, ctx) => (await import("./code/command.js")).runCodeCommand(args, ctx),
+    run: async (args, ctx) => (await (await import("./modules/code-package.js")).requireCodePackage()).runCodeCommand(args, ctx),
   },
   {
     name: "shell",
@@ -548,6 +548,13 @@ export const REGISTRY: Command[] = [
   },
 
   // Config
+  {
+    name: "fanout",
+    topic: "config",
+    usage: "phren fanout run|usage|resume|review|list|archive",
+    summary: "Launch and manage usage-aware agent workers",
+    run: async (args, ctx) => (await import("./fanout/command.js")).runFanout(args, ctx),
+  },
   {
     name: "modules",
     topic: "config",

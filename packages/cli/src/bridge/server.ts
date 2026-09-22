@@ -1,3 +1,5 @@
+import { saveCodeNote } from "./code-note.js";
+import { handOff } from "./hand-off.js";
 import { activateModules as moduleSnapshot, type ModuleSnapshot } from "../modules/runtime.js";
 import { BUILTIN_MODULES, disabledHint } from "../modules/registry.js";
 import { randomUUID } from "node:crypto";
@@ -324,7 +326,13 @@ export async function serve(version: string): Promise<void> {
         }
       } else if (request.method === "POST") {
         const data = await body(request);
-        if (url.pathname === "/v1/schedules") {
+        if (url.pathname === "/v1/code/note") {
+          result = await saveCodeNote(scheduleStore, data, dispatches ? async (note, prompt) => {
+            if (note.target && "session" in note.target) return handOff({ session: note.target.session, project: note.project, text: prompt });
+            return dispatches.dispatch({ computer: "anywhere", project: note.project,
+              harness: note.target && "harness" in note.target ? note.target.harness : "codex", prompt, label: `Code note: ${note.symbol}`.slice(0, 200) });
+          } : undefined);
+        } else if (url.pathname === "/v1/schedules") {
           result = await scheduler!.statuses();
         } else if (url.pathname === "/v1/schedules/run") {
           const input = z.object({ project: z.string().min(1).max(200), id: z.string().regex(/^[a-f0-9]{8}$/) }).parse(data);

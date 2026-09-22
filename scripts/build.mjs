@@ -102,6 +102,7 @@ function pruneMissing(sourceDir, targetDir) {
 }
 
 try {
+  await import("./build-code.mjs");
   rmDir(tempRoot);
   fs.mkdirSync(tempRoot, { recursive: true });
   await bundleBrowserAssets(tempRoot);
@@ -118,7 +119,7 @@ try {
     outfile: path.join(tempRoot, "bridge-hook.mjs"), bundle: true,
     platform: "node", target: "node20", format: "esm",
     banner: { js: 'import { createRequire as __phrenCreateRequire } from "node:module"; const require = __phrenCreateRequire(import.meta.url);' },
-    external: ["bufferutil", "utf-8-validate"],
+    external: ["bufferutil", "utf-8-validate", "@phren/code"],
     define: {
       PHREN_HOOK_VERSION: JSON.stringify(JSON.parse(fs.readFileSync(path.join(cliRoot, "package.json"), "utf8")).version),
       // The simulator input helper's Swift source rides inside the bundle

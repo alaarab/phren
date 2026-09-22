@@ -1,9 +1,9 @@
-import { isValidProjectName } from "../utils-paths.js";
+import { isValidProjectName } from "@phren/cli/code-host/utils-paths";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { SqlJsDatabase, SqlValue } from "../index-query.js";
-import { bootstrapSqlJs } from "../shared/sqljs.js";
-import { atomicWriteText, ensurePrivateDir, runtimeDir } from "../phren-paths.js";
+import type { SqlJsDatabase, SqlValue } from "@phren/cli/code-host/index-query";
+import { bootstrapSqlJs } from "@phren/cli/code-host/shared/sqljs";
+import { atomicWriteText, ensurePrivateDir, runtimeDir } from "@phren/cli/code-host/phren-paths";
 
 /**
  * On-disk shape of the code index.

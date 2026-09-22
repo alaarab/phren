@@ -6,7 +6,7 @@ import { lookupCommand, REGISTRY } from "../cli-registry.js";
 import { CORE_TOOLS, createToolGate } from "../mcp/profile.js";
 import { VERSION } from "../package-metadata.js";
 import { makeTempDir } from "../test-helpers.js";
-import { BUILTIN_MODULES, enabled } from "./registry.js";
+import { BUILTIN_MODULES, disabledHint, enabled } from "./registry.js";
 
 let tmp: ReturnType<typeof makeTempDir>;
 beforeEach(() => { tmp = makeTempDir("modules-test-"); });
@@ -22,8 +22,11 @@ function names(profile?: string): string[] {
 }
 
 describe("module enablement", () => {
-  it("defaults to memory and tasks without provisioning files", () => {
-    expect(names()).toEqual(["memory", "tasks"]);
+  it("points disabled code invocations at the optional package installer", () => {
+    expect(disabledHint("code")).toBe("phren code needs @phren/code: run phren modules enable code");
+  });
+  it("defaults to memory without provisioning files", () => {
+    expect(names()).toEqual(["memory"]);
     expect(fs.readdirSync(tmp.path)).toEqual([]);
   });
 
@@ -54,14 +57,14 @@ profiles:
 
   it("accepts a version-only config and reads changes on the next call", () => {
     configure("version: 1\n");
-    expect(names()).toEqual(["memory", "tasks"]);
+    expect(names()).toEqual(["memory"]);
     configure("version: 1\nenabled:\n  tasks: false\n");
     expect(names()).toEqual(["memory"]);
   });
 
   it("treats a store profile named full as a literal profile name", () => {
     configure("version: 1\nprofiles:\n  full:\n    enabled:\n      tasks: false\n");
-    expect(names()).toEqual(["memory", "tasks"]);
+    expect(names()).toEqual(["memory"]);
     expect(names("full")).toEqual(["memory"]);
   });
 
@@ -82,7 +85,7 @@ profiles:
   it("ignores unknown module names even in an inactive profile", () => {
     configure("version: 1\nprofiles:\n  work:\n    enabled:\n      code-map: false\n");
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
-    expect(names()).toEqual(["memory", "tasks"]);
+    expect(names()).toEqual(["memory"]);
     expect(error.mock.calls.map(([line]) => String(line)))
       .toContain(`warning: unknown module "code-map" in .config/modules.yaml ignored by Hook ${VERSION}`);
   });
@@ -105,7 +108,7 @@ profiles:
     enabled:
       hook: false
 `);
-    expect(names()).toEqual(["memory", "tasks", "hook", "conductor"]);
+    expect(names()).toEqual(["memory", "hook", "conductor"]);
     expect(() => names("work")).toThrow('Module "conductor" requires enabled module "hook"');
   });
 });
@@ -131,7 +134,7 @@ describe("built-in registration declarations", () => {
     expect([...new Set(commands.map(command => command.split(" ")[0]))].sort())
       .toEqual(REGISTRY.flatMap(command => [command.name, ...(command.aliases ?? [])]).sort());
     const skills = fs.readdirSync(new URL("../../starter/global/skills/", import.meta.url)).sort();
-    expect(BUILTIN_MODULES.flatMap(module => module.skills).sort()).toEqual(skills);
+    expect(BUILTIN_MODULES.flatMap(module => module.skills).sort()).toEqual([...skills, "code"].sort());
   });
 
   it("covers Hook routes with exact methods and no competing owners", () => {

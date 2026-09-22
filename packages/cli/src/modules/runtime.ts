@@ -25,8 +25,8 @@ export function moduleSnapshot(store: string, profile = snapshotProfile(store), 
   const config = readConfig(store);
   const hasStore = !!config || fs.existsSync(path.join(store, "phren.root.yaml")) || fs.existsSync(installPreferencesFile(store));
   const modules = !hasStore && legacyHook
-    ? BUILTIN_MODULES.filter(module => module.name !== "memory" && module.name !== "tasks")
-    : resolveModules(config, profile);
+    ? BUILTIN_MODULES.filter(module => ["hook", "git", "schedules", "conductor"].includes(module.name))
+    : resolveModules(config ?? (hasStore ? { version: 1, enabled: { tasks: true } } : undefined), profile);
   const names = new Set(modules.map(module => module.name));
   const generation = createHash("sha256").update(JSON.stringify([store, profile, modules.map(module => [module.name, module.version])])).digest("hex").slice(0, 16);
   return { store, profile, modules, generation, has: name => names.has(name) };
@@ -46,7 +46,7 @@ export function migrateInstalledModules(store: string, legacyHook = false): void
   // A store without .config was never set up; migration must not create it and
   // make `phren add` believe the store is ready.
   if (!fs.existsSync(path.join(store, ".config"))) return;
-  if (fs.existsSync(path.join(store, "phren.root.yaml")) || fs.existsSync(installPreferencesFile(store))) migrateModules(store, installedHook);
+  if (readConfig(store) || fs.existsSync(path.join(store, "phren.root.yaml")) || fs.existsSync(installPreferencesFile(store))) migrateModules(store, installedHook);
 }
 
 /** The version in <bridge>/installed.json, or undefined when no Hook is installed. */

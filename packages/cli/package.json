@@ -1,7 +1,7 @@
 {
   "name": "@phren/cli",
   "version": "0.2.14",
-  "description": "Knowledge layer for AI agents — CLI, MCP server, and data layer",
+  "description": "Knowledge layer for AI agents - CLI, MCP server, and data layer",
   "type": "module",
   "bin": {
     "phren": "dist/index.js"
@@ -92,11 +92,50 @@
     "./phren-art": {
       "types": "./dist/phren-art.d.ts",
       "default": "./dist/phren-art.js"
+    },
+    "./code-host/project-config": {
+      "types": "./dist/project-config.d.ts",
+      "default": "./dist/project-config.js"
+    },
+    "./code-host/phren-paths": {
+      "types": "./dist/phren-paths.d.ts",
+      "default": "./dist/phren-paths.js"
+    },
+    "./code-host/utils": {
+      "types": "./dist/utils.d.ts",
+      "default": "./dist/utils.js"
+    },
+    "./code-host/governance/locks": {
+      "types": "./dist/governance/locks.d.ts",
+      "default": "./dist/governance/locks.js"
+    },
+    "./code-host/logger": {
+      "types": "./dist/logger.d.ts",
+      "default": "./dist/logger.js"
+    },
+    "./code-host/index-query": {
+      "types": "./dist/index-query.d.ts",
+      "default": "./dist/index-query.js"
+    },
+    "./code-host/utils-paths": {
+      "types": "./dist/utils-paths.d.ts",
+      "default": "./dist/utils-paths.js"
+    },
+    "./code-host/shared/sqljs": {
+      "types": "./dist/shared/sqljs.d.ts",
+      "default": "./dist/shared/sqljs.js"
+    },
+    "./code-host/data/access": {
+      "types": "./dist/data/access.d.ts",
+      "default": "./dist/data/access.js"
+    },
+    "./code-host/content/summarize": {
+      "types": "./dist/content/summarize.d.ts",
+      "default": "./dist/content/summarize.js"
     }
   },
   "files": [
     "dist",
-    "grammars",
     "plugins",
     "starter",
     "skills",
@@ -116,7 +155,6 @@
     "inquirer": "^14.1.0",
     "js-yaml": "^5.3.0",
     "sql.js-fts5": "^1.4.0",
-    "web-tree-sitter": "^0.27.0",
     "ws": "8.21.3",
     "zod": "^4.4.3"
   },
@@ -140,7 +178,8 @@
   "devDependencies": {
     "3d-force-graph": "^1.80.0",
     "@types/ws": "8.18.1",
-    "three": "^0.185.1"
+    "three": "^0.185.1",
+    "@phren/code": "workspace:*"
   },
   "publishConfig": {
     "access": "public"

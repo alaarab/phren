@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
-import type { SqlJsDatabase } from "../index-query.js";
-import { parseFindingsContent, readFindings, type FindingItem } from "../data/access.js";
-import { listTopicFiles } from "../content/summarize.js";
+import type { SqlJsDatabase } from "@phren/cli/code-host/index-query";
+import { parseFindingsContent, readFindings, type FindingItem } from "@phren/cli/code-host/data/access";
+import { listTopicFiles } from "@phren/cli/code-host/content/summarize";
 import { openCodeDatabase, type CodeDatabase } from "./store.js";
 import { parseSymbolQuery, resolveSymbol, type SymbolHit } from "./query.js";
 

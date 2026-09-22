@@ -11,7 +11,7 @@ export function setModuleEnabled(store: string, name: string, value: boolean, pr
   if (!BUILTIN_MODULES.some(module => module.name === name)) throw new Error(`Unknown module "${name}".`);
   const file = path.join(store, ".config", "modules.yaml");
   withFileLock(file, () => {
-    const config: ModulesConfig = readConfig(store) ?? { version: 1 };
+    const config: ModulesConfig = readConfig(store) ?? { version: 1, enabled: { tasks: false } };
     if (profile !== undefined) {
       if (!profile.trim() || ["__proto__", "constructor", "prototype"].includes(profile)) throw new Error("Invalid module profile.");
       config.profiles ??= {};
@@ -28,16 +28,26 @@ export function setModuleEnabled(store: string, name: string, value: boolean, pr
 export function migrateModules(store: string, hookInstalled = false): void {
   if (inProgressGitOperation(store)) return;
   const file = path.join(store, ".config", "modules.yaml");
-  if (readConfig(store)) return;
+  const existing = readConfig(store);
+  if (existing?.enabled?.tasks !== undefined) return;
   const legacy = fs.existsSync(path.join(store, "phren.root.yaml")) || fs.existsSync(installPreferencesFile(store));
-  if (!legacy && !hookInstalled) return;
+  if (!existing && !legacy && !hookInstalled) return;
   withFileLock(file, () => {
-    if (readConfig(store)) return;
+    const current = readConfig(store);
+    if (current?.enabled?.tasks !== undefined) return;
+    if (current) {
+      // Before memory-only defaults, an omitted tasks override meant enabled.
+      current.enabled = { tasks: true, ...current.enabled };
+      const text = yaml.dump(current, { noRefs: true });
+      atomicWriteText(runtimeFile(store, "modules.yaml.migration-backup"), fs.readFileSync(file, "utf8"));
+      atomicWriteText(file, text);
+      return;
+    }
     const conductor = fs.existsSync(path.join(store, "global", "skills", "conductor"));
     const schedules = fs.existsSync(store) && fs.readdirSync(store, { withFileTypes: true })
       .some(entry => entry.isDirectory() && fs.existsSync(path.join(store, entry.name, "schedules.yaml")));
     const config: ModulesConfig = { version: 1, enabled: Object.fromEntries(BUILTIN_MODULES.map(module => [module.name,
-      module.defaultEnabled || module.name === "git" || (hookInstalled && ["hook", "schedules", "conductor"].includes(module.name))
+      ["memory", "tasks", "git"].includes(module.name) || (hookInstalled && ["hook", "schedules", "conductor"].includes(module.name))
       || (conductor && ["hook", "conductor"].includes(module.name)) || (schedules && module.name === "schedules"),
     ])) };
     const text = yaml.dump(config, { noRefs: true });
@@ -49,6 +59,6 @@ export function migrateModules(store: string, hookInstalled = false): void {
 export function initializeModules(store: string): void {
   const file = path.join(store, ".config", "modules.yaml");
   withFileLock(file, () => {
-    if (!readConfig(store)) atomicWriteText(file, "version: 1\n");
+    if (!readConfig(store)) atomicWriteText(file, yaml.dump({ version: 1, enabled: Object.fromEntries(BUILTIN_MODULES.map(module => [module.name, module.defaultEnabled])) }, { noRefs: true }));
   });
 }

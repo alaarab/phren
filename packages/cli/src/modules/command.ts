@@ -1,3 +1,4 @@
+import { installCodePackage, copyCodeSkill } from "./code-package.js";
 import { resolveRuntimeProfile } from "../runtime-profile.js";
 import { resolveAllStores } from "../store-registry.js";
 import { isVersionNewer } from "../init/init.js";
@@ -34,7 +35,9 @@ export async function runModules(args: string[], ctx: CliContext): Promise<numbe
   const selectedProfile = profile ?? (action === "list" ? (storeName ? resolveRuntimeProfile(store) : ctx.profile()) : "");
   if (action !== "list") {
     migrateInstalledModules(store);
+    const code = name === "code" && action === "enable" ? await installCodePackage() : undefined;
     setModuleEnabled(store, name!, action === "enable", profile);
+    if (code) copyCodeSkill(store, code);
     console.log(`${name} ${action === "enable" ? "enabled" : "disabled"}${profile ? ` for profile ${profile}` : " for the store"}. Run phren init to reconcile integrations; restart MCP and Hook to refresh their surfaces.`);
     if (action === "enable") {
       const manifest = BUILTIN_MODULES.find(module => module.name === name);

@@ -16,9 +16,9 @@ describe("module configuration writes", () => {
     setModuleEnabled(tmp.path, "git", true);
     setModuleEnabled(tmp.path, "tasks", false, "personal");
     setModuleEnabled(tmp.path, "schedules", true, "work");
-    expect(names()).toEqual(["memory", "tasks", "git"]);
+    expect(names()).toEqual(["memory", "git"]);
     expect(names("personal")).toEqual(["memory", "git"]);
-    expect(names("work")).toEqual(["memory", "tasks", "git", "schedules"]);
+    expect(names("work")).toEqual(["memory", "git", "schedules"]);
     const config = readConfig(tmp.path);
     expect(moduleSource(config, "memory", "work")).toBe("default");
     expect(moduleSource(config, "git", "work")).toBe("store");
@@ -48,7 +48,7 @@ describe("module configuration writes", () => {
   it("honors explicit configuration during idempotent legacy migration", () => {
     initializeModules(tmp.path);
     migrateModules(tmp.path, true);
-    expect(names()).toEqual(["memory", "tasks"]);
+    expect(names()).toEqual(["memory"]);
     setModuleEnabled(tmp.path, "tasks", false);
     migrateModules(tmp.path, true);
     expect(names()).toEqual(["memory"]);
@@ -95,4 +95,17 @@ it("keeps snapshots read-only until legacy runtime activation", async () => {
   expect(fs.existsSync(path.join(tmp.path, ".config", "modules.yaml"))).toBe(false);
   const { activateModules } = await import("./runtime.js");
   expect(activateModules(tmp.path, "").has("git")).toBe(true);
+});
+
+
+it("freezes omitted legacy tasks without changing profile overrides", async () => {
+  fs.mkdirSync(path.join(tmp.path, ".config"));
+  const file = path.join(tmp.path, ".config", "modules.yaml");
+  fs.writeFileSync(file, "version: 1\nenabled:\n  code: true\nprofiles:\n  personal:\n    enabled:\n      tasks: false\n");
+  const { activateModules } = await import("./runtime.js");
+  expect(activateModules(tmp.path, "").modules.map(module => module.name)).toEqual(["memory", "tasks", "code"]);
+  expect(activateModules(tmp.path, "personal").has("tasks")).toBe(false);
+  const frozen = fs.readFileSync(file, "utf8");
+  activateModules(tmp.path, "");
+  expect(fs.readFileSync(file, "utf8")).toBe(frozen);
 });

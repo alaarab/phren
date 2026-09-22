@@ -92,3 +92,11 @@ symbol. Local unexported variables are excluded from automatic attachment.
 and archived topic files. `get_findings` and `search_knowledge` expose stored
 symbol citations. The Hook definition route currently returns the code
 payload without these findings.
+
+## Optional installation
+
+Code indexing ships in the separate `@phren/code` workspace and npm package.
+Fresh stores enable memory only. Run `phren modules enable code` to install the
+package, enable its tools and routes, and copy its bundled code skill into the
+store. If npm installation fails, run `npm install -g @phren/code` and retry.
+Restart MCP and Hook after changing modules.

@@ -5,12 +5,12 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createToolGate } from "../mcp/profile.js";
 import { BUILTIN_MODULES } from "../modules/registry.js";
-import { indexProject } from "../code/indexer.js";
+import { indexProject } from "../../../code/src/indexer.js";
 import { makeTempDir } from "../test-helpers.js";
 import { register } from "./code.js";
 import type { McpContext } from "./types.js";
 
-const FIXTURES = path.join(__dirname, "..", "code", "__fixtures__");
+const FIXTURES = path.join(__dirname, "../../../code/src/__fixtures__");
 
 let tmp: ReturnType<typeof makeTempDir>;
 let repo: string;

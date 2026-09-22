@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { makeTempDir } from "../test-helpers.js";
+import { makeTempDir } from "../../cli/src/test-helpers.js";
 import { indexProject, resolveRepoRoot } from "./indexer.js";
 import { references } from "./query.js";
 import { codeIndexStatus } from "./status.js";

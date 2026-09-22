@@ -1,8 +1,11 @@
 import * as path from "node:path";
 import { Language, Parser, Query, type Node as SyntaxNode } from "web-tree-sitter";
-import { ROOT } from "../package-metadata.js";
-import { logger } from "../logger.js";
-import { errorMessage } from "../utils.js";
+import { fileURLToPath } from "node:url";
+import * as fs from "node:fs";
+let ROOT = path.dirname(fileURLToPath(import.meta.url));
+while (!fs.existsSync(path.join(ROOT, "grammars")) && path.dirname(ROOT) !== ROOT) ROOT = path.dirname(ROOT);
+import { logger } from "@phren/cli/code-host/logger";
+import { errorMessage } from "@phren/cli/code-host/utils";
 import {
   languageForFile,
   type LanguageSpec,
@@ -16,7 +19,7 @@ import {
  * Tree-sitter front end for the code index.
  *
  * `web-tree-sitter` is initialised once per process and every grammar is
- * loaded from `packages/cli/grammars/` on first use. Files whose language has
+ * loaded from `packages/code/grammars/` on first use. Files whose language has
  * no grammar (or whose grammar fails to load) go through a line-based
  * fallback so every indexed file still has an outline.
  */

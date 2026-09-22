@@ -4,7 +4,7 @@ import * as os from "os";
 import * as path from "path";
 import { PhrenShell } from "./shell/shell.js";
 import { readTasks, readFindings, readReviewQueue, loadShellState } from "./data/access.js";
-import { writeFile as write, makeTempDir } from "./test-helpers.js";
+import { writeFile as write, makeTempDir, initTestPhrenRoot } from "./test-helpers.js";
 import { shellStartupFrames, stripAnsi } from "./shell/render.js";
 
 interface TempContext {
@@ -13,6 +13,7 @@ interface TempContext {
 }
 
 function seedPhren(root: string): TempContext {
+  initTestPhrenRoot(root);
   const project = "demo";
   write(
     path.join(root, project, "summary.md"),

@@ -1,4 +1,4 @@
-import type { CliContext } from "../cli-registry.js";
+interface CliContext { phrenPath(): string }
 import { defaultProjectForCwd, indexProject } from "./indexer.js";
 import {
   definition,

@@ -60,7 +60,7 @@ describe("invalid project name handling", () => {
     });
 
     it("ignores hidden, reserved, and archived entries", () => {
-      fs.mkdirSync(path.join(phrenDir, ".config"));
+      fs.mkdirSync(path.join(phrenDir, ".config"), { recursive: true });
       fs.mkdirSync(path.join(phrenDir, "something.archived"));
       fs.mkdirSync(path.join(phrenDir, "MYPROJECT"));
       const invalid = listInvalidProjectDirs(phrenDir);

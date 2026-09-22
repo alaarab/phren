@@ -13,6 +13,7 @@ pnpm workspace with turborepo. Shipped packages:
 
 | Package | Path | npm | Description |
 |---------|------|-----|-------------|
+| `@phren/code` | `packages/code/` | Published | Optional symbol index, grammars and code skill |
 | `@phren/cli` | `packages/cli/` | Published | CLI, MCP server, data layer |
 | `@phren/vscode` | `packages/vscode/` | VS Code Marketplace | VS Code extension. Versions separately from the CLI (`packages/vscode/CHANGELOG.md`, shown on the Marketplace listing) and releases through the `Release VS Code extension` workflow. It is a thin client calling MCP tools by name, so it starts its server in the `full` tool profile, and a test in `packages/cli` fails if the CLI stops registering a tool it calls. |
 
@@ -57,7 +58,7 @@ Outside the pnpm workspace:
 | `packages/cli/src/graph-core/` | Host-agnostic graph model shared by the browser viewer and the terminal graph view: payload types, palette, kind/health derivation, filters, ranking, search. Must not import node builtins or anything outside itself (it is bundled for the browser). |
 | `packages/cli/src/shell/graph/` | The shell's Graph view: deterministic force layout, braille canvas, controller (data/camera/selection/keys), view renderer, watch mode (tails the lookup log), agents overlay |
 | `packages/cli/src/agents/` | Discovering coding agents running on this machine (`PHREN_FEATURE_AGENTS`). Host-agnostic `AgentRecord` contract plus `providers/` (herdr, phren-agent spawner). Nothing host-specific may leak outside `providers/`. |
-| `packages/cli/src/code/` | Per-project SQLite code index: tree-sitter parsing, incremental transactions, persisted identifier references, symbol queries and finding citations. `phren code index` resolves this machine's checkout. |
+| `packages/code/src/` | Per-project SQLite code index: tree-sitter parsing, incremental transactions, persisted identifier references, symbol queries and finding citations. `phren code index` resolves this machine's checkout. |
 | `packages/cli/src/bridge/code-routes.ts` | Validated code query routes plus per-project debounced reindexing after file changes and HEAD polling. |
 | `packages/cli/src/bridge/grants.ts` | Standing conductor dispatch/hand-off grants, scope matching, locked atomic updates and stale-row revocation checks. |
 | `packages/cli/src/bridge/hand-off.ts` | Delivers one prompt to an existing local or verified-peer session, with live target validation. |

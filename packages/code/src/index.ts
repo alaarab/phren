@@ -1,0 +1,10 @@
+export * from "./query.js";
+export * from "./indexer.js";
+export * from "./status.js";
+export * from "./store.js";
+export * from "./citations.js";
+export * from "./command.js";
+import * as fs from "node:fs";
+let skillRoot = new URL("../", import.meta.url);
+while (!fs.existsSync(new URL("skills/code/SKILL.md", skillRoot)) && skillRoot.pathname !== "/") skillRoot = new URL("../", skillRoot);
+export const codeSkill = new URL("skills/code/SKILL.md", skillRoot);

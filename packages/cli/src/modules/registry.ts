@@ -56,7 +56,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
     skills: ["phren-init", "phren-sync", "phren-profiles", "phren-discover", "phren-consolidate", "phren-summarize"],
   },
   {
-    schemaVersion: 1, name: "tasks", version: VERSION, defaultEnabled: true, requires: ["memory"],
+    schemaVersion: 1, name: "tasks", version: VERSION, defaultEnabled: false, requires: ["memory"],
     tools: [
       ...core(["get_tasks", "add_task", "manage_task"]),
       ...full(["complete_task", "remove_task", "update_task", "tidy_done_tasks", "pin_task"]),
@@ -134,11 +134,17 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
     localFiles: ["<bridge>/hooks.yaml", "<bridge>/conductor.yaml", "<bridge>/dispatches/*.json"], phoneScreens: [], skills: ["conductor"],
   },
   {
+    schemaVersion: 1, name: "fanout", version: VERSION, defaultEnabled: false, requires: ["memory", "hook"],
+    tools: [], cliCommands: ["fanout"], agentHooks: [], hookRoutes: [], capabilities: [],
+    storeFiles: [".config/fanout.yaml"], localFiles: ["<store>/.runtime/agent-fanouts/**"],
+    phoneScreens: [], skills: ["fanout"],
+  },
+  {
     schemaVersion: 1, name: "code", version: VERSION, defaultEnabled: false, requires: ["memory"],
     tools: full(["code_search", "code_definition", "code_references", "code_outline", "code_usage"]),
     cliCommands: ["code index", "code status", "code search", "code outline", "code refs", "code def", "code usage"],
     agentHooks: [],
-    hookRoutes: routes("GET", ["/v1/code/status", "/v1/code/search", "/v1/code/outline", "/v1/code/definition", "/v1/code/references", "/v1/code/usage"]),
+    hookRoutes: [...routes("GET", ["/v1/code/status", "/v1/code/search", "/v1/code/outline", "/v1/code/definition", "/v1/code/references", "/v1/code/usage"]), ...routes("POST", ["/v1/code/note"])],
     capabilities: ["code"],
     storeFiles: [], localFiles: ["<store>/.runtime/code/*.sqlite"],
     phoneScreens: [{ screen: "CodeView", capability: "code" }], skills: ["code"],
@@ -230,5 +236,6 @@ export function commandOwner(command: string): ModuleManifest | undefined {
 }
 
 export function disabledHint(name: string): string {
+  if (name === "code") return "phren code needs @phren/code: run phren modules enable code";
   return `module ${name} is disabled; enable it with phren modules enable ${name}`;
 }
