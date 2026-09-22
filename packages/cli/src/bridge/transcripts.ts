@@ -47,7 +47,9 @@ function addChildRelation(line: string, found: Map<string, DirectRelation>): voi
     if (raw.type !== "event_msg" || payload.type !== "item_completed" || item.type !== "SubAgentActivity") return;
     const kind = String(item.kind), child = String(item.agent_thread_id ?? ""), agentPath = String(item.agent_path ?? "");
     const callId = String(item.id ?? "");
-    if (!["started", "completed"].includes(kind) || !sessionId.safeParse(child).success || !callId || agentPath.length > 512) return;
+    // Codex 0.155 also reports "interacted" between start and completion;
+    // it proves the child exists without changing its state.
+    if (!["started", "interacted", "completed"].includes(kind) || !sessionId.safeParse(child).success || !callId || agentPath.length > 512) return;
     const previous = found.get(child);
     found.set(child, { session: child, path: agentPath, callId: previous?.callId || callId,
       state: kind === "completed" ? "completed" : previous?.state ?? "running" });

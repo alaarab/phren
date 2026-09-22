@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { materializeCodexThread, materializedPath, queuedQuestion, threadHealth } from "./codex-threads.js";
-import { TranscriptReader, transcriptPath } from "./transcripts.js";
+import { childAgentTree, TranscriptReader, transcriptPath } from "./transcripts.js";
 import { currentStep } from "./steps.js";
 
 const thread = "01a0aaaa-1111-7222-8333-444444444444";
@@ -21,8 +21,8 @@ describe("Codex thread store", () => {
     db.exec("create table thread_items (thread_id text, turn_id text, item_id text, rollout_ordinal integer, created_at_ms integer, item_json text, item_type text, updated_at_ordinal integer, primary key (thread_id, turn_id, item_id))");
     db.exec("create table thread_turns (thread_id text, turn_id text, rollout_ordinal integer, status text, started_at integer, rollout_end_ordinal integer, primary key (thread_id, turn_id))");
     const state = new sqlite.DatabaseSync(path.join(process.env.CODEX_HOME, "state_5.sqlite"));
-    state.exec("create table threads (id text primary key, rollout_path text, model text, cwd text)");
-    state.prepare("insert into threads values (?, ?, ?, ?)").run(thread, "/home/sam/.codex/sessions/2026/09/20/rollout-x.jsonl", "gpt-5.6-sol", "/home/sam/app");
+    state.exec("create table threads (id text primary key, rollout_path text, model text, cwd text, source text)");
+    state.prepare("insert into threads values (?, ?, ?, ?, ?)").run(thread, "/home/sam/.codex/sessions/2026/09/20/rollout-x.jsonl", "gpt-5.6-sol", "/home/sam/app", "cli");
     state.close();
   });
   afterEach(async () => {
@@ -74,6 +74,26 @@ describe("Codex thread store", () => {
     // Unchanged store: a refresh appends nothing.
     await materializeCodexThread(thread);
     expect(await readFile(file, "utf8")).toBe(after);
+  });
+
+  it("finds a native Codex subagent spawned into the thread store under its parent", async () => {
+    const child = "01a0bbbb-2222-7333-8444-555555555555";
+    const sqlite = await import("node:sqlite");
+    const state = new sqlite.DatabaseSync(path.join(process.env.CODEX_HOME!, "state_5.sqlite"));
+    state.prepare("insert into threads values (?, ?, ?, ?, ?)").run(child, "", "gpt-5.6-luna", "/home/sam/app",
+      JSON.stringify({ subagent: { thread_spawn: { parent_thread_id: thread, depth: 1, agent_path: "/root/luna_scan", agent_nickname: "Luna" } } }));
+    state.close();
+    insert(1, { type: "agentMessage", id: "msg-1", text: "Spawning a scan.", phase: "commentary" });
+    insert(2, { type: "subAgentActivity", id: "call_spawn", kind: "started", agentThreadId: child, agentPath: "/root/luna_scan" });
+    insert(3, { type: "subAgentActivity", id: "call_ping", kind: "interacted", agentThreadId: child, agentPath: "/root/luna_scan" });
+    db.prepare("insert or replace into thread_items values (?, 'turn-1', ?, ?, ?, ?, ?, ?)")
+      .run(child, "msg-c1", 1, 1001, JSON.stringify({ type: "agentMessage", id: "msg-c1", text: "Scanning.", phase: "commentary" }), "agentMessage", 1);
+    turn("inProgress");
+    const tree = await childAgentTree("codex", thread);
+    expect(tree).toHaveLength(1);
+    expect(tree[0]).toMatchObject({ session: child, state: "running", provider: "codex", path: "/root/luna_scan" });
+    insert(4, { type: "subAgentActivity", id: "subagent-completed-x", kind: "completed", agentThreadId: child, agentPath: "/root/luna_scan" });
+    expect((await childAgentTree("codex", thread))[0].state).toBe("completed");
   });
 
   it("stays a 404 for a thread the store does not know", async () => {

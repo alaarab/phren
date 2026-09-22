@@ -91,7 +91,10 @@ async function materializeThread(session: string): Promise<string | undefined> {
     const lines: string[] = [];
     if (fresh) {
       const meta = await threadMeta(session);
-      lines.push(JSON.stringify({ type: "session_meta", payload: { id: session, ...(meta.cwd ? { cwd: meta.cwd } : {}), source: "codex-thread-store" } }));
+      // A child thread's row names its parent inside `source`; the child
+      // agent tree verifies that link from the first line, so it rides along.
+      lines.push(JSON.stringify({ type: "session_meta", payload: { id: session, ...(meta.cwd ? { cwd: meta.cwd } : {}),
+        source: meta.spawn ? { subagent: { thread_spawn: meta.spawn } } : "codex-thread-store" } }));
       if (meta.model) lines.push(JSON.stringify({ type: "turn_context", payload: { model: meta.model } }));
     }
     for (const row of rows) {
@@ -100,6 +103,13 @@ async function materializeThread(session: string): Promise<string | undefined> {
       const call = callRow(item), output = outputRow(item);
       if (!emitted) {
         if (call) { lines.push(JSON.stringify(call)); state.done[id] = "call"; }
+        else if (subAgentRow(item)) {
+          // A child Codex agent (spawn, interaction, completion) rides along
+          // as the event the rollout carried before 0.155, so the child
+          // agent tree keeps finding native subagents.
+          lines.push(JSON.stringify(subAgentRow(item)));
+          state.done[id] = "done"; continue;
+        }
         else if (messageRow(item)) {
           lines.push(JSON.stringify(messageRow(item)));
           // A question the agent asked (delivered async) rides along as the
@@ -130,12 +140,34 @@ async function materializeThread(session: string): Promise<string | undefined> {
   } catch { return undefined; } finally { history.close(); }
 }
 
-async function threadMeta(session: string): Promise<{ model?: string; cwd?: string }> {
+/** Codex 0.155 stores a child agent's lifecycle as `subAgentActivity` items
+ * with camelCase fields; the rollout shape the child tree parses is the
+ * `SubAgentActivity` event with snake_case fields. */
+function subAgentRow(item: Json): Json | undefined {
+  if (item.type !== "subAgentActivity") return undefined;
+  const kind = String(item.kind ?? ""), child = String(item.agentThreadId ?? item.agent_thread_id ?? "");
+  if (!child) return undefined;
+  return { type: "event_msg", payload: { type: "item_completed", item: {
+    type: "SubAgentActivity", id: String(item.id ?? ""), kind,
+    agent_thread_id: child, agent_path: String(item.agentPath ?? item.agent_path ?? ""),
+  } } };
+}
+
+async function threadMeta(session: string): Promise<{ model?: string; cwd?: string; spawn?: Json }> {
   const db = await openReadOnly(path.join(codexHome(), "state_5.sqlite"));
   if (!db) return {};
   try {
     const row = object(db.prepare("select model, cwd from threads where id = ?").get(session));
-    return { ...(typeof row.model === "string" && row.model ? { model: row.model } : {}), ...(typeof row.cwd === "string" && row.cwd ? { cwd: row.cwd } : {}) };
+    let spawn: Json | undefined;
+    try {
+      // Older stores have no `source` column; a child thread's names its parent there.
+      const source = object(db.prepare("select source from threads where id = ?").get(session)).source;
+      if (typeof source === "string" && source.startsWith("{")) {
+        const parsed = object(object(JSON.parse(source)).subagent).thread_spawn;
+        if (parsed && typeof parsed === "object" && Object.keys(parsed).length) spawn = parsed as Json;
+      }
+    } catch { /* no source column or plain text */ }
+    return { ...(typeof row.model === "string" && row.model ? { model: row.model } : {}), ...(typeof row.cwd === "string" && row.cwd ? { cwd: row.cwd } : {}), ...(spawn ? { spawn } : {}) };
   } catch { return {}; } finally { db.close(); }
 }
 

@@ -51,6 +51,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Codex 0.155's own subagents (a Codex thread spawning Codex threads) are back in
+  the agent tree, the worker counts and hand-off targets: the thread-store
+  materializer now carries the subagent activity rows and each child's parent link.
 - A `.config/modules.yaml` key for a module this Hook build does not know (a
   newer CLI enabled it) no longer makes `phren-hook ssh` and `serve` exit with
   `Unknown module`, which showed every phone Offline on every computer. The
