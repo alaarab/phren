@@ -1014,8 +1014,14 @@ export async function launchSession(server: string, data: Json): Promise<Json> {
   try {
     await rpc(server, "agent.start", { name, kind, pane_id: created.paneId, timeout_ms: timeout, ...(args.length ? { args } : {}) }, undefined, timeout + 5_000);
   } catch (error) {
+    // A first-run screen (Claude's folder trust, a login notice) holds the
+    // agent at startup. It did start: hand the pane back so the owner answers
+    // that screen from the chat instead of stranding the workspace.
+    const blocked = error instanceof BridgeError && error.details?.herdrCode === "agent_not_ready";
+    if (!blocked) {
     const reason = error instanceof BridgeError && error.status === 504 ? "it did not become ready in time" : "Herdr reported an error";
     throw new BridgeError(409, `Herdr couldn't start ${kind} in the new "${label}" pane (${reason}). The workspace was created and is still open on the computer — open it from Herdr workspaces.`);
+    }
   }
   const after = await snapshot(server);
   const pane = objects(after.panes).find(p => p.pane_id === created!.paneId && p.tab_id === created!.tabId && p.workspace_id === created!.workspaceId);
