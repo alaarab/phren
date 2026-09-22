@@ -1,3 +1,4 @@
+import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import * as fs from "fs";
 import * as path from "path";
 import { execFileSync } from "child_process";
@@ -43,6 +44,8 @@ import { readInstallPreferences } from "../init/preferences.js";
 import { logger } from "../logger.js";
 import { CONTEXT_COST_LIMITS, medianHookInjectionTokens, storeWeight } from "../store-weight.js";
 import { resolveMcpProfile } from "../mcp/profile.js";
+import { activeStoreAuthFailure, isGitAuthFailure, recordStoreAuthFailure, storeAuthDetail, storeSyncRemote } from "../sync/auth.js";
+import { storeCredentialCheck, type ConfirmStoreRemoval } from "../sync/auth-doctor.js";
 
 // ── Doctor ──────────────────────────────────────────────────────────────────
 
@@ -69,8 +72,11 @@ function isWrapperActive(tool: string): boolean {
 }
 
 function gitRemoteStatus(phrenPath: string, syncIntent?: "sync" | "local"): { ok: boolean; detail: string } {
+  const auth = activeStoreAuthFailure(phrenPath);
+  if (auth) return { ok: false, detail: storeAuthDetail(auth) };
   try {
     execFileSync("git", ["-C", phrenPath, "rev-parse", "--is-inside-work-tree"], {
+      env: nonInteractiveGitEnv(),
       stdio: ["ignore", "ignore", "ignore"],
       timeout: EXEC_TIMEOUT_QUICK_MS,
     });
@@ -79,8 +85,10 @@ function gitRemoteStatus(phrenPath: string, syncIntent?: "sync" | "local"): { ok
   }
 
   let remote: string | undefined;
+  const remoteName = storeSyncRemote(phrenPath)?.remoteName || "origin";
   try {
-    remote = execFileSync("git", ["-C", phrenPath, "remote", "get-url", "origin"], {
+    remote = execFileSync("git", ["-C", phrenPath, "remote", "get-url", "--", remoteName], {
+      env: nonInteractiveGitEnv(),
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: EXEC_TIMEOUT_QUICK_MS,
@@ -101,16 +109,20 @@ function gitRemoteStatus(phrenPath: string, syncIntent?: "sync" | "local"): { ok
 
   // Remote exists — verify it's reachable
   try {
-    execFileSync("git", ["-C", phrenPath, "ls-remote", "--exit-code", "origin"], {
-      stdio: ["ignore", "ignore", "ignore"],
+    execFileSync("git", ["-C", phrenPath, "ls-remote", "--exit-code", "--", remoteName], {
+      env: nonInteractiveGitEnv(),
+      stdio: ["ignore", "ignore", "pipe"],
       timeout: 10_000,
     });
-    return { ok: true, detail: `origin=${remote}` };
-  } catch {
-    if (syncIntent === "sync") {
-      return { ok: false, detail: `origin=${remote} (unreachable) — check your network or SSH keys` };
+    return { ok: true, detail: `${remoteName}=${remote}` };
+  } catch (err: unknown) {
+    if (isGitAuthFailure(err)) {
+      return { ok: false, detail: storeAuthDetail(recordStoreAuthFailure(phrenPath, remoteName, remote)) };
     }
-    return { ok: true, detail: `origin=${remote} (unreachable, local-only mode)` };
+    if (syncIntent === "sync") {
+      return { ok: false, detail: `${remoteName}=${remote} (unreachable); check your network or SSH keys` };
+    }
+    return { ok: true, detail: `${remoteName}=${remote} (unreachable, local-only mode)` };
   }
 }
 
@@ -129,6 +141,7 @@ function rootConfigStatus(
   }
   try {
     execFileSync("git", ["cat-file", "-e", `HEAD:${filename}`], {
+      env: nonInteractiveGitEnv(),
       cwd: phrenPath,
       stdio: "ignore",
       timeout: EXEC_TIMEOUT_QUICK_MS,
@@ -143,6 +156,7 @@ function rootConfigStatus(
 function materializeRootConfig(phrenPath: string, filename: string): boolean {
   try {
     execFileSync("git", ["sparse-checkout", "add", `/${filename}`], {
+      env: nonInteractiveGitEnv(),
       cwd: phrenPath,
       stdio: "ignore",
       timeout: EXEC_TIMEOUT_QUICK_MS,
@@ -201,7 +215,7 @@ function pushSkillMirrorChecks(
   }
 }
 
-export async function runDoctor(phrenPath: string, fix: boolean = false, checkData: boolean = false): Promise<DoctorResult> {
+export async function runDoctor(phrenPath: string, fix: boolean = false, checkData: boolean = false, confirmStoreRemoval?: ConfirmStoreRemoval): Promise<DoctorResult> {
   // Import runLink lazily to avoid circular dependency at module load time
   const { runLink } = await import("./link.js");
   const checks: Array<{ name: string; ok: boolean; detail: string }> = [];
@@ -449,6 +463,11 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
           : `projects claimed by unattached stores (writes to them will fail): ${orphanedClaims.join("; ")}`,
       });
       for (const store of stores) {
+        const credentials = await storeCredentialCheck(phrenPath, store, fix, confirmStoreRemoval);
+        if (credentials) {
+          checks.push(credentials);
+          continue;
+        }
         const pathExists = store.available !== false;
         const gitExists = pathExists && fs.existsSync(path.join(store.path, ".git"));
         if (!pathExists) {

@@ -24,11 +24,12 @@ import { addGrant, listGrants, removeGrant } from "./grants.js";
 import { hookPeers, peerRequest } from "./peers.js";
 import { candidateRepos, enrollProject } from "./enroll.js";
 import { browseFiles } from "./files.js";
+import { MAX_FILE_RANGE, rangeInteger, readFileRange } from "./file-range.js";
 import { gitBranches, gitDiscard, gitLog, gitPulls, gitStage, gitStatus, gitTree, gitUnstage } from "./git.js";
 import { paneChatState, paneIdentity, panes, rpc, servers, snapshot, trustedDirectory, validateStartingTarget, validateTarget, workspaceSnapshot, startingPane } from "./herdr.js";
 import { LaunchLimiter } from "./limits.js";
 import { locateProject } from "./locate.js";
-import { launchDirectory, repositoryBranch, repositoryDiff, webServers } from "./projects.js";
+import { gitRoot, launchDirectory, repositoryBranch, repositoryDiff, webServers } from "./projects.js";
 import { atomic, BridgeError, bridgeRoot, id, type Json, MAX_FRAME, object, objects, PROTOCOL, provider, type Provider, serverName, socketPath, startingTargetSchema, type Target, targetFromURL, targetSchema } from "./protocol.js";
 import { CodexQuestions } from "./questions.js";
 import { bootedSimulators, type SimulatorAction, simulatorAct, simulatorApps, simulatorScreenshot } from "./simulators.js";
@@ -227,6 +228,28 @@ export async function serve(version: string): Promise<void> {
             response.setHeader("Content-Type", "image/png"); response.end(bytes); return;
           }
           case "/v1/files": result = { files: await listUploads("files") }; break;
+          case "/v1/files/range": {
+            let root: string;
+            if (url.searchParams.get("scope") === "uploads") {
+              root = path.join(bridgeRoot(), "uploads");
+            } else if (url.searchParams.has("session")) {
+              const target = targetFromURL(url), pane = await validateTarget(target);
+              const cwd = await gitRepository(pane, target, url.searchParams.get("child") ?? undefined);
+              const repository = await gitRoot(cwd);
+              if (!repository) throw new BridgeError(409, "This pane is not in a project repository.");
+              root = repository;
+            } else {
+              const candidates = await locateProject(url.searchParams.get("project") ?? "", await journal.recent());
+              const directory = url.searchParams.get("directory");
+              const candidate = directory ? candidates.find(item => item.directory === directory) : candidates[0];
+              if (!candidate) throw new BridgeError(404, "This project folder is not available on this computer.");
+              root = candidate.directory;
+            }
+            result = await readFileRange(root, url.searchParams.get("path") ?? "",
+              rangeInteger(url.searchParams.get("offset"), 0), rangeInteger(url.searchParams.get("length"), MAX_FILE_RANGE),
+              url.searchParams.get("version") ?? undefined);
+            break;
+          }
           case "/v1/models": result = { models: await modelCatalog.list(String(url.searchParams.get("source") ?? "")) }; break;
           case "/v1/projects/files": {
             const candidates = await locateProject(String(url.searchParams.get("project") ?? ""), await journal.recent());

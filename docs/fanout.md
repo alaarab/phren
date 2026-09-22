@@ -101,8 +101,18 @@ The launcher may record exit 0 even though the denied permission aborted the
 turn. The Hook treats a job with `blocked.json` as failed regardless of
 `exit.txt`. The public `/v1/subagents` state is `completed` for terminal jobs,
 with the failure recorded in the reason
-`blocked: <type> <pattern>`, and a registered phone receives one push naming the
-worker and the reason. Overlapping notification sweeps are coalesced.
+`blocked: <type> <pattern>`. Rows also expose `failed` and `finishedAt` so the
+phone can distinguish failure and show its age. The worker row and chat header
+read Permission refused with the refused type and pattern and a FAILED badge.
+
+Agent work puts running jobs first, keeps failures for one hour and remembers
+dismissed failures. Header counts match those visible rows. This phone policy
+does not change the archive rules below or delete the job directory.
+
+With direct APNs configured and a phone registered, the Hook sends one push
+naming the worker and reason. Overlapping notification sweeps are coalesced.
+The phone's local approval and schedule reminders are a separate path; see
+[phone notifications](../apps/ios/design/notifications.md).
 
 ## Archiving finished jobs
 

@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { getProjectSourcePath, readProjectConfig } from "@phren/cli/code-host/project-config";
 import { projectSlugFromPath } from "@phren/cli/code-host/phren-paths";
-import { errorMessage } from "@phren/cli/code-host/utils";
+import { errorMessage, nonInteractiveGitEnv } from "@phren/cli/code-host/utils";
 import { tryFileLock } from "@phren/cli/code-host/governance/locks";
 import { logger } from "@phren/cli/code-host/logger";
 import { languageForFile } from "./languages.js";
@@ -86,6 +86,7 @@ interface BlameInfo {
 
 function runGit(repoRoot: string, args: string[], encoding: "utf8" | "buffer" = "utf8"): string | Buffer {
   return execFileSync("git", ["-C", repoRoot, ...args], {
+    env: nonInteractiveGitEnv(),
     encoding,
     maxBuffer: 256 * 1024 * 1024,
     stdio: ["ignore", "pipe", "pipe"],

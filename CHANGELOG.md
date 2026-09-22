@@ -12,6 +12,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 
 - Child worker messages use `POST /v1/subagents/resume`, validated against the live parent and the Hook's own store. Finished Codex and OpenCode workers resume their saved sessions in the original worktree as another round of the same job. Running workers keep durable queued messages, exposed by `GET /v1/subagents/messages`.
+- `GET /v1/files/range` reads up to 4 MiB from verified project checkouts, pane repositories or bridge uploads, including git-ignored output. Zero-length reads check existence; total size, content type and version tokens support resumable phone downloads. Traversal and symlink escapes are rejected.
 
 - Code home opens on indexed files with directory counts, languages, index time and reindex. New Hook routes provide tree summaries, paged usage across every symbol and recent symbol changes; search accepts a directory scope and a type family. Symbol fingerprints retain change times across unchanged scans.
 
@@ -78,6 +79,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   private reasoning, which Claude Code stores without text and marks as
   thinking, stays redacted.
 - Model switches use a verified `/v1/model` route. Codex walks its model and reasoning menus and checks the status line, Claude keeps its alias command, and unsupported OpenCode selection is refused. Working panes reject slash commands before typing them.
+- Store sync remembers authentication failures locally, backs off retries from one hour to one day, and reports "needs credentials" with the exact remote in status and doctor. All phren Git commands disable terminal and askpass prompts. `phren doctor --fix` asks before unregistering a non-primary store whose authentication has failed for more than a week; local files are kept.
 
 - The phone's Claude model picker reads Claude Code's own cached `/model`
   catalogue (`~/.claude/cache/model-catalog/*-cc.json`), so a new model such as

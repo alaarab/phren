@@ -1,3 +1,4 @@
+import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type McpContext, mcpResponse, resolveStoreForProject } from "./types.js";
 import { z } from "zod";
@@ -605,7 +606,7 @@ async function handlePushChanges(
         cwd: phrenPath,
         encoding: "utf8",
         timeout: opts.timeout ?? EXEC_TIMEOUT_MS,
-        env: opts.env,
+        env: nonInteractiveGitEnv(opts.env),
         stdio: ["ignore", "pipe", "pipe"],
       }
     ).trim();
@@ -706,7 +707,7 @@ async function handlePushChanges(
             cwd: store.path,
             encoding: "utf8",
             timeout: opts.timeout ?? EXEC_TIMEOUT_MS,
-            env: opts.env,
+            env: nonInteractiveGitEnv(opts.env),
             stdio: ["ignore", "pipe", "pipe"],
           }).trim();
         const mergeStoreGit: RunStoreGit = async (_cwd, gitArgs) => {

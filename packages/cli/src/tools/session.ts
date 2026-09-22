@@ -1,3 +1,4 @@
+import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import { moduleEnabled } from "../modules/runtime.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type McpContext, mcpResponse, resolveStoreForProject } from "./types.js";
@@ -33,7 +34,7 @@ const STALE_SESSION_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 function collectGitStatusSnapshot(cwd: string): { gitStatus: string; editedFiles: string[] } {
   try {
-    const output = execFileSync("git", ["status", "--short"], { cwd, encoding: "utf8" }).trim();
+    const output = execFileSync("git", ["status", "--short"], { env: nonInteractiveGitEnv(), cwd, encoding: "utf8" }).trim();
     if (!output) return { gitStatus: "", editedFiles: [] };
     const lines = output.split("\n").map((line) => line.trim()).filter(Boolean);
     const editedFiles = lines.map((line) => line.replace(/^[ MADRCU?!]{1,2}\s+/, "").trim()).filter(Boolean);

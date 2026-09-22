@@ -1,3 +1,4 @@
+import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import { moduleEnabled } from "../modules/runtime.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type McpContext, mcpResponse, resolveStoreForProject } from "./types.js";
@@ -785,7 +786,7 @@ async function handleStoreList(ctx: McpContext) {
     try {
       const result = execFileSync(
         "git", ["log", "-1", "--format=%ci"],
-        { cwd: store.path, encoding: "utf8", timeout: 3000 }
+        { env: nonInteractiveGitEnv(), cwd: store.path, encoding: "utf8", timeout: 3000 }
       ).trim();
       lastSync = result || null;
     } catch { /* non-critical */ }
