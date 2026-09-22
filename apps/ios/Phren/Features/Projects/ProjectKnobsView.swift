@@ -131,15 +131,28 @@ struct ProjectKnobsView: View {
                     .accessibilityIdentifier("knob-value:nameColour")
             }
             .frame(minHeight: 32)
-            PhrenColorDotRow(
-                items: [PhrenOption(id: "default", value: ProjectNameColor.default, title: "Default")]
-                    + ProjectNameColor.palette.enumerated().map { index, hex in
-                        PhrenOption(id: hex, value: ProjectNameColor.hex(hex), title: ProjectNameColor.paletteNames[index])
-                    },
-                selection: Binding(get: { nameColour }, set: { chooseNameColour($0) }),
-                identifier: "knob:nameColour",
-                color: { $0.color }
-            )
+            // The same row a computer gets: 28pt dots, a ring on the chosen one.
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(nameColourChoices, id: \.id) { choice in
+                        Button { chooseNameColour(choice.value) } label: {
+                            ZStack {
+                                Circle().fill(choice.value.color).frame(width: 28, height: 28)
+                                if choice.value == nameColour {
+                                    Circle().stroke(PhrenTheme.text, lineWidth: 2).frame(width: 34, height: 34)
+                                }
+                            }
+                            .frame(width: 40, height: 40)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(choice.title)
+                        .accessibilityAddTraits(choice.value == nameColour ? [.isSelected] : [])
+                        .accessibilityIdentifier("knob:nameColour:\(choice.id)")
+                    }
+                }
+                .padding(.horizontal, 2)
+            }
+            .accessibilityIdentifier("knob:nameColour")
             HStack(spacing: PhrenTheme.Space.medium) {
                 ColorPicker("Custom", selection: Binding(get: { nameColour.color }, set: { color in
                     var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
@@ -167,6 +180,13 @@ struct ProjectKnobsView: View {
         .padding(.horizontal, PhrenTheme.Space.medium)
         .padding(.vertical, PhrenTheme.Space.small)
         .sessionCard()
+    }
+
+    private var nameColourChoices: [PhrenOption<ProjectNameColor>] {
+        [PhrenOption(id: "default", value: .default, title: "Default")]
+            + ProjectNameColor.palette.enumerated().map { index, hex in
+                PhrenOption(id: hex, value: .hex(hex), title: ProjectNameColor.paletteNames[index])
+            }
     }
 
     private func chooseNameColour(_ value: ProjectNameColor) {
