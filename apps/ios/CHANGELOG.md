@@ -6,10 +6,39 @@ Settings → About. `scripts/changelog.py` refuses to build a version that has n
 section here; the version is `MARKETING_VERSION` in `project.yml`, the build
 number counts up on its own.
 
-## 1.0.1
+## 1.0.2
 
-A patch on the day-one build: faster sends, a chat that stays put, and the
-lock screen and Changes screen done properly.
+A patch with the conductor's grants, the Code screen, grouped tasks, and a
+run of chat fixes: replies unfold in place, queued Codex questions become
+cards, idle reconnects keep the transcript, and the chat header stays alone.
+
+### New
+
+- Grants: a conductor's standing dispatch and hand-off authorizations open
+  from the chat options as a list of scope, action and computer rows, with
+  add and revoke. A conductor permission card also offers "Allow for this
+  project" and "Allow everywhere", which approve the call and write the
+  matching grant on the computer.
+- Code: the project page's Code cell opens a symbol search over the computer's
+  code index, with the hottest and coldest symbols when no query is typed. Tap a
+  symbol for its dossier: the definition, the last change, its references by
+  file and a Findings section reserved for later.
+- Tasks: the backlog groups into one collapsible section per project, busiest
+  open work first. Headers show the project's colour with Active and Queue
+  counts as chips, tapping a header folds that section, and All folds or
+  unfolds every section. Folds are remembered.
+
+### Changed
+
+- Folded tool pills and cards in the chat are one accessibility element each, so a long
+  transcript's accessibility tree stays flat and swipes stay quick.
+- The Knobs screen is a plain list like the others: category headers over
+  session cards, each knob one row with a caption and a phren drop-down for
+  its value, and a Reset row at the bottom that clears every override after
+  a confirmation.
+- The Projects tab's Explore list no longer shows Memory graph; the Memory
+  tab is the graph now, and a session's or chat's Explore graph still opens
+  that project's graph. The More menu keeps its Memory graph item.
 
 ### Fixed
 
@@ -20,21 +49,40 @@ lock screen and Changes screen done properly.
   store, the card lists them, and Send presses alt+up (Codex's queue binding)
   followed by the chosen option's key. Without readable text the plain answer
   keys stay as the fallback.
+- Choosing Full Access under /permissions no longer leaves Codex's terminal on
+  "Enable full access?". The Hook walks that second confirmation itself from
+  the pane's lines; if it never appears the phone gets the visible prompt as a
+  question card instead of a blind Enter that landed too early.
+- Claude's usage numbers add up. The Fable weekly window is labelled
+  "7-day, Fable only" with its own reset time and its own "updated" age beside
+  it, never drawn as part of the all-models window it can exceed; the Claude
+  card says where the numbers came from ("from Claude Code status line,
+  updated 6 s ago"); and the Live sessions header ring is bound to the same
+  5-hour window the Account usage page shows first, instead of whichever
+  window happens to be highest.
+- After the app sits idle, the chat no longer resets to an earlier point until
+  it catches up: a reconnect merges the resumed stream by line and keeps every
+  row the phone already showed, an empty placeholder while the transcript file
+  is missing cannot claim the beginning is loaded, and only the Hook's explicit
+  conversation-replacement snapshot clears the conversation.
+- The floating chat header is the only bar: the system navigation bar no
+  longer returns above it when the app comes back from another app or a chat
+  sheet is dismissed, and the bar is never titled "Agent chat".
+- Sending while dictating delivers new words again: the send ends the current
+  recognition task, starts a fresh request and tap on the same audio engine
+  with the audio session reasserted, and the composer shows the next segment's
+  text instead of a live mic over a silent recogniser.
+
+## 1.0.1
+
+A patch on the day-one build: faster sends, a chat that stays put, and the
+lock screen and Changes screen done properly.
 
 ### New
 
 - Conductor is a launch role with its own provider, model and effort choice,
   a pinned dispatch-marked session card, and matching chat and Lock Screen identity.
-- Grants: a conductor's standing dispatch and hand-off authorizations open
-  from the chat options as a list of scope, action and computer rows, with
-  add and revoke. A conductor permission card also offers "Allow for this
-  project" and "Allow everywhere", which approve the call and write the
-  matching grant on the computer.
 
-- Code: the project page's Code cell opens a symbol search over the computer's
-  code index, with the hottest and coldest symbols when no query is typed. Tap a
-  symbol for its dossier: the definition, the last change, its references by
-  file and a Findings section reserved for later.
 - Memory is map or list: the full graph with its node dossier, or the same findings,
   notes, tasks and topics as a filterable list. A search icon and two drop-down
   filters for kinds and projects sit above both; mode and filters are remembered.
@@ -71,16 +119,6 @@ lock screen and Changes screen done properly.
 
 ### Changed
 
-- Folded tool pills and cards in the chat are one accessibility element each, so a long
-  transcript's accessibility tree stays flat and swipes stay quick.
-- Tasks: the backlog groups into one collapsible section per project, busiest
-  open work first. Headers show the project's colour with Active and Queue
-  counts as chips, tapping a header folds that section, and All folds or
-  unfolds every section. Folds are remembered.
-- The Knobs screen is a plain list like the others: category headers over
-  session cards, each knob one row with a caption and a phren drop-down for
-  its value, and a Reset row at the bottom that clears every override after
-  a confirmation.
 - The schedule editor, the chat /model picker and the launch computer chooser pick
   from phren's own drop-down rows instead of long option lists.
 - Account usage is rebuilt around what each source means: one updated line with the
@@ -114,9 +152,6 @@ lock screen and Changes screen done properly.
   list.
 - The Projects tab's dictate button is gone; Siri and the capture shortcut
   are the way to speak a note or task.
-- The Projects tab's Explore list no longer shows Memory graph; the Memory
-  tab is the graph now, and a session's or chat's Explore graph still opens
-  that project's graph. The More menu keeps its Memory graph item.
 - The /model picker waits for the computer's list instead of flashing the
   built-in names first; those appear only when the computer cannot answer.
 - Sending is faster: the phone keeps one SSH connection per computer and
@@ -154,25 +189,6 @@ lock screen and Changes screen done properly.
 
 ### Fixed
 
-- Choosing Full Access under /permissions no longer leaves Codex's terminal on
-  "Enable full access?". The Hook walks that second confirmation itself from
-  the pane's lines; if it never appears the phone gets the visible prompt as a
-  question card instead of a blind Enter that landed too early.
-- Claude's usage numbers add up. The Fable weekly window is labelled
-  "7-day, Fable only" with its own reset time and its own "updated" age beside
-  it, never drawn as part of the all-models window it can exceed; the Claude
-  card says where the numbers came from ("from Claude Code status line,
-  updated 6 s ago"); and the Live sessions header ring is bound to the same
-  5-hour window the Account usage page shows first, instead of whichever
-  window happens to be highest.
-- After the app sits idle, the chat no longer resets to an earlier point until
-  it catches up: a reconnect merges the resumed stream by line and keeps every
-  row the phone already showed, an empty placeholder while the transcript file
-  is missing cannot claim the beginning is loaded, and only the Hook's explicit
-  conversation-replacement snapshot clears the conversation.
-- The floating chat header is the only bar: the system navigation bar no
-  longer returns above it when the app comes back from another app or a chat
-  sheet is dismissed, and the bar is never titled "Agent chat".
 - A Codex approval in the terminal shows its actual question and options as the
   question card, answered by their own keys (`y`, `p`, `Esc`), instead of a bare
   "Waiting for your answer" line and a key strip; the terminal stays in the
@@ -205,10 +221,6 @@ lock screen and Changes screen done properly.
 - Account usage: each provider's windows keep their own accessibility ids.
 - Working tree folders open on the first tap again.
 - Dictation keeps what you said across pauses and keeps listening after a send.
-- Sending while dictating delivers new words again: the send ends the current
-  recognition task, starts a fresh request and tap on the same audio engine
-  with the audio session reasserted, and the composer shows the next segment's
-  text instead of a live mic over a silent recogniser.
 - The lock screen counts a session as running while its fan-out workers run,
   and says how many.
 - The Add computer button on an unknown remote agent's page is a full
@@ -566,7 +578,6 @@ lock screen and Changes screen done properly.
 
 - Agent chats stay at the last message when the keyboard or nearby activity
   changes height, without scrolling into empty space below the transcript.
-
 
 ## 0.0.7
 
