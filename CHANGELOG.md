@@ -11,6 +11,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- Child worker messages use `POST /v1/subagents/resume`, validated against the live parent and the Hook's own store. Finished Codex and OpenCode workers resume their saved sessions in the original worktree as another round of the same job. Running workers keep durable queued messages, exposed by `GET /v1/subagents/messages`.
+
 - Code home opens on indexed files with directory counts, languages, index time and reindex. New Hook routes provide tree summaries, paged usage across every symbol and recent symbol changes; search accepts a directory scope and a type family. Symbol fingerprints retain change times across unchanged scans.
 
 - Live reply previews on the transcript socket: Claude pane text and Codex/OpenCode delta text update at most twice a second, stay out of history, and give way to the completed entry.
@@ -68,6 +70,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   aliases. Codex and OpenCode keep their live catalogues in the same shape.
 
 ### Fixed
+
+- Model switches use a verified `/v1/model` route. Codex walks its model and reasoning menus and checks the status line, Claude keeps its alias command, and unsupported OpenCode selection is refused. Working panes reject slash commands before typing them.
 
 - The phone's Claude model picker reads Claude Code's own cached `/model`
   catalogue (`~/.claude/cache/model-catalog/*-cc.json`), so a new model such as

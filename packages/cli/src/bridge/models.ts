@@ -5,7 +5,10 @@ import path from "node:path";
 import { object, objects, type Json } from "./protocol.js";
 
 /** One entry of a `/model` menu as the phone draws it. */
-export interface AgentModel { id: string; name: string; description?: string; isDefault?: boolean; isCurrent?: boolean }
+export interface AgentModel {
+  id: string; name: string; description?: string; isDefault?: boolean; isCurrent?: boolean;
+  defaultReasoningEffort?: string; supportedReasoningEfforts?: string[];
+}
 
 /** Only initialize and list. Never a thread, a prompt, or a login. */
 export function readCodexModels(executable = "codex"): Promise<AgentModel[]> {
@@ -50,12 +53,15 @@ export function readCodexModels(executable = "codex"): Promise<AgentModel[]> {
   });
 }
 
-function codexModels(result: Json): AgentModel[] {
+export function codexModels(result: Json): AgentModel[] {
   return objects(result.data).filter(entry => entry.hidden !== true && typeof entry.id === "string" && entry.id).slice(0, 32).map(entry => ({
     id: String(entry.id).slice(0, 100),
     name: String(entry.displayName || entry.id).slice(0, 100),
     ...(typeof entry.description === "string" && entry.description ? { description: entry.description.slice(0, 300) } : {}),
     ...(entry.isDefault === true ? { isDefault: true } : {}),
+    ...(typeof entry.defaultReasoningEffort === "string" ? { defaultReasoningEffort: entry.defaultReasoningEffort } : {}),
+    supportedReasoningEfforts: objects(entry.supportedReasoningEfforts).flatMap(value =>
+      typeof value.reasoningEffort === "string" ? [value.reasoningEffort] : []),
   }));
 }
 

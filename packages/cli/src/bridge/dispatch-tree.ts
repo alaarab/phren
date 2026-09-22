@@ -191,6 +191,7 @@ function projectAgents(
       ...(typeof raw.worktreeName === "string" && raw.worktreeName.length > 0 && raw.worktreeName.length <= 200
         && !/[/\\]/.test(raw.worktreeName) ? { worktreeName: raw.worktreeName } : {}),
       ...(typeof raw.branch === "string" && raw.branch.length > 0 && raw.branch.length <= 200 ? { branch: raw.branch } : {}),
+      ...(typeof object(raw.fanout).resumable === "boolean" ? { fanout: { resumable: object(raw.fanout).resumable as boolean } } : {}),
       computer: routed.computer,
       remote: routed.remote,
       children,

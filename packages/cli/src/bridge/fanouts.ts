@@ -89,6 +89,7 @@ export interface FanoutChild {
   reason?: string;
   finishedAt?: string;
   transcript: string;
+  fanout: { resumable: boolean };
   children: FanoutChild[];
 }
 
@@ -115,7 +116,7 @@ async function worktreeDetails(worktree: string): Promise<WorktreeDetails> {
   return details;
 }
 
-function storeRoot(env: NodeJS.ProcessEnv): string {
+export function storeRoot(env: NodeJS.ProcessEnv): string {
   const configured = env.PHREN_PATH?.trim();
   return !configured ? path.join(homedir(), ".phren")
     : configured === "~" ? homedir() : configured.startsWith("~/") ? path.join(homedir(), configured.slice(2)) : path.resolve(configured);
@@ -123,6 +124,19 @@ function storeRoot(env: NodeJS.ProcessEnv): string {
 
 export function fanoutRoot(env: NodeJS.ProcessEnv = process.env): string {
   return path.join(storeRoot(env), ".runtime", "agent-fanouts");
+}
+
+/** Bind public worker identities to the canonical store as well as their parent. */
+export function fanoutChildID(root: string, manifest: FanoutManifest): string {
+  return createHash("sha256").update(`${root}\0${manifest.parent?.provider}\0${manifest.parent?.session}\0${manifest.id}`).digest("hex").slice(0, 32);
+}
+
+export async function containedFanoutRoot(env: NodeJS.ProcessEnv): Promise<string | undefined> {
+  try {
+    const store = await realpath(storeRoot(env));
+    const expected = path.join(store, ".runtime", "agent-fanouts");
+    return await realpath(expected) === expected ? expected : undefined;
+  } catch { return undefined; }
 }
 
 /** Where the archive sweep moves finished job folders, same id, one directory over. */
@@ -184,9 +198,8 @@ export function blockedReason(value: Blocked): string {
 export async function fanoutChildren(parentProvider: Provider, parentSession: string, env: NodeJS.ProcessEnv = process.env,
   parentComputer?: string): Promise<FanoutChild[]> {
   if (!sessionId.safeParse(parentSession).success) return [];
-  const configured = fanoutRoot(env);
-  let root: string;
-  try { root = await realpath(configured); } catch { return []; }
+  const root = await containedFanoutRoot(env);
+  if (!root) return [];
   // Newest first, so a directory that outgrew MAX_JOBS drops old finished
   // jobs rather than the workers running right now.
   const entries = (await readdir(root).catch(() => [])).filter(name => jobID.safeParse(name).success);
@@ -206,7 +219,7 @@ export async function fanoutChildren(parentProvider: Provider, parentSession: st
       const transcript = await regularContainedFile(jobRoot, path.join(jobRoot, manifest.eventLog), MAX_EVENT_LOG_BYTES);
       if (!transcript) continue;
       const worktree = await worktreeDetails(manifest.worktree);
-      const id = createHash("sha256").update(`${parentProvider}\0${parentSession}\0${manifest.id}`).digest("hex").slice(0, 32);
+      const id = fanoutChildID(root, manifest);
       // A denied permission aborts the turn while the launcher still records a
       // zero exit; blocked.json is the only evidence the worker did not finish.
       const blocked = await readBlocked(jobRoot);
@@ -216,7 +229,8 @@ export async function fanoutChildren(parentProvider: Provider, parentSession: st
       children.push({ id, provider: manifest.provider, session: manifest.session, model: manifest.model, ...worktree, cwd: manifest.worktree,
         path: manifest.taskLabel, callId: `fanout:${id}`,
         state: blocked || manifest.status === "failed" || manifest.status === "cancelled" ? "failed" : ["queued", "running"].includes(manifest.status) ? "running" : "completed",
-        ...(blocked ? { reason: blockedReason(blocked) } : {}), ...(finishedAt ? { finishedAt } : {}), transcript, children: [] });
+        ...(blocked ? { reason: blockedReason(blocked) } : {}), ...(finishedAt ? { finishedAt } : {}), transcript,
+        fanout: { resumable: ["codex", "opencode"].includes(manifest.provider) && manifest.session !== undefined }, children: [] });
     } catch { /* Torn, old, or untrusted manifests do not become child agents. */ }
   }
   return children.sort((a, b) => a.path.localeCompare(b.path) || a.id.localeCompare(b.id));
@@ -234,9 +248,8 @@ export interface BlockedFanout {
 
 /** Every fan-out job that left a blocked.json, for the Hook's push watcher. */
 export async function blockedFanouts(env: NodeJS.ProcessEnv = process.env): Promise<BlockedFanout[]> {
-  const configured = fanoutRoot(env);
-  let root: string;
-  try { root = await realpath(configured); } catch { return []; }
+  const root = await containedFanoutRoot(env);
+  if (!root) return [];
   const names = (await readdir(root).catch(() => [])).filter(name => jobID.safeParse(name).success).slice(0, MAX_JOBS);
   const blocked: BlockedFanout[] = [];
   for (const name of names) {
@@ -315,6 +328,9 @@ export async function archiveFinishedFanouts(env: NodeJS.ProcessEnv = process.en
       const directory = path.join(root, name);
       const metadata = await lstat(directory).catch(() => undefined);
       if (!metadata?.isDirectory() || metadata.isSymbolicLink()) continue;
+      if (await lstat(path.join(directory, "message-lock")).catch(() => undefined)) continue;
+      const messages = await readdir(path.join(directory, "messages")).catch(() => []);
+      if (messages.some(name => name.endsWith(".queued.json"))) continue;
       const exit = await exitStamp(directory);
       if (exit === undefined) continue;
       const manifest = await jobManifest(root, directory);
@@ -358,6 +374,11 @@ export async function archiveFinishedFanouts(env: NodeJS.ProcessEnv = process.en
  * An MCP tool keeps its own arguments and an edit, write or patch carries the
  * changed-file diff the phone draws under the card; both are bounded. */
 export function visibleOpenCodeRunEvent(raw: Json, cwd?: string): Json | undefined {
+  if (raw.type === "phren/fanout-message" && typeof raw.text === "string") {
+    return { type: "user/message", time: raw.timestamp, data: { message: {
+      role: "user", content: [{ type: "text", text: raw.text }],
+    } } };
+  }
   const part = object(raw.part), time = typeof raw.timestamp === "number" && Number.isFinite(raw.timestamp)
     ? new Date(raw.timestamp).toISOString() : undefined;
   if (raw.type === "text" && part.type === "text" && typeof part.text === "string") {
@@ -389,6 +410,10 @@ export function visibleOpenCodeRunEvent(raw: Json, cwd?: string): Json | undefin
  * Command text, a bounded output tail, and changed paths cross the wire so the
  * owner can see what a worker is doing; diffs, usage, and costs do not. */
 export function visibleCodexExecEvent(raw: Json): Json | undefined {
+  if (raw.type === "phren/fanout-message" && typeof raw.text === "string") {
+    return { type: "response_item", timestamp: raw.timestamp, payload: { type: "message", role: "user",
+      content: [{ type: "input_text", text: raw.text }] } };
+  }
   const item = object(raw.item), callId = () => String(item.id ?? "").slice(0, 200);
   if (raw.type === "item.completed" && item.type === "agent_message") {
     if (typeof item.text !== "string") return undefined;

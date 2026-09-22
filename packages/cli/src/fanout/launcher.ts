@@ -54,7 +54,7 @@ export function createJob(options: JobOptions, env: NodeJS.ProcessEnv = process.
 export async function launch(options: JobOptions, reservation = createJob(options)): Promise<number> {
   const { job, manifest } = reservation, adapter = adapters[options.provider];
   console.log(job);
-  const out = fs.openSync(path.join(job, "events.jsonl"), "a"), err = fs.openSync(path.join(job, "stderr.log"), "a");
+  const out = fs.openSync(path.join(job, manifest.eventLog), "a"), err = fs.openSync(path.join(job, "stderr.log"), "a");
   const child = spawn("nice", ["-n", "15", adapter.command, ...adapter.argv({ ...options, job })], {
     cwd: manifest.worktree, env: { ...process.env, PHREN_FANOUT_JOB: manifest.id, PHREN_FANOUT_DIR: job },
     stdio: ["pipe", "pipe", "pipe"], detached: process.platform !== "win32",
@@ -83,7 +83,7 @@ export async function launch(options: JobOptions, reservation = createJob(option
     atomicWriteText(path.join(job, "blocked.json"), JSON.stringify({ type: "tool_loop", pattern: "", message: reason, at: new Date().toISOString() }));
     kill();
   }, 30_000);
-  const exitCode = await new Promise<number>(resolve => { child.once("error", () => resolve(127)); child.once("close", code => resolve(cancelled ? 130 : code ?? 1)); });
+  const exitCode = await new Promise<number>(resolve => { child.once("error", error => { fs.writeSync(err, `${error.message}\n`); resolve(127); }); child.once("close", code => resolve(cancelled ? 130 : code ?? 1)); });
   clearInterval(timer);
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.off(signal, cancel);
   fs.closeSync(out); fs.closeSync(err);

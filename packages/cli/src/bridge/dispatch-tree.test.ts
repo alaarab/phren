@@ -161,3 +161,12 @@ describe("remote ancestry projection", () => {
     expect(await remoteChildren(parent, [spoofed], { [spoofed.id]: { agents: [] } })).toEqual([]);
   });
 });
+
+it("keeps a remote worker's continuation capability with its destination child id", async () => {
+  const id = "c".repeat(32);
+  const tree = await remoteChildren(parent, [receipt()], { agents: [agent(id, { callId: "fanout:parser", fanout: { resumable: true } })] });
+  const nested = tree[0].children[0];
+  expect(nested.fanout).toEqual({ resumable: true });
+  expect(nested.remote).toEqual({ target: remoteTarget(), child: id });
+  expect(publicChildAgents(tree)[0]).toMatchObject({ children: [{ fanout: { resumable: true }, remote: { child: id } }] });
+});

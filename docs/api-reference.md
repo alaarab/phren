@@ -113,10 +113,12 @@ history.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | string | The argument `/model` accepts. The Hook caps Codex ids at 100 characters; OpenCode ids are not capped. |
+| `id` | string | The model identifier sent to `POST /v1/model`. The Hook caps Codex ids at 100 characters; OpenCode catalogue ids are not capped. |
 | `name` | string | The display name the picker shows, at most 100 characters. |
 | `description` | string? | Optional caption under the name, at most 300 characters. |
 | `isDefault` | boolean? | Present and `true` on the harness default; the picker marks it with a chip. |
+| `defaultReasoningEffort` | string? | Codex's default effort from its app-server catalogue. |
+| `supportedReasoningEfforts` | string[]? | Codex's supported effort identifiers. |
 
 Per source: Codex comes from its app-server `model/list` (hidden entries
 dropped, at most 32); Claude is the Hook's maintained table of Claude Code's
@@ -127,9 +129,25 @@ most 400). An unknown source returns an empty `models` list, and answers are
 cached per source for ten minutes. The phone's chat picker shows a
 `model-loading` row until this route answers, never another harness's list,
 and falls back to its per-harness built-in names only when the route fails.
-The phone keeps at most 64 rows and only ids `/model` accepts: up to 100
+The phone keeps at most 64 rows and only ids the model route accepts: up to 100
 characters of letters, digits, and `. - _ [ ] : /`, one token with no
 whitespace.
+
+`POST /v1/model { target, model, effort? }` switches an established, idle pane.
+The reply is `{ ok: true, model, name, effort? }` only after verification.
+Codex receives bare `/model`, optionally walks through `All models`, matches
+the catalogue's display name, verifies the cursor before Enter, then chooses
+the requested or default reasoning effort and verifies the new model in its
+status line. An unreadable menu, missing row, or unconfirmed result returns an
+error; open menus are escaped without interrupting a working or replacement
+session. Claude receives `/model <id-or-alias>` and must show its confirmation.
+OpenCode returns 422 with a direction to use its terminal `/models` picker.
+
+A working pane returns 409 before any model command is typed. `/v1/prompt`
+also refuses every slash command while working. The phone offers
+`Switch after this turn`, holds only the model selection until the pane goes
+idle, allows cancellation, and displays a verified switch as a system row.
+An uncertain result is never retried automatically.
 
 ---
 
