@@ -237,20 +237,27 @@ function errorResponse(error: string, extra: Record<string, unknown> = {}) {
 
 /**
  * A composite's schema is `passthrough`, so the host serializes whatever it
- * does not recognize; Claude Code hands nested objects (`updates`, `settings`,
- * `citation`) over as JSON strings. When the target wants an object and the
- * string reads as one, use what it reads as.
+ * does not recognize; Claude Code hands nested objects (`updates`, `settings`)
+ * over as JSON strings, sometimes wrapped twice. A JSON-looking string whose
+ * decode validates replaces the raw string; so does a decode that does not
+ * validate when the raw string never would, so the miss reports its real inner
+ * path instead of "expected object, received string". A string the field
+ * accepts as-is (JSON that is genuinely text) and a string that is not JSON
+ * are left to the schema's own error.
  */
 function decodeJsonArguments(schema: z.ZodObject<z.ZodRawShape>, args: Record<string, unknown>): Record<string, unknown> {
   const out = { ...args };
   for (const [key, value] of Object.entries(args)) {
-    if (typeof value !== "string" || !/^\s*[[{]/.test(value)) continue;
+    if (typeof value !== "string") continue;
     const field = schema.shape[key] as z.ZodTypeAny | undefined;
-    if (!field || field.safeParse(value).success) continue;
-    try {
-      const decoded: unknown = JSON.parse(value);
-      if (decoded !== null && typeof decoded === "object" && field.safeParse(decoded).success) out[key] = decoded;
-    } catch { /* Not JSON: the schema's own error explains the miss. */ }
+    if (!field || !/^\s*[[{"]/.test(value)) continue;
+    let decoded: unknown = value;
+    for (let hop = 0; hop < 3; hop++) {
+      if (typeof decoded !== "string" || !/^\s*[[{"]/.test(decoded)) break;
+      try { decoded = JSON.parse(decoded); } catch { decoded = undefined; break; }
+    }
+    if (decoded === undefined || decoded === null || typeof decoded !== "object") continue;
+    if (field.safeParse(decoded).success || !field.safeParse(value).success) out[key] = decoded;
   }
   return out;
 }
