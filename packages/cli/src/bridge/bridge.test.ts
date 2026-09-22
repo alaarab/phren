@@ -123,6 +123,8 @@ describe("Phren Hook boundaries", () => {
     expect(role(base)).toBeUndefined();
     expect(role({ ...base, agents: [{ pane_id: "w1:p1", agent: "claude", name: "conductor-conductor" }] })).toBe("conductor");
     expect(role({ ...base, panes: [{ ...base.panes[0], agent_name: "conductor-lead" }] })).toBe("conductor");
+    expect(role({ ...base, agents: [{ pane_id: "w1:p1", agent: "claude", name: "conductor" }] })).toBe("conductor");
+    expect(role({ ...base, agents: [{ pane_id: "w1:p1", agent: "claude", name: "conductors-helper" }] })).toBeUndefined();
   });
   it("exports focus only when workspace, tab and pane belong together", () => {
     const snapshot = {
@@ -1990,6 +1992,7 @@ schedules:
       const launched = await api("/v1/workspaces/launch?mux=herdr:default", { label: "Conductor", kind: "codex", role: "conductor" });
       expect(launched.status, JSON.stringify(launched.data)).toBe(200);
       expect(commands.find(c => c.method === "workspace.create")?.params.cwd).toBe(await realpathAsync(store));
+      expect(commands.find(c => c.method === "agent.start")?.params.name).toBe("conductor");
       const agent = await api("/v1/workspaces/launch?mux=herdr:default", { label: "Worker", kind: "codex" });
       expect(agent.status).toBe(400);
     });

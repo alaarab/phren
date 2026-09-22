@@ -4,7 +4,7 @@ import { hookRequest } from "./client.js";
 import { projectName } from "./dispatch.js";
 import { grantLabel, listGrants, matchGrant } from "./grants.js";
 import { hookPeers, peerRequest, type HookPeer } from "./peers.js";
-import { BridgeError, objects, sessionId, targetSchema, type Json, type Target } from "./protocol.js";
+import { BridgeError, object, objects, sessionId, targetSchema, type Json, type Target } from "./protocol.js";
 
 const promptText = z.string().min(1).max(32768).refine(value => !/[\x00-\x08\x0b-\x1f\x7f]/.test(value));
 
@@ -47,4 +47,45 @@ export async function handOff(input: unknown): Promise<{ ok: boolean; delivered:
   const result = await request("/v1/prompt", { target, text: data.text });
   const delivered = result.ok === true && result.deliveryUncertain !== true;
   return { ok: delivered, delivered, target, ...(grant ? { granted: grantLabel(grant) } : {}) };
+}
+
+/** One live agent pane, on this computer or an enrolled one. */
+export interface LiveSession {
+  computer: string; local: boolean; project?: string; label?: string; title?: string; agent?: string;
+  status?: string; role?: string; branch?: string; model?: string; target?: Target;
+}
+
+function sessionsFrom(overview: Json, computer: string, local: boolean): LiveSession[] {
+  const sessions: LiveSession[] = [];
+  for (const group of objects(overview.groups)) for (const tab of objects(group.children)) {
+    if (typeof tab.agent !== "string") continue;
+    const target = targetSchema.safeParse(tab.target);
+    const cwd = typeof tab.cwd === "string" ? tab.cwd : "";
+    const text = (value: unknown) => typeof value === "string" && value ? value : undefined;
+    // A conductor sits in the store, not a project.
+    sessions.push({ computer, local, project: tab.role === "conductor" ? undefined : text(cwd.split("/").filter(Boolean).at(-1)), label: text(group.label),
+      title: text(tab.title), agent: tab.agent, status: text(tab.agentStatus), role: text(tab.role),
+      branch: text(tab.branch), model: text(tab.model), ...(target.success ? { target: target.data } : {}) });
+  }
+  return sessions;
+}
+
+/** Every live agent the conductor could hand work to: this computer's Herdr
+ * overview plus each enrolled computer's, read through its verified Hook.
+ * An unreachable computer is reported, never silently dropped. */
+export async function listLiveSessions(): Promise<{ sessions: LiveSession[]; unreachable: { computer: string; error: string }[]; enrolled: number }> {
+  const health = await hookRequest("/v1/health");
+  const here = typeof object(health.computer).name === "string" ? String(object(health.computer).name) : "this computer";
+  const sessions = sessionsFrom(await hookRequest("/v1/workspaces"), here, true);
+  const peers = await hookPeers().catch(() => [] as HookPeer[]);
+  const unreachable: { computer: string; error: string }[] = [];
+  await Promise.all(peers.map(async peer => {
+    try {
+      const route = peer.server && peer.server !== "default" ? `/v1/workspaces?server=${encodeURIComponent(peer.server)}` : "/v1/workspaces";
+      sessions.push(...sessionsFrom(await peerRequest(peer, route), peer.name, false));
+    } catch (error) {
+      unreachable.push({ computer: peer.name, error: error instanceof Error ? error.message : "Unreachable." });
+    }
+  }));
+  return { sessions, unreachable, enrolled: peers.length };
 }

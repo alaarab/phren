@@ -26,7 +26,7 @@ import { candidateRepos, enrollProject } from "./enroll.js";
 import { browseFiles } from "./files.js";
 import { MAX_FILE_RANGE, rangeInteger, readFileRange } from "./file-range.js";
 import { gitBranches, gitDiscard, gitLog, gitPulls, gitStage, gitStatus, gitTree, gitUnstage } from "./git.js";
-import { paneChatState, paneIdentity, panes, rpc, servers, snapshot, trustedDirectory, validateStartingTarget, validateTarget, workspaceSnapshot, startingPane, paneAgentName } from "./herdr.js";
+import { paneChatState, paneIdentity, panes, rpc, servers, snapshot, trustedDirectory, validateStartingTarget, validateTarget, workspaceSnapshot, startingPane, paneAgentName, isConductorName } from "./herdr.js";
 import { LaunchLimiter } from "./limits.js";
 import { locateProject } from "./locate.js";
 import { gitRoot, launchDirectory, repositoryBranch, repositoryDiff, webServers } from "./projects.js";
@@ -979,7 +979,8 @@ export async function launchSession(server: string, data: Json): Promise<Json> {
   // Herdr's agent name is a slug (lowercase, digits, - or _, 1 to 32 chars);
   // the label a person typed is not, so derive one from it.
   const baseName = herdrAgentName(data.name === undefined ? label : plainText(200).parse(data.name));
-  const wanted = role === "conductor" ? herdrAgentName(`conductor-${baseName}`) : baseName;
+  // "Conductor" stays "conductor", never "conductor-conductor".
+  const wanted = role === "conductor" ? (baseName === "conductor" || baseName.startsWith("conductor-") ? baseName : herdrAgentName(`conductor-${baseName}`)) : baseName;
   const model = typeof data.model === "string" && data.model.trim() ? plainText(200).parse(data.model.trim()) : undefined;
   const modelFlag: Partial<Record<(typeof launchKinds)[number], string>> = { codex: "--model", claude: "--model", opencode: "--model" };
   const workspace = data.workspaceId === undefined ? undefined : id.parse(data.workspaceId);
@@ -994,7 +995,7 @@ export async function launchSession(server: string, data: Json): Promise<Json> {
     const otherServers = (await servers()).map(item => String(item.session)).filter(name => name !== server);
     const overviews = [{ name: server, value: before }, ...await Promise.all(otherServers.map(async name => ({ name, value: await snapshot(name) })))];
     for (const overview of overviews) {
-      const existing = objects(overview.value.panes).find(pane => paneAgentName(overview.value, pane)?.startsWith("conductor-")
+      const existing = objects(overview.value.panes).find(pane => isConductorName(paneAgentName(overview.value, pane))
         && provider.safeParse(pane.agent).success && !["completed", "exited", "failed", "stopped"].includes(String(pane.agent_status)));
       if (existing) throw new BridgeError(409, "A conductor is already running for this store.", { target: await targetForPane(overview.name, existing) });
     }

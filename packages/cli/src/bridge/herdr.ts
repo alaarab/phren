@@ -76,6 +76,11 @@ export function paneAgentName(s: Json, pane: Json | undefined): string | undefin
   return typeof named?.name === "string" ? named.name : undefined;
 }
 
+/** A conductor's Herdr name: "conductor", or "conductor-" plus its label. */
+export function isConductorName(name: string | undefined): boolean {
+  return name === "conductor" || !!name?.startsWith("conductor-");
+}
+
 export function workspaceSnapshot(s: Json, contextUsedPercent?: ReadonlyMap<Json, number>, approvalPanes?: ReadonlySet<string>, lastChanged?: ReadonlyMap<string, string>): Json {
   const focusedPane = objects(s.panes).find(p => p.pane_id === s.focused_pane_id
     && p.tab_id === s.focused_tab_id && p.workspace_id === s.focused_workspace_id);
@@ -95,7 +100,7 @@ export function workspaceSnapshot(s: Json, contextUsedPercent?: ReadonlyMap<Json
       const changed = Math.max(0, ...panes.map(p => Number.isSafeInteger(p.state_change_seq) ? Number(p.state_change_seq) : 0));
       return { id: t.tab_id, label: t.label, title: agent?.title || agent?.terminal_title_stripped,
         agent: agent?.agent, agentStatus: t.agent_status, cwd: agent?.foreground_cwd || agent?.cwd,
-        role: paneAgentName(s, agent)?.startsWith("conductor-") ? "conductor" : undefined,
+        role: isConductorName(paneAgentName(s, agent)) ? "conductor" : undefined,
         changedSeq: changed || undefined,
         lastChangedAt: lastChanged?.get(tabActivityKey(t.workspace_id, t.tab_id)),
         approvalPending: panes.some(p => approvalPanes?.has(String(p.pane_id))) || undefined,
