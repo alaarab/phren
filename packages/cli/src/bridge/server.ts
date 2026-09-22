@@ -12,7 +12,7 @@ import { ActivityJournal } from "./activity.js";
 import { AgentHooks } from "./agent-hooks.js";
 import { homeDirectory, startChangeRetention } from "./changes.js";
 import { CodeReindexer, CodeRoutes } from "./code-routes.js";
-import { threadHealth } from "./codex-threads.js";
+import { queuedQuestion, threadHealth } from "./codex-threads.js";
 import { WorkspaceContextUsage } from "./context.js";
 import { DispatchService, dispatchProjectDirectory, dispatchStatus } from "./dispatch.js";
 import { remoteChildren } from "./dispatch-tree.js";
@@ -624,7 +624,20 @@ export async function serve(version: string): Promise<void> {
             const pendingQuestions = target.source === "codex" ? await codexQuestions.pending(target).catch(() => undefined) : undefined;
             const cwd = await trustedDirectory(pane).catch(() => undefined);
             const branch = modules.has("git") && cwd ? await repositoryBranch(cwd) : undefined;
-            const terminalPrompt = !pendingApproval && ["blocked", "waiting"].includes(String(pane.agent_status)) ? agentHooks.terminalPrompt(target) : undefined;
+            const waiting = !pendingApproval && ["blocked", "waiting"].includes(String(pane.agent_status));
+            const hookPrompt = waiting ? agentHooks.terminalPrompt(target) : undefined;
+            // Codex 0.155's queued follow-up question never becomes a held
+            // PermissionRequest: it lives as a thread item the terminal shows
+            // under "Queued follow-up inputs". With nothing else to ask, read
+            // its text and options and publish them as the same choice shape
+            // the phone already answers with keys (alt+up, then the option).
+            const terminalPrompt = hookPrompt
+              ?? (waiting && target.source === "codex" && !pendingQuestions?.length
+                ? await queuedQuestion(target.session).then(queued => queued ? {
+                    toolName: "Question", message: queued.title, queued: true,
+                    choice: { title: queued.title, options: queued.options },
+                  } : undefined).catch(() => undefined)
+                : undefined);
             const historyHealth = target.source === "codex" ? await threadHealth(target.session, pane.agent_status) : { stalled: false };
             send(client, { agentStatus: { source: target.source, session: target.session,
               status: pendingApproval ? "waiting" : pane.agent_status, pendingApproval, pendingQuestions, terminalPrompt,
@@ -698,9 +711,11 @@ export async function serve(version: string): Promise<void> {
   await unlink(socketPath()).catch(() => {});
 }
 
-/** The phone can press these and nothing else; never a typed string. */
-const ANSWER_KEYS = ["Escape", "Enter", "Up", "Down", "Tab", "y", "n", "p", "1", "2", "3", "4", "5", "6", "7", "8", "9"] as const;
-const HERDR_KEYS: Partial<Record<(typeof ANSWER_KEYS)[number], string>> = { Escape: "esc", Enter: "enter", Up: "up", Down: "down", Tab: "tab" };
+/** The phone can press these and nothing else; never a typed string.
+ * `AltUp` is Codex's "edit/answer the last queued follow-up": it opens the
+ * queue, after which the option key (or typed text) is the answer. */
+const ANSWER_KEYS = ["Escape", "Enter", "Up", "Down", "Tab", "AltUp", "y", "n", "p", "1", "2", "3", "4", "5", "6", "7", "8", "9"] as const;
+const HERDR_KEYS: Partial<Record<(typeof ANSWER_KEYS)[number], string>> = { Escape: "esc", Enter: "enter", Up: "up", Down: "down", Tab: "tab", AltUp: "alt+Up" };
 
 /** A secret typed into a terminal prompt: printable, bounded, never logged. */
 const secretText = z.string().min(1).max(256).refine(t => !/[\x00-\x1f\x7f]/.test(t));
