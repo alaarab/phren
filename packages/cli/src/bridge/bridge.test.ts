@@ -28,35 +28,49 @@ const hookBundle = path.resolve(process.env.PHREN_TEST_HOOK_BUNDLE || "packages/
 const target = { server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p1", source: "codex", session };
 const row = (text: string) => ({ type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text }] } });
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const permissionsMenu = (highlight: number | undefined) => "Choose permissions\n"
+  + ["Read only", "Ask for approval", "Full access"].map((label, index) =>
+    `${index === highlight ? "›" : " "} ${index + 1}. ${label}`).join("\n") + "\nPress enter to confirm\n";
 
 describe("Phren Hook boundaries", () => {
   it("splits numbered option descriptions without changing labels or answer keys", () => {
     const choice = visibleTerminalChoice("Older output\n\nAllow the tool?\n"
-      + "1. Allow            Run the tool and continue.\n"
+      + "› 1. Allow            Run the tool and continue.\n"
       + "2. Allow for this session (p)  Keep this permission until the session ends.\n"
       + "3. No (esc)\n");
-    expect(choice).toEqual({ title: "Allow the tool?", options: [
-      { label: "Allow", description: "Run the tool and continue.", key: "1" },
-      { label: "Allow for this session", description: "Keep this permission until the session ends.", key: "p" },
-      { label: "No", key: "Escape" },
+    expect(choice).toEqual({ title: "Allow the tool?", highlightedIndex: 0, options: [
+      { label: "Allow", description: "Run the tool and continue.", key: "1", hasKey: false },
+      { label: "Allow for this session", description: "Keep this permission until the session ends.", key: "p", hasKey: true },
+      { label: "No", key: "Escape", hasKey: true },
     ] });
     expect(visibleTerminalChoice("Continue?\n1. Allow  Run the tool.  Then continue. (y)\n2. No (esc)")?.options[0])
-      .toEqual({ label: "Allow", description: "Run the tool.  Then continue.", key: "y" });
+      .toEqual({ label: "Allow", description: "Run the tool.  Then continue.", key: "y", hasKey: true });
     expect(terminalChoice({ question: "Allow?", options: [
       { label: "Allow", description: "Run it.", key: "1" }, { label: "Decline", key: "2" },
     ] })?.options).toEqual([{ label: "Allow", description: "Run it.", key: "1" }, { label: "Decline", key: "2" }]);
   });
 
+  it("records keyless menu highlights and refuses an unreadable or ambiguous cursor", () => {
+    expect(visibleTerminalChoice(permissionsMenu(0))).toEqual({ title: "Choose permissions", highlightedIndex: 0,
+      options: [{ label: "Read only", key: "1", hasKey: false },
+        { label: "Ask for approval", key: "2", hasKey: false }, { label: "Full access", key: "3", hasKey: false }] });
+    expect(visibleTerminalChoice(permissionsMenu(undefined))).toBeUndefined();
+    expect(visibleTerminalChoice(permissionsMenu(0).replace("  2.", "› 2."))).toBeUndefined();
+    for (const marker of [">", "❯", "›", "▸", "▶", "»", "•", "*"]) {
+      expect(visibleTerminalChoice(permissionsMenu(2).replace("›", marker))?.highlightedIndex).toBe(2);
+    }
+  });
+
   it("normalizes MCP arguments and only resolves choices for the matching permission", () => {
     const input = { action: "read_skill", name: "m4l-improve" };
     const sentence = "Allow the phren MCP server to run tool phren_admin?";
-    const options = "\n1. Allow  Run the tool and continue.\n2. Allow for this session  Keep it until the session ends.\n3. Deny";
+    const options = "\n› 1. Allow  Run the tool and continue.\n2. Allow for this session  Keep it until the session ends.\n3. Deny";
     const prompt = permissionPrompt("mcp__phren__phren_admin", input, sentence + options);
     expect(prompt.title).toBe(sentence);
     expect(JSON.parse(prompt.details)).toEqual(input);
     expect(prompt.terminalOnly).toBe(false);
     expect(prompt.choice?.options.map(option => option.key)).toEqual(["1", "2", "3"]);
-    expect(prompt.choice?.options[0]).toEqual({ label: "Allow", description: "Run the tool and continue.", key: "1" });
+    expect(prompt.choice?.options[0]).toEqual({ label: "Allow", description: "Run the tool and continue.", key: "1", hasKey: false });
     // A provider may report only the bare tool name; prefer its pane's sentence.
     expect(permissionPrompt("phren_admin", input, sentence + options).title).toBe(sentence);
     expect(permissionPrompt("mcp__phren__phren_admin", input, "Allow a different tool?" + options).terminalOnly).toBe(true);
@@ -345,6 +359,11 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
   let extraWorkspaces: Record<string, unknown>[] = [], extraTabs: Record<string, unknown>[] = [], extraPanes: Record<string, unknown>[] = [], failAgentStart = false;
   let helperPIDs: number[] = [];
   let paneLines = "", drawConfirmation = false;
+  let confirmationHasKeys = true;
+  let menuHighlight: number | undefined, confirmedMenuRow: number | undefined;
+  let ignoredMenuMoves = 0, loseMenuHighlight = false, replaceMenuAfterMove = false;
+  /** The pane a moving highlight redraws; the permissions menu unless a test sets its own. */
+  let menuPane: (highlight: number | undefined) => string = permissionsMenu;
   let paneAgent = "codex";
   let paneCwd: string | undefined;
   let remoteHook: ChildProcess | undefined;
@@ -373,6 +392,9 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     replaceBeforeMutation = false; deliveries = [];
     extraWorkspaces = []; extraTabs = []; extraPanes = []; failAgentStart = false; helperPIDs = []; remoteHook = undefined;
     paneLines = ""; drawConfirmation = false; paneAgent = "codex";
+    confirmationHasKeys = true;
+    menuHighlight = undefined; confirmedMenuRow = undefined; ignoredMenuMoves = 0; menuPane = permissionsMenu;
+    loseMenuHighlight = false; replaceMenuAfterMove = false;
   }
   async function resetRecord(): Promise<void> {
     record = path.join(root, `codex/sessions/2026/09/10/rollout-2026-09-10T00-00-00-${session}.jsonl`);
@@ -404,10 +426,22 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
           if (replaceBeforeMutation) current = "bbbbbbbb-1111-4111-8111-111111111111";
           deliveries.push({ method: req.method, session: current });
           const sent: string[] = Array.isArray(req.params?.keys) ? req.params.keys : [];
+          if (menuHighlight !== undefined) {
+            const arrows = sent.filter(key => key === "down" || key === "up");
+            if (arrows.length) {
+              if (ignoredMenuMoves > 0) ignoredMenuMoves--;
+              else for (const key of arrows) menuHighlight = Math.max(0, Math.min(2, menuHighlight + (key === "down" ? 1 : -1)));
+              paneLines = menuPane(loseMenuHighlight ? undefined : menuHighlight);
+              if (replaceMenuAfterMove) paneLines = paneLines.replace("Choose permissions", "Choose a different setting");
+            }
+            if (sent.includes("enter")) { confirmedMenuRow = menuHighlight; paneLines = ""; menuHighlight = undefined; }
+          }
           // A fake Codex pane: Enter on the permissions menu draws Full Access's
-          // second confirmation; the Hook's own 1+Enter clears it.
-          if (drawConfirmation && sent.includes("enter") && !sent.includes("1")) {
-            paneLines = "Enable full access?\n1. Yes, continue anyway\n2. Cancel\n";
+          // second confirmation; another Enter clears it.
+          if (drawConfirmation && sent.includes("enter")) {
+            paneLines = paneLines.startsWith("Enable full access?") ? ""
+              : confirmationHasKeys ? "Enable full access?\n› 1. Yes, continue anyway (1)\n2. Cancel (esc)\n"
+              : "Enable full access?\n› 1. Yes, continue anyway\n2. Cancel\n";
           }
           if (sent.includes("1")) paneLines = "";
         }
@@ -1065,7 +1099,7 @@ schedules:
 
     it("reports a confirmation that never appears as the visible waiting prompt", async () => {
       agentStatus = "idle"; drawConfirmation = false;
-      paneLines = "Apply the permission change?\n1. Yes, continue anyway\n2. Cancel\n";
+      paneLines = "Apply the permission change?\n› 1. Yes, continue anyway\n2. Cancel\n";
       expect((await api("/v1/prompt", { target, text: "/permissions" })).status).toBe(200);
       const selected = await api("/v1/keys", { target, keys: ["Down", "Down", "Enter"] });
       expect(selected.status, JSON.stringify(selected.data)).toBe(200);
@@ -1089,6 +1123,17 @@ schedules:
       socket.terminate();
       // The window stays open so the card's own key still lands.
       expect((await api("/v1/keys", { target, keys: ["1"] })).status).toBe(200);
+    });
+
+    it("verifies the highlighted Full Access confirmation when it has no shortcut keys", async () => {
+      agentStatus = "idle"; drawConfirmation = true; confirmationHasKeys = false;
+      expect((await api("/v1/prompt", { target, text: "/permissions" })).status).toBe(200);
+      const selected = await api("/v1/keys", { target, keys: ["Down", "Down", "Enter"] });
+      expect(selected.status, JSON.stringify(selected.data)).toBe(200);
+      expect(selected.data.menuClosed).toBe(true);
+      expect(commands.filter(c => c.method === "agent.send_keys").map(c => c.params.keys))
+        .toEqual([["down", "down", "enter"], ["enter"]]);
+      expect(paneLines).toBe("");
     });
 
     it("publishes a Claude terminal numbered dialog, answers it with Enter, and drops it when the pane works", async () => {
@@ -1176,6 +1221,68 @@ schedules:
       expect((await status()).terminalPrompt).toBeUndefined();
       agentStatus = "working";
       expect((await status()).terminalPrompt).toBeUndefined();
+    });
+
+    describe("Codex keyless terminal menus", () => {
+      beforeEach(startFixture);
+
+      async function status() {
+        const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
+        const frames: any[] = []; socket.on("message", data => frames.push(JSON.parse(data.toString())));
+        await once(socket, "open");
+        for (let i = 0; i < 80 && !frames.length; i++) await sleep(25);
+        socket.terminate();
+        return frames[0].agentStatus;
+      }
+
+      it.each([
+        { from: 0, to: 2, ignored: 0, sent: [["down", "down"], ["enter"]] },
+        { from: 2, to: 2, ignored: 0, sent: [["enter"]] },
+        { from: 2, to: 0, ignored: 0, sent: [["up", "up"], ["enter"]] },
+        { from: 0, to: 2, ignored: 1, sent: [["down", "down"], ["down", "down"], ["enter"]] },
+      ])("answers row $to from row $from with $ignored missed moves", async ({ from, to, ignored, sent }) => {
+        agentStatus = "waiting"; menuHighlight = from; ignoredMenuMoves = ignored;
+        paneLines = permissionsMenu(menuHighlight);
+        expect((await status()).terminalPrompt.choice).toMatchObject({ highlightedIndex: from });
+        const answered = await api("/v1/keys", { target, keys: [String(to + 1)] });
+        expect(answered.status, JSON.stringify(answered.data)).toBe(200);
+        expect(confirmedMenuRow).toBe(to);
+        expect(commands.filter(c => c.method === "agent.send_keys").map(c => c.params.keys)).toEqual(sent);
+        // The last read must precede the confirming Enter, after any arrows.
+        const interaction = commands.filter(c => ["agent.read", "agent.send_keys"].includes(c.method));
+        expect(interaction.at(-2)?.method).toBe("agent.read");
+        expect(interaction.at(-1)?.params.keys).toEqual(["enter"]);
+      });
+
+      it("reads a highlight that moved since the card was published", async () => {
+        agentStatus = "waiting"; menuHighlight = 0; paneLines = permissionsMenu(menuHighlight);
+        await status();
+        menuHighlight = 1; paneLines = permissionsMenu(menuHighlight);
+        expect((await api("/v1/keys", { target, keys: ["3"] })).status).toBe(200);
+        expect(confirmedMenuRow).toBe(2);
+        expect(commands.filter(c => c.method === "agent.send_keys").map(c => c.params.keys)).toEqual([["down"], ["enter"]]);
+      });
+
+      it("publishes no choice when a menu has no readable highlight", async () => {
+        agentStatus = "waiting"; paneLines = permissionsMenu(undefined);
+        expect((await status()).terminalPrompt?.choice).toBeUndefined();
+        expect(commands.filter(c => c.method === "agent.send_keys")).toEqual([]);
+      });
+
+      it.each(["stuck", "lost", "changed", "missing"])("does not confirm a %s highlight", async mode => {
+        agentStatus = "waiting"; menuHighlight = 0; paneLines = permissionsMenu(menuHighlight);
+        await status();
+        ignoredMenuMoves = mode === "stuck" ? 2 : 0;
+        loseMenuHighlight = mode === "lost";
+        replaceMenuAfterMove = mode === "changed";
+        if (mode === "missing") paneLines = permissionsMenu(undefined);
+        const answered = await api("/v1/keys", { target, keys: ["3"] });
+        expect(answered.status).toBe(409);
+        expect(JSON.stringify(answered.data)).toContain("Open terminal");
+        expect(confirmedMenuRow).toBeUndefined();
+        expect(commands.filter(c => c.method === "agent.send_keys").map(c => c.params.keys))
+          .toEqual(mode === "stuck" ? [["down", "down"], ["down", "down"]] : mode === "missing" ? [] : [["down", "down"]]);
+      });
     });
 
     it("flags a terminal password prompt only while the pane is reading one", async () => {
@@ -1528,8 +1635,16 @@ schedules:
     it("holds MCP arguments as details and answers the matching terminal choices with their own keys", async () => {
       agentStatus = "waiting";
       const sentence = "Allow the phren MCP server to run tool phren_admin?";
-      paneLines = sentence + "\n1. Allow            Run the tool and continue.\n"
-        + "2. Allow for this session  Keep this permission for this session.\n3. Deny  Do not run the tool.\n";
+      // Codex marks the highlighted row; without a cursor the Hook refuses to
+      // answer a menu whose rows carry no keys of their own, and the phone's
+      // answer walks that cursor rather than typing a number the menu ignores.
+      menuPane = highlight => sentence + "\n"
+        + ["1. Allow            Run the tool and continue.",
+           "2. Allow for this session  Keep this permission for this session.",
+           "3. Deny  Do not run the tool."]
+          .map((row, index) => (index === highlight ? "\u203a " : "  ") + row).join("\n") + "\n";
+      menuHighlight = 0;
+      paneLines = menuPane(menuHighlight);
       const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
       const frames: any[] = []; socket.on("message", bytes => frames.push(JSON.parse(bytes.toString())));
       await once(socket, "open");
@@ -1549,12 +1664,15 @@ schedules:
       expect(approval.terminalOnly).toBe(false);
       expect(approval.choice.title).toBe(sentence);
       expect(approval.choice.options).toEqual([
-        { label: "Allow", description: "Run the tool and continue.", key: "1" },
-        { label: "Allow for this session", description: "Keep this permission for this session.", key: "2" },
-        { label: "Deny", description: "Do not run the tool.", key: "3" },
+        { label: "Allow", description: "Run the tool and continue.", key: "1", hasKey: false },
+        { label: "Allow for this session", description: "Keep this permission for this session.", key: "2", hasKey: false },
+        { label: "Deny", description: "Do not run the tool.", key: "3", hasKey: false },
       ]);
+      // The rows carry no keys of their own, so the Hook walks the cursor from
+      // the highlighted first row to the second and confirms it.
       expect((await api("/v1/keys", { target, keys: ["2"] })).status).toBe(200);
-      expect(commands.filter(c => c.method === "agent.send_keys").map(c => c.params.keys)).toEqual([["2", "enter"]]);
+      expect(commands.filter(c => c.method === "agent.send_keys").map(c => c.params.keys))
+        .toEqual([["down"], ["enter"]]);
       expect(await reply).toEqual({});
       socket.close(); await once(socket, "close");
     });

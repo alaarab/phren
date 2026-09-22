@@ -36,6 +36,7 @@ import { childAgent, childAgentTree, conversationNamedPaths, historicalImage, pu
 import { listUploads, saveUpload, uploadImage } from "./uploads.js";
 import { ModelCatalog } from "./models.js";
 import { currentModel, currentStep } from "./steps.js";
+import { TranscriptPreviewStream } from "./transcript-preview.js";
 import { AccountUsageReader } from "./usage.js";
 import { createScheduleLauncher, Scheduler, scheduleRunsFile } from "./schedules.js";
 import { defaultPhrenPath } from "../shared.js";
@@ -507,9 +508,9 @@ export async function serve(version: string): Promise<void> {
               await rpc(target.server, "agent.send_keys", { target: target.pane, keys: question.map(key => HERDR_KEYS[key as (typeof ANSWER_KEYS)[number]] ?? key) });
               result = { ok: true };
             } else {
-              // A digit chosen from a parsed terminal dialog also needs Enter to
-              // submit the selection; the phone only sends the option's key.
-              const answerKeys = agentHooks.dialogAnswerKeys(target, keys);
+              // Keyless choices move and verify the highlight before Enter;
+              // the phone sends the option identifier through the same route.
+              const answerKeys = await agentHooks.dialogAnswerKeys(target, keys);
               await rpc(target.server, "agent.send_keys", { target: target.pane, keys: answerKeys.map(key => HERDR_KEYS[key] ?? key) });
               // A remembered prompt is answered by any key but a cursor move; the
               // menu window stays open through Enter because some choices (Codex
@@ -517,10 +518,10 @@ export async function serve(version: string): Promise<void> {
               if (keys.some(key => key !== "Up" && key !== "Down" && key !== "Tab")) { agentHooks.clearTerminalPrompt(target); agentHooks.releaseChoice(target); }
               if (keys.includes("Escape")) agentHooks.menuClosed(target);
               // Enter on Codex's /permissions menu may open "Enable full access?".
-              // Watch the pane's lines for it, answer with 1 then Enter, and only
+              // Watch the pane's lines for it, answer its visible option, and only
               // then close the window; a prompt that never arrives is reported as
               // still waiting with the visible text for the phone's question card.
-              if (keys.includes("Enter") && menu && target.source === "codex"
+              if (answerKeys.includes("Enter") && menu && target.source === "codex"
                 && (agentHooks.menuCommand(target) ?? "").toLowerCase() === "/permissions") {
                 const walk = await agentHooks.walkMenuConfirmation(target);
                 result = { ok: true, ...(walk.menuClosed ? { menuClosed: true } : {}),
@@ -652,6 +653,7 @@ export async function serve(version: string): Promise<void> {
     // Even rejected upgrades may already contain invalid WebSocket frames.
     // Handle their errors before parsing any untrusted destination fields.
     const target = targetFromURL(url);
+    const previews = new TranscriptPreviewStream(target);
     // A child agent's transcript streams through the same socket, bound to
     // the parent conversation: the parent target is what gets revalidated
     // each tick, and the frames name the child by its parent-scoped id.
@@ -679,11 +681,19 @@ export async function serve(version: string): Promise<void> {
             if (first) send(client, { ...emptyPage, type: "backlog", ...conversation });
           } else if (reader) {
             await refreshTranscript(reader.file, conversation.source, conversation.session);
+            if (first && child === null && target.source === "claude" && resumeAfterLine !== undefined) {
+              // A reconnect cursor can omit the current user row entirely.
+              // Seed only ephemeral turn state from the bounded recent tail.
+              previews.observe((await new TranscriptReader(reader.file, conversation.source).read(undefined, abort.signal)).entries);
+            }
             const page = resumeAfterLine === undefined
               ? await reader.read(undefined, abort.signal)
               : await reader.readAfter(resumeAfterLine, abort.signal);
             resumeAfterLine = undefined;
-            if (first || page.entries.length || page.reset) send(client, { ...page, type: first || page.reset ? "backlog" : "append", ...conversation });
+            if (child === null) previews.observe(page.entries, page.reset);
+            const preview = child === null ? await previews.update(pane.agent_status, reader.file) : undefined;
+            if (first || page.entries.length || page.reset) send(client, { ...page, ...preview, type: first || page.reset ? "backlog" : "append", ...conversation });
+            else if (preview) send(client, { type: "preview", ...conversation, ...preview });
           } else {
             let pendingApproval = agentHooks.approval(target);
             const pendingQuestions = target.source === "codex" ? await codexQuestions.pending(target).catch(() => undefined) : undefined;

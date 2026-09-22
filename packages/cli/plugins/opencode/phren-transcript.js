@@ -173,7 +173,8 @@ function linesFor(session) {
       const blocks = blocksFor(message);
       if (blocks.length) emit("user/message", { source: "user", message: { role: "user", content: blocks } }, info.time?.created);
     } else if (info.role === "assistant") {
-      const blocks = blocksFor(message);
+      const complete = Boolean(info.time?.completed || info.finish);
+      const blocks = blocksFor(message).filter(block => complete || block.type !== "text");
       const data = { stop_reason: STOP_REASONS[info.finish] || info.finish || "end_turn", message: { role: "assistant", content: blocks } };
       if (info.tokens && (typeof info.tokens.input === "number" || typeof info.tokens.output === "number")) {
         data.usage = { input_tokens: info.tokens.input ?? 0, output_tokens: info.tokens.output ?? 0 };
@@ -194,7 +195,7 @@ export const PhrenTranscriptPlugin = async () => {
 
   const sessionState = sessionID => {
     let state = sessions.get(sessionID);
-    if (!state) { state = { messages: new Map(), order: [] }; sessions.set(sessionID, state); }
+    if (!state) { state = { messages: new Map(), order: [], idle: false }; sessions.set(sessionID, state); }
     return state;
   };
 
@@ -210,10 +211,19 @@ export const PhrenTranscriptPlugin = async () => {
     if (!state) return;
     const body = linesFor(state);
     const content = body.length ? body.join("\n") + "\n" : "";
-    if (written.get(sessionID) === content) return;
     const directory = path.join(storeRoot(), ".runtime", "sessions");
     mkdirSync(directory, { recursive: true });
     const file = path.join(directory, `opencode-${sessionID}.events.jsonl`);
+    const messages = state.order.map(id => state.messages.get(id));
+    const latest = messages.at(-1), info = latest?.info;
+    const user = messages.findLast(message => message.info?.role === "user");
+    const preview = !state.idle && info?.role === "assistant" && !info.time?.completed && !info.finish
+      ? blocksFor(latest).filter(block => block.type === "text").map(block => block.text).join("\n").slice(0, 32_768) : "";
+    if (preview && user?.info.time?.created) writeJsonAtomic(file + ".preview.json", {
+      turnStartedAt: new Date(user.info.time.created).toISOString(), text: preview,
+    });
+    else removeFile(file + ".preview.json");
+    if (written.get(sessionID) === content) return;
     const staging = `${file}.${process.pid}.tmp`;
     writeFileSync(staging, content, { mode: 0o600 });
     renameSync(staging, file);
@@ -232,6 +242,7 @@ export const PhrenTranscriptPlugin = async () => {
     if (!info || typeof info.id !== "string") return;
     const message = messageState(sessionID, info.id);
     message.info = { ...message.info, ...info };
+    if (info.role === "user") sessionState(sessionID).idle = false;
     schedule(sessionID);
   };
 
@@ -305,6 +316,11 @@ export const PhrenTranscriptPlugin = async () => {
       if (!OPENCODE_SESSION.test(text(sessionID))) return;
       if (event.type === "message.updated") rememberInfo(sessionID, properties.info);
       else if (event.type === "message.part.updated") rememberPart(sessionID, properties.part?.messageID, properties.part);
+      else if (event.type === "message.part.delta" && properties.field === "text" && typeof properties.delta === "string") {
+        const message = messageState(sessionID, properties.messageID);
+        const part = message.parts.get(properties.partID);
+        if (part?.type === "text") rememberPart(sessionID, properties.messageID, { ...part, text: text(part.text) + properties.delta });
+      }
       else if (event.type === "message.removed") {
         const state = sessions.get(sessionID);
         if (state && typeof properties.messageID === "string") {
@@ -312,7 +328,10 @@ export const PhrenTranscriptPlugin = async () => {
           state.order = state.order.filter(id => id !== properties.messageID);
           schedule(sessionID);
         }
-      } else if (event.type === "session.idle") flush(sessionID);
+      } else if (event.type === "session.idle" || event.type === "session.error") {
+        sessionState(sessionID).idle = true;
+        flush(sessionID);
+      } else if (event.type === "session.status" && properties.status?.type === "busy") sessionState(sessionID).idle = false;
     },
   };
 };

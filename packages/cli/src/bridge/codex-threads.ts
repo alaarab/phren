@@ -10,7 +10,7 @@ import { atomic, bridgeRoot, object, objects, sessionId, type Json } from "./pro
 const MAX_ITEMS = 20_000, OUTPUT_TAIL = 4_000;
 const STALLED_AFTER_MS = 10 * 60 * 1_000;
 
-interface Emitted { lastOrdinal: number; maxUpdated: number; count: number; done: Record<string, "call" | "done"> }
+interface Emitted { lastOrdinal: number; maxUpdated: number; count: number; turnSignature?: string; done: Record<string, "call" | "done"> }
 
 export function codexHome(): string { return process.env.CODEX_HOME || path.join(homedir(), ".codex"); }
 export function materializedRoot(): string { return path.join(bridgeRoot(), "codex-threads"); }
@@ -61,6 +61,31 @@ export async function threadHealth(session: string, agentStatus: unknown): Promi
 
 const materializations = new Map<string, Promise<string | undefined>>();
 
+/** The thread store accumulates agent-message deltas in place. Only text
+ * from the newest unfinished message is public; reasoning is never read out. */
+function pendingMessage(history: Db, session: string): { id: string; turnStartedAt: string; text: string } | undefined {
+  const turn = object(history.prepare("select turn_id, status, started_at from thread_turns where thread_id = ? order by rollout_ordinal desc limit 1").get(session));
+  if (turn.status !== "inProgress") return undefined;
+  const row = object(history.prepare("select item_json from thread_items where thread_id = ? and turn_id = ? order by rollout_ordinal desc limit 1").get(session, turn.turn_id));
+  let item: Json;
+  try { item = object(JSON.parse(String(row.item_json))); } catch { return undefined; }
+  if (item.type !== "agentMessage" || finished(item) || item.delivery === "async") return undefined;
+  const started = Number(turn.started_at);
+  if (!Number.isFinite(started) || started <= 0) return undefined;
+  return { id: String(item.id), turnStartedAt: new Date(started > 1e12 ? started : started * 1000).toISOString(),
+    text: typeof item.text === "string" ? item.text.slice(0, 32_768) : "" };
+}
+
+export async function codexThreadPreview(session: string): Promise<{ turnStartedAt: string; text: string } | undefined> {
+  if (!sessionId.safeParse(session).success) return undefined;
+  const history = await openReadOnly(path.join(codexHome(), "thread_history_1.sqlite"));
+  if (!history) return undefined;
+  try {
+    const pending = pendingMessage(history, session);
+    return pending?.text ? { turnStartedAt: pending.turnStartedAt, text: pending.text } : undefined;
+  } catch { return undefined; } finally { history.close(); }
+}
+
 /** Bring the materialized file up to date with the store. Returns the file
  * when the thread exists there, undefined otherwise. Safe to call often:
  * an unchanged thread costs one aggregate query. */
@@ -86,7 +111,11 @@ async function materializeThread(session: string): Promise<string | undefined> {
     let state: Emitted = { lastOrdinal: -1, maxUpdated: -1, count: 0, done: {} };
     try { state = { ...state, ...object(JSON.parse(await readFile(stateFile, "utf8"))) as Partial<Emitted> }; } catch { /* first time */ }
     const fresh = state.count === 0;
-    if (!fresh && state.count === Number(summary.n) && state.lastOrdinal === Number(summary.last) && state.maxUpdated === Number(summary.updated)) return file;
+    const turn = object(history.prepare("select turn_id, status from thread_turns where thread_id = ? order by rollout_ordinal desc limit 1").get(session));
+    const turnSignature = JSON.stringify(turn);
+    if (!fresh && state.count === Number(summary.n) && state.lastOrdinal === Number(summary.last) && state.maxUpdated === Number(summary.updated)
+        && state.turnSignature === turnSignature) return file;
+    const pending = pendingMessage(history, session);
     const rows = objects(history.prepare("select rollout_ordinal, item_type, item_json, updated_at_ordinal from thread_items where thread_id = ? order by rollout_ordinal limit ?").all(session, MAX_ITEMS));
     const lines: string[] = [];
     if (fresh) {
@@ -100,6 +129,7 @@ async function materializeThread(session: string): Promise<string | undefined> {
     for (const row of rows) {
       let item: Json; try { item = object(JSON.parse(String(row.item_json))); } catch { continue; }
       const id = String(item.id ?? `ordinal-${row.rollout_ordinal}`), emitted = state.done[id];
+      if (item.type === "agentMessage" && id === pending?.id) continue;
       const calls = callRows(item), output = outputRow(item);
       if (!emitted) {
         if (calls) { for (const call of calls) lines.push(JSON.stringify(call)); state.done[id] = "call"; }
@@ -134,7 +164,7 @@ async function materializeThread(session: string): Promise<string | undefined> {
       const handle = await open(file, "a", 0o600);
       try { await handle.appendFile(lines.join("\n") + "\n"); } finally { await handle.close(); }
     }
-    state.count = Number(summary.n); state.lastOrdinal = Number(summary.last); state.maxUpdated = Number(summary.updated);
+    state.count = Number(summary.n); state.lastOrdinal = Number(summary.last); state.maxUpdated = Number(summary.updated); state.turnSignature = turnSignature;
     await atomic(stateFile, JSON.stringify(state));
     return file;
   } catch { return undefined; } finally { history.close(); }
