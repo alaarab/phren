@@ -465,7 +465,6 @@ struct HerdrTerminalView: View {
             model.terminal.onShortcutGesture = { shortcuts = true }
             model.terminal.onOpenChat = openChat
             model.terminal.onDictate = { showingDictation = true }
-            model.terminal.onPasteImage = pasteImageIntoTerminal
         }.onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
             visible = false
@@ -476,7 +475,15 @@ struct HerdrTerminalView: View {
             model.terminal.onPasteImage = nil
         }
         .task(id: Run(active: active, reconnect: reconnect)) {
-            if active { await model.run(host: host, session: session, target: target, paneID: paneID, route: route, commandMenu: commandMenu) }
+            // Refresh the callback with this scene's current environment. An
+            // onAppear closure can retain the inactive scene from navigation
+            // and silently reject every later image paste in its active guard.
+            if active {
+                model.terminal.onPasteImage = { image in pasteImageIntoTerminal(image) }
+                await model.run(host: host, session: session, target: target, paneID: paneID, route: route, commandMenu: commandMenu)
+            } else {
+                model.terminal.onPasteImage = nil
+            }
         }
     }
     private func closeAgents() { withAnimation(.easeInOut(duration: 0.18)) { showingAgents = false } }

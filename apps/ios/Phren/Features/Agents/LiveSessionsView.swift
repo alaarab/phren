@@ -16,6 +16,13 @@ struct LiveSessionsView: View {
     @State private var showingMore = false
     @State private var schedulesStoreID: String?
     @State private var setupDestination: LiveSessionsModel.SetupAction?
+    @State private var showingConductorLaunch = false
+    @State private var conductorStoreID: String?
+    private var conductorStore: StoreDescriptor? {
+        model.storeDescriptors.first(where: { $0.id == conductorStoreID })
+            ?? model.storeDescriptors.first(where: { $0.id == model.storeFilter })
+            ?? model.storeDescriptors.first
+    }
     private struct SessionOpen: Identifiable, Hashable {
         let session: LiveAgentSession
         let destination: AgentLaunch.Destination
@@ -70,6 +77,9 @@ struct LiveSessionsView: View {
             } else {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: PhrenTheme.Space.medium) {
+                    if let store = conductorStore {
+                        conductorEntry(store: store, screen: screen)
+                    }
                     PhrenSearchField(text: Binding(get: { sessions.query }, set: sessions.setQuery),
                                      placeholder: "Search all sessions", identifier: "sessions-search")
                     sessionSections(screen)
@@ -158,6 +168,15 @@ struct LiveSessionsView: View {
             }
         }
         .sheet(isPresented: $sessions.adding) { NavigationStack { LiveHostEditor() } }
+        .sheet(isPresented: $showingConductorLaunch) {
+            if let store = conductorStore {
+                LaunchSessionView(storeID: store.id,
+                                  project: LiveSessionsModel.conductorProject(storeID: store.id, projects: model.sessionProjects,
+                                                                              registry: model.machineRegistry(storeId: store.id)),
+                                  initialRole: .conductor, allowsStoreSelection: true,
+                                  onStoreSelected: { conductorStoreID = $0 })
+            }
+        }
         .navigationDestination(item: $selected) { selection in
             LiveSessionDetailView(sessionID: selection.id, monitor: selection.monitor)
         }
@@ -201,6 +220,40 @@ struct LiveSessionsView: View {
                 } catch { /* Keep the verified connection unchanged when an identity conflicts. */ }
             }
         }
+    }
+
+    @ViewBuilder
+    private func conductorEntry(store: StoreDescriptor, screen: SessionOverviewMonitor.Screen) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let conductor = sessions.conductor(in: store.id) {
+                sessionCard(conductor, screen: screen)
+            } else {
+                Button { showingConductorLaunch = true } label: {
+                    ConductorStartRow(storeName: model.storeDescriptors.count > 1 ? store.id : nil)
+                }
+                .buttonStyle(.plain)
+                .phrenIdentifier("sessions-start-conductor")
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .phrenIdentifier("sessions-conductor-slot")
+    }
+
+    private func sessionCard(_ session: LiveAgentSession, screen: SessionOverviewMonitor.Screen) -> some View {
+        let monitor = sessions.monitor(for: session.host.id)
+        return LiveSessionCard(session: session, fresh: monitor?.isLive(at: .now) == true,
+                               stale: monitor?.isStale(at: .now) == true,
+                               showHost: true,
+                               resolvedProject: screen.projects[session.id] ?? preferences?.projectMatch(hostID: session.host.id, cwd: session.tab.cwd,
+                                                                                                       projects: model.sessionProjects)?.project.name,
+                               resolvedPin: preferences?.isPinned(session.id) == true,
+                               onChat: { sessionOpen = SessionOpen(session: session, destination: .chat) }, onDetails: {
+            if let monitor { selected = OverviewSelection(session: session, monitor: monitor) }
+        }, onClose: { request, confirm in
+            if confirm { closeRequest = request }
+            else { SessionCloseDialogs.perform(request, monitor: sessions.monitor(for: request.session.host.id)) { closeError = $0 } }
+        })
+        .equatable()
     }
 
     private var moreActions: [PhrenActionSheet.Action] {
@@ -285,24 +338,18 @@ struct LiveSessionsView: View {
                     .accessibilityIdentifier("sessions-empty")
             }
         }
+        let conductorID = conductorStore.flatMap { sessions.conductor(in: $0.id)?.id }
         ForEach(screen.groups) { group in
-            PhrenGroup("\(group.title) · \(group.sessions.count)") {
-                ForEach(group.sessions) { session in
-                        let monitor = sessions.monitor(for: session.host.id)
-                        LiveSessionCard(session: session, fresh: monitor?.isLive(at: .now) == true,
-                                        stale: monitor?.isStale(at: .now) == true,
-                                        showHost: true, resolvedProject: screen.projects[session.id], resolvedPin: screen.pinned.contains(session.id),
-                                        onChat: { sessionOpen = SessionOpen(session: session, destination: .chat) }, onDetails: {
-                            if let monitor { selected = OverviewSelection(session: session, monitor: monitor) }
-                        }, onClose: { request, confirm in
-                            if confirm { closeRequest = request }
-                            else { SessionCloseDialogs.perform(request, monitor: sessions.monitor(for: request.session.host.id)) { closeError = $0 } }
-                        })
-                        .equatable()
-                }
-                if group.id == "previous" {
-                    Text("These computers aren't connected. Reconnect before opening a session.")
-                        .font(.caption).foregroundStyle(PhrenTheme.textMuted)
+            let remaining = group.sessions.filter { $0.id != conductorID }
+            if !remaining.isEmpty {
+                PhrenGroup("\(group.title) · \(remaining.count)") {
+                    ForEach(remaining) { session in
+                        sessionCard(session, screen: screen)
+                    }
+                    if group.id == "previous" {
+                        Text("These computers aren't connected. Reconnect before opening a session.")
+                            .font(.caption).foregroundStyle(PhrenTheme.textMuted)
+                    }
                 }
             }
         }
@@ -509,6 +556,9 @@ final class LiveHostMonitor {
         }
         if AppModel.isUITesting && ProcessInfo.processInfo.arguments.contains("--automatic-sessions-fixture") {
             if ProcessInfo.processInfo.arguments.contains("--session-discovery-offline") { throw LiveConnectionError.disconnected }
+            if ProcessInfo.processInfo.arguments.contains("--conductor-running-fixture") {
+                return try LiveWorkspaces.read(Data(#"{"kind":"herdr","groups":[{"id":"w9","label":"Phone conductor","children":[{"id":"w9:t1","label":"1","title":"Phone conductor","agent":"codex","agentStatus":"idle","cwd":"/work/phone","role":"conductor"}]},{"id":"w7","label":"Phone work","children":[{"id":"w7:t9","label":"1","title":"Polish the phone app","agent":"codex","agentStatus":"working","cwd":"/work/phone/src"}]}]}"#.utf8))
+            }
             if ProcessInfo.processInfo.arguments.contains("--conductor-fixture"),
                let launch = AgentChatFixture.launches.last(where: { $0.role == "conductor" }) {
                 let model = launch.kind == "claude" ? "opus" : launch.kind == "codex" ? "gpt-5" : "default"

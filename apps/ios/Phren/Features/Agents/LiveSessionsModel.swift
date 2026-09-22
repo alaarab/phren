@@ -76,6 +76,26 @@ final class LiveSessionsModel {
 
     var hosts: [LiveHost] { preferences?.hosts ?? [] }
 
+    /// The conductor slot ignores search and Focus so its entry never moves
+    /// between activity groups or disappears when another session is sought.
+    func conductor(in storeID: String) -> LiveAgentSession? {
+        for computer in overview.computers {
+            for session in computer.monitor.snapshot?.sessions(on: computer.host) ?? [] where session.tab.isConductor {
+                if preferences?.projectMatch(hostID: computer.id, cwd: session.tab.cwd,
+                                               projects: projects)?.project.storeID == storeID {
+                    return session
+                }
+            }
+        }
+        return nil
+    }
+
+    static func conductorProject(storeID: String, projects: [SessionProject], registry: MachineRegistry) -> String {
+        let available = projects.filter { $0.storeID == storeID && $0.name != "global" }.map(\.name).sorted()
+        if let saved = ConductorLaunchSettings.load(storeID: storeID)?.project, available.contains(saved) { return saved }
+        return available.first(where: { registry.sourcePaths[$0] != nil }) ?? available.first ?? "global"
+    }
+
     var configuration: SessionOverviewMonitor.Configuration {
         .init(query: query, preferences: preferences, projects: projects, focusFilter: focusFilter,
               metadataReady: metadataReady, memoryConnected: memoryConnected)

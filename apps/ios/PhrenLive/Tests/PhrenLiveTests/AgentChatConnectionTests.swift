@@ -11,6 +11,17 @@ import XCTest
 
 final class AgentChatConnectionTests: XCTestCase {
 
+    func testModelRequestUsesItsOwnRouteWithoutPromptText() throws {
+        let target = try AgentChatTarget(hostID: UUID(), workspaceID: "w1", tabID: "w1:t1", paneID: "w1:p1", source: "codex", sessionID: "fixture")
+        let request = try GatewayRequest.model(target, model: "gpt-6-astra", effort: "high")
+        XCTAssertEqual(request.path, "/v1/model")
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(request.body)) as? [String: Any])
+        XCTAssertEqual(body["model"] as? String, "gpt-6-astra")
+        XCTAssertEqual(body["effort"] as? String, "high")
+        XCTAssertNil(body["text"])
+        XCTAssertEqual((body["target"] as? [String: String])?["session"], "fixture")
+    }
+
 
     func testUnconfirmedDeliveryIsNotClassifiedAsAValidationRejection() throws {
         try PhrenConnection.confirmChatDelivery(Data(#"{"ok":true}"#.utf8))

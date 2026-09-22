@@ -41,6 +41,9 @@ enum UITestFixtures {
         defaults.removeObject(forKey: AgentLaunch.pendingKey)
         defaults.removeObject(forKey: AgentLaunch.pendingProjectKey)
         defaults.removeObject(forKey: AgentFocusFilterStore.key)
+        if arguments.contains("--conductor-entry-fixture") {
+            defaults.removeObject(forKey: "launch.conductor.choices.v1")
+        }
         // Each UI-test launch starts with no recently used models, so the
         // picker's order is the catalogue's until a test picks one.
         defaults.removeObject(forKey: ChatModelPickerSheet.recentKey)
@@ -147,6 +150,9 @@ enum UITestFixtures {
                     }
                 } else {
                 try await store.write("phone/FINDINGS.md", content: "# Findings\n\n- [decision] Keep phone sessions connected to project memory\n", blobSha: nil)
+                if arguments.contains("--chat-phren-tools") {
+                    try await store.write("phone/tasks.md", content: "# Tasks\n\n## Queue\n- [ ] \(PhrenToolCardFixture.task) <!-- bid:a1b2c3d4 -->\n", blobSha: nil)
+                }
                 // The store knows this computer carries the project, and where.
                 // The schedules fixture registered Desk above; keep it, or its
                 // schedules read "unknown computer" when both fixtures run.
@@ -156,6 +162,15 @@ enum UITestFixtures {
                 try await store.write("phone/phren.project.yaml", content: "ownership: repo-managed\nsourcePath: /work/phone\n", blobSha: nil)
                 }
                 defaults.set(try LiveSessionPreferences.saving(mac(), in: Data()), forKey: preferencesKey)
+                if arguments.contains("--conductor-remembered-fixture") {
+                    let remote = try LiveHost(id: hostIDs[1], name: "Linuxbox", address: "linuxbox.invalid", username: "sam",
+                                              hookComputerID: hookIDs[1], fingerprint: "SHA256:" + String(repeating: "B", count: 43))
+                    defaults.set(try LiveSessionPreferences.saving(remote, in: defaults.data(forKey: preferencesKey)!), forKey: preferencesKey)
+                    ConductorLaunchSettings.save(storeID: "sample/brain", harness: .claude, model: "opus",
+                                                 effort: .high, hostID: remote.id, project: "phone")
+                    ConductorLaunchSettings.save(storeID: "team/brain", harness: .codex, model: "gpt-5",
+                                                 effort: .low, hostID: hostIDs[0], project: "demo")
+                }
                 if arguments.contains("--all-sessions-fixture") {
                     let remote = try LiveHost(id: hostIDs[1], name: trailer ? "laptop" : tour ? "linuxbox" : "Test Linux",
                                              address: trailer ? "laptop" : tour ? "linuxbox" : "remote.fixture.invalid", username: tour ? "sam" : "fixture",

@@ -536,6 +536,7 @@ struct PhrenSingleSelectSheet<Value: Hashable>: View {
     var footer: AnyView? = nil
     /// Runs after the selection is set, before the card dismisses.
     var onSelect: ((Value) -> Void)? = nil
+    var dismissOnSelect = true
     let dismiss: () -> Void
     @AccessibilityFocusState private var titleFocused: Bool
 
@@ -598,7 +599,7 @@ struct PhrenSingleSelectSheet<Value: Hashable>: View {
         guard option.isEnabled else { return }
         selection = PhrenOptionSelection.single(option.value, in: options, current: selection)
         onSelect?(option.value)
-        dismiss()
+        if dismissOnSelect { dismiss() }
     }
 }
 

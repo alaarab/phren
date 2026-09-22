@@ -123,7 +123,7 @@ private struct ChatTranscriptRow: View, Equatable {
         } else if let compaction = entry.messages.first, compaction.isCompaction {
             ChatCompactionRow(message: compaction).equatable()
         } else if let phren = entry.phren {
-            PhrenToolCard(presentation: phren, messages: entry.messages).equatable()
+            PhrenToolCard(presentation: phren, messages: entry.messages, session: session).equatable()
         } else if entry.card != nil {
             ChatToolCard(entry: entry)
         } else if entry.isReadRun {

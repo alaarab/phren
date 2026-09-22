@@ -19,6 +19,7 @@ export interface ChildAgentRelation {
   finishedAt?: string;
   /** Fan-out manifests and Claude child transcripts can name a model. */
   model?: string;
+  fanout?: { resumable: boolean };
   /** Public checkout labels for fan-outs; full paths remain private. */
   worktreeName?: string;
   branch?: string;
@@ -268,7 +269,7 @@ async function childTranscriptBelongsTo(file: string, parent: string): Promise<b
 /** Explicit wire projection prevents a provider's private transcript identity
  * from being returned if relation internals grow later. */
 export function publicChildAgents(tree: ChildAgentRelation[]): Json[] {
-  return tree.map(({ id, provider, path: agentPath, callId, state, reason, finishedAt, model, worktreeName, branch, computer, remote, children }) =>
+  return tree.map(({ id, provider, path: agentPath, callId, state, reason, finishedAt, model, worktreeName, branch, computer, remote, fanout, children }) =>
     // A blocked worker is finished; the phone's relation contract has no failed
     // state, so the reason carries what happened without breaking old clients.
     ({ id, provider, path: agentPath, callId, state: state === "failed" ? "completed" : state,
@@ -277,6 +278,7 @@ export function publicChildAgents(tree: ChildAgentRelation[]): Json[] {
       ...(worktreeName !== undefined ? { worktreeName } : {}), ...(branch !== undefined ? { branch } : {}),
       ...(computer !== undefined ? { computer: { id: computer.id, name: computer.name } } : {}),
       ...(remote !== undefined ? { remote: { target: remote.target, ...(remote.child !== undefined ? { child: remote.child } : {}) } } : {}),
+      ...(fanout ? { fanout } : {}),
       children: publicChildAgents(children) }));
 }
 

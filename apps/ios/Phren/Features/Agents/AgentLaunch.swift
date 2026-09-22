@@ -6,6 +6,8 @@ struct ConductorLaunchChoice: Codable, Equatable {
     let harness: String
     let model: String
     let effort: String
+    var hostID: UUID? = nil
+    var project: String? = nil
 }
 
 private struct ConductorLaunchSettingsDocument: Codable, VersionedDocument {
@@ -28,10 +30,13 @@ enum ConductorLaunchSettings {
     }
 
     static func save(storeID: String, harness: PhrenConnection.LaunchKind, model: String,
-                     effort: PhrenConnection.LaunchEffort, defaults: UserDefaults = AppRuntime.defaults) {
+                     effort: PhrenConnection.LaunchEffort, hostID: UUID? = nil, project: String? = nil,
+                     defaults: UserDefaults = AppRuntime.defaults) {
         var value = PersistedState.load(ConductorLaunchSettingsDocument.self, fromDefaults: defaults,
                                         key: key, document: document).value ?? .init()
-        value.stores[storeID] = .init(harness: harness.rawValue, model: model, effort: effort.rawValue)
+        let previous = value.stores[storeID]
+        value.stores[storeID] = .init(harness: harness.rawValue, model: model, effort: effort.rawValue,
+                                     hostID: hostID ?? previous?.hostID, project: project ?? previous?.project)
         PersistedState.save(value, toDefaults: defaults, key: key, document: document)
     }
 }

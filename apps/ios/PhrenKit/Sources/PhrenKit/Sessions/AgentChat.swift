@@ -156,6 +156,7 @@ public struct AgentChild: Codable, Equatable, Sendable, Identifiable {
     public let branch: String?
     public let computer: AgentComputer?
     public let remote: AgentRemote?
+    public let fanout: AgentFanoutCapability?
     public let children: [AgentChild]
     /// SwiftUI selection must remain distinct when two computers reuse a
     /// session, public row id, or parent-scoped child id.
@@ -188,7 +189,7 @@ public struct AgentChild: Codable, Equatable, Sendable, Identifiable {
     public var refusedCount: Int { (permissionRefused ? 1 : 0) + children.reduce(0) { $0 + $1.refusedCount } }
 
     private enum CodingKeys: String, CodingKey {
-        case id, provider, model, path, callId, state, reason, finishedAt, failed, worktreeName, branch, computer, remote, children
+        case id, provider, model, path, callId, state, reason, finishedAt, failed, worktreeName, branch, computer, remote, fanout, children
     }
 
     public init(from decoder: Decoder) throws {
@@ -206,6 +207,7 @@ public struct AgentChild: Codable, Equatable, Sendable, Identifiable {
         branch = try values.decodeIfPresent(String.self, forKey: .branch)
         computer = try values.decodeIfPresent(AgentComputer.self, forKey: .computer)
         remote = try values.decodeIfPresent(AgentRemote.self, forKey: .remote)
+        fanout = try values.decodeIfPresent(AgentFanoutCapability.self, forKey: .fanout)
         children = try values.decode([AgentChild].self, forKey: .children)
         guard AgentChatTarget.validID(id), AgentChatTarget.sources.contains(provider),
               remote == nil || computer != nil else {

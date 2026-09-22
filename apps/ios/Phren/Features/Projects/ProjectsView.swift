@@ -99,9 +99,21 @@ struct ProjectsView: View {
                     }
                 }
                 .safeAreaInset(edge: .top, spacing: 0) {
-                    if showSearch {
-                        PhrenSearchField(text: $projectsModel.filter, placeholder: "Filter projects", identifier: "projects-search")
-                            .padding(.horizontal, 16).padding(.bottom, 8)
+                    if model.hasMultipleStores || showSearch {
+                        VStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
+                            if model.hasMultipleStores {
+                                PhrenSingleSelect(options: storeOptions, selection: $model.storeFilter,
+                                                  placeholder: "Filter stores", identifier: "projects-stores",
+                                                  isPresented: $showStores)
+                                    .fixedSize(horizontal: true, vertical: false)
+                            }
+                            if showSearch {
+                                PhrenSearchField(text: $projectsModel.filter, placeholder: "Filter projects", identifier: "projects-search")
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, PhrenTheme.Space.large)
+                        .padding(.bottom, PhrenTheme.Space.small)
                     }
                 }
                 .onChange(of: projectsKey, initial: true) { _, key in
@@ -120,13 +132,6 @@ struct ProjectsView: View {
                 ToolbarItem(placement: .primaryAction) {
                     PhrenIconButton(icon: "magnifyingglass", label: "Filter projects") { showSearch.toggle() }
                         .accessibilityIdentifier("projects-search-toggle")
-                }
-                if model.hasMultipleStores {
-                    ToolbarItem(placement: .topBarLeading) {
-                        PhrenIconButton(icon: model.storeFilter == nil ? "line.3.horizontal.decrease" : "line.3.horizontal.decrease.circle.fill",
-                                        label: "Filter stores") { showStores = true }
-                            .accessibilityIdentifier("projects-stores")
-                    }
                 }
                 if !projectsModel.voiceCaptureTargets.isEmpty {
                     ToolbarItem(placement: .primaryAction) {
@@ -174,6 +179,13 @@ struct ProjectsView: View {
         }
         .phrenActionSheet(isPresented: $showStores, title: "Store", actions: storeActions, identifier: "projects-store-sheet")
         .projectAgentSheet(choice: $agentChoice)
+    }
+
+    private var storeOptions: [PhrenOption<String?>] {
+        [.init(id: "all", value: nil, title: "All stores")]
+        + model.storeDescriptors.map { store in
+            .init(id: store.id, value: store.id, title: store.displayName)
+        }
     }
 
     private var storeActions: [PhrenControlAction] {

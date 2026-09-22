@@ -2,10 +2,10 @@ import PhrenKit
 import SwiftUI
 import UIKit
 
-/// Which paragraph of which message is selectable right now — one across
+/// Which paragraph of which message is selectable right now, one across
 /// the whole conversation. The chat screen owns it and every paragraph
-/// reads it, so a tap or a scroll anywhere in the transcript ends the
-/// selection, not only a control on the paragraph.
+/// reads it. Selection owns its gestures until it collapses or the person
+/// taps outside the paragraph or chooses Done.
 @Observable @MainActor final class ChatTextSelection {
     struct Target: Equatable {
         let owner: String
@@ -16,6 +16,20 @@ import UIKit
         let point: CGPoint?
     }
     private(set) var active: Target?
+    var composerSelecting = false
+    private(set) var messageSelecting = false
+    @ObservationIgnored weak var composerView: ChatSelectionTextView?
+    var preventsTranscriptScrolling: Bool { composerSelecting || messageSelecting }
+    /// Consult the recognizers synchronously too: a dismissal drag can be
+    /// delivered before SwiftUI has rendered the latest selection state.
+    var preventsKeyboardDismissal: Bool {
+        preventsTranscriptScrolling || composerView?.isSelectingText == true
+    }
+
+    func messageSelectionChanged(_ selecting: Bool, target: Target?) {
+        guard active == target, active != nil else { return }
+        messageSelecting = selecting
+    }
     @ObservationIgnored private var began = Date.distantPast
     @ObservationIgnored private var touchedInside = Date.distantPast
     @ObservationIgnored private var anchor: CGFloat?
@@ -23,12 +37,14 @@ import UIKit
 
     func begin(owner: String, block: Int, at point: CGPoint?) {
         active = Target(owner: owner, block: block, point: point)
+        messageSelecting = true
         began = .now
         anchor = position
     }
     func end() {
         guard active != nil else { return }
         active = nil
+        messageSelecting = false
         anchor = nil
     }
     func end(owner: String, block: Int) {
@@ -42,7 +58,7 @@ import UIKit
     /// The selectable view saw a touch: the transcript tap that follows is
     /// the person working the selection, not leaving it.
     func noteTouchInside() { touchedInside = .now }
-    /// A tap in the transcript ends the selection — unless it is the tap
+    /// A tap in the transcript ends the selection unless it is the tap
     /// that just started it, or one on the selectable text itself.
     func transcriptTapped() {
         guard active != nil, Date.now.timeIntervalSince(began) > 0.6, Date.now.timeIntervalSince(touchedInside) > 0.6 else { return }
@@ -51,6 +67,7 @@ import UIKit
     /// The transcript moved; past a few points the selection is over.
     func scrolled(to offset: CGFloat) {
         position = offset
+        guard !preventsTranscriptScrolling else { anchor = offset; return }
         guard active != nil, let anchor, abs(offset - anchor) > 12 else { return }
         end()
     }
@@ -67,6 +84,7 @@ struct ChatSelectableText: UIViewRepresentable {
     let identifier: String
     let touched: () -> Void
     let resigned: () -> Void
+    @Environment(ChatTextSelection.self) private var selection: ChatTextSelection?
 
     func makeCoordinator() -> Coordinator { Coordinator() }
     func makeUIView(context: Context) -> ChatSelectableTextView {
@@ -89,6 +107,10 @@ struct ChatSelectableText: UIViewRepresentable {
     }
     func updateUIView(_ view: ChatSelectableTextView, context: Context) { configure(view, context: context) }
     private func configure(_ view: ChatSelectableTextView, context: Context) {
+        let target = selection?.active
+        view.selectionActivityChanged = { [weak selection] in
+            selection?.messageSelectionChanged($0, target: target)
+        }
         context.coordinator.openURL = context.environment.openURL
         view.accessibilityIdentifier = identifier
         context.coordinator.apply(attributed, heading: heading, size: size, to: view)
@@ -122,16 +144,13 @@ struct ChatSelectableText: UIViewRepresentable {
         }
         func textView(_ textView: UITextView, menuConfigurationFor textItem: UITextItem, defaultMenu: UIMenu) -> UITextItem.MenuConfiguration? { nil }
         func textViewDidChangeSelection(_ textView: UITextView) {
-            #if DEBUG && targetEnvironment(simulator)
-            guard AgentChatFixture.enabled, let range = Range(textView.selectedRange, in: textView.text) else { return }
-            AgentChatFixture.report.selected = String(textView.text[range])
-            #endif
+            (textView as? ChatSelectionTextView)?.selectionDidChange()
         }
     }
 
     /// The paragraph's runs as UIKit draws them: the chat's monospaced face
-    /// and colours, bold and italic from the Markdown, inline code in its
-    /// own colour, links carrying their URL.
+    /// and colors, bold and italic from the Markdown, inline code in its
+    /// own color, links carrying their URL.
     static func render(_ source: AttributedString, heading: Bool, size: CGFloat) -> NSAttributedString {
         let base = UIFont.monospacedSystemFont(ofSize: size, weight: heading ? .semibold : .regular)
         let paragraph = NSMutableParagraphStyle()
@@ -156,7 +175,7 @@ struct ChatSelectableText: UIViewRepresentable {
     }
 }
 
-final class ChatSelectableTextView: UITextView {
+final class ChatSelectableTextView: ChatSelectionTextView {
     /// Where to start selecting once there is a layout to hit-test against.
     var pendingSelection: CGPoint?
     var selectsAll = false
@@ -188,7 +207,7 @@ final class ChatSelectableTextView: UITextView {
         let length = range.map { offset(from: $0.start, to: $0.end) } ?? 0
         selectedRange = NSRange(location: start, length: length)
     }
-    // A finger here — on the text, a handle, the loupe — must not read as a
+    // A finger on the text, a handle or the loupe must not read as a
     // tap elsewhere in the transcript. Only real touches count, not the
     // hit-testing accessibility and tests do.
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {

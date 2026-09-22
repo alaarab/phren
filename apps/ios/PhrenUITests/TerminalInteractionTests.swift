@@ -3,11 +3,22 @@ import XCTest
 final class TerminalInteractionTests: XCTestCase {
     @MainActor
     func testDoubleTapPastesTextWithoutMouseClicksOrReturn() throws {
-        let app = launch("--terminal-mouse-fixture", extra: ["--clipboard-text-fixture"])
+        let app = launch("--terminal-links-fixture", extra: ["--clipboard-text-fixture"])
         let terminal = app.descendants(matching: .any).matching(identifier: "herdr-terminal").firstMatch
         XCTAssertTrue(terminal.waitForExistence(timeout: 5))
         terminal.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).doubleTap()
         XCTAssertEqual(try state(app).input, "clipboard fixture text")
+        XCTAssertFalse(app.keyboards.firstMatch.exists)
+    }
+
+    @MainActor
+    func testDoubleTapPastesTextAfterOneImmediateMouseClick() throws {
+        let app = launch("--terminal-mouse-fixture", extra: ["--clipboard-text-fixture"])
+        let point = try cell(app, column: 12, row: 10)
+        point.doubleTap()
+        XCTAssertEqual(try state(app).input,
+                       "\u{1B}[<0;12;10M\u{1B}[<0;12;10mclipboard fixture text",
+                       "The first tap clicks immediately; only the second pastes, with no second click or Return")
         XCTAssertFalse(app.keyboards.firstMatch.exists)
     }
 
@@ -24,13 +35,19 @@ final class TerminalInteractionTests: XCTestCase {
         waitForExpectations(timeout: 8)
         let first = try state(app).input
         XCTAssertTrue(first.hasSuffix(" "))
+        XCTAssertFalse(first.contains("\u{1B}"), "The paste button sends only the uploaded path")
         XCTAssertFalse(first.contains("\n"))
-        terminal.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).doubleTap()
-        expectation(for: NSPredicate { _, _ in (try? self.state(app).input.count) ?? 0 > first.count }, evaluatedWith: app)
+        try cell(app, column: 12, row: 10).doubleTap()
+        expectation(for: NSPredicate { _, _ in
+            (try? self.state(app).input.components(separatedBy: "/bridge/uploads/files/").count) == 3
+        }, evaluatedWith: app)
         waitForExpectations(timeout: 8)
         let second = try state(app).input
-        XCTAssertTrue(second.hasPrefix(first))
-        XCTAssertFalse(second.contains("\u{1B}[<0;"), "Double tap does not also click the remote pane")
+        let prefix = first + "\u{1B}[<0;12;10M\u{1B}[<0;12;10m"
+        XCTAssertTrue(second.hasPrefix(prefix), "The first tap sends exactly one complete click before pasting")
+        let pasted = String(second.dropFirst(prefix.count))
+        XCTAssertTrue(pasted.contains("/bridge/uploads/files/") && pasted.hasSuffix(" "))
+        XCTAssertFalse(pasted.contains("\u{1B}"), "The second tap only pastes; it must not click again")
         XCTAssertFalse(second.contains("\n"))
     }
 
@@ -187,7 +204,7 @@ final class TerminalInteractionTests: XCTestCase {
 
     @MainActor
     func testSwitchActivatesOnFirstTapWithoutRaisingKeyboard() throws {
-        let app = launch("--terminal-controls-fixture")
+        let app = launch("--terminal-controls-fixture", extra: ["--clipboard-text-fixture"])
         let before = try state(app)
         try tapCell(app, column: before.columns - 3, row: 1)
         XCTAssertTrue(try state(app).switchOpen, "Switch must actually open, not just emit some mouse bytes")
@@ -207,6 +224,7 @@ final class TerminalInteractionTests: XCTestCase {
         try tapCell(app, column: try state(app).columns - 3, row: 1)
         XCTAssertFalse(try state(app).switchOpen)
         XCTAssertFalse(app.keyboards.firstMatch.exists)
+        XCTAssertFalse(try state(app).input.contains("clipboard fixture text"), "Separate control taps must never paste")
         capture(app, "Switch works with keyboard hidden")
     }
 
@@ -468,11 +486,16 @@ final class TerminalInteractionTests: XCTestCase {
 
     @MainActor
     private func tapCell(_ app: XCUIApplication, column: Int, row: Int) throws {
+        try cell(app, column: column, row: row).tap()
+    }
+
+    @MainActor
+    private func cell(_ app: XCUIApplication, column: Int, row: Int) throws -> XCUICoordinate {
         let geometry = try state(app)
         let terminal = app.descendants(matching: .any).matching(identifier: "herdr-terminal").firstMatch
-        terminal.coordinate(withNormalizedOffset: .zero)
+        return terminal.coordinate(withNormalizedOffset: .zero)
             .withOffset(CGVector(dx: (Double(column) - 0.5) * geometry.cellWidth,
-                                 dy: (Double(row) - 0.5) * geometry.cellHeight)).tap()
+                                 dy: (Double(row) - 0.5) * geometry.cellHeight))
     }
 
     @MainActor

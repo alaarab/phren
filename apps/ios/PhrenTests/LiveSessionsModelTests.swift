@@ -5,6 +5,30 @@ import PhrenLive
 
 @MainActor
 final class LiveSessionsModelTests: XCTestCase {
+    func testConductorChoicesUpgradeAndKeepLastSuccessfulComputerPerStore() throws {
+        let name = "ConductorEntryTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set(Data(#"{"schemaVersion":1,"stores":{"sam/brain":{"harness":"claude","model":"opus","effort":"high"}}}"#.utf8),
+                     forKey: "launch.conductor.choices.v1")
+        let legacy = try XCTUnwrap(ConductorLaunchSettings.load(storeID: "sam/brain", defaults: defaults))
+        XCTAssertEqual(legacy.model, "opus")
+        XCTAssertNil(legacy.hostID)
+
+        let computer = UUID()
+        ConductorLaunchSettings.save(storeID: "sam/brain", harness: .claude, model: "opus", effort: .high,
+                                     hostID: computer, project: "phone", defaults: defaults)
+        ConductorLaunchSettings.save(storeID: "sam/brain", harness: .codex, model: "gpt-5", effort: .medium,
+                                     defaults: defaults)
+        ConductorLaunchSettings.save(storeID: "sam/team", harness: .opencode, model: "", effort: .low,
+                                     hostID: UUID(), project: "demo", defaults: defaults)
+        let updated = try XCTUnwrap(ConductorLaunchSettings.load(storeID: "sam/brain", defaults: defaults))
+        XCTAssertEqual(updated.hostID, computer, "Editing harness settings must keep the last successful launch destination")
+        XCTAssertEqual(updated.project, "phone")
+        XCTAssertEqual(updated.harness, "codex")
+        XCTAssertEqual(ConductorLaunchSettings.load(storeID: "sam/team", defaults: defaults)?.effort, "low")
+    }
+
     private func host(_ name: String) throws -> LiveHost {
         try LiveHost(name: name, address: name.lowercased() + ".invalid", username: "sam")
     }

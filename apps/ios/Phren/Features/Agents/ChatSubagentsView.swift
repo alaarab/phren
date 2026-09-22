@@ -18,7 +18,11 @@ struct ChatSubagentsView: View {
     private var overview: SessionOverviewMonitor { .shared }
 
     private var rows: [AgentTreeRow] {
-        AgentTreeRow.project(history.rows(agents, scope: scope, now: now))
+        let visible = history.rows(agents, scope: scope, now: now)
+        let completedWorkers = AgentChild.rows(agents, includeCompleted: true).filter {
+            $0.agent.messageDestination == .worker && $0.agent.displayState == .completed
+        }
+        return AgentTreeRow.project(visible + completedWorkers)
     }
     private var running: Int { rows.filter { $0.agent.displayState == .running }.count }
     private var refused: Int { rows.filter(\.agent.permissionRefused).count }
@@ -390,8 +394,8 @@ struct SessionSubagentsCard: View {
     }
 }
 
-/// A child agent's own conversation, read-only. Follows the transcript live
-/// while the agent works, and pages back through what it did earlier.
+/// A child's transcript with explicit worker continuation or parent delivery.
+/// Pane-backed children use their full session chat through AgentWorkDestinationView.
 struct ChildAgentTranscriptView: View {
     let session: LiveAgentSession
     let target: AgentChatTarget
@@ -407,6 +411,11 @@ struct ChildAgentTranscriptView: View {
     @State private var fullToolOutput: FullToolOutput?
     @State private var textSelection = ChatTextSelection()
     @State private var refresh = UUID()
+    @State private var draft = ""
+    @State private var sending = false
+    @State private var sendError: String?
+    @State private var delivery: String?
+    @State private var messages: [AgentFanoutMessage] = []
 
     init(destination: AgentDestination, agent: AgentChild) {
         session = destination.session(for: agent)
@@ -464,6 +473,7 @@ struct ChildAgentTranscriptView: View {
                 }.padding(.horizontal, 16).padding(.vertical, 12)
             }
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) { childComposer }
         .background(PhrenTheme.chatCanvas)
         .environment(\.openToolOutput) { fullToolOutput = $0 }
         .environment(textSelection)
@@ -472,14 +482,140 @@ struct ChildAgentTranscriptView: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         .task(id: "\(agent.navigationID)/\(target.id)/\(child)/\(refresh)") { await follow() }
+        .task(id: "messages/\(agent.navigationID)") { await followMessages() }
+    }
+
+    private var childComposer: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            let pending = messages.filter { $0.status == .queued || $0.status == .failed }
+            if !pending.isEmpty {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(pending) { message in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(message.text).font(.body).foregroundStyle(PhrenTheme.text)
+                                Text(message.status == .queued ? "Queued until this worker finishes" : "Worker continuation failed")
+                                    .font(.caption).foregroundStyle(PhrenTheme.textMuted)
+                            }
+                            .padding(12).frame(maxWidth: .infinity, alignment: .leading).sessionCard()
+                            .accessibilityIdentifier("child-message:\(message.id.uuidString.lowercased())")
+                        }
+                    }
+                }.frame(maxHeight: 160)
+            }
+            if let delivery {
+                Text(delivery).font(.caption).foregroundStyle(PhrenTheme.textMuted)
+                    .accessibilityIdentifier("child-message-delivery")
+            }
+            #if DEBUG && targetEnvironment(simulator)
+            if AgentChatFixture.enabled {
+                Text(AgentChatFixture.report.childDelivery).font(.caption2).frame(height: 1).clipped()
+                    .accessibilityIdentifier("child-fixture-delivery")
+            }
+            #endif
+            if let sendError {
+                Text(sendError).font(.caption).foregroundStyle(PhrenTheme.warning)
+                    .accessibilityIdentifier("child-message-error")
+            }
+            Text(agent.messageNote).font(.caption).foregroundStyle(PhrenTheme.textMuted)
+                .accessibilityIdentifier("child-composer-note")
+            HStack(alignment: .bottom, spacing: 8) {
+                PhrenChildMessageField(text: $draft,
+                    placeholder: agent.messageDestination == .parent ? "Message parent…" : "Message worker…")
+                PhrenIconButton(icon: "arrow.up", label: sending ? "Sending" : "Send message") {
+                    Task { await sendMessage() }
+                }
+                .disabled(sending || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || agent.messageDestination == .unavailableWorker)
+                .accessibilityIdentifier("child-composer-send")
+            }
+            .disabled(sending || agent.messageDestination == .unavailableWorker)
+        }
+        .padding(.horizontal, 16).padding(.vertical, 10)
+        .background(PhrenTheme.chatCanvas)
+    }
+
+    @MainActor private func sendMessage() async {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sending, !text.isEmpty else { return }
+        sending = true; sendError = nil
+        defer { sending = false }
+        do {
+            if agent.messageDestination == .worker {
+                let receipt: AgentFanoutMessage
+                #if DEBUG && targetEnvironment(simulator)
+                if AgentChatFixture.enabled {
+                    receipt = try AgentChatFixture.resumeChild(agent, target: target, child: child, text: text)
+                } else {
+                    receipt = try await PhrenConnection.resumeChildAgent(host: session.host,
+                        privateKey: DeviceSSHKey.load(session.host.id), target: target, child: child, text: text)
+                }
+                #else
+                receipt = try await PhrenConnection.resumeChildAgent(host: session.host,
+                    privateKey: DeviceSSHKey.load(session.host.id), target: target, child: child, text: text)
+                #endif
+                messages.removeAll { $0.id == receipt.id }
+                messages.append(receipt)
+                switch receipt.status {
+                case .queued: delivery = "Queued for this worker"
+                case .running: delivery = "Continuing this worker"
+                case .completed: delivery = "Worker finished"
+                case .failed: delivery = "Worker continuation failed"; return
+                }
+            } else if agent.messageDestination == .parent {
+                let labeled = agent.parentMessage(text)
+                #if DEBUG && targetEnvironment(simulator)
+                if AgentChatFixture.enabled { try await AgentChatFixture.send(target, text: labeled) }
+                else { try await PhrenConnection.sendChat(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, text: labeled) }
+                #else
+                try await PhrenConnection.sendChat(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, text: labeled)
+                #endif
+                delivery = "Sent to parent: \(labeled)"
+            } else { return }
+            draft = ""
+        } catch {
+            sendError = error.localizedDescription + " Check delivery before sending again."
+        }
+    }
+
+    @MainActor private func followMessages() async {
+        guard agent.messageDestination == .worker else { return }
+        #if DEBUG && targetEnvironment(simulator)
+        if AgentChatFixture.enabled { return }
+        #endif
+        while !Task.isCancelled {
+            do {
+                messages = try await PhrenConnection.childAgentMessages(host: session.host,
+                    privateKey: DeviceSSHKey.load(session.host.id), target: target, child: child)
+                if messages.contains(where: { $0.status == .running }) { delivery = "Continuing this worker" }
+                else if messages.last?.status == .completed { delivery = "Worker finished" }
+            } catch { /* Keep acknowledged receipts through a transient disconnect. */ }
+            do { try await Task.sleep(for: .seconds(2)) } catch { return }
+        }
+    }
+
+    private var workerDisplayState: AgentChild.State {
+        guard let latest = messages.last else { return agent.displayState }
+        switch latest.status {
+        case .queued, .running: return .running
+        case .completed: return .completed
+        case .failed: return .failed
+        }
     }
 
     private var stateLine: String {
-        if agent.permissionRefused {
-            return [agent.displayName, agent.refusedDetail].compactMap { $0 }.joined(separator: " · ") + " · read-only view"
+        if let latest = messages.last {
+            switch latest.status {
+            case .queued: return "Working now · follow-up queued"
+            case .running: return "Working now · continuing worker"
+            case .completed: return "Completed"
+            case .failed: return "Continuation failed"
+            }
         }
-        if agent.state != .running { return "Completed · read-only view" }
-        return live ? "Working now · following live" : "Working now · read-only view"
+        if agent.permissionRefused {
+            return [agent.displayName, agent.refusedDetail].compactMap { $0 }.joined(separator: " · ")
+        }
+        if agent.state != .running { return "Completed" }
+        return live ? "Working now · following live" : "Working now"
     }
 
     private var transcriptMeta: String {
@@ -498,7 +634,7 @@ struct ChildAgentTranscriptView: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Back")
             .accessibilityIdentifier("child-agent-back")
-            AgentProviderAvatar(provider: agent.provider, state: agent.displayState)
+            AgentProviderAvatar(provider: agent.provider, state: workerDisplayState)
             VStack(alignment: .leading, spacing: 1) {
                 Text(agent.displayName)
                     .font(.subheadline.weight(.medium))
@@ -574,5 +710,19 @@ struct ChildAgentTranscriptView: View {
                 target: target, child: child, provider: agent.provider, beforeLine: before)
             history.receive(page)
         } catch { /* The earlier rows stay one tap away; the live tail keeps flowing. */ }
+    }
+}
+
+/// Phren's plain, growing message field, using the same field surface and spacing as chat.
+private struct PhrenChildMessageField: View {
+    @Binding var text: String
+    let placeholder: String
+    var body: some View {
+        TextField(placeholder, text: $text, axis: .vertical)
+            .textFieldStyle(.plain).font(PhrenTypography.body)
+            .foregroundStyle(PhrenTheme.text).tint(PhrenTheme.accent)
+            .lineLimit(1...6).padding(12).frame(minHeight: 44)
+            .background(PhrenTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium))
+            .accessibilityIdentifier("child-composer-field")
     }
 }

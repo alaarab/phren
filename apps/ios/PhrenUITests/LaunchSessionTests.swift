@@ -30,10 +30,11 @@ final class LaunchSessionTests: XCTestCase {
         XCTAssertEqual(folder.value as? String, "/Users/fixture/Projects/phone", "A candidate fills the field")
         app.buttons["launch-found:/work/phone"].tap()
         XCTAssertEqual(folder.value as? String, "/work/phone")
+        for _ in 0..<5 where !app.buttons["launch-harness:claude"].isHittable { app.swipeUp() }
         app.buttons["launch-harness:claude"].tap()
         XCTAssertTrue(app.buttons["launch-harness:claude"].isSelected)
-        app.swipeUp()
         let open = app.buttons["launch-open"]
+        for _ in 0..<6 where !open.isHittable { app.swipeUp() }
         XCTAssertTrue(open.isEnabled)
         XCTAssertTrue(open.label.contains("Claude Code"))
         open.tap()
@@ -54,14 +55,14 @@ final class LaunchSessionTests: XCTestCase {
         XCTAssertTrue(session.waitForExistence(timeout: 10)); session.tap()
         let newThread = app.buttons["New thread"]
         XCTAssertTrue(newThread.waitForExistence(timeout: 8)); newThread.tap()
-        app.swipeUp()
+        for _ in 0..<8 where !app.buttons["launch-open"].isHittable { app.swipeUp() }
         XCTAssertTrue(app.buttons["launch-open"].waitForExistence(timeout: 5))
         app.buttons["launch-open"].tap()
         XCTAssertTrue(app.staticTexts["Couldn't open session"].waitForExistence(timeout: 8))
         // The harness is whichever was picked last (it persists), so match the verb only.
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "couldn't start")).firstMatch.exists)
         app.buttons["OK"].tap()
-        app.swipeDown()
+        for _ in 0..<8 where !app.textFields["launch-folder"].isHittable { app.swipeDown() }
         XCTAssertTrue(app.textFields["launch-folder"].exists, "The picker stays so the folder or harness can be changed")
     }
 }

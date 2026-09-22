@@ -118,6 +118,12 @@ Unbound or conflicting identities remain unavailable for chat and attachments.
   `message.model` and `gitBranch`; Codex `turn_context` rows are exported
   with only their `model`.
 - `POST /v1/prompt`, `/v1/keys`, `/v1/upload`, `/v1/diff`
+- `POST /v1/model`: verified model selection by `{ target, model, effort? }`.
+  Codex walks its model and effort menus; Claude uses its alias command.
+  OpenCode returns a clear refusal directing the person to `/models` in the
+  terminal. Working panes reject model changes and all slash prompts with 409.
+  The phone can hold a cancellable selection until idle and shows successful
+  switches as system rows without adding a user message.
 - `POST /v1/approvals/answer`: one exact pending callback, with approve or deny.
   When the pending tool is Claude Code's `AskUserQuestion`, approve with
   `updatedInput` — the request's own input plus `answers` keyed by question

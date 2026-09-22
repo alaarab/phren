@@ -42,9 +42,16 @@ final class ProjectsTests: XCTestCase {
         let app = launch()
         let title = app.navigationBars["Projects"].staticTexts["Projects"]
         XCTAssertTrue(title.waitForExistence(timeout: 5))
+        let project = app.buttons["project:sample/brain:phone"]
+        XCTAssertTrue(project.waitForExistence(timeout: 8))
         let frame = title.frame
         XCTAssertGreaterThan(frame.width, 0)
         XCTAssertTrue(app.navigationBars["Projects"].frame.contains(frame))
+        XCTAssertEqual(frame.minX, project.frame.minX, accuracy: 2, "The title leads the project grid")
+        let stores = app.buttons["projects-stores"]
+        XCTAssertTrue(stores.isHittable)
+        XCTAssertGreaterThanOrEqual(stores.frame.minY, app.navigationBars["Projects"].frame.maxY,
+                                    "The store filter leaves the title's leading edge clear")
         for identifier in ["projects-add", "projects-search-toggle", "projects-mic"] {
             let control = app.buttons[identifier]
             XCTAssertTrue(control.exists)
@@ -59,7 +66,14 @@ final class ProjectsTests: XCTestCase {
             app.tabBars.buttons[tab].tap()
             let other = app.navigationBars[heading].staticTexts[heading]
             XCTAssertTrue(other.waitForExistence(timeout: 5))
-            XCTAssertEqual(frame.minX, other.frame.minX, accuracy: 2, "Projects shares \(tab)'s title leading edge")
+            if tab == "Tasks" {
+                // Tasks has Select on the leading side and Add on the trailing
+                // side. Its inline title is centered between those actions.
+                XCTAssertEqual(other.frame.midX, app.navigationBars[heading].frame.midX, accuracy: 2)
+                XCTAssertGreaterThanOrEqual(other.frame.minX, app.buttons["task-selection-mode"].frame.maxX)
+            } else {
+                XCTAssertEqual(frame.minX, other.frame.minX, accuracy: 2, "Projects shares \(tab)'s title leading edge")
+            }
             XCTAssertEqual(frame.midY, other.frame.midY, accuracy: 2, "Projects shares \(tab)'s title line")
             capture(app, "\(tab) header alignment")
         }

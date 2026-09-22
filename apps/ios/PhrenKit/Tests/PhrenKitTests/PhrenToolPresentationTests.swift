@@ -62,3 +62,41 @@ extension PhrenToolPresentationTests {
         XCTAssertEqual(PhrenToolPresentation.readable(#"{"content":[{"type":"text","text":"just text"}]}"#), "just text")
     }
 }
+
+extension PhrenToolPresentationTests {
+    func testNestedAndTransportFailuresKeepTheirReasonAndRawText() throws {
+        let results = [
+            #"{"isError":true,"content":[{"type":"text","text":"Store is read-only.\nNo task saved."}]}"#,
+            #"{"structuredContent":{"ok":false,"error":{"message":"Store is read-only."}}}"#,
+            #"{"content":[{"type":"text","text":"Processing"},{"type":"text","text":"{\"ok\":false,\"error\":\"Store is read-only.\"}"}]}"#,
+            #"{"ok":true,"data":{"added":["First task"],"errors":["Store is read-only."]}}"#
+        ]
+        for result in results {
+            let card = try XCTUnwrap(PhrenToolPresentation(name: "mcp__phren__add_task", input: "{}", result: result))
+            XCTAssertEqual(card.status, .failed, result)
+            XCTAssertEqual(card.resultSummary, "Store is read-only.")
+            XCTAssertEqual(card.rawResult, result)
+            XCTAssertNil(card.target)
+        }
+        let failed = PhrenToolPresentation(name: "phren_session", input: "{}", result: "Connection closed.\nTry later.", isError: true)
+        XCTAssertEqual(failed?.resultSummary, "Connection closed.")
+        XCTAssertEqual(PhrenToolPresentation(name: "phren_session", input: "{}", isError: true)?.status, .failed)
+        XCTAssertEqual(PhrenToolPresentation(name: "phren_session", input: "{}", result: "", isError: true)?.resultSummary, "Call failed")
+        let recalled = PhrenToolPresentation(name: "phren_search_knowledge", input: "{}", result: #"{"ok":true,"data":{"results":[{"error":"A finding about errors"}]}}"#)
+        XCTAssertEqual(recalled?.status, .succeeded)
+    }
+
+    func testExpandedInputAndEveryResultRemainComplete() throws {
+        let long = String(repeating: "Keep this entire instruction.\n", count: 100) + "Final marker"
+        let input = String(decoding: try JSONSerialization.data(withJSONObject: ["item": long]), as: UTF8.self)
+        let task = try XCTUnwrap(PhrenToolPresentation(name: "phren_add_task", input: input))
+        XCTAssertTrue(task.fullInput.contains(long))
+        XCTAssertLessThan(task.body.count, long.count)
+        XCTAssertEqual(PhrenToolPresentation.readable(#"{"content":[{"type":"text","text":"First"},{"type":"text","text":"Last"}]}"#), "First\n\nLast")
+        let search = try XCTUnwrap(PhrenToolPresentation(name: "phren_search_knowledge", input: "{}", result: #"{"ok":true,"data":{"results":[{"title":"First"},{"title":"Second"},{"title":"Third"},{"title":"Fourth","content":"Full recalled text"}]}}"#))
+        XCTAssertEqual(search.titles.count, 3)
+        XCTAssertEqual(search.searchResults.count, 4)
+        XCTAssertEqual(search.searchResults.last?.text, "Full recalled text")
+        XCTAssertNil(PhrenToolPresentation(name: "phren_manage_task", input: #"{"action":"remove","item":"Old task"}"#, result: #"{"ok":true}"#)?.target)
+    }
+}

@@ -5,7 +5,7 @@ final class AgentModelChoiceTests: XCTestCase {
     func testChoicesAndCommands() {
         XCTAssertTrue(AgentModelChoice.supportsPicker(source: "claude"))
         XCTAssertTrue(AgentModelChoice.supportsPicker(source: "codex"))
-        XCTAssertFalse(AgentModelChoice.supportsPicker(source: "opencode"))
+        XCTAssertTrue(AgentModelChoice.supportsPicker(source: "opencode"))
         XCTAssertEqual(AgentModelChoice.choices(source: "claude").map(\.argument),
                        ["claude-fable-5-1", "claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5-20251001", "claude-fable-5-1[1m]"])
         XCTAssertEqual(AgentModelChoice.choices(source: "claude").first?.name, "Fable 5.1")

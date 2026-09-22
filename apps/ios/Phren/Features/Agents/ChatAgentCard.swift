@@ -2,7 +2,7 @@ import PhrenKit
 import SwiftUI
 
 /// A subagent the agent delegated to: who it was, what it was asked in one
-/// line, the model, whether it is still out there, and its report — the
+/// line, the model, whether it is still out there, and its report, the
 /// first screenful, the rest in the reader. The prompt can be enormous, so it
 /// stays behind Show prompt.
 struct ChatAgentCard: View, Equatable {
@@ -106,7 +106,8 @@ struct ChatAgentCard: View, Equatable {
                 NavigationLink {
                     AgentWorkDestinationView(navigation: navigation)
                 } label: {
-                    Label(child.agent.state == .running ? "Follow transcript" : "Open transcript", systemImage: "text.bubble")
+                    Label("Open conversation", systemImage: "text.bubble")
+                        .frame(minHeight: 44)
                         .font(.caption.weight(.semibold)).foregroundStyle(PhrenTheme.accent)
                 }
                 .buttonStyle(.plain)

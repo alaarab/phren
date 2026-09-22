@@ -87,7 +87,8 @@ targets:
     preBuildScripts:
       - name: Bundle memory graph
         script: |
-          true
+          export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+          node "$SRCROOT/scripts/bundle-graph.mjs"
         basedOnDependencyAnalysis: false
         inputFiles:
           - $(SRCROOT)/scripts/bundle-graph.mjs

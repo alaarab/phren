@@ -8,15 +8,27 @@ final class GraphInteractionTests: XCTestCase {
         app.launch()
         _ = openDossier(in: app)
         let dossier = nodeDetails(in: app)
-        let projectedNode = app.webViews.descendants(matching: .any)["memory-selected-node"].firstMatch
+        // The page's DOM id is not a native accessibility identifier.
+        // WebKit exposes this projection marker as an image with its aria-label.
+        let projectedNode = app.webViews.images.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "Selected finding: ")
+        ).firstMatch
         XCTAssertTrue(dossier.waitForExistence(timeout: 5))
         XCTAssertTrue(projectedNode.waitForExistence(timeout: 5), "selected sprite exposes its projected frame")
         let canvas = app.webViews.firstMatch
-        let actions: [String?] = [nil, "Zoom in", "Zoom out", "Next node", "Next node"]
-        for action in actions {
+        let firstFinding = "Cache repeated requests for offline use"
+        let actions: [(String?, String)] = [
+            (nil, firstFinding),
+            ("Zoom in", firstFinding),
+            ("Zoom out", firstFinding),
+            ("Next node", "Retry sync after reconnecting"),
+            ("Next node", "Connect the phone graph to desktop memory")
+        ]
+        for (action, finding) in actions {
             if let action { app.buttons[action].tap() }
             let centered = NSPredicate { _, _ in
-                guard projectedNode.exists, dossier.exists else { return false }
+                guard projectedNode.exists, dossier.exists,
+                      projectedNode.label == "Selected finding: \(finding)" else { return false }
                 let freeCenter = (canvas.frame.minY + dossier.frame.minY - 24) / 2
                 return abs(projectedNode.frame.midY - freeCenter) < 6
                     && abs(projectedNode.frame.midX - canvas.frame.midX) < 6
@@ -302,7 +314,7 @@ final class GraphInteractionTests: XCTestCase {
         XCTAssertTrue(computer.waitForExistence(timeout: 10))
         for _ in 0..<4 where !computer.isHittable { app.scrollViews["sessions-scroll"].swipeUp() }
         computer.tap()
-        let details = app.buttons["live-detail:w1:w1:t1"]
+        let details = app.buttons["live-detail:w7:w7:t9"]
         XCTAssertTrue(details.waitForExistence(timeout: 10))
         details.tap()
         if app.buttons["Change project link"].exists { app.buttons["Change project link"].tap() }

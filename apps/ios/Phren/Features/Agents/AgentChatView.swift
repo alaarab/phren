@@ -350,6 +350,18 @@ struct AgentChatView: View {
                                                images: model.imagesByMessage, session: session, target: model.target,
                                                active: active, viewportHeight: scrollHeight,
                                                preview: { previewImage = $0 }).equatable()
+                            if let notice = model.modelSwitchNotice {
+                                Text(notice).font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .accessibilityIdentifier("chat-model-system-row")
+                            }
+                            if let pending = model.deferredModel {
+                                PhrenOptionRow(title: "Switch after this turn", caption: pending.name + " · Tap to cancel", icon: "clock") {
+                                    model.cancelModelSwitch()
+                                }
+                                .disabled(model.switchingModel)
+                                .phrenIdentifier("chat-model-pending")
+                            }
                             if let preview = model.replyPreview {
                                 ChatReplyPreviewRow(preview: preview)
                             }
@@ -375,7 +387,14 @@ struct AgentChatView: View {
                 }
                 .accessibilityIdentifier("chat-transcript")
                 .contentShape(Rectangle())
-                .simultaneousGesture(TapGesture().onEnded { composing = false; textSelection.transcriptTapped() })
+                .simultaneousGesture(TapGesture().onEnded {
+                    guard !textSelection.preventsTranscriptScrolling else {
+                        textSelection.transcriptTapped()
+                        return
+                    }
+                    composing = false
+                    textSelection.transcriptTapped()
+                })
                 .modifier(ChatHistoryScrollObserver { near in
                     if near && !nearHistoryTop && model.historyError != nil { requestedHistoryLine = nil }
                     if near != nearHistoryTop { historyChain = 0 }
@@ -393,7 +412,8 @@ struct AgentChatView: View {
                 }
                 .onChange(of: model.history.startLine) { _, _ in loadHistoryIfNeeded(proxy, automatic: true) }
                 .onPreferenceChange(ChatContentHeight.self) { transcriptContentHeight = $0 }
-                .scrollDismissesKeyboard(.interactively)
+                .scrollDismissesKeyboard(textSelection.preventsTranscriptScrolling ? .never : .interactively)
+                .scrollDisabled(textSelection.preventsTranscriptScrolling)
                 .coordinateSpace(name: "chat-scroll")
                 .background(GeometryReader { geometry in
                     Color.clear.onAppear { scrollHeight = geometry.size.height }
@@ -403,7 +423,8 @@ struct AgentChatView: View {
                         }
                 })
                 .modifier(ChatFollowScroll(viewport: scrollHeight, contentHeight: transcriptContentHeight,
-                                           following: atBottom, pinRequest: scrollPinRequest) { _, new, userDriven in
+                                           following: atBottom, pinRequest: scrollPinRequest,
+                                           selectionActive: textSelection.preventsTranscriptScrolling) { _, new, userDriven in
                     scrollMetrics = new
                     textSelection.scrolled(to: new.offsetY)
                     let near = new.distanceFromBottom <= ChatFollow.threshold
@@ -706,11 +727,9 @@ struct AgentChatView: View {
             }
         }
         .sheet(isPresented: $showingModelPicker) {
-            ChatModelPickerSheet(source: model.target?.source ?? "", current: model.modelName, host: session.host) { command in
-                showingModelPicker = false
-                model.draft = command
-                sendDraft(handoffCommands: false)
-            }
+            ChatModelPickerSheet(source: model.target?.source ?? "", current: model.modelName, host: session.host,
+                                 choose: { argument in try await model.switchModel(session, argument: argument) },
+                                 deferChoice: { argument in model.deferModelSwitch(session, argument: argument) })
         }
         .sheet(isPresented: $showingUsage) { usageSheet }
         .sheet(isPresented: $showingSecret) { ChatSecretSheet(model: model, session: session) }
@@ -882,7 +901,7 @@ struct AgentChatView: View {
 
     private func pinToBottom(_ proxy: ScrollViewProxy, animated: Bool = false) {
         DispatchQueue.main.async {
-            guard scrollMetrics.bottomOffset > 0.5 else { return }
+            guard !textSelection.preventsTranscriptScrolling, scrollMetrics.bottomOffset > 0.5 else { return }
             if #available(iOS 18.0, *) {
                 scrollPinRequest = ChatPinRequest(animated: animated)
             } else if animated {
@@ -1035,6 +1054,22 @@ struct AgentChatView: View {
                     .font(PhrenTypography.caption2).foregroundStyle(PhrenTheme.chatNeutral)
                     .accessibilityLabel(chatLocationSpoken).accessibilityIdentifier("chat-location")
             }.frame(maxWidth: .infinity, alignment: .leading)
+            if session.tab.isConductor {
+                NavigationLink {
+                    ConductorGrantsView(host: session.host, storeId: project?.storeID ?? appModel.storeDescriptors.first?.id)
+                } label: {
+                    Text("Grants")
+                        .font(PhrenTypography.caption.weight(.semibold))
+                        .foregroundStyle(PhrenTheme.accent)
+                        .padding(.horizontal, PhrenTheme.Space.small)
+                        .frame(minHeight: 32)
+                        .background(PhrenTheme.surfaceRaised, in: Capsule())
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .phrenIdentifier("chat-conductor-grants")
+            }
             if let target = model.target,
                (model.capabilities ?? session.capabilities)?.allows(.changes) ?? true {
                 NavigationLink {
@@ -1291,13 +1326,25 @@ struct AgentChatView: View {
             if let error = model.deliveryError { Text(error).font(.caption).foregroundStyle(PhrenTheme.warning).accessibilityIdentifier("chat-delivery-error") }
             if let error = model.draftStorageError { Text(error).font(.caption).foregroundStyle(PhrenTheme.warning).accessibilityIdentifier("chat-draft-storage-error") }
             VStack(spacing: 0) {
-                TextField("Message \(model.target?.providerName ?? "agent")…", text: $model.draft, axis: .vertical)
-                    .autocorrectionDisabled(!ChatSettings.autocorrects)
-                    .lineLimit(1...4).focused($composing).font(.system(size: composerTextSize, design: .monospaced))
-                    .tint(PhrenTheme.cyan).padding(.vertical, 8).padding(.horizontal, 12)
+                ChatComposer(text: $model.draft, focused: Binding(get: { composing }, set: { composing = $0 }),
+                             placeholder: "Message \(model.target?.providerName ?? "agent")…",
+                             size: composerTextSize, selection: textSelection)
+                    .overlay(alignment: .topLeading) {
+                        if model.draft.isEmpty {
+                            Text("Message \(model.target?.providerName ?? "agent")…")
+                                .font(.system(size: composerTextSize, design: .monospaced))
+                                .foregroundStyle(PhrenTheme.textMuted)
+                                .padding(.vertical, 8).padding(.horizontal, 12)
+                                .allowsHitTesting(false).accessibilityHidden(true)
+                        }
+                    }
                     .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
                     .contentShape(Rectangle())
-                    .dismissKeyboardOnDownwardDrag { composing = false }
+                    .dismissKeyboardOnDownwardDrag {
+                        guard !textSelection.preventsKeyboardDismissal,
+                              textSelection.composerView?.hasScrollableDraft != true else { return }
+                        composing = false
+                    }
                     .accessibilityIdentifier("chat-composer").disabled(model.target == nil)
                 HStack(alignment: .bottom, spacing: 4) {
                     Button { showingAttachments = true } label: {
@@ -1356,10 +1403,9 @@ struct AgentChatView: View {
                             // The agent would draw a menu in its terminal; the
                             // phone draws the same rows and walks it with keys.
                             menuCommand = ChatMenuCommand(command: trimmed)
-                        } else if trimmed == "/model", model.attachments.isEmpty, AgentModelChoice.supportsPicker(source: model.target?.source ?? "") {
-                            // The agent's own /model is a terminal menu; the
-                            // phone offers the same choice as a sheet and sends
-                            // the argument form, which applies without one.
+                        } else if ["/model", "/models"].contains(trimmed), model.attachments.isEmpty, AgentModelChoice.supportsPicker(source: model.target?.source ?? "") {
+                            // Model selection uses a verified control route.
+                            model.draft = ""
                             showingModelPicker = true
                         } else {
                             suppressComposingPin = true
@@ -1384,7 +1430,10 @@ struct AgentChatView: View {
                 }
                 .padding(.horizontal, 6).padding(.bottom, 4)
                 .contentShape(Rectangle())
-                .dismissKeyboardOnDownwardDrag { composing = false }
+                .dismissKeyboardOnDownwardDrag {
+                    guard !textSelection.preventsKeyboardDismissal else { return }
+                    composing = false
+                }
             }
             .padding(.top, 2)
             .background(PhrenTheme.chatPanel, in: RoundedRectangle(cornerRadius: 22))
@@ -1588,6 +1637,7 @@ private struct ChatFollowScroll: ViewModifier {
     let contentHeight: CGFloat
     let following: Bool
     let pinRequest: ChatPinRequest?
+    let selectionActive: Bool
     let changed: (ChatScrollMetrics, ChatScrollMetrics, Bool) -> Void
 
     @State private var userDriven = false
@@ -1597,7 +1647,7 @@ private struct ChatFollowScroll: ViewModifier {
     func body(content: Content) -> some View {
         if #available(iOS 18.0, *) {
             ModernChatFollowScroll(content: content, following: following, pinRequest: pinRequest,
-                                   userDriven: $userDriven, changed: changed)
+                                   selectionActive: selectionActive, userDriven: $userDriven, changed: changed)
         } else {
             content
                 .simultaneousGesture(DragGesture(minimumDistance: 12).onChanged { value in
@@ -1630,6 +1680,7 @@ private struct ModernChatFollowScroll<Content: View>: View {
     let content: Content
     let following: Bool
     let pinRequest: ChatPinRequest?
+    let selectionActive: Bool
     @Binding var userDriven: Bool
     let changed: (ChatScrollMetrics, ChatScrollMetrics, Bool) -> Void
     @State private var position = ScrollPosition()
@@ -1649,6 +1700,7 @@ private struct ModernChatFollowScroll<Content: View>: View {
             .onScrollGeometryChange(for: ChatScrollMetrics.self) { ChatScrollMetrics($0) } action: { old, new in
                 metrics = new
                 changed(old, new, userDriven)
+                guard !selectionActive else { return }
                 if !userDriven, let corrected = ChatScrollMetrics.correctiveOffset(new) {
                     position.scrollTo(y: corrected)
                     return
@@ -1669,11 +1721,18 @@ private struct ModernChatFollowScroll<Content: View>: View {
             }
             .onChange(of: pinRequest) { _, request in
                 guard let request else { return }
+                guard !selectionActive else { handledPinID = request.id; return }
                 apply(request, to: metrics)
             }
             .onChange(of: metrics) { _, metrics in
-                guard let request = pinRequest else { return }
+                guard !selectionActive, let request = pinRequest else { return }
                 apply(request, to: metrics)
+            }
+            .onChange(of: selectionActive) { _, selecting in
+                if selecting {
+                    settlingUntil = nil
+                    handledPinID = pinRequest?.id
+                }
             }
     }
 

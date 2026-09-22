@@ -36,6 +36,10 @@ struct ChatTurnActivityRow: View {
         }
         .font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
         .frame(maxWidth: .infinity, alignment: .leading).frame(height: rowHeight)
+        // Keep the accessibility region on the laid-out row. Without a
+        // shape, its bounds follow the text and rotating arc, not the space
+        // reserved for the timer and the rest of the row.
+        .contentShape(.accessibility, Rectangle())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(activity.label(at: now))
         .accessibilityIdentifier(activity.identifier)

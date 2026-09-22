@@ -8,10 +8,12 @@ import SwiftUI
 /// computers carry the project (`machines.yaml` + profiles) and the folder
 /// it was added from, so the usual case is three taps.
 struct LaunchSessionView: View {
-    let storeID: String
-    let project: String
+    @State private var storeID: String
+    @State private var project: String
     var taskRequest: TaskAgentRequest? = nil
     var preferredHostID: UUID? = nil
+    var allowsStoreSelection = false
+    var onStoreSelected: ((String) -> Void)? = nil
     var onTaskMoved: ((TaskListRow, PhrenTask.Section) -> Void)? = nil
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -19,6 +21,9 @@ struct LaunchSessionView: View {
     @AppStorage("launch.kind.v1") private var kind = "codex"
     @State private var hostID: UUID?
     @State private var showComputers = false
+    @State private var showStores = false
+    @State private var showProjects = false
+    @State private var prepared = false
     @State private var folder = ""
     @State private var folderEdited = false
     @State private var computerNames: [UUID: String] = [:]
@@ -37,6 +42,20 @@ struct LaunchSessionView: View {
     @State private var chatSession: LiveAgentSession?
     @State private var terminalRoute: TerminalDestination?
     @State private var modelName = ""
+
+    init(storeID: String, project: String, taskRequest: TaskAgentRequest? = nil,
+         preferredHostID: UUID? = nil, initialRole: PhrenConnection.LaunchRole = .agent,
+         allowsStoreSelection: Bool = false, onStoreSelected: ((String) -> Void)? = nil,
+         onTaskMoved: ((TaskListRow, PhrenTask.Section) -> Void)? = nil) {
+        _storeID = State(initialValue: storeID)
+        _project = State(initialValue: project)
+        _role = State(initialValue: initialRole)
+        self.taskRequest = taskRequest
+        self.preferredHostID = preferredHostID
+        self.allowsStoreSelection = allowsStoreSelection
+        self.onStoreSelected = onStoreSelected
+        self.onTaskMoved = onTaskMoved
+    }
 
     private typealias Harness = PhrenConnection.LaunchKind
     private var harness: Harness? { Harness(rawValue: kind) }
@@ -77,6 +96,19 @@ struct LaunchSessionView: View {
     private var hosts: [LiveHost] { preferences?.hosts ?? [] }
     private var registry: MachineRegistry { model.machineRegistry(storeId: storeID) }
     private var selectedHost: LiveHost? { hosts.first { $0.id == hostID } }
+    private var storeOptions: [PhrenOption<String>] {
+        model.storeDescriptors.map { .init(id: $0.id, value: $0.id, title: $0.id) }
+    }
+    private var projectOptions: [PhrenOption<String>] {
+        model.sessionProjects.filter { $0.storeID == storeID && $0.name != "global" }
+            .sorted { $0.name < $1.name }
+            .map { .init(id: $0.name, value: $0.name, title: $0.name) }
+    }
+    private var conductorHostID: UUID? {
+        guard role == .conductor, let saved = ConductorLaunchSettings.load(storeID: storeID)?.hostID,
+              hosts.contains(where: { $0.id == saved }) else { return nil }
+        return saved
+    }
     private var computerOptions: [PhrenOption<UUID?>] {
         hosts.map { host in
             PhrenOption(id: host.id.uuidString, value: host.id, title: host.name,
@@ -106,6 +138,7 @@ struct LaunchSessionView: View {
 
     private func locate(_ host: LiveHost) async {
         guard host.fingerprint != nil, located[host.id] == nil else { return }
+        let locatingStore = storeID, locatingProject = project
         locating = true
         defer { locating = false }
         let folders: [PhrenConnection.LocatedFolder]
@@ -115,6 +148,7 @@ struct LaunchSessionView: View {
         #else
         folders = (try? await PhrenConnection.locateProject(host: host, privateKey: DeviceSSHKey.load(host.id), project: project)) ?? []
         #endif
+        guard storeID == locatingStore, project == locatingProject else { return }
         located[host.id] = folders
         if hostID == host.id, !folderEdited { folder = suggestedFolder(host); folderEdited = false }
     }
@@ -125,8 +159,30 @@ struct LaunchSessionView: View {
 
     var body: some View {
         PhrenNavigationStack {
-            PhrenList {
-                Section {
+            PhrenScreen {
+                if allowsStoreSelection {
+                    if storeOptions.count > 1 {
+                        PhrenGroup("Store") {
+                            PhrenSingleSelect(options: storeOptions, selection: $storeID,
+                                              placeholder: "Store", identifier: "launch-store",
+                                              isPresented: $showStores)
+                        }
+                    }
+                    if !projectOptions.isEmpty {
+                        PhrenGroup("Project") {
+                            PhrenSingleSelect(options: projectOptions, selection: $project,
+                                              placeholder: "Project", identifier: "launch-project",
+                                              isPresented: $showProjects)
+                        }
+                    }
+                }
+                PhrenGroup("Role") {
+                    PhrenSingleSelect(options: roleOptions, selection: $role,
+                                      placeholder: "Role", identifier: "launch-role",
+                                      isPresented: $showRoles)
+                }
+
+                PhrenGroup("Computer") {
                     if hosts.isEmpty {
                         Text("Connect a computer in Agents first. Phren Hook on it creates the workspace.").foregroundStyle(PhrenTheme.textMuted)
                     } else {
@@ -134,12 +190,13 @@ struct LaunchSessionView: View {
                                           placeholder: "Choose a computer", identifier: "launch-computer",
                                           isPresented: $showComputers)
                     }
-                } header: { Text("Computer") }
+                }
 
-                Section {
-                    TextField("/path/to/\(project)", text: $folder)
+                PhrenGroup("Folder on that computer") {
+                    TextField("/path/to/\(project)", text: Binding(get: { folder }, set: { folder = $0; folderEdited = true }))
                         .font(.system(.body, design: .monospaced)).autocorrectionDisabled().textInputAutocapitalization(.never)
-                        .onChange(of: folder) { _, _ in folderEdited = true }
+                        .padding(PhrenTheme.Space.medium)
+                        .background(PhrenTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.questionOption))
                         .accessibilityIdentifier("launch-folder")
                     if let host = selectedHost {
                         if locating && located[host.id] == nil {
@@ -147,77 +204,59 @@ struct LaunchSessionView: View {
                                 .font(.caption).foregroundStyle(PhrenTheme.textMuted)
                         }
                         ForEach(located[host.id] ?? []) { candidate in
-                            Button { folder = candidate.directory; folderEdited = false } label: {
-                                HStack(spacing: 8) {
-                                    Image(systemName: candidate.directory == folder ? "checkmark.circle.fill" : "folder")
-                                        .foregroundStyle(candidate.directory == folder ? PhrenTheme.success : PhrenTheme.chatNeutralDim)
-                                    VStack(alignment: .leading, spacing: 1) {
-                                        Text(candidate.directory).font(.system(.caption, design: .monospaced)).foregroundStyle(PhrenTheme.text)
-                                            .lineLimit(1).truncationMode(.head)
-                                        Text(candidate.sourceLabel).font(.caption2).foregroundStyle(PhrenTheme.textMuted)
-                                    }
-                                }
+                            PhrenOptionRow(title: candidate.directory, caption: candidate.sourceLabel,
+                                           selected: candidate.directory == folder, icon: "folder") {
+                                folder = candidate.directory
+                                folderEdited = false
                             }
                             .accessibilityIdentifier("launch-found:\(candidate.directory)")
                         }
                     }
-                } header: { Text("Folder on that computer") } footer: {
                     Text(selectedHost.flatMap { located[$0.id]?.isEmpty == false ? "Found on the computer itself: where an agent last worked on it, a saved Herdr workspace, or phren's registration." : nil }
                          ?? (folderEdited || selectedHost.map(suggestedFolder)?.isEmpty != false
                              ? "The workspace opens here; the agent starts in it."
                              : "From where the project was added to phren. Change it if this computer keeps it elsewhere."))
+                        .font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
                 }
 
-                Section {
-                    PhrenSingleSelect(options: roleOptions, selection: $role,
-                                      placeholder: "Role", identifier: "launch-role",
-                                      isPresented: $showRoles)
-                } header: { Text("Role") }
-
-                Section {
+                PhrenGroup("Harness") {
                     ForEach(Harness.allCases) { harness in
-                        Button { kind = harness.rawValue } label: {
-                            HStack(spacing: 10) {
-                                AgentProviderGlyph(source: harness.rawValue, size: 20)
-                                Text(harness.title).foregroundStyle(PhrenTheme.text)
-                                Spacer()
-                                if kind == harness.rawValue { Image(systemName: "checkmark").foregroundStyle(PhrenTheme.cyan) }
-                            }
+                        PhrenOptionRow(title: harness.title, selected: kind == harness.rawValue,
+                                       glyph: AnyView(AgentProviderGlyph(source: harness.rawValue, size: 20))) {
+                            kind = harness.rawValue
                         }
                         .accessibilityIdentifier("launch-harness:\(harness.rawValue)")
                         .accessibilityAddTraits(kind == harness.rawValue ? .isSelected : [])
                     }
-                } header: { Text("Harness") }
+                }
 
                 if supportsModel {
-                    Section {
+                    PhrenGroup("Model") {
                         TextField(modelPlaceholder, text: $modelName)
                             .font(.system(.body, design: .monospaced)).autocorrectionDisabled().textInputAutocapitalization(.never)
+                            .padding(PhrenTheme.Space.medium)
+                            .background(PhrenTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.questionOption))
                             .accessibilityIdentifier("launch-model")
                         ForEach(modelSuggestions, id: \.self) { suggestion in
-                            Button { modelName = suggestion } label: {
-                                HStack(spacing: 8) {
-                                    Text(suggestion).font(.system(.caption, design: .monospaced)).foregroundStyle(PhrenTheme.text)
-                                    Spacer()
-                                    if modelName == suggestion { Image(systemName: "checkmark").foregroundStyle(PhrenTheme.cyan) }
-                                }
+                            PhrenOptionRow(title: suggestion, selected: modelName == suggestion) {
+                                modelName = suggestion
                             }
                             .accessibilityIdentifier("launch-model-suggestion:\(suggestion)")
                         }
-                    } header: { Text("Model") } footer: {
                         Text("Optional. Passed to \(harness?.title ?? kind) as --model when it starts; leave blank for its default.")
+                            .font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
                     }
                 }
 
                 if role == .conductor && supportsEffort {
-                    Section {
+                    PhrenGroup("Effort") {
                         PhrenSingleSelect(options: effortOptions, selection: $effort,
                                           placeholder: "Effort", identifier: "launch-effort",
                                           isPresented: $showEfforts)
-                    } header: { Text("Effort") }
+                    }
                 }
 
-                Section {
+                VStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
                     Button {
                         Task { await open() }
                     } label: {
@@ -231,33 +270,35 @@ struct LaunchSessionView: View {
                         }
                         .frame(maxWidth: .infinity, minHeight: 44)
                     }
-                    .buttonStyle(.borderedProminent).tint(PhrenTheme.cyan).foregroundStyle(PhrenTheme.chatPanel)
+                    .buttonStyle(.plain).foregroundStyle(PhrenTheme.chatPanel)
+                    .background(PhrenTheme.cyan, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.questionOption))
                     .disabled(!canOpen)
+                    .opacity(canOpen ? 1 : 0.45)
                     .accessibilityIdentifier("launch-open")
-                } footer: {
                     Text(taskRequest == nil
                          ? "Creates a Herdr workspace on the computer, starts the agent in it, and opens the chat here. Starting can take up to a minute."
                          : "Creates a workspace, sends the task and its context, then opens the working agent. The task moves to Active only after delivery succeeds.")
+                        .font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
                 }
 
                 if taskRequest == nil {
-                    Section {
+                    VStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
                         Button {
                             guard let host = selectedHost else { return }
                             terminalRoute = TerminalDestination(host: host, route: .shell(directory: folder.trimmingCharacters(in: .whitespacesAndNewlines), agent: harness))
                         } label: {
-                            Label("Open a terminal instead", systemImage: "terminal")
-                                .frame(maxWidth: .infinity, minHeight: 44)
+                            PhrenRow(icon: "terminal", title: "Open a terminal instead")
                         }
-                        .buttonStyle(.bordered).tint(PhrenTheme.cyan)
+                        .buttonStyle(.plain)
                         .disabled(!canOpen)
                         .accessibilityIdentifier("launch-terminal")
-                    } footer: {
                         Text("Runs \(harness?.title ?? kind) straight over SSH in that folder. No Herdr needed. Terminal only: it ends when you leave, and it has no chat or approvals.")
+                            .font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
                     }
                 }
             }
-            .listSectionSpacing(12)
+            .buttonStyle(.plain)
+            .disabled(launching)
             .navigationTitle("Open \(project)").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -271,7 +312,13 @@ struct LaunchSessionView: View {
             .navigationDestination(item: $chatSession) { AgentChatSheet(session: $0) }
             .navigationDestination(item: $terminalRoute) { HerdrTerminalView(host: $0.host, route: $0.route) }
             .interactiveDismissDisabled(launching)
-            .task { modelName = storedModel(kind); await prepare() }
+            .task {
+                guard !prepared else { return }
+                modelName = storedModel(kind)
+                roleSelected(role)
+                prepared = true
+                await prepare()
+            }
             .onChange(of: kind) { _, newKind in
                 if role == .conductor,
                    let saved = ConductorLaunchSettings.load(storeID: storeID), saved.harness == newKind {
@@ -291,6 +338,10 @@ struct LaunchSessionView: View {
         .phrenSingleSelectSheet(isPresented: $showComputers, title: "Computer", options: computerOptions,
                                 selection: $hostID, rowPrefix: "launch-computer",
                                 onSelect: { id in if let host = hosts.first(where: { $0.id == id }) { select(host) } })
+        .phrenSingleSelectSheet(isPresented: $showStores, title: "Store", options: storeOptions,
+                                selection: $storeID, rowPrefix: "launch-store", onSelect: { _ in storeSelected() })
+        .phrenSingleSelectSheet(isPresented: $showProjects, title: "Project", options: projectOptions,
+                                selection: $project, rowPrefix: "launch-project", onSelect: { _ in resetFolder() })
         .phrenSingleSelectSheet(isPresented: $showRoles, title: "Role", options: roleOptions,
                                 selection: $role, rowPrefix: "launch-role", onSelect: roleSelected)
         .phrenSingleSelectSheet(isPresented: $showEfforts, title: "Effort", options: effortOptions,
@@ -322,10 +373,28 @@ struct LaunchSessionView: View {
     }
 
     private func rememberConductorChoice() {
-        guard role == .conductor, let harness else { return }
+        guard prepared, role == .conductor, let harness else { return }
         ConductorLaunchSettings.save(storeID: storeID, harness: harness,
                                      model: modelName.trimmingCharacters(in: .whitespacesAndNewlines),
                                      effort: effort)
+    }
+
+    private func storeSelected() {
+        project = LiveSessionsModel.conductorProject(storeID: storeID, projects: model.sessionProjects, registry: registry)
+        modelName = storedModel(kind)
+        effort = .medium
+        roleSelected(role)
+        hostID = nil
+        resetFolder()
+        onStoreSelected?(storeID)
+        Task { await prepare() }
+    }
+
+    private func resetFolder() {
+        located = [:]
+        folder = ""
+        folderEdited = false
+        if let host = selectedHost { select(host) }
     }
 
     private func existingConductor() -> LiveAgentSession? {
@@ -347,7 +416,8 @@ struct LaunchSessionView: View {
     /// Pre-select the first computer the store says has the project, and
     /// learn each computer's own name so `machines.yaml` can be matched.
     private func prepare() async {
-        if hostID == nil, let known = hosts.first(where: { $0.id == preferredHostID }) ?? hosts.first(where: knowsProject) ?? hosts.first { select(known) }
+        if hostID == nil, let known = hosts.first(where: { $0.id == conductorHostID })
+            ?? hosts.first(where: { $0.id == preferredHostID }) ?? hosts.first(where: knowsProject) ?? hosts.first { select(known) }
         await withTaskGroup(of: (UUID, String?).self) { group in
             for host in hosts where host.fingerprint != nil {
                 group.addTask {
@@ -361,7 +431,7 @@ struct LaunchSessionView: View {
             for await (id, name) in group where name != nil { computerNames[id] = name }
         }
         // A better-informed choice once names are in, unless the user moved on.
-        if preferredHostID == nil, !folderEdited, let current = selectedHost, !knowsProject(current), let known = hosts.first(where: knowsProject) { select(known) }
+        if conductorHostID == nil, preferredHostID == nil, !folderEdited, let current = selectedHost, !knowsProject(current), let known = hosts.first(where: knowsProject) { select(known) }
     }
 
     private func select(_ host: LiveHost) {
@@ -394,6 +464,10 @@ struct LaunchSessionView: View {
             let session = try await AgentLaunch.launch(host: host, cwd: cwd, label: project, kind: harness,
                                                        model: chosen.isEmpty ? nil : chosen, role: role,
                                                        effort: role == .conductor && supportsEffort ? effort : nil) { status = $0 }
+            if role == .conductor {
+                ConductorLaunchSettings.save(storeID: storeID, harness: harness, model: chosen,
+                                             effort: effort, hostID: host.id, project: project)
+            }
             ProjectAgentRecents.record(storeID: storeID, project: project, hostID: host.id)
             // Remember the folder for this project on this computer, so the
             // next session is found without asking.

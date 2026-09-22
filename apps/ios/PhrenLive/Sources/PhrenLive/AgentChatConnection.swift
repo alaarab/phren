@@ -127,10 +127,54 @@ extension PhrenConnection {
         return try AgentModelChoice.read(data)
     }
 
+    public static func switchModel(host: LiveHost, privateKey: Data, target: AgentChatTarget, model: String, effort: String? = nil) async throws -> AgentModelSwitch {
+        guard !target.isStarting, target.hostID == host.id && target.muxID == host.muxID else {
+            throw PhrenKitError.validation("The chat is starting or belongs to another computer.")
+        }
+        let request = try GatewayRequest.model(target, model: model, effort: effort)
+        try Task.checkCancellation()
+        do {
+            // Never retry a request that may already have changed the terminal.
+            let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: request)
+            return try AgentModelSwitch.read(data)
+        } catch LiveConnectionError.gatewayRejection(status: 409, reason: let reason)
+                    where reason == AgentModelSwitchError.working.localizedDescription {
+            throw AgentModelSwitchError.working
+        }
+    }
+
     public static func childAgents(host: LiveHost, privateKey: Data, target: AgentChatTarget) async throws -> AgentChildTree {
         guard !target.isStarting, target.hostID == host.id && target.muxID == host.muxID else { throw PhrenKitError.validation("The chat belongs to another computer.") }
         let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: .childAgents(target))
         return try AgentChildTree.read(data)
+    }
+
+    public static func resumeChildAgent(host: LiveHost, privateKey: Data, target: AgentChatTarget,
+                                        child: String, text: String) async throws -> AgentFanoutMessage {
+        try validateChildMessageTarget(host: host, target: target, child: child)
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, text.utf8.count <= 32_768,
+              !text.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) && $0 != "\n" && $0 != "\t" }) else {
+            throw PhrenKitError.validation("Enter a message up to 32 KB without terminal control characters.")
+        }
+        let request = try GatewayRequest.resumeChild(target, child: child, text: text)
+        let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: request)
+        return try AgentFanoutMessage.receipt(data)
+    }
+
+    public static func childAgentMessages(host: LiveHost, privateKey: Data, target: AgentChatTarget,
+                                          child: String) async throws -> [AgentFanoutMessage] {
+        try validateChildMessageTarget(host: host, target: target, child: child)
+        var query = GatewayRequest.targetQuery(target); query["child"] = child
+        let request = GatewayRequest(path: GatewayRequest.path("/v1/subagents/messages", query), maximumResponseBytes: 8_388_608)
+        let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: request)
+        return try AgentFanoutMessage.list(data)
+    }
+
+    private static func validateChildMessageTarget(host: LiveHost, target: AgentChatTarget, child: String) throws {
+        guard !target.isStarting, target.hostID == host.id, target.muxID == host.muxID,
+              child.range(of: "^[a-f0-9]{32}$", options: .regularExpression) != nil else {
+            throw PhrenKitError.validation("This child conversation belongs to another computer or is invalid.")
+        }
     }
 
     public static func childAgentTranscript(host: LiveHost, privateKey: Data, target: AgentChatTarget, child: String, provider: String) async throws -> AgentChatTranscript {
@@ -237,6 +281,9 @@ struct GatewayRequest: Sendable {
     static func childAgents(_ target: AgentChatTarget) -> Self {
         Self(path: path("/v1/subagents", targetQuery(target)))
     }
+    static func resumeChild(_ target: AgentChatTarget, child: String, text: String) throws -> Self {
+        Self(path: "/v1/subagents/resume", body: try targetBody(target, fields: ["child": child, "text": text]))
+    }
     static func childTranscript(_ target: AgentChatTarget, child: String) -> Self {
         var query = targetQuery(target); query["child"] = child
         return Self(path: path("/v1/subagents/transcript", query), maximumResponseBytes: 8_388_608)
@@ -276,6 +323,14 @@ struct GatewayRequest: Sendable {
             return Self(path: "/v1/secret", body: try JSONSerialization.data(withJSONObject: ["target": route, "text": text], options: [.sortedKeys]))
         }
         return Self(path: "/v1/secret", body: try targetBody(target, fields: ["text": text]))
+    }
+    static func model(_ target: AgentChatTarget, model: String, effort: String? = nil) throws -> Self {
+        guard !target.isStarting, AgentModelChoice.command(for: model) != nil else {
+            throw PhrenKitError.validation("Choose a model for an established conversation.")
+        }
+        var fields: [String: Any] = ["model": model]
+        if let effort { fields["effort"] = effort }
+        return Self(path: "/v1/model", body: try targetBody(target, fields: fields))
     }
     static func prompt(_ target: AgentChatTarget, text: String) throws -> Self {
         if target.isStarting {

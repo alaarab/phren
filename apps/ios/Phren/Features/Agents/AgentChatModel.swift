@@ -151,10 +151,77 @@ final class AgentChatModel {
             preferProgressActivity = false
             if ["working", "idle", "done", "waiting", "blocked"].contains(activity) { awaitingReply = false }
         }
+        let changed = liveActivity != activity
         liveActivity = activity
+        if changed { startDeferredModelSwitch() }
         scheduleDrain()
     }
     var modelName: String?
+    var modelSwitchNotice: String?
+    private var modelBeforeSwitch: String?
+    private(set) var switchingModel = false
+    private(set) var deferredModel: (target: AgentChatTarget, argument: String, name: String)?
+    private var deferredModelSession: LiveAgentSession?
+
+    func switchModel(_ session: LiveAgentSession, argument: String) async throws {
+        guard let expected = target, !expected.isStarting, !switchingModel else {
+            throw PhrenKitError.validation("Wait for the current model switch or session startup to finish.")
+        }
+        switchingModel = true
+        defer { switchingModel = false }
+        let receipt: AgentModelSwitch
+        #if DEBUG && targetEnvironment(simulator)
+        if AgentChatFixture.enabled {
+            receipt = try await AgentChatFixture.switchModel(expected, model: argument)
+        } else {
+            receipt = try await PhrenConnection.switchModel(host: session.host, privateKey: try DeviceSSHKey.load(session.host.id), target: expected, model: argument)
+        }
+        #else
+        receipt = try await PhrenConnection.switchModel(host: session.host, privateKey: try DeviceSSHKey.load(session.host.id), target: expected, model: argument)
+        #endif
+        guard target == expected else { return }
+        modelBeforeSwitch = transcriptContext.modelName
+        modelName = receipt.model
+        modelSwitchNotice = "Switched to \(receipt.name)"
+        deferredModel = nil; deferredModelSession = nil
+    }
+
+    func deferModelSwitch(_ session: LiveAgentSession, argument: String) {
+        guard let target else { return }
+        let name = AgentModelChoice.choices(source: target.source).first { $0.argument == argument }?.name ?? argument
+        deferredModel = (target, argument, name)
+        deferredModelSession = session
+        startDeferredModelSwitch()
+    }
+
+    func cancelModelSwitch() {
+        guard !switchingModel else { return }
+        deferredModel = nil; deferredModelSession = nil
+    }
+
+    private func startDeferredModelSwitch() {
+        guard let pending = deferredModel, let session = deferredModelSession, pending.target == target,
+              ["idle", "done"].contains(liveActivity ?? ""), !switchingModel else { return }
+        Task {
+            guard deferredModel?.argument == pending.argument, target == pending.target, !switchingModel else { return }
+            do { try await switchModel(session, argument: pending.argument) }
+            catch AgentModelSwitchError.working {
+                // A new turn won the race. Only a fresh idle transition retries.
+                if target == pending.target { liveActivity = "working" }
+            } catch {
+                guard target == pending.target else { return }
+                deferredModel = nil; deferredModelSession = nil
+                modelSwitchNotice = "Model switch not confirmed: " + error.localizedDescription
+            }
+        }
+    }
+
+    private func acceptReportedModel(_ name: String?) {
+        guard let name, name != modelBeforeSwitch else { return }
+        modelBeforeSwitch = nil
+        if modelName != name { modelName = name }
+    }
+
     /// The model and branch the transcript names, kept across status ticks;
     /// the live branch from Phren Hook wins over the transcript's stamp
     /// because it is read from git now rather than when the row was written.
@@ -209,6 +276,7 @@ final class AgentChatModel {
     /// Working activity drives Stop and the timer, never prompt delivery.
     var isBusy: Bool { !needsAnswer && approval == nil && (awaitingReply || isCompacting || (target?.isStarting != true && activityPhase == .working)) }
     var pendingReason: String? {
+        if switchingModel { return "Switching model" }
         if !connected || liveActivity == "unknown" { return "Disconnected" }
         let heldQuestion = question.map { $0.isAsync != true } ?? false
         let heldTerminalPrompt = terminalPrompt.map { !$0.queued || liveActivity != "working" } ?? false
@@ -251,6 +319,7 @@ final class AgentChatModel {
         persistDraft(immediately: true)
         draftLoadTask?.cancel()
         let draftRun = UUID(); draftGeneration = draftRun
+        deferredModel = nil; deferredModelSession = nil; modelSwitchNotice = nil; modelBeforeSwitch = nil
         target = chosen
         rejectedStreamTarget = nil
         restoringDraft = true
@@ -314,6 +383,7 @@ final class AgentChatModel {
         }
     }
     func chooseAnother() {
+        deferredModel = nil; deferredModelSession = nil; modelSwitchNotice = nil; modelBeforeSwitch = nil
         pendingPreview = nil; replyPreview = nil
         persistDraft(immediately: true)
         draftLoadTask?.cancel(); draftGeneration = UUID(); restoringDraft = false
@@ -518,7 +588,7 @@ final class AgentChatModel {
     /// an append, an older page, or a reconnect delta only adds to it.
     private func acceptContext(_ frame: AgentChatTranscript) {
         if frame.replacesConversation { transcriptContext = frame.context } else { transcriptContext.merge(frame.context) }
-        if let name = transcriptContext.modelName, modelName != name { modelName = name }
+        acceptReportedModel(transcriptContext.modelName)
     }
 
     private func mergeHistory(_ frame: AgentChatTranscript) {
@@ -586,7 +656,7 @@ final class AgentChatModel {
                         acceptActivity(status.activity); interactionConnected = true
                         isCompacting = status.compacting
                         historyStalled = status.historyStalled; historyStalledSince = status.historyStalledSince
-                        if let name = status.modelName, modelName != name { modelName = name }
+                        acceptReportedModel(status.modelName)
                         if statusBranch != status.branch { statusBranch = status.branch }
                         if approval != nil || ["waiting", "blocked"].contains(status.activity ?? "") { awaitingReply = false }
                         await ApprovalActivityController.shared.sync(approval, session: session, target: target)

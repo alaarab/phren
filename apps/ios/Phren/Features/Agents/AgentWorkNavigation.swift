@@ -26,9 +26,16 @@ struct AgentWorkDestinationView: View {
     var body: some View {
         switch navigation.resolution {
         case .available(let destination), .offline(let destination):
-            if destination.isRemote && destination.child == nil {
+            if destination.child == nil {
                 AgentChatSheet(session: destination.session(for: navigation.agent),
                                initialTarget: destination.target)
+                    .safeAreaInset(edge: .top, spacing: 0) {
+                        Text("Messages go directly to this agent session.")
+                            .font(.caption).foregroundStyle(PhrenTheme.textMuted)
+                            .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16)
+                            .background(PhrenTheme.chatCanvas)
+                            .accessibilityIdentifier("child-session-note")
+                    }
             } else {
                 ChildAgentTranscriptView(destination: destination, agent: navigation.agent)
             }

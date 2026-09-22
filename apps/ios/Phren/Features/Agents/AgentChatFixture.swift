@@ -47,8 +47,12 @@ import UIKit
     @Observable final class Report {
         var copied: [String] = []
         var selected = ""
+        var childDelivery = ""
+        var selectionEndX = 0.0
+        var selectionEndY = 0.0
         var json: String {
-            let report: [String: Any] = ["copied": copied, "selected": selected]
+            let report: [String: Any] = ["copied": copied, "selected": selected,
+                                       "selectionEndX": selectionEndX, "selectionEndY": selectionEndY]
             return String(decoding: (try? JSONSerialization.data(withJSONObject: report, options: .sortedKeys)) ?? Data(), as: UTF8.self)
         }
     }
@@ -212,6 +216,14 @@ import UIKit
             ["id": auditChild, "provider": "claude", "model": "gpt-5-codex", "path": "Audit the chat timeline", "callId": "agent-audit", "state": "completed", "worktreeName": "phren-color-ui", "branch": "codex/device-color", "children": [] as [Any]],
             ["id": testsChild, "provider": "claude", "path": "Run the full test suite", "callId": "agent-tests", "state": "running", "children": [] as [Any]],
         ] : []
+        if flag("--chat-child-workers") {
+            agents = [
+                ["id": auditChild, "provider": "codex", "path": "Finished parser worker", "callId": "fanout:finished",
+                 "state": "completed", "fanout": ["resumable": true], "children": [] as [Any]],
+                ["id": testsChild, "provider": "opencode", "path": "Running parser worker", "callId": "fanout:running",
+                 "state": "running", "fanout": ["resumable": true], "children": [] as [Any]],
+            ]
+        }
         if flag("--agent-work-navigation") {
             if target.hostID.uuidString.hasSuffix("000002") {
                 agents = [["id": remoteChild, "provider": "codex", "path": "Parser fixtures", "callId": "fanout:parser", "state": "running", "children": [] as [Any]]]
@@ -265,13 +277,19 @@ import UIKit
                                     "entries": entries, "startLine": 0, "totalLines": entries.count, "hasMore": false]
         return try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: frame), source: "claude", sidechain: true, session: child)
     }
+    static func resumeChild(_ agent: AgentChild, target: AgentChatTarget, child: String, text: String) throws -> AgentFanoutMessage {
+        report.childDelivery = "worker|\(target.sessionID)|\(child)|\(text)"
+        let value: [String: Any] = ["ok": true, "message": ["id": UUID().uuidString, "text": text,
+            "status": agent.state == .running ? "queued" : "running", "createdAt": Date.now.formatted(.iso8601)]]
+        return try AgentFanoutMessage.receipt(JSONSerialization.data(withJSONObject: value))
+    }
     static func panes(_ session: LiveAgentSession) throws -> AgentChatPanes {
         reads += 1
         if flag("--chat-offline") && hasReadTranscript { throw LiveConnectionError.disconnected }
         // A session launched from a project runs the harness that was picked.
         let launchedKind = launches.last.map(\.kind).flatMap { session.workspaceID == "w9" ? $0 : nil }
         let remote = flag("--agent-work-navigation") && session.host.id.uuidString.hasSuffix("000002")
-        let agent = remote ? "codex" : launchedKind ?? (flag("--chat-opencode") ? "opencode" : flag("--chat-copilot") ? "copilot" : (trailer || flag("--chat-claude-queue") || flag("--chat-claude-image") || flag("--chat-read-images") || flag("--chat-approval-question") || flag("--chat-agent-card") || flag("--chat-todos") || flag("--chat-plan-mode") || flag("--chat-web-tools") || flag("--chat-skill-chip") || flag("--chat-mcp-card") || flag("--chat-compaction") || flag("--chat-density") || flag("--chat-model-picker") || (tour && flag("--chat-phren-tools"))) ? "claude" : "codex")
+        let agent = remote ? "codex" : launchedKind ?? (flag("--chat-opencode") ? "opencode" : flag("--chat-copilot") ? "copilot" : (trailer || flag("--chat-claude-queue") || flag("--chat-claude-image") || flag("--chat-read-images") || flag("--chat-approval-question") || flag("--chat-agent-card") || flag("--chat-todos") || flag("--chat-plan-mode") || flag("--chat-web-tools") || flag("--chat-skill-chip") || flag("--chat-mcp-card") || flag("--chat-compaction") || flag("--chat-density") || flag("--chat-model-picker") || flag("--chat-phren-tools")) ? "claude" : "codex")
         var panes: [[String: Any]] = [["id": "\(session.workspaceID):p1", "label": "1", "title": tour ? "Ship the onboarding flow" : "Polish the phone app", "agent": agent,
                                      "agentStatus": ((flag("--chat-blocked") || flag("--chat-password") || flag("--chat-approval") || flag("--chat-approval-question") || flag("--chat-plan-mode") || flag("--chat-question")) && !answered) ? "blocked" : (flag("--chat-queue-completion") || flag("--chat-history-stalled") || (flag("--chat-working") && !stopped) ? "working" : "idle"), "sessionId": remote ? "00000000-0000-0000-0000-000000000042" : agent == "copilot" ? "00000000-0000-0000-0000-000000000023" : agent == "opencode" ? "ses_fixtureopencode" : "fixture-\(agent)-session", "cwd": root]]
         if flag("--starting-session-fixture") {
@@ -432,8 +450,9 @@ import UIKit
                 : String(repeating: "Keep queue identities when a real turn replaces its pending copy. ", count: 12)
             let calls: [(String, String, [String: Any], [String: Any])] = [
                 ("finding", "add_finding", ["project": project, "findingType": "pitfall", "finding": saved], ["ok": true]),
-                ("task", "add_task", ["project": project, "task": "Verify pasted images in chat"], ["ok": true]),
+                ("task", "add_task", ["project": project, "item": PhrenToolCardFixture.task], ["ok": true, "data": ["project": project, "item": PhrenToolCardFixture.task]]),
                 ("complete", "manage_task", ["project": project, "action": "complete", "item": "Pin curated font downloads"], ["ok": true]),
+                ("failed", "add_task", ["project": project, "item": "Try to save the follow-up"], ["isError": true, "content": [["type": "text", "text": "Store is read-only.\nThe task was not saved."]]]),
                 ("search", "search_knowledge", ["project": project, "query": "chat navigation"], ["ok": true, "message": "Found 4 result(s): a recalled memory is one long line the phone must wrap to stay readable, since findings, decisions and pitfalls are written as paragraphs rather than code.", "data": ["count": 4, "results": [["title": "Interactive back"], ["title": "Stable chat scroll"], ["title": "One image bubble"], ["title": "Fourth match"]]]]),
             ]
             for (id, tool, input, result) in calls {
@@ -700,6 +719,9 @@ import UIKit
             claudeResult("trailer-tests", "Tests: 128 passed, 128 total\nTime: 6.4 s")
             append("assistant", "Answer received — all 128 tests pass. The onboarding flow is ready to ship.")
         } else if answered { append("assistant", "Answer received in this conversation.") }
+        if flag("--chat-mcp-approval"), let key = answeredKeys.last {
+            append("assistant", "Answer key received: \(key)")
+        }
         if denied { append("assistant", "Permission denied in this conversation.") }
         if !flag("--chat-claude-queue") && !flag("--chat-codex-queue"), stopped { append("assistant", "Turn stopped in the selected pane.") }
         if flag("--chat-compaction"), target.source == "claude" {
@@ -758,13 +780,26 @@ import UIKit
     /// `--chat-models-delayed` holds the picker on its loading row for a
     /// beat, so a test can photograph the wait before the list arrives;
     /// `--chat-models-fail` fails the route instead, for the built-in rows.
+    static func switchModel(_ target: AgentChatTarget, model: String) async throws -> AgentModelSwitch {
+        if flag("--chat-working"), !stopped { throw AgentModelSwitchError.working }
+        if target.source == "opencode" {
+            throw PhrenKitError.validation("OpenCode uses an interactive /models picker. Open terminal to switch models; remote selection cannot yet be verified.")
+        }
+        guard let choice = models(source: target.source).first(where: { $0.argument == model }) else {
+            throw PhrenKitError.validation("That model is not in the computer's catalogue.")
+        }
+        let data = try JSONSerialization.data(withJSONObject: ["ok": true, "model": choice.argument, "name": choice.name])
+        return try AgentModelSwitch.read(data)
+    }
+
     static var modelsDelayed: Bool { flag("--chat-models-delayed") }
     static var modelsFailed: Bool { flag("--chat-models-fail") }
     static var answeredKeys: [String] = []
     static func answer(_ target: AgentChatTarget, key: AgentAnswerKey) async throws {
         try await Task.sleep(for: .milliseconds(150))
         answeredKeys.append(key.rawValue)
-        if key == .enter || key == .yes || key == .no { answered = true }
+        let approvalChoice = try approval(target)?.choice?.options.contains { $0.answerKey == key } == true
+        if approvalChoice || key == .enter || key == .yes || key == .no { answered = true }
     }
     static var answeredSecretCharacters: [Int] = []
     /// Records only how long the secret was — never the text itself.

@@ -10,13 +10,14 @@ import SwiftUI
 /// per-harness names stand in only when there is no computer to ask or the
 /// route fails or answers empty, each row marked "built-in" beside its
 /// default chip, and a field for any other id sits at the bottom. Choosing
-/// (row or typed id) records the recents and sends `/model <id>`.
+/// (row or typed id) asks the Hook to switch and verify the model.
 struct ChatModelPickerSheet: View {
     static let recentKey = "chat.model.recent.v1"
     let source: String
     let current: String?
     var host: LiveHost? = nil
-    let choose: (String) -> Void
+    let choose: (String) async throws -> Void
+    let deferChoice: (String) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var custom = ""
     /// What the computer reports. Until it answers the list is empty with a
@@ -24,6 +25,9 @@ struct ChatModelPickerSheet: View {
     /// to ask or the request fails, so a wrong list never flashes first.
     @State private var reported: [AgentModelChoice]?
     @State private var failed = false
+    @State private var switching = false
+    @State private var switchError: String?
+    @State private var waitingChoice: String?
 
     private var choices: [AgentModelChoice] {
         if let reported { return reported }
@@ -50,7 +54,8 @@ struct ChatModelPickerSheet: View {
         AgentModelRecents.ordered(choices, recent: recentIds).filter { AgentModelChoice.command(for: $0.argument) != nil }
     }
     private var options: [PhrenOption<String>] {
-        orderedChoices.map { choice in
+        guard waitingChoice == nil else { return [] }
+        return orderedChoices.map { choice in
             PhrenOption(id: choice.argument, value: choice.argument, title: choice.name,
                         caption: choice.description, trailing: trailingChip(choice))
         }
@@ -77,9 +82,12 @@ struct ChatModelPickerSheet: View {
                                rowPrefix: "model-option", loading: isLoading,
                                loadingLabel: host.map { "Loading models from \($0.name)" } ?? "Loading models from the computer",
                                loadingIdentifier: "model-loading",
-                               footer: AnyView(customField),
+                               footer: AnyView(switchFooter),
                                onSelect: { argument in commit(argument) },
+                               dismissOnSelect: false,
                                dismiss: { dismiss() })
+        .disabled(switching)
+        .interactiveDismissDisabled(switching)
         .presentationDetents([.medium, .large])
         .task { await loadFromComputer() }
     }
@@ -132,13 +140,53 @@ struct ChatModelPickerSheet: View {
         AgentModelRecents(raw: AppRuntime.defaults.string(forKey: Self.recentKey) ?? "")
     }
 
-    /// A chosen model, typed or tapped, leads the list next time: remember
-    /// first, then send the command form.
-    private func commit(_ argument: String) {
-        guard let command = AgentModelChoice.command(for: argument) else { return }
+    private var switchFooter: some View {
+        VStack(spacing: PhrenTheme.Space.small) {
+            if switching {
+                Text("Switching model…").font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
+            }
+            if let switchError {
+                Text(switchError).font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
+                    .accessibilityIdentifier("chat-model-error")
+            }
+            if let argument = waitingChoice {
+                PhrenOptionRow(title: "Switch after this turn", icon: "clock") {
+                    remember(argument)
+                    deferChoice(argument)
+                    dismiss()
+                }
+                .phrenIdentifier("chat-model-after-turn")
+                PhrenOptionRow(title: "Cancel", icon: "xmark") {
+                    waitingChoice = nil; switchError = nil
+                }
+                .phrenIdentifier("chat-model-cancel-switch")
+            } else {
+                customField
+            }
+        }
+    }
+
+    private func remember(_ argument: String) {
         var store = recents
         store.remember(argument, source: source)
         AppRuntime.defaults.set(store.raw, forKey: Self.recentKey)
-        choose(command)
+    }
+
+    private func commit(_ argument: String) {
+        guard !switching, AgentModelChoice.command(for: argument) != nil else { return }
+        switching = true; waitingChoice = nil; switchError = nil
+        Task {
+            defer { switching = false }
+            do {
+                try await choose(argument)
+                remember(argument)
+                dismiss()
+            } catch AgentModelSwitchError.working {
+                switchError = "This agent is working. The model can switch when the turn ends."
+                waitingChoice = argument
+            } catch {
+                switchError = error.localizedDescription
+            }
+        }
     }
 }

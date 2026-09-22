@@ -1,9 +1,6 @@
 import Foundation
 
-/// What `/model` can be given on the phone without a terminal picker. Each
-/// agent accepts the argument form of its own command (`/model sonnet`,
-/// `/model gpt-5.6-terra`) and answers in the transcript, so the chat can
-/// offer the usual names and still let any id be typed.
+/// A catalogue choice sent to the Hook's verified model-switch route.
 public struct AgentModelChoice: Identifiable, Equatable, Sendable {
     public let name: String
     public let argument: String
@@ -31,9 +28,10 @@ public struct AgentModelChoice: Identifiable, Equatable, Sendable {
         }
     }
 
-    /// Providers whose `/model <id>` applies without an interactive menu.
+    /// Providers handled by the model route, including its clear refusal
+    /// when a terminal picker cannot yet be driven remotely.
     public static func supportsPicker(source: String) -> Bool {
-        ["claude", "codex"].contains(source)
+        ["claude", "codex", "opencode"].contains(source)
     }
 
     /// The per-harness built-in list, shown when the computer's `/v1/models`

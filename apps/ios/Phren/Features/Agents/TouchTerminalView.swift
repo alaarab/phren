@@ -8,6 +8,7 @@ final class TouchTerminalView: TerminalView, UIGestureRecognizerDelegate, UIEdit
     private var wheelRemainder: CGFloat = 0
     private var pinchStartSize: CGFloat = 12
     private var requestingKeyboard = false
+    private var canPasteOnSecondTap = false
     var onTextSizeChanged: ((CGFloat) -> Void)?
     var onShortcutGesture: (() -> Void)?
     var onOpenChat: (() -> Void)?
@@ -79,14 +80,10 @@ final class TouchTerminalView: TerminalView, UIGestureRecognizerDelegate, UIEdit
         wheel.require(toFail: hold)
         addGestureRecognizer(wheel)
         wheelPan = wheel
-        let doubleTap = UITapGestureRecognizer(target: self, action: #selector(pasteAtCursor(_:)))
-        doubleTap.numberOfTapsRequired = 2
-        doubleTap.require(toFail: hold)
-        doubleTap.require(toFail: wheel)
-        doubleTap.require(toFail: pinch)
-        addGestureRecognizer(doubleTap)
-        let tap = UITapGestureRecognizer(target: self, action: #selector(tapTerminal(_:)))
-        tap.require(toFail: doubleTap)
+        // Recognize each tap immediately. UIKit's touch count identifies a
+        // genuine second tap without making a control wait for a double-tap
+        // recognizer to time out or letting two recognizers cancel each other.
+        let tap = TerminalTapGestureRecognizer(target: self, action: #selector(tapTerminal(_:)))
         tap.require(toFail: hold)
         tap.require(toFail: wheel)
         tap.require(toFail: pinch)
@@ -129,6 +126,7 @@ final class TouchTerminalView: TerminalView, UIGestureRecognizerDelegate, UIEdit
         guard TerminalSettings.enabled(TerminalSettings.pinchKey) else { return }
         switch gesture.state {
         case .began:
+            canPasteOnSecondTap = false
             editMenu.dismissMenu()
             clearSelection()
             pinchStartSize = font.pointSize
@@ -160,11 +158,6 @@ final class TouchTerminalView: TerminalView, UIGestureRecognizerDelegate, UIEdit
         allowMouseReporting = !hasActiveSelection
         panGestureRecognizer.isEnabled = getTerminal().mouseMode == .off && !hasActiveSelection
         wheelPan?.isEnabled = getTerminal().mouseMode != .off || hasActiveSelection
-    }
-
-    @objc private func pasteAtCursor(_ gesture: UITapGestureRecognizer) {
-        guard gesture.state == .ended, !hasActiveSelection else { return }
-        paste(nil)
     }
 
     override func paste(_ sender: Any?) {
@@ -212,8 +205,16 @@ final class TouchTerminalView: TerminalView, UIGestureRecognizerDelegate, UIEdit
                       height: max(1, frame.height / CGFloat(max(1, core.rows))))
     }
 
-    @objc private func tapTerminal(_ gesture: UITapGestureRecognizer) {
+    @objc private func tapTerminal(_ gesture: TerminalTapGestureRecognizer) {
         guard gesture.state == .ended else { return }
+        if gesture.touchTapCount > 1 {
+            if gesture.touchTapCount == 2, canPasteOnSecondTap, !hasActiveSelection {
+                paste(nil)
+            }
+            canPasteOnSecondTap = false
+            return
+        }
+        canPasteOnSecondTap = false
         if hasActiveSelection {
             clearSelection()
             editMenu.dismissMenu()
@@ -225,6 +226,7 @@ final class TouchTerminalView: TerminalView, UIGestureRecognizerDelegate, UIEdit
             terminalDelegate?.requestOpenLink(source: self, link: link, params: [:])
             return
         }
+        canPasteOnSecondTap = true
         guard core.mouseMode != .off else { return }
         let viewport = CGPoint(x: point.x - bounds.minX, y: point.y - bounds.minY)
         let column = max(0, min(core.cols - 1, Int(viewport.x / cellSize.width)))
@@ -238,6 +240,7 @@ final class TouchTerminalView: TerminalView, UIGestureRecognizerDelegate, UIEdit
     }
 
     @objc private func scrollTerminal(_ gesture: UIPanGestureRecognizer) {
+        if gesture.state == .began { canPasteOnSecondTap = false }
         if hasActiveSelection {
             let point = gesture.location(in: self)
             let position = bufferPosition(at: point)
@@ -283,6 +286,7 @@ final class TouchTerminalView: TerminalView, UIGestureRecognizerDelegate, UIEdit
         let position = bufferPosition(at: point)
         switch gesture.state {
         case .began:
+            canPasteOnSecondTap = false
             editMenu.dismissMenu()
             selection.selectWordOrExpression(at: position, in: core.buffer)
             selection.selectionMode = .word
@@ -302,5 +306,16 @@ final class TouchTerminalView: TerminalView, UIGestureRecognizerDelegate, UIEdit
         return Position(col: max(0, min(core.cols - 1, Int(point.x / cellSize.width))),
                         row: max(core.getTopVisibleRow(), min(core.getTopVisibleRow() + core.rows - 1,
                                                             Int(point.y / cellSize.height))))
+    }
+}
+
+/// Keep UIKit's spatial and timing rules for repeated taps while dispatching
+/// the first tap at touch-up. A second tap pastes instead of clicking again.
+private final class TerminalTapGestureRecognizer: UITapGestureRecognizer {
+    private(set) var touchTapCount = 0
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        touchTapCount = touches.first?.tapCount ?? 0
+        super.touchesBegan(touches, with: event)
     }
 }

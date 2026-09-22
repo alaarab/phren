@@ -61,6 +61,24 @@ under `chat-message-menu:`: `copy-paragraph`, `select-text`, `copy-message`,
 restore both layers in one 0.18-second animation. Reduce Motion removes motion.
 Selection and the system sharing service begin after dismissal completes.
 
+## Text selection and the composer
+
+Selection takes priority over conversation scrolling and keyboard dismissal.
+Read the composer's UITextView selectedRange and UITextInteraction gesture
+states: a nonempty selection or a handle or loupe drag freezes the transcript
+and switches keyboard dismissal to never. Restore interactive dismissal as
+soon as the range collapses and the interaction ends. A plain transcript drag
+still lowers the keyboard. Composer and icon-row dismissal gestures must obey
+the same selection guard.
+
+The composer grows from one to four lines at the current text size, then
+scrolls internally. Keep UITextView scrolling enabled so dragging a handle
+past the visible lines follows the selection through the entire draft. Do not
+scroll the whole selected range into view or hand that drag to the transcript.
+In a message's Select text mode, use the same selection and gesture guard;
+handle movement must neither dismiss the keyboard nor end selection by moving
+the transcript. Done or a tap outside the paragraph still leaves selection.
+
 ## Steering and pending messages
 
 Working, thinking, responding and compacting never create a phone queue.
@@ -90,3 +108,51 @@ Pending messages can be edited or removed and leave immediately when the
 blocker clears, even during a working turn. Submitted receipts remain internal
 until the transcript acknowledges them, and cannot be edited, removed or sent
 again. A confirmed rejection keeps the draft available for an explicit retry.
+
+## Sub-agent composers
+
+Child navigation keeps the tree's `navigationID`, including the computer and
+parent-scoped child identity. An agent with its own verified pane opens that
+session's full chat and composer. Its note says "Messages go directly to this
+agent session." Unknown computers still require enrollment; an offline pane
+keeps ordinary chat connection behavior.
+
+A fan-out worker has an explicit Hook continuation capability. Its note above
+the Phren message field says "Continues this worker's own session. Messages
+wait in its queue while it runs." Send uses `POST /v1/subagents/resume` with the
+validated parent target, opaque child id and text. A completed worker resumes
+its existing Codex or OpenCode session in its original worktree. A running
+worker receives a durable queued message and starts the next round only after
+finishing. `GET /v1/subagents/messages` supplies receipt state across reopening.
+Queued bubbles say "Queued until this worker finishes" and stop showing as
+queued once the Hook starts that round. The resumed user turn and reply remain
+in the same child transcript. Finished resumable workers remain in the tree.
+A worker without a resumable session has a disabled field and explains why.
+
+In-process Claude Task agents and Codex spawned threads cannot receive phone
+input. Their note says "This sub-agent cannot receive input. Your message goes
+to its parent, labeled with this sub-agent's name." Send goes through the
+parent's validated prompt route with `About the <label> sub-agent: <message>`.
+The child transcript stays scoped to the child; the delivery receipt names the
+parent. A failed or uncertain send preserves the draft and never retries
+silently. Fields, send controls, notes and queue receipts use Phren surfaces,
+colors, wrapping text and 44-point action targets.
+## Phren tool cards
+
+The card body toggles full input and output in place. Folded previews retain
+four body lines and the existing density. Expanded content wraps, is selectable,
+and has no height cap. The 0.18-second animation respects Reduce Motion.
+`chat-phren-card:<call-id>` remains the body control; its accessibility value
+is Folded or Expanded. `chat-phren-expanded:<call-id>` identifies the full text.
+
+A separate 44-point chevron, `chat-phren-open:<call-id>`, opens a resolved task,
+finding dossier or the captured search results. Task and finding resolution
+requires the originating store (or an explicit attached store), project and a
+unique stable ID or exact text match. Missing, ambiguous and unsynced targets
+have no chevron. Positional task or finding IDs are not trusted across syncs.
+
+A failed call uses a danger-colored Failed label and a one-line reason from
+the result, including errors nested in MCP content or structured results.
+The same expand gesture exposes raw error text. Transcript cards have no API
+for safely replaying an exact call. They offer no Retry until such a route can
+prove both the target and replay safety; writes are never replayed from a card.

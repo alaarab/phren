@@ -11,7 +11,7 @@ final class TrailerTour: XCTestCase {
 
     override func setUp() { continueAfterFailure = true }
 
-    // MARK: Beats 4 and 5 — Agents tab, then read the chat and queue what's next
+    // MARK: Beats 4 and 5: Agents tab, then read the chat and send what's next
 
     @MainActor
     func testTour1AgentsAndChat() {
@@ -52,12 +52,15 @@ final class TrailerTour: XCTestCase {
             settle(0.25)
         }
         settle(1)
-        let queue = app.buttons["chat-queue"]
-        XCTAssertTrue(queue.waitForExistence(timeout: 5))
-        queue.tap()
+        let send = app.buttons["chat-send"]
+        XCTAssertTrue(send.waitForExistence(timeout: 5))
+        XCTAssertTrue(send.isEnabled)
+        send.tap()
         // Claude owns the queued instruction: a muted bubble under the reply.
+        XCTAssertTrue(app.staticTexts["run the tests after"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-queued-tag:")).firstMatch.waitForExistence(timeout: 8))
-        // Queueing puts the keyboard away; the muted row sits on the composer.
+        XCTAssertEqual(composer.value as? String, "")
+        // Sending puts the keyboard away; Claude's queued row stays visible.
         settle(4)
     }
 

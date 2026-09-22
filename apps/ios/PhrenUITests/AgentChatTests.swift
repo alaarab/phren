@@ -5,11 +5,14 @@ final class AgentChatTests: XCTestCase {
     func testActivityCountsWhileThinkingAndCollapsesAboveTheReply() {
         let app = launch(extra: ["--chat-streaming", "--chat-activity-fixture", "--chat-clear-drafts"])
         app.buttons["live-chat:w7:w7:t9"].tap()
-        XCTAssertTrue(app.scrollViews["chat-transcript"].waitForExistence(timeout: 8))
+        let transcript = app.scrollViews["chat-transcript"]
+        XCTAssertTrue(transcript.waitForExistence(timeout: 8))
         let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
         composer.tap(); composer.typeText("Show turn activity")
         app.buttons["chat-send"].tap()
-        let live = app.descendants(matching: .any).matching(identifier: "chat-activity").firstMatch
+        // The header has its own compact activity indicator. This test owns
+        // the timed row in the conversation, including its removal on finish.
+        let live = transcript.descendants(matching: .any).matching(identifier: "chat-activity").firstMatch
         XCTAssertTrue(live.waitForExistence(timeout: 5))
         XCTAssertTrue(live.label.hasPrefix("Thinking "), live.label)
         let frame = live.frame
@@ -19,7 +22,7 @@ final class AgentChatTests: XCTestCase {
         XCTAssertEqual(live.frame.width, frame.width, accuracy: 1)
         XCTAssertEqual(live.frame.height, frame.height, accuracy: 1)
         capture(app, "Chat thinking activity")
-        let done = app.descendants(matching: .any).matching(identifier: "chat-activity-done").firstMatch
+        let done = transcript.descendants(matching: .any).matching(identifier: "chat-activity-done").firstMatch
         XCTAssertTrue(done.waitForExistence(timeout: 18))
         XCTAssertEqual(done.label, "Thought for 12s")
         XCTAssertFalse(live.exists)
@@ -27,7 +30,8 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(reply.waitForExistence(timeout: 5))
         XCTAssertLessThanOrEqual(done.frame.maxY, reply.frame.minY)
         capture(app, "Chat completed activity")
-        app.navigationBars.buttons.firstMatch.tap()
+        app.buttons["chat-close"].tap()
+        XCTAssertTrue(app.buttons["live-chat:w7:w7:t9"].waitForExistence(timeout: 5))
         app.buttons["live-chat:w7:w7:t9"].tap()
         XCTAssertTrue(done.waitForExistence(timeout: 8))
         XCTAssertEqual(done.label, "Thought for 12s")
@@ -71,44 +75,73 @@ final class AgentChatTests: XCTestCase {
     func testPhrenToolsHaveTheirOwnCardsAndOpenFullDetails() {
         let app = launch(extra: ["--chat-phren-tools"])
         app.buttons["live-chat:w7:w7:t9"].tap()
-        XCTAssertTrue(app.scrollViews["chat-transcript"].waitForExistence(timeout: 8))
-        for (id, verb) in [("search", "Search memory"), ("complete", "Update task"), ("task", "Add task"), ("finding", "Save finding")] {
-            let card = app.buttons["chat-phren-card:phren-" + id]
-            for _ in 0..<8 where !card.isHittable { app.scrollViews["chat-transcript"].swipeDown() }
-            XCTAssertTrue(card.waitForExistence(timeout: 5), "The phren \(id) call has its own card")
-            XCTAssertTrue(card.label.contains(verb), "Expected \(verb) in \(card.label)")
-            XCTAssertTrue(card.label.contains("Completed"), "The result status remains visible")
-            if id == "complete" {
-                XCTAssertTrue(card.label.contains("complete"), "The task card identifies its completion action")
-            }
-        }
-        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-read-run:")).firstMatch.exists)
-        capture(app, "Phren memory and task cards")
-        let search = app.buttons["chat-phren-card:phren-search"]
-        for _ in 0..<8 where !search.isHittable { app.scrollViews["chat-transcript"].swipeUp() }
-        XCTAssertTrue(search.isHittable)
+        let transcript = app.scrollViews["chat-transcript"]
+        XCTAssertTrue(transcript.waitForExistence(timeout: 8))
+        let card = app.buttons["chat-phren-card:phren-task"]
+        for _ in 0..<12 where !card.isHittable { transcript.swipeDown() }
+        XCTAssertTrue(card.waitForExistence(timeout: 5))
+        XCTAssertTrue(card.label.contains("Add task"))
+        XCTAssertTrue(card.label.contains("Completed"))
+        XCTAssertEqual(card.value as? String, "Folded")
+        let foldedHeight = card.frame.height
+        card.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.15)).tap()
+        XCTAssertEqual(card.value as? String, "Expanded")
+        XCTAssertFalse(app.navigationBars["Task details"].exists)
+        let expanded = app.descendants(matching: .any).matching(identifier: "chat-phren-expanded:phren-task").firstMatch
+        XCTAssertTrue(expanded.waitForExistence(timeout: 5))
+        XCTAssertGreaterThan(expanded.frame.height, foldedHeight)
+        for _ in 0..<12 where !card.isHittable { transcript.swipeDown() }
+        card.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.05)).tap()
+        XCTAssertEqual(card.value as? String, "Folded")
+        XCTAssertTrue(expanded.waitForNonExistence(timeout: 5))
+        let open = app.buttons["chat-phren-open:phren-task"]
+        for _ in 0..<12 where !open.isHittable { transcript.swipeDown() }
+        XCTAssertTrue(open.isHittable)
+        open.tap()
+        XCTAssertTrue(app.navigationBars["Task details"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final task check")).firstMatch.exists)
+        capture(app, "Phren task detail from its chevron")
+    }
+
+    @MainActor
+    func testFailedPhrenCallShowsReasonAndExpandsRawErrorWithoutChevron() {
+        let app = launch(extra: ["--chat-phren-tools"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let transcript = app.scrollViews["chat-transcript"]
+        XCTAssertTrue(transcript.waitForExistence(timeout: 8))
+        let card = app.buttons["chat-phren-card:phren-failed"]
+        for _ in 0..<12 where !card.isHittable { transcript.swipeDown() }
+        XCTAssertTrue(card.waitForExistence(timeout: 5))
+        XCTAssertTrue(card.label.contains("Failed"))
+        XCTAssertTrue(card.label.contains("Store is read-only."))
+        XCTAssertFalse(card.label.contains("Completed"))
+        XCTAssertFalse(app.buttons["chat-phren-open:phren-failed"].exists)
+        XCTAssertFalse(app.buttons["Retry"].exists)
+        card.tap()
+        XCTAssertEqual(card.value as? String, "Expanded")
+        XCTAssertTrue(app.staticTexts["Raw error"].waitForExistence(timeout: 5))
+        capture(app, "Failed phren call with raw error expanded")
+    }
+
+    @MainActor
+    func testPhrenSearchChevronOpensAllCapturedResultsAndMissingFindingHasNoChevron() {
+        let app = launch(extra: ["--chat-phren-tools"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let transcript = app.scrollViews["chat-transcript"]
+        XCTAssertTrue(transcript.waitForExistence(timeout: 8))
+        let search = app.buttons["chat-phren-open:phren-search"]
+        for _ in 0..<12 where !search.isHittable { transcript.swipeDown() }
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
         search.tap()
-        XCTAssertTrue(app.buttons["chat-tool-output-wrap"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.buttons["chat-tool-output-done"].exists, "Back is the only way out of a pushed detail")
-        // Recalled memories wrap by default: the whole line fits the screen instead of running off it.
-        let text = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "one long line the phone must wrap")).firstMatch
-        XCTAssertTrue(text.waitForExistence(timeout: 5))
-        XCTAssertLessThanOrEqual(text.frame.maxX, app.frame.maxX + 1, "Wrapped output must not extend past the screen")
-        capture(app, "Recalled memories wrapped")
-        let wrapToggle = app.buttons["chat-tool-output-wrap"]
-        XCTAssertTrue(wrapToggle.exists)
-        wrapToggle.tap()
-        XCTAssertTrue(text.waitForExistence(timeout: 3))
-        XCTAssertGreaterThan(text.frame.maxX, app.frame.maxX, "Long lines mode lets the line run past the screen")
-        wrapToggle.tap()
+        XCTAssertTrue(app.navigationBars["Search results"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Fourth match"].exists)
         app.navigationBars.buttons.firstMatch.tap()
         let finding = app.buttons["chat-phren-card:phren-finding"]
-        for _ in 0..<8 where !finding.isHittable { app.scrollViews["chat-transcript"].swipeDown() }
-        XCTAssertTrue(finding.isHittable)
+        for _ in 0..<12 where !finding.isHittable { transcript.swipeDown() }
+        XCTAssertTrue(finding.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["chat-phren-open:phren-finding"].exists)
         finding.tap()
-        XCTAssertTrue(app.buttons["chat-tool-output-wrap"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "findingType")).firstMatch.exists)
-        app.navigationBars.buttons.firstMatch.tap()
+        XCTAssertEqual(finding.value as? String, "Expanded")
     }
 
     @MainActor
@@ -285,8 +318,8 @@ final class AgentChatTests: XCTestCase {
         app.buttons["child-agent-back"].tap()
         let open = app.buttons["chat-agent-transcript:agent-audit"]
         XCTAssertTrue(open.waitForExistence(timeout: 8))
-        XCTAssertEqual(open.label, "Open transcript")
-        XCTAssertEqual(app.buttons["chat-agent-transcript:agent-tests"].label, "Follow transcript")
+        XCTAssertEqual(open.label, "Open conversation")
+        XCTAssertEqual(app.buttons["chat-agent-transcript:agent-tests"].label, "Open conversation")
         open.tap()
         // The child's rows are all sidechain rows; they read as its conversation.
         let header = app.descendants(matching: .any).matching(identifier: "child-agent-header").firstMatch
@@ -606,6 +639,106 @@ final class AgentChatTests: XCTestCase {
         XCTAssertEqual(runs.element(boundBy: 0).value as? String, "Collapsed")
         XCTAssertTrue(cards.element(boundBy: 3).waitForNonExistence(timeout: 5))
         XCTAssertEqual(cards.count, 1)
+    }
+
+    @MainActor
+    func testDraftSelectionDragsPastVisibleLinesWithoutDismissingKeyboard() {
+        let app = launch(extra: ["--chat-paragraphs"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let composer = app.textViews["chat-composer"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 8))
+        let oneLineHeight = composer.frame.height
+        composer.tap()
+        composer.typeText("Alpha first line\nBravo second line\nCharlie third line")
+        XCTAssertGreaterThan(composer.frame.height, oneLineHeight + 15)
+        composer.typeText("\nDelta fourth line\nEcho fifth line\nFoxtrot sixth line\nGolf seventh line\nHotel eighth line\nIndia ninth line\nJuliet tenth line\nKilo eleventh line\nOmega final line")
+        let cappedHeight = composer.frame.height
+        XCTAssertLessThan(cappedHeight, oneLineHeight * 4)
+        // Typing leaves the caret at the end. Scroll the editor itself back
+        // to the first line before selecting, keeping the draft intact.
+        for _ in 0..<4 {
+            let start = composer.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.2))
+            start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: cappedHeight - 20)))
+        }
+        composer.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 30, dy: 16)).doubleTap()
+        let report = app.staticTexts["chat-fixture-copied"]
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            self.selectionReport(app)["selected"] as? String == "Alpha"
+        }, object: report)], timeout: 5), .completed)
+        let before = selectionReport(app)["selected"] as? String ?? ""
+        let marker = app.descendants(matching: .any)["chat-paragraph:2:0:2"]
+        let originalY = marker.frame.minY
+        let handle = selectionEnd(app, in: composer)
+        let belowEditor = composer.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 1))
+            .withOffset(CGVector(dx: 0, dy: 30))
+        handle.press(forDuration: 0.15, thenDragTo: belowEditor, withVelocity: .slow, thenHoldForDuration: 3)
+        let selected = selectionReport(app)["selected"] as? String ?? ""
+        XCTAssertTrue(app.keyboards.firstMatch.exists, "The handle drag must keep the keyboard up")
+        XCTAssertGreaterThan(selected.count, before.count, "The actual UITextView selection must grow")
+        XCTAssertTrue(selected.contains("Omega final line"), "Edge autoscroll must reach beyond the four visible lines")
+        XCTAssertEqual(marker.frame.minY, originalY, accuracy: 2, "The transcript must stay still while the editor scrolls")
+        XCTAssertEqual(composer.frame.height, cappedHeight, accuracy: 1)
+        // Collapse the selection by typing, then exercise dismissal again
+        // in the same chat to catch a selection guard that never releases.
+        composer.typeText("Replacement")
+        dragTranscriptDown(app)
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testPlainTranscriptDragStillDismissesKeyboardInteractively() {
+        let app = launch(extra: ["--chat-paragraphs"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let composer = app.textViews["chat-composer"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 8))
+        composer.tap(); composer.typeText("Keep this draft")
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        dragTranscriptDown(app)
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+        XCTAssertEqual(composer.value as? String, "Keep this draft")
+    }
+
+    @MainActor
+    func testMessageSelectionHandleDoesNotMoveTranscriptOrDismissSelection() {
+        let app = launch(extra: ["--chat-paragraphs"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let paragraph = app.descendants(matching: .any)["chat-paragraph:2:0:1"]
+        XCTAssertTrue(paragraph.waitForExistence(timeout: 8))
+        paragraph.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 5, dy: 5)).doubleTap()
+        let selectable = app.textViews["chat-selectable:2:0:1"]
+        XCTAssertTrue(selectable.waitForExistence(timeout: 5))
+        let report = app.staticTexts["chat-fixture-copied"]
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            self.selectionReport(app)["selected"] as? String == "Bravo"
+        }, object: report)], timeout: 5), .completed)
+        let originalFrame = selectable.frame
+        let keyboardWasVisible = app.keyboards.firstMatch.exists
+        let bottom = selectable.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 1))
+            .withOffset(CGVector(dx: 0, dy: 20))
+        selectionEnd(app, in: selectable).press(forDuration: 0.15, thenDragTo: bottom, withVelocity: .slow, thenHoldForDuration: 1)
+        XCTAssertTrue(selectable.exists, "A handle drag must not exit Select text mode")
+        XCTAssertEqual(selectable.frame.minY, originalFrame.minY, accuracy: 2)
+        XCTAssertEqual(app.keyboards.firstMatch.exists, keyboardWasVisible)
+        XCTAssertGreaterThan((selectionReport(app)["selected"] as? String ?? "").count, "Bravo".count)
+        XCTAssertTrue(app.buttons["chat-selectable-done"].exists)
+    }
+
+    @MainActor private func selectionReport(_ app: XCUIApplication) -> [String: Any] {
+        let label = app.staticTexts["chat-fixture-copied"].label
+        return (try? JSONSerialization.jsonObject(with: Data(label.utf8)) as? [String: Any]) ?? [:]
+    }
+
+    @MainActor private func selectionEnd(_ app: XCUIApplication, in editor: XCUIElement) -> XCUICoordinate {
+        let report = selectionReport(app)
+        return editor.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+            dx: report["selectionEndX"] as? Double ?? 0,
+            dy: report["selectionEndY"] as? Double ?? 0))
+    }
+
+    @MainActor private func dragTranscriptDown(_ app: XCUIApplication) {
+        let transcript = app.scrollViews["chat-transcript"]
+        let start = transcript.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.3))
+        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 150)))
     }
 
     @MainActor
@@ -1295,9 +1428,14 @@ final class AgentChatTests: XCTestCase {
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "[Image: source:")).firstMatch.exists)
         capture(app, "Read frames under the pill, uploaded pictures in the bubble")
         pictures.firstMatch.tap()
-        XCTAssertTrue(app.navigationBars["Conversation image.jpg"].waitForExistence(timeout: 5))
-        app.navigationBars["Conversation image.jpg"].buttons["Done"].tap()
+        let viewer = app.descendants(matching: .any).matching(identifier: "image-viewer").firstMatch
+        XCTAssertTrue(viewer.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Conversation image.jpg"].exists)
+        XCTAssertEqual(viewer.value as? String, "Fit")
+        app.buttons["image-viewer-close"].tap()
+        XCTAssertTrue(viewer.waitForNonExistence(timeout: 5))
         XCTAssertEqual(card.value as? String, "Collapsed")
+        XCTAssertEqual(pictures.count, 4)
     }
 
     /// A slash command or `!` shell line typed at Claude Code's own prompt
@@ -1417,8 +1555,12 @@ final class AgentChatTests: XCTestCase {
         attachImage(app)
         XCTAssertTrue(app.buttons["Preview Screenshot.png"].waitForExistence(timeout: 5))
         app.buttons["Preview Screenshot.png"].tap()
-        XCTAssertTrue(app.navigationBars["Screenshot.png"].waitForExistence(timeout: 5))
-        app.navigationBars["Screenshot.png"].buttons["Done"].tap()
+        let viewer = app.descendants(matching: .any).matching(identifier: "image-viewer").firstMatch
+        XCTAssertTrue(viewer.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Screenshot.png"].exists)
+        XCTAssertEqual(viewer.value as? String, "Fit")
+        app.buttons["image-viewer-close"].tap()
+        XCTAssertTrue(viewer.waitForNonExistence(timeout: 5))
         app.buttons["Remove Screenshot.png"].tap()
         XCTAssertFalse(app.buttons["Preview Screenshot.png"].exists)
         attachImage(app)
@@ -1427,6 +1569,11 @@ final class AgentChatTests: XCTestCase {
         capture(app, "Image and prompt ready to send")
         app.buttons["chat-send"].tap()
         XCTAssertTrue(app.buttons["View attached Screenshot.png"].waitForExistence(timeout: 8))
+        app.buttons["View attached Screenshot.png"].tap()
+        XCTAssertTrue(viewer.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Screenshot.png"].exists)
+        app.buttons["image-viewer-close"].tap()
+        XCTAssertTrue(viewer.waitForNonExistence(timeout: 5))
         capture(app, "Sent image in conversation")
         if app.buttons["Latest messages"].isHittable { app.buttons["Latest messages"].tap() }
         XCTAssertTrue(app.staticTexts["Received in codex on w7:p1: Review this screenshot"].waitForExistence(timeout: 8))
@@ -1584,13 +1731,22 @@ final class AgentChatTests: XCTestCase {
         app.buttons["live-chat:w7:w7:t9"].tap()
         XCTAssertTrue(app.staticTexts["Allow the phren MCP server to run tool phren_admin?"].waitForExistence(timeout: 8))
         XCTAssertEqual(rawJSONTexts(app).count, 0)
-        XCTAssertTrue(app.buttons["chat-approval-option-1"].exists)
+        let allow = app.buttons["chat-approval-approve"]
+        let allowSession = app.buttons["chat-approval-option-1"]
+        let deny = app.buttons["chat-approval-option-2"]
+        XCTAssertTrue(allow.label.contains("Allow"))
+        XCTAssertTrue(allowSession.label.contains("Allow for this session"))
+        XCTAssertTrue(deny.label.contains("Deny"))
+        XCTAssertLessThan(allow.frame.minY, allowSession.frame.minY)
+        XCTAssertLessThan(allowSession.frame.minY, deny.frame.minY)
         XCTAssertFalse(app.buttons["Yes"].exists)
         XCTAssertFalse(app.buttons["No"].exists)
         app.buttons["Action details"].tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "read_skill")).firstMatch.exists)
-        app.buttons["chat-approval-option-1"].tap()
+        allowSession.tap()
+        XCTAssertTrue(app.staticTexts["Answer key received: 2"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.staticTexts["Answer received in this conversation."].waitForExistence(timeout: 8))
+        XCTAssertFalse(allowSession.exists)
     }
 
     @MainActor
@@ -1709,7 +1865,55 @@ final class AgentChatTests: XCTestCase {
     }
 
     @MainActor
-    func testSlashModelOpensAPickerAndSendsTheArgumentFormWithoutTheTerminal() {
+    func testWorkingModelPickerOffersDeferredSwitchAndCancellation() {
+        let app = launch(extra: ["--chat-working"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
+        XCTAssertTrue(composer.waitForExistence(timeout: 8))
+        composer.tap(); composer.typeText("/model")
+        app.buttons["chat-send"].tap()
+        let terra = app.buttons["model-option:gpt-5.6-terra"]
+        XCTAssertTrue(terra.waitForExistence(timeout: 5))
+        terra.tap()
+        let afterTurn = app.buttons["chat-model-after-turn"]
+        if !afterTurn.isHittable { app.swipeUp() }
+        XCTAssertTrue(afterTurn.waitForExistence(timeout: 5))
+        XCTAssertTrue(afterTurn.label.contains("Switch after this turn"))
+        XCTAssertTrue(app.buttons["chat-model-cancel-switch"].exists)
+        afterTurn.tap()
+        let pending = app.buttons["chat-model-pending"]
+        XCTAssertTrue(pending.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["chat-model-system-row"].exists)
+        pending.tap()
+        XCTAssertFalse(pending.exists)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "/model gpt-5.6-terra")).firstMatch.exists)
+    }
+
+    @MainActor
+    func testDeferredModelSwitchRunsWhenTheTurnEnds() {
+        let app = launch(extra: ["--chat-working"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
+        XCTAssertTrue(composer.waitForExistence(timeout: 8))
+        composer.tap(); composer.typeText("/model")
+        app.buttons["chat-send"].tap()
+        let terra = app.buttons["model-option:gpt-5.6-terra"]
+        XCTAssertTrue(terra.waitForExistence(timeout: 5))
+        terra.tap()
+        let afterTurn = app.buttons["chat-model-after-turn"]
+        XCTAssertTrue(afterTurn.waitForExistence(timeout: 5))
+        afterTurn.tap()
+        XCTAssertTrue(app.buttons["chat-model-pending"].waitForExistence(timeout: 5))
+        app.buttons["chat-stop"].tap()
+        let receipt = app.staticTexts["chat-model-system-row"]
+        XCTAssertTrue(receipt.waitForExistence(timeout: 8))
+        XCTAssertEqual(receipt.label, "Switched to GPT-5.6-Terra")
+        XCTAssertFalse(app.buttons["chat-model-pending"].exists)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "/model gpt-5.6-terra")).firstMatch.exists)
+    }
+
+    @MainActor
+    func testSlashModelOpensAPickerAndShowsAVerifiedSystemRow() {
         let app = launch()
         app.buttons["live-chat:w7:w7:t9"].tap()
         let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
@@ -1724,8 +1928,10 @@ final class AgentChatTests: XCTestCase {
         XCTAssertFalse(app.buttons["model-loading"].exists, "The catalogue has answered; no loading row remains")
         capture(app, "Model picker")
         terra.tap()
-        let echoed = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "/model gpt-5.6-terra")).firstMatch
-        XCTAssertTrue(echoed.waitForExistence(timeout: 8), "The chosen model goes out as the command's argument form")
+        let switched = app.staticTexts["chat-model-system-row"]
+        XCTAssertTrue(switched.waitForExistence(timeout: 8))
+        XCTAssertEqual(switched.label, "Switched to GPT-5.6-Terra")
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "/model gpt-5.6-terra")).firstMatch.exists)
         XCTAssertFalse(app.otherElements["herdr-terminal-header"].exists, "A model choice is answered in the transcript, not in the terminal")
         XCTAssertTrue(composer.waitForExistence(timeout: 3))
         // The same picker is one row in the options sheet.
@@ -1800,8 +2006,9 @@ final class AgentChatTests: XCTestCase {
         let haiku = app.buttons["model-option:claude-haiku-4-5-20251001"]
         XCTAssertTrue(haiku.waitForExistence(timeout: 5))
         haiku.tap()
-        let echoed = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "/model claude-haiku-4-5-20251001")).firstMatch
-        XCTAssertTrue(echoed.waitForExistence(timeout: 8), "The choice goes out as the command's argument form")
+        let switched = app.staticTexts["chat-model-system-row"]
+        XCTAssertTrue(switched.waitForExistence(timeout: 8))
+        XCTAssertEqual(switched.label, "Switched to Haiku 4.5")
         XCTAssertTrue(composer.waitForExistence(timeout: 3))
         // The same picker is one row in the options sheet; the chosen model
         // now leads it, above the default the catalogue sent first.
@@ -2174,7 +2381,11 @@ final class AgentChatTests: XCTestCase {
         XCTAssertFalse(app.buttons["Slash commands"].exists)
         app.buttons["chat-options-done"].tap()
         XCTAssertTrue(reconnect.waitForExistence(timeout: 8))
-        XCTAssertFalse(app.buttons["chat-send"].isEnabled)
+        let pending = app.buttons["chat-queue"]
+        XCTAssertTrue(pending.waitForExistence(timeout: 5))
+        XCTAssertTrue(pending.isEnabled, "Offline text can be kept pending explicitly")
+        XCTAssertEqual(pending.label, "Keep pending")
+        XCTAssertFalse(app.buttons["chat-send"].exists)
         reconnect.tap()
         XCTAssertEqual(composer.value as? String, "Keep this while offline")
         XCTAssertFalse(app.staticTexts["Received in codex on w7:p1: Keep this while offline"].exists)
@@ -2222,9 +2433,24 @@ final class AgentChatTests: XCTestCase {
         XCTAssertFalse(app.buttons["chat-answer-secret"].exists, "Ordinary blocked prompts do not request a password")
         let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
         composer.tap(); composer.typeText("Keep this for later")
-        XCTAssertTrue(app.buttons["chat-send"].isEnabled, "A blocked agent can be answered from the composer")
-        app.buttons["chat-send"].tap()
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Received in codex")).firstMatch.waitForExistence(timeout: 8))
+        let pending = app.buttons["chat-queue"]
+        XCTAssertTrue(pending.waitForExistence(timeout: 5))
+        XCTAssertTrue(pending.isEnabled)
+        pending.tap()
+        XCTAssertEqual(composer.value as? String, "")
+        XCTAssertTrue(app.staticTexts["Holding a prompt"].waitForExistence(timeout: 5))
+        let received = app.staticTexts["Received in codex on w7:p1: Keep this for later"]
+        XCTAssertFalse(received.exists, "Text must wait until the terminal prompt is answered")
+        let sendPending = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-queued-send:")).firstMatch
+        XCTAssertTrue(sendPending.exists)
+        XCTAssertFalse(sendPending.isEnabled)
+        XCTAssertTrue(app.buttons["chat-answer-terminal"].isHittable)
+        app.buttons["chat-answer-key:y"].tap()
+        XCTAssertTrue(app.staticTexts["Answer received in this conversation."].waitForExistence(timeout: 8))
+        XCTAssertTrue(received.waitForExistence(timeout: 8))
+        XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label == %@", "Received in codex on w7:p1: Keep this for later")).count, 1)
+        XCTAssertFalse(app.staticTexts["Holding a prompt"].exists)
+        XCTAssertFalse(sendPending.exists)
     }
 
     @MainActor
@@ -2244,6 +2470,78 @@ final class AgentChatTests: XCTestCase {
         found.tap()
         XCTAssertTrue(app.buttons["chat-close"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["The project screen is ready. What would you like to change?"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testInProcessChildComposerLabelsAndSendsToParent() {
+        let app = launch(extra: ["--chat-agent-card"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        XCTAssertTrue(app.buttons["chat-agent-tree"].waitForExistence(timeout: 8))
+        app.buttons["chat-agent-tree"].tap()
+        let child = app.buttons["child-agent:b" + String(repeating: "2", count: 31)]
+        XCTAssertTrue(child.waitForExistence(timeout: 5)); child.tap()
+        let note = app.staticTexts["child-composer-note"]
+        XCTAssertTrue(note.waitForExistence(timeout: 5))
+        XCTAssertTrue(note.label.contains("goes to its parent"))
+        let field = app.descendants(matching: .any).matching(identifier: "child-composer-field").firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5)); field.tap(); field.typeText("Check the parser too")
+        app.buttons["child-composer-send"].tap()
+        let expected = "About the Run the full test suite sub-agent: Check the parser too"
+        let receipt = app.staticTexts["child-message-delivery"]
+        XCTAssertTrue(receipt.waitForExistence(timeout: 5))
+        XCTAssertTrue(receipt.label.contains(expected))
+        app.buttons["child-agent-back"].tap(); app.buttons["chat-subagents-back"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", expected)).firstMatch.waitForExistence(timeout: 8))
+        capture(app, "Child message delivered to parent")
+    }
+
+    @MainActor
+    func testFinishedWorkerComposerContinuesItsOwnSession() {
+        assertWorkerComposer(running: false)
+    }
+
+    @MainActor
+    func testRunningWorkerComposerShowsQueuedMessage() {
+        assertWorkerComposer(running: true)
+    }
+
+    @MainActor
+    private func assertWorkerComposer(running: Bool) {
+        let app = launch(extra: ["--chat-agent-card", "--chat-child-workers"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        XCTAssertTrue(app.buttons["chat-agent-tree"].waitForExistence(timeout: 8)); app.buttons["chat-agent-tree"].tap()
+        let id = running ? "b" + String(repeating: "2", count: 31) : "a" + String(repeating: "1", count: 31)
+        let child = app.buttons["child-agent:" + id]
+        XCTAssertTrue(child.waitForExistence(timeout: 5)); child.tap()
+        let note = app.staticTexts["child-composer-note"]
+        XCTAssertTrue(note.waitForExistence(timeout: 5)); XCTAssertTrue(note.label.contains("worker's own session"))
+        let field = app.descendants(matching: .any).matching(identifier: "child-composer-field").firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5)); field.tap(); field.typeText("Review the follow-up")
+        app.buttons["child-composer-send"].tap()
+        let delivery = app.staticTexts["child-message-delivery"]
+        XCTAssertTrue(delivery.waitForExistence(timeout: 5))
+        XCTAssertEqual(delivery.label, running ? "Queued for this worker" : "Continuing this worker")
+        let route = app.staticTexts["child-fixture-delivery"].label
+        XCTAssertTrue(route.hasPrefix("worker|")); XCTAssertTrue(route.hasSuffix("|" + id + "|Review the follow-up"))
+        if running { XCTAssertTrue(app.staticTexts["Queued until this worker finishes"].exists) }
+        capture(app, running ? "Child worker queued" : "Child worker continued")
+    }
+
+    @MainActor
+    func testPaneChildOpensFullChatAndSendsToThatSession() {
+        let app = launch(extra: ["--chat-agent-card", "--all-sessions-fixture", "--agent-work-navigation"], chat: "live-chat:w1:w1:t1")
+        app.buttons["live-chat:w1:w1:t1"].tap()
+        XCTAssertTrue(app.buttons["chat-agent-tree"].waitForExistence(timeout: 8)); app.buttons["chat-agent-tree"].tap()
+        let lead = app.buttons["child-agent:c1000000-0000-0000-0000-000000000002/remote-parser-lead/lead"]
+        XCTAssertTrue(lead.waitForExistence(timeout: 5)); lead.tap()
+        XCTAssertTrue(app.staticTexts["child-session-note"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["child-session-note"].label, "Messages go directly to this agent session.")
+        let field = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 8)); field.tap(); field.typeText("Continue parser checks")
+        app.buttons["chat-send"].tap()
+        XCTAssertTrue(app.staticTexts["Continue parser checks"].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.staticTexts["child-composer-note"].exists)
+        capture(app, "Pane child full chat")
     }
 
     @MainActor

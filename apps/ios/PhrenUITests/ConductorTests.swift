@@ -16,18 +16,18 @@ final class ConductorTests: XCTestCase {
         XCTAssertTrue(newThread.waitForExistence(timeout: 8)); newThread.tap()
 
         let role = app.buttons["launch-role"]
-        for _ in 0..<4 where !role.exists { app.swipeUp() }
+        for _ in 0..<4 where !role.isHittable { app.swipeUp() }
         XCTAssertTrue(role.waitForExistence(timeout: 5)); role.tap()
         let conductor = app.buttons["launch-role:conductor"]
         XCTAssertTrue(conductor.waitForExistence(timeout: 5)); conductor.tap()
         let codex = app.buttons["launch-harness:codex"]
-        for _ in 0..<3 where !codex.exists { app.swipeUp() }
+        for _ in 0..<5 where !codex.isHittable { app.swipeUp() }
         XCTAssertTrue(codex.waitForExistence(timeout: 5)); codex.tap()
-        for _ in 0..<4 where !app.buttons["launch-effort"].exists { app.swipeUp() }
+        for _ in 0..<6 where !app.buttons["launch-effort"].isHittable { app.swipeUp() }
         XCTAssertTrue(app.buttons["launch-effort"].waitForExistence(timeout: 5))
         attachUIScreenshot(app, "Launch conductor role and effort")
-        app.swipeUp()
         let open = app.buttons["launch-open"]
+        for _ in 0..<4 where !open.isHittable { app.swipeUp() }
         XCTAssertTrue(open.waitForExistence(timeout: 5)); open.tap()
         XCTAssertTrue(app.descendants(matching: .any)["chat-conductor-mark"].waitForExistence(timeout: 10))
 
@@ -45,8 +45,8 @@ final class ConductorTests: XCTestCase {
         let conductorCard = app.buttons["overview-chat:\(key)"]
         let ordinaryCard = app.buttons["overview-chat:A1000000-0000-0000-0000-000000000001:herdr:default:w7:w7:t9"]
         XCTAssertTrue(conductorCard.exists)
-        XCTAssertLessThan(conductorCard.frame.minY, ordinaryCard.frame.minY, "The conductor is first in Working")
-        attachUIScreenshot(app, "Conductor first in Working")
+        XCTAssertLessThan(conductorCard.frame.minY, ordinaryCard.frame.minY, "The conductor is pinned above the activity groups")
+        attachUIScreenshot(app, "Conductor pinned above session search")
         conductorCard.tap()
         XCTAssertTrue(app.descendants(matching: .any)["chat-conductor-mark"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.staticTexts["Conductor"].exists)

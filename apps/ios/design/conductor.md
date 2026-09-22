@@ -1,8 +1,8 @@
 # Conductor on the phone
 
-Status: design for a later worker. The first CLI slice adds enrollment and
-placement only. No Swift implementation ships with it. The backend contracts and
-worker ownership live in [Conductor](../../../docs/conductor.md).
+Status: conductor launch, identification, grants and Siri entry points ship on
+the phone. The remote-work experience below also describes planned work. Backend
+contracts and worker ownership live in [Conductor](../../../docs/conductor.md).
 
 ## Experience
 
@@ -116,6 +116,21 @@ set to, or model or whatever", "how do I distinguish it from the rest".
 
 ### Launching
 
+Open **Agents** and tap **Start a conductor**, pinned above session search. It
+opens the launch sheet with **Conductor** selected and restores the store's last
+harness, model, effort and successfully used computer. With several stores, the
+row names its destination store and the sheet's **Store** choice changes it;
+**Project** chooses the starting folder's project. The selected store keeps its
+own remembered choices. Without a remembered computer, use the existing project
+computer selection. Removed computers fall back to an available saved computer.
+
+A running conductor's existing card replaces that row in the same top slot,
+including while idle or while searching other sessions. It appears only once.
+Cached conductors retain the card with the existing connection status until a
+fresh snapshot establishes that they have ended. Holding a project and choosing
+a computer still reaches the same launch sheet, initially on **Agent**. The
+one-conductor-per-store dialog still offers **Open the running conductor**.
+
 The launch flow gains a **Role** row above Harness: a `PhrenSingleSelect`
 with two values, "Agent" (default) and "Conductor". Harness, computer and
 model stay free choices for both roles, so a conductor can be Claude Opus,
@@ -126,7 +141,7 @@ OpenCode `--variant`), default medium. Ids: `launch-role`,
 `launch-role:agent`, `launch-role:conductor`, `launch-effort`,
 `launch-effort:<level>`.
 
-The phone remembers the last conductor choice (harness, model, effort) per
+The phone remembers the last conductor choice (harness, model, effort and computer) per
 store so the next launch is one tap; the row reads "Conductor · Claude Opus
 · medium" until changed.
 
@@ -150,7 +165,8 @@ harness's own session files.
 - **Agents list**: the card's glyph is the dispatch mark (a baton:
   `wand.and.rays` in PhrenTheme accent) inside the provider ring, the title
   line reads "Conductor" before the session title, and the card is pinned
-  first in Working. Remote leads nest under it with computer chips.
+  above search in the same slot as Start a conductor. Remote leads nest under
+  it with computer chips.
 - **Lock screen line**: the same glyph replaces the provider glyph; the
   step column reads "N leads on M computers".
 - **Chat**: the header shows the baton and "Conductor"; replies stay the
@@ -167,9 +183,10 @@ chat, see the header mark. No accessibility-size tests.
 
 ## Grants
 
-Standing conductor authorizations live in the Hook's `conductor.yaml` and are
-reached from the conductor chat's ellipsis sheet: a **Grants** link, shown only
-for a conductor session, opens a list of rows. Each row reads the scope
+Standing conductor authorizations live in the Hook's `conductor.yaml`. A
+**Grants** control in the conductor chat header opens the grants screen directly;
+the existing **Grants** link in the ellipsis sheet remains available. Both are
+shown only for a conductor session. Each grant row reads the scope
 ("Everywhere" or the project name), one PhrenChip per action ("Dispatch",
 "Hand off"), the computers (or "Any computer") and the expiry, or "Until
 revoked". An **Add grant** row opens a PhrenScreen editor with scope (Everywhere
@@ -190,6 +207,14 @@ call and write the grant through the Hook's `answer` path.
 
 Fixture: `--conductor-grants-fixture` supplies two grants (one global
 dispatch, one `project:phone` dispatch + hand off on Desk with an expiry).
+
+Entry tests: `ConductorEntryTests` uses the sessions fixture to check the launch
+preset, remembered settings and store switch, replacement at the same position,
+and direct header navigation to Grants. IDs: `sessions-start-conductor`,
+`sessions-conductor-slot`, `launch-store`, `launch-project` and
+`chat-conductor-grants`. `--conductor-running-fixture` supplies an idle conductor
+to prove pinning does not depend on Working; `--conductor-remembered-fixture`
+supplies separate choices for two stores. Siri settings keep their existing home.
 
 ### Siri and the Action button (owner, September 21; stage three)
 

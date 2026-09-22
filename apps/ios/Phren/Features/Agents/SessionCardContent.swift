@@ -1,6 +1,36 @@
 import PhrenKit
 import SwiftUI
 
+/// Shares the conductor card's mark, surface and minimum height so its
+/// launch action can occupy the same pinned place in the Agents tab.
+struct ConductorStartRow: View {
+    let storeName: String?
+
+    var body: some View {
+        HStack(spacing: PhrenTheme.Space.small) {
+            Image(systemName: "wand.and.rays")
+                .font(PhrenTypography.body.weight(.semibold))
+                .foregroundStyle(PhrenTheme.accent)
+                .frame(width: 44, height: 44)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Start a conductor").font(PhrenTypography.subheadline.weight(.semibold))
+                    .foregroundStyle(PhrenTheme.text)
+                if let storeName {
+                    Text(storeName).font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Image(systemName: "chevron.right").font(PhrenTypography.caption)
+                .foregroundStyle(PhrenTheme.textDim).accessibilityHidden(true)
+        }
+        .padding(.horizontal, PhrenTheme.Space.medium).padding(.vertical, PhrenTheme.Space.xs)
+        .frame(minHeight: 56)
+        .sessionCard()
+        .contentShape(Rectangle())
+    }
+}
+
 extension LiveWorkspaces.Tab.Activity {
     var color: Color {
         switch self {
