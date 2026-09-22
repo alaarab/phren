@@ -352,3 +352,32 @@ describe("Codex code-mode projection", () => {
     expect(args.source).toBe(source);
   });
 });
+
+describe("Claude narration", () => {
+  // Signatures are protobuf: a length-prefixed field 8 names the block's kind.
+  const signature = (kind: string) => Buffer.from([0x08, 0x04, 0x12, 0x10, 0x0a, 0x11, 0x08, 0x12, 0x18, 0x02, 0x38, 0x01,
+    0x42, kind.length, ...Buffer.from(kind), 0x12, 0x0c, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]).toString("base64");
+
+  it("shows narration the terminal shows and keeps private reasoning redacted", () => {
+    const row = { type: "assistant", message: { role: "assistant", content: [
+      { type: "thinking", thinking: "That's a real gap: the phone can't open a session while sshd is fine.", signature: signature("narration") },
+      { type: "thinking", thinking: "", signature: signature("thinking") },
+      { type: "thinking", thinking: "private chain of thought", signature: signature("thinking") },
+      { type: "text", text: "Done." },
+    ] } };
+    expect((visibleEvent(row, "claude") as any).message.content).toEqual([
+      { type: "text", text: "That's a real gap: the phone can't open a session while sshd is fine.", narration: true },
+      { type: "redacted" },
+      { type: "redacted" },
+      { type: "text", text: "Done." },
+    ]);
+  });
+
+  it("never treats an unsigned or malformed thinking block as narration", () => {
+    const row = { type: "assistant", message: { role: "assistant", content: [
+      { type: "thinking", thinking: "no signature" },
+      { type: "thinking", thinking: "junk", signature: "!!!not base64!!!" },
+    ] } };
+    expect((visibleEvent(row, "claude") as any).message.content).toEqual([{ type: "redacted" }, { type: "redacted" }]);
+  });
+});

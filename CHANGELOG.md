@@ -71,6 +71,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Claude's narration now reaches the phone. Opus 5.5 writes its short progress
+  notes (the lines Claude Code's terminal shows between tool calls) as thinking
+  blocks marked as narration, and the Hook dropped every thinking block, so
+  those lines were missing from the chat. Narration now passes through as text;
+  private reasoning, which Claude Code stores without text and marks as
+  thinking, stays redacted.
 - Model switches use a verified `/v1/model` route. Codex walks its model and reasoning menus and checks the status line, Claude keeps its alias command, and unsupported OpenCode selection is refused. Working panes reject slash commands before typing them.
 
 - The phone's Claude model picker reads Claude Code's own cached `/model`

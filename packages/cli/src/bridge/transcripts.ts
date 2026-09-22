@@ -459,6 +459,17 @@ function unwrapUserText(message: Json): Json {
   }) };
 }
 
+/** A thinking block Claude marks as narration for the person watching: its
+ * signature is a length-prefixed field reading "narration" (private
+ * reasoning reads "thinking" and is stored without text). */
+export function isNarration(block: Record<string, unknown>): boolean {
+  if (block.type !== "thinking" || typeof block.thinking !== "string" || !block.thinking.trim()) return false;
+  if (typeof block.signature !== "string" || block.signature.length > 16_384) return false;
+  let bytes: Buffer;
+  try { bytes = Buffer.from(block.signature, "base64"); } catch { return false; }
+  return bytes.subarray(0, 96).includes(Buffer.from([0x42, 0x09, ...Buffer.from("narration")]));
+}
+
 /** Public conversation/tool events and real usage only. Never export private reasoning. */
 export function visibleEvent(raw: Json, source: Provider, includeSidechain = false, cwd?: string): Json | undefined {
   if (source === "opencode") {
@@ -545,9 +556,15 @@ export function visibleEvent(raw: Json, source: Provider, includeSidechain = fal
     raw = Object.fromEntries(Object.entries(raw).filter(([key]) => CLAUDE_KEYS.has(key)));
     const message = unwrapUserText(object(raw.message));
     // Keep indexes for historical images while removing thinking contents.
+    // The one exception is narration: short progress notes the model writes
+    // for the person watching (the lines Claude Code's terminal shows between
+    // tool calls). They arrive as thinking blocks whose signature declares
+    // them narration and whose text is present; private reasoning is stored
+    // with empty text and a "thinking" signature and stays redacted.
     if (typeof message.content === "string") return raw.type === "user" && harnessPreamble(message.content) ? undefined : { ...raw, message };
     if (Array.isArray(message.content)) return { ...raw, message: { ...message, content: objects(message.content).map(b =>
-      ["text", "image", "tool_use", "tool_result"].includes(String(b.type)) ? b : { type: "redacted" }) } };
+      ["text", "image", "tool_use", "tool_result"].includes(String(b.type)) ? b
+        : isNarration(b) ? { type: "text", text: String(b.thinking), narration: true } : { type: "redacted" }) } };
   } else {
     if (raw.agentId || raw.ephemeral || !["user.message", "assistant.message", "assistant.message_delta", "tool.execution_start", "tool.execution_complete", "assistant.turn_start", "assistant.turn_end", "session.idle", "abort", "session.error", "session.usage_info", "assistant.usage"].includes(String(raw.type))) return undefined;
     const data = object(raw.data);
