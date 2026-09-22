@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- Hook: the Claude live preview skips tool-call lines and reads Claude's spinner verb, sent beside transcript frames as `activityVerb` (older phones ignore it).
 - Hook: a launch whose label matches a live agent gets its own Herdr name (`sr-requests-2`) instead of colliding; a scheduled run waits for the agent to finish starting before it sends the prompt; Herdr's own error text reaches the phone.
 - Hook: an agent that Herdr reports as held at a first-run screen (Claude's folder trust, for one) counts as launched, so its pane comes back to the phone to answer instead of failing and stranding the workspace.
 - Hook: agent launches take `effort` too (`--effort`, `model_reasoning_effort` or `--variant`), with minimal, xhigh and max accepted; `/v1/models` gives Claude models their `--effort` levels and default from Claude Code's catalogue.
