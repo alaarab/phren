@@ -37,6 +37,7 @@ enum UITestFixtures {
         let arguments = ProcessInfo.processInfo.arguments
         let defaults = AppRuntime.defaults
         await endLiveActivities()
+        defaults.removeObject(forKey: ProjectAgentRecents.key)
         defaults.removeObject(forKey: AgentLaunch.pendingKey)
         defaults.removeObject(forKey: AgentLaunch.pendingProjectKey)
         defaults.removeObject(forKey: AgentFocusFilterStore.key)
@@ -172,6 +173,9 @@ enum UITestFixtures {
             }
             if arguments.contains("--workflow-fixture") {
                 try await populateWorkflow(store, owner: owner)
+            }
+            if owner == primary, arguments.contains("--project-chooser-fixture") {
+                try await ProjectAgentChooserFixture.populate(store: store)
             }
             // A fresh tokenless client refuses before making any request. The
             // video's store answers every poll with "nothing changed", so the

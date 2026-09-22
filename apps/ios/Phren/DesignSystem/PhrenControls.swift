@@ -80,7 +80,7 @@ struct PhrenOption<Value: Hashable>: Identifiable {
     let title: String
     var caption: String? = nil
     var icon: String? = nil
-    /// A custom leading view (a provider mark, a host colour dot).
+    /// A custom leading view (a provider mark, a host color dot).
     var glyph: AnyView? = nil
     /// A passive trailing badge, such as the model catalogue's "default" chip.
     var trailing: AnyView? = nil
@@ -257,10 +257,38 @@ struct PhrenMultiSelect<Value: Hashable>: View {
     }
 }
 
-/// The card `PhrenMultiSelect` opens: one check row per option and a Done row.
-/// `leading` carries a section the caller needs above the options (Memory's
-/// store chooser). Rows identify as `rowPrefix:option.id`; Done is
-/// `rowPrefix-done`.
+/// Shared selection rules keep filtering independent of chips and bulk changes.
+enum PhrenMultiSelection {
+    static func filtered<Value>(_ options: [PhrenOption<Value>], query: String) -> [PhrenOption<Value>] {
+        let words = query.split(whereSeparator: \.isWhitespace).map(String.init)
+        return options.filter { option in
+            words.allSatisfy { (option.title + " " + (option.caption ?? "")).localizedStandardContains($0) }
+        }
+    }
+
+    static func chosen<Value>(_ options: [PhrenOption<Value>], selection: Set<Value>) -> [PhrenOption<Value>] {
+        options.filter { selection.contains($0.value) }
+    }
+
+    static func toggle<Value>(_ value: Value, options: [PhrenOption<Value>], selection: Set<Value>,
+                              requiresSelection: Bool) -> Set<Value> {
+        let next = PhrenOptionSelection.multiple(value, in: options, current: selection)
+        return requiresSelection && chosen(options, selection: next).isEmpty ? selection : next
+    }
+
+    static func all<Value>(_ options: [PhrenOption<Value>], selection: Set<Value>) -> Set<Value> {
+        selection.union(options.filter(\.isEnabled).map(\.value))
+    }
+
+    static func none<Value>(_ options: [PhrenOption<Value>], selection: Set<Value>,
+                            requiresSelection: Bool) -> Set<Value> {
+        let next = selection.subtracting(options.filter(\.isEnabled).map(\.value))
+        return requiresSelection && chosen(options, selection: next).isEmpty ? selection : next
+    }
+}
+
+/// Content-sized filter card. Search and selected chips stay above the list;
+/// only overflowing options scroll. Existing row and dismissal IDs are stable.
 struct PhrenMultiSelectSheet<Value: Hashable>: View {
     let title: String
     let options: [PhrenOption<Value>]
@@ -269,28 +297,38 @@ struct PhrenMultiSelectSheet<Value: Hashable>: View {
     var requiresSelection = false
     var leading: AnyView? = nil
     let dismiss: () -> Void
+    @State private var query = ""
     @AccessibilityFocusState private var titleFocused: Bool
+
+    private var chosen: [PhrenOption<Value>] { PhrenMultiSelection.chosen(options, selection: selection) }
+    private var matches: [PhrenOption<Value>] { PhrenMultiSelection.filtered(options, query: query) }
+    private var all: Set<Value> { PhrenMultiSelection.all(options, selection: selection) }
+    private var none: Set<Value> {
+        PhrenMultiSelection.none(options, selection: selection, requiresSelection: requiresSelection)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: PhrenTheme.Space.medium) {
             Text(title).font(PhrenTypography.subheadline.weight(.semibold))
                 .accessibilityAddTraits(.isHeader).accessibilityFocused($titleFocused)
-            ScrollView {
-                VStack(spacing: PhrenTheme.Space.small) {
-                    if let leading { leading }
-                    ForEach(options) { option in
-                        PhrenOptionRow(title: option.title, caption: option.caption,
-                                       selected: selection.contains(option.value), mark: .check,
-                                       disabled: !option.isEnabled, icon: option.icon) {
-                            toggle(option)
-                        }
-                        .phrenIdentifier("\(rowPrefix):\(option.id)")
-                    }
+            HStack(spacing: PhrenTheme.Space.xs) {
+                if options.count > 8 {
+                    PhrenSearchField(text: $query, identifier: "\(rowPrefix)-search")
+                } else {
+                    Spacer(minLength: 0)
                 }
+                bulkButton("All", id: "all", disabled: all == selection) { selection = all }
+                bulkButton("None", id: "none", disabled: none == selection) { selection = none }
             }
-            .scrollBounceBehavior(.basedOnSize)
+            if !chosen.isEmpty { chips }
+            ViewThatFits(in: .vertical) {
+                rows.fixedSize(horizontal: false, vertical: true)
+                ScrollView { rows }.scrollBounceBehavior(.basedOnSize)
+                    .scrollDismissesKeyboard(.interactively)
+                    .phrenContainerMarker("\(rowPrefix)-scroll", label: "Options")
+            }
             Button(action: dismiss) {
-                Text("Done").font(PhrenTypography.body.weight(.medium))
+                Text("Done (\(chosen.count))").font(PhrenTypography.body.weight(.medium))
                     .foregroundStyle(PhrenTheme.accent)
                     .padding(.horizontal, PhrenTheme.Space.medium)
                     .frame(maxWidth: .infinity, minHeight: 44)
@@ -310,12 +348,85 @@ struct PhrenMultiSelectSheet<Value: Hashable>: View {
         .onAppear { titleFocused = true }
     }
 
+    private var chips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: PhrenTheme.Space.small) {
+                ForEach(chosen) { option in
+                    Button { toggle(option) } label: {
+                        HStack(spacing: 6) {
+                            Text(option.title).font(PhrenTypography.caption.weight(.medium))
+                            Image(systemName: "xmark").font(PhrenTypography.icon(10, weight: .semibold))
+                                .accessibilityHidden(true)
+                        }
+                        .foregroundStyle(PhrenTheme.cyan).padding(.horizontal, 10).padding(.vertical, 6)
+                        .background(PhrenTheme.cyan.opacity(0.1), in: Capsule())
+                        .overlay(Capsule().strokeBorder(PhrenTheme.cyan.opacity(0.5), lineWidth: 1))
+                        .frame(minHeight: 44).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).disabled(!option.isEnabled || (requiresSelection && chosen.count == 1))
+                    .opacity(option.isEnabled && !(requiresSelection && chosen.count == 1) ? 1 : 0.45)
+                    .accessibilityLabel("Remove \(option.title)")
+                    .phrenIdentifier("\(rowPrefix)-chip:\(option.id)")
+                }
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var rows: some View {
+        VStack(spacing: PhrenTheme.Space.xs) {
+            if let leading { leading }
+            if matches.isEmpty {
+                Text("No matches").font(PhrenTypography.subheadline).foregroundStyle(PhrenTheme.textMuted)
+                    .frame(maxWidth: .infinity, minHeight: 40)
+            }
+            ForEach(matches) { option in
+                let selected = selection.contains(option.value)
+                Button { toggle(option) } label: {
+                    HStack(spacing: PhrenTheme.Space.small) {
+                        if let icon = option.icon {
+                            Image(systemName: icon).font(PhrenTypography.icon(14))
+                                .foregroundStyle(PhrenTheme.textMuted).frame(width: 16).accessibilityHidden(true)
+                        }
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(option.title).font(PhrenTypography.subheadline)
+                            if let caption = option.caption {
+                                Text(caption).font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
+                            }
+                        }
+                        .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                        Image(systemName: "checkmark").font(PhrenTypography.icon(12, weight: .semibold))
+                            .foregroundStyle(PhrenTheme.cyan).opacity(selected ? 1 : 0).accessibilityHidden(true)
+                    }
+                    .foregroundStyle(PhrenTheme.text)
+                    .padding(.horizontal, 12).padding(.vertical, 6)
+                    .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
+                    .background(selected ? PhrenTheme.cyan.opacity(0.1) : PhrenTheme.surfaceRaised,
+                                in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.questionOption))
+                    .overlay(RoundedRectangle(cornerRadius: PhrenTheme.Radius.questionOption)
+                        .strokeBorder(selected ? PhrenTheme.cyan.opacity(0.5) : .clear, lineWidth: 1))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).disabled(!option.isEnabled).opacity(option.isEnabled ? 1 : 0.45)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+                .phrenIdentifier("\(rowPrefix):\(option.id)")
+            }
+        }
+    }
+
+    private func bulkButton(_ title: String, id: String, disabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title).font(PhrenTypography.caption.weight(.semibold))
+                .foregroundStyle(PhrenTheme.accent).frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).disabled(disabled).opacity(disabled ? 0.45 : 1)
+        .phrenIdentifier("\(rowPrefix)-\(id)")
+    }
+
     private func toggle(_ option: PhrenOption<Value>) {
-        guard option.isEnabled else { return }
-        var next = selection
-        if !next.insert(option.value).inserted { next.remove(option.value) }
-        if requiresSelection, next.isEmpty { return }
-        selection = next
+        selection = PhrenMultiSelection.toggle(option.value, options: options, selection: selection,
+                                               requiresSelection: requiresSelection)
     }
 }
 
@@ -342,7 +453,7 @@ private struct PhrenMultiSelectModifier<Value: Hashable>: ViewModifier {
                             PhrenMultiSelectSheet(title: title, options: options, selection: $selection,
                                                   rowPrefix: rowPrefix, requiresSelection: requiresSelection,
                                                   leading: leading, dismiss: { isPresented = false })
-                                .frame(maxWidth: 360, maxHeight: max(44, geometry.size.height - 32))
+                                .frame(maxWidth: 360, maxHeight: max(44, min(600, geometry.size.height * 0.85)))
                                 .padding(PhrenTheme.Space.large)
                                 .transition(.opacity)
                         }
@@ -647,6 +758,8 @@ struct PhrenActionSheet: View {
     let actions: [Action]
     let identifier: String
     let dismiss: () -> Void
+    var searchPlaceholder: String? = nil
+    @State private var query = ""
     @State private var drag: CGFloat = 0
     @AccessibilityFocusState private var titleFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -673,6 +786,10 @@ struct PhrenActionSheet: View {
                     if value.translation.height > 80 || value.predictedEndTranslation.height > 160 { dismiss() }
                     withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) { drag = 0 }
                 })
+            if let searchPlaceholder {
+                PhrenSearchField(text: $query, placeholder: searchPlaceholder, identifier: "\(identifier):search")
+                    .padding(.horizontal, 8).padding(.bottom, 8)
+            }
             ViewThatFits(in: .vertical) {
                 rows.fixedSize(horizontal: false, vertical: true)
                 ScrollView { rows }.scrollBounceBehavior(.basedOnSize).phrenIdentifier("\(identifier):scroll")
@@ -688,9 +805,20 @@ struct PhrenActionSheet: View {
         .onAppear { titleFocused = true }
     }
 
+    private var filteredActions: [Action] {
+        let words = query.split(whereSeparator: \.isWhitespace).map(String.init)
+        return actions.filter { action in
+            words.allSatisfy { (action.title + " " + (action.caption ?? "")).localizedStandardContains($0) }
+        }
+    }
+
     private var rows: some View {
         VStack(spacing: 4) {
-            ForEach(actions) { action in
+            if filteredActions.isEmpty {
+                Text("No matches").font(PhrenTypography.subheadline).foregroundStyle(PhrenTheme.textMuted)
+                    .frame(maxWidth: .infinity, minHeight: 48)
+            }
+            ForEach(filteredActions) { action in
                 if let selected = action.isSelected {
                     PhrenOptionRow(title: action.title, caption: action.caption, selected: selected,
                                    disabled: !action.isEnabled, icon: action.icon, minimumHeight: 48) {
@@ -798,6 +926,7 @@ private struct PhrenModal: ViewModifier {
     var message: String? = nil
     let actions: [PhrenControlAction]
     let identifier: String
+    var searchPlaceholder: String? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
@@ -817,7 +946,8 @@ private struct PhrenModal: ViewModifier {
                                     .padding(16)
                                     .transition(.opacity)
                             } else {
-                                PhrenActionSheet(title: title, actions: actions, identifier: identifier, dismiss: dismiss)
+                                PhrenActionSheet(title: title, actions: actions, identifier: identifier, dismiss: dismiss,
+                                                 searchPlaceholder: searchPlaceholder)
                                     .frame(maxWidth: 560, maxHeight: geometry.size.height * 0.85)
                                     .padding(8)
                                     .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
@@ -836,8 +966,9 @@ private struct PhrenModal: ViewModifier {
 
 extension View {
     func phrenActionSheet(isPresented: Binding<Bool>, title: String, actions: [PhrenActionSheet.Action],
-                          identifier: String = "phren-action-sheet") -> some View {
-        modifier(PhrenModal(isPresented: isPresented, title: title, actions: actions, identifier: identifier))
+                          identifier: String = "phren-action-sheet", searchPlaceholder: String? = nil) -> some View {
+        modifier(PhrenModal(isPresented: isPresented, title: title, actions: actions, identifier: identifier,
+                            searchPlaceholder: searchPlaceholder))
     }
 
     func phrenDialog(isPresented: Binding<Bool>, title: String, message: String, actions: [PhrenDialog.Action],

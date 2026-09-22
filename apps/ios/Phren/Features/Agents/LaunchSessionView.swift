@@ -394,6 +394,7 @@ struct LaunchSessionView: View {
             let session = try await AgentLaunch.launch(host: host, cwd: cwd, label: project, kind: harness,
                                                        model: chosen.isEmpty ? nil : chosen, role: role,
                                                        effort: role == .conductor && supportsEffort ? effort : nil) { status = $0 }
+            ProjectAgentRecents.record(storeID: storeID, project: project, hostID: host.id)
             // Remember the folder for this project on this computer, so the
             // next session is found without asking.
             data = (try? LiveSessionPreferences.assigning(hostID: host.id, directory: cwd, storeID: storeID, project: project, in: data)) ?? data

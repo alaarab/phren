@@ -73,7 +73,10 @@ final class ProjectsTests: XCTestCase {
         project.press(forDuration: 0.5)
         let computer = app.buttons["project-agent-sheet:sample/brain:phone:A1000000-0000-0000-0000-000000000001"]
         XCTAssertTrue(computer.waitForExistence(timeout: 5))
-        XCTAssertTrue(computer.label.contains("Open agent on"))
+        XCTAssertTrue(computer.label.contains("Test Mac"))
+        XCTAssertTrue(computer.label.contains("session"))
+        XCTAssertTrue(app.staticTexts["Open on computer · phone · brain"].exists)
+        XCTAssertTrue(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: computer)], timeout: 8) == .completed)
         capture(app, "Hold project computer chooser")
         computer.tap()
         XCTAssertTrue(app.navigationBars["Open phone"].waitForExistence(timeout: 5))

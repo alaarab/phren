@@ -458,6 +458,9 @@ final class LiveHostMonitor {
 
     static func fetch(_ host: LiveHost, previousUpdate: Date? = nil) async throws -> LiveWorkspaces {
         #if DEBUG && targetEnvironment(simulator)
+        if AppRuntime.isUITesting && ProcessInfo.processInfo.arguments.contains("--project-chooser-fixture") {
+            return try ProjectAgentChooserFixture.snapshot(host: host)
+        }
         if AppModel.isUITesting && ProcessInfo.processInfo.arguments.contains("--all-sessions-fixture") {
             if ProcessInfo.processInfo.arguments.contains("--all-sessions-empty") {
                 return try LiveWorkspaces.read(Data(#"{"kind":"herdr","groups":[]}"#.utf8))

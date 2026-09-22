@@ -127,35 +127,44 @@ set; a general filter list uses this group.
 ## PhrenMultiSelect<Value: Hashable>
 
 Purpose: a compact multi-select filter. The trigger is a 44-minimum pill that
-summarises the chosen values ("All kinds", "Findings, Tasks"); the card it opens
-is PhrenDialog-styled: a centred surface card with one check `PhrenOptionRow`
-per option and a Done row. Memory's Kinds and Projects filters are the two
-instances. The owner presents the card with
-`.phrenMultiSelectSheet(isPresented:title:options:selection:rowPrefix:requiresSelection:leading:)`
-at the same full-screen root as an action sheet or dialog, so the scrim covers
-navigation and tab controls. `leading` is an optional section above the options
-(Memory's store chooser when the phone carries several stores).
+summarizes chosen values ("All kinds", "Findings, Tasks"). Memory's Kinds and
+Projects filters use it. Present `.phrenMultiSelectSheet` at the full-screen
+root so the scrim covers navigation and tabs. Optional `leading` content keeps
+Memory's store chooser above the option rows.
 
-Geometry: the trigger is a capsule, `surfaceRaised`, 12 horizontal padding,
-44 minimum height; label is subheadline medium, one line, middle-truncated;
-a 9-point chevron follows. The card is `surface`, radius 18, maximum width 360,
-16 padding, 12 between title, scroller and Done; rows are the standard check
-rows 8 apart. Done is a 44-minimum `surfaceRaised` row with radius 12 and accent
-text. The scrim is black at 0.5. Normal, selected and disabled states are the
-rows' own; the trigger dims to 0.45 when disabled.
+Geometry: the trigger is a surfaceRaised capsule with 12 horizontal padding
+and a 9-point chevron. The centered surface card has radius 18, width up to
+360, 16 padding and 12 between sections. It fits its content up to 600 points
+or 85% of available height, whichever is smaller. Only overflowing rows scroll;
+four kinds must not stretch into an otherwise empty full-height card.
 
-The trigger's label is `allLabel` when the selection is empty or every option;
-otherwise the chosen titles joined with ", ". Empty means all: the owner
-decides, and `requiresSelection` refuses the tap that would clear the last
-member. The card toggles its binding live; backdrop, Escape or Done dismiss
-without a separate commit. Reduce Motion drops the opacity animation.
+Option rows are 40 minimum height, 4 apart, with 12 horizontal and 6 vertical
+padding. This dense list is the exception to the general 44-point minimum.
+Titles and captions wrap at larger text sizes. A small trailing check replaces
+the empty checkbox; selected rows retain cyan at 0.1 fill and the 1-point cyan
+at 0.5 outline. Unavailable rows retain selection, dim and cannot change.
 
-Accessibility: the trigger is one Button with `allLabel` as its label and the
-current summary as its value; the card is modal with focus on its title, rows
-are Buttons with the selected trait, and Escape dismisses. Identifiers: trigger
-`screen-multiselect`, rows `screen-multiselect:option.id`, Done
-`screen-multiselect-done`, card marker `screen-multiselect-sheet`. Dynamic Type
-wraps the pill label and the rows; the card scrolls when its options overflow.
+With more than eight options, PhrenSearchField sits above the rows. Search
+matches words in titles and captions without changing the selection. All and
+None are 44-point text targets on that same line, or right-aligned on a line
+of their own for a short list. Bulk actions apply to the whole option set,
+preserve unavailable selections, and disable when they would make no change.
+`requiresSelection` prevents both chip removal and None from clearing the
+last current option. Unknown stored values survive edits but do not count.
+
+Chosen options stay above the list as removable cyan chips, in option order.
+The chip strip scrolls horizontally so many selections do not consume the
+card. Chips remain visible while searching; each has a 44-point removal target
+and speaks "Remove <title>". Done reads "Done (N)" with the count of chosen
+current options, independent of search results. An empty set still uses the
+trigger's `allLabel`; the owning filter decides what an empty set means.
+The binding changes live; backdrop, Escape and Done dismiss without a commit.
+
+Accessibility: the trigger speaks its summary, the modal focuses its title,
+and selected rows retain the selected trait. Existing identifiers survive:
+`rowPrefix:optionId`, `rowPrefix-done`, `rowPrefix-sheet`. Additional targets are
+`rowPrefix-search`, `rowPrefix-all`, `rowPrefix-none` and
+`rowPrefix-chip:optionId`. Reduce Motion removes the presentation animation.
 
 ## PhrenTextSegment<Value: Hashable>
 
@@ -237,6 +246,11 @@ Buttons; selected rows use the shared radio trait. Identifiers:
 Dynamic Type: title and captions wrap, rows grow, and overflow scrolls.
 Reduce Motion eliminates both presentation motion and drag offset animation.
 This uses no UIKit sheet, detents, system grabber or menu chrome.
+
+A searchable chooser may pass `searchPlaceholder` to `phrenActionSheet`.
+Its PhrenSearchField stays below the fixed header, filters action titles and
+captions, and uses `screen-sheet:search`. No matches gets an explicit empty
+state. Ordinary action menus do not show search.
 
 Action rows may supply `iconColor` for a semantic glyph, such as the computer
 color dot in the Projects launch chooser. The title and caption retain their
