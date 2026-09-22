@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DispatchService, dispatchStatus } from "./dispatch.js";
+import { addGrant } from "./grants.js";
 import { BridgeError } from "./protocol.js";
 import { hookPeers, peerRequest } from "./peers.js";
 
@@ -110,5 +111,19 @@ describe("dispatch receipts and selection", () => {
     expect(result).toMatchObject({ parent, parentTarget, computerId: remoteID });
     const stored = JSON.parse(await readFile(path.join(root, `dispatches/${result.id}.json`), "utf8"));
     expect(stored).toMatchObject({ parent, parentTarget, computerId: remoteID });
+  });
+
+  it("records granted on a matching receipt and leaves it off when no grant covers the call", async () => {
+    expect((await new DispatchService().dispatch({ ...brief, computer: "Desk" })).granted).toBeUndefined();
+    await addGrant({ scope: "project:phren", actions: ["dispatch"], computers: ["Desk"] }, root);
+    const granted = await new DispatchService().dispatch({ ...brief, computer: "Desk" });
+    expect(granted).toMatchObject({ ok: true, granted: "project:phren" });
+    // A computers-restricted grant never covers a peer outside its list.
+    vi.mocked(hookPeers).mockResolvedValue(["Desk", "Linuxbox"].map(name => ({ name, address: "desk.example", username: "sam", port: 22, hostKey: "unused", server: "default" })));
+    vi.mocked(peerRequest).mockImplementation(async (_peer, route) => route === "/v1/dispatch/capacity"
+      ? { product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working: 0 }
+      : route.startsWith("/v1/workspaces/launch") ? { ok: true, target } : { ok: true });
+    const other = await new DispatchService().dispatch({ ...brief, computer: "Linuxbox" });
+    expect(other.granted).toBeUndefined();
   });
 });

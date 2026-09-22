@@ -5,6 +5,7 @@ import { z } from "zod";
 import { readProjectConfig } from "../project-config.js";
 import { computerName } from "./computers.js";
 import { dispatchParentSchema, validateDispatchParent } from "./dispatch-tree.js";
+import { grantLabel, listGrants, matchGrant } from "./grants.js";
 import { hookPeers, peerRequest, type HookPeer } from "./peers.js";
 import { BridgeError, bridgeRoot, PROTOCOL, startingTargetSchema, targetSchema, type Json, type Target } from "./protocol.js";
 import { phrenStoreRoot } from "./transcripts.js";
@@ -28,6 +29,7 @@ const receiptSchema = dispatchSchema.omit({ prompt: true }).extend({
   computerId: z.string().uuid().optional(),
   state: z.enum(["launching", "sending", "accepted", "uncertain", "failed"]),
   target: remoteTarget.optional(), error: z.string().max(500).optional(),
+  granted: z.string().max(200).optional().describe("Scope of the conductor grant that allowed this call."),
 });
 type Receipt = z.infer<typeof receiptSchema>;
 
@@ -124,10 +126,12 @@ export class DispatchService {
         if (!peer) throw new BridgeError(404, "Unknown computer. Add its verified connection to hooks.yaml.");
         remoteComputerID = (await capacity(peer)).computerId;
       }
+      const grant = matchGrant(await listGrants(), { action: "dispatch", project: data.project, computer: peer.name });
       // Prompts are sent over the pipe, never stored in the dispatch ledger.
       const { prompt, ...metadata } = data;
       const receipt: Receipt = { ...metadata, computer: peer.name, computerId: remoteComputerID!, id: randomUUID(),
-        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), state: "launching" };
+        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), state: "launching",
+        ...(grant ? { granted: grantLabel(grant) } : {}) };
       await save(receipt);
       try {
         const launched = await peerRequest(peer, `/v1/workspaces/launch?server=${encodeURIComponent(peer.server)}`,

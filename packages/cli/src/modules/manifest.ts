@@ -12,7 +12,7 @@ export interface ModuleAgentHook {
 }
 
 export interface ModuleRoute {
-  method: "GET" | "POST" | "WS";
+  method: "GET" | "POST" | "DELETE" | "WS";
   path: string;
 }
 

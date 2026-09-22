@@ -4,10 +4,10 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { forcedCommand } from "./install.js";
-import { BridgeError, bridgeRoot, serverName } from "./protocol.js";
+import { BridgeError, bridgeRoot, computerName } from "./protocol.js";
 
 const exec = promisify(execFile);
-export const computerName = serverName.refine(name => name !== "anywhere", "anywhere is reserved for scheduling");
+export { computerName };
 export const dispatchKeyPath = (root = bridgeRoot()) => path.join(root, "id_ed25519_dispatch");
 
 export function publicComputerKey(value: string): string {
