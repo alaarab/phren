@@ -108,6 +108,7 @@ export async function readClaudeCatalog(configDir = claudeConfigDir(), installed
     name: typeof row.name === "string" && row.name.trim() ? row.name.trim().slice(0, 100) : claudeName(String(row.id)),
     ...(typeof row.description === "string" && row.description.trim() ? { description: row.description.trim().slice(0, 300) } : {}),
     ...(String(row.id) === selected ? { isDefault: true } : {}),
+    ...claudeEfforts(row),
   }));
   // The terminal offers the selected model with a 1M context window as its
   // own row; the catalogue does not list that variant, so add it after the
@@ -115,9 +116,20 @@ export async function readClaudeCatalog(configDir = claudeConfigDir(), installed
   const chosen = models.find(model => model.isDefault);
   if (chosen && !models.some(model => model.id === `${chosen.id}[1m]`)) {
     const main = models.filter(model => ordered.find(row => row.id === model.id)?.section !== "overflow").length;
-    models.splice(main, 0, { id: `${chosen.id}[1m]`, name: `${chosen.name} (1M context)`, description: `${chosen.name} with a 1M context window.` });
+    models.splice(main, 0, { id: `${chosen.id}[1m]`, name: `${chosen.name} (1M context)`, description: `${chosen.name} with a 1M context window.`,
+      ...(chosen.supportedReasoningEfforts ? { supportedReasoningEfforts: chosen.supportedReasoningEfforts } : {}),
+      ...(chosen.defaultReasoningEffort ? { defaultReasoningEffort: chosen.defaultReasoningEffort } : {}) });
   }
   return models;
+}
+
+/** A catalogue row's `thinking.effort_options`, the levels `--effort` takes for that model. */
+function claudeEfforts(row: Json): Pick<AgentModel, "supportedReasoningEfforts" | "defaultReasoningEffort"> {
+  const options = objects(object(row.thinking).effort_options).filter(option => typeof option.id === "string" && /^[a-z]{1,16}$/.test(option.id));
+  if (!options.length) return {};
+  const fallback = options.find(option => object(option.badge).message === "Default");
+  return { supportedReasoningEfforts: options.map(option => String(option.id)),
+    ...(fallback ? { defaultReasoningEffort: String(fallback.id) } : {}) };
 }
 
 function claudeConfigDir(): string {
