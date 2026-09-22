@@ -647,7 +647,10 @@ export async function loadGraphData(client: PhrenClient): Promise<GraphPayload> 
     if (findingPage.total === 0 && tasks.length === 0) continue;
 
     const projectNodeId = `project:${projectName}`;
-    summaryMap[projectName] = { ...summary, findingCount: findingPage.total, taskCount: tasks.length };
+    // Show what the project holds, not the page of findings drawn here.
+    const findingTotal = summary.findingCount || findingPage.total;
+    const taskTotal = summary.taskCount || tasks.length;
+    summaryMap[projectName] = { ...summary, findingCount: findingTotal, taskCount: taskTotal };
 
     nodes.push({
       id: projectNodeId,
@@ -659,8 +662,8 @@ export async function loadGraphData(client: PhrenClient): Promise<GraphPayload> 
       radius: Math.min(14 + Math.sqrt(findingPage.total + tasks.length) * 1.5, 30),
       color: "#7B68AE",
       store,
-      findingCount: findingPage.total,
-      taskCount: tasks.length,
+      findingCount: findingTotal,
+      taskCount: taskTotal,
     });
 
     // Finding nodes
@@ -841,12 +844,15 @@ export async function fetchProjectSummary(client: PhrenClient, project: string):
       files.push({ filename, type });
     }
   }
+  // CLIs from Sep 22 on report what the project holds, archive included; an
+  // older CLI leaves these at zero and the graph falls back to the page total.
+  const counts = asRecord(data?.counts);
   return {
     name: asString(data?.name) ?? project,
     summary: asString(data?.summary) ?? "No summary.md found.",
     files,
-    findingCount: 0,
-    taskCount: 0,
+    findingCount: typeof counts?.findings === "number" ? counts.findings : 0,
+    taskCount: typeof counts?.openTasks === "number" ? counts.openTasks : 0,
   };
 }
 

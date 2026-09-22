@@ -15,7 +15,7 @@ import { readCustomHooks } from "../hooks.js";
 import { hookConfigPaths, hookConfigRoots } from "../provider-adapters.js";
 import { readProjectConfig, isProjectHookEnabled, PROJECT_HOOK_EVENTS } from "../project-config.js";
 import { getAllSkills } from "../skill/registry.js";
-import { resolveTaskFilePath, readTasks, TASKS_FILENAME } from "../data/tasks.js";
+import { readTasks, TASKS_FILENAME } from "../data/tasks.js";
 import { FINDINGS_FILENAME, readFindings } from "../data/access.js";
 import { buildIndex, queryDocBySourceKey, queryRows } from "../shared/index.js";
 import type { SqlJsDatabase } from "../shared/index.js";
@@ -24,6 +24,7 @@ import { entryScoreKey } from "../governance/scores.js";
 import { findingStableId } from "../finding-graph-id.js";
 import { readRecentLookups, type LookupEvent } from "../governance/activity.js";
 import { logger } from "../logger.js";
+import { projectMemoryCounts } from "../content/summarize.js";
 
 export interface EntryScore {
   impressions: number;
@@ -781,6 +782,14 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
   }
   const filteredNodes = nodes.filter((n) => n.group !== "project" || connectedIds.has(n.id));
 
+  // The counts beside a project are what it holds, not the slice drawn here:
+  // live findings, journal findings, the whole archive, and every open task.
+  for (const [project, projectNode] of projectNodeByName) {
+    const counts = projectMemoryCounts(phrenPath, project);
+    projectNode.findingCount = counts.findings;
+    projectNode.taskCount = counts.openTasks;
+  }
+
   const total = filteredNodes.length;
   const topics = Array.from(topicMetaMap.values());
   return { nodes: filteredNodes, links: dedupedLinks, total, scores, topics };
@@ -807,16 +816,12 @@ export function recentAccepted(phrenPath: string): string[] {
 function buildProjectInfo(basePath: string, project: string, store?: string): ProjectInfo {
   const dir = path.join(basePath, project);
   const findingsPath = path.join(dir, FINDINGS_FILENAME);
-  const taskPath = resolveTaskFilePath(basePath, project);
   const claudeMdPath = path.join(dir, "AGENTS.md");
   const summaryPath = path.join(dir, "summary.md");
   const refPath = path.join(dir, "reference");
 
-  let findingCount = 0;
-  if (fs.existsSync(findingsPath)) {
-    const content = fs.readFileSync(findingsPath, "utf8");
-    findingCount = (content.match(/^- /gm) || []).length;
-  }
+  const counts = projectMemoryCounts(basePath, project);
+  const findingCount = counts.findings;
 
   const sparkline: number[] = new Array(8).fill(0);
   if (fs.existsSync(findingsPath)) {
@@ -832,12 +837,8 @@ function buildProjectInfo(basePath: string, project: string, store?: string): Pr
     }
   }
 
-  let taskCount = 0;
-  if (taskPath && fs.existsSync(taskPath)) {
-    const content = fs.readFileSync(taskPath, "utf8");
-    const queueMatch = content.match(/## Queue[\s\S]*?(?=## |$)/);
-    if (queueMatch) taskCount = (queueMatch[0].match(/^- /gm) || []).length;
-  }
+  // Every open task (Active and Queue), the same number the graph shows.
+  const taskCount = counts.openTasks;
 
   let summaryText = "";
   if (fs.existsSync(summaryPath)) {

@@ -299,7 +299,7 @@ export async function summarizeTopicFile(filePath: string, slug: string, opts: S
 
 export interface ProjectSummary { project: string; topics: TopicResult[]; summaryPath: string | null; summaryUpdated: boolean }
 
-function countActiveFindingsIn(findingsPath: string): number {
+export function countActiveFindingsIn(findingsPath: string): number {
   try {
     let inArchive = false;
     let n = 0;
@@ -312,8 +312,53 @@ function countActiveFindingsIn(findingsPath: string): number {
   } catch { return 0; }
 }
 
-function countOpenTasks(tasksPath: string): number {
+export function countOpenTasks(tasksPath: string): number {
   try { return fs.readFileSync(tasksPath, "utf8").split("\n").filter((l) => /^- \[ \]/.test(l)).length; } catch { return 0; }
+}
+
+function olderBullets(topicsDir: string | null): number {
+  if (!topicsDir || !fs.existsSync(topicsDir)) return 0;
+  let n = 0;
+  for (const entry of fs.readdirSync(topicsDir)) {
+    if (!entry.endsWith(".older.md")) continue;
+    try { n += parseTopicBullets(fs.readFileSync(path.join(topicsDir, entry), "utf8")).length; } catch { /* unreadable: not counted */ }
+  }
+  return n;
+}
+
+function archivedBullets(topicsDir: string | null): number {
+  if (!topicsDir || !fs.existsSync(topicsDir)) return 0;
+  let n = 0;
+  for (const entry of fs.readdirSync(topicsDir)) {
+    if (!entry.endsWith(".md")) continue;
+    try { n += parseTopicBullets(fs.readFileSync(path.join(topicsDir, entry), "utf8")).length; } catch { /* unreadable: not counted */ }
+  }
+  return n;
+}
+
+function journalBullets(journalDir: string | null): number {
+  if (!journalDir || !fs.existsSync(journalDir)) return 0;
+  let n = 0;
+  for (const entry of fs.readdirSync(journalDir)) {
+    if (!entry.endsWith(".md")) continue;
+    try { n += fs.readFileSync(path.join(journalDir, entry), "utf8").split("\n").filter((l) => l.startsWith("- ")).length; } catch { /* unreadable: not counted */ }
+  }
+  return n;
+}
+
+/** What a project holds, counted the same way everywhere a count is shown:
+ * live findings, team journal findings, everything archived into topic files
+ * (older halves included), and open tasks. Every graph and project list reads
+ * this so no surface shows only the slice it happened to draw. */
+export interface ProjectMemoryCounts { active: number; journal: number; archived: number; findings: number; openTasks: number }
+export function projectMemoryCounts(phrenPath: string, project: string): ProjectMemoryCounts {
+  const findingsPath = storeAwareProjectPath(phrenPath, project, "FINDINGS.md");
+  const tasksPath = storeAwareProjectPath(phrenPath, project, "tasks.md");
+  const active = findingsPath ? countActiveFindingsIn(findingsPath) : 0;
+  const journal = journalBullets(storeAwareProjectPath(phrenPath, project, "journal"));
+  const archived = archivedBullets(storeAwareProjectPath(phrenPath, project, "reference", "topics"));
+  const openTasks = tasksPath ? countOpenTasks(tasksPath) : 0;
+  return { active, journal, archived, findings: active + journal + archived, openTasks };
 }
 
 /** Summarize every topic file of a project and refresh the "What phren knows" block in summary.md. */
@@ -347,7 +392,9 @@ export async function summarizeProject(phrenPath: string, project: string, opts:
   const tasksEnabled = moduleEnabled(path.dirname(path.dirname(summaryPath)), "tasks");
   const tasksPath = tasksEnabled ? storeAwareProjectPath(phrenPath, project, "tasks.md") : null;
   const active = findingsPath ? countActiveFindingsIn(findingsPath) : 0;
-  const archived = results.reduce((n, r) => n + r.bullets, 0);
+  // An oversized topic's older half lives in <topic>.older.md; it is not
+  // summarized as a topic of its own, but its findings are still archived.
+  const archived = results.reduce((n, r) => n + r.bullets, 0) + olderBullets(topicsDir);
   const open = tasksPath ? countOpenTasks(tasksPath) : 0;
   const lines = [`- ${plural(active, "active finding")}, ${archived} archived across ${plural(results.filter((r) => r.bullets > 0).length, "topic")}${tasksEnabled ? `, ${plural(open, "open task")}` : ""}.`];
   for (const r of results.filter((r) => r.bullets > 0).sort((a, b) => b.bullets - a.bullets)) {
