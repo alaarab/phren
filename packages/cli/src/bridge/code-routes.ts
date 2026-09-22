@@ -47,12 +47,16 @@ export async function resolveCodeStore(base: string, value?: string | null, writ
  * debounce; a branch switch (HEAD changed) forces a full re-index.
  */
 
-const KIND_VALUES = ["function", "method", "class", "struct", "enum", "interface", "type", "variable"] as const;
+const KIND_VALUES = ["function", "method", "class", "struct", "enum", "interface", "type", "variable", "types"] as const;
 
 const projectSchema = z.string().min(1).max(100).refine(value => isValidProjectName(value), "Choose a valid project name.");
 const querySchema = z.string().max(500);
 const symbolSchema = z.string().min(1).max(4600);
 const pathSchema = z.string().min(1).max(4096).refine(value => !value.includes("\0") && !value.split("/").includes(".."), "Choose a valid file path.");
+const relativePathSchema = pathSchema.refine(value => !path.isAbsolute(value) && !path.win32.isAbsolute(value)
+  && !value.includes("\\") && !value.split("/").some(part => part === "." || part === ""));
+const optionalPath = (value?: string | null) => value ? relativePathSchema.parse(value) : undefined;
+const offsetSchema = z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const kindSchema = z.enum(KIND_VALUES);
 const limitSchema = z.coerce.number().int().min(1).max(500);
 const topSchema = z.coerce.number().int().min(1).max(100);
@@ -73,14 +77,49 @@ export class CodeRoutes {
     return result;
   }
 
-  async search(projectValue: string | null, queryValue: string | null, kindValue: string | null, limitValue: string | null): Promise<{ project: string; query: string; symbols: SymbolHit[] }> {
+  async search(projectValue: string | null, queryValue: string | null, kindValue: string | null, limitValue: string | null, directoryValue?: string | null): Promise<{ project: string; query: string; symbols: SymbolHit[] }> {
     const project = projectSchema.parse(projectValue ?? "");
     const query = querySchema.parse(queryValue ?? "");
     const kind = kindValue === null || kindValue === "" ? undefined : kindSchema.parse(kindValue);
     const limit = limitValue === null || limitValue === "" ? undefined : limitSchema.parse(limitValue);
-    const result = await (await requireCodePackage(this.store)).search(this.store, project, query, kind, limit ?? 20);
+    const result = await (await requireCodePackage(this.store)).search(this.store, project, query, kind, limit ?? 20, optionalPath(directoryValue));
     if (!result.available) throw noIndex(project);
     return { project, query, symbols: result.value };
+  }
+
+  async tree(projectValue: string | null, directoryValue?: string | null) {
+    const project = projectSchema.parse(projectValue ?? "");
+    const directory = optionalPath(directoryValue) ?? "";
+    const result = await (await requireCodePackage(this.store)).treeSummary(this.store, project, directory);
+    if (!result.available) throw noIndex(project);
+    return { project, directory, entries: result.value };
+  }
+
+  async usagePage(projectValue: string | null, values: { kind?: string | null; file?: string | null; directory?: string | null;
+    offset?: string | null; limit?: string | null; end?: string | null } = {}) {
+    const project = projectSchema.parse(projectValue ?? "");
+    const result = await (await requireCodePackage(this.store)).usagePage(this.store, project, {
+      kind: values.kind ? kindSchema.parse(values.kind) : undefined,
+      file: optionalPath(values.file), directory: optionalPath(values.directory),
+      offset: values.offset ? offsetSchema.parse(values.offset) : 0,
+      limit: values.limit ? topSchema.parse(values.limit) : 50,
+      end: values.end ? z.enum(["0", "1"]).parse(values.end) === "1" : false,
+    });
+    if (!result.available) throw noIndex(project);
+    return { project, ...result.value };
+  }
+
+  async recent(projectValue: string | null, directoryValue?: string | null) {
+    const project = projectSchema.parse(projectValue ?? "");
+    const result = await (await requireCodePackage(this.store)).recentSymbols(this.store, project, optionalPath(directoryValue));
+    if (!result.available) throw noIndex(project);
+    return { project, entries: result.value };
+  }
+
+  async reindex(projectValue: string | null) {
+    const project = projectSchema.parse(projectValue ?? "");
+    await indexProject(this.store, project);
+    return this.status(project);
   }
 
   async outline(projectValue: string | null, pathValue: string | null): Promise<{ project: string; path: string; entries: OutlineEntry[] }> {

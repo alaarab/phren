@@ -353,8 +353,14 @@ export async function serve(version: string): Promise<void> {
             const page = await reader.read();
             result = { ...page, type: "backlog", source, session }; break;
           }
+          case "/v1/code/tree": result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, url.searchParams.get("store")))).tree(url.searchParams.get("project"), url.searchParams.get("directory")); break;
+          case "/v1/code/recent": result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, url.searchParams.get("store")))).recent(url.searchParams.get("project"), url.searchParams.get("directory")); break;
+          case "/v1/code/usage-page": result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, url.searchParams.get("store")))).usagePage(url.searchParams.get("project"), {
+            kind: url.searchParams.get("kind"), file: url.searchParams.get("file"), directory: url.searchParams.get("directory"),
+            offset: url.searchParams.get("offset"), limit: url.searchParams.get("limit"), end: url.searchParams.get("end"),
+          }); break;
           case "/v1/code/status": result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, url.searchParams.get("store")))).status(url.searchParams.get("project")); break;
-          case "/v1/code/search": result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, url.searchParams.get("store")))).search(url.searchParams.get("project"), url.searchParams.get("q"), url.searchParams.get("kind"), url.searchParams.get("limit")); break;
+          case "/v1/code/search": result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, url.searchParams.get("store")))).search(url.searchParams.get("project"), url.searchParams.get("q"), url.searchParams.get("kind"), url.searchParams.get("limit"), url.searchParams.get("directory")); break;
           case "/v1/code/outline-summary": result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, url.searchParams.get("store")))).outlineSummary(url.searchParams.get("project"), url.searchParams.get("paths")); break;
           case "/v1/code/outline": result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, url.searchParams.get("store")))).outline(url.searchParams.get("project"), url.searchParams.get("path")); break;
           case "/v1/code/definition": result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, url.searchParams.get("store")))).definition(url.searchParams.get("project"), url.searchParams.get("symbol")); break;
@@ -364,7 +370,10 @@ export async function serve(version: string): Promise<void> {
         }
       } else if (request.method === "POST") {
         const data = await body(request);
-        if (url.pathname === "/v1/code/note") {
+        if (url.pathname === "/v1/code/reindex") {
+          result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, typeof data.store === "string" ? data.store : undefined, true)))
+            .reindex(z.string().parse(data.project));
+        } else if (url.pathname === "/v1/code/note") {
           result = await saveCodeNote(await resolveCodeStore(scheduleStore, typeof data.store === "string" ? data.store : undefined, true), data, dispatches ? async (note, prompt) => {
             if (note.target && "session" in note.target) return handOff({ session: note.target.session, project: note.project, text: prompt });
             return dispatches.dispatch({ computer: "anywhere", project: note.project,

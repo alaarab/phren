@@ -218,3 +218,22 @@ it("searches dollar-prefixed identifiers without FTS syntax errors", async () =>
   await indexProject(store, "fixture", { repoRoot: repo });
   expect((await search(store, "fixture", "$helper")).value[0]?.name).toBe("$helper");
 });
+
+describe("recent index observations", () => {
+  it("retains unchanged symbols across reindex and advances body edits", async () => {
+    const { recentSymbols } = await import("./query.js");
+    const before = (await recentSymbols(store, "fixture", "typescript", 100)).value;
+    const original = before.find(row => row.name === "add")!;
+    const unchanged = before.find(row => row.name === "Point")!;
+    expect(original.indexedAt).toBeGreaterThan(0);
+    const file = path.join(repo, original.file);
+    const content = fs.readFileSync(file, "utf8");
+    fs.writeFileSync(file, content.replace("return a + b", "return a + b + 1"));
+    await indexProject(store, "fixture", { repoRoot: repo });
+    const after = (await recentSymbols(store, "fixture", "typescript", 100)).value;
+    expect(after.find(row => row.name === "add")!.indexedAt).toBeGreaterThan(original.indexedAt);
+    expect(after.find(row => row.name === "Point")!.indexedAt).toBe(unchanged.indexedAt);
+    await indexProject(store, "fixture", { repoRoot: repo, full: true });
+    expect((await recentSymbols(store, "fixture", "typescript", 100)).value).toEqual(after);
+  });
+});
