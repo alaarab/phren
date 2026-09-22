@@ -1166,11 +1166,13 @@ struct AgentChatView: View {
                     if let choice = prompt.choice, choice.prompt(id: "terminal-choice") != nil {
                         // The terminal dialog the Hook read: the actual question
                         // and its options, answered by their own keys. No key
-                        // strip and no waiting line behind it.
+                        // strip and no waiting line behind it. Codex's queued
+                        // follow-up question opens with alt+up first.
                         ChatChoiceQuestionCard(choice: choice, id: "terminal-choice", title: "\(model.target?.providerName ?? "Agent") asks",
                                                busy: model.answering || !active || !model.connected,
                                                terminal: AnyView(answerTerminalLink)) { key in
-                            sendTask = Task { await model.answer(session, key: key) }
+                            let keys: [AgentAnswerKey] = prompt.queued ? [.altUp, key] : [key]
+                            sendTask = Task { await model.answer(session, keys: keys) }
                         }
                         .id(prompt.message ?? "terminal-choice")
                     } else {

@@ -433,8 +433,9 @@ final class AgentChatModel {
     }
     func accept(_ frame: AgentChatTranscript) {
         // Older history must not resurrect a prompt whose answer fell outside
-        // that page. Live/backlog events carry the current question lifecycle.
-        if frame.kind != .older { questionState.receive(frame.questionEvents, reset: frame.kind == .backlog) }
+        // that page. A full snapshot or replacement carries the current
+        // question lifecycle; a reconnect delta is partial and leaves it alone.
+        if frame.kind != .older { questionState.receive(frame.questionEvents, reset: frame.kind == .backlog && frame.reset) }
         reveal.receive(frame, previous: messages, animated: animateReplies && hasTranscript)
         if frame.messages.contains(where: { $0.line > submittedAfterLine && $0.role != .user }) { awaitingReply = false }
         if !progressConnected, !frame.progressEvents.isEmpty { acceptProgress(frame) }
@@ -475,10 +476,10 @@ final class AgentChatModel {
         if let target { AgentChatQueues.reconciledRows[target.id] = reconciledQueueRows }
     }
 
-    /// A backlog replaces what the transcript said (the conversation was
-    /// reopened or reset); an append or older page only adds to it.
+    /// A conversation-replacement snapshot replaces what the transcript said;
+    /// an append, an older page, or a reconnect delta only adds to it.
     private func acceptContext(_ frame: AgentChatTranscript) {
-        if frame.kind == .backlog { transcriptContext = frame.context } else { transcriptContext.merge(frame.context) }
+        if frame.replacesConversation { transcriptContext = frame.context } else { transcriptContext.merge(frame.context) }
         if let name = transcriptContext.modelName, modelName != name { modelName = name }
     }
 

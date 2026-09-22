@@ -72,6 +72,11 @@ enum UITestFixtures {
         if arguments.contains("--workflow-fixture") {
             defaults.set("Queue", forKey: "tasks.section.v1")
             defaults.set("Task order", forKey: "tasks.sort.v1")
+            // Folded task sections live in AppStorage; start each workflow
+            // launch fully open unless a test relaunched to check persistence.
+            if !arguments.contains("--tasks-keep-collapsed") {
+                defaults.removeObject(forKey: "tasks.collapsed.v1")
+            }
         }
 
         var contexts: [StoreContext] = []
@@ -543,6 +548,21 @@ enum UITestFixtures {
           Context: Keep the full plan available from task details.
         - [ ] A short follow-up task <!-- bid:dead0002 created:\(Date().ISO8601Format()) -->
         - [ ] Check the finished app <!-- bid:dead0003 -->
+        ## Done
+        """, blobSha: nil)
+        // A second project so open-count ordering differs from visible-row
+        // ordering under Backlog: api carries 3 Active + 1 Queue per store
+        // (open 8 merged, 2 visible) against demo's 0 Active + 3 Queue
+        // (open 6, 6 visible). Alphabetical order would also put api first;
+        // the visible-row order would put demo first.
+        try await store.write("api/tasks.md", content: """
+        # API tasks
+        ## Active
+        - [ ] Fold sections with Reduce Motion respected <!-- bid:dead0211 -->
+        - [ ] Keep header counts unfiltered <!-- bid:dead0212 -->
+        - [ ] Leave folded projects alone when All runs <!-- bid:dead0213 -->
+        ## Queue
+        - [ ] Show Active and Queue counts on every header <!-- bid:dead0201 created:2026-09-20T09:00:00.000Z -->
         ## Done
         """, blobSha: nil)
         try await store.write("demo/review.md", content: """

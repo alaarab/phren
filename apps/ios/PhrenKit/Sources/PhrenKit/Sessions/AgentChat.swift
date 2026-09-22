@@ -399,6 +399,13 @@ public struct AgentChatTranscript: Equatable, Sendable {
     public let hasMore: Bool
     public let totalLines: Int
     public let startLine: Int?
+    /// The Hook's explicit conversation-replacement flag. A resume delta is
+    /// never a replacement; an empty placeholder while the file is missing
+    /// carries no conversation to replace with (`replacesConversation`).
+    public var reset: Bool = false
+    /// True only for a snapshot that actually carries the conversation after
+    /// a replacement: the only frame that may clear what the phone retained.
+    public var replacesConversation: Bool { reset && (totalLines > 0 || !messages.isEmpty) }
     public var questionEvents: [AgentQuestionEvent] = []
     public var progressEvents: [AgentChatProgressEvent] = []
     public var queueEvents: [AgentQueueConsumption] = []
@@ -462,7 +469,8 @@ public struct AgentChatTranscript: Equatable, Sendable {
         let ordered = messages.sorted { $0.line < $1.line }
         return Self(kind: kind, messages: Self.collapsedCompactions(ordered), hasMore: frame["hasMore"] as? Bool ?? false,
                     totalLines: frame["totalLines"] as? Int ?? 0,
-                    startLine: frame["startLine"] as? Int ?? entries.compactMap { $0["line"] as? Int }.min(), questionEvents: questionEvents,
+                    startLine: frame["startLine"] as? Int ?? entries.compactMap { $0["line"] as? Int }.min(),
+                    reset: frame["reset"] as? Bool ?? false, questionEvents: questionEvents,
                     progressEvents: progressEvents, queueEvents: queueEvents, context: context)
     }
 

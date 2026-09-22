@@ -7,6 +7,9 @@ public enum AgentAnswerKey: String, CaseIterable, Sendable, Identifiable {
     case one = "1", two = "2", three = "3", escape = "Escape"
     /// Codex's "yes, and don't ask again for commands that start with …".
     case proceedAlways = "p"
+    /// Codex's "answer the last queued follow-up": opens the queue, after
+    /// which the option key (or typed text) is the answer.
+    case altUp = "AltUp"
 
     public var id: String { rawValue }
 
@@ -22,6 +25,7 @@ public enum AgentAnswerKey: String, CaseIterable, Sendable, Identifiable {
         case .yes: return "Y"
         case .no: return "N"
         case .escape: return "Esc"
+        case .altUp: return "⌥\u{2191}"
         default: return rawValue
         }
     }
@@ -35,6 +39,7 @@ public enum AgentAnswerKey: String, CaseIterable, Sendable, Identifiable {
         case .yes: return "Answer yes"
         case .no: return "Answer no"
         case .escape: return "Press Escape"
+        case .altUp: return "Open the queued question"
         default: return "Press \(rawValue)"
         }
     }

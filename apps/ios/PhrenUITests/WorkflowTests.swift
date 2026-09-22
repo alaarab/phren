@@ -1,6 +1,13 @@
 import XCTest
 
 final class WorkflowTests: XCTestCase {
+    /// Grouped sections can push a row past the first screen; scroll until
+    /// it is in the tree. Never swipe down: the list pulls to refresh at the
+    /// top.
+    private func reveal(_ element: XCUIElement, in app: XCUIApplication, attempts: Int = 8) {
+        for _ in 0..<attempts where !element.exists { app.swipeUp() }
+    }
+
     @MainActor
     func testProjectsLayoutAndMemorySearch() {
         let app = XCUIApplication()
@@ -48,16 +55,22 @@ final class WorkflowTests: XCTestCase {
         app.tabBars.buttons["Tasks"].tap()
         app.buttons["task-status"].tap()
         app.buttons["Active"].tap()
-        XCTAssertTrue(app.staticTexts["No active tasks"].waitForExistence(timeout: 5))
+        // Active work lives in api; demo's backlog rows stay out of the way.
+        XCTAssertTrue(app.buttons["tasks-section-toggle:api"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["task-detail:sample/brain/demo/dead0001"].exists)
         attachUIScreenshot(app, "Calm active tasks state")
-        app.buttons["View backlog (6)"].tap()
+        app.buttons["task-status"].tap()
+        app.buttons["Backlog"].tap()
         let long = app.buttons["task-detail:sample/brain/demo/dead0001"]
         XCTAssertTrue(long.waitForExistence(timeout: 5))
         XCTAssertLessThan(long.frame.height, 180)
-        let group = app.buttons["tasks-project:demo"]
+        let all = app.buttons["tasks-section-all"]
+        XCTAssertTrue(all.exists)
+        XCTAssertLessThan(all.frame.minY - app.buttons["task-status"].frame.maxY, 32)
+        let group = app.buttons["tasks-section-toggle:demo"]
         XCTAssertTrue(group.exists)
-        XCTAssertLessThan(group.frame.minY - app.buttons["task-status"].frame.maxY, 32)
+        XCTAssertLessThan(app.buttons["tasks-section-toggle:api"].frame.minY, group.frame.minY)
+        XCTAssertLessThan(group.frame.minY, long.frame.minY)
         XCTAssertLessThan(long.frame.minY - group.frame.maxY, 32)
         attachUIScreenshot(app, "Scannable backlog with full task details on demand")
         long.tap()
@@ -66,10 +79,12 @@ final class WorkflowTests: XCTestCase {
         app.navigationBars["Task details"].buttons.element(boundBy: 0).tap()
         app.buttons["task-status"].tap()
         app.buttons["Active"].tap()
-        XCTAssertTrue(app.staticTexts["No active tasks"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["tasks-section-toggle:api"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["task-detail:sample/brain/demo/dead0001"].exists)
         app.tabBars.buttons["Settings"].tap()
         app.tabBars.buttons["Tasks"].tap()
-        XCTAssertTrue(app.staticTexts["No active tasks"].waitForExistence(timeout: 5), "Tasks remembers the chosen workload view")
+        XCTAssertTrue(app.buttons["tasks-section-toggle:api"].waitForExistence(timeout: 5),
+                      "Tasks remembers the chosen workload view")
     }
 
     @MainActor
@@ -102,6 +117,7 @@ final class WorkflowTests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Task details"].waitForExistence(timeout: 5))
         app.navigationBars["Task details"].buttons.element(boundBy: 0).tap()
         app.buttons["task-status"].tap(); app.buttons["Active"].tap()
+        reveal(task, in: app)
         XCTAssertTrue(task.waitForExistence(timeout: 5), "A backlog task becomes active only after its prompt is delivered")
     }
 
@@ -196,8 +212,11 @@ final class WorkflowTests: XCTestCase {
         let second = app.buttons["task-detail:team/brain/demo/dead0001"]
         XCTAssertTrue(first.waitForExistence(timeout: 5))
         app.buttons["task-selection-mode"].tap()
-        first.tap(); second.tap()
+        first.tap()
+        if !second.isHittable { app.swipeUp() }
+        second.tap()
         app.buttons["task-bulk-Start"].tap()
+        reveal(first, in: app)
         XCTAssertTrue(first.waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["task-bulk-Start"].exists)
         XCTAssertTrue(app.buttons["task-status"].label.contains("Active"))
@@ -205,17 +224,20 @@ final class WorkflowTests: XCTestCase {
         app.buttons["task-selection-mode"].tap()
         app.buttons["Select all"].tap()
         app.buttons["task-bulk-Done"].tap()
+        reveal(first, in: app)
         XCTAssertTrue(first.waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["task-status"].label.contains("Done"))
         app.buttons["task-selection-mode"].tap()
         app.buttons["Select all"].tap()
         app.buttons["task-bulk-Backlog"].tap()
+        reveal(first, in: app)
         XCTAssertTrue(first.waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["task-status"].label.contains("Backlog"))
         first.swipeRight()
         app.buttons["Start"].firstMatch.tap()
         app.buttons["task-status"].tap()
         app.buttons["Active"].tap()
+        reveal(first, in: app)
         XCTAssertTrue(first.waitForExistence(timeout: 5))
         XCTAssertFalse(second.exists)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Created Jan 1, 2026")).firstMatch.exists)

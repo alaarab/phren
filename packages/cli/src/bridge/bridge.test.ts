@@ -859,6 +859,54 @@ schedules:
       cleared.terminate();
     });
 
+    it("carries Codex's queued follow-up question on the overview and answers it with alt+up then the option key", async () => {
+      agentStatus = "blocked";
+      const sqlite = await import("node:sqlite");
+      const historyPath = path.join(root, "codex/thread_history_1.sqlite");
+      const db = new sqlite.DatabaseSync(historyPath);
+      db.exec("create table if not exists thread_items (thread_id text, turn_id text, item_id text, rollout_ordinal integer, created_at_ms integer, item_json text, item_type text, updated_at_ordinal integer, primary key (thread_id, turn_id, item_id))");
+      const item = { type: "question", id: "q-queued", status: "queued",
+        questions: [{ title: "Deploy as-is?", options: ["Yes, deploy", "Hold"] }] };
+      db.prepare("insert or replace into thread_items values (?, 'turn-1', ?, ?, ?, ?, ?, ?)")
+        .run(session, item.id, 7, 1700, JSON.stringify(item), item.type, 7);
+      db.close();
+      try {
+        const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
+        const frames: any[] = []; socket.on("message", data => frames.push(JSON.parse(data.toString())));
+        await once(socket, "open");
+        for (let i = 0; i < 80 && !frames.length; i++) await sleep(25);
+        expect(frames[0].agentStatus.terminalPrompt).toMatchObject({
+          toolName: "Question", message: "Deploy as-is?", queued: true,
+          choice: { title: "Deploy as-is?",
+            options: [{ label: "Yes, deploy", key: "1" }, { label: "Hold", key: "2" }] },
+        });
+        socket.terminate();
+        // The phone opens Codex's queue first, then presses the option's key.
+        expect((await api("/v1/keys", { target, keys: ["AltUp", "1"] })).status).toBe(200);
+        expect(commands.filter(c => c.method === "agent.send_keys").map(c => c.params.keys)).toEqual([["alt+Up", "1"]]);
+        // Answered in the store: the choice is gone from the next frame.
+        const answered = { ...item, status: "answered", answers: { deploy: ["Yes, deploy"] } };
+        const rewrite = new sqlite.DatabaseSync(historyPath);
+        rewrite.prepare("insert or replace into thread_items values (?, 'turn-1', ?, ?, ?, ?, ?, ?)")
+          .run(session, item.id, 7, 1707, JSON.stringify(answered), answered.type, 8);
+        rewrite.close();
+        const cleared = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
+        const last: any[] = []; cleared.on("message", data => last.push(JSON.parse(data.toString())));
+        await once(cleared, "open");
+        for (let i = 0; i < 80 && !last.length; i++) await sleep(25);
+        expect(last[0].agentStatus.terminalPrompt).toBeUndefined();
+        cleared.terminate();
+      } finally {
+        // Leave no thread store behind: a later test deletes the rollout and
+        // expects the conversation to have no transcript at all.
+        const cleanup = new sqlite.DatabaseSync(historyPath);
+        cleanup.prepare("delete from thread_items where thread_id = ?").run(session);
+        cleanup.close();
+        await rm(path.join(root, `bridge/codex-threads/${session}.jsonl`), { force: true });
+        await rm(path.join(root, `bridge/codex-threads/${session}.jsonl.state.json`), { force: true });
+      }
+    });
+
     it("tells the overview what a working agent is doing", async () => {
       await appendFile(record, JSON.stringify({ type: "turn_context", payload: { model: "gpt-6-astra" } }) + "\n");
       const before = await api("/v1/workspaces");
@@ -1087,6 +1135,31 @@ schedules:
         for (let i = 0; i < 60 && !frames.length; i++) await sleep(25);
         expect(frames[0]).toMatchObject({ type: "backlog", totalLines: 4 });
         expect(frames[0].entries.map((entry: any) => entry.line)).toEqual([2, 3]);
+        expect(JSON.stringify(frames[0])).not.toContain("First message");
+        // An in-range resume is a delta, never an explicit replacement.
+        expect(frames[0].reset).toBe(false);
+      } finally { resumed.terminate(); }
+    });
+
+    it("treats a resume cursor past a shortened transcript as a replacement snapshot", async () => {
+      const query = new URLSearchParams(target).toString();
+      const first = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/transcripts?${query}`);
+      const opening: any[] = []; first.on("message", data => opening.push(JSON.parse(data.toString())));
+      await once(first, "open");
+      for (let i = 0; i < 60 && !opening.length; i++) await sleep(25);
+      expect(opening[0]).toMatchObject({ type: "backlog", totalLines: 2 });
+      const disconnected = once(first, "close"); first.terminate(); await disconnected;
+
+      // The conversation was replaced: the new file ends before the phone's cursor.
+      await writeFile(record, JSON.stringify(row("Replacement message")) + "\n");
+      const resumed = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/transcripts?${new URLSearchParams({ ...target, afterLine: "1" })}`);
+      const frames: any[] = []; resumed.on("message", data => frames.push(JSON.parse(data.toString())));
+      try {
+        await once(resumed, "open");
+        for (let i = 0; i < 60 && !frames.length; i++) await sleep(25);
+        expect(frames[0]).toMatchObject({ type: "backlog", reset: true, totalLines: 1 });
+        expect(frames[0].entries.map((entry: any) => entry.line)).toEqual([0]);
+        expect(JSON.stringify(frames[0])).toContain("Replacement message");
         expect(JSON.stringify(frames[0])).not.toContain("First message");
       } finally { resumed.terminate(); }
     });

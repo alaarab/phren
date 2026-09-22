@@ -96,6 +96,14 @@ export async function materializeCodexThread(session: string): Promise<string | 
           if (asked) lines.push(JSON.stringify(asked));
           state.done[id] = "done"; continue;
         }
+        else if (isQueuedQuestionItem(item)) {
+          // The queued follow-up question reads in the transcript as the
+          // asking sentence; the Hook answers it from the store, not by
+          // quoting a reply, so no async event rides along here.
+          const title = questionTitle(objects(item.questions));
+          if (title) lines.push(JSON.stringify({ type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: title }] } }));
+          state.done[id] = "done"; continue;
+        }
         else continue;
       }
       if (state.done[id] === "call" && output) { lines.push(JSON.stringify(output)); state.done[id] = "done"; }
@@ -139,6 +147,59 @@ function questionEvent(item: Json): Json | undefined {
   if (item.type !== "agentMessage" || item.delivery !== "async" || !Array.isArray(item.questions) || !item.questions.length) return undefined;
   return { type: "event_msg", payload: { type: "item_completed", item: { type: "AgentMessage", id: String(item.id ?? ""),
     content: [{ type: "Text", text: String(item.text ?? "") }], delivery: "async", questions: objects(item.questions).slice(0, 8) } } };
+}
+
+/** Codex 0.155 records a queued follow-up question as its own thread item
+ * (`question` or `requestUserInput`), not as a delivered async agent message.
+ * It sits under the terminal's "Queued follow-up inputs" until alt+up opens
+ * it, so the Hook reads its text and options straight from the store. */
+const QUEUED_QUESTION_TYPES = new Set(["question", "requestUserInput"]);
+function isQueuedQuestionItem(item: Json): boolean { return QUEUED_QUESTION_TYPES.has(String(item.type)); }
+function questionAnswered(item: Json): boolean {
+  if (item.answers !== undefined && item.answers !== null) return true;
+  return ["answered", "completed", "resolved", "cancelled", "canceled", "error", "declined"].includes(String(item.status ?? ""));
+}
+function questionTitle(questions: Json[]): string {
+  return questions.map(raw => {
+    const q = object(raw);
+    const text = [q.question, q.title].find(v => typeof v === "string" && v.trim());
+    return typeof text === "string" ? text.trim() : "";
+  }).filter(Boolean).join("\n\n").slice(0, 4_000);
+}
+function questionOptionLabels(questions: Json[]): string[] {
+  const first = object(questions[0]);
+  const raw = first.options;
+  if (!Array.isArray(raw)) return [];
+  return raw.map(option => {
+    if (typeof option === "string") return option.trim();
+    const label = object(option).label;
+    return typeof label === "string" ? label.trim() : "";
+  }).filter(Boolean).slice(0, 12);
+}
+/** The pending queued question as the pane's choice shape: the asking
+ * sentence and one numbered option per choice (Codex answers with number
+ * keys once alt+up has opened the queue). Undefined when nothing answerable
+ * remains. */
+export async function queuedQuestion(session: string): Promise<{ title: string; options: { label: string; key: string }[] } | undefined> {
+  if (!sessionId.safeParse(session).success) return undefined;
+  const db = await openReadOnly(path.join(codexHome(), "thread_history_1.sqlite"));
+  if (!db) return undefined;
+  try {
+    const rows = objects(db.prepare(
+      "select item_json from thread_items where thread_id = ? and item_type in ('question', 'requestUserInput') order by rollout_ordinal desc limit 32"
+    ).all(session));
+    for (const row of rows) {
+      let item: Json;
+      try { item = object(JSON.parse(String(row.item_json))); } catch { continue; }
+      if (questionAnswered(item)) continue;
+      const questions = objects(item.questions);
+      const title = questionTitle(questions);
+      if (!title) continue;
+      const labels = questionOptionLabels(questions);
+      return { title, options: labels.map((label, index) => ({ label, key: String(index + 1) })) };
+    }
+    return undefined;
+  } catch { return undefined; } finally { db.close(); }
 }
 
 /** The call row an item starts with; tool inputs, not reasoning. */

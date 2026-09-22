@@ -23,8 +23,10 @@ public struct AgentChatHistory: Equatable, Sendable {
     public func acknowledgementID(for messageID: String) -> String { acknowledgementIDs[messageID] ?? messageID }
 
     public mutating func receive(_ frame: AgentChatTranscript) {
-        // A reconnect page can lag behind rows the phone already retained.
-        // Conversation selection owns resets; a lower count cannot prove one.
+        // Only an explicit conversation replacement clears what the phone
+        // retained. A reconnect page that lags those rows — a stale backlog,
+        // an empty placeholder while the file is missing — merges instead.
+        if frame.replacesConversation { self = Self() }
         var merged = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, $0) })
         for message in frame.messages where replacedQueueMessages[message.id] == nil {
             // Once browsing beyond the retained live window, incoming output
@@ -74,7 +76,10 @@ public struct AgentChatHistory: Equatable, Sendable {
             retiredQueue = Array(retiredQueue.suffix(4_000))
         }
         totalLines = max(totalLines, frame.totalLines)
-        if frame.kind != .append, let start = frame.startLine, start <= (startLine ?? Int.max) {
+        // An empty placeholder while the file is missing claims no range: it
+        // must not pretend the beginning is loaded or hide further history.
+        let placeholder = frame.reset && frame.totalLines == 0 && frame.messages.isEmpty
+        if !placeholder, frame.kind != .append, let start = frame.startLine, start <= (startLine ?? Int.max) {
             startLine = start; hasMore = frame.hasMore
         }
         if frame.kind == .older && !frame.hasMore {

@@ -292,6 +292,12 @@ extension View {
             .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 2, trailing: 0))
     }
 
+    /// plainListSectionLabel's typography without its list padding, for a
+    /// label that shares a row with chips or a chevron (the Tasks headers).
+    func plainListSectionTypography() -> some View {
+        self.font(.caption.weight(.semibold)).foregroundStyle(PhrenTheme.textMuted).textCase(.uppercase).tracking(0.6)
+    }
+
     /// In a plain list the row insets are the card's margins: a short gap
     /// between cards and nearly the full width across.
     func separatedSessionRow() -> some View {

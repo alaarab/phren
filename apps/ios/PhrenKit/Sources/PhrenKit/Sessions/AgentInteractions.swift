@@ -102,15 +102,29 @@ public struct AgentPromptChoice: Decodable, Equatable, Sendable {
 /// Hook had no one to hold it for. Read-only on the phone: the answer goes
 /// in as keys, not as an approval. `choice` is present when the Hook could
 /// read the command and options, so the phone shows them as a question.
+/// `queued` marks Codex's queued follow-up question: alt+up opens the queue
+/// before the option key answers it.
 public struct AgentTerminalPrompt: Decodable, Equatable, Sendable {
     public let toolName: String?
     public let message: String?
     public let choice: AgentPromptChoice?
+    public let queued: Bool
 
-    public init(toolName: String?, message: String?, choice: AgentPromptChoice? = nil) {
+    public init(toolName: String?, message: String?, choice: AgentPromptChoice? = nil, queued: Bool = false) {
         self.toolName = toolName
         self.message = message
         self.choice = choice
+        self.queued = queued
+    }
+
+    private enum CodingKeys: String, CodingKey { case toolName, message, choice, queued }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        toolName = try container.decodeIfPresent(String.self, forKey: .toolName)
+        message = try container.decodeIfPresent(String.self, forKey: .message)
+        choice = try container.decodeIfPresent(AgentPromptChoice.self, forKey: .choice)
+        queued = try container.decodeIfPresent(Bool.self, forKey: .queued) ?? false
     }
 
     /// The same first-line rule as an approval card: the human reason or
@@ -164,7 +178,7 @@ public struct AgentInteractionStatus: Equatable, Sendable {
         var terminalPrompt: AgentTerminalPrompt?
         if approval == nil, let raw = status["terminalPrompt"] as? [String: Any], JSONSerialization.isValidJSONObject(raw) {
             terminalPrompt = try? JSONDecoder().decode(AgentTerminalPrompt.self, from: JSONSerialization.data(withJSONObject: raw))
-            if let message = terminalPrompt?.message, message.utf8.count > 32_768 { terminalPrompt = AgentTerminalPrompt(toolName: terminalPrompt?.toolName, message: String(message.prefix(32_768)), choice: terminalPrompt?.choice) }
+            if let message = terminalPrompt?.message, message.utf8.count > 32_768 { terminalPrompt = AgentTerminalPrompt(toolName: terminalPrompt?.toolName, message: String(message.prefix(32_768)), choice: terminalPrompt?.choice, queued: terminalPrompt?.queued ?? false) }
         }
         let capabilities = (status["capabilities"] as? [String: Any]).flatMap { raw in
             (try? JSONSerialization.data(withJSONObject: raw)).flatMap { try? JSONDecoder().decode(LiveCapabilities.self, from: $0) }

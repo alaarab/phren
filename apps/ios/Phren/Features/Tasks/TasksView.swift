@@ -59,23 +59,31 @@ struct TaskListView: View {
     let scope: Scope
 
     @Environment(AppModel.self) private var model
-    @State private var selectedProject: String?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var tasks = TasksModel()
     @State private var showAdd = false
     @State private var editing: TaskListRow?
     @State private var reading: TaskListRow?
     @AppStorage("tasks.section.v1") private var section: PhrenTask.Section = .queue
-    @State private var query = ""
-    @State private var showSearch = false
-    @State private var isSelecting = false
-    @State private var selectedIDs: Set<String> = []
-    @State private var isMoving = false
-    /// Projects the person folded in the cross-project list; the count badge
-    /// keeps saying how much sits inside a folded section.
-    @State private var collapsedProjects: Set<String> = []
-    @FocusState private var searchFocused: Bool
-    @State private var priority: PhrenTask.Priority?
-    @State private var age: TaskAge = .all
     @AppStorage("tasks.sort.v1") private var sort: TaskSort = .manual
+    /// Projects the person folded in the cross-project list, encoded into
+    /// one AppStorage string so a fold is remembered across launches. The
+    /// chips keep saying how much open work sits inside a folded section.
+    @AppStorage(TasksCollapse.storageKey) private var collapsedRaw = ""
+    @FocusState private var searchFocused: Bool
+
+    private var collapsedProjects: Set<String> { TasksCollapse.decode(collapsedRaw) }
+
+    private func setCollapsed(_ projects: Set<String>) {
+        collapsedRaw = TasksCollapse.encode(projects)
+    }
+
+    private func toggleSection(_ project: String) {
+        var folded = collapsedProjects
+        if folded.contains(project) { folded.remove(project) } else { folded.insert(project) }
+        setCollapsed(folded)
+    }
 
     private var isProjectScoped: Bool {
         if case .project = scope { return true }
@@ -89,29 +97,6 @@ struct TaskListView: View {
     private var isReadOnlyScope: Bool {
         guard case .project(_, let project) = scope else { return false }
         return LocalStore.isReadOnlyProject(project)
-    }
-
-    private func rows(in section: PhrenTask.Section) -> [TaskListRow] {
-        var result: [TaskListRow] = []
-        if case .project(let scopeStore, let scopeProject) = scope {
-            // Project scope reads the store's snapshot directly — the global
-            // store filter must not blank out a project-detail tab.
-            if let doc = model.snapshot(for: scopeStore).tasks[scopeProject] {
-                for task in doc.items(in: section) {
-                    result.append(TaskListRow(storeId: scopeStore, storeName: model.storeName(for: scopeStore),
-                                              project: scopeProject, task: task))
-                }
-            }
-        } else {
-            for (storeId, storeName, doc) in model.mergedTaskDocs {
-                if let selectedProject, doc.project != selectedProject { continue }
-                for task in doc.items(in: section) {
-                    result.append(TaskListRow(storeId: storeId, storeName: storeName,
-                                              project: doc.project, task: task))
-                }
-            }
-        }
-        return TaskBrowsing.rows(result, query: query, priority: priority, age: age, sort: sort)
     }
 
     private var projectNames: [String] {
@@ -129,20 +114,22 @@ struct TaskListView: View {
     var body: some View {
         // Sorting and date parsing scale with the task count. Share one result
         // across this render; the next observed change computes fresh rows.
-        let visibleRows = rows(in: section)
+        @Bindable var tasks = tasks
+        let visibleRows = tasks.rows(in: section, sort: sort, scope: scope, model: model)
         let writableRows = visibleRows.filter { model.canWrite(storeId: $0.storeId, project: $0.project) }
         VStack(spacing: 0) {
-            controls(visibleCount: visibleRows.count, writableCount: writableRows.count)
-            if showSearch && !isSelecting {
+            controls(visibleCount: visibleRows.count,
+                     writableCount: writableRows.filter { !collapsedProjects.contains($0.project) }.count)
+            if tasks.showSearch && !tasks.isSelecting {
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass").foregroundStyle(PhrenTheme.textMuted)
-                    TextField("Search tasks", text: $query)
+                    TextField("Search tasks", text: $tasks.query)
                         .focused($searchFocused)
                         .submitLabel(.search)
                         .onSubmit { searchFocused = false }
                         .accessibilityIdentifier("task-search-field")
-                    if !query.isEmpty {
-                        Button { query = "" } label: { Image(systemName: "xmark.circle.fill") }
+                    if !tasks.query.isEmpty {
+                        Button { tasks.query = "" } label: { Image(systemName: "xmark.circle.fill") }
                             .accessibilityLabel("Clear search")
                     }
                 }
@@ -153,31 +140,15 @@ struct TaskListView: View {
                 .padding(.bottom, 6)
             }
             PhrenList(plain: true) {
-                if !visibleRows.isEmpty, !isProjectScoped, selectedProject == nil {
-                    // Across projects the backlog reads per project: the busiest
-                    // first, each with its count, foldable to skim the rest.
-                    ForEach(projectGroups(visibleRows), id: \.project) { group in
-                        Button {
-                            withAnimation(.easeInOut(duration: 0.18)) {
-                                if collapsedProjects.contains(group.project) { collapsedProjects.remove(group.project) }
-                                else { collapsedProjects.insert(group.project) }
-                            }
-                        } label: {
-                            HStack(spacing: 8) {
-                                Text(group.project).plainListSectionLabel()
-                                PhrenCountBadge(count: group.rows.count)
-                                Spacer(minLength: 0)
-                                Image(systemName: "chevron.down")
-                                    .font(.caption2.weight(.semibold)).foregroundStyle(PhrenTheme.textDim)
-                                    .rotationEffect(.degrees(collapsedProjects.contains(group.project) ? -90 : 0))
-                                    .padding(.trailing, 14)
-                            }
-                            .frame(minHeight: 44).contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("\(group.project), \(group.rows.count) tasks")
-                        .accessibilityIdentifier("tasks-project:\(group.project)")
-                        .listRowInsets(EdgeInsets()).listRowSeparator(.hidden).listRowBackground(Color.clear)
+                if !visibleRows.isEmpty, !isProjectScoped, tasks.selectedProject == nil {
+                    // Across projects the backlog reads per project: busiest
+                    // open work first, each with its own counts, foldable to
+                    // skim the rest. The top All control folds or unfolds
+                    // every section at once.
+                    let groups = tasks.groups(visible: visibleRows, scope: scope, model: model)
+                    allSectionsControl(groups)
+                    ForEach(groups) { group in
+                        sectionHeader(group)
                         if !collapsedProjects.contains(group.project) { taskRows(group.rows) }
                     }
                 } else if !visibleRows.isEmpty {
@@ -195,7 +166,7 @@ struct TaskListView: View {
                                 .font(.subheadline).foregroundStyle(PhrenTheme.textMuted)
                         }
                         .padding(.vertical, 10)
-                        let backlogCount = rows(in: .queue).count
+                        let backlogCount = tasks.rows(in: .queue, sort: sort, scope: scope, model: model).count
                         if backlogCount > 0 {
                             Button("View backlog (\(backlogCount))") { section = .queue }
                         }
@@ -217,23 +188,23 @@ struct TaskListView: View {
         }
         .background(PhrenTheme.bg)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if isSelecting { selectionActions }
+            if tasks.isSelecting { selectionActions }
         }
-        .onChange(of: section) { _, _ in selectedIDs.removeAll() }
-        .onChange(of: visibleRows.map(\.id)) { _, ids in selectedIDs.formIntersection(ids) }
+        .onChange(of: section) { _, _ in tasks.selectedIDs.removeAll() }
+        .onChange(of: visibleRows.map(\.id)) { _, ids in tasks.selectedIDs.formIntersection(ids) }
         .toolbar {
             if !isReadOnlyScope {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button(isSelecting ? "Cancel" : "Select") {
-                        isSelecting.toggle()
-                        selectedIDs.removeAll()
+                    Button(tasks.isSelecting ? "Cancel" : "Select") {
+                        tasks.isSelecting.toggle()
+                        tasks.selectedIDs.removeAll()
                         searchFocused = false
                     }
                     .accessibilityIdentifier("task-selection-mode")
-                    .disabled(isMoving || (!isSelecting && writableRows.isEmpty))
+                    .disabled(tasks.isMoving || (!tasks.isSelecting && writableRows.isEmpty))
                 }
             }
-            if !isReadOnlyScope && !isSelecting {
+            if !isReadOnlyScope && !tasks.isSelecting {
                 ToolbarItem(placement: .primaryAction) {
                     Button { showAdd = true } label: { Image(systemName: "plus") }
                         .disabled(!isProjectScoped && addTargets.isEmpty)
@@ -252,21 +223,112 @@ struct TaskListView: View {
     }
 
     private var hasFilters: Bool {
-        !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || priority != nil || age != .all
-            || (!isProjectScoped && (selectedProject != nil || model.storeFilter != nil))
+        !tasks.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || tasks.priority != nil || tasks.age != .all
+            || (!isProjectScoped && (tasks.selectedProject != nil || model.storeFilter != nil))
     }
 
     private func clearFilters() {
-        query = ""
-        priority = nil
-        age = .all
+        tasks.query = ""
+        tasks.priority = nil
+        tasks.age = .all
         if !isProjectScoped {
-            selectedProject = nil
+            tasks.selectedProject = nil
             model.storeFilter = nil
         }
     }
 
+    /// One section header: the project name in its own colour, Active and
+    /// Queue chips, and a chevron. The whole row is the fold target, at
+    /// least 44 points tall; at accessibility sizes the name leads and the
+    /// chips wrap beneath it.
+    private func sectionHeader(_ group: TaskSectionGroup) -> some View {
+        let folded = collapsedProjects.contains(group.project)
+        return Button {
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { toggleSection(group.project) }
+        } label: {
+            sectionHeaderLabel(group, folded: folded)
+                .frame(minHeight: 44).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(group.project), \(group.activeCount) active, \(group.queueCount) queue")
+        .accessibilityAddTraits(.isHeader)
+        .accessibilityIdentifier("tasks-section-toggle:\(group.project)")
+        .phrenContainerMarker("tasks-section:\(group.project)", label: group.project,
+                              value: "\(group.activeCount) active, \(group.queueCount) queue")
+        .listRowInsets(EdgeInsets()).listRowSeparator(.hidden).listRowBackground(Color.clear)
+    }
+
+    @ViewBuilder
+    private func sectionHeaderLabel(_ group: TaskSectionGroup, folded: Bool) -> some View {
+        let name = Text(group.project)
+            .foregroundStyle(PhrenTheme.projectColor(storeId: group.storeId, project: group.project))
+            .plainListSectionTypography()
+            .padding(.leading, 14)
+        let chevron = Image(systemName: "chevron.down")
+            .font(.caption2.weight(.semibold)).foregroundStyle(PhrenTheme.textDim)
+            .rotationEffect(.degrees(folded ? -90 : 0))
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    name
+                    Spacer(minLength: 0)
+                    chevron.padding(.trailing, 14)
+                }
+                PhrenFlowLayout(spacing: PhrenTheme.Space.small) {
+                    if group.activeCount > 0 {
+                        PhrenChip(text: "\(group.activeCount) active", color: PhrenTheme.success)
+                    }
+                    if group.queueCount > 0 {
+                        PhrenChip(text: "\(group.queueCount) queue", color: PhrenTheme.textSecondary)
+                    }
+                }
+                .padding(.leading, 14)
+            }
+        } else {
+            HStack(spacing: 8) {
+                name
+                if group.activeCount > 0 {
+                    PhrenChip(text: "\(group.activeCount) active", color: PhrenTheme.success)
+                }
+                if group.queueCount > 0 {
+                    PhrenChip(text: "\(group.queueCount) queue", color: PhrenTheme.textSecondary)
+                }
+                Spacer(minLength: 0)
+                chevron.padding(.trailing, 14)
+            }
+        }
+    }
+
+    /// Above the sections: fold every visible section, or unfold them when
+    /// all visible ones are already folded. Folds on projects filtered off
+    /// screen are left alone either way.
+    private func allSectionsControl(_ groups: [TaskSectionGroup]) -> some View {
+        let visible = Set(groups.map(\.project))
+        let allFolded = !visible.isEmpty && visible.allSatisfy { collapsedProjects.contains($0) }
+        return Button {
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
+                setCollapsed(allFolded ? collapsedProjects.subtracting(visible)
+                                       : collapsedProjects.union(visible))
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Text("All").plainListSectionTypography().padding(.leading, 14)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.down")
+                    .font(.caption2.weight(.semibold)).foregroundStyle(PhrenTheme.textDim)
+                    .rotationEffect(.degrees(allFolded ? -90 : 0))
+                    .padding(.trailing, 14)
+            }
+            .frame(minHeight: 44).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(allFolded ? "Expand all sections" : "Collapse all sections")
+        .accessibilityIdentifier("tasks-section-all")
+        .listRowInsets(EdgeInsets()).listRowSeparator(.hidden).listRowBackground(Color.clear)
+    }
+
     private func controls(visibleCount: Int, writableCount: Int) -> some View {
+        @Bindable var tasks = tasks
         @Bindable var model = model
         return HStack(spacing: 0) {
             Menu {
@@ -279,45 +341,47 @@ struct TaskListView: View {
                 HStack(spacing: 6) {
                     Text(section == .queue ? "Backlog" : section.rawValue).fontWeight(.semibold)
                     Image(systemName: "chevron.down").font(.caption2.weight(.semibold))
-                    Text(isSelecting ? "\(selectedIDs.count)/\(visibleCount)" : visibleCount.formatted())
+                    Text(tasks.isSelecting ? "\(tasks.selectedIDs.count)/\(visibleCount)" : visibleCount.formatted())
                         .foregroundStyle(PhrenTheme.textMuted)
                 }
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
             }
             .accessibilityIdentifier("task-status")
-            .disabled(isMoving)
+            .disabled(tasks.isMoving)
             Spacer(minLength: 4)
-            if isSelecting {
-                Button(selectedIDs.count == writableCount ? "Deselect all" : "Select all") {
-                    let writableRows = currentWritableRows()
-                    selectedIDs = selectedIDs.count == writableRows.count ? [] : Set(writableRows.map(\.id))
+            if tasks.isSelecting {
+                Button(tasks.selectedIDs.count == writableCount ? "Deselect all" : "Select all") {
+                    // Only rows the person can see: a folded section's work
+                    // must not join a bulk move.
+                    let writableRows = currentWritableRows().filter { !collapsedProjects.contains($0.project) }
+                    tasks.selectedIDs = tasks.selectedIDs.count == writableRows.count ? [] : Set(writableRows.map(\.id))
                 }
-                .disabled(isMoving)
+                .disabled(tasks.isMoving)
                 .frame(minHeight: 44)
                 .padding(.horizontal, 8)
             } else {
                 Button {
-                    showSearch.toggle()
-                    searchFocused = showSearch
-                    if !showSearch { query = "" }
+                    tasks.showSearch.toggle()
+                    searchFocused = tasks.showSearch
+                    if !tasks.showSearch { tasks.query = "" }
                 } label: {
                     Image(systemName: "magnifyingglass").frame(width: 44, height: 44)
                 }
-                .accessibilityLabel(showSearch ? "Hide task search" : "Search tasks")
+                .accessibilityLabel(tasks.showSearch ? "Hide task search" : "Search tasks")
                 .accessibilityIdentifier("task-search-toggle")
                 Menu {
-                    Picker("Priority", selection: $priority) {
+                    Picker("Priority", selection: $tasks.priority) {
                         Text("Any priority").tag(PhrenTask.Priority?.none)
                         ForEach(PhrenTask.Priority.allCases, id: \.self) { value in
                             Text(value.rawValue.capitalized).tag(PhrenTask.Priority?.some(value))
                         }
                     }
-                    Picker("Created", selection: $age) {
+                    Picker("Created", selection: $tasks.age) {
                         ForEach(TaskAge.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                     }
                     if !isProjectScoped {
-                        Picker("Project", selection: $selectedProject) {
+                        Picker("Project", selection: $tasks.selectedProject) {
                             Text("All projects").tag(String?.none)
                             ForEach(projectNames, id: \.self) { Text($0).tag(String?.some($0)) }
                         }
@@ -368,21 +432,22 @@ struct TaskListView: View {
     /// Actions resolve the current selection at tap time, since sync or store
     /// permissions may have changed since the last render.
     private func currentWritableRows() -> [TaskListRow] {
-        rows(in: section).filter { model.canWrite(storeId: $0.storeId, project: $0.project) }
+        tasks.rows(in: section, sort: sort, scope: scope, model: model)
+            .filter { model.canWrite(storeId: $0.storeId, project: $0.project) }
     }
 
     private var selectionActions: some View {
         HStack(spacing: 8) {
             ForEach(TaskMove.allCases, id: \.self) { action in
                 Button {
-                    move(currentWritableRows().filter { selectedIDs.contains($0.id) }, using: action)
+                    move(currentWritableRows().filter { tasks.selectedIDs.contains($0.id) }, using: action)
                 } label: {
                     Label(action.rawValue, systemImage: action.symbol)
                         .font(.subheadline.weight(.medium))
                         .frame(maxWidth: .infinity, minHeight: 44)
                 }
                 .accessibilityIdentifier("task-bulk-\(action.rawValue)")
-                .disabled(selectedIDs.isEmpty || isMoving || section == action.section)
+                .disabled(tasks.selectedIDs.isEmpty || tasks.isMoving || section == action.section)
             }
         }
         .padding(.horizontal, 12)
@@ -391,30 +456,22 @@ struct TaskListView: View {
     }
 
     private func select(_ row: TaskListRow) {
-        guard !isMoving, model.canWrite(storeId: row.storeId, project: row.project) else { return }
-        if !selectedIDs.insert(row.id).inserted { selectedIDs.remove(row.id) }
-    }
-
-    @ViewBuilder
-    /// Rows by project, the fullest project first; ties by name.
-    private func projectGroups(_ rows: [TaskListRow]) -> [(project: String, rows: [TaskListRow])] {
-        let grouped = Dictionary(grouping: rows, by: \.project)
-        return grouped.map { (project: $0.key, rows: $0.value) }
-            .sorted { $0.rows.count != $1.rows.count ? $0.rows.count > $1.rows.count : $0.project < $1.project }
+        guard !tasks.isMoving, model.canWrite(storeId: row.storeId, project: row.project) else { return }
+        if !tasks.selectedIDs.insert(row.id).inserted { tasks.selectedIDs.remove(row.id) }
     }
 
     private func taskRows(_ items: [TaskListRow]) -> some View {
         ForEach(items) { row in
-            let canWrite = !isMoving && model.canWrite(storeId: row.storeId, project: row.project)
+            let canWrite = !tasks.isMoving && model.canWrite(storeId: row.storeId, project: row.project)
             TaskRow(
                 row: row,
                 showProject: !isProjectScoped,
                 showStore: !isProjectScoped && model.hasMultipleStores,
                 canWrite: canWrite,
-                selection: isSelecting ? selectedIDs.contains(row.id) : nil,
-                onRead: { if isSelecting { select(row) } else { reading = row } }
+                selection: tasks.isSelecting ? tasks.selectedIDs.contains(row.id) : nil,
+                onRead: { if tasks.isSelecting { select(row) } else { reading = row } }
             ) {
-                if isSelecting { select(row) }
+                if tasks.isSelecting { select(row) }
                 else { move([row], using: row.task.checked ? .start : .done) }
             }
             .padding(.horizontal, 12).padding(.vertical, 8)
@@ -426,7 +483,7 @@ struct TaskListView: View {
             }
             .separatedSessionRow()
             .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                if canWrite && !isSelecting {
+                if canWrite && !tasks.isSelecting {
                     if row.task.section != .active {
                         Button { move([row], using: .start) } label: { Label("Start", systemImage: "play") }
                             .tint(PhrenTheme.accent)
@@ -438,7 +495,7 @@ struct TaskListView: View {
                 }
             }
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                if canWrite && !isSelecting {
+                if canWrite && !tasks.isSelecting {
                     Button(role: .destructive) { delete(row) } label: { Label("Delete", systemImage: "trash") }
                     Button { editing = row } label: { Label("Edit", systemImage: "pencil") }
                         .tint(PhrenTheme.accent)
@@ -449,7 +506,7 @@ struct TaskListView: View {
                 }
             }
             .contextMenu {
-                if canWrite && !isSelecting {
+                if canWrite && !tasks.isSelecting {
                     ForEach(TaskMove.allCases.filter { $0.section != row.task.section }, id: \.self) { action in
                         Button { move([row], using: action) } label: { Label(action.rawValue, systemImage: action.symbol) }
                     }
@@ -461,9 +518,9 @@ struct TaskListView: View {
     }
 
     private func move(_ rows: [TaskListRow], using action: TaskMove) {
-        guard !isMoving, !rows.isEmpty else { return }
-        isMoving = true
-        let wasSelecting = isSelecting
+        guard !tasks.isMoving, !rows.isEmpty else { return }
+        tasks.isMoving = true
+        let wasSelecting = tasks.isSelecting
         Task {
             var failed: Set<String> = []
             var failureMessage: String?
@@ -479,11 +536,11 @@ struct TaskListView: View {
                 }
             }
             await model.refresh()
-            selectedIDs = failed
+            tasks.selectedIDs = failed
             model.lastActionError = failureMessage.map { "\(failed.count) task(s) couldn't move. \($0)" }
-            isMoving = false
+            tasks.isMoving = false
             if wasSelecting && failed.isEmpty {
-                isSelecting = false
+                tasks.isSelecting = false
                 section = action.section
             }
         }

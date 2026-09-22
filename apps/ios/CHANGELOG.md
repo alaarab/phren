@@ -11,6 +11,14 @@ number counts up on its own.
 A patch on the day-one build: faster sends, a chat that stays put, and the
 lock screen and Changes screen done properly.
 
+### Fixed
+
+- A Codex queued follow-up question waiting in the terminal now opens as the
+  chat's question card: the Hook reads its text and options from the thread
+  store, the card lists them, and Send presses alt+up (Codex's queue binding)
+  followed by the chosen option's key. Without readable text the plain answer
+  keys stay as the fallback.
+
 ### New
 
 - Conductor is a launch role with its own provider, model and effort choice,
@@ -56,6 +64,10 @@ lock screen and Changes screen done properly.
 
 ### Changed
 
+- Tasks: the backlog groups into one collapsible section per project, busiest
+  open work first. Headers show the project's colour with Active and Queue
+  counts as chips, tapping a header folds that section, and All folds or
+  unfolds every section. Folds are remembered.
 - The schedule editor, the chat /model picker and the launch computer chooser pick
   from phren's own drop-down rows instead of long option lists.
 - Account usage is rebuilt around what each source means: one updated line with the
@@ -142,6 +154,11 @@ lock screen and Changes screen done properly.
   updated 6 s ago"); and the Live sessions header ring is bound to the same
   5-hour window the Account usage page shows first, instead of whichever
   window happens to be highest.
+- After the app sits idle, the chat no longer resets to an earlier point until
+  it catches up: a reconnect merges the resumed stream by line and keeps every
+  row the phone already showed, an empty placeholder while the transcript file
+  is missing cannot claim the beginning is loaded, and only the Hook's explicit
+  conversation-replacement snapshot clears the conversation.
 - A Codex approval in the terminal shows its actual question and options as the
   question card, answered by their own keys (`y`, `p`, `Esc`), instead of a bare
   "Waiting for your answer" line and a key strip; the terminal stays in the

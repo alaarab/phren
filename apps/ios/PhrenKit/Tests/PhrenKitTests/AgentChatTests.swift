@@ -129,6 +129,46 @@ final class AgentChatTests: XCTestCase {
         XCTAssertEqual(history.totalLines, 14)
     }
 
+    /// One fake stream through idle, a reconnect that replays an older
+    /// backlog, catch-up appends, an explicit replacement, and the empty
+    /// placeholder while the file is missing: the transcript never shows
+    /// fewer lines than before until a real replacement says so.
+    func testFakeStreamIdleReconnectNeverShrinksThenCatchUpAndReplace() throws {
+        func frame(_ kind: String, lines: ClosedRange<Int>?, total: Int, reset: Bool = false) throws -> AgentChatTranscript {
+            let rows = lines.map { range in range.map { line in
+                ["line": line, "raw": ["type": "response_item", "payload": ["type": "message", "role": "assistant", "content": "Message \(line)"]]] as [String: Any]
+            } } ?? []
+            return try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: [
+                "type": kind, "source": "codex", "entries": rows, "startLine": lines?.lowerBound ?? 0,
+                "totalLines": total, "hasMore": (lines?.lowerBound ?? 0) > 0, "reset": reset,
+            ]), source: "codex")
+        }
+        var history = AgentChatHistory()
+        history.receive(try frame("backlog", lines: 0...9, total: 10))
+        history.receive(try frame("append", lines: 10...14, total: 15))
+        XCTAssertEqual(history.messages.map(\.line), Array(0...14))
+
+        // Idle: the link dropped. Reconnect replays an older backlog (no
+        // replacement flag) before the Hook's catch-up frames arrive.
+        history.receive(try frame("backlog", lines: 0...4, total: 5))
+        XCTAssertEqual(history.messages.map(\.line), Array(0...14), "An older backlog after idle must not drop lines the phone kept")
+        XCTAssertEqual(history.totalLines, 15)
+
+        history.receive(try frame("append", lines: 15...19, total: 20))
+        XCTAssertEqual(history.messages.map(\.line), Array(0...19), "Catch-up appends extend the retained transcript")
+
+        // The file is missing: the empty placeholder keeps the conversation.
+        history.receive(try frame("backlog", lines: nil, total: 0, reset: true))
+        XCTAssertEqual(history.messages.map(\.line), Array(0...19), "An empty reset placeholder is not a conversation replacement")
+        XCTAssertTrue(history.hasMore == false || history.startLine != nil)
+
+        // Only the Hook's explicit replacement clears what the phone retained.
+        history.receive(try frame("backlog", lines: 0...2, total: 3, reset: true))
+        XCTAssertEqual(history.messages.map(\.line), [0, 1, 2], "An explicit replacement swaps in the new conversation")
+        XCTAssertEqual(history.totalLines, 3)
+        XCTAssertFalse(history.hasMore)
+    }
+
     func testEmptyFinalHistoryPageClosesPaginationWithoutLosingMessages() throws {
         var history = AgentChatHistory()
         let recent = Data(#"{"type":"backlog","source":"codex","startLine":8,"totalLines":9,"hasMore":true,"entries":[{"line":8,"raw":{"type":"response_item","payload":{"type":"message","role":"assistant","content":"Recent message"}}}]}"#.utf8)
