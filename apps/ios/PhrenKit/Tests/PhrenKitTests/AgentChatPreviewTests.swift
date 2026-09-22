@@ -18,6 +18,13 @@ final class AgentChatPreviewTests: XCTestCase {
         XCTAssertEqual(history, before)
     }
 
+    func testClaudeSpinnerVerbRidesBesideFramesAndRejectsAnythingElse() throws {
+        let frame = try AgentChatTranscript.read(Data(#"{"type":"append","source":"claude","activityVerb":"Pondering","entries":[]}"#.utf8), source: "claude")
+        XCTAssertEqual(frame.activityVerb, "Pondering")
+        let odd = try AgentChatTranscript.read(Data(#"{"type":"append","source":"claude","activityVerb":"rm -rf /","entries":[]}"#.utf8), source: "claude")
+        XCTAssertNil(odd.activityVerb)
+    }
+
     func testRealEntryClearsPreviewInItsOwnFrame() throws {
         let frame = try AgentChatTranscript.read(Data(#"{"type":"append","source":"claude","preview":null,"entries":[{"line":1,"raw":{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Finished reply"}]}}}]}"#.utf8), source: "claude")
         XCTAssertTrue(frame.updatesPreview)

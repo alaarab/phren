@@ -22,16 +22,18 @@ describe("live reply previews", () => {
     const stream = new TranscriptPreviewStream(target, pane);
     stream.observe([user]);
     expect(await stream.update("working", undefined, 0)).toEqual({ preview: { turnStartedAt: start, text: "The first" } });
+    expect(stream.verb).toBe("Working");
     words = "The first words grow";
     expect(await stream.update("working", undefined, 100)).toBeUndefined();
     expect(pane).toHaveBeenCalledTimes(1);
     expect(await stream.update("working", undefined, 500)).toEqual({ preview: { turnStartedAt: start, text: words } });
     expect(await stream.update("working", undefined, 1000)).toBeUndefined();
     stream.observe([{ line: 1, raw: { type: "assistant", timestamp: "2026-09-22T10:00:01Z", message: { content: words, stop_reason: "end_turn" } } }]);
-    expect(await stream.update("working", undefined, 1001)).toEqual({ preview: null });
-    const reads = pane.mock.calls.length;
-    expect(await stream.update("working", undefined, 2000)).toBeUndefined();
-    expect(pane).toHaveBeenCalledTimes(reads);
+    // The text stops at the real entry; Claude's spinner verb carries on.
+    expect(await stream.update("working", undefined, 1600)).toEqual({ preview: null });
+    expect(stream.verb).toBe("Working");
+    await stream.update("idle", undefined, 2600);
+    expect(stream.verb).toBeUndefined();
   });
 
   it("clears at stop and does not resurrect a preview from unchanged terminal content", async () => {
@@ -43,6 +45,14 @@ describe("live reply previews", () => {
     expect(pane).toHaveBeenCalledTimes(1);
     stream.observe([{ ...user, line: 2, raw: { ...user.raw, timestamp: "2026-09-22T10:01:00Z" } }]);
     expect((await stream.update("working", undefined, 1500))?.preview?.turnStartedAt).toBe("2026-09-22T10:01:00Z");
+  });
+
+  it("reads Claude's own spinner verb and never previews a tool call line", async () => {
+    const { claudeSpinnerVerb } = await import("./transcript-preview.js");
+    expect(claudeSpinnerVerb("⏺ Reply\n✢ Pondering… (12s · ↑ 1.2k tokens · esc to interrupt)\n❯")).toBe("Pondering");
+    expect(claudeSpinnerVerb("⏺ Reply\n❯")).toBeUndefined();
+    expect(claudePanePreview("❯ Explain this\n⏺ Let me look.\n⏺ Bash(ls -la)\n  ⎿ file\n⏺ phren - search_knowledge (MCP)(query: \"x\")\n✻ Pondering… (3s)\n❯", "Explain this"))
+      .toBe("Let me look.");
   });
 
   it("strips chrome, prompts and spinners without showing old replies or tool output", () => {

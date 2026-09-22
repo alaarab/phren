@@ -449,6 +449,9 @@ public struct AgentChatTranscript: Equatable, Sendable {
     public var context = AgentSessionContext()
     public var preview: AgentChatPreview? = nil
     public var updatesPreview = false
+    /// The harness's own word for the running turn (Claude's spinner:
+    /// "Pondering"), when the computer reads one.
+    public var activityVerb: String? = nil
 
     /// `sidechain` reads a child agent's own transcript, where Claude marks
     /// every row `isSidechain`: those are that conversation's turns, not the
@@ -475,7 +478,9 @@ public struct AgentChatTranscript: Equatable, Sendable {
         }
         if kind == .preview {
             guard updatesPreview, entries.isEmpty else { throw PhrenKitError.validation("A reply preview cannot contain messages.") }
-            return Self(kind: kind, messages: [], hasMore: false, totalLines: 0, startLine: nil, preview: preview, updatesPreview: true)
+            var frameValue = Self(kind: kind, messages: [], hasMore: false, totalLines: 0, startLine: nil, preview: preview, updatesPreview: true)
+            frameValue.activityVerb = activityVerb(frame)
+            return frameValue
         }
         guard entries.count <= 2_000 else { throw PhrenKitError.validation("The chat transcript is too large.") }
         var messages: [AgentChatMessage] = []
@@ -540,12 +545,21 @@ public struct AgentChatTranscript: Equatable, Sendable {
             }
         }
         let ordered = messages.sorted { $0.line < $1.line }
-        return Self(kind: kind, messages: Self.collapsedCompactions(ordered), hasMore: frame["hasMore"] as? Bool ?? false,
+        var value = Self(kind: kind, messages: Self.collapsedCompactions(ordered), hasMore: frame["hasMore"] as? Bool ?? false,
                     totalLines: frame["totalLines"] as? Int ?? 0,
                     startLine: frame["startLine"] as? Int ?? entries.compactMap { $0["line"] as? Int }.min(),
                     reset: frame["reset"] as? Bool ?? false, questionEvents: questionEvents,
                     progressEvents: progressEvents, queueEvents: queueEvents, context: context,
                     preview: preview, updatesPreview: updatesPreview)
+        value.activityVerb = activityVerb(frame)
+        return value
+    }
+
+    /// One capitalized word, as a spinner shows it; anything else is ignored.
+    private static func activityVerb(_ frame: [String: Any]) -> String? {
+        guard let verb = frame["activityVerb"] as? String,
+              verb.range(of: #"^[A-Z][\p{L}'-]{1,30}$"#, options: .regularExpression) != nil else { return nil }
+        return verb
     }
 
     /// Foundation JSON strings can retain NSString storage. Walking a long

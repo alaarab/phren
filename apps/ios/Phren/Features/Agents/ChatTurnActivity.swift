@@ -4,6 +4,7 @@ import PhrenKit
 /// Only source changes enter preparation. The view's one-second clock never does.
 struct ChatActivityContext: Equatable {
     var turns: [AgentChatProgress.Turn] = []
+    var harnessVerb: String?
     var submittedAt: Date?
     var submittedAfterLine = -1
     var busy = false
@@ -48,7 +49,7 @@ extension ChatTranscriptPreparation {
             if turn.phase == .working {
                 guard index == context.turns.count - 1, context.busy, !context.waiting else { continue }
                 live = .init(ownerID: owner.id, startedAt: start, finishedAt: nil, phase: .working,
-                             verb: liveVerb(rows: rows, calls: calls))
+                             verb: context.harnessVerb ?? liveVerb(rows: rows, calls: calls))
             } else if turn.finishedAt != nil {
                 let activity = ChatTurnActivity(ownerID: owner.id, startedAt: start, finishedAt: turn.finishedAt, phase: turn.phase,
                     verb: turn.phase == .stopped ? "Stopped after" : calls.isEmpty ? "Thought for" : "Worked for")
@@ -66,7 +67,7 @@ extension ChatTranscriptPreparation {
             let rows = messages.filter { $0.line > (owner?.line ?? context.submittedAfterLine) }
             let calls = rows.filter { $0.role == .tool && !$0.isToolResult && !$0.isChange && !$0.isCompaction }
             live = .init(ownerID: owner?.id ?? "submission:\(start.timeIntervalSince1970)", startedAt: start,
-                         finishedAt: nil, phase: .working, verb: liveVerb(rows: rows, calls: calls))
+                         finishedAt: nil, phase: .working, verb: context.harnessVerb ?? liveVerb(rows: rows, calls: calls))
         }
         var result: [ChatTimelineEntry] = []
         for index in 0...entries.count {

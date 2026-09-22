@@ -31,6 +31,9 @@ export function claudePanePreview(rendered: string, prompt: string, previous = "
   for (const line of lines.slice(Math.max(0, start))) {
     if (/^\s*[❯>]/.test(line) || /esc(?:ape)? to interrupt/i.test(line)) break;
     if (/^\s*[✻✽✶✢✳·⠁-⣿]/u.test(line)) continue;
+    // A tool call ("⏺ Bash(ls)", "⏺ phren - search (MCP)(…)") is not reply
+    // text; it lands as its own entry a moment later.
+    if (/^\s*[⏺●]\s*[\w.:-]+(?: - [\w.:-]+)?(?: \(MCP\))?\(/.test(line)) { writing = false; continue; }
     if (/^\s*[⏺●]/.test(line)) { reply.length = 0; writing = true; }
     if (!writing) continue;
     const clean = line.replace(/^\s*[⏺●]\s?/, "").replace(/[⠁-⣿✻✽✶✢✳]/gu, "");
@@ -43,6 +46,16 @@ export function claudePanePreview(rendered: string, prompt: string, previous = "
   const overlap = previous.lastIndexOf(text.split("\n", 1)[0].slice(0, 80));
   return overlap >= 0 && text.startsWith(previous.slice(overlap))
     ? (previous.slice(0, overlap) + text).slice(0, MAX_TEXT) : previous;
+}
+
+/** The word Claude's own spinner shows ("✻ Pondering… (12s · esc to interrupt)"). */
+export function claudeSpinnerVerb(rendered: string): string | undefined {
+  const lines = rendered.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").split(/\r?\n/);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const match = /^\s*[✻✽✶✢✳✦·*⠁-⣿]\s+([A-Z][\p{L}'-]{1,30})(?:…|\.\.\.)\s*\((?:\d|.*esc to interrupt)/u.exec(lines[i]);
+    if (match) return match[1];
+  }
+  return undefined;
 }
 
 export async function readPreviewPane(target: Target): Promise<string> {
@@ -109,6 +122,10 @@ export class TranscriptPreviewStream {
   private startedAt?: string;
   private prompt = "";
   private landed = false;
+  private ended = false;
+  /** Claude's own spinner word for the running turn, sent beside frames as
+   * `activityVerb`; older phones ignore the field. */
+  verb: string | undefined;
   private lastRead = -Infinity;
   private lastSent = -Infinity;
   private current: TranscriptPreview | null = null;
@@ -120,7 +137,7 @@ export class TranscriptPreviewStream {
     private readonly delta: (file?: string) => Promise<TranscriptPreview | null> = file => readDeltaPreview(target, file, this.rollout)) {}
 
   observe(entries: Entry[], reset = false): void {
-    if (reset) { this.observedLine = -1; this.startedAt = undefined; this.landed = false; this.wasWorking = false; }
+    if (reset) { this.observedLine = -1; this.startedAt = undefined; this.landed = false; this.ended = false; this.wasWorking = false; }
     for (const { raw, line } of entries) {
       if (line <= this.observedLine) continue;
       this.observedLine = line;
@@ -129,7 +146,7 @@ export class TranscriptPreviewStream {
       if (raw.type === "user" && !raw.phrenQueued && !raw.isMeta && !blocks.some(b => b.type === "tool_result")) {
         const prompt = typeof message.content === "string" ? message.content : blocks.filter(b => b.type === "text").map(b => String(b.text ?? "")).join("\n");
         if (prompt.trim() && typeof raw.timestamp === "string" && Number.isFinite(Date.parse(raw.timestamp))) {
-          this.startedAt = raw.timestamp; this.prompt = prompt; this.landed = false; this.wasWorking = false;
+          this.startedAt = raw.timestamp; this.prompt = prompt; this.landed = false; this.ended = false; this.wasWorking = false; this.verb = undefined;
         }
       } else if (this.startedAt && (raw.type === "assistant" || blocks.some(b => b.type === "tool_result"))) this.landed = true;
     }
@@ -144,14 +161,18 @@ export class TranscriptPreviewStream {
         // These harnesses own a delta source. Never scrape their pane, even
         // when the source is temporarily empty or unavailable.
         next = await this.delta(file);
-      } else if (this.target.source === "claude" && this.startedAt && !this.landed) {
+      } else if (this.target.source === "claude" && this.startedAt && !this.ended) {
         if (readAt - this.lastRead < PREVIEW_INTERVAL_MS) return undefined;
         this.lastRead = readAt;
-        const text = claudePanePreview(await this.pane(), this.prompt,
+        // The reply text stops once a real entry lands; Claude's spinner
+        // verb keeps naming the work until the turn ends.
+        const pane = await this.pane();
+        const text = this.landed ? "" : claudePanePreview(pane, this.prompt,
           this.current?.turnStartedAt === this.startedAt ? this.current.text : "");
+        this.verb = claudeSpinnerVerb(pane) ?? this.verb;
         if (text) next = { turnStartedAt: this.startedAt, text };
       }
-    } else if (this.target.source === "claude" && this.wasWorking) this.landed = true;
+    } else if (this.target.source === "claude" && this.wasWorking) { this.landed = true; this.ended = true; this.verb = undefined; }
     const sentAt = now ?? Date.now();
     if (next?.text === this.current?.text && next?.turnStartedAt === this.current?.turnStartedAt) return undefined;
     if (next && sentAt - this.lastSent < PREVIEW_INTERVAL_MS) return undefined;

@@ -76,6 +76,8 @@ final class AgentChatModel {
     private(set) var timeline: [ChatTimelineEntry] = []
     private(set) var timelineRevision = 0
     private(set) var replyPreview: AgentChatPreview?
+    /// The harness's own word for the running turn (Claude's spinner verb).
+    private var harnessVerb: String?
     @ObservationIgnored private var pendingPreview: AgentChatPreview?
     private(set) var backgroundJobs: [ChatBackgroundJob] = []
     private(set) var currentToolName: String?
@@ -90,7 +92,7 @@ final class AgentChatModel {
         let id = UUID(); preparationID = id
         let messages = history.messages
         let preview = pendingPreview
-        let activity = ChatActivityContext(turns: progress.turns, submittedAt: sentAt ?? preview?.turnStartedAt,
+        let activity = ChatActivityContext(turns: progress.turns, harnessVerb: harnessVerb, submittedAt: sentAt ?? preview?.turnStartedAt,
             submittedAfterLine: submittedAfterLine, busy: isBusy || preview != nil,
             waiting: needsAnswer || approval != nil || question != nil || terminalPrompt != nil || passwordPrompt
                 || ["waiting", "blocked"].contains(liveActivity ?? ""))
@@ -144,7 +146,7 @@ final class AgentChatModel {
     }
     func acceptActivity(_ activity: String?) {
         guard let activity else { return }
-        if ["idle", "done", "waiting", "blocked"].contains(activity) { pendingPreview = nil; replyPreview = nil }
+        if ["idle", "done", "waiting", "blocked"].contains(activity) { pendingPreview = nil; replyPreview = nil; harnessVerb = nil }
         // A repeated terminal snapshot must not overwrite a newer transcript
         // completion. Only an actual status transition changes precedence.
         if liveActivity != activity {
@@ -339,7 +341,7 @@ final class AgentChatModel {
             attachments = AgentChatDrafts.attachments[chosen.id] ?? saved.attachments.map { .init(attachment: $0) }
             restoringDraft = false
         }
-        pendingPreview = nil; replyPreview = nil
+        pendingPreview = nil; replyPreview = nil; harnessVerb = nil
         history = .init(); progress = .init(); reveal.finish(); hasTranscript = false
         awaitingReply = false; sentAt = nil; liveActivity = nil; isCompacting = false; historyStalled = false; historyStalledSince = nil
         modelName = nil; preferProgressActivity = false
@@ -384,7 +386,7 @@ final class AgentChatModel {
     }
     func chooseAnother() {
         deferredModel = nil; deferredModelSession = nil; modelSwitchNotice = nil; modelBeforeSwitch = nil
-        pendingPreview = nil; replyPreview = nil
+        pendingPreview = nil; replyPreview = nil; harnessVerb = nil
         persistDraft(immediately: true)
         draftLoadTask?.cancel(); draftGeneration = UUID(); restoringDraft = false
         progressTask?.cancel(); progressTask = nil
@@ -473,7 +475,7 @@ final class AgentChatModel {
         !target.isStarting && streamTarget != target && rejectedStreamTarget != target
     }
     func handleConnectionFailure(_ error: Error) {
-        pendingPreview = nil; replyPreview = nil
+        pendingPreview = nil; replyPreview = nil; harnessVerb = nil
         progressTask?.cancel(); progressTask = nil
         streamTask?.cancel(); streamTask = nil; streamTarget = nil
         statusTask?.cancel(); statusTask = nil; interactionConnected = false; approval = nil; isCompacting = false
@@ -484,7 +486,7 @@ final class AgentChatModel {
         if !automaticReconnectSuspended { self.error = error.localizedDescription }
     }
     func handleStreamFailure(_ error: Error, target: AgentChatTarget) {
-        pendingPreview = nil; replyPreview = nil
+        pendingPreview = nil; replyPreview = nil; harnessVerb = nil
         connected = false
         if error is AgentChatTranscript.LimitError {
             rejectedStreamTarget = target
@@ -530,12 +532,14 @@ final class AgentChatModel {
     }
     func accept(_ frame: AgentChatTranscript) {
         let hadPreview = replyPreview != nil
+        let verbChanged = frame.activityVerb != nil && frame.activityVerb != harnessVerb
+        if let verb = frame.activityVerb { harnessVerb = verb }
         if frame.updatesPreview { pendingPreview = frame.preview }
         else if frame.kind == .backlog || (frame.kind == .append && !frame.messages.isEmpty) { pendingPreview = nil }
         if frame.kind == .preview {
             let changedTurn = replyPreview?.turnStartedAt != pendingPreview?.turnStartedAt
             replyPreview = pendingPreview
-            if changedTurn { prepareTranscript() }
+            if changedTurn || verbChanged { prepareTranscript() }
             return
         }
         let previousMessages = messages
