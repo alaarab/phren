@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- Hook: `/v1/workspaces/launch` with `role: "conductor"` and no `cwd` or `project` starts the conductor in this computer's phren store.
 - Git tree routes share a bounded repository snapshot keyed by HEAD and a status hash, return one directory with descendant file counts, and avoid full diff statistics on folder opens. Status refresh and mutations invalidate the cache; external edits expire after two seconds.
 
 ### Added

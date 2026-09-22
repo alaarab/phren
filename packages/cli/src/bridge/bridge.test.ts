@@ -1937,6 +1937,16 @@ schedules:
       }
     });
 
+    it("starts a conductor with no folder in the phren store", async () => {
+      const store = path.join(root, ".phren");
+      await mkdir(store, { recursive: true });
+      const launched = await api("/v1/workspaces/launch?mux=herdr:default", { label: "Conductor", kind: "codex", role: "conductor" });
+      expect(launched.status, JSON.stringify(launched.data)).toBe(200);
+      expect(commands.find(c => c.method === "workspace.create")?.params.cwd).toBe(await realpathAsync(store));
+      const agent = await api("/v1/workspaces/launch?mux=herdr:default", { label: "Worker", kind: "codex" });
+      expect(agent.status).toBe(400);
+    });
+
     it("reports the conductor role and returns its target when a second launch is refused", async () => {
       const first = await api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "Owner", kind: "codex", role: "conductor", effort: "high" });
       expect(first.status).toBe(200);
