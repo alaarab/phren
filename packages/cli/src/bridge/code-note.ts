@@ -17,7 +17,7 @@ export type CodeNoteDelivery = (note: CodeNote, brief: string) => Promise<Json>;
 export async function saveCodeNote(store: string, input: unknown, deliver?: CodeNoteDelivery): Promise<Json> {
   const note = codeNoteSchema.parse(input);
   if (note.target && !deliver) throw new BridgeError(409, "Enable conductor to send code notes to an agent.");
-  const code = await requireCodePackage();
+  const code = await requireCodePackage(store);
   const result = await code.definition(store, note.project, note.symbol);
   if (!result.available || !result.value) throw new BridgeError(404, "The symbol is not in this project's code index.");
   const definition = result.value;

@@ -29,6 +29,16 @@ inaccessible through SSH forwarding. Update the helper and authorization lines
 on every computer before installing the updated phone app, then reconnect SSH.
 An older helper produces an explicit update instruction in the app.
 
+The forced command is a small POSIX shell gateway. For the phone's byte pipe it
+hands off to `socat - UNIX-CONNECT:<socket>` when socat is installed, or to
+`nc -U <socket>` when that nc understands Unix sockets, and only otherwise
+starts the node gateway. The installer detects the forwarder and records the
+choice in `installed.json`, so a loaded computer does not pay for a fresh node
+process on every connection. Every other SSH command (loopback web previews,
+project shells, Herdr terminals) always uses the node gateway. The service is
+installed at a lower nice value (`Nice -5` in the launchd plist and the systemd
+unit) so the Hook daemon keeps the CPU ahead of the workers it supervises.
+
 For unreleased fixes from a local checkout, build and install that checkout's
 helper instead of reinstalling the published package:
 
@@ -165,6 +175,13 @@ line includes the Phren dispatcher and `pty`. On Linux, enable user lingering if
 you need the service to continue after logout. Hook errors on macOS are recorded
 in `~/.local/share/phren/bridge/service.log`; on Linux use
 `journalctl --user -u phren-hook`.
+
+`GET /v1/health` reports the computer's 1-minute load average and CPU count
+(`load`) and, when the node gateway was the path, its own cost from process
+start to the first response byte (`gatewayMs`). The iPhone shows a computer as
+"Slow to answer" when the load is more than four times its CPU count or the
+gateway took over 1.5 seconds, keeping the last snapshot visible instead of
+calling it unreachable.
 
 The helper exposes a private Unix socket, not a public HTTP port. SSH keys stay
 in the iPhone Keychain. Images and activity remain local to the computer; see the

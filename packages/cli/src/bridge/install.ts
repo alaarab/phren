@@ -8,7 +8,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { bridgeRoot, object, objects, atomic } from "./protocol.js";
+import { bridgeRoot, object, objects, atomic, socketPath } from "./protocol.js";
 import { herdrRoot } from "./herdr.js";
 import { health } from "./transport.js";
 
@@ -52,6 +52,54 @@ export function upgradeKeys(text: string): { text: string; changed: number } {
 const quote = (s: string) => "'" + s.replace(/'/g, "'\\''") + "'";
 const xml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const systemdQuote = (s: string) => '"' + s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/%/g, "%%") + '"';
+
+/** The forwarder the forced command uses for the phone's byte pipe. */
+export type GatewayKind = "socat" | "nc" | "node";
+export interface GatewayEnvironment {
+  root: string; herdr: string; store: string; profile: string;
+  node: string; bundle: string; socket: string; timing: string;
+}
+
+async function commandOutput(file: string, args: string[], env: NodeJS.ProcessEnv): Promise<string | undefined> {
+  try {
+    const { stdout, stderr } = await exec(file, args, { env, timeout: 2000 });
+    return stdout + stderr || undefined;
+  } catch (error) {
+    const value = error as { stdout?: string; stderr?: string };
+    return `${value.stdout ?? ""}${value.stderr ?? ""}` || undefined;
+  }
+}
+
+/** Pick the cheapest reliable forwarder at install time: socat, then an nc that
+ *  understands Unix sockets, then the node gateway that always works. */
+export async function detectGateway(env: NodeJS.ProcessEnv = process.env): Promise<GatewayKind> {
+  if ((await commandOutput("/bin/sh", ["-c", "command -v socat"], env))?.trim()) return "socat";
+  const help = await commandOutput("nc", ["-h"], env);
+  if (help !== undefined && /(^|\s)-U(\s|,|$)/m.test(help)) return "nc";
+  return "node";
+}
+
+/** The POSIX sh forced command: the phone's byte pipe goes straight to the Hook
+ *  socket through a tiny forwarder, so a loaded machine never pays for a fresh
+ *  node process; every other SSH command falls through to the node gateway. */
+export function gatewayScript(gateway: GatewayKind, environment: GatewayEnvironment): string {
+  const { root, herdr, store, profile, node, bundle, socket, timing } = environment;
+  const forward = gateway === "socat"
+    ? `  if command -v socat >/dev/null 2>&1; then rm -f ${quote(timing)}; exec socat - UNIX-CONNECT:${quote(socket)}; fi`
+    : gateway === "nc"
+      ? `  if command -v nc >/dev/null 2>&1; then rm -f ${quote(timing)}; exec nc -U ${quote(socket)}; fi`
+      : "";
+  const pipe = forward ? `if [ "$SSH_ORIGINAL_COMMAND" = "phren-hook v1 pipe" ]; then\n${forward}\nfi\n` : "";
+  return `#!/bin/sh
+# Phren Hook gateway. The phone's byte pipe goes straight to the Hook socket
+# through a tiny forwarder so a loaded machine does not pay for a fresh node
+# process; every other SSH command falls through to the node gateway.
+export PHREN_BRIDGE_HOME=${quote(root)}
+export PHREN_HERDR_HOME=${quote(herdr)}
+export PHREN_PATH=${quote(store)}
+export PHREN_PROFILE=${quote(profile)}
+${pipe}exec ${quote(node)} ${quote(bundle)} ssh
+`; }
 
 async function activate(version: string) {
   const root = bridgeRoot();
@@ -101,16 +149,20 @@ export async function install(version: string, noService = false): Promise<void>
   const stagedBundle = installedBundle + `.phren-${process.pid}`;
   await copyFile(bundle, stagedBundle); await rename(stagedBundle, installedBundle);
   const previous = await readFile(path.join(root, "installed.json"), "utf8").then(v => JSON.parse(v) as { version: string; previous?: string }).catch(() => null);
-  await atomic(path.join(root, "dispatch"), `#!/bin/sh\nexport PHREN_BRIDGE_HOME=${quote(root)}\nexport PHREN_HERDR_HOME=${quote(herdr)}\nexport PHREN_PATH=${quote(modules.store)}\nexport PHREN_PROFILE=${quote(modules.profile)}\nexec ${quote(process.execPath)} ${quote(path.join(root, "current/bridge-hook.mjs"))} ssh\n`, 0o700);
+  const gateway = await detectGateway();
+  await atomic(path.join(root, "dispatch"), gatewayScript(gateway, {
+    root, herdr, store: modules.store, profile: modules.profile, node: process.execPath,
+    bundle: path.join(root, "current/bridge-hook.mjs"), socket: socketPath(), timing: path.join(root, "gateway.json"),
+  }), 0o700);
   const environmentPath = [path.dirname(process.execPath), path.join(homedir(), ".local/bin"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin"].join(":");
   const program = path.join(root, "current/bridge-hook.mjs");
   if (!noService) {
     if (process.platform === "darwin") {
       const folder = path.join(homedir(), "Library/LaunchAgents"); await mkdir(folder, { recursive: true });
-      await atomic(path.join(folder, `${label}.plist`), `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>Label</key><string>${label}</string><key>ProgramArguments</key><array><string>${xml(process.execPath)}</string><string>${xml(program)}</string><string>serve</string></array><key>Umask</key><integer>63</integer><key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>ThrottleInterval</key><integer>5</integer><key>EnvironmentVariables</key><dict><key>PATH</key><string>${xml(environmentPath)}</string><key>PHREN_BRIDGE_HOME</key><string>${xml(root)}</string><key>PHREN_HERDR_HOME</key><string>${xml(herdr)}</string><key>PHREN_PATH</key><string>${xml(modules.store)}</string><key>PHREN_PROFILE</key><string>${xml(modules.profile)}</string></dict><key>StandardErrorPath</key><string>${xml(path.join(root, "service.log"))}</string></dict></plist>\n`);
+      await atomic(path.join(folder, `${label}.plist`), `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>Label</key><string>${label}</string><key>ProgramArguments</key><array><string>${xml(process.execPath)}</string><string>${xml(program)}</string><string>serve</string></array><key>Umask</key><integer>63</integer><key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>ThrottleInterval</key><integer>5</integer><key>Nice</key><integer>-5</integer><key>EnvironmentVariables</key><dict><key>PATH</key><string>${xml(environmentPath)}</string><key>PHREN_BRIDGE_HOME</key><string>${xml(root)}</string><key>PHREN_HERDR_HOME</key><string>${xml(herdr)}</string><key>PHREN_PATH</key><string>${xml(modules.store)}</string><key>PHREN_PROFILE</key><string>${xml(modules.profile)}</string></dict><key>StandardErrorPath</key><string>${xml(path.join(root, "service.log"))}</string></dict></plist>\n`);
     } else {
       const folder = path.join(homedir(), ".config/systemd/user"); await mkdir(folder, { recursive: true });
-      await atomic(path.join(folder, unit), `[Unit]\nDescription=Phren Hook\n[Service]\nExecStart=${systemdQuote(process.execPath)} ${systemdQuote(program)} serve\nEnvironment=${systemdQuote("PATH=" + environmentPath)} ${systemdQuote("PHREN_BRIDGE_HOME=" + root)} ${systemdQuote("PHREN_HERDR_HOME=" + herdr)} ${systemdQuote("PHREN_PATH=" + modules.store)} ${systemdQuote("PHREN_PROFILE=" + modules.profile)}\nRestart=on-failure\nRestartSec=3\nUMask=0077\n[Install]\nWantedBy=default.target\n`);
+      await atomic(path.join(folder, unit), `[Unit]\nDescription=Phren Hook\n[Service]\nExecStart=${systemdQuote(process.execPath)} ${systemdQuote(program)} serve\nNice=-5\nEnvironment=${systemdQuote("PATH=" + environmentPath)} ${systemdQuote("PHREN_BRIDGE_HOME=" + root)} ${systemdQuote("PHREN_HERDR_HOME=" + herdr)} ${systemdQuote("PHREN_PATH=" + modules.store)} ${systemdQuote("PHREN_PROFILE=" + modules.profile)}\nRestart=on-failure\nRestartSec=3\nUMask=0077\n[Install]\nWantedBy=default.target\n`);
     }
     await stopService();
   }
@@ -141,8 +193,9 @@ export async function install(version: string, noService = false): Promise<void>
       }
       console.log(`Updated ${after.changed} Phren iPhone key(s); other keys were preserved.`);
     }
-    await atomic(path.join(root, "installed.json"), JSON.stringify({ version, previous: previous?.version === version ? previous.previous : previous?.version, node: process.execPath }, null, 2) + "\n");
+    await atomic(path.join(root, "installed.json"), JSON.stringify({ version, previous: previous?.version === version ? previous.previous : previous?.version, node: process.execPath, gateway }, null, 2) + "\n");
     console.log("Agent hooks installed. In Codex, review the new Phren entries in /hooks. Existing agents may need to resume before new hooks load.");
+    console.log(`SSH gateway: ${gateway}${gateway === "node" ? " (no socat or nc -U found)" : ""}.`);
     console.log(`Phren Hook ${version} installed${noService ? " (service not started)" : " and running"}. Run phren bridge doctor.`);
   } catch (error) {
     await restoreAgentHooks(hookEdits);

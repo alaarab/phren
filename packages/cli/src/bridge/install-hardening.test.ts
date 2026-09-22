@@ -36,20 +36,30 @@ it("pins both roots in dispatch and launchd, sets launchd Umask, and pre-creates
   expect(await readFile(path.join(root, "service.log"), "utf8")).toBe("previous\n");
   const plist = await readFile(path.join(state.home, "Library/LaunchAgents/com.phren.hook.plist"), "utf8");
   expect(plist).toContain("<key>Umask</key><integer>63</integer>");
+  expect(plist).toContain("<key>Nice</key><integer>-5</integer>");
   expect(plist).toContain(`<key>PHREN_BRIDGE_HOME</key><string>${root}</string>`);
   expect(plist).toContain(`<key>PHREN_HERDR_HOME</key><string>${process.env.PHREN_HERDR_HOME}</string>`);
   const dispatch = await readFile(path.join(root, "dispatch"), "utf8");
   const { execFile } = await vi.importActual<typeof import("node:child_process")>("node:child_process");
-  const exportsOnly = dispatch.split("\n").filter(line => !line.startsWith("exec ")).join("\n");
+  const exportsOnly = dispatch.split("\n").filter(line => line.startsWith("export ")).join("\n");
   const { stdout } = await promisify(execFile)("/bin/sh", ["-c", exportsOnly + '\nprintf "%s\\n" "$PHREN_BRIDGE_HOME" "$PHREN_HERDR_HOME"'],
     { env: { PHREN_BRIDGE_HOME: "/wrong", PHREN_HERDR_HOME: "/wrong" } });
   expect(stdout.split("\n").slice(0, 2)).toEqual([root, process.env.PHREN_HERDR_HOME]);
+  expect(JSON.parse(await readFile(path.join(root, "installed.json"), "utf8")).gateway).toBe("node");
 });
 
 it("creates the service log privately even when service startup is disabled", async () => {
   await install("0.2.14", true);
   const log = await stat(path.join(process.env.PHREN_BRIDGE_HOME!, "service.log"));
   expect(log.size).toBe(0); expect(log.mode & 0o777).toBe(0o600);
+});
+
+it("runs the Linux unit at a lower nice value", async () => {
+  vi.spyOn(process, "platform", "get").mockReturnValue("linux");
+  await install("0.2.14");
+  const unitFile = await readFile(path.join(state.home, ".config/systemd/user/phren-hook.service"), "utf8");
+  expect(unitFile).toContain("Nice=-5\n");
+  expect(unitFile).toContain("Restart=on-failure");
 });
 
 it("reconciles Hook and Git owners independently and preserves user hooks", async () => {

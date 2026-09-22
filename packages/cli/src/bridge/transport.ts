@@ -6,7 +6,7 @@ import { request } from "node:http";
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import path from "node:path";
-import { BridgeError, object, PROTOCOL, serverName, socketPath, type Json } from "./protocol.js";
+import { BridgeError, object, PROTOCOL, serverName, socketPath, bridgeRoot, atomic, type Json } from "./protocol.js";
 import { rpc } from "./herdr.js";
 import { launchDirectory } from "./projects.js";
 
@@ -42,11 +42,17 @@ export async function health(): Promise<Json> {
   });
 }
 
-async function pipe(destination: NetConnectOpts): Promise<void> {
+async function pipe(destination: NetConnectOpts, timing?: string): Promise<void> {
+  // The gateway's own cost, from process start to the first byte the Hook
+  // answers with. A loaded machine makes this large even while it is healthy.
+  const started = Date.now() - process.uptime() * 1000;
   await new Promise<void>((resolve, reject) => {
     const socket = connect(destination);
     const end = () => socket.end();
     const stop = () => socket.destroy();
+    if (timing) socket.once("data", () => {
+      atomic(timing, { ms: Math.round(Date.now() - started), at: new Date().toISOString() }).catch(() => {});
+    });
     socket.on("connect", () => { process.stdin.pipe(socket); socket.pipe(process.stdout); });
     socket.on("error", reject);
     socket.on("close", () => {
@@ -64,7 +70,7 @@ export async function dispatch(command: string): Promise<void> {
     if (!moduleSnapshot(defaultPhrenPath(), undefined, true).has("hook")) throw new BridgeError(404, disabledHint("hook"));
   };
   if (command === "phren-hook v1 pipe") { requireHook();
-    await pipe({ path: socketPath() });
+    await pipe({ path: socketPath() }, path.join(bridgeRoot(), "gateway.json"));
     return;
   }
   // SSH port-forwarding also permits Unix sockets, bypassing the callback and

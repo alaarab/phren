@@ -488,6 +488,13 @@ socket.on('close', () => process.exit(0));
       if (process.platform !== "darwin") expect(simulators.data.simulators).toEqual([]);
       const health = await api("/v1/health");
       expect(health.data.product).toBe("phren-hook"); expect(health.data.protocol).toBe(1);
+      // The code module is off in this fixture, so the package is reported missing.
+      expect(health.data.codePackage).toEqual({ missing: true });
+      expect(health.data.load.cpus).toBeGreaterThan(0);
+      expect(health.data.load.average).toBeGreaterThanOrEqual(0);
+      // The node gateway's last startup cost, once it has answered.
+      await writeFile(path.join(root, "bridge/gateway.json"), JSON.stringify({ ms: 4200, at: new Date().toISOString() }));
+      expect((await api("/v1/health")).data.gatewayMs).toBe(4200);
       // A phone that predates OpenCode Go names no sources and must not meet one it cannot read.
       const legacyUsage = await api("/v1/usage");
       expect(legacyUsage.status).toBe(200);
@@ -496,12 +503,30 @@ socket.on('close', () => process.exit(0));
       expect(fullUsage.data.accounts.map((a: { source: string }) => a.source)).toContain("opencode-go");
       const workspaces = await api("/v1/workspaces?mux=herdr:default");
       expect(workspaces.data.groups[0].children[0].id).toBe("w1:t1");
+      expect(workspaces.data.phren.load.cpus).toBeGreaterThan(0);
+      expect(workspaces.data.phren.gatewayMs).toBe(4200);
       expect((await api("/v1/workspaces/panes?groupId=w1&childId=w1:t1")).data.panes[0].sessionId).toBe(session);
       expect((await api("/v1/activity")).data.events[0].directory).toBe(root);
       const permissions = await import("node:fs/promises").then(fs => fs.stat(path.join(root, "bridge/hook.sock")));
       expect(permissions.mode & 0o777).toBe(0o600);
       expect(await stat(path.join(root, "bridge/changes/expired.jsonl")).catch(() => undefined)).toBeUndefined();
       expect((await stat(path.join(root, "bridge/computer-id"))).mode & 0o777).toBe(0o600);
+    });
+
+    it("records the node gateway cost for the phone's byte pipe", async () => {
+      await rm(path.join(root, "bridge/gateway.json"), { force: true });
+      const child = spawn(process.execPath, [hookBundle, "ssh"], {
+        env: { ...process.env, PHREN_BRIDGE_HOME: path.join(root, "bridge"), PHREN_HERDR_HOME: path.join(root, "herdr"),
+          PHREN_PATH: path.join(root, ".phren"), SSH_ORIGINAL_COMMAND: "phren-hook v1 pipe" },
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      const chunks: Buffer[] = []; child.stdout.on("data", bytes => chunks.push(bytes));
+      child.stdin.end("GET /v1/health HTTP/1.1\r\nHost: phren.local\r\nConnection: close\r\n\r\n");
+      const [code] = await once(child, "exit");
+      expect(code).toBe(0);
+      expect(Buffer.concat(chunks).toString()).toContain('"product":"phren-hook"');
+      const sample = JSON.parse(await readFile(path.join(root, "bridge/gateway.json"), "utf8"));
+      expect(sample.ms).toBeGreaterThanOrEqual(0);
     });
 
     it("lists, launches, and reports scheduled prompts", async () => {

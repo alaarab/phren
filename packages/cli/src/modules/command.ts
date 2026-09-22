@@ -35,7 +35,7 @@ export async function runModules(args: string[], ctx: CliContext): Promise<numbe
   const selectedProfile = profile ?? (action === "list" ? (storeName ? resolveRuntimeProfile(store) : ctx.profile()) : "");
   if (action !== "list") {
     migrateInstalledModules(store);
-    const code = name === "code" && action === "enable" ? await installCodePackage() : undefined;
+    const code = name === "code" && action === "enable" ? await installCodePackage(store) : undefined;
     setModuleEnabled(store, name!, action === "enable", profile);
     if (code) copyCodeSkill(store, code);
     console.log(`${name} ${action === "enable" ? "enabled" : "disabled"}${profile ? ` for profile ${profile}` : " for the store"}. Run phren init to reconcile integrations; restart MCP and Hook to refresh their surfaces.`);
