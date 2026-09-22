@@ -1,6 +1,46 @@
 import PhrenKit
 import SwiftUI
 
+/// The transcript scroll view's viewport height, for deciding whether a
+/// materialized row still sits inside the visible window.
+private struct ChatViewportHeightKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 0
+}
+extension EnvironmentValues {
+    var chatViewportHeight: CGFloat {
+        get { self[ChatViewportHeightKey.self] }
+        set { self[ChatViewportHeightKey.self] = newValue }
+    }
+}
+
+/// A row's frame in the transcript's named scroll space (viewport-relative).
+private struct ChatRowViewportFrame: PreferenceKey {
+    static let defaultValue: CGRect = .null
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        let next = nextValue()
+        if value == .null { value = next }
+    }
+}
+
+/// A materialized row outside the visible window exposes one element with a
+/// composed label and the same identifier tests use, instead of its whole
+/// rich subtree. Back inside the window the normal tree returns.
+private struct ChatOffScreenAccessibility: ViewModifier {
+    let off: Bool
+    let label: String
+    let identifier: String
+    @ViewBuilder func body(content: Content) -> some View {
+        if off, !identifier.isEmpty {
+            content
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(label)
+                .accessibilityIdentifier(identifier)
+        } else {
+            content
+        }
+    }
+}
+
 /// Plain values isolate transcript layout from connection, composer, usage,
 /// and scroll-position changes in the observable chat model.
 struct ChatTranscriptRows: View, Equatable {
@@ -39,11 +79,80 @@ private struct ChatTranscriptRow: View, Equatable {
     let target: AgentChatTarget?
     let active: Bool
     let preview: (ChatAttachmentDraft) -> Void
+    @Environment(\.chatViewportHeight) private var viewportHeight: CGFloat
+    @State private var rowFrame: CGRect = .null
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.entry == rhs.entry && lhs.revealedText == rhs.revealedText && lhs.images == rhs.images
             && lhs.session.id == rhs.session.id && lhs.target == rhs.target && lhs.active == rhs.active
     }
+    /// Unknown layout (first frame) counts as on-screen so tests meet the
+    /// normal tree; a zero viewport (not yet measured) never hides rows.
+    private var offScreen: Bool {
+        guard viewportHeight > 0, rowFrame != .null else { return false }
+        return rowFrame.maxY <= 0 || rowFrame.minY >= viewportHeight
+    }
+    private var offScreenIdentifier: String {
+        if let compaction = entry.messages.first, compaction.isCompaction { return "chat-compaction" }
+        if entry.phren != nil { return "chat-phren-card:\(entry.callID)" }
+        if let card = entry.card {
+            switch card {
+            case .agent: return "chat-agent-card:\(entry.callID)"
+            case .todos: return "chat-todo-card:\(entry.callID)"
+            case .plan, .planMode: return "chat-plan-card:\(entry.callID)"
+            case .web: return "chat-web-card:\(entry.callID)"
+            case .skill: return "chat-skill-chip:\(entry.callID)"
+            case .mcp: return "chat-mcp-card:\(entry.callID)"
+            }
+        }
+        if entry.isReadRun { return "chat-read-run:\(entry.messages[0].id)" }
+        if entry.isActivity { return "chat-tool-group:\(entry.messages[0].id)" }
+        if let message = entry.messages.first {
+            if message.localCommand != nil { return "chat-command:\(message.id)" }
+            return "chat-message:\(message.id)"
+        }
+        return ""
+    }
+    private var offScreenLabel: String {
+        if let compaction = entry.messages.first, compaction.isCompaction {
+            return compaction.text.isEmpty ? "Conversation compacted" : "Conversation compacted: \(compaction.text)"
+        }
+        if entry.phren != nil, let phren = entry.phren {
+            return [phren.verb, phren.project, phren.tag].compactMap { $0 }.joined(separator: ", ")
+        }
+        if let card = entry.card { return card.offScreenLabel(callID: entry.callID) }
+        if entry.isReadRun || entry.isActivity {
+            let summary = ChatToolSummary(entry.messages)
+            return "\(summary.title), \(summary.count) \(summary.count == 1 ? "operation" : "operations")"
+        }
+        if let message = entry.messages.first {
+            if let command = message.localCommand {
+                return command.kind == .output ? "Command output: \(command.text)" : "Command: \(command.text)"
+            }
+            let role = message.role == .user ? "Your message" : "Agent reply"
+            let body = ToolOutputPreview(message.text, lines: 40, characters: 6_000).text
+            return body.isEmpty ? role : "\(role): \(body)"
+        }
+        return ""
+    }
     var body: some View {
+        row
+            .background {
+                GeometryReader { geometry in
+                    Color.clear.preference(key: ChatRowViewportFrame.self,
+                                           value: geometry.frame(in: .named("chat-scroll")))
+                }
+            }
+            .onPreferenceChange(ChatRowViewportFrame.self) { frame in
+                let height = viewportHeight
+                guard height > 0 else { return }
+                let nowOff = frame.maxY <= 0 || frame.minY >= height
+                // Only cross the boundary: preference fires every scroll frame.
+                if rowFrame == .null || nowOff != offScreen { rowFrame = frame }
+            }
+            .modifier(ChatOffScreenAccessibility(off: offScreen, label: offScreenLabel,
+                                                 identifier: offScreenIdentifier))
+    }
+    @ViewBuilder private var row: some View {
         #if DEBUG
         let _ = ChatPerformance.enabled ? Self._printChanges() : ()
         #endif

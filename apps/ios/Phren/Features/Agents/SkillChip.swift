@@ -44,6 +44,8 @@ struct SkillChip: View, Equatable {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        // Chip glyph, command and args as one element.
+        .accessibilityElement(children: .combine)
         .accessibilityLabel("Skill \(presentation.command)" + (presentation.args.map { ", \($0)" } ?? ""))
         .accessibilityHint("Read what the skill loaded")
         .accessibilityIdentifier("chat-skill-chip:\(callID)")

@@ -66,6 +66,8 @@ lock screen and Changes screen done properly.
 
 ### Changed
 
+- Folded tool pills and cards in the chat are one accessibility element each, so a long
+  transcript's accessibility tree stays flat and swipes stay quick.
 - Tasks: the backlog groups into one collapsible section per project, busiest
   open work first. Headers show the project's colour with Active and Queue
   counts as chips, tapping a header folds that section, and All folds or

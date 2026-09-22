@@ -95,6 +95,8 @@ struct ChatReadRun: View, Equatable {
                         .rotationEffect(.degrees(expanded ? 180 : 0)).foregroundStyle(PhrenTheme.chatNeutralDim)
                 }.font(PhrenTypography.footnote).padding(.horizontal, 12).frame(height: 44)
             }.buttonStyle(.plain)
+                // One element for the folded pill's icon, title and preview.
+                .accessibilityElement(children: .combine)
                 .accessibilityLabel("\(title), \(groups.count) read operations")
                 .accessibilityValue(expanded ? "Expanded" : "Collapsed")
                 .accessibilityIdentifier("chat-read-run:\(messages[0].id)")
@@ -167,6 +169,8 @@ struct ChatToolActivity: View, Equatable {
                 .padding(.horizontal, 12).frame(height: 44)
                 .contentShape(Rectangle())
             }.buttonStyle(.plain)
+                // One element for the folded pill's icon, title and preview.
+                .accessibilityElement(children: .combine)
                 .accessibilityLabel("\(summary.title), \(summary.count) \(summary.count == 1 ? "operation" : "operations")")
                 .accessibilityValue(expanded ? "Expanded" : "Collapsed")
                 .accessibilityHint("Expand this call and its output")

@@ -228,6 +228,20 @@ enum ToolCardKind: Equatable {
         default: return nil
         }
     }
+
+    /// The single accessibility label this card reads as when the transcript
+    /// flattens it off-screen.
+    func offScreenLabel(callID: String) -> String {
+        switch self {
+        case .agent(let agent): return "\(agent.name), \(agent.description), \(agent.state.rawValue)"
+        case .todos(let list): return "\(list.title), \(list.summary)"
+        case .plan: return "Plan ready for review"
+        case .planMode: return "Entered plan mode"
+        case .web(let web): return "\(web.title), \(web.location)"
+        case .skill(let skill): return "Skill \(skill.command)" + (skill.args.map { ", \($0)" } ?? "")
+        case .mcp(let mcp): return "\(mcp.server) · \(mcp.verb)"
+        }
+    }
 }
 
 struct ChatBackgroundJob: Identifiable, Equatable {

@@ -28,6 +28,8 @@ struct ChatPlanCard: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain).disabled(plan.state != .pending)
+            // Header alone: glyph, title and state as one element.
+            .accessibilityElement(children: .combine)
             .accessibilityLabel("Plan ready for review, \(stateLabel)")
             .accessibilityValue(folded ? "Collapsed" : "Expanded")
             if !folded, let preview = entry.card?.markdownPreview {

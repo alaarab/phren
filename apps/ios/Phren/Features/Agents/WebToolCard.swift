@@ -46,6 +46,8 @@ struct WebToolCard: View, Equatable {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            // Folded: glyph, host and status read as one element.
+            .accessibilityElement(children: .combine)
             .accessibilityLabel("\(presentation.title), \(presentation.location)")
             .accessibilityValue(expanded ? "Expanded" : "Collapsed")
             .accessibilityHint("Show the prompt and the first lines of the result")

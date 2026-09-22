@@ -66,6 +66,8 @@ struct MCPToolCard: View, Equatable {
             .contentShape(RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium))
         }
         .buttonStyle(.plain)
+        // Server chip, verb and field rows as one card element.
+        .accessibilityElement(children: .combine)
         .accessibilityIdentifier("chat-mcp-card:\(callID)")
         .accessibilityHint("Read full input and output")
     }
