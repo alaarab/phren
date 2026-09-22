@@ -55,8 +55,9 @@ final class SettingsScreensTests: XCTestCase {
         back()
 
         open("settings-terminal-advanced", title: "Advanced")
-        XCTAssertTrue(app.descendants(matching: .any)["terminal-cursor-style"].waitForExistence(timeout: 3))
-        app.buttons["▁ Underline"].tap()
+        let cursor = app.descendants(matching: .any)["terminal-cursor-style"].firstMatch
+        XCTAssertTrue(cursor.waitForExistence(timeout: 3))
+        cursor.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).tap()
         turnOn("terminal-keep-screen-on")
         back()
 
@@ -85,7 +86,7 @@ final class SettingsScreensTests: XCTestCase {
         let kept = app.switches["terminal-keep-screen-on"]
         XCTAssertTrue(kept.waitForExistence(timeout: 3))
         XCTAssertTrue(isOn(kept.switches.firstMatch))
-        XCTAssertTrue(app.buttons["▁ Underline"].isSelected)
+        XCTAssertEqual(app.descendants(matching: .any)["terminal-cursor-style"].firstMatch.value as? String, "▁ Underline")
     }
 
     /// The Agents header's extra icons and the screens behind them, with fixture data.

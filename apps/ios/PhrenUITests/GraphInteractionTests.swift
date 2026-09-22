@@ -206,11 +206,11 @@ final class GraphInteractionTests: XCTestCase {
         app.buttons["Graph options"].tap()
         app.buttons["Save this view"].tap()
         let name = "Offline view \(UUID().uuidString.prefix(6))"
-        let nameField = app.alerts.textFields.firstMatch
+        let nameField = app.textFields["graph-view-name"]
         nameField.tap()
         nameField.typeText(name)
         XCTAssertEqual(nameField.value as? String, name)
-        app.alerts.buttons["Save"].tap()
+        app.buttons["Save"].tap()
         app.buttons["Show full view"].tap()
         app.terminate()
         app.launch()

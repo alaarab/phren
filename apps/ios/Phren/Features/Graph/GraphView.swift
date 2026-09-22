@@ -38,6 +38,11 @@ struct GraphView: View {
     @State private var restoringView: GraphSavedView?
     @State private var projectRoute: ProjectRoute?
     @State private var shareText: String?
+    @State private var showingOptions = false
+    @State private var showingStores = false
+    @State private var showingProjects = false
+    @State private var showingSteps = false
+    @State private var showingLiveSessions = false
     @AppStorage("graph.savedViews.v1") private var savedViewData = Data()
     @FocusState private var searchFocused: Bool
 
@@ -121,22 +126,8 @@ struct GraphView: View {
                     searchFocused = showingSearch
                     if !showingSearch { query = "" }
                 } label: { Label("Search graph", systemImage: "magnifyingglass") }
-                Menu {
-                    Button("Save this view", systemImage: "bookmark") {
-                        suggestedViewName = focusedNodeID.flatMap { id in filtered?.nodes.first { $0.id == id }?.label }
-                            ?? selectedProject ?? "All projects"
-                        savedViewName = ""
-                        namingView = true
-                    }.disabled(payload == nil)
-                    Button("Saved views", systemImage: "bookmark.fill") { showingSavedViews = true }
-                    NavigationLink { LiveSessionsView() } label: {
-                        Label("Live sessions", systemImage: "waveform.path")
-                    }
-                    Button("Refresh", systemImage: "arrow.clockwise") {
-                        Task { await model.pullToRefresh(); await rebuild() }
-                    }
-                    Button("About this graph", systemImage: "info.circle") { showingInfo = true }
-                } label: { Label("Graph options", systemImage: "ellipsis") }
+                Button { showingOptions = true } label: { Label("Graph options", systemImage: "ellipsis") }
+                    .accessibilityIdentifier("graph-options")
             }
         }
         .task(id: refreshKey) { await rebuild() }
@@ -185,23 +176,48 @@ struct GraphView: View {
                 await applyEdit(node, text: text)
             }
         }
-        .confirmationDialog(
-            deletingNode?.isTask == true ? "Delete this task?" : "Delete this finding?",
+        .phrenDialog(
             isPresented: $deletingNode.isPresent(),
-            titleVisibility: .visible
-        ) {
-            if let node = deletingNode {
-                Button("Delete", role: .destructive) { Task { await applyDelete(node) } }
+            title: deletingNode?.isTask == true ? "Delete this task?" : "Delete this finding?",
+            message: "This removes it from the store on sync.",
+            actions: deleteActions,
+            identifier: "graph-delete-dialog"
+        )
+        .sheet(isPresented: $namingView) {
+            NavigationStack {
+                PhrenScreen {
+                    PhrenGroup("Name") {
+                        TextField(suggestedViewName, text: $savedViewName)
+                            .accessibilityIdentifier("graph-view-name")
+                    }
+                }
+                .navigationTitle("Save graph view")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { namingView = false } }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Save") { saveCurrentView(); namingView = false }
+                    }
+                }
             }
+            .presentationDetents([.medium])
         }
-        .alert("Save graph view", isPresented: $namingView) {
-            TextField(suggestedViewName, text: $savedViewName)
-            Button("Save") { saveCurrentView() }
-            Button("Cancel", role: .cancel) {}
-        } message: { Text("Save this store, project, content filter, and connection focus on this iPhone.") }
-        .alert("Graph view", isPresented: $notice.isPresent()) {
-            Button("OK") { notice = nil }
-        } message: { Text(notice ?? "") }
+        .phrenDialog(
+            isPresented: $notice.isPresent(),
+            title: "Graph view",
+            message: notice ?? "",
+            actions: [.init(id: "ok", title: "OK", role: .cancel) { notice = nil }],
+            identifier: "graph-notice-dialog"
+        )
+        .phrenActionSheet(isPresented: $showingOptions, title: "Graph options", actions: graphOptionsActions,
+                          identifier: "graph-options-sheet")
+        .phrenSingleSelectSheet(isPresented: $showingStores, title: "Store", options: storeOptions,
+                                selection: storeSelection, rowPrefix: "graph-store")
+        .phrenSingleSelectSheet(isPresented: $showingProjects, title: "Project", options: projectOptions,
+                                selection: projectSelection, rowPrefix: "graph-project")
+        .phrenSingleSelectSheet(isPresented: $showingSteps, title: "Connections", options: stepOptions,
+                                selection: stepsSelection, rowPrefix: "graph-steps")
+        .navigationDestination(isPresented: $showingLiveSessions) { LiveSessionsView() }
         .sheet(isPresented: $showingInfo) {
             NavigationStack {
                 PhrenList {
@@ -225,37 +241,29 @@ struct GraphView: View {
     private var controls: some View {
         VStack(spacing: 8) {
             HStack {
-                Menu {
-                    ForEach(model.storeDescriptors) { store in
-                        Button(store.id) {
-                            clearFocus()
-                            storeId = store.id
-                            project = "*"
-                            payload = nil
-                        }
-                    }
-                } label: {
+                Button { showingStores = true } label: {
                     Label(selectedStore, systemImage: "externaldrive")
                         .lineLimit(1)
                 }
+                .frame(minHeight: 44)
                 .accessibilityLabel("Store: \(selectedStore)")
+                .phrenIdentifier("graph-store")
                 Spacer(minLength: 10)
-                Menu {
-                    Button("All projects") { clearFocus(); project = "*" }
-                    ForEach(projects, id: \.self) { name in Button(name) { clearFocus(); project = name } }
-                } label: {
+                Button { showingProjects = true } label: {
                     Label(selectedProject ?? "All projects", systemImage: "square.grid.2x2").lineLimit(1)
                 }
+                .frame(minHeight: 44)
                 .accessibilityLabel("Project: \(selectedProject ?? "All projects")")
+                .phrenIdentifier("graph-project")
             }
             .font(.subheadline.weight(.medium))
             .padding(.horizontal, 12)
             .frame(minHeight: 44)
             .background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
 
-            Picker("Graph content", selection: Binding(get: { filter }, set: { filter = $0; clearFocus() })) {
-                ForEach(GraphPayload.ContentFilter.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-            }.pickerStyle(.segmented)
+            PhrenTextSegment(items: GraphPayload.ContentFilter.allCases.map {
+                PhrenOption(id: $0.rawValue, value: $0, title: $0.rawValue)
+            }, selection: Binding(get: { filter }, set: { filter = $0; clearFocus() }), identifier: "graph-content")
 
             if let focusedNodeID, let anchor = filtered?.nodes.first(where: { $0.id == focusedNodeID }) {
                 HStack {
@@ -268,14 +276,10 @@ struct GraphView: View {
                     }
                     Text(anchor.label).font(.caption).lineLimit(1)
                     Spacer(minLength: 4)
-                    Menu("\(connectionSteps) \(connectionSteps == 1 ? "step" : "steps")") {
-                        ForEach(1...2, id: \.self) { steps in
-                            Button("\(steps) \(steps == 1 ? "step" : "steps") of connections") {
-                                connectionSteps = steps
-                                resetSelection()
-                            }
-                        }
-                    }.font(.caption)
+                    Button("\(connectionSteps) \(connectionSteps == 1 ? "step" : "steps")") { showingSteps = true }
+                        .frame(minHeight: 44)
+                        .phrenIdentifier("graph-steps")
+                        .font(.caption)
                     Button { clearFocus() } label: { Label("Show full view", systemImage: "xmark.circle.fill").labelStyle(.iconOnly) }
                         .frame(minWidth: 44, minHeight: 44)
                 }
@@ -550,11 +554,74 @@ struct GraphView: View {
         let revision: UUID
     }
 
+    private var deleteActions: [PhrenDialog.Action] {
+        guard let node = deletingNode else {
+            return [.init(id: "cancel", title: "Cancel", role: .cancel) {}]
+        }
+        return [
+            .init(id: "delete", title: "Delete", role: .destructive) { Task { await applyDelete(node) } },
+            .init(id: "cancel", title: "Cancel", role: .cancel) {},
+        ]
+    }
+
     private struct PresentationKey: Equatable {
         let revision: UUID
         let filter: GraphPayload.ContentFilter
         let focus: String?
         let steps: Int
+    }
+
+    private var graphOptionsActions: [PhrenControlAction] {
+        [
+            PhrenControlAction(id: "save", title: "Save this view", icon: "bookmark", isEnabled: payload != nil) {
+                suggestedViewName = focusedNodeID.flatMap { id in filtered?.nodes.first { $0.id == id }?.label }
+                    ?? selectedProject ?? "All projects"
+                savedViewName = ""
+                namingView = true
+            },
+            PhrenControlAction(id: "saved", title: "Saved views", icon: "bookmark.fill") { showingSavedViews = true },
+            PhrenControlAction(id: "live", title: "Live sessions", icon: "waveform.path") { showingLiveSessions = true },
+            PhrenControlAction(id: "refresh", title: "Refresh", icon: "arrow.clockwise") {
+                Task { await model.pullToRefresh(); await rebuild() }
+            },
+            PhrenControlAction(id: "about", title: "About this graph", icon: "info.circle") { showingInfo = true },
+        ]
+    }
+
+    private var storeOptions: [PhrenOption<String>] {
+        model.storeDescriptors.map { PhrenOption(id: $0.id, value: $0.id, title: $0.id) }
+    }
+
+    private var storeSelection: Binding<String> {
+        Binding(get: { selectedStore }, set: { id in
+            clearFocus()
+            storeId = id
+            project = "*"
+            payload = nil
+        })
+    }
+
+    private var projectOptions: [PhrenOption<String>] {
+        [PhrenOption(id: "all", value: "*", title: "All projects")]
+            + projects.map { PhrenOption(id: $0, value: $0, title: $0) }
+    }
+
+    private var projectSelection: Binding<String> {
+        Binding(get: { project.isEmpty ? (focusProject ?? "*") : project }, set: { value in
+            clearFocus()
+            project = value
+        })
+    }
+
+    private var stepOptions: [PhrenOption<Int>] {
+        (1...2).map { PhrenOption(id: "\($0)", value: $0, title: "\($0) \($0 == 1 ? "step" : "steps") of connections") }
+    }
+
+    private var stepsSelection: Binding<Int> {
+        Binding(get: { connectionSteps }, set: { value in
+            connectionSteps = value
+            resetSelection()
+        })
     }
 }
 

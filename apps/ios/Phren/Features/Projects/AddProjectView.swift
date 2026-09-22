@@ -73,11 +73,10 @@ struct AddProjectView: View {
 
                 if let host = selectedHost {
                     Section {
-                        Picker("Repository", selection: $mode) {
-                            ForEach(Mode.allCases) { Text($0.title).tag($0) }
-                        }
-                        .pickerStyle(.segmented).listRowBackground(Color.clear)
-                        .accessibilityIdentifier("add-project-mode")
+                        PhrenTextSegment(items: Mode.allCases.map {
+                            PhrenOption(id: $0.rawValue, value: $0, title: $0.title)
+                        }, selection: $mode, identifier: "add-project-mode")
+                            .listRowBackground(Color.clear)
                     }
                     switch mode {
                     case .existing:
@@ -139,7 +138,13 @@ struct AddProjectView: View {
             .navigationTitle("Add project").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(adding) } }
             .phrenScreen()
-            .alert("Couldn't add project", isPresented: $error.isPresent()) { Button("OK") { error = nil } } message: { Text(error ?? "") }
+            .phrenDialog(
+                isPresented: $error.isPresent(),
+                title: "Couldn't add project",
+                message: error ?? "",
+                actions: [.init(id: "ok", title: "OK", role: .cancel) { error = nil }],
+                identifier: "add-project-error-dialog"
+            )
             .sheet(isPresented: $addingHost) { NavigationStack { LiveHostEditor() } }
             .interactiveDismissDisabled(adding)
             .task { if hostID == nil, let first = hosts.first(where: { $0.fingerprint != nil }) ?? hosts.first { select(first) } }

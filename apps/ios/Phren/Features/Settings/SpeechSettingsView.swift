@@ -40,8 +40,17 @@ struct SpeechSettingsView: View {
     @State private var newFrom = ""
     @State private var newTo = ""
     @State private var testing = false
+    @State private var showingLanguage = false
     private var locales: [Locale] {
         SFSpeechRecognizer.supportedLocales().sorted { ($0.localizedString(forIdentifier: $0.identifier) ?? $0.identifier) < ($1.localizedString(forIdentifier: $1.identifier) ?? $1.identifier) }
+    }
+    private var localeOptions: [PhrenOption<String>] {
+        [PhrenOption(id: "automatic", value: "",
+                     title: "Automatic (\(Locale.current.localizedString(forIdentifier: Locale.current.identifier) ?? "phone language"))")]
+            + locales.map {
+                PhrenOption(id: $0.identifier, value: $0.identifier,
+                            title: $0.localizedString(forIdentifier: $0.identifier) ?? $0.identifier)
+            }
     }
 
     var body: some View {
@@ -51,13 +60,9 @@ struct SpeechSettingsView: View {
                     .accessibilityIdentifier("speech-test")
             } footer: { Text("Recognition runs on the phone with Apple's speech engine. Nothing leaves the device.") }
             Section("Language") {
-                Picker(selection: $localeID) {
-                    Text("Automatic (\(Locale.current.localizedString(forIdentifier: Locale.current.identifier) ?? "phone language"))").tag("")
-                    ForEach(locales, id: \.identifier) { locale in
-                        Text(locale.localizedString(forIdentifier: locale.identifier) ?? locale.identifier).tag(locale.identifier)
-                    }
-                } label: { Label("Language", systemImage: "globe") }
-                    .accessibilityIdentifier("speech-language")
+                PhrenSingleSelect(options: localeOptions, selection: $localeID,
+                                  placeholder: "Language", identifier: "speech-language",
+                                  isPresented: $showingLanguage)
             }
             Section {
                 PhrenSwitch(isOn: $cleanup) {
@@ -91,6 +96,8 @@ struct SpeechSettingsView: View {
         .sheet(isPresented: $testing) {
             ChatDictationView { _ in }
         }
+        .phrenSingleSelectSheet(isPresented: $showingLanguage, title: "Language", options: localeOptions,
+                                selection: $localeID, rowPrefix: "speech-language")
         .navigationTitle("Speech").navigationBarTitleDisplayMode(.inline)
         .phrenScreen()
     }

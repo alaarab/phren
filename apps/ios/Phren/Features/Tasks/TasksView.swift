@@ -64,6 +64,9 @@ struct TaskListView: View {
     @State private var tasks = TasksModel()
     @State private var showAdd = false
     @State private var showStatus = false
+    @State private var showFilters = false
+    @State private var showSort = false
+    @State private var actionRow: TaskListRow?
     @State private var editing: TaskListRow?
     @State private var reading: TaskListRow?
     @AppStorage("tasks.status") private var status: TaskStatus = .open
@@ -242,6 +245,66 @@ struct TaskListView: View {
         .phrenSingleSelectSheet(isPresented: $showStatus, title: "Task status",
                                 options: statusOptions, selection: $status,
                                 rowPrefix: "tasks-status")
+        .phrenActionSheet(isPresented: $showFilters, title: "Task filters", actions: filterActions,
+                          identifier: "task-filters-sheet")
+        .phrenSingleSelectSheet(isPresented: $showSort, title: "Sort tasks", options: sortOptions,
+                                selection: $sort, rowPrefix: "task-sort")
+        .phrenActionSheet(isPresented: $actionRow.isPresent(), title: "Task actions", actions: rowActions,
+                          identifier: "task-actions-sheet")
+    }
+
+    /// The filter sheet's rows: the four pickers as radio actions, each
+    /// committing and closing on tap.
+    private var filterActions: [PhrenControlAction] {
+        var actions: [PhrenControlAction] = [
+            PhrenControlAction(id: "any-priority", title: "Any priority", icon: "flag",
+                               isSelected: tasks.priority == nil) { tasks.priority = nil },
+        ]
+        actions += PhrenTask.Priority.allCases.map { value in
+            PhrenControlAction(id: "priority-\(value.rawValue)", title: value.rawValue.capitalized, icon: "flag",
+                               isSelected: tasks.priority == value) { tasks.priority = value }
+        }
+        actions += TaskAge.allCases.map { value in
+            PhrenControlAction(id: "age-\(value.rawValue)", title: value.rawValue, icon: "calendar",
+                               isSelected: tasks.age == value) { tasks.age = value }
+        }
+        if !isProjectScoped {
+            actions.append(PhrenControlAction(id: "all-projects", title: "All projects", icon: "square.grid.2x2",
+                                              isSelected: tasks.selectedProject == nil) { tasks.selectedProject = nil })
+            actions += tasks.projectNames.map { name in
+                PhrenControlAction(id: "project-\(name)", title: name, icon: "square.grid.2x2",
+                                   isSelected: tasks.selectedProject == name) { tasks.selectedProject = name }
+            }
+            if model.hasMultipleStores {
+                actions.append(PhrenControlAction(id: "all-stores", title: "All stores", icon: "externaldrive",
+                                                  isSelected: model.storeFilter == nil) { model.storeFilter = nil })
+                actions += model.storeDescriptors.map { store in
+                    PhrenControlAction(id: "store-\(store.id)", title: store.displayName, icon: "externaldrive",
+                                       isSelected: model.storeFilter == store.id) { model.storeFilter = store.id }
+                }
+            }
+        }
+        if hasFilters {
+            actions.append(PhrenControlAction(id: "clear", title: "Clear filters", icon: "xmark.circle") { clearFilters() })
+        }
+        return actions
+    }
+
+    private var sortOptions: [PhrenOption<TaskSort>] {
+        TaskSort.allCases.map { PhrenOption(id: $0.rawValue, value: $0, title: $0.rawValue) }
+    }
+
+    private var rowActions: [PhrenControlAction] {
+        guard let row = actionRow, !tasks.isSelecting,
+              !tasks.isMoving, model.canWrite(storeId: row.storeId, project: row.project) else { return [] }
+        var actions = TaskMove.allCases.filter { $0.section != row.task.section }.map { action in
+            PhrenControlAction(id: action.rawValue.lowercased(), title: action.rawValue, icon: action.symbol) {
+                move([row], using: action)
+            }
+        }
+        actions.append(PhrenControlAction(id: "edit", title: "Edit", icon: "pencil") { editing = row })
+        actions.append(PhrenControlAction(id: "delete", title: "Delete", icon: "trash", role: .destructive) { delete(row) })
+        return actions
     }
 
     private var hasFilters: Bool {
@@ -372,7 +435,6 @@ struct TaskListView: View {
 
     private func controls(visibleCount: Int, writableCount: Int) -> some View {
         @Bindable var tasks = tasks
-        @Bindable var model = model
         return HStack(spacing: 0) {
             PhrenSingleSelect(options: statusOptions, selection: $status,
                               placeholder: "Task status", identifier: "tasks-status",
@@ -402,40 +464,13 @@ struct TaskListView: View {
                 }
                 .accessibilityLabel(tasks.showSearch ? "Hide task search" : "Search tasks")
                 .accessibilityIdentifier("task-search-toggle")
-                Menu {
-                    Picker("Priority", selection: $tasks.priority) {
-                        Text("Any priority").tag(PhrenTask.Priority?.none)
-                        ForEach(PhrenTask.Priority.allCases, id: \.self) { value in
-                            Text(value.rawValue.capitalized).tag(PhrenTask.Priority?.some(value))
-                        }
-                    }
-                    Picker("Created", selection: $tasks.age) {
-                        ForEach(TaskAge.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                    }
-                    if !isProjectScoped {
-                        Picker("Project", selection: $tasks.selectedProject) {
-                            Text("All projects").tag(String?.none)
-                            ForEach(tasks.projectNames, id: \.self) { Text($0).tag(String?.some($0)) }
-                        }
-                        if model.hasMultipleStores {
-                            Picker("Store", selection: $model.storeFilter) {
-                                Text("All stores").tag(String?.none)
-                                ForEach(model.storeDescriptors) { Text($0.displayName).tag(String?.some($0.id)) }
-                            }
-                        }
-                    }
-                    if hasFilters { Button("Clear filters", action: clearFilters) }
-                } label: {
+                Button { showFilters = true } label: {
                     Image(systemName: hasFilters ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease")
                         .frame(width: 44, height: 44)
                 }
                 .accessibilityLabel(hasFilters ? "Task filters, applied" : "Task filters")
                 .accessibilityIdentifier("task-filters")
-                Menu {
-                    Picker("Sort tasks", selection: $sort) {
-                        ForEach(TaskSort.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                    }
-                } label: {
+                Button { showSort = true } label: {
                     Image(systemName: "arrow.up.arrow.down").frame(width: 44, height: 44)
                 }
                 .accessibilityLabel("Sort tasks, \(sort.rawValue)")
@@ -538,13 +573,11 @@ struct TaskListView: View {
                     }
                 }
             }
-            .contextMenu {
+            .overlay(alignment: .trailing) {
                 if canWrite && !tasks.isSelecting {
-                    ForEach(TaskMove.allCases.filter { $0.section != row.task.section }, id: \.self) { action in
-                        Button { move([row], using: action) } label: { Label(action.rawValue, systemImage: action.symbol) }
-                    }
-                    Button { editing = row } label: { Label("Edit", systemImage: "pencil") }
-                    Button(role: .destructive) { delete(row) } label: { Label("Delete", systemImage: "trash") }
+                    PhrenIconButton(icon: "ellipsis", label: "Task actions") { actionRow = row }
+                        .phrenIdentifier("task-actions:\(row.id)")
+                        .padding(.trailing, 4)
                 }
             }
         }
@@ -606,6 +639,7 @@ struct AddTaskSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var text = ""
     @State private var selectedTarget: Target?
+    @State private var showingTarget = false
 
     init(scope: TaskListView.Scope, targets: [(storeId: String, storeName: String, project: String)]) {
         self.scope = scope
@@ -628,12 +662,9 @@ struct AddTaskSheet: View {
                 TextField("Task", text: $text, axis: .vertical)
                     .lineLimit(2...6)
                 if fixedTarget == nil {
-                    Picker("Project", selection: $selectedTarget) {
-                        Text("Choose…").tag(Target?.none)
-                        ForEach(targets) { target in
-                            Text(targetLabel(target)).tag(Target?.some(target))
-                        }
-                    }
+                    PhrenSingleSelect(options: targetOptions, selection: $selectedTarget,
+                                      placeholder: "Project", identifier: "add-task-project",
+                                      isPresented: $showingTarget)
                 }
             }
             .navigationTitle("Add to Backlog")
@@ -651,6 +682,13 @@ struct AddTaskSheet: View {
                 }
             }
         }
+        .phrenSingleSelectSheet(isPresented: $showingTarget, title: "Project", options: targetOptions,
+                                selection: $selectedTarget, rowPrefix: "add-task-project")
+    }
+
+    private var targetOptions: [PhrenOption<Target?>] {
+        [PhrenOption(id: "none", value: Target?.none, title: "Choose…")]
+            + targets.map { PhrenOption(id: $0.id, value: Target?.some($0), title: targetLabel($0)) }
     }
 
     private func resolvedTarget() -> (storeId: String, project: String)? {
@@ -849,6 +887,7 @@ struct TaskEditSheet: View {
     @State private var priority: PhrenTask.Priority?
     @State private var section: PhrenTask.Section
     @State private var pinned: Bool
+    @State private var showingSection = false
 
     init(row: TaskListRow) {
         self.row = row
@@ -864,17 +903,10 @@ struct TaskEditSheet: View {
                 TextField("Task", text: $text, axis: .vertical)
                     .lineLimit(2...6)
                 PhrenSwitch("Pinned", isOn: $pinned)
-                Picker("Priority", selection: $priority) {
-                    Text("none").tag(PhrenTask.Priority?.none)
-                    ForEach(PhrenTask.Priority.allCases, id: \.self) { p in
-                        Text(p.rawValue).tag(PhrenTask.Priority?.some(p))
-                    }
-                }
-                Picker("Section", selection: $section) {
-                    ForEach(PhrenTask.Section.allCases, id: \.self) { s in
-                        Text(s == .queue ? "Backlog" : s.rawValue).tag(s)
-                    }
-                }
+                PhrenStepSlider(options: priorityOptions, selection: $priority, identifier: "task-priority")
+                PhrenSingleSelect(options: sectionOptions, selection: $section,
+                                  placeholder: "Section", identifier: "task-section",
+                                  isPresented: $showingSection)
             }
             .navigationTitle("Edit task")
             .navigationBarTitleDisplayMode(.inline)
@@ -907,6 +939,21 @@ struct TaskEditSheet: View {
                     .disabled(text.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
+        }
+        .phrenSingleSelectSheet(isPresented: $showingSection, title: "Section", options: sectionOptions,
+                                selection: $section, rowPrefix: "task-section")
+    }
+
+    private var priorityOptions: [PhrenOption<PhrenTask.Priority?>] {
+        [PhrenOption(id: "none", value: PhrenTask.Priority?.none, title: "none")]
+            + PhrenTask.Priority.allCases.map {
+                PhrenOption(id: $0.rawValue, value: PhrenTask.Priority?.some($0), title: $0.rawValue)
+            }
+    }
+    private var sectionOptions: [PhrenOption<PhrenTask.Section>] {
+        PhrenTask.Section.allCases.map {
+            PhrenOption(id: $0.rawValue.lowercased(), value: $0,
+                        title: $0 == .queue ? "Backlog" : $0.rawValue)
         }
     }
 }

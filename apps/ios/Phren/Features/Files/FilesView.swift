@@ -127,6 +127,7 @@ struct FileViewerView: View {
     @Environment(AppModel.self) private var model
     @State private var editing = false
     @State private var copied = false
+    @State private var showingActions = false
 
     private var context: StoreContext? { model.storeContexts.first { $0.id == storeId } }
     private var content: String { context?.store.read(path) ?? "" }
@@ -144,22 +145,28 @@ struct FileViewerView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    Button(copied ? "Copied" : "Copy file", systemImage: copied ? "checkmark" : "doc.on.doc") {
-                        UIPasteboard.general.string = content
-                        copied = true
-                    }
-                    if isWritable {
-                        Button("Edit", systemImage: "pencil") { editing = true }
-                    }
-                } label: { Image(systemName: "ellipsis.circle") }
-                .accessibilityLabel("File actions")
+                PhrenIconButton(icon: "ellipsis.circle", label: "File actions") { showingActions = true }
+                    .phrenIdentifier("file-actions")
             }
         }
+        .phrenActionSheet(isPresented: $showingActions, title: "File actions", actions: fileActions,
+                          identifier: "file-actions-sheet")
         .sheet(isPresented: $editing) {
             DocumentEditorSheet(title: (path as NSString).lastPathComponent, storeId: storeId,
                                 draft: DocumentDraft(path: path, content: content))
         }
+    }
+
+    private var fileActions: [PhrenControlAction] {
+        var actions = [PhrenControlAction(id: "copy", title: copied ? "Copied" : "Copy file",
+                                          icon: copied ? "checkmark" : "doc.on.doc") {
+            UIPasteboard.general.string = content
+            copied = true
+        }]
+        if isWritable {
+            actions.append(PhrenControlAction(id: "edit", title: "Edit", icon: "pencil") { editing = true })
+        }
+        return actions
     }
 }
 

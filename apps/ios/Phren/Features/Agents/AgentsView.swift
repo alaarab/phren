@@ -16,52 +16,56 @@ struct AgentsView: View {
     }
 
     var body: some View {
-        PhrenList {
-            Section {
-                Text("Shape how your agents work with shared instructions and reusable skills.")
-                    .foregroundStyle(.secondary)
-                NavigationLink { LiveSessionsView() } label: {
-                    Label("Live sessions", systemImage: "waveform.path")
-                }
-            }
-            Section("Global instructions") {
-                ForEach(stores.filter { query.isEmpty || $0.displayName.localizedCaseInsensitiveContains(query)
-                    || "global".localizedCaseInsensitiveContains(query) }) { store in
-                    NavigationLink { AgentContextView(storeId: store.id, scope: "global") } label: {
-                        Label {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(store.displayName).font(.headline)
-                                Text("Shared across projects").font(.caption).foregroundStyle(.secondary)
-                            }
-                        } icon: { Image(systemName: "globe") }
+        VStack(spacing: 0) {
+            LiveStatusBar()
+            PhrenSearchField(text: $query, placeholder: "Search projects and stores", identifier: "agents-search")
+                .padding(.horizontal, PhrenTheme.Space.large)
+                .padding(.bottom, PhrenTheme.Space.small)
+            PhrenList {
+                Section {
+                    Text("Shape how your agents work with shared instructions and reusable skills.")
+                        .foregroundStyle(.secondary)
+                    NavigationLink { LiveSessionsView() } label: {
+                        Label("Live sessions", systemImage: "waveform.path")
                     }
                 }
-            }
-            Section("Project instructions") {
-                ForEach(projects) { item in
-                    NavigationLink { AgentContextView(storeId: item.storeId, scope: item.project.name) } label: {
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text(item.project.name).font(.headline)
-                            HStack {
-                                if model.hasMultipleStores { TagChip(text: item.storeName, role: .store) }
-                                if !model.canPush(storeId: item.storeId) { TagChip(text: "Read-only", role: .status) }
-                                Text(model.instructions(scope: item.project.name, in: item.storeId) == nil
-                                     ? "No project instructions" : "Instructions ready")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
+                Section("Global instructions") {
+                    ForEach(stores.filter { query.isEmpty || $0.displayName.localizedCaseInsensitiveContains(query)
+                        || "global".localizedCaseInsensitiveContains(query) }) { store in
+                        NavigationLink { AgentContextView(storeId: store.id, scope: "global") } label: {
+                            Label {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(store.displayName).font(.headline)
+                                    Text("Shared across projects").font(.caption).foregroundStyle(.secondary)
+                                }
+                            } icon: { Image(systemName: "globe") }
                         }
                     }
                 }
-                if projects.isEmpty {
-                    Text(query.isEmpty ? "Your projects will appear here." : "No matching projects.")
-                        .foregroundStyle(.secondary)
+                Section("Project instructions") {
+                    ForEach(projects) { item in
+                        NavigationLink { AgentContextView(storeId: item.storeId, scope: item.project.name) } label: {
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(item.project.name).font(.headline)
+                                HStack {
+                                    if model.hasMultipleStores { TagChip(text: item.storeName, role: .store) }
+                                    if !model.canPush(storeId: item.storeId) { TagChip(text: "Read-only", role: .status) }
+                                    Text(model.instructions(scope: item.project.name, in: item.storeId) == nil
+                                         ? "No project instructions" : "Instructions ready")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                    if projects.isEmpty {
+                        Text(query.isEmpty ? "Your projects will appear here." : "No matching projects.")
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
+            .refreshable { await model.pullToRefresh() }
         }
         .navigationTitle("Agent setup")
-        .searchable(text: $query, prompt: "Search projects and stores")
-        .refreshable { await model.pullToRefresh() }
-        .safeAreaInset(edge: .top, spacing: 0) { LiveStatusBar() }
         .phrenScreen()
     }
 }

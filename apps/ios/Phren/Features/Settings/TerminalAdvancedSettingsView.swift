@@ -36,9 +36,11 @@ struct TerminalAdvancedSettingsView: View {
     var body: some View {
         PhrenList {
             Section("Cursor") {
-                Picker("Cursor style", selection: $cursorStyle) {
-                    Text("▮ Block").tag("block"); Text("▁ Underline").tag("underline"); Text("▏Bar").tag("bar")
-                }.pickerStyle(.segmented).accessibilityIdentifier("terminal-cursor-style")
+                PhrenStepSlider(options: [
+                    PhrenOption(id: "block", value: "block", title: "▮ Block"),
+                    PhrenOption(id: "underline", value: "underline", title: "▁ Underline"),
+                    PhrenOption(id: "bar", value: "bar", title: "▏Bar"),
+                ], selection: $cursorStyle, identifier: "terminal-cursor-style")
                 PhrenSwitch("Cursor blink", isOn: $cursorBlink).accessibilityIdentifier("terminal-cursor-blink")
             }
             Section {

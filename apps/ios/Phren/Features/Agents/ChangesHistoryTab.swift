@@ -16,6 +16,7 @@ struct ChangesHistoryTab: View {
     @State private var visible = false
     @State private var copied: String?
     @State private var showingFull: GitLog.Commit?
+    @State private var commitDialog = false
     @State private var loadTask: Task<Void, Never>?
 
     private enum Row: Identifiable {
@@ -64,14 +65,23 @@ struct ChangesHistoryTab: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active, visible { start() } else if phase != .active { loadTask?.cancel() }
         }
-        .alert("Commit", isPresented: Binding(get: { showingFull != nil }, set: { if !$0 { showingFull = nil } })) {
-            if let commit = showingFull {
-                Button("Copy short sha") { copy(commit) }
-                Button("OK", role: .cancel) {}
-            }
-        } message: {
-            if let commit = showingFull { Text("\(commit.sha)\n\(commit.author)") }
+        .phrenDialog(
+            isPresented: $commitDialog,
+            title: "Commit",
+            message: showingFull.map { "\($0.sha)\n\($0.author)" } ?? "",
+            actions: commitActions,
+            identifier: "changes-history-commit-dialog"
+        )
+    }
+
+    private var commitActions: [PhrenDialog.Action] {
+        guard let commit = showingFull else {
+            return [.init(id: "ok", title: "OK", role: .cancel) {}]
         }
+        return [
+            .init(id: "copy-short-sha", title: "Copy short sha") { copy(commit) },
+            .init(id: "ok", title: "OK", role: .cancel) {},
+        ]
     }
 
     @ViewBuilder
@@ -109,7 +119,7 @@ struct ChangesHistoryTab: View {
             .contentShape(Rectangle().inset(by: -2))
             .overlay(alignment: .leading) { HistoryRail(connectTop: top, connectBottom: bottom, ring: false) }
             .onTapGesture { copy(commit) }
-            .onLongPressGesture { showingFull = commit }
+            .onLongPressGesture { showingFull = commit; commitDialog = true }
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.isButton)
             .accessibilityIdentifier("changes-history-commit:\(commit.short)")

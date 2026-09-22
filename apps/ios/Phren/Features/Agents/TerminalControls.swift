@@ -190,6 +190,7 @@ private struct TerminalShortcutMenu: View {
     @State private var settings = false
     @State private var customize = false
     @State private var editing: TerminalShortcut?
+    @State private var actionShortcut: TerminalShortcut?
     @State private var editingPanel: TerminalShortcutPanelID = .favorites
     @State private var error: String?
     @State private var sequenceTask: Task<Void, Never>?
@@ -245,6 +246,8 @@ private struct TerminalShortcutMenu: View {
             }
             .onDisappear { sequenceTask?.cancel() }
             .onChange(of: enabled) { _, enabled in if !enabled { sequenceTask?.cancel() } }
+            .phrenActionSheet(isPresented: $actionShortcut.isPresent(), title: "Shortcut actions",
+                              actions: shortcutActions, identifier: "terminal-shortcut-actions")
     }
 
     private var header: some View {
@@ -293,41 +296,53 @@ private struct TerminalShortcutMenu: View {
                     Text(Self.shortHint(shortcut.hint, command: shortcut.displayLabel)).font(.caption2).foregroundStyle(PhrenTheme.textMuted).lineLimit(1)
                 }
             }.frame(maxWidth: .infinity, minHeight: 50).padding(.horizontal, 4).padding(.vertical, 6)
+                .padding(.trailing, 40)
                 .background(PhrenTheme.surface.opacity(0.45), in: RoundedRectangle(cornerRadius: 12))
         }.accessibilityIdentifier(shortcut.id.contains(":/") ? "terminal-command:" + shortcut.id : "terminal-shortcut:" + shortcut.id)
             .accessibilityLabel(shortcut.kind == .action && ["photos", "camera", "files"].contains(shortcut.value)
                                 ? "Attach from " + shortcut.displayLabel
                                 : shortcut.displayLabel + (shortcut.hint.isEmpty ? "" : ", " + shortcut.hint))
             .disabled(!enabled || sequenceTask != nil || (shortcut.kind == .action && shortcut.value == "camera" && !UIImagePickerController.isSourceTypeAvailable(.camera)))
-            .contextMenu {
-                Button("Edit Shortcut", systemImage: "pencil") { editingPanel = selected.id; editing = shortcut }
-                if selected.id == .favorites {
-                    Button("Remove from Favorites", systemImage: "star.slash") {
-                        change { value in
-                            if let index = value.panels.firstIndex(where: { $0.id == .favorites }) {
-                                value.panels[index].shortcuts.removeAll { $0.id == shortcut.id }
-                            }
-                        }
-                    }
-                } else {
-                    Button("Add to Favorites", systemImage: "star") {
-                        change { value in
-                            guard let index = value.panels.firstIndex(where: { $0.id == .favorites }) else { return }
-                            var copy = shortcut; copy.id = "favorite:" + shortcut.id; copy.enabled = true
-                            if let row = value.panels[index].shortcuts.firstIndex(where: { $0.id == copy.id }) {
-                                value.panels[index].shortcuts[row] = copy
-                            } else { value.panels[index].shortcuts.append(copy) }
-                        }
-                    }
-                }
-                Button("Disable Shortcut", systemImage: "minus.circle") {
-                    change { value in
-                        guard let index = value.panels.firstIndex(where: { $0.id == selected.id }),
-                              let row = value.panels[index].shortcuts.firstIndex(where: { $0.id == shortcut.id }) else { return }
-                        value.panels[index].shortcuts[row].enabled = false
+            .disabled(storage.saved == nil)
+            .overlay(alignment: .trailing) {
+                PhrenIconButton(icon: "ellipsis", label: "Shortcut actions") { actionShortcut = shortcut }
+                    .phrenIdentifier(shortcut.id.contains(":/") ? "terminal-command-actions:" + shortcut.id : "terminal-shortcut-actions:" + shortcut.id)
+                    .disabled(storage.saved == nil)
+            }
+    }
+
+    private var shortcutActions: [PhrenControlAction] {
+        guard let shortcut = actionShortcut else { return [] }
+        var actions = [PhrenControlAction(id: "edit", title: "Edit Shortcut", icon: "pencil") {
+            editingPanel = selected.id; editing = shortcut
+        }]
+        if selected.id == .favorites {
+            actions.append(PhrenControlAction(id: "unfavorite", title: "Remove from Favorites", icon: "star.slash") {
+                change { value in
+                    if let index = value.panels.firstIndex(where: { $0.id == .favorites }) {
+                        value.panels[index].shortcuts.removeAll { $0.id == shortcut.id }
                     }
                 }
-            }.disabled(storage.saved == nil)
+            })
+        } else {
+            actions.append(PhrenControlAction(id: "favorite", title: "Add to Favorites", icon: "star") {
+                change { value in
+                    guard let index = value.panels.firstIndex(where: { $0.id == .favorites }) else { return }
+                    var copy = shortcut; copy.id = "favorite:" + shortcut.id; copy.enabled = true
+                    if let row = value.panels[index].shortcuts.firstIndex(where: { $0.id == copy.id }) {
+                        value.panels[index].shortcuts[row] = copy
+                    } else { value.panels[index].shortcuts.append(copy) }
+                }
+            })
+        }
+        actions.append(PhrenControlAction(id: "disable", title: "Disable Shortcut", icon: "minus.circle") {
+            change { value in
+                guard let index = value.panels.firstIndex(where: { $0.id == selected.id }),
+                      let row = value.panels[index].shortcuts.firstIndex(where: { $0.id == shortcut.id }) else { return }
+                value.panels[index].shortcuts[row].enabled = false
+            }
+        })
+        return actions
     }
 
     /// The hint's gist in one word: "Manage agent permissions" → "permissions",

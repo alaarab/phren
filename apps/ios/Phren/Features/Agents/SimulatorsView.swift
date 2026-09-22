@@ -120,6 +120,8 @@ struct SimulatorScreenView: View {
     @State private var message: String?
     @State private var busy = false
     @State private var flash: CGPoint?
+    @State private var showingApps = false
+    @State private var showingMore = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -150,17 +152,12 @@ struct SimulatorScreenView: View {
                 control("Home", "house") { await act("home") }
                 control("Lock", "lock") { await act("lock") }
                 control("Type", "keyboard") { typing = true }
-                Menu {
-                    if apps.isEmpty { Text("No apps installed") }
-                    ForEach(apps) { app in Button(app.name) { Task { await act("launch", ["bundleId": app.bundleId]) } } }
-                    Divider()
-                    Button("Open URL…", systemImage: "link") { opening = true }
-                } label: { Label("Apps", systemImage: "square.grid.2x2").font(.caption).frame(maxWidth: .infinity, minHeight: 44) }
-                    .accessibilityIdentifier("simulator-apps")
-                Menu {
-                    Button("Shut down", systemImage: "power", role: .destructive) { Task { await act("shutdown"); dismiss() } }
-                } label: { Image(systemName: "ellipsis.circle").frame(width: 44, height: 44) }
-                    .accessibilityLabel("More")
+                Button { showingApps = true } label: {
+                    Label("Apps", systemImage: "square.grid.2x2").font(.caption).frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .accessibilityIdentifier("simulator-apps")
+                PhrenIconButton(icon: "ellipsis.circle", label: "More") { showingMore = true }
+                    .phrenIdentifier("simulator-more")
             }
             .padding(.horizontal, 10).padding(.bottom, 6)
             .buttonStyle(.plain).foregroundStyle(PhrenTheme.text)
@@ -174,16 +171,71 @@ struct SimulatorScreenView: View {
             #endif
             apps = (try? await PhrenConnection.simulatorApps(host: host, privateKey: DeviceSSHKey.load(host.id), udid: simulator.udid)) ?? []
         }
-        .alert("Type into the simulator", isPresented: $typing) {
-            TextField("Text", text: $text).accessibilityIdentifier("simulator-type-field")
-            Button("Type") { let value = text; text = ""; Task { await act("type", ["text": value]) } }
-            Button("Cancel", role: .cancel) { text = "" }
+        .sheet(isPresented: $typing) {
+            NavigationStack {
+                PhrenScreen {
+                    PhrenGroup("Text") {
+                        TextField("Text", text: $text)
+                            .accessibilityIdentifier("simulator-type-field")
+                    }
+                }
+                .navigationTitle("Type into the simulator")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { text = "" } }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Type") { let value = text; text = ""; Task { await act("type", ["text": value]) } }
+                    }
+                }
+            }
+            .presentationDetents([.medium])
         }
-        .alert("Open a URL in the simulator", isPresented: $opening) {
-            TextField("https://", text: $url).textInputAutocapitalization(.never).autocorrectionDisabled()
-            Button("Open") { let value = url; url = ""; Task { await act("openurl", ["url": value]) } }
-            Button("Cancel", role: .cancel) { url = "" }
+        .sheet(isPresented: $opening) {
+            NavigationStack {
+                PhrenScreen {
+                    PhrenGroup("URL") {
+                        TextField("https://", text: $url)
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .keyboardType(.URL)
+                            .accessibilityIdentifier("simulator-url-field")
+                    }
+                }
+                .navigationTitle("Open a URL in the simulator")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { url = "" } }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Open") { let value = url; url = ""; Task { await act("openurl", ["url": value]) } }
+                    }
+                }
+            }
+            .presentationDetents([.medium])
         }
+        .phrenActionSheet(isPresented: $showingApps, title: "Apps", actions: appActions,
+                          identifier: "simulator-apps-sheet")
+        .phrenActionSheet(isPresented: $showingMore, title: "Simulator", actions: moreActions,
+                          identifier: "simulator-more-sheet")
+    }
+
+    private var appActions: [PhrenControlAction] {
+        var actions: [PhrenControlAction] = []
+        if apps.isEmpty {
+            actions.append(PhrenControlAction(id: "empty", title: "No apps installed", isEnabled: false) {})
+        } else {
+            actions.append(contentsOf: apps.map { app in
+                PhrenControlAction(id: app.bundleId, title: app.name) {
+                    Task { await act("launch", ["bundleId": app.bundleId]) }
+                }
+            })
+        }
+        actions.append(PhrenControlAction(id: "open-url", title: "Open URL…", icon: "link") { opening = true })
+        return actions
+    }
+
+    private var moreActions: [PhrenControlAction] {
+        [PhrenControlAction(id: "shutdown", title: "Shut down", icon: "power", role: .destructive) {
+            Task { await act("shutdown"); dismiss() }
+        }]
     }
 
     private func control(_ title: String, _ symbol: String, _ action: @escaping () async -> Void) -> some View {

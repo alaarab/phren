@@ -19,6 +19,8 @@ struct HerdrWorkspacesView: View {
     @State private var action: Task<Void, Never>?
     @State private var query = ""
     @State private var collapsed: Set<String> = []
+    @State private var showingServers = false
+    @State private var actionTarget: RowAction?
     private var host: LiveHost? { (try? LiveSessionPreferences.read(data))?.hosts.first { $0.id == hostID } }
     private var active: Bool { visible && scenePhase == .active }
     private struct Edit: Identifiable {
@@ -27,22 +29,28 @@ struct HerdrWorkspacesView: View {
         var tab: String? = nil
         let title: String
     }
+    private enum RowAction: Identifiable {
+        case workspace(id: String, label: String)
+        case tab(workspace: String, id: String, label: String, displayTitle: String)
+        var id: String {
+            switch self {
+            case .workspace(let id, _): return "workspace:\(id)"
+            case .tab(let workspace, let id, _, _): return "tab:\(workspace):\(id)"
+            }
+        }
+    }
     var body: some View {
         PhrenList {
             if let host {
                 Section {
                     LabeledContent("Computer", value: host.name)
-                    Menu {
-                        ForEach(servers) { server in
-                            Button(server.session) {
-                                do {
-                                    var changed = host; changed.herdrSession = server.session == "default" ? nil : server.session
-                                    data = try LiveSessionPreferences.saving(changed, in: data)
-                                } catch { self.error = error.localizedDescription }
-                            }
-                        }
-                    } label: { LabeledContent("Herdr server", value: host.herdrSession ?? "default") }
+                    Button { showingServers = true } label: {
+                        LabeledContent("Herdr server", value: host.herdrSession ?? "default")
+                            .frame(minHeight: 44).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                     .disabled(servers.isEmpty || busy)
+                    .accessibilityIdentifier("herdr-server")
                     NavigationLink { HerdrTerminalView(host: host) } label: { Label("Open Herdr terminal", systemImage: "terminal") }
                 }
                 if let error { Section { Text(error).font(.footnote).foregroundStyle(PhrenTheme.warning) } }
@@ -57,34 +65,40 @@ struct HerdrWorkspacesView: View {
                     Section {
                         ForEach(groups) { group in
                             let open = !collapsed.contains(group.id)
-                            Button {
-                                withAnimation(.easeInOut(duration: 0.15)) { if open { collapsed.insert(group.id) } else { collapsed.remove(group.id) } }
-                            } label: { WorkspaceTreeDisclosure(label: group.label, count: group.children.count, open: open) }
-                            .buttonStyle(.plain).listRowBackground(Color.clear)
-                            .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
-                            .accessibilityLabel("\(group.label) workspace, \(open ? "expanded" : "collapsed")")
-                            .accessibilityIdentifier("workspace:\(group.id)")
-                            .contextMenu {
-                                Button("New tab", systemImage: "plus") { perform(.create, host: host, workspace: group.id) }
-                                Button("Rename workspace", systemImage: "pencil") { name = group.label; operation = .init(workspace: group.id, title: "Rename workspace") }
-                                Button("Close workspace", systemImage: "xmark", role: .destructive) { closing = .init(workspace: group.id, title: group.label) }
+                            HStack(spacing: 4) {
+                                Button {
+                                    withAnimation(.easeInOut(duration: 0.15)) { if open { collapsed.insert(group.id) } else { collapsed.remove(group.id) } }
+                                } label: { WorkspaceTreeDisclosure(label: group.label, count: group.children.count, open: open) }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("\(group.label) workspace, \(open ? "expanded" : "collapsed")")
+                                .accessibilityIdentifier("workspace:\(group.id)")
+                                Spacer(minLength: 0)
+                                PhrenIconButton(icon: "ellipsis", label: "Workspace actions") {
+                                    actionTarget = .workspace(id: group.id, label: group.label)
+                                }
+                                .phrenIdentifier("workspace-actions:\(group.id)")
                             }
+                            .listRowBackground(Color.clear)
+                            .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
                             if open {
                                 ForEach(group.children.filter { needle.isEmpty || $0.displayTitle.lowercased().contains(needle) || ($0.agent ?? "").contains(needle) || group.label.lowercased().contains(needle) }) { tab in
                                     let session = LiveAgentSession(host: host, workspaceID: group.id, workspaceName: group.label, tab: tab)
                                     let focused = snapshot.focus?.workspaceID == group.id && snapshot.focus?.tabID == tab.id
-                                    NavigationLink { HerdrPanesView(session: session) } label: {
-                                        WorkspaceTreeAgentLabel(tab: tab, selected: focused)
+                                    HStack(spacing: 4) {
+                                        NavigationLink { HerdrPanesView(session: session) } label: {
+                                            WorkspaceTreeAgentLabel(tab: tab, selected: focused)
+                                        }
+                                        .accessibilityIdentifier("workspace-tab:\(tab.id)")
+                                        Spacer(minLength: 0)
+                                        PhrenIconButton(icon: "ellipsis", label: "Tab actions") {
+                                            actionTarget = .tab(workspace: group.id, id: tab.id, label: tab.label, displayTitle: tab.displayTitle)
+                                        }
+                                        .phrenIdentifier("workspace-tab-actions:\(tab.id)")
                                     }
                                     .listRowBackground(focused ? PhrenTheme.success.opacity(0.14) : Color.clear)
                                     .listRowInsets(EdgeInsets(top: 2, leading: 44, bottom: 2, trailing: 16))
-                                    .accessibilityIdentifier("workspace-tab:\(tab.id)")
                                     .swipeActions(edge: .trailing) {
                                         Button("Close", systemImage: "xmark", role: .destructive) { closing = .init(workspace: group.id, tab: tab.id, title: tab.displayTitle) }
-                                    }
-                                    .contextMenu {
-                                        Button("Rename tab", systemImage: "pencil") { name = tab.label; operation = .init(workspace: group.id, tab: tab.id, title: "Rename tab") }
-                                        Button("Close tab", systemImage: "xmark", role: .destructive) { closing = .init(workspace: group.id, tab: tab.id, title: tab.displayTitle) }
                                     }
                                 }
                             }
@@ -94,26 +108,56 @@ struct HerdrWorkspacesView: View {
                 } else if error == nil { ProgressView("Loading Herdr…") }
             }
         }
-        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search workspaces, tabs, agents")
+        .safeAreaInset(edge: .top, spacing: 0) {
+            PhrenSearchField(text: $query, placeholder: "Search workspaces, tabs, agents", identifier: "herdr-search")
+                .padding(.horizontal, PhrenTheme.Space.large)
+                .padding(.vertical, PhrenTheme.Space.small)
+                .background(PhrenTheme.bg)
+        }
         .navigationTitle("Herdr").navigationBarTitleDisplayMode(.inline)
         .toolbar {
             Button("New workspace", systemImage: "plus") { name = ""; cwd = snapshot?.groups.flatMap(\.children).compactMap(\.cwd).first ?? ""; operation = .init(workspace: nil, title: "New workspace") }.disabled(busy || host == nil)
         }
-        .alert(operation?.title ?? "Workspace", isPresented: $operation.isPresent()) {
-            TextField("Name", text: $name)
-            if operation?.workspace == nil { TextField("Full folder path on computer", text: $cwd).textInputAutocapitalization(.never).autocorrectionDisabled() }
-            Button("Cancel", role: .cancel) { operation = nil }
-            Button("Save") {
-                if let op = operation, let host { perform(op.workspace == nil ? .create : .rename, host: host, workspace: op.workspace, tab: op.tab, label: name, cwd: op.workspace == nil ? cwd : nil) }
-                operation = nil
+        .sheet(item: $operation) { op in
+            NavigationStack {
+                PhrenScreen {
+                    PhrenGroup("Name") {
+                        TextField("Name", text: $name)
+                            .accessibilityIdentifier("herdr-name")
+                    }
+                    if op.workspace == nil {
+                        PhrenGroup("Folder") {
+                            TextField("Full folder path on computer", text: $cwd)
+                                .textInputAutocapitalization(.never).autocorrectionDisabled()
+                                .accessibilityIdentifier("herdr-cwd")
+                        }
+                    }
+                }
+                .navigationTitle(op.title)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { operation = nil } }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Save") {
+                            if let host { perform(op.workspace == nil ? .create : .rename, host: host, workspace: op.workspace, tab: op.tab, label: name, cwd: op.workspace == nil ? cwd : nil) }
+                            operation = nil
+                        }
+                    }
+                }
             }
+            .presentationDetents([.medium])
         }
-        .confirmationDialog("Close \(closing?.title ?? "workspace")?", isPresented: $closing.isPresent(), titleVisibility: .visible) {
-            Button("Close and stop its processes", role: .destructive) {
-                if let op = closing, let host { perform(.close, host: host, workspace: op.workspace, tab: op.tab) }
-                closing = nil
-            }
-        } message: { Text("Running shells and agents in this destination will be stopped.") }
+        .phrenDialog(
+            isPresented: $closing.isPresent(),
+            title: "Close \(closing?.title ?? "workspace")?",
+            message: "Running shells and agents in this destination will be stopped.",
+            actions: closeActions,
+            identifier: "herdr-close-dialog"
+        )
+        .phrenSingleSelectSheet(isPresented: $showingServers, title: "Herdr server", options: serverOptions,
+                                selection: serverSelection, rowPrefix: "herdr-server")
+        .phrenActionSheet(isPresented: $actionTarget.isPresent(), title: rowActionTitle, actions: rowActions,
+                          identifier: "herdr-row-actions")
         .onAppear { visible = true }.onDisappear { visible = false; action?.cancel() }
         .onChange(of: host) { _, _ in snapshot = nil; servers = []; action?.cancel() }
         .onChange(of: scenePhase) { _, phase in if phase != .active { action?.cancel() } }
@@ -149,6 +193,67 @@ struct HerdrWorkspacesView: View {
         }
     }
     private struct Run: Equatable { let host: LiveHost?; let active: Bool; let refresh: UUID }
+
+    private var serverOptions: [PhrenOption<String>] {
+        servers.map { PhrenOption(id: $0.session, value: $0.session, title: $0.session) }
+    }
+
+    private var serverSelection: Binding<String> {
+        Binding(get: { host?.herdrSession ?? "default" }, set: { session in
+            guard let host else { return }
+            do {
+                var changed = host; changed.herdrSession = session == "default" ? nil : session
+                data = try LiveSessionPreferences.saving(changed, in: data)
+            } catch { self.error = error.localizedDescription }
+        })
+    }
+
+    private var rowActionTitle: String {
+        guard let actionTarget else { return "" }
+        switch actionTarget {
+        case .workspace(_, let label): return label
+        case .tab(_, _, _, let displayTitle): return displayTitle
+        }
+    }
+
+    private var rowActions: [PhrenControlAction] {
+        guard let host, let actionTarget else { return [] }
+        switch actionTarget {
+        case .workspace(let id, let label):
+            return [
+                PhrenControlAction(id: "new-tab", title: "New tab", icon: "plus") {
+                    perform(.create, host: host, workspace: id)
+                },
+                PhrenControlAction(id: "rename", title: "Rename workspace", icon: "pencil") {
+                    name = label; operation = .init(workspace: id, title: "Rename workspace")
+                },
+                PhrenControlAction(id: "close", title: "Close workspace", icon: "xmark", role: .destructive) {
+                    closing = .init(workspace: id, title: label)
+                },
+            ]
+        case .tab(let workspace, let id, let label, let displayTitle):
+            return [
+                PhrenControlAction(id: "rename", title: "Rename tab", icon: "pencil") {
+                    name = label; operation = .init(workspace: workspace, tab: id, title: "Rename tab")
+                },
+                PhrenControlAction(id: "close", title: "Close tab", icon: "xmark", role: .destructive) {
+                    closing = .init(workspace: workspace, tab: id, title: displayTitle)
+                },
+            ]
+        }
+    }
+
+    private var closeActions: [PhrenDialog.Action] {
+        guard let op = closing else {
+            return [.init(id: "cancel", title: "Cancel", role: .cancel) {}]
+        }
+        return [
+            .init(id: "close", title: "Close and stop its processes", role: .destructive) {
+                if let host { perform(.close, host: host, workspace: op.workspace, tab: op.tab) }
+            },
+            .init(id: "cancel", title: "Cancel", role: .cancel) {},
+        ]
+    }
 }
 
 private struct HerdrPanesView: View {

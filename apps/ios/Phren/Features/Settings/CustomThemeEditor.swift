@@ -5,6 +5,8 @@ struct CustomThemeEditor: View {
     @State var theme: PhrenCustomTheme
     @State private var invalidColors: Set<ThemeColorField> = []
     @State private var paletteRevision = UUID()
+    @State private var showingPresets = false
+    @State private var presetSelection: PhrenAppearanceStyle = .charcoal
 
     var body: some View {
         ScrollView {
@@ -14,15 +16,12 @@ struct CustomThemeEditor: View {
                 VStack(alignment: .leading, spacing: 12) {
                     TextField("Theme name", text: $theme.name).font(.headline)
                         .accessibilityIdentifier("theme-name")
-                    Menu("Start from a preset", systemImage: "square.on.square") {
-                        ForEach(PhrenAppearanceStyle.allCases) { preset in
-                            Button(preset.name) {
-                                theme.palette = preset.palette
-                                invalidColors.removeAll()
-                                paletteRevision = UUID()
-                            }
-                        }
-                    }.font(.subheadline)
+                    Button { showingPresets = true } label: {
+                        Label("Start from a preset", systemImage: "square.on.square").font(.subheadline)
+                            .frame(minHeight: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("theme-preset")
                 }.padding(16).phrenCard()
                 VStack(spacing: 0) {
                     ForEach(ThemeColorField.allCases) { field in
@@ -51,6 +50,19 @@ struct CustomThemeEditor: View {
                     .accessibilityIdentifier("theme-save")
             }
         }
+        .phrenSingleSelectSheet(isPresented: $showingPresets, title: "Start from a preset",
+                                options: presetOptions, selection: $presetSelection,
+                                rowPrefix: "theme-preset", onSelect: applyPreset)
+    }
+
+    private var presetOptions: [PhrenOption<PhrenAppearanceStyle>] {
+        PhrenAppearanceStyle.allCases.map { PhrenOption(id: $0.id, value: $0, title: $0.name) }
+    }
+
+    private func applyPreset(_ preset: PhrenAppearanceStyle) {
+        theme.palette = preset.palette
+        invalidColors.removeAll()
+        paletteRevision = UUID()
     }
 }
 

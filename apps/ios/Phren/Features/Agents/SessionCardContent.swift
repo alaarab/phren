@@ -254,9 +254,13 @@ struct SessionPinButton: View {
         .buttonStyle(.plain)
         .accessibilityLabel(pinned ? "Unpin session" : "Pin session")
         .accessibilityIdentifier("\(identifierPrefix)-pin:\(session.accessibilityKey)")
-        .alert("Couldn't update pin", isPresented: $error.isPresent()) {
-            Button("OK", role: .cancel) { error = nil }
-        } message: { Text(error ?? "") }
+        .phrenDialog(
+            isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } }),
+            title: "Couldn't update pin",
+            message: error ?? "",
+            actions: [.init(id: "ok", title: "OK", role: .cancel) { error = nil }],
+            identifier: "session-pin-error-dialog"
+        )
     }
 }
 

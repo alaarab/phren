@@ -75,6 +75,7 @@ struct VoiceCaptureView: View {
     @State private var confirmDiscard = false
     @State private var saving = false
     @State private var kind: CaptureKind = .note
+    @State private var showingTarget = false
 
     private let ticker = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
@@ -93,10 +94,9 @@ struct VoiceCaptureView: View {
                     )
                 } else {
                     VStack(spacing: 20) {
-                        Picker("Save as", selection: $kind) {
-                            ForEach(CaptureKind.allCases, id: \.self) { Text($0.rawValue) }
-                        }
-                        .pickerStyle(.segmented)
+                        PhrenTextSegment(items: CaptureKind.allCases.map {
+                            PhrenOption(id: $0.rawValue, value: $0, title: $0.rawValue)
+                        }, selection: $kind, identifier: "voice-capture-kind")
                         micArea
                         editorSection
                         destinationFooter
@@ -129,14 +129,18 @@ struct VoiceCaptureView: View {
         }
         .background(DismissAttemptDetector { confirmDiscard = true })
         .interactiveDismissDisabled(hasUnsavedText)
-        .confirmationDialog(
-            kind == .note ? "Discard this note?" : "Discard this task?",
+        .phrenDialog(
             isPresented: $confirmDiscard,
-            titleVisibility: .visible
-        ) {
-            Button("Discard", role: .destructive) { dismiss() }
-            Button("Keep editing", role: .cancel) {}
-        }
+            title: kind == .note ? "Discard this note?" : "Discard this task?",
+            message: "The text you dictated will be lost.",
+            actions: [
+                .init(id: "discard", title: "Discard", role: .destructive) { dismiss() },
+                .init(id: "keep", title: "Keep editing", role: .cancel) {},
+            ],
+            identifier: "voice-capture-discard-dialog"
+        )
+        .phrenSingleSelectSheet(isPresented: $showingTarget, title: "Project", options: targetOptions,
+                                selection: $selectedTarget, rowPrefix: "voice-capture-project")
         .task {
             selectedTarget = preselected ?? Self.defaultTarget(in: targets)
             await preparePermissions()
@@ -283,16 +287,9 @@ struct VoiceCaptureView: View {
     private var destinationFooter: some View {
         if targets.count > 1 {
             VStack(alignment: .leading, spacing: 4) {
-                Picker("Project", selection: $selectedTarget) {
-                    // A real, visible "nothing picked yet" row: with several
-                    // projects, a preselected one the user didn't choose is
-                    // how a capture lands somewhere nobody can name later.
-                    Text("Choose a project…").tag(VoiceCaptureTarget?.none)
-                    ForEach(targets) { target in
-                        Text(targetLabel(target)).tag(Optional(target))
-                    }
-                }
-                .pickerStyle(.menu)
+                PhrenSingleSelect(options: targetOptions, selection: $selectedTarget,
+                                  placeholder: "Choose a project…", identifier: "voice-capture-project",
+                                  isPresented: $showingTarget)
 
                 if selectedTarget == nil {
                     Text("Pick where this goes — phren won't choose for you. Set a default in Settings → Quick capture.")
@@ -310,6 +307,14 @@ struct VoiceCaptureView: View {
 
     private func targetLabel(_ target: VoiceCaptureTarget) -> String {
         model.hasMultipleStores ? "\(target.project) · \(target.storeName)" : target.project
+    }
+
+    /// A real, visible "nothing picked yet" row: with several projects, a
+    /// preselected one the user didn't choose is how a capture lands
+    /// somewhere nobody can name later.
+    private var targetOptions: [PhrenOption<VoiceCaptureTarget?>] {
+        [PhrenOption(id: "none", value: VoiceCaptureTarget?.none, title: "Choose a project…")]
+            + targets.map { PhrenOption(id: $0.id, value: VoiceCaptureTarget?.some($0), title: targetLabel($0)) }
     }
 
     // MARK: - Recording

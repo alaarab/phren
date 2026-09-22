@@ -44,16 +44,16 @@ final class AddProjectTests: XCTestCase {
         XCTAssertTrue(app.buttons["projects-add"].waitForExistence(timeout: 10))
         app.buttons["projects-add"].tap()
         XCTAssertTrue(app.buttons["add-project-computer:A1000000-0000-0000-0000-000000000001"].waitForExistence(timeout: 5))
-        app.segmentedControls["add-project-mode"].buttons["Clone from GitHub"].tap()
+        app.buttons["add-project-mode:clone"].tap()
         let url = app.textFields["add-project-url"]
         XCTAssertTrue(url.waitForExistence(timeout: 5))
         url.tap(); url.typeText("https://github.com/alaarab/lantern")
         let submit = app.buttons["add-project-submit"]
         XCTAssertTrue(submit.isEnabled)
         submit.tap()
-        XCTAssertTrue(app.alerts["Couldn't add project"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.alerts.staticTexts.element(boundBy: 1).label.contains("git clone failed"))
-        app.alerts.buttons["OK"].tap()
+        XCTAssertTrue(app.staticTexts["Couldn't add project"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "git clone failed")).firstMatch.exists)
+        app.buttons["OK"].tap()
         XCTAssertTrue(url.exists, "The picker stays so the URL can be fixed")
     }
 }

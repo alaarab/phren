@@ -29,19 +29,20 @@ struct ChangesTab: View {
             if mode == "diff" { diffMode } else { listMode }
         }
         .background(PhrenTheme.bg)
-        .confirmationDialog(discardTitle, isPresented: discardPresented, titleVisibility: .visible) {
-            if let target = discardTarget {
-                Button("Discard", role: .destructive) { discard(target) }
-            }
-            Button("Cancel", role: .cancel) { discardTarget = nil }
-        } message: {
-            Text("This cannot be undone.")
-        }
-        .alert("Could not update changes", isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })) {
-            Button("OK", role: .cancel) { actionError = nil }
-        } message: {
-            Text(actionError ?? "")
-        }
+        .phrenDialog(
+            isPresented: discardPresented,
+            title: discardTitle,
+            message: "This cannot be undone.",
+            actions: discardActions,
+            identifier: "changes-discard-dialog"
+        )
+        .phrenDialog(
+            isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } }),
+            title: "Could not update changes",
+            message: actionError ?? "",
+            actions: [.init(id: "ok", title: "OK", role: .cancel) { actionError = nil }],
+            identifier: "changes-error-dialog"
+        )
         .onAppear { reload() }
         .onDisappear { loadTask?.cancel() }
         // The List/Diff toggle lives in the section band above; load the diff
@@ -129,6 +130,16 @@ struct ChangesTab: View {
     }
     private var discardPresented: Binding<Bool> {
         Binding(get: { discardTarget != nil }, set: { if !$0 { discardTarget = nil } })
+    }
+
+    private var discardActions: [PhrenDialog.Action] {
+        guard let target = discardTarget else {
+            return [.init(id: "cancel", title: "Cancel", role: .cancel) {}]
+        }
+        return [
+            .init(id: "discard", title: "Discard", role: .destructive) { discard(target) },
+            .init(id: "cancel", title: "Cancel", role: .cancel) {},
+        ]
     }
 
     private func stage(_ file: GitStatus.File) {

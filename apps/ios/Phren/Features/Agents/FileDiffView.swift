@@ -12,6 +12,7 @@ struct FileDiffView: View {
     @AppStorage(ChatSettings.wrapFullDiffKey) private var wrap = false
     @State private var change = 0
     @State private var focused: Int?
+    @State private var showingOptions = false
 
     private let document: DiffDocument?
     init(file: AgentRepositoryDiff.File, section: AgentRepositoryDiff.Section) {
@@ -44,19 +45,29 @@ struct FileDiffView: View {
                     Button("Next change", systemImage: "chevron.down") { step(1, in: document) }
                         .disabled(change >= document.changeStarts.count - 1).accessibilityIdentifier("diff-next-change")
                 }
-                Menu {
-                    Picker("Layout", selection: $sideBySide) {
-                        Label("Inline", systemImage: "text.alignleft").tag(false)
-                        Label("Side by side", systemImage: "rectangle.split.2x1").tag(true)
-                    }
-                    PhrenSwitch("Wrap long lines", systemImage: "text.word.spacing", isOn: $wrap).accessibilityIdentifier("diff-wrap")
-                    if let patch = section.patch {
-                        Button("Copy patch", systemImage: "doc.on.doc") { ChatClipboard.copy(patch) }
-                    }
-                } label: { Image(systemName: "ellipsis.circle") }
-                    .accessibilityLabel("Diff options").accessibilityIdentifier("diff-options")
+                PhrenIconButton(icon: "ellipsis.circle", label: "Diff options") { showingOptions = true }
+                    .phrenIdentifier("diff-options")
             }
         }
+        .phrenActionSheet(isPresented: $showingOptions, title: "Diff options",
+                          actions: optionsActions, identifier: "diff-options-sheet")
+    }
+
+    private var optionsActions: [PhrenControlAction] {
+        var actions: [PhrenControlAction] = [
+            PhrenControlAction(id: "inline", title: "Inline", icon: "text.alignleft",
+                               isSelected: !sideBySide) { sideBySide = false },
+            PhrenControlAction(id: "side-by-side", title: "Side by side", icon: "rectangle.split.2x1",
+                               isSelected: sideBySide) { sideBySide = true },
+            PhrenControlAction(id: "wrap", title: "Wrap long lines", icon: "text.word.spacing",
+                               isSelected: wrap) { wrap.toggle() },
+        ]
+        if let patch = section.patch {
+            actions.append(PhrenControlAction(id: "copy", title: "Copy patch", icon: "doc.on.doc") {
+                ChatClipboard.copy(patch)
+            })
+        }
+        return actions
     }
 
     /// The strip VS Code keeps above the editor: path, group, and counts.

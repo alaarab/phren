@@ -32,8 +32,10 @@ struct PhrenHookSettingsView: View {
             Section {
                 Text("Install Phren Hook on each computer that runs your agents. It unlocks native chat, live diffs of what commands changed, web previews, approvals and account usage.")
                     .font(.callout).foregroundStyle(PhrenTheme.textSecondary)
-                Picker("Platform", selection: $platform) { Text("macOS").tag("macOS"); Text("Linux").tag("Linux") }
-                    .pickerStyle(.segmented).accessibilityIdentifier("hook-platform")
+                PhrenTextSegment(items: [
+                    PhrenOption(id: "macos", value: "macOS", title: "macOS"),
+                    PhrenOption(id: "linux", value: "Linux", title: "Linux"),
+                ], selection: $platform, identifier: "hook-platform")
                 Text(snippet).font(.system(.caption, design: .monospaced)).textSelection(.enabled).foregroundStyle(PhrenTheme.text)
                     .padding(10).frame(maxWidth: .infinity, alignment: .leading).background(PhrenTheme.bgSunken, in: RoundedRectangle(cornerRadius: 8))
                     .accessibilityIdentifier("hook-snippet")

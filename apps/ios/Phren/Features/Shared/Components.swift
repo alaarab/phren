@@ -175,6 +175,7 @@ struct TextEntrySheet: View {
     @Environment(\.dismiss) private var dismiss
     @State var text: String
     @State var selectedType: FindingType?
+    @State private var showingType = false
 
     init(title: String, initialText: String = "", initialType: FindingType? = nil,
          showsTypePicker: Bool = false, confirmLabel: String = "Save",
@@ -195,12 +196,9 @@ struct TextEntrySheet: View {
                         .lineLimit(3...12)
                 }
                 if showsTypePicker {
-                    Picker("Type", selection: $selectedType) {
-                        Text("none").tag(FindingType?.none)
-                        ForEach(FindingType.allCases, id: \.self) { type in
-                            Text(type.rawValue).tag(FindingType?.some(type))
-                        }
-                    }
+                    PhrenSingleSelect(options: typeOptions, selection: $selectedType,
+                                      placeholder: "Type", identifier: "finding-type",
+                                      isPresented: $showingType)
                 }
             }
             .navigationTitle(title)
@@ -222,5 +220,14 @@ struct TextEntrySheet: View {
                 }
             }
         }
+        .phrenSingleSelectSheet(isPresented: $showingType, title: "Type", options: typeOptions,
+                                selection: $selectedType, rowPrefix: "finding-type")
+    }
+
+    private var typeOptions: [PhrenOption<FindingType?>] {
+        [PhrenOption(id: "none", value: FindingType?.none, title: "none")]
+            + FindingType.allCases.map {
+                PhrenOption(id: $0.rawValue, value: FindingType?.some($0), title: $0.rawValue)
+            }
     }
 }

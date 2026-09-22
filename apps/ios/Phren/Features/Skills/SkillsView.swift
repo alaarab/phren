@@ -39,52 +39,56 @@ struct SkillsView: View {
     }
 
     var body: some View {
-        PhrenList {
-            ForEach(scopes, id: \.self) { scope in
-                Section(scope == "global" ? "Global skills" : scope) {
-                    ForEach(skills.filter { $0.skill.scope.source == scope }.sorted {
-                        if $0.skill.name != $1.skill.name { return $0.skill.name < $1.skill.name }
-                        return $0.storeId < $1.storeId
-                    }) { entry in
-                        NavigationLink { SkillEditorView(entry: entry, returnToProject: returnToProject) } label: {
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text(entry.skill.title ?? entry.skill.name).font(.headline)
-                                if let summary = entry.skill.summary, !summary.isEmpty {
-                                    Text(summary).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
-                                }
-                                HStack {
-                                    if model.hasMultipleStores { TagChip(text: entry.storeName, role: .store) }
-                                    if !model.canPush(storeId: entry.storeId) { TagChip(text: "Read-only", role: .status) }
-                                    if let preferences = try? model.skillPreferences(in: entry.storeId),
-                                       preferences.explicitSetting(scope: entry.skill.scope.source, name: entry.skill.name) == false {
-                                        TagChip(text: "Disabled", role: .status)
+        VStack(spacing: 0) {
+            LiveStatusBar()
+            PhrenSearchField(text: $query, placeholder: "Search skills", identifier: "skills-search")
+                .padding(.horizontal, PhrenTheme.Space.large)
+                .padding(.bottom, PhrenTheme.Space.small)
+            PhrenList {
+                ForEach(scopes, id: \.self) { scope in
+                    Section(scope == "global" ? "Global skills" : scope) {
+                        ForEach(skills.filter { $0.skill.scope.source == scope }.sorted {
+                            if $0.skill.name != $1.skill.name { return $0.skill.name < $1.skill.name }
+                            return $0.storeId < $1.storeId
+                        }) { entry in
+                            NavigationLink { SkillEditorView(entry: entry, returnToProject: returnToProject) } label: {
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text(entry.skill.title ?? entry.skill.name).font(.headline)
+                                    if let summary = entry.skill.summary, !summary.isEmpty {
+                                        Text(summary).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
                                     }
-                                    if project != nil && entry.skill.scope == .global {
-                                        TagChip(text: "Global", role: .scope)
+                                    HStack {
+                                        if model.hasMultipleStores { TagChip(text: entry.storeName, role: .store) }
+                                        if !model.canPush(storeId: entry.storeId) { TagChip(text: "Read-only", role: .status) }
+                                        if let preferences = try? model.skillPreferences(in: entry.storeId),
+                                           preferences.explicitSetting(scope: entry.skill.scope.source, name: entry.skill.name) == false {
+                                            TagChip(text: "Disabled", role: .status)
+                                        }
+                                        if project != nil && entry.skill.scope == .global {
+                                            TagChip(text: "Global", role: .scope)
+                                        }
+                                        if !SkillFile.frontmatterWarnings(for: entry.skill.content).isEmpty {
+                                            Label("Needs details", systemImage: "exclamationmark.triangle")
+                                                .font(.caption).foregroundStyle(.orange)
+                                        }
                                     }
-                                    if !SkillFile.frontmatterWarnings(for: entry.skill.content).isEmpty {
-                                        Label("Needs details", systemImage: "exclamationmark.triangle")
-                                            .font(.caption).foregroundStyle(.orange)
-                                    }
-                                }
-                            }.padding(.vertical, 3)
+                                }.padding(.vertical, 3)
+                            }
+                            .accessibilityIdentifier("skill:\(entry.storeId):\(entry.skill.path)")
                         }
-                        .accessibilityIdentifier("skill:\(entry.storeId):\(entry.skill.path)")
                     }
                 }
             }
-        }
-        .overlay {
-            if skills.isEmpty {
-                PhrenEmptyState(title: query.isEmpty ? "No skills yet" : "No matching skills",
-                                message: query.isEmpty ? "Create reusable instructions for your agents." : "Try another name, project, or phrase.")
+            .overlay {
+                if skills.isEmpty {
+                    PhrenEmptyState(title: query.isEmpty ? "No skills yet" : "No matching skills",
+                                    message: query.isEmpty ? "Create reusable instructions for your agents." : "Try another name, project, or phrase.")
+                }
             }
+            .refreshable { await model.pullToRefresh() }
         }
         .navigationTitle("Skills")
         .navigationBarTitleDisplayMode(.inline)
-        .searchable(text: $query, prompt: "Search skills")
-        .refreshable { await model.pullToRefresh() }
-        .safeAreaInset(edge: .top, spacing: 0) { LiveStatusBar() }
         .phrenScreen()
         .toolbar {
             if let returnToProject {
@@ -199,19 +203,31 @@ struct SkillEditorView: View {
         }
         .sheet(item: $draft) { DocumentEditorSheet(title: "Edit skill", storeId: entry.storeId, draft: $0) }
         .sheet(item: $moving) { MoveSkillSheet(entry: $0) { dismiss() } }
-        .confirmationDialog("Delete \(entry.skill.name)?",
-                            isPresented: $deleting.isPresent(),
-                            titleVisibility: .visible) {
-            if let deleting {
-                Button("Delete skill", role: .destructive) { Task { await remove(deleting) } }
-            }
-        } message: {
-            Text("The skill's instructions will be removed from \(entry.storeName) on sync."
-                 + (entry.skill.format == .folder ? " Supporting files will remain in its folder." : ""))
+        .phrenDialog(
+            isPresented: $deleting.isPresent(),
+            title: "Delete \(entry.skill.name)?",
+            message: "The skill's instructions will be removed from \(entry.storeName) on sync."
+                + (entry.skill.format == .folder ? " Supporting files will remain in its folder." : ""),
+            actions: deleteActions,
+            identifier: "skill-delete-dialog"
+        )
+        .phrenDialog(
+            isPresented: $error.isPresent(),
+            title: "Couldn't update skill",
+            message: error ?? "",
+            actions: [.init(id: "ok", title: "OK", role: .cancel) { error = nil }],
+            identifier: "skill-update-error-dialog"
+        )
+    }
+
+    private var deleteActions: [PhrenDialog.Action] {
+        guard let deleting else {
+            return [.init(id: "cancel", title: "Cancel", role: .cancel) {}]
         }
-        .alert("Couldn't update skill", isPresented: $error.isPresent()) {
-            Button("OK") { error = nil }
-        } message: { Text(error ?? "") }
+        return [
+            .init(id: "delete", title: "Delete skill", role: .destructive) { Task { await remove(deleting) } },
+            .init(id: "cancel", title: "Cancel", role: .cancel) {},
+        ]
     }
 
     private func remove(_ entry: StoreSkill) async {
@@ -237,6 +253,7 @@ private struct MoveSkillSheet: View {
     @State private var scope = ""
     @State private var error: String?
     @State private var moving = false
+    @State private var showingDestination = false
 
     /// Destinations in the skill's own store, minus where it already lives.
     private var destinations: [String] {
@@ -254,10 +271,9 @@ private struct MoveSkillSheet: View {
         NavigationStack {
             PhrenForm {
                 Section {
-                    Picker("Move to", selection: $scope) {
-                        ForEach(destinations, id: \.self) { Text($0 == "global" ? "Global · all projects" : $0).tag($0) }
-                    }
-                    .accessibilityIdentifier("skill-move-destination")
+                    PhrenSingleSelect(options: destinationOptions, selection: $scope,
+                                      placeholder: "Move to", identifier: "skill-move-destination",
+                                      isPresented: $showingDestination)
                     if occupied {
                         Text("A skill named \(entry.skill.name) already exists there.").font(.caption).foregroundStyle(.red)
                     }
@@ -283,12 +299,23 @@ private struct MoveSkillSheet: View {
                 }
             }
             .onAppear { if scope.isEmpty { scope = destinations.first ?? "" } }
-            .alert("Couldn't move skill", isPresented: $error.isPresent()) {
-                Button("OK") { error = nil }
-            } message: { Text(error ?? "") }
+            .phrenDialog(
+                isPresented: $error.isPresent(),
+                title: "Couldn't move skill",
+                message: error ?? "",
+                actions: [.init(id: "ok", title: "OK", role: .cancel) { error = nil }],
+                identifier: "skill-move-error-dialog"
+            )
         }
         .presentationDetents([.medium])
         .interactiveDismissDisabled(moving)
+        .phrenSingleSelectSheet(isPresented: $showingDestination, title: "Move to",
+                                options: destinationOptions, selection: $scope,
+                                rowPrefix: "skill-move-destination")
+    }
+
+    private var destinationOptions: [PhrenOption<String>] {
+        destinations.map { PhrenOption(id: $0, value: $0, title: $0 == "global" ? "Global · all projects" : $0) }
     }
 
     private func move() async {
@@ -317,6 +344,8 @@ private struct NewSkillSheet: View {
     @State private var error: String?
     @State private var saving = false
     @State private var confirmingDiscard = false
+    @State private var showingStore = false
+    @State private var showingScope = false
 
     private var stores: [StoreDescriptor] {
         model.storeDescriptors.filter {
@@ -355,12 +384,13 @@ private struct NewSkillSheet: View {
                 }
                 Section("Location") {
                     if stores.count > 1 {
-                        Picker("Store", selection: $storeId) { ForEach(stores) { Text($0.displayName).tag($0.id) } }
+                        PhrenSingleSelect(options: storeOptions, selection: $storeId,
+                                          placeholder: "Store", identifier: "new-skill-store",
+                                          isPresented: $showingStore)
                     } else if let store = stores.first { LabeledContent("Store", value: store.displayName) }
-                    Picker("Scope", selection: $scope) {
-                        Text("Global · all projects").tag("global")
-                        ForEach(projects, id: \.self) { Text($0).tag($0) }
-                    }
+                    PhrenSingleSelect(options: scopeOptions, selection: $scope,
+                                      placeholder: "Scope", identifier: "new-skill-scope",
+                                      isPresented: $showingScope)
                 }
                 Section("Instructions") {
                     TextEditor(text: $instructions).frame(minHeight: 200).accessibilityLabel("Skill instructions")
@@ -385,14 +415,37 @@ private struct NewSkillSheet: View {
             .onChange(of: storeId) { _, _ in
                 if scope != "global" && !projects.contains(scope) { scope = "global" }
             }
-            .confirmationDialog("Discard this skill?", isPresented: $confirmingDiscard, titleVisibility: .visible) {
-                Button("Discard", role: .destructive) { dismiss() }
-            }
-            .alert("Couldn't create skill", isPresented: $error.isPresent()) {
-                Button("OK") { error = nil }
-            } message: { Text(error ?? "") }
+            .phrenDialog(
+                isPresented: $confirmingDiscard,
+                title: "Discard this skill?",
+                message: "The name, summary, and instructions you entered will be lost.",
+                actions: [
+                    .init(id: "discard", title: "Discard", role: .destructive) { dismiss() },
+                    .init(id: "keep", title: "Keep editing", role: .cancel) {},
+                ],
+                identifier: "skill-discard-dialog"
+            )
+            .phrenDialog(
+                isPresented: $error.isPresent(),
+                title: "Couldn't create skill",
+                message: error ?? "",
+                actions: [.init(id: "ok", title: "OK", role: .cancel) { error = nil }],
+                identifier: "skill-create-error-dialog"
+            )
         }
         .interactiveDismissDisabled(dirty || saving)
+        .phrenSingleSelectSheet(isPresented: $showingStore, title: "Store", options: storeOptions,
+                                selection: $storeId, rowPrefix: "new-skill-store")
+        .phrenSingleSelectSheet(isPresented: $showingScope, title: "Scope", options: scopeOptions,
+                                selection: $scope, rowPrefix: "new-skill-scope")
+    }
+
+    private var storeOptions: [PhrenOption<String>] {
+        stores.map { PhrenOption(id: $0.id, value: $0.id, title: $0.displayName) }
+    }
+    private var scopeOptions: [PhrenOption<String>] {
+        [PhrenOption(id: "global", value: "global", title: "Global · all projects")]
+            + projects.map { PhrenOption(id: $0, value: $0, title: $0) }
     }
 
     private func create() async {

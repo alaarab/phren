@@ -86,6 +86,12 @@ and scrolls again.
 - Knobs are sliders: every stop is visible under its own dot, the current value
   sits beside the title, a tap or a press-and-drag sets it, and a knob that
   overrides the global value shows a reset glyph. The whole screen fits at once.
+- The remaining native controls are replaced by the Phren control kit: Toggle
+  25 to 0, alert 17 to 4, confirmationDialog 13 to 2, Menu 15 to 2, contextMenu
+  12 to 6, Picker 27 to 4, and searchable 6 to 3. ReviewView's list now scrolls
+  as cards. The leftover counts live in the Chat, live-session and project
+  screens another pass owns; PhrenList and PhrenForm stay until each screen
+  migrates with its own list behaviour.
 
 ### Fixed
 

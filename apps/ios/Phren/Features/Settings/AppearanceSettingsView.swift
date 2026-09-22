@@ -3,6 +3,7 @@ import SwiftUI
 struct AppearanceSettingsView: View {
     @State private var appearance = PhrenAppearance.shared
     @State private var editingTheme: PhrenCustomTheme?
+    @State private var actionTheme: PhrenCustomTheme?
 
     var body: some View {
         ScrollView {
@@ -24,14 +25,13 @@ struct AppearanceSettingsView: View {
                     ForEach(appearance.customThemes) { theme in
                         VStack(alignment: .trailing, spacing: 4) {
                             themeChoice(id: theme.id, name: theme.name, detail: "Custom palette", palette: theme.palette)
-                            Button("Edit", systemImage: "pencil") { editingTheme = theme }
-                                .font(.caption).frame(minHeight: 36).accessibilityIdentifier("theme-edit-\(theme.id)")
-                        }
-                        .contextMenu {
-                            Button("Duplicate", systemImage: "plus.square.on.square") {
-                                editingTheme = .init(name: "\(theme.name) copy", palette: theme.palette)
+                                .simultaneousGesture(LongPressGesture(minimumDuration: 0.8).onEnded { _ in actionTheme = theme })
+                            HStack(spacing: 4) {
+                                Button("Edit", systemImage: "pencil") { editingTheme = theme }
+                                    .font(.caption).frame(minHeight: 36).accessibilityIdentifier("theme-edit-\(theme.id)")
+                                PhrenIconButton(icon: "ellipsis", label: "Theme actions") { actionTheme = theme }
+                                    .phrenIdentifier("theme-actions-\(theme.id)")
                             }
-                            Button("Delete theme", role: .destructive) { appearance.remove(theme) }
                         }
                     }
                     Text("PRESETS").font(.caption).foregroundStyle(PhrenTheme.textMuted)
@@ -46,6 +46,20 @@ struct AppearanceSettingsView: View {
         .sheet(item: $editingTheme) { theme in
             NavigationStack { CustomThemeEditor(theme: theme) }
         }
+        .phrenActionSheet(isPresented: $actionTheme.isPresent(), title: "Theme actions",
+                          actions: themeActions, identifier: "theme-actions-sheet")
+    }
+
+    private var themeActions: [PhrenControlAction] {
+        guard let theme = actionTheme else { return [] }
+        return [
+            PhrenControlAction(id: "duplicate", title: "Duplicate", icon: "plus.square.on.square") {
+                editingTheme = .init(name: "\(theme.name) copy", palette: theme.palette)
+            },
+            PhrenControlAction(id: "delete", title: "Delete theme", role: .destructive) {
+                appearance.remove(theme)
+            },
+        ]
     }
 
     private func themeChoice(id: String, name: String, detail: String, palette: PhrenPalette) -> some View {

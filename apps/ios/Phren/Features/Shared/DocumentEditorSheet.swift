@@ -74,18 +74,23 @@ struct DocumentEditorSheet: View {
                                   || !model.canPush(storeId: storeId))
                 }
             }
-            .confirmationDialog("Discard your changes?", isPresented: $confirmingDiscard, titleVisibility: .visible) {
-                Button("Discard changes", role: .destructive) { dismiss() }
-                Button("Keep editing", role: .cancel) {}
-            }
-            .alert("Couldn't save", isPresented: $error.isPresent()) {
-                if latestContent != expectedContent {
-                    Button("Compare versions") {
-                        comparison = DocumentDraft(path: draft.path, content: latestContent)
-                    }
-                }
-                Button("Keep editing", role: .cancel) { error = nil }
-            } message: { Text(error ?? "") }
+            .phrenDialog(
+                isPresented: $confirmingDiscard,
+                title: "Discard your changes?",
+                message: "The edits you made in this draft will be lost.",
+                actions: [
+                    .init(id: "discard", title: "Discard changes", role: .destructive) { dismiss() },
+                    .init(id: "keep", title: "Keep editing", role: .cancel) {},
+                ],
+                identifier: "document-discard-dialog"
+            )
+            .phrenDialog(
+                isPresented: $error.isPresent(),
+                title: "Couldn't save",
+                message: error ?? "",
+                actions: saveErrorActions,
+                identifier: "document-save-error-dialog"
+            )
             .sheet(item: $comparison) { latest in
                 NavigationStack {
                     PhrenList {
@@ -117,6 +122,17 @@ struct DocumentEditorSheet: View {
             }
         }
         .interactiveDismissDisabled(dirty || saving)
+    }
+
+    private var saveErrorActions: [PhrenDialog.Action] {
+        var actions: [PhrenDialog.Action] = []
+        if latestContent != expectedContent {
+            actions.append(.init(id: "compare", title: "Compare versions") {
+                comparison = DocumentDraft(path: draft.path, content: latestContent)
+            })
+        }
+        actions.append(.init(id: "keep-editing", title: "Keep editing", role: .cancel) { error = nil })
+        return actions
     }
 
     private func save() async {

@@ -15,6 +15,7 @@ struct SettingsView: View {
     /// `nil` = "Always ask". Mirrors `QuickCaptureDefault`, held in state so
     /// the picker has something to bind to.
     @State private var captureDefaultId: String?
+    @State private var showingCaptureDefault = false
     @State private var captureLog: [CaptureLogEntry] = []
     @State private var captureQueue = CaptureQueueState()
     /// Drives the health cards' relative "synced Xm ago" text and staleness
@@ -35,6 +36,16 @@ struct SettingsView: View {
     }
 
     private static let needsAttentionAnchor = "needs-attention"
+
+    private var removeStoreActions: [PhrenDialog.Action] {
+        guard let store = removingStore else {
+            return [.init(id: "cancel", title: "Cancel", role: .cancel) {}]
+        }
+        return [
+            .init(id: "remove", title: "Remove store", role: .destructive) { Task { await model.removeStore(id: store.id) } },
+            .init(id: "cancel", title: "Cancel", role: .cancel) {},
+        ]
+    }
 
     var body: some View {
         PhrenNavigationStack {
@@ -291,27 +302,26 @@ struct SettingsView: View {
                     }
                 }
             }
-            .confirmationDialog(
-                "Remove \(removingStore?.id ?? "this store") from this device? The GitHub repository is not affected.",
+            .phrenDialog(
                 isPresented: $removingStore.isPresent(),
-                titleVisibility: .visible
-            ) {
-                Button("Remove store", role: .destructive) {
-                    if let store = removingStore {
-                        Task { await model.removeStore(id: store.id) }
-                    }
-                    removingStore = nil
-                }
-            }
-            .confirmationDialog(
-                "Sign out of GitHub and remove local memory stores? Your agent connections and chat drafts stay on this device.",
+                title: "Remove \(removingStore?.id ?? "this store") from this device?",
+                message: "The GitHub repository is not affected.",
+                actions: removeStoreActions,
+                identifier: "settings-remove-store-dialog"
+            )
+            .phrenDialog(
                 isPresented: $confirmSignOut,
-                titleVisibility: .visible
-            ) {
-                Button("Sign out", role: .destructive) {
-                    Task { await model.signOut() }
-                }
-            }
+                title: "Sign out of GitHub?",
+                message: "Local memory stores are removed from this device. Your agent connections and chat drafts stay.",
+                actions: [
+                    .init(id: "sign-out", title: "Sign out", role: .destructive) { Task { await model.signOut() } },
+                    .init(id: "cancel", title: "Cancel", role: .cancel) {},
+                ],
+                identifier: "settings-sign-out-dialog"
+            )
+            .phrenSingleSelectSheet(isPresented: $showingCaptureDefault, title: "Default project",
+                                    options: captureDefaultOptions, selection: captureDefaultBinding,
+                                    rowPrefix: "settings-capture-default")
             }
             }
         }
@@ -326,18 +336,10 @@ struct SettingsView: View {
     @ViewBuilder
     private var quickCaptureSection: some View {
         Section {
-            Picker("Default project", selection: captureDefaultBinding) {
-                Text("Always ask").tag(String?.none)
-                // Keeps a broken default visible (and selected) instead of
-                // rendering an empty row that looks like "Always ask".
-                if let unavailable = unavailableDefault {
-                    Text("\(unavailable.label) — unavailable").tag(String?.some(unavailable.id))
-                }
-                ForEach(captureTargets, id: \.entityId) { target in
-                    Text(target.displayName).tag(String?.some(target.entityId))
-                }
-            }
-            .disabled(captureTargets.isEmpty && unavailableDefault == nil)
+            PhrenSingleSelect(options: captureDefaultOptions, selection: captureDefaultBinding,
+                              placeholder: "Always ask", identifier: "settings-capture-default",
+                              isPresented: $showingCaptureDefault)
+                .disabled(captureTargets.isEmpty && unavailableDefault == nil)
         } header: {
             Text("Quick capture")
         } footer: {
@@ -349,6 +351,20 @@ struct SettingsView: View {
                 Text("Choose where Siri, Shortcuts, and voice captures are saved. With Always ask, you choose a project each time.")
             }
         }
+    }
+
+    /// "Always ask" first; a broken default stays visible (and selected)
+    /// instead of rendering as if it were "Always ask".
+    private var captureDefaultOptions: [PhrenOption<String?>] {
+        var options = [PhrenOption(id: "always-ask", value: String?.none, title: "Always ask")]
+        if let unavailable = unavailableDefault {
+            options.append(PhrenOption(id: unavailable.id, value: String?.some(unavailable.id),
+                                       title: "\(unavailable.label) — unavailable"))
+        }
+        options.append(contentsOf: captureTargets.map {
+            PhrenOption(id: $0.entityId, value: String?.some($0.entityId), title: $0.displayName)
+        })
+        return options
     }
 
     /// Writes straight through to `QuickCaptureDefault` so the setting is

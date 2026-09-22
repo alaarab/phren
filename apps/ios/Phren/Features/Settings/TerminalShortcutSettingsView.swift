@@ -190,6 +190,8 @@ struct TerminalShortcutEditor: View {
     let isNew: Bool
     let save: (TerminalShortcut) throws -> Void
     @State private var error: String?
+    @State private var showingKind = false
+    @State private var showingAction = false
     private var validation: String? {
         do { try shortcut.validate(); return nil } catch { return error.localizedDescription }
     }
@@ -205,12 +207,9 @@ struct TerminalShortcutEditor: View {
                     .frame(maxWidth: .infinity, minHeight: 64)
             }
             Section {
-                Picker("Shortcut type", selection: $shortcut.kind) {
-                    Text("Key").tag(TerminalShortcut.Kind.key)
-                    Text("Text").tag(TerminalShortcut.Kind.text)
-                    Text("Advanced").tag(TerminalShortcut.Kind.binding)
-                    Text("App action").tag(TerminalShortcut.Kind.action)
-                }.pickerStyle(.menu)
+                PhrenSingleSelect(options: kindOptions, selection: $shortcut.kind,
+                                  placeholder: "Shortcut type", identifier: "shortcut-kind",
+                                  isPresented: $showingKind)
             }
             if shortcut.kind == .key || shortcut.kind == .text { modifiers }
             keyInput
@@ -258,6 +257,23 @@ struct TerminalShortcutEditor: View {
             error = nil
             if kind == .binding || kind == .action { shortcut.modifiers = 0 }
             if kind == .action { shortcut.appendEnter = false; shortcut.value = TerminalShortcut.actions.first! }
+        }
+        .phrenSingleSelectSheet(isPresented: $showingKind, title: "Shortcut type", options: kindOptions,
+                                selection: $shortcut.kind, rowPrefix: "shortcut-kind")
+        .phrenSingleSelectSheet(isPresented: $showingAction, title: "Action", options: actionOptions,
+                                selection: $shortcut.value, rowPrefix: "shortcut-action")
+    }
+    private var kindOptions: [PhrenOption<TerminalShortcut.Kind>] {
+        [PhrenOption(id: "key", value: .key, title: "Key"),
+         PhrenOption(id: "text", value: .text, title: "Text"),
+         PhrenOption(id: "binding", value: .binding, title: "Advanced"),
+         PhrenOption(id: "action", value: .action, title: "App action")]
+    }
+    private var actionOptions: [PhrenOption<String>] {
+        TerminalShortcut.actions.map { action in
+            PhrenOption(id: action, value: action,
+                        title: ["photos": "Photos", "camera": "Camera", "files": "Files",
+                                "workspaces": "Workspaces & panes", "webServers": "Web servers"][action] ?? action)
         }
     }
     private var modifiers: some View {
@@ -311,11 +327,9 @@ struct TerminalShortcutEditor: View {
             footer: { Text("Separate keystrokes with commas. Use Ctrl, Opt, Shift, or C-, M-, S-. Named keys include Esc, Tab, Enter, BSpace, arrows, Home, End, PageUp, PageDown and F1–F12. Use Space, Comma, Plus or Dash for punctuation.") }
         case .action:
             Section("App action") {
-                Picker("Action", selection: $shortcut.value) {
-                    ForEach(TerminalShortcut.actions, id: \.self) { action in
-                        Text(["photos": "Photos", "camera": "Camera", "files": "Files", "workspaces": "Workspaces & panes", "webServers": "Web servers"][action] ?? action).tag(action)
-                    }
-                }
+                PhrenSingleSelect(options: actionOptions, selection: $shortcut.value,
+                                  placeholder: "Action", identifier: "shortcut-action",
+                                  isPresented: $showingAction)
             }
         }
     }

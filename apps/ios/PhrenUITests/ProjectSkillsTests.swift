@@ -39,7 +39,7 @@ final class ProjectSkillsTests: XCTestCase {
         editor.typeText(" Unsaved phone edit.")
         app.buttons["Cancel"].tap()
         XCTAssertTrue(app.buttons["Discard changes"].waitForExistence(timeout: 5))
-        app.otherElements["PopoverDismissRegion"].tap()
+        app.buttons["Keep editing"].tap()
         XCTAssertTrue((editor.value as? String)?.contains("Unsaved phone edit.") == true)
         app.buttons["Cancel"].tap()
         app.buttons["Discard changes"].tap()
@@ -70,7 +70,7 @@ final class ProjectSkillsTests: XCTestCase {
         let picker = app.buttons["skill-move-destination"]
         XCTAssertTrue(picker.waitForExistence(timeout: 5))
         picker.tap()
-        app.buttons["other"].tap()
+        app.buttons["skill-move-destination:other"].tap()
         capture(app, "Move skill destination")
         app.buttons["skill-move-confirm"].tap()
         // The editor closes with the skill; the project list no longer holds it.

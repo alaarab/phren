@@ -143,18 +143,27 @@ struct LiveHostEditor: View {
         .onDisappear {
             if existing == nil && !saved { try? DeviceSSHKey.delete(id) }
         }
-        .confirmationDialog("Forget this computer and delete its SSH key from this iPhone?", isPresented: $removing, titleVisibility: .visible) {
-            Button("Forget computer", role: .destructive) {
-                Task { @MainActor in
-                    do {
-                        let next = try LiveSessionPreferences.removing(id, from: data)
-                        try await SessionOverviewDiskCache.shared.purge(forgetting: id)
-                        try DeviceSSHKey.delete(id)
-                        data = next
-                        dismiss()
-                    } catch { self.error = error.localizedDescription }
-                }
-            }
+        .phrenDialog(
+            isPresented: $removing,
+            title: "Forget this computer and delete its SSH key from this iPhone?",
+            message: "Phren stops connecting to it and removes the saved key. Remove the public key on the computer to revoke access there.",
+            actions: [
+                .init(id: "forget", title: "Forget computer", role: .destructive) { forget() },
+                .init(id: "cancel", title: "Cancel", role: .cancel) {},
+            ],
+            identifier: "live-host-forget-dialog"
+        )
+    }
+
+    private func forget() {
+        Task { @MainActor in
+            do {
+                let next = try LiveSessionPreferences.removing(id, from: data)
+                try await SessionOverviewDiskCache.shared.purge(forgetting: id)
+                try DeviceSSHKey.delete(id)
+                data = next
+                dismiss()
+            } catch { self.error = error.localizedDescription }
         }
     }
 
