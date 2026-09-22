@@ -69,5 +69,42 @@ final class ScheduleRoutesTests: XCTestCase {
         XCTAssertEqual(run.status, .finished)
         XCTAssertNil(run.notified)
         XCTAssertNil(run.notifyReason)
+        XCTAssertNil(run.blockedStartupPrompt)
+    }
+
+    func testBlockedRunDecodesStatusAndPromptText() throws {
+        let data = Data(#"""
+        {
+          "id":"run-2","scheduleId":"7f3a2c1d","project":"phone-kit",
+          "startedAt":"2026-09-21T08:00:00Z","status":"blocked",
+          "blockedStartupPrompt":"Allow external CLAUDE.md file imports?",
+          "launch":{"mode":"herdr","workspaceId":"w1","tabId":"w1:t1","paneId":"w1:p1"}
+        }
+        """#.utf8)
+
+        let run = try JSONDecoder().decode(ScheduleRun.self, from: data)
+
+        XCTAssertEqual(run.status, .blocked)
+        XCTAssertEqual(run.blockedStartupPrompt, "Allow external CLAUDE.md file imports?")
+    }
+
+    func testSchedulesListDecodesALatestBlockedRun() throws {
+        let data = Data(#"""
+        {
+          "id":"7f3a2c1d","name":"Nightly","enabled":true,"computer":"Desk",
+          "harness":"codex","every":"daily","at":"07:30","prompt":"Test",
+          "createdAt":"2026-09-20T21:00:00Z","updatedAt":"2026-09-20T21:00:00Z",
+          "project":"phone-kit","nextRun":null,"running":true,
+          "lastRun":{"id":"run-2","scheduleId":"7f3a2c1d","project":"phone-kit",
+            "startedAt":"2026-09-21T08:00:00Z","status":"blocked",
+            "blockedStartupPrompt":"Do you trust the files in this folder?",
+            "launch":{"mode":"herdr","workspaceId":"w1","tabId":"w1:t1","paneId":"w1:p1"}}
+        }
+        """#.utf8)
+
+        let status = try JSONDecoder().decode(ScheduleStatus.self, from: data)
+        XCTAssertEqual(status.lastRun?.status, .blocked)
+        XCTAssertEqual(status.lastRun?.blockedStartupPrompt, "Do you trust the files in this folder?")
+        XCTAssertTrue(status.running)
     }
 }

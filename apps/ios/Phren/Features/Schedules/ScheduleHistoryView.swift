@@ -87,7 +87,8 @@ struct ScheduleHistoryView: View {
                 }
                 Text(statusText(run))
                     .font(PhrenTypography.caption)
-                    .foregroundStyle(run.status == .failed ? PhrenTheme.danger : PhrenTheme.textSecondary)
+                    .foregroundStyle(run.status == .failed ? PhrenTheme.danger
+                                     : run.status == .blocked ? PhrenTheme.stateWaiting : PhrenTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.vertical, PhrenTheme.Space.small)
@@ -148,13 +149,16 @@ struct ScheduleHistoryView: View {
             tabID: tab,
             label: schedule.name,
             agent: schedule.harness.rawValue,
-            agentStatus: run.status == .running ? "working" : "idle",
+            agentStatus: run.status == .running ? "working" : run.status == .blocked ? "waiting" : "idle",
             cwd: cwd
         ) else { return }
         if let url = SessionWorkingActivityController.shared.routeURL(for: session) { openURL(url) }
     }
 
     private func statusText(_ run: ScheduleRun) -> String {
+        if run.status == .blocked, let prompt = run.blockedStartupPrompt, !prompt.isEmpty {
+            return "blocked: \(prompt)"
+        }
         guard let reason = run.reason, !reason.isEmpty else { return run.status.rawValue }
         return "\(run.status.rawValue): \(reason)"
     }
@@ -164,12 +168,12 @@ struct ScheduleHistoryView: View {
         case .finished: PhrenTheme.stateDone
         case .failed: PhrenTheme.danger
         case .launched, .running: PhrenTheme.stateWorking
-        case .skipped: PhrenTheme.stateWaiting
+        case .blocked, .skipped: PhrenTheme.stateWaiting
         }
     }
 
     private func duration(_ run: ScheduleRun) -> String {
-        let end = run.finishedAt ?? ([.running, .launched].contains(run.status) ? .now : run.startedAt)
+        let end = run.finishedAt ?? ([.running, .launched, .blocked].contains(run.status) ? .now : run.startedAt)
         let seconds = max(0, Int(end.timeIntervalSince(run.startedAt)))
         let hours = seconds / 3_600
         let minutes = (seconds % 3_600) / 60

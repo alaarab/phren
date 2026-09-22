@@ -463,6 +463,7 @@ struct ScheduleRow: View {
         if state?.running == true { return PhrenTheme.stateWorking }
         if !schedule.enabled { return PhrenTheme.textDim }
         if state?.lastRun?.status == .failed { return PhrenTheme.stateWaiting }
+        if state?.lastRun?.status == .blocked { return PhrenTheme.stateWaiting }
         return PhrenTheme.stateDone
     }
 
@@ -489,12 +490,16 @@ struct ScheduleRow: View {
 
     private var lastRunIcon: String {
         if state?.running == true { return "circle.fill" }
-        return state?.lastRun?.status == .failed ? "xmark" : "checkmark"
+        if state?.lastRun?.status == .failed { return "xmark" }
+        if state?.lastRun?.status == .blocked { return "exclamationmark.triangle" }
+        return "checkmark"
     }
 
     private var lastRunColor: Color {
         if state?.running == true { return PhrenTheme.stateWorking }
-        return state?.lastRun?.status == .failed ? PhrenTheme.danger : PhrenTheme.stateDone
+        if state?.lastRun?.status == .failed { return PhrenTheme.danger }
+        if state?.lastRun?.status == .blocked { return PhrenTheme.stateWaiting }
+        return PhrenTheme.stateDone
     }
 
     private var accessibilityText: String {

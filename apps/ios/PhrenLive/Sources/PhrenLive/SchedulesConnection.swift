@@ -4,7 +4,7 @@ import PhrenKit
 /// One execution recorded by Phren Hook in the computer-local run log.
 public struct ScheduleRun: Decodable, Equatable, Identifiable, Sendable {
     public enum Status: String, Decodable, Equatable, Sendable {
-        case launched, running, finished, failed, skipped
+        case launched, running, blocked, finished, failed, skipped
     }
 
     public struct Launch: Decodable, Equatable, Sendable {
@@ -43,12 +43,14 @@ public struct ScheduleRun: Decodable, Equatable, Identifiable, Sendable {
     public let finishedAt: Date?
     public let status: Status
     public let reason: String?
+    public let blockedStartupPrompt: String?
     public let notified: Bool?
     public let notifyReason: String?
     public let launch: Launch
 
     public init(id: String, scheduleID: String, project: String, startedAt: Date,
                 finishedAt: Date? = nil, status: Status, reason: String? = nil,
+                blockedStartupPrompt: String? = nil,
                 notified: Bool? = nil, notifyReason: String? = nil, launch: Launch) {
         self.id = id
         self.scheduleID = scheduleID
@@ -57,6 +59,7 @@ public struct ScheduleRun: Decodable, Equatable, Identifiable, Sendable {
         self.finishedAt = finishedAt
         self.status = status
         self.reason = reason
+        self.blockedStartupPrompt = blockedStartupPrompt
         self.notified = notified
         self.notifyReason = notifyReason
         self.launch = launch
@@ -71,13 +74,14 @@ public struct ScheduleRun: Decodable, Equatable, Identifiable, Sendable {
         finishedAt = try values.decodeIfPresent(String.self, forKey: .finishedAt).map(scheduleTimestamp)
         status = try values.decode(Status.self, forKey: .status)
         reason = try values.decodeIfPresent(String.self, forKey: .reason)
+        blockedStartupPrompt = try values.decodeIfPresent(String.self, forKey: .blockedStartupPrompt)
         notified = try values.decodeIfPresent(Bool.self, forKey: .notified)
         notifyReason = try values.decodeIfPresent(String.self, forKey: .notifyReason)
         launch = try values.decode(Launch.self, forKey: .launch)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, project, startedAt, finishedAt, status, reason, notified, notifyReason, launch
+        case id, project, startedAt, finishedAt, status, reason, blockedStartupPrompt, notified, notifyReason, launch
         case scheduleID = "scheduleId"
     }
 }

@@ -9,7 +9,7 @@ extension PhrenConnection {
         let body = try JSONSerialization.data(withJSONObject: ["deviceID": deviceID.uuidString.lowercased(),
                                                                "hostID": host.id.uuidString.lowercased(), "token": token,
                                                                "environment": production ? "production" : "development",
-                                                               "kinds": ["approval", "scheduleStarted", "scheduleFinished", "scheduleFailed"]])
+                                                               "kinds": ["approval", "scheduleStarted", "scheduleFinished", "scheduleFailed", "scheduleBlocked"]])
         try requireOK(await fetchData(host: host, key: .init(rawRepresentation: privateKey),
                                       request: .init(path: "/v1/push/register", body: body)))
     }

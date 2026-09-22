@@ -47,6 +47,31 @@ function payload() {
   return { nodes, links, topics: [], total: nodes.length };
 }
 
+/** 40 projects x 8 findings: the survey's largest scale, for frame timing. */
+function largePayload() {
+  const nodes = [];
+  const links = [];
+  for (let p = 0; p < 40; p++) {
+    const project = `proj-${String(p).padStart(2, "0")}`;
+    nodes.push({ id: project, label: project, fullLabel: project, group: "project", project,
+                 store: "owner/brain", tagged: false, findingCount: 8, taskCount: 0 });
+    for (let n = 0; n < 8; n++) {
+      const id = `${project}:${n}`;
+      nodes.push({ id, label: `Finding ${n + 1}`, fullLabel: `${project}: finding ${n + 1} under load`,
+                   group: "topic:architecture", project, store: "owner/brain",
+                   tagged: true, scoreKey: `${project}/FINDINGS.md:${n}`, refCount: 1 });
+      links.push({ source: project, target: id });
+    }
+  }
+  return { nodes, links, topics: [], total: nodes.length };
+}
+
+test("bundle contains the shared collision resolver", async () => {
+  const bundle = await readFile(new URL("phren-graph.js", root), "utf8");
+  assert.ok(bundle.includes("hysteresisPx"), "phren-graph.js must ship resolveLabelOverlaps options");
+  assert.ok(bundle.includes("previousVisible"), "phren-graph.js must ship hysteresis state");
+});
+
 test("phone graph renders, selects nodes, and accepts camera commands", { timeout: 60000 }, async () => {
   const page = await browser.newPage({ viewport: { width: 393, height: 620 }, isMobile: true, hasTouch: true });
   const errors = [];
@@ -104,6 +129,62 @@ test("phone graph renders, selects nodes, and accepts camera commands", { timeou
   assert.deepEqual(errors, []);
   assert.deepEqual(await page.evaluate(() => window.messages.filter(message => message.name === "graphError")), []);
   assert.ok(requests.every(url => url.startsWith(baseURL)), "graph must not depend on remote assets");
+  await page.close();
+});
+
+test("no visible finding label overlaps a project label at default zoom", { timeout: 60000 }, async () => {
+  const page = await browser.newPage({ viewport: { width: 393, height: 620 }, isMobile: true, hasTouch: true });
+  page.on("pageerror", error => assert.fail(`page error: ${error.message}`));
+  await page.addInitScript(() => {
+    window.messages = [];
+    window.webkit = { messageHandlers: Object.fromEntries(["graphReady", "graphSelect", "graphError"].map(
+      name => [name, { postMessage: body => window.messages.push({ name, body }) }]
+    )) };
+  });
+  await page.goto(baseURL);
+  await page.waitForFunction(() => window.messages.some(message => message.name === "graphReady"));
+  await page.evaluate(graph => window.phrenHost.render(graph), payload());
+  await page.waitForFunction(() => window.phrenGraph?.getData().nodes.length === 39);
+  // Default zoom: intro/fit must have settled before reading label rects.
+  await page.waitForTimeout(3500);
+  const overlaps = await page.evaluate(() => {
+    const visible = el => {
+      if (!el || el.classList.contains("occluded")) return false;
+      const style = getComputedStyle(el);
+      if (style.display === "none" || style.visibility === "hidden") return false;
+      return parseFloat(style.opacity || "0") > 0.01;
+    };
+    const boxes = el => {
+      const r = el.getBoundingClientRect();
+      return { x0: r.left, y0: r.top, x1: r.right, y1: r.bottom };
+    };
+    const hit = (a, b) => a.x0 < b.x1 && a.x1 > b.x0 && a.y0 < b.y1 && a.y1 > b.y0;
+    const projects = [...document.querySelectorAll(".phren-label--project")].filter(visible).map(boxes);
+    const leaves = [...document.querySelectorAll(".phren-label:not(.phren-label--project)")].filter(visible);
+    const bad = [];
+    for (const leaf of leaves) {
+      const lb = boxes(leaf);
+      if (projects.some(pb => hit(lb, pb))) bad.push(leaf.textContent.slice(0, 60));
+    }
+    return { projectCount: projects.length, leafCount: leaves.length, bad };
+  });
+  // The resolver may hide every leaf at default zoom; when any draw, none
+  // may sit on top of PHREN/LEDGER-style group labels (the reported bug).
+  assert.deepEqual(overlaps.bad, [], `finding labels over project labels: ${overlaps.bad.join(" | ")}`);
+  assert.ok(overlaps.projectCount > 0, "expected at least one visible project label");
+
+  // Frame budget on the same page: swap in the 40-project store and time
+  // 60 labelTicks (declutter every frame, pool reassign on the 0.15s LOD).
+  // typeof must be evaluated in-page: Playwright cannot serialize a function
+  // result across the bridge, so returning `phrenGraph.benchLabels` would be
+  // undefined even when the method exists.
+  const hasBench = await page.evaluate(() => typeof window.phrenGraph?.benchLabels === "function");
+  assert.equal(hasBench, true, "bundle must expose benchLabels for the frame-budget probe");
+  await page.evaluate(graph => window.phrenHost.render(graph), largePayload());
+  await page.waitForFunction(() => window.phrenGraph?.getData().nodes.length === 360);
+  const ms = await page.evaluate(() => window.phrenGraph.benchLabels(60));
+  assert.ok(Number.isFinite(ms) && ms >= 0, `benchLabels returned ${ms}`);
+  console.log(`# browser labelTick 60 frames on 40-project store: ${ms.toFixed(1)} ms (${(ms / 60).toFixed(2)} ms/frame)`);
   await page.close();
 });
 

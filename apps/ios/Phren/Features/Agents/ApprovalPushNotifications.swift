@@ -57,7 +57,7 @@ final class PhrenAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificatio
 }
 
 struct SchedulePushNotification: Equatable {
-    enum Kind: String { case scheduleStarted, scheduleFinished, scheduleFailed }
+    enum Kind: String { case scheduleStarted, scheduleFinished, scheduleFailed, scheduleBlocked }
     struct SessionRoute: Codable, Equatable {
         let server: String
         let workspace: String
@@ -96,7 +96,7 @@ struct SchedulePushNotification: Equatable {
               let computer = value["computer"] as? String, !computer.isEmpty,
               let runID = value["runId"] as? String, !runID.isEmpty,
               let status = value["status"] as? String,
-              ["running", "finished", "failed"].contains(status) else { return nil }
+              ["running", "finished", "failed", "blocked"].contains(status) else { return nil }
         self.kind = kind; self.scheduleID = scheduleID; self.project = project; self.name = name
         self.computer = computer; self.runID = runID; self.status = status
         reason = value["reason"] as? String
@@ -104,7 +104,8 @@ struct SchedulePushNotification: Equatable {
     }
 
     var title: String {
-        let state = kind == .scheduleStarted ? "started" : kind == .scheduleFinished ? "finished" : "failed"
+        let state = kind == .scheduleStarted ? "started" : kind == .scheduleFinished ? "finished"
+            : kind == .scheduleBlocked ? "blocked" : "failed"
         return "\(name) \(state)"
     }
     var body: String { "\(project) on \(computer)\(reason.map { ". \($0)" } ?? "")" }
@@ -134,8 +135,9 @@ enum SchedulePushNotifications {
                     && host.muxID == "herdr:\(route.server)"
             }),
                let session = try? AgentLaunch.session(host: host, workspaceID: route.workspace, tabID: route.tab,
-                                                      label: notification.name, agent: route.source,
-                                                      agentStatus: notification.status == "running" ? "working" : "idle", cwd: "/") {
+                                                       label: notification.name, agent: route.source,
+                                                       agentStatus: notification.status == "running" ? "working"
+                                                        : notification.status == "blocked" ? "waiting" : "idle", cwd: "/") {
                 AgentLaunch.setPending(session)
                 return
             }
