@@ -14,4 +14,19 @@ extension XCTestCase {
         attachment.lifetime = .keepAlways
         add(attachment)
     }
+
+    /// Open the pushed Memory graph screen from the Projects tab. The Explore
+    /// list no longer carries a Memory graph row (the Memory tab is the graph
+    /// now), so these tests go through the toolbar's More menu instead.
+    @MainActor
+    func openMemoryGraph(from app: XCUIApplication) {
+        let more = app.buttons["More"]
+        XCTAssertTrue(more.waitForExistence(timeout: 8), "Projects toolbar offers More")
+        more.tap()
+        // iOS exposes both the menu action and the obscured list shortcut.
+        let item = app.buttons.matching(NSPredicate(format: "label == %@", "Memory graph"))
+            .allElementsBoundByIndex.first { $0.isHittable }
+        XCTAssertNotNil(item, "More menu offers Memory graph")
+        item?.tap()
+    }
 }

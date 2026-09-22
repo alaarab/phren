@@ -32,14 +32,4 @@ public struct AgentMenuChoice: Identifiable, Equatable, Sendable {
     public static func keys(selecting index: Int) -> [AgentAnswerKey] {
         Array(repeating: .down, count: max(0, index)) + [.enter]
     }
-
-    /// Keys a choice needs after the menu closes: Codex answers "Full
-    /// Access" with a second "Enable full access?" dialog whose default is
-    /// "Yes, continue anyway", so one more Enter confirms it. Empty otherwise.
-    public static func confirmationKeys(command: String, source: String, index: Int) -> [AgentAnswerKey] {
-        switch (source, command, index) {
-        case ("codex", "/permissions", 2): return [.enter]
-        default: return []
-        }
-    }
 }

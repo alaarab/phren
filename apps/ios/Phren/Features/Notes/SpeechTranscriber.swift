@@ -118,12 +118,17 @@ final class SpeechTranscriber: DictationRecognizing {
             }
             request = recognitionRequest
 
+            // Reassert the session on every segment, not only the first. A
+            // send dismisses the keyboard and hands the MainActor to the
+            // network; the session can stop delivering input while the flag
+            // still reads active, and the fresh tap would then append to a
+            // request that never hears anything. setActive(true) on an
+            // already-active session is a no-op, so pause restarts pay
+            // nothing for the guarantee.
             let session = AVAudioSession.sharedInstance()
-            if !audioSessionActive {
-                try session.setCategory(.record, mode: .measurement, options: [.duckOthers])
-                try session.setActive(true, options: .notifyOthersOnDeactivation)
-                audioSessionActive = true
-            }
+            try session.setCategory(.record, mode: .measurement, options: [.duckOthers])
+            try session.setActive(true, options: .notifyOthersOnDeactivation)
+            audioSessionActive = true
 
             let inputNode = audioEngine.inputNode
             let format = inputNode.outputFormat(forBus: 0)

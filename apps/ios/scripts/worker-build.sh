@@ -17,6 +17,9 @@ readonly DERIVED_ROOT="${PHREN_IOS_DERIVED_ROOT:-/tmp/phren-ios-derived}"
 readonly MIN_FREE_KB=$((8 * 1024 * 1024)) # 8 GB
 readonly KEEP_ATTACHMENTS=5
 readonly CLEAN_AGE_DAYS=2
+# Where test .xcresult bundles and their exported attachments land: an
+# overridable path, else the gitignored apps/ios/.scratch.
+readonly RESULTS_DIR="${PHREN_RESULTS_DIR:-$IOS_DIR/.scratch}"
 
 err() { printf 'worker-build: %s\n' "$*" >&2; }
 
@@ -32,6 +35,9 @@ usage: worker-build.sh <family> build <simulator-udid> [-- <xcodebuild args>]
   test     xcodebuild test-without-building, export attachments, drop bundle
   clean    remove derived-data families older than 2 days, print freed space
   status   print each family's size and free disk
+
+  PHREN_RESULTS_DIR  where test .xcresult bundles and attachments are written
+                     (default: apps/ios/.scratch, gitignored)
 EOF
 }
 
@@ -113,11 +119,14 @@ run_test() {
   local family="$1" udid="$2"
   shift 2
   local dir="$(family_dir "$family")"
-  local results="$dir/results"
+  local results="$RESULTS_DIR"
   local ts bundle attachments
   mkdir -p "$dir"
   require_disk
   mkdir -p "$results"
+  # Resolve before the subshell changes directory, so a relative
+  # PHREN_RESULTS_DIR still points at the caller's path.
+  results="$(cd "$results" && pwd)"
   ts="$(date +%Y%m%d-%H%M%S)-$$"
   bundle="$results/$ts.xcresult"
   attachments="$results/$ts-attachments"

@@ -13,7 +13,7 @@ final class AccountUsageTests: XCTestCase {
     }
     func testSameAccountOnTwoComputersKeepsTheNewestReportIntact() throws {
         let now = try XCTUnwrap(ISO8601Dates.parse("2026-09-15T20:30:00Z"))
-        let mac = try AccountUsageSnapshot.read(Data(#"{"accounts":[{"source":"codex","windows":[],"message":"Sign in"},{"source":"claude","updatedAt":"2026-09-15T20:29:30Z","windows":[{"id":"five_hour","name":"5-hour limit","usedPercent":40},{"id":"seven_day","name":"7-day, all models","usedPercent":16},{"id":"seven_day_fable","name":"7-day, Fable","usedPercent":18,"asOf":"2026-09-14T08:06:00Z"}]}]}"#.utf8))
+        let mac = try AccountUsageSnapshot.read(Data(#"{"accounts":[{"source":"codex","windows":[],"message":"Sign in"},{"source":"claude","origin":"status-line","updatedAt":"2026-09-15T20:29:30Z","windows":[{"id":"five_hour","name":"5-hour limit","usedPercent":40},{"id":"seven_day","name":"7-day, all models","usedPercent":16},{"id":"seven_day_fable","name":"7-day, Fable","usedPercent":18,"asOf":"2026-09-14T08:06:00Z"}]}]}"#.utf8))
         let remote = try AccountUsageSnapshot.read(Data(#"{"accounts":[{"source":"codex","updatedAt":"2026-09-15T20:29:40Z","windows":[{"id":"codex:primary","name":"7-day limit","usedPercent":90}]},{"source":"claude","updatedAt":"2026-09-15T20:29:00Z","windows":[{"id":"five_hour","name":"5-hour limit","usedPercent":13},{"id":"seven_day","name":"7-day, all models","usedPercent":70},{"id":"seven_day_fable","name":"7-day, Fable","usedPercent":89,"asOf":"2026-09-15T18:00:00Z"}]}]}"#.utf8))
         let merged = MergedAccountUsage.merge([("Desk", mac), ("Desk 2", remote)], at: now)
         XCTAssertEqual(merged.map(\.source), ["codex", "claude"])
@@ -26,6 +26,7 @@ final class AccountUsageTests: XCTestCase {
         XCTAssertEqual(claude.windows.map(\.name), ["5-hour limit", "7-day, all models", "7-day, Fable"])
         XCTAssertEqual(claude.primaryWindow?.id, "five_hour")
         XCTAssertEqual(claude.primaryWindow?.usedPercent, 40)
+        XCTAssertEqual(claude.origin, "status-line")
         XCTAssertEqual(claude.updatedAt, ISO8601Dates.parse("2026-09-15T20:29:30Z"))
         XCTAssertFalse(claude.stale)
         XCTAssertEqual(MergedAccountUsage.merge([("Desk", nil)], at: now), [])
@@ -34,6 +35,25 @@ final class AccountUsageTests: XCTestCase {
         let value = try AccountUsageSnapshot.read(Data(#"{"accounts":[{"source":"codex","windows":[],"message":"Sign in"}]}"#.utf8))
         XCTAssertTrue(value.accounts[0].windows.isEmpty)
         XCTAssertNil(value.accounts[0].updatedDate)
+    }
+    /// The header ring draws primaryWindow, which must be the first window
+    /// the Account usage page shows (Claude's 5-hour window), even when the
+    /// per-model weekly allowance or the all-models window is higher.
+    func testRingBindsToTheFiveHourWindowThePageShowsFirst() throws {
+        let now = try XCTUnwrap(ISO8601Dates.parse("2026-09-15T20:30:00Z"))
+        let claudeReport = try AccountUsageSnapshot.read(Data(#"{"accounts":[{"source":"claude","origin":"status-line","updatedAt":"2026-09-15T20:29:30Z","windows":[{"id":"seven_day_fable","name":"7-day, Fable","usedPercent":90},{"id":"seven_day","name":"7-day, all models","usedPercent":70},{"id":"five_hour","name":"5-hour limit","usedPercent":5}]}]}"#.utf8))
+        let codexReport = try AccountUsageSnapshot.read(Data(#"{"accounts":[{"source":"codex","updatedAt":"2026-09-15T20:29:30Z","windows":[{"id":"codex:primary","name":"5-hour limit","usedPercent":23.5},{"id":"codex:secondary","name":"7-day limit","usedPercent":41.2}]}]}"#.utf8))
+        let merged = MergedAccountUsage.merge([("Desk", claudeReport), ("Desk 2", codexReport)], at: now)
+
+        let claude = try XCTUnwrap(merged.first { $0.source == "claude" })
+        XCTAssertEqual(claude.displayWindows.map(\.id), ["five_hour", "seven_day_fable", "seven_day"])
+        XCTAssertEqual(claude.primaryWindow?.id, "five_hour", "The ring never jumps to a higher window")
+        XCTAssertEqual(claude.primaryWindow?.usedPercent, 5)
+
+        let codex = try XCTUnwrap(merged.first { $0.source == "codex" })
+        XCTAssertEqual(codex.displayWindows.map(\.id), ["codex:primary", "codex:secondary"])
+        XCTAssertEqual(codex.primaryWindow?.id, "codex:primary", "The 5-hour window the page shows first, not the higher 7-day one")
+        XCTAssertEqual(codex.primaryWindow?.usedPercent, 23.5)
     }
     func testOpenCodeCostsSumAndDuplicateOpenRouterKeysCountOnce() throws {
         let now = try XCTUnwrap(ISO8601Dates.parse("2026-09-19T18:30:00Z"))

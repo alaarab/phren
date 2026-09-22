@@ -111,7 +111,11 @@ enum AccountUsagePresentation {
         guard source == "claude" else { return shortName(window.name) }
         if window.id == "seven_day" { return "7-day, all models" }
         if window.id.hasPrefix("seven_day_") {
-            return shortName(window.name).replacingOccurrences(of: "7-day · ", with: "7-day, ")
+            // Fable's weekly window is its own allowance with its own reset,
+            // not a subset of the all-models window it can exceed. "only"
+            // says so in the label.
+            let own = shortName(window.name).replacingOccurrences(of: "7-day · ", with: "7-day, ")
+            return own.hasSuffix(" only") ? own : own + " only"
         }
         return shortName(window.name)
     }

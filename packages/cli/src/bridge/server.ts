@@ -424,8 +424,9 @@ export async function serve(version: string): Promise<void> {
             const outcome = await expected;
             if (outcome === "blocked") throw new BridgeError(409, "The conversation in this pane changed; the message was not delivered. Reopen the chat and send it again.");
             // A bare slash command opens the agent's own menu; the phone may
-            // walk it with keys for the next half minute.
-            if (/^\/[a-z][a-z0-9_-]*$/i.test(text.trim())) agentHooks.menuOpened(target);
+            // walk it with keys for the next half minute. The command rides
+            // along so a Codex /permissions walk can find its confirmation.
+            if (/^\/[a-z][a-z0-9_-]*$/i.test(text.trim())) agentHooks.menuOpened(target, text.trim());
             if (outcome === "delivered") { result = { ok: true, delivered: true }; }
             else {
               // The agent has not submitted it yet (a busy agent queues typed
@@ -452,10 +453,19 @@ export async function serve(version: string): Promise<void> {
             await rpc(target.server, "agent.send_keys", { target: target.pane, keys: keys.map(key => HERDR_KEYS[key] ?? key) });
             // A remembered prompt is answered by any key but a cursor move; the
             // menu window stays open through Enter because some choices (Codex
-            // full access) open a second confirmation the phone still walks.
+            // full access) open a second confirmation the Hook now walks itself.
             if (keys.some(key => key !== "Up" && key !== "Down" && key !== "Tab")) { agentHooks.clearTerminalPrompt(target); agentHooks.releaseChoice(target); }
             if (keys.includes("Escape")) agentHooks.menuClosed(target);
-            result = { ok: true };
+            // Enter on Codex's /permissions menu may open "Enable full access?".
+            // Watch the pane's lines for it, answer with 1 then Enter, and only
+            // then close the window; a prompt that never arrives is reported as
+            // still waiting with the visible text for the phone's question card.
+            if (keys.includes("Enter") && menu && target.source === "codex"
+              && (agentHooks.menuCommand(target) ?? "").toLowerCase() === "/permissions") {
+              const walk = await agentHooks.walkMenuConfirmation(target);
+              result = { ok: true, ...(walk.menuClosed ? { menuClosed: true } : {}),
+                ...(walk.waiting ? { waiting: walk.waiting } : {}) };
+            } else result = { ok: true };
           } else if (url.pathname === "/v1/secret") {
             // A password the terminal is reading (sudo, a login) cannot be
             // pasted: bracketed paste corrupts a tty read, so it is typed a

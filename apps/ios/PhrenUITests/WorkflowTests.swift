@@ -32,9 +32,9 @@ final class WorkflowTests: XCTestCase {
         let project = app.buttons["project:sample/brain:demo"]
         XCTAssertTrue(project.waitForExistence(timeout: 8))
         XCTAssertLessThanOrEqual(project.frame.height, 60)
-        let graph = app.buttons["Memory graph"].firstMatch
-        XCTAssertTrue(graph.exists)
-        XCTAssertLessThanOrEqual(graph.frame.height, 60)
+        let explore = app.buttons["Files"].firstMatch
+        XCTAssertTrue(explore.exists)
+        XCTAssertLessThanOrEqual(explore.frame.height, 60)
         attachUIScreenshot(app, "Compact grouped projects and Explore rows")
     }
 

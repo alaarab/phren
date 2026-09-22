@@ -96,10 +96,11 @@ WHAT TO TRY
    captures and their destinations, and quick-capture defaults. Open Memory
    maintenance for project groups, a copyable agent request, and manual batch
    selection. The filter menu also offers optional individual triage.
-6. Optional: the microphone button on the Projects tab dictates a note or
-   task using on-device speech recognition. Siri shortcuts ("Add a phren
-   task") do the same hands-free. Both are optional; declining the
-   microphone and speech permissions leaves every other feature working.
+6. Optional: Siri shortcuts ("Add a phren task", "Add a phren note") dictate
+   a task or note hands-free, including from the Lock Screen. Declining the
+   microphone and speech permissions leaves every other feature working;
+   chat and voice dictation simply stay off until the permissions are allowed
+   in Settings.
 
 
 ON GUIDELINE 4.2 (MINIMUM FUNCTIONALITY)

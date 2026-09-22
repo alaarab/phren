@@ -99,9 +99,7 @@ final class TrailerTour: XCTestCase {
         app.tabBars.buttons["Projects"].tap()
         XCTAssertTrue(app.buttons["project:alaarab/memory:ledger"].waitForExistence(timeout: 10))
         settle(3.5)
-        let graph = app.buttons["Memory graph"]
-        XCTAssertTrue(graph.waitForExistence(timeout: 10))
-        graph.tap()
+        openMemoryGraph(from: app)
         // The graph has content once a project label is in the page.
         XCTAssertTrue(app.webViews.staticTexts["LEDGER"].firstMatch.waitForExistence(timeout: 25))
         let canvas = app.webViews.firstMatch

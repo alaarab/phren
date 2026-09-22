@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import plistlib
 import re
+import shutil
 import subprocess
 
 parser = argparse.ArgumentParser(description=__doc__)
@@ -17,60 +18,95 @@ parser.add_argument("--allow-token-sign-in", action="store_true", help="Permit a
 export = parser.add_mutually_exclusive_group()
 export.add_argument("--export", action="store_true", help="Export a signed IPA for App Store Connect")
 export.add_argument("--upload", action="store_true", help="Upload the archive to App Store Connect for TestFlight")
-args = parser.parse_args()
-if args.build_number < 1:
-    parser.error("Build number must be positive and higher than the last uploaded build.")
+
+
+def prune_archives(root, keep=3):
+    """Delete archive directories under `root` beyond the newest `keep`.
+
+    Each `build-<n>` directory holds one .xcarchive, so directories are the
+    archives; stray files are left alone and a missing root prunes nothing.
+    """
+    if not root.is_dir():
+        return []
+    directories = sorted(
+        (entry for entry in root.iterdir() if entry.is_dir()),
+        key=lambda entry: entry.stat().st_mtime,
+        reverse=True,
+    )
+    removed = []
+    for stale in directories[keep:]:
+        shutil.rmtree(stale)
+        removed.append(stale)
+    return removed
+
 
 root = Path(__file__).resolve().parents[1]
+
+
 def run(command, **kwargs):
     return subprocess.run(command, cwd=root, check=True, **kwargs)
 
-import changelog
-version = changelog.require_entry()
-print(f"Archiving Phren {version} build {args.build_number}.", flush=True)
-run(["xcodegen", "generate"])
-settings = [f"CURRENT_PROJECT_VERSION={args.build_number}", "CODE_SIGN_STYLE=Automatic"]
-if args.team:
-    settings.append(f"DEVELOPMENT_TEAM={args.team}")
-if args.client_id:
-    settings.append(f"PHREN_GITHUB_CLIENT_ID={args.client_id}")
-base = ["xcodebuild", "-project", "Phren.xcodeproj", "-scheme", "Phren", "-configuration", "Release"]
-resolved = json.loads(run(base + ["-showBuildSettings", "-json"] + settings, capture_output=True, text=True).stdout)
-app = next(target["buildSettings"] for target in resolved if target["target"] == "Phren")
-team = app.get("DEVELOPMENT_TEAM", "")
-client_id = app.get("PHREN_GITHUB_CLIENT_ID", "").strip()
-if not re.fullmatch(r"[A-Z0-9]{10}", team):
-    parser.error("Set DEVELOPMENT_TEAM in Config/Local.xcconfig or pass --team.")
-configured = bool(re.fullmatch(r"[A-Za-z0-9._-]+", client_id)) and not client_id.startswith(("YOUR_", "REPLACE_WITH_"))
-if not configured and not args.allow_token_sign_in:
-    parser.error("Set a registered OAuth client ID, or explicitly use --allow-token-sign-in.")
 
-output = args.output.expanduser().resolve() / f"build-{args.build_number}"
-archive = output / "Phren.xcarchive"
-if archive.exists():
-    parser.error(f"Archive already exists: {archive}. Choose another build number or output directory.")
-output.mkdir(parents=True, exist_ok=True)
-run(base + ["archive", "-destination", "generic/platform=iOS", "-archivePath", str(archive),
-            "-allowProvisioningUpdates", "-skipPackagePluginValidation"] + settings)
-print(f"Signed archive: {archive}")
-if args.export or args.upload:
-    options = output / "ExportOptions.plist"
-    options.write_bytes(plistlib.dumps({
-        "method": "app-store-connect", "teamID": team, "signingStyle": "automatic",
-        "destination": "upload" if args.upload else "export", "manageAppVersionAndBuildNumber": False,
-        "uploadSymbols": True,
-    }))
-    # An App Store Connect API key (~/.config/ios-release.json: key_id,
-    # issuer_id, key_path) lets the export and upload run without an Apple ID
-    # signed into Xcode — the same file mina's release script reads.
-    authentication = []
-    credentials = Path.home() / ".config/ios-release.json"
-    if credentials.exists():
-        saved = json.loads(credentials.read_text())
-        key_path = Path(saved.get("key_path", "")).expanduser()
-        if saved.get("key_id") and saved.get("issuer_id") and key_path.exists():
-            authentication = ["-authenticationKeyPath", str(key_path), "-authenticationKeyID", saved["key_id"],
-                              "-authenticationKeyIssuerID", saved["issuer_id"]]
-    run(["xcodebuild", "-exportArchive", "-archivePath", str(archive), "-exportPath", str(output / "export"),
-         "-exportOptionsPlist", str(options), "-allowProvisioningUpdates"] + authentication)
-    print("Uploaded to App Store Connect; wait for processing in TestFlight." if args.upload else f"Exported IPA: {output / 'export'}")
+def main() -> None:
+    args = parser.parse_args()
+    if args.build_number < 1:
+        parser.error("Build number must be positive and higher than the last uploaded build.")
+
+    import changelog
+    version = changelog.require_entry()
+    print(f"Archiving Phren {version} build {args.build_number}.", flush=True)
+    run(["xcodegen", "generate"])
+    settings = [f"CURRENT_PROJECT_VERSION={args.build_number}", "CODE_SIGN_STYLE=Automatic"]
+    if args.team:
+        settings.append(f"DEVELOPMENT_TEAM={args.team}")
+    if args.client_id:
+        settings.append(f"PHREN_GITHUB_CLIENT_ID={args.client_id}")
+    base = ["xcodebuild", "-project", "Phren.xcodeproj", "-scheme", "Phren", "-configuration", "Release"]
+    resolved = json.loads(run(base + ["-showBuildSettings", "-json"] + settings, capture_output=True, text=True).stdout)
+    app = next(target["buildSettings"] for target in resolved if target["target"] == "Phren")
+    team = app.get("DEVELOPMENT_TEAM", "")
+    client_id = app.get("PHREN_GITHUB_CLIENT_ID", "").strip()
+    if not re.fullmatch(r"[A-Z0-9]{10}", team):
+        parser.error("Set DEVELOPMENT_TEAM in Config/Local.xcconfig or pass --team.")
+    configured = bool(re.fullmatch(r"[A-Za-z0-9._-]+", client_id)) and not client_id.startswith(("YOUR_", "REPLACE_WITH_"))
+    if not configured and not args.allow_token_sign_in:
+        parser.error("Set a registered OAuth client ID, or explicitly use --allow-token-sign-in.")
+
+    output = args.output.expanduser().resolve() / f"build-{args.build_number}"
+    archive = output / "Phren.xcarchive"
+    if archive.exists():
+        parser.error(f"Archive already exists: {archive}. Choose another build number or output directory.")
+    output.mkdir(parents=True, exist_ok=True)
+    run(base + ["archive", "-destination", "generic/platform=iOS", "-archivePath", str(archive),
+                "-allowProvisioningUpdates", "-skipPackagePluginValidation"] + settings)
+    print(f"Signed archive: {archive}")
+    if args.export or args.upload:
+        options = output / "ExportOptions.plist"
+        options.write_bytes(plistlib.dumps({
+            "method": "app-store-connect", "teamID": team, "signingStyle": "automatic",
+            "destination": "upload" if args.upload else "export", "manageAppVersionAndBuildNumber": False,
+            "uploadSymbols": True,
+        }))
+        # An App Store Connect API key (~/.config/ios-release.json: key_id,
+        # issuer_id, key_path) lets the export and upload run without an Apple ID
+        # signed into Xcode; the same file the deploy script reads.
+        authentication = []
+        credentials = Path.home() / ".config/ios-release.json"
+        if credentials.exists():
+            saved = json.loads(credentials.read_text())
+            key_path = Path(saved.get("key_path", "")).expanduser()
+            if saved.get("key_id") and saved.get("issuer_id") and key_path.exists():
+                authentication = ["-authenticationKeyPath", str(key_path), "-authenticationKeyID", saved["key_id"],
+                                  "-authenticationKeyIssuerID", saved["issuer_id"]]
+        run(["xcodebuild", "-exportArchive", "-archivePath", str(archive), "-exportPath", str(output / "export"),
+             "-exportOptionsPlist", str(options), "-allowProvisioningUpdates"] + authentication)
+        print("Uploaded to App Store Connect; wait for processing in TestFlight." if args.upload else f"Exported IPA: {output / 'export'}")
+        if args.upload:
+            # A successful upload is the moment old archives are safe to drop;
+            # the newest three stay on this machine for a re-upload.
+            for stale in prune_archives(args.output.expanduser().resolve()):
+                print(f"Pruned old archive: {stale}")
+
+
+if __name__ == "__main__":
+    main()

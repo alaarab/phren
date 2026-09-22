@@ -52,7 +52,7 @@ final class AccountUsageCache {
                     ["id": "codex:primary", "name": "5-hour limit", "usedPercent": 23.5, "resetsAt": now.addingTimeInterval(7200).ISO8601Format()],
                     ["id": "codex:secondary", "name": "7-day limit", "usedPercent": 41.2, "resetsAt": now.addingTimeInterval(172800).ISO8601Format()]
                 ]],
-                ["source": "claude", "updatedAt": now.ISO8601Format(), "windows": [
+                ["source": "claude", "origin": "status-line", "updatedAt": now.ISO8601Format(), "windows": [
                     ["id": "five_hour", "name": "5-hour limit", "usedPercent": 40.0, "resetsAt": now.addingTimeInterval(7200).ISO8601Format()],
                     ["id": "seven_day", "name": "7-day, all models", "usedPercent": 16.0, "resetsAt": now.addingTimeInterval(172800).ISO8601Format()],
                     ["id": "seven_day_fable", "name": "7-day, Fable", "usedPercent": 18.0, "resetsAt": now.addingTimeInterval(172800).ISO8601Format()]

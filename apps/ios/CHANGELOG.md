@@ -83,8 +83,6 @@ lock screen and Changes screen done properly.
 - A prompt from the agent's terminal is asked as a card with Yes and No rows;
   the raw keys sit in a quiet strip beneath, and the orange waiting sentence
   is gone.
-- Choosing Full Access under /permissions on Codex also confirms Codex's
-  "Enable full access?" dialog, so the terminal no longer sits on it.
 - Tasks: across projects the backlog is grouped by project, fullest first,
   with a count on each section; tap a project name to fold it.
 - Coming back to a chat from another app no longer shows the system bar
@@ -93,6 +91,9 @@ lock screen and Changes screen done properly.
   list.
 - The Projects tab's dictate button is gone; Siri and the capture shortcut
   are the way to speak a note or task.
+- The Projects tab's Explore list no longer shows Memory graph; the Memory
+  tab is the graph now, and a session's or chat's Explore graph still opens
+  that project's graph. The More menu keeps its Memory graph item.
 - The /model picker waits for the computer's list instead of flashing the
   built-in names first; those appear only when the computer cannot answer.
 - Sending is faster: the phone keeps one SSH connection per computer and
@@ -130,6 +131,17 @@ lock screen and Changes screen done properly.
 
 ### Fixed
 
+- Choosing Full Access under /permissions no longer leaves Codex's terminal on
+  "Enable full access?". The Hook walks that second confirmation itself from
+  the pane's lines; if it never appears the phone gets the visible prompt as a
+  question card instead of a blind Enter that landed too early.
+- Claude's usage numbers add up. The Fable weekly window is labelled
+  "7-day, Fable only" with its own reset time and its own "updated" age beside
+  it, never drawn as part of the all-models window it can exceed; the Claude
+  card says where the numbers came from ("from Claude Code status line,
+  updated 6 s ago"); and the Live sessions header ring is bound to the same
+  5-hour window the Account usage page shows first, instead of whichever
+  window happens to be highest.
 - A Codex approval in the terminal shows its actual question and options as the
   question card, answered by their own keys (`y`, `p`, `Esc`), instead of a bare
   "Waiting for your answer" line and a key strip; the terminal stays in the
@@ -162,6 +174,10 @@ lock screen and Changes screen done properly.
 - Account usage: each provider's windows keep their own accessibility ids.
 - Working tree folders open on the first tap again.
 - Dictation keeps what you said across pauses and keeps listening after a send.
+- Sending while dictating delivers new words again: the send ends the current
+  recognition task, starts a fresh request and tap on the same audio engine
+  with the audio session reasserted, and the composer shows the next segment's
+  text instead of a live mic over a silent recogniser.
 - The lock screen counts a session as running while its fan-out workers run,
   and says how many.
 - The Add computer button on an unknown remote agent's page is a full

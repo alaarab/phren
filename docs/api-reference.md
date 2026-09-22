@@ -905,3 +905,14 @@ CLI equivalents: `phren code search <project> <query> [--kind k] [--limit n]`, `
 ### Hook routes
 
 When the `code` module is enabled, Phren Hook serves the same index to the phone over its private HTTP pipe: `GET /v1/code/status?project=`, `/v1/code/search?project=&q=&kind=&limit=`, `/v1/code/outline?project=&path=`, `/v1/code/definition?project=&symbol=`, `/v1/code/references?project=&symbol=&limit=` and `/v1/code/usage?project=&top=`. Each returns JSON shaped from the corresponding query; a project with no index is a 404 naming `phren code index`. See [phren-hook.md](phren-hook.md) and the canonical route table in `packages/cli/src/bridge/AGENT_CONNECTIONS.md`.
+
+### `GET /v1/usage`
+
+Account limits and spend for the phone's Account usage screen: `{accounts: [...]}`, each account carrying `source` (`codex`, `claude`, `opencode`, `opencode-go`, `openrouter`), `windows`, optional `updatedAt`, `message`, `spend`, `accountName`, `accountId` and, for Claude, `origin`. The optional `?sources=` comma list names the sources the phone understands; an older phone that sends none gets the original four so it never meets a source it cannot read.
+
+Each Claude number has one documented source:
+
+- `five_hour` ("5-hour limit") and `seven_day` ("7-day, all models") come from Claude Code's documented status-line `rate_limits` payload, reported as `origin: "status-line"`, or from the OAuth usage endpoint when the computer's sign-in token is readable, reported as `origin: "oauth"`. The phone captions the card with that origin and the report's age ("from Claude Code status line, updated 6 s ago").
+- A per-model weekly window such as `seven_day_fable` ("7-day, Fable") comes from Claude Code's own usage snapshot in `~/.claude.json` (`cachedUsageUtilization`, `kind: weekly_scoped`) when the status line does not carry it, and then carries its own `asOf` so the phone can show how old it is; the live endpoint reports the same window without `asOf`.
+
+Every window carries its own `resetsAt`. A per-model window is its own allowance with its own denominator, not a subset of `seven_day`, so it can show a higher percentage than the all-models window without contradicting it; the phone labels it "only" (for example "7-day, Fable only") and shows its own reset time. The Live sessions header ring binds to `five_hour`, the window the Account usage page shows first, never a higher window.

@@ -104,19 +104,16 @@ private struct AccountUsageCard: View {
         return "snapshot from \(UsageFormat.compact(now.timeIntervalSince(updated))) ago"
     }
 
-    private var orderedWindows: [AccountUsageSnapshot.Window] {
-        guard account.source == "claude" else { return account.windows }
-        let order = ["five_hour", "seven_day_fable", "seven_day"]
-        return account.windows.sorted {
-            (order.firstIndex(of: $0.id) ?? order.count) < (order.firstIndex(of: $1.id) ?? order.count)
-        }
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: PhrenTheme.Space.medium) {
             header
             if let snapshot {
                 Text(snapshot).font(PhrenTypography.caption).foregroundStyle(PhrenTheme.warning)
+            }
+            if account.source == "claude", account.origin != nil, let updated = account.updatedAt {
+                Text(sourceLine(updated: updated))
+                    .font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
+                    .phrenIdentifier("usage-source:claude")
             }
             switch account.source {
             case "opencode-go":
@@ -131,7 +128,7 @@ private struct AccountUsageCard: View {
                     }
                 }
             default:
-                ForEach(orderedWindows) { window in
+                ForEach(account.displayWindows) { window in
                     UsageWindowLine(account: account, window: window, now: now)
                 }
             }
@@ -143,6 +140,16 @@ private struct AccountUsageCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .sessionCard()
         .phrenContainerMarker("account-usage:\(account.source)", label: account.name)
+    }
+
+    /// One documented source per number: which Claude report these windows came
+    /// from, and how old that report is.
+    private func sourceLine(updated: Date) -> String {
+        let ago = UsageFormat.compact(now.timeIntervalSince(updated))
+        switch account.origin {
+        case "oauth": return "from Claude's usage endpoint, updated \(ago) ago"
+        default: return "from Claude Code status line, updated \(ago) ago"
+        }
     }
 
     private var header: some View {
@@ -195,8 +202,13 @@ private struct UsageWindowLine: View {
             date > now ? "resets in \(UsageFormat.compact(date.timeIntervalSince(now)))"
                        : "reset passed · waiting for an update"
         }
-        if let reset {
-            Text(reset).font(PhrenTypography.caption)
+        // A per-model window read from Claude Code's own snapshot carries its
+        // own asOf: show that age beside the window's own reset time so the
+        // row is never read as part of a fresher all-models window.
+        let own: String? = window.asOfDate.map { "updated \(UsageFormat.compact(now.timeIntervalSince($0))) ago" }
+        let parts = [reset, own].compactMap { $0 }
+        if !parts.isEmpty {
+            Text(parts.joined(separator: " · ")).font(PhrenTypography.caption)
                 .foregroundStyle(window.resetDate.map { $0 <= now } == true ? PhrenTheme.warning : PhrenTheme.textMuted)
                 .accessibilityIdentifier("usage-window-caption:\(window.id)")
         }

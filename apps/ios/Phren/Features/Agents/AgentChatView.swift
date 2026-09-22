@@ -195,6 +195,11 @@ struct AgentChatView: View {
     private func restartDictationSegment() {
         dictationBase = ""
         dictationPreview = nil
+        // The send cleared the composer; reattach the draft binding before the
+        // fresh segment starts so its first partial lands in the model again.
+        dictation.readDraft = { [model] in model.draft }
+        dictation.onDraftChange = { [model] in model.draft = $0 }
+        dictation.onFailure = { [model] in model.deliveryError = $0 }
         dictation.send()
     }
     /// Stops and preserves the raw words in the draft. When opted in, Apple

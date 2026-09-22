@@ -36,11 +36,9 @@ struct ProjectsView: View {
                 PhrenScrollScreen {
                     PhrenSectionHeader(title: "Explore")
                     VStack(spacing: 4) {
-                        NavigationLink { GraphView() } label: {
-                            PhrenMenuRow(title: "Memory graph", subtitle: "Explore how your knowledge connects",
-                                         icon: "circle.hexagongrid", color: PhrenTheme.cyan, compact: true)
-                        }.accessibilityLabel("Memory graph")
-                        .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
+                        // No graph row: the Memory tab is the graph now. The
+                        // More menu above still opens this screen, and each
+                        // session or chat keeps its own Explore graph.
                         NavigationLink { FilesView() } label: {
                             PhrenMenuRow(title: "Files", subtitle: "Browse the store's markdown and config",
                                          icon: "folder", color: PhrenTheme.success, compact: true)

@@ -15,6 +15,8 @@ public struct MergedAccountUsage: Identifiable, Equatable, Sendable {
     public let stale: Bool
     /// The signed-in email or handle from the newest report, when one carries it.
     public let accountName: String?
+    /// Which Claude report the newest account came from: `status-line` or `oauth`.
+    public let origin: String?
     public var id: String { source }
     public var name: String {
         switch source {
@@ -25,10 +27,22 @@ public struct MergedAccountUsage: Identifiable, Equatable, Sendable {
         default: "Codex"
         }
     }
+    /// The Account usage card's window order: Claude leads with the 5-hour
+    /// window, then the per-model weekly allowance, then all models. The
+    /// header ring binds to the first row of this order, so both surfaces
+    /// always show the same number first.
+    public var displayWindows: [AccountUsageSnapshot.Window] {
+        guard source == "claude" else { return windows }
+        let order = ["five_hour", "seven_day_fable", "seven_day"]
+        let rank = { (window: AccountUsageSnapshot.Window) in order.firstIndex(of: window.id) ?? order.count }
+        return windows.sorted { rank($0) != rank($1) ? rank($0) < rank($1) : $0.id < $1.id }
+    }
+
+    /// The window the header ring draws: the first window the page shows
+    /// with a percentage (Claude's 5-hour window), never a different or
+    /// higher window such as the per-model weekly allowance.
     public var primaryWindow: AccountUsageSnapshot.Window? {
-        windows.compactMap { window in window.usedPercent == nil ? nil : window }.max {
-            ($0.usedPercent ?? 0) < ($1.usedPercent ?? 0)
-        }
+        displayWindows.first { $0.usedPercent != nil }
     }
 
     public static func merge(_ reports: [(computer: String, snapshot: AccountUsageSnapshot?)], at now: Date) -> [MergedAccountUsage] {
@@ -95,7 +109,7 @@ public struct MergedAccountUsage: Identifiable, Equatable, Sendable {
             let isStale = spend == nil ? (selected?.isStale(at: now) ?? false) : (stale[source] ?? false)
             return MergedAccountUsage(source: source, computers: computers[source] ?? [], windows: list, spend: spend,
                                       updatedAt: updated[source], message: source == "opencode-go" ? selected?.message : (list.isEmpty && spend == nil ? selected?.message : nil),
-                                      stale: isStale, accountName: selected?.accountName)
+                                      stale: isStale, accountName: selected?.accountName, origin: selected?.origin)
         }
     }
 }

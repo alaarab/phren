@@ -634,17 +634,14 @@ final class AgentChatModel {
     /// Types a slash command whose agent answers with a menu, then walks
     /// that menu to `index`. The command goes through the ordinary send so
     /// the transcript shows it; the keys follow once the menu has drawn.
+    /// Codex's Full Access confirmation is the Hook's own step: it reads the
+    /// pane and answers "Enable full access?" before closing the walk.
     func drive(_ session: LiveAgentSession, menuCommand command: String, index: Int) async {
         draft = command
         await send(session)
         guard deliveryError == nil else { return }
         try? await Task.sleep(for: .milliseconds(700))
         await answer(session, keys: AgentMenuChoice.keys(selecting: index))
-        let confirmation = AgentMenuChoice.confirmationKeys(command: command, source: target?.source ?? "", index: index)
-        guard !confirmation.isEmpty, deliveryError == nil else { return }
-        // The agent draws its confirmation after the choice lands.
-        try? await Task.sleep(for: .milliseconds(900))
-        await answer(session, keys: confirmation)
     }
 
     func showLatest() {

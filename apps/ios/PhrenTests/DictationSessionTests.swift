@@ -80,6 +80,76 @@ final class DictationSessionTests: XCTestCase {
         XCTAssertEqual(composer, "Next message")
     }
 
+    /// The chat composer's exact send order: updateDraft banks typed edits,
+    /// model.send captures the draft, then consumeDraft calls send(). The
+    /// audio session must stay up, a fresh segment must start, and its words
+    /// must land in the cleared composer without the sent text returning.
+    func testChatSendOrderKeepsTheSessionStartsASegmentAndDeliversNewWords() {
+        let recognizer = FakeRecognizer()
+        let session = DictationSession(recognizer: recognizer)
+        var composer = ""
+        session.readDraft = { composer }
+        session.onDraftChange = { composer = $0 }
+        session.start(draft: "Typed prefix")
+        recognizer.emit(.partial("send these words"))
+        XCTAssertEqual(composer, "Typed prefix send these words")
+
+        session.updateDraft(composer)
+        let submitted = session.send()
+        XCTAssertEqual(submitted, "Typed prefix send these words")
+        XCTAssertEqual(composer, "")
+        XCTAssertEqual(session.committedText, "")
+        XCTAssertTrue(session.isRecording)
+
+        // The send stopped the old segment with the session still up and
+        // began a new one; both must be true or the mic is a dead button.
+        XCTAssertEqual(recognizer.segments.count, 2)
+        XCTAssertEqual(recognizer.stops.last, true)
+        let restarted = recognizer.segments.last
+        XCTAssertNotEqual(restarted, nil)
+
+        recognizer.emit(.partial("Next message"))
+        XCTAssertEqual(composer, "Next message")
+        XCTAssertNil(session.failureReason)
+        XCTAssertTrue(session.isRecording)
+
+        // Old segment callbacks still cannot push the sent words back.
+        recognizer.emit(.partial("send these words"), segment: recognizer.segments.first)
+        XCTAssertEqual(composer, "Next message")
+    }
+
+    /// A draft restored under the session (a failed-delivery join, a typed
+    /// edit) becomes the baseline: the first result is absorbed as that
+    /// offset and restarts the segment, and only later results add words.
+    func testExternalDraftAfterSendIsBankedAsTheOffsetBeforeNewWords() {
+        let recognizer = FakeRecognizer()
+        let session = DictationSession(recognizer: recognizer)
+        var composer = ""
+        session.readDraft = { composer }
+        session.onDraftChange = { composer = $0 }
+        session.start(draft: "")
+        recognizer.emit(.partial("Sent message"))
+        let sent = session.send()
+        XCTAssertEqual(composer, "")
+        XCTAssertEqual(recognizer.segments.count, 2)
+
+        // model.send's failure path rejoins the submitted text.
+        composer = DictationSession.join(sent, composer)
+        recognizer.emit(.partial("spoken after restore"))
+        // The mismatched draft is banked as the offset and the segment
+        // restarts; that first result is dropped rather than duplicated.
+        XCTAssertEqual(composer, "Sent message")
+        XCTAssertEqual(recognizer.segments.count, 3)
+        XCTAssertEqual(recognizer.stops.last, true)
+
+        recognizer.emit(.partial("spoken after restore"))
+        XCTAssertEqual(composer, "Sent message spoken after restore")
+        recognizer.emit(.partial("spoken after restore and again"))
+        XCTAssertEqual(composer, "Sent message spoken after restore and again")
+        XCTAssertTrue(session.isRecording)
+        XCTAssertNil(session.failureReason)
+    }
+
     func testOldPartialsFinalsAndErrorsCannotChangeTheNewSegment() throws {
         let recognizer = FakeRecognizer()
         let session = DictationSession(recognizer: recognizer)

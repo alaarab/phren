@@ -103,9 +103,9 @@ final class GraphInteractionTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing"]
         app.launch()
-        XCTAssertTrue(app.buttons["Memory graph"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons["More"].waitForExistence(timeout: 8))
         capture(app, name: "Projects design")
-        app.buttons["Memory graph"].tap()
+        openMemoryGraph(from: app)
         XCTAssertTrue(app.webViews.staticTexts["DEMO"].firstMatch.waitForExistence(timeout: 20))
         let canvas = app.webViews.firstMatch
         let back = app.buttons["graph-back"]
@@ -150,8 +150,7 @@ final class GraphInteractionTests: XCTestCase {
 
     @MainActor
     private func openDossier(in app: XCUIApplication) -> XCUIElement {
-        _ = app.buttons["Memory graph"].waitForExistence(timeout: 8)
-        app.buttons["Memory graph"].tap()
+        openMemoryGraph(from: app)
         _ = app.webViews.staticTexts["DEMO"].firstMatch.waitForExistence(timeout: 20)
         app.buttons["Search graph"].tap()
         let field = app.textFields["Search findings, tasks, projects"]
@@ -167,8 +166,7 @@ final class GraphInteractionTests: XCTestCase {
 
     @MainActor
     private func openProjectDossier(in app: XCUIApplication) -> XCUIElement {
-        _ = app.buttons["Memory graph"].waitForExistence(timeout: 8)
-        app.buttons["Memory graph"].tap()
+        openMemoryGraph(from: app)
         _ = app.webViews.staticTexts["DEMO"].firstMatch.waitForExistence(timeout: 20)
         app.buttons["Search graph"].tap()
         let field = app.textFields["Search findings, tasks, projects"]
@@ -190,9 +188,7 @@ final class GraphInteractionTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing"]
         app.launch()
-        let graph = app.buttons["Memory graph"]
-        XCTAssertTrue(graph.waitForExistence(timeout: 8))
-        graph.tap()
+        openMemoryGraph(from: app)
         // The native search is available before WKWebView has mounted its
         // graph. Wait for rendered content before issuing camera commands.
         XCTAssertTrue(app.webViews.staticTexts["DEMO"].firstMatch.waitForExistence(timeout: 20))
@@ -218,8 +214,7 @@ final class GraphInteractionTests: XCTestCase {
         app.buttons["Show full view"].tap()
         app.terminate()
         app.launch()
-        XCTAssertTrue(graph.waitForExistence(timeout: 8))
-        graph.tap()
+        openMemoryGraph(from: app)
         app.buttons["Store: sample/brain"].tap()
         app.buttons["team/brain"].tap()
         XCTAssertTrue(app.buttons["Store: team/brain"].waitForExistence(timeout: 5))

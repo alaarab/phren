@@ -639,10 +639,12 @@ swift test
 
 ### Memory graph
 
-Open **Projects → Memory graph**, or use the graph button on a project's
-detail screen. The app bundles the same Three.js renderer as the VS Code
-extension and web viewer, using the payload contract shared with the terminal
-graph. All rendering assets are local; browsing cached data works offline.
+Open **Projects → More → Memory graph**, or use **Explore graph** on a
+session or in a chat to focus one project. The Memory tab's map is the same
+renderer for everyday browsing. The app bundles the same Three.js renderer as
+the VS Code extension and web viewer, using the payload contract shared with
+the terminal graph. All rendering assets are local; browsing cached data
+works offline.
 
 The phone provides native store/project menus, All/Findings/Tasks filters,
 search, zoom buttons and Fit graph. Drag to orbit, pinch to zoom, and tap a
