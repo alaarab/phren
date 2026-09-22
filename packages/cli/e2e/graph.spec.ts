@@ -855,7 +855,7 @@ test.describe.serial("graph visualization e2e", () => {
     expect(start).toBeTruthy();
 
     await expect(page.locator("#graph-node-popover")).toBeVisible({ timeout: 8_000 });
-    const nextBtn = page.locator('[data-graph-action="next-finding"]');
+    const nextBtn = page.locator('[data-graph-action="next-node"]');
     await expect(nextBtn).toBeVisible({ timeout: 8_000 });
     await nextBtn.click();
     // Selection flies to the sibling; the dossier re-renders with different content

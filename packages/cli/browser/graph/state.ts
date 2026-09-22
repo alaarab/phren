@@ -206,3 +206,35 @@ export function focusMode(): FocusMode {
 export function bestSearchMatch(): RuntimeNode | null {
   return core.bestSearchMatch(state.searchResults);
 }
+
+/** The nodes the dossier's Previous/Next may walk: visible, else the payload. */
+function dossierNodes(): RuntimeNode[] {
+  return state.visibleNodes.length ? state.visibleNodes : state.rawNodes;
+}
+
+function steppableDossierNode(nodeId: string): RuntimeNode | null {
+  const node = state.nodeById.get(nodeId);
+  if (!node || (node.kind !== "finding" && node.kind !== "task")) return null;
+  return node;
+}
+
+/**
+ * Previous/next node id in the ranked list the list mode shows (the
+ * project's findings newest first, then its tasks), wrapping at the ends.
+ * Null when the node does not step: projects, fragments, references.
+ */
+export function stepDossier(nodeId: string, delta: number): string | null {
+  const node = steppableDossierNode(nodeId);
+  if (!node) return null;
+  const ranked = core.rankedProjectIds(dossierNodes(), node.project || "");
+  return core.stepRanked(ranked, nodeId, delta);
+}
+
+/** 0-based index and size of that ranked list, for the dossier's counter. */
+export function dossierPosition(nodeId: string): { index: number; total: number } | null {
+  const node = steppableDossierNode(nodeId);
+  if (!node) return null;
+  const ranked = core.rankedProjectIds(dossierNodes(), node.project || "");
+  const index = ranked.indexOf(nodeId);
+  return index < 0 ? null : { index, total: ranked.length };
+}

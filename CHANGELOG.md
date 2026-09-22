@@ -18,6 +18,110 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   Six `/v1/code/*` Hook routes expose it to clients. File changes trigger a
   500 ms debounced reindex and HEAD changes trigger a full scan.
   See `docs/code-index.md`.
+- Finished fan-out jobs archive themselves. The Hook sweeps the store's
+  `.runtime/agent-fanouts` at start and then hourly, moving a folder whose
+  manifest status is completed, failed or cancelled and whose `finishedAt`
+  (or `exit.txt` mtime when there is none) is more than 24 hours old into
+  `.runtime/agent-fanouts-archive/<job id>`. A folder with no manifest goes
+  there too once its `exit.txt` is that old, gaining a synthesized manifest
+  `{ "status": "failed", "reason": "no manifest" }`. A folder without
+  `exit.txt` is still running and is never touched. The archive keeps at most
+  500 folders, deleting the oldest beyond that, and one log line records each
+  sweep that moved anything. Run the sweep by hand with
+  `phren bridge fanouts archive [--dry-run]`. See `docs/fanout.md`.
+- The `code` module now serves its symbol index to the phone. Phren Hook adds
+  `GET /v1/code/status`, `/v1/code/search`, `/v1/code/outline`,
+  `/v1/code/definition`, `/v1/code/references` and `/v1/code/usage`, gated by the
+  module like the other routes and advertised as the `code` capability. The Hook
+  re-indexes a project after the git module records a file change, debounced 500
+  ms, and runs a full re-index when the repository's HEAD moves. The iPhone adds
+  a Code cell to the project page, symbol search and a symbol dossier. See
+  `docs/code-index.md`.
+
+### Changed
+
+- The graph dossier's Edit and Delete are icon buttons in its header beside
+  Close (pencil; trash in the danger tint) instead of text buttons in the
+  actions row, and Previous and Next chevrons in the same header walk the
+  current ranked list: the project's findings newest date first, then its
+  tasks, the order the list mode shows, wrapping at both ends. `←`/`→` on the
+  keyboard do the same walk while a node dossier is open. Every target stays
+  44px; the buttons are labelled `Edit`, `Delete`, `Previous node` and
+  `Next node`.
+
+### Fixed
+
+- A `.config/modules.yaml` key for a module this Hook build does not know (a
+  newer CLI enabled it) no longer makes `phren-hook ssh` and `serve` exit with
+  `Unknown module`, which showed every phone Offline on every computer. The
+  unknown key is ignored with one warning line on stderr naming the key and the
+  Hook version, and every known module keeps its value. `phren modules enable
+  <name>` now also warns, without refusing, when the installed Hook recorded in
+  `<bridge>/installed.json` is older than the module's version in the manifest.
+- An opencode permission ask reaches the phone as a push. The Hook watches the
+  approvals directory, maps a new request to its pane through the recorded
+  session binding (or Herdr's opencode session id), sends the same kind of
+  binding-backed alert a held Claude request sends, and writes the plugin's
+  answer file when the phone approves or denies it. The alert carries the ask's
+  title and message, so an external_directory ask reads
+  `external_directory: <pattern>`.
+- A fan-out worker whose permission the plugin refused no longer looks
+  finished. The plugin writes `blocked.json` when it denies under
+  `PHREN_FANOUT_JOB`, and the Hook reports the child as failed with the reason
+  `blocked: <type> <pattern>` even when `exit.txt` says 0, carries the reason on
+  the child row, and pushes a notification naming the blocked worker.
+- The phone's agent tree lists the newest fan-out workers first, so a computer with more
+  than 128 finished jobs on disk no longer hides the ones running now.
+- A Codex approval or terminal dialog whose command and options the Hook could
+  read is published to the phone as a structured question instead of a bare
+  approval, so the chat can ask it with its real choices and answer by the
+  option's own key (`y`, `p`, `Esc`); the `p` answer is accepted by `/v1/keys`.
+- A dispatch whose remote agent had not written its session yet when the launch
+  returned reported an uncertain delivery without sending the brief; the dispatch now
+  waits up to fifteen seconds for the pane's session before sending.
+- Launching an agent from the phone or a dispatch with a label Herdr cannot use as an
+  agent name (spaces, capitals, more than 32 characters) failed with "Herdr reported an
+  error"; the Hook now derives a valid agent name from the label.
+- Git run by phren never prompts for credentials. A store with an HTTPS remote and
+  no credential helper used to make the session-start sync ask for a GitHub username
+  in the agent's pane, so Codex and OpenCode never reached their first prompt on that
+  computer and every launch from the phone or a dispatch reported a failure.
+- Account usage no longer breaks a phone that predates OpenCode Go: the phone names the
+  sources it understands and an older one keeps getting the original four.
+- A Claude subagent the orchestrator stopped leaves the phone's running count; its
+  "killed" notification now counts as finished like a completed one.
+- A store that was never set up stays that way: the modules migration no longer creates
+  `.config` on it, so `phren add` still says to run `phren init`, and module gating
+  falls back to the unscoped view while `phren init` is creating the profiles.
+- Store sync now merges divergent commits with union handling for findings and
+  tasks, aborts unresolved merges cleanly, and leaves existing Git operations
+  untouched. Module migration backups now stay under `.runtime/`.
+- The Hook's OpenCode plugin updates with the Hook. The plugin now rides inside the
+  Hook bundle, carries an "Installed by Phren Hook" first line, and an installed copy
+  with that line is replaced on update while a copy you wrote yourself is left alone.
+- OpenCode fan-out workers no longer stall on permission prompts. A headless worker's
+  edits, commands and fetches in its own worktree are granted by the Hook's OpenCode
+  plugin and anything else is refused at once instead of timing out after 50 seconds.
+- The Claude model list the phone shows matches Claude Code's own /model menu:
+  exact models, default first, an alias only for a family with no exact id.
+- The menu window the Hook opens after a bare slash command stays open through
+  Enter, so a choice that opens a second confirmation (Codex full access) can
+  still be answered from the phone; Escape closes it.
+- The periodic store pull commits uncommitted writes (a task from `add_task`,
+  a new finding) before it fetches or merges, so a managed sync can no longer
+  discard or block on a write that arrived moments earlier; a divergent remote
+  is merged instead of deferred, and conflicting `tasks.md` and `FINDINGS.md`
+  keep both sides' bullets. Each pull records what it did in
+  `background-sync.log`.
+- `phren code index` no longer fails with "repository path does not exist" on a
+  computer whose checkout sits at a different path than the store records. The
+  indexer, the Hook's re-indexer and the CLI resolve the repository the way the
+  Hook locates a project's checkout: this machine's registered path first, then
+  the store's sourcePath, with `--repo` still overriding, and the index records
+  the checkout it used in `repo_root` when it differs.
+
+### Added
+
 - Conductor sessions can be launched from the phone with a chosen Claude,
   Codex or OpenCode harness and effort, are marked in workspace overviews, and
   are limited to one running conductor per store. The new `hand_off` MCP tool,
