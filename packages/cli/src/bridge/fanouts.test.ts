@@ -118,6 +118,16 @@ describe("fan-out manifests", () => {
     expect(found[0]).toMatchObject({ state: "failed", reason: "blocked: external_directory /private/tmp/elsewhere" });
   });
 
+  it("reads OpenCode's own refusal from stderr.log when blocked.json is absent", async () => {
+    const { directory, env } = await fixture("job-refused", { status: "completed", exitCode: 0 });
+    await writeFile(path.join(directory, "exit.txt"), "0\n");
+    await writeFile(path.join(directory, "stderr.log"),
+      "\u001b[93m\u001b[1m! \u001b[0mpermission requested: doom_loop (glob); auto-rejecting\n");
+    const found = await fanoutChildren("codex", parent, env);
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatchObject({ state: "failed", reason: "blocked: doom_loop glob" });
+  });
+
   it("rejects event-log symlinks and mismatched directory IDs", async () => {
     const first = await fixture("job-link");
     const outside = path.join(first.root, "outside.jsonl"); await writeFile(outside, "secret");
