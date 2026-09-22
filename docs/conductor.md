@@ -58,6 +58,20 @@ or one that arrives later remains in chat. Settings > Siri and the Action
 button lists the phrases and opens Shortcuts, where one can be assigned to the
 Action button. These use the existing Hook prompt and transcript paths.
 
+## See what is running
+
+```sh
+phren dispatch sessions
+```
+
+`live_sessions` (MCP) and `phren dispatch sessions` list every live agent on
+this computer and on each computer in this Hook's `hooks.yaml`, with project,
+harness, status, role and the target `hand_off` takes. A peer that does not
+answer is listed under `unreachable`. Enrollment is one-way: a computer sees
+only the peers in its own `hooks.yaml`, so a conductor on each computer needs
+the others enrolled there too. A conductor starts in the phren store and has no
+project; its Herdr name is `conductor` (or `conductor-<label>`).
+
 ## Dispatch new work
 
 ```sh

@@ -1,6 +1,6 @@
 # MCP API Reference
 
-Phren exposes 68 MCP tools across 16 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the seven built-in [Modules](modules.md). **`core`**, the default, exposes the seven memory tools plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default ten. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
+Phren exposes 69 MCP tools across 16 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the seven built-in [Modules](modules.md). **`core`**, the default, exposes the seven memory tools plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default ten. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
 
 ## Core profile
 
@@ -55,6 +55,16 @@ internal adapters but are not wired into dispatch placement.
 
 CLI equivalent:
 `phren dispatch Desk phren --harness codex --label 'Checks' --prompt 'Run the assigned checks'`.
+
+### `live_sessions`
+
+List every live agent session on this computer and each enrolled computer:
+computer, project (none for a conductor), harness, status, role, branch, model
+and the `target` that `hand_off` takes. Computers that could not be reached come
+back in `unreachable`; `enrolled` counts this Hook's peers. No parameters. In the
+core profile use `phren_admin(action: "live_sessions")`.
+
+CLI equivalent: `phren dispatch sessions`.
 
 ### `hand_off`
 

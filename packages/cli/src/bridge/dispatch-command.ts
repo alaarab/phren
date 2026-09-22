@@ -9,6 +9,10 @@ export async function runDispatch(args: string[]): Promise<number> {
   if (args.length === 1 && args[0] === "status") {
     console.log(JSON.stringify(await hookRequest("/v1/dispatch"), null, 2)); return 0;
   }
+  if (args.length === 1 && args[0] === "sessions") {
+    const { listLiveSessions } = await import("./hand-off.js");
+    console.log(JSON.stringify(await listLiveSessions(), null, 2)); return 0;
+  }
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
     harness: { type: "string", default: "codex" }, model: { type: "string" }, prompt: { type: "string" }, label: { type: "string" },
     "parent-provider": { type: "string" }, "parent-session": { type: "string" }, "parent-computer": { type: "string" },

@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { hookRequest } from "../bridge/client.js";
 import { dispatchSchema } from "../bridge/dispatch.js";
-import { handOff, handOffSchema } from "../bridge/hand-off.js";
+import { handOff, handOffSchema, listLiveSessions } from "../bridge/hand-off.js";
 import { mcpResponse } from "./types.js";
 
 export function register(server: McpServer): void {
@@ -15,6 +15,19 @@ export function register(server: McpServer): void {
       return mcpResponse({ ok: result.ok === true, data: result, message: `${result.computer}: ${result.state}.` });
     } catch (error) {
       return mcpResponse({ ok: false, error: error instanceof Error ? error.message : "Dispatch failed." });
+    }
+  });
+  server.registerTool("live_sessions", {
+    title: "◆ phren · live sessions",
+    description: "List the live agent sessions on this computer and every enrolled computer: computer, project, harness, status, role and the target hand_off takes. Computers that could not be reached are listed separately.",
+    inputSchema: {},
+  }, async () => {
+    try {
+      const result = await listLiveSessions();
+      const note = result.enrolled === 0 ? " No other computers are enrolled here; run `phren bridge enroll-computer` to add them." : "";
+      return mcpResponse({ ok: true, data: result, message: `${result.sessions.length} live sessions across ${result.enrolled + 1} computers.${note}` });
+    } catch (error) {
+      return mcpResponse({ ok: false, error: error instanceof Error ? error.message : "Could not list live sessions." });
     }
   });
   server.registerTool("hand_off", {
