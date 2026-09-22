@@ -366,7 +366,7 @@ export class Scheduler {
     try { return await operation(); } finally { release(); }
   }
 
-  async statuses(): Promise<{ computer: string; schedules: ScheduleStatus[] }> {
+  async statuses(): Promise<{ computer: string; timeZone: string; schedules: ScheduleStatus[] }> {
     const runs = await readScheduleRuns(this.runsFile), result: ScheduleStatus[] = [], computer = this.computer();
     for (const directory of this.projectDirectories()) {
       let schedules: Schedule[];
@@ -383,7 +383,7 @@ export class Scheduler {
             ...(last.blockNotified !== undefined ? { blockNotified: last.blockNotified } : {}), launch: last.launch } : null, running });
       }
     }
-    return { computer, schedules: result };
+    return { computer, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, schedules: result };
   }
 
   async history(filters: { project?: string; id?: string; limit?: number } = {}): Promise<ScheduleRun[]> {
