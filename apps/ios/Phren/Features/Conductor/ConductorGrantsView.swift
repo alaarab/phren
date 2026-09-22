@@ -86,6 +86,7 @@ struct ConductorGrantsView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .disabled(busy || loading)
                 .accessibilityIdentifier("conductor-grant-revoke:\(index)")
             }
             HStack(spacing: 6) {
@@ -143,7 +144,8 @@ struct ConductorGrantsView: View {
         }
     }
 
-    private func add(_ grant: ConductorGrant) async {
+    private func add(_ grant: ConductorGrant) async -> Bool {
+        guard !busy else { return false }
         busy = true
         defer { busy = false }
         do {
@@ -151,20 +153,22 @@ struct ConductorGrantsView: View {
             if AgentChatFixture.grantsEnabled {
                 grants.append(grant)
                 showingAdd = false
-                return
+                return true
             }
             #endif
             let key = try DeviceSSHKey.load(host.id)
             _ = try await PhrenConnection.addConductorGrant(host: host, privateKey: key, grant: grant)
             errorMessage = nil
             await load()
+            return true
         } catch {
             errorMessage = error.localizedDescription
+            return false
         }
     }
 
     private func revoke(_ index: Int) async {
-        guard grants.indices.contains(index) else { return }
+        guard !busy, grants.indices.contains(index) else { return }
         busy = true
         defer { busy = false }
         do {
@@ -175,7 +179,7 @@ struct ConductorGrantsView: View {
             }
             #endif
             let key = try DeviceSSHKey.load(host.id)
-            try await PhrenConnection.removeConductorGrant(host: host, privateKey: key, index: index)
+            try await PhrenConnection.removeConductorGrant(host: host, privateKey: key, index: index, expected: grants[index])
             errorMessage = nil
             await load()
         } catch {
@@ -189,7 +193,7 @@ struct ConductorGrantsView: View {
 private struct ConductorGrantEditorView: View {
     let host: LiveHost
     let storeId: String?
-    let save: (ConductorGrant) async -> Void
+    let save: (ConductorGrant) async -> Bool
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -207,7 +211,7 @@ private struct ConductorGrantEditorView: View {
     private var snapshot: LocalStore.Snapshot { model.snapshot(for: storeId ?? "") }
     private var projects: [String] { snapshot.projects.map(\.name).sorted() }
     private var computerNames: [String] {
-        Set(snapshot.machines.machines.keys.sorted()).sorted()
+        snapshot.machines.machines.keys.sorted()
     }
 
     private var scopeOptions: [PhrenOption<String>] {
@@ -281,8 +285,7 @@ private struct ConductorGrantEditorView: View {
         do {
             let grant = try ConductorGrant(scope: scope, actions: actionList,
                                            computers: computerList, until: untilValue)
-            await save(grant)
-            dismiss()
+            if await save(grant) { dismiss() }
         } catch {
             // The header stays disabled; surface the modelled validation text.
         }

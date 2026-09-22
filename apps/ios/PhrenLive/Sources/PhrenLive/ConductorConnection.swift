@@ -20,9 +20,9 @@ extension PhrenConnection {
     }
 
     /// Removes the grant at `index` (the Hook's list order, 0...63).
-    public static func removeConductorGrant(host: LiveHost, privateKey: Data, index: Int) async throws {
+    public static func removeConductorGrant(host: LiveHost, privateKey: Data, index: Int, expected: ConductorGrant? = nil) async throws {
         struct Response: Decodable { let ok: Bool }
-        let request = try conductorGrantRemoveRequest(index: index)
+        let request = try conductorGrantRemoveRequest(index: index, expected: expected)
         let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: request)
         let response = try JSONDecoder().decode(Response.self, from: data)
         guard response.ok else { throw PhrenKitError.validation("The computer did not confirm the removal.") }
@@ -44,11 +44,15 @@ extension PhrenConnection {
         return request
     }
 
-    static func conductorGrantRemoveRequest(index: Int) throws -> GatewayRequest {
+    static func conductorGrantRemoveRequest(index: Int, expected: ConductorGrant? = nil) throws -> GatewayRequest {
         guard (0...63).contains(index) else {
             throw PhrenKitError.validation("That grant is no longer on this computer.")
         }
-        let body = try JSONSerialization.data(withJSONObject: ["index": index], options: [.sortedKeys])
+        var fields: [String: Any] = ["index": index]
+        if let expected {
+            fields["expected"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(expected))
+        }
+        let body = try JSONSerialization.data(withJSONObject: fields, options: [.sortedKeys])
         var request = GatewayRequest(path: "/v1/conductor/grants", body: body)
         request.method = "DELETE"
         return request

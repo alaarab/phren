@@ -141,7 +141,7 @@ struct ToolPresentation {
         case "wait", "wait_agent":
             let milliseconds = (fields?["timeout_ms"] as? NSNumber)?.doubleValue
                 ?? (fields?["timeout_ms"] as? String).flatMap(Double.init)
-            guard let milliseconds, milliseconds > 0 else { return "waited" }
+            guard let milliseconds, milliseconds.isFinite, milliseconds > 0, milliseconds < Double(Int.max) else { return "waited" }
             let seconds = Int((milliseconds / 1_000).rounded())
             return seconds >= 60 ? "waited \(seconds / 60) min" : "waited \(seconds)s"
         case "list_agents", "list_agent": return "listed agents"

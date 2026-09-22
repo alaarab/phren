@@ -94,14 +94,12 @@ public struct AgentChatProgress: Sendable {
     public private(set) var usage: AgentTokenUsage?
     public private(set) var activityLine = -1
     private var latestLine = -1
-    private var totalLines = 0
     public init() {}
 
     public mutating func receive(_ frame: AgentChatTranscript) {
         guard frame.kind != .older else { return }
-        // A truncated file's lower count clears the turn state; the empty
-        // placeholder while the file is missing (totalLines 0) does not.
-        if frame.kind == .backlog, frame.totalLines > 0, frame.totalLines < totalLines { self = Self() }
+        // Progress follows the same explicit replacement contract as chat rows.
+        if frame.replacesConversation { self = Self() }
         for event in frame.progressEvents.sorted(by: { $0.line < $1.line }) where event.line > latestLine {
             latestLine = event.line
             switch event.value {
@@ -111,6 +109,5 @@ public struct AgentChatProgress: Sendable {
             case .usage(let value): usage = value
             }
         }
-        totalLines = max(totalLines, frame.totalLines)
     }
 }

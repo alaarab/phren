@@ -17,6 +17,7 @@ struct CodeView: View {
     @State private var usage: CodeUsage?
     @State private var selected: CodeDossierTarget?
     @State private var loading = false
+    @State private var searchGeneration = 0
     @State private var errorText: String?
     @FocusState private var searchFocused: Bool
 
@@ -168,19 +169,24 @@ struct CodeView: View {
     }
 
     private func runSearch() async {
+        searchGeneration += 1
+        let generation = searchGeneration
         let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
         submitted = text
         errorText = nil
-        guard !text.isEmpty else { symbols = []; return }
+        guard !text.isEmpty else { symbols = []; loading = false; return }
         loading = true
-        defer { loading = false }
+        defer { if generation == searchGeneration { loading = false } }
         #if DEBUG && targetEnvironment(simulator)
         if CodeFixture.enabled { symbols = CodeFixture.search(text); return }
         #endif
         guard let host = hosts.first else { symbols = []; return }
         do {
-            symbols = try await PhrenConnection.codeSearch(host: host, privateKey: DeviceSSHKey.load(host.id), project: project, query: text)
+            let result = try await PhrenConnection.codeSearch(host: host, privateKey: DeviceSSHKey.load(host.id), project: project, query: text)
+            guard !Task.isCancelled, generation == searchGeneration else { return }
+            symbols = result
         } catch {
+            guard !Task.isCancelled, generation == searchGeneration else { return }
             symbols = []
             errorText = error.localizedDescription
         }

@@ -1,8 +1,6 @@
 # MCP API Reference
 
-Phren exposes 68 MCP tools across 16 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the six built-in [Modules](modules.md). **`core`**, the default, exposes the seven memory tools plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default ten. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
-
-Why: the full surface is about 53k characters of schema, roughly 13k tokens, downloaded before a session says a word, and 59 similar verbs to pick the wrong one from. Core is about 17k characters.
+Phren exposes 68 MCP tools across 16 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the seven built-in [Modules](modules.md). **`core`**, the default, exposes the seven memory tools plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default ten. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
 
 ## Core profile
 
@@ -21,7 +19,7 @@ Why: the full surface is about 53k characters of schema, roughly 13k tokens, dow
 
 A composite takes `action` plus the target tool's own parameters, validated against that tool's schema; a miss returns the parameter list. A nested object parameter (`manage_task` `updates`, `set_config` `settings`, `add_finding` `citation`) may arrive as a real object or as its JSON string (some hosts serialize what a passthrough schema does not name); both are accepted, and a decoded value that misses its own schema fails at the inner field rather than as a type error on the parameter. `phren_admin list_actions` returns every admin action with its full parameter list. The individual tool sections below still describe each tool's parameters; in the core profile, reach them through the composite that stands for them.
 
-All tools return structured JSON: `{ ok, message, data?, error? }`.
+Most tools return structured JSON: `{ ok, message, data?, error? }`. The five code query tools return compact text.
 
 Module layout: search, tasks, findings, daily notes, memory quality, data management, fragment graph, sessions, operations/review, skills, hooks, extraction, configuration, topic summaries, code index, dispatch and hand-off.
 
@@ -44,13 +42,16 @@ See [Conductor](conductor.md) for setup, trust boundaries and worker contracts.
 | `model` | string | no | Explicit remote model, up to 200 characters; otherwise its configured default. |
 | `prompt` | string | yes | Worker brief, up to 32768 characters. |
 | `label` | string | yes | Task label, up to 200 characters. |
+| `parent` | object | no | Conversation identity to retain in the dispatch receipt. |
+| `parentTarget` | object | no | Live local target used to validate the parent identity. |
 
 Returns the receipt in `data`: dispatch ID, computer, project, harness/model,
-label, timestamps, state, remote target when known, and an optional error.
+label, timestamps, state, remote target when known, grant match (`granted`), and an optional error.
 `accepted` means first-prompt acceptance, not task completion. `uncertain` means
-delivery might have occurred; never retry it automatically. The first slice
-provides placement only, with receipts through `phren dispatch status`; live
-reports, remote tree rows and headless fallback are later work packages.
+delivery might have occurred; never retry it automatically. Receipts are available
+through `phren dispatch status`. Remote leads and their workers appear in
+`/v1/subagents`. The headless receiver, question relay and report outbox have
+internal adapters but are not wired into dispatch placement.
 
 CLI equivalent:
 `phren dispatch Desk phren --harness codex --label 'Checks' --prompt 'Run the assigned checks'`.
@@ -67,9 +68,19 @@ exposes `hand_off` directly. Supply exactly one of `target` or `session`.
 | `target` | object | one of | Complete live Hook target. |
 | `session` | string | one of | Session id resolved through the selected Hook's workspace overview. |
 | `text` | string | yes | Prompt to deliver, up to 32768 characters. |
+| `project` | string | no | Project scope for standing-grant matching. |
 
-Returns `{ ok, delivered, target }`. CLI equivalent:
+Returns `{ ok, delivered, target, granted }`. CLI equivalent:
 `phren hand-off local --session <id> --text 'Continue with the review'`.
+
+### Standing grants
+
+`GET /v1/conductor/grants` lists grants. `POST /v1/conductor/grants` adds a
+validated `scope`, `actions` and optional `computers` rule.
+`DELETE /v1/conductor/grants` takes an `index` and optional `expected` grant;
+a changed row returns 409 instead of revoking a different grant.
+Concurrent writes are serialized per store and protected by a file lock.
+See [Conductor](conductor.md) for scope and matching rules.
 
 ### Hook workspace launch fields
 

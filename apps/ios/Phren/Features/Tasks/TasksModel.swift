@@ -107,6 +107,20 @@ final class TasksModel {
     var priority: PhrenTask.Priority?
     var age: TaskAge = .all
 
+    private(set) var visibleRows: [TaskListRow] = []
+    private(set) var visibleGroups: [TaskSectionGroup] = []
+    private(set) var projectNames: [String] = []
+    private(set) var backlogCount = 0
+
+    /// Rebuild only when store revisions or browsing inputs change.
+    func update(status: TaskStatus, sort: TaskSort, scope: TaskListView.Scope, model: AppModel) {
+        visibleRows = rows(for: status, sort: sort, scope: scope, model: model)
+        visibleGroups = groups(visible: visibleRows, scope: scope, model: model, status: status)
+        projectNames = Array(Set(model.mergedTaskDocs.map { $0.doc.project })).sorted()
+        backlogCount = rows(in: .queue, sort: sort, scope: scope, model: model).count
+        selectedIDs.formIntersection(visibleRows.map(\.id))
+    }
+
     /// Rows for one status section, before the person's search and filters.
     func rawRows(in section: PhrenTask.Section, scope: TaskListView.Scope, model: AppModel) -> [TaskListRow] {
         var result: [TaskListRow] = []

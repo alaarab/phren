@@ -161,9 +161,14 @@ enum AgentLaunch {
     /// A session object from its identifiers alone.
     static func session(host: LiveHost, workspaceID: String, tabID: String, label: String, agent: String,
                         agentStatus: String?, cwd: String, role: PhrenConnection.LaunchRole = .agent) throws -> LiveAgentSession {
-        let escape = { (s: String) in s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") }
-        let json = #"{"kind":"herdr","groups":[{"id":"\#(escape(workspaceID))","label":"\#(escape(label))","children":[{"id":"\#(escape(tabID))","label":"1","title":"\#(escape(label))","agent":"\#(escape(agent))","agentStatus":"\#(escape(agentStatus ?? "idle"))","cwd":"\#(escape(cwd))","role":"\#(role.rawValue)"}]}]}"#
-        guard let session = try LiveWorkspaces.read(Data(json.utf8)).sessions(on: host).first else {
+        let payload: [String: Any] = ["kind": "herdr", "groups": [
+            ["id": workspaceID, "label": label, "children": [
+                ["id": tabID, "label": "1", "title": label, "agent": agent,
+                 "agentStatus": agentStatus ?? "idle", "cwd": cwd, "role": role.rawValue]
+            ]]
+        ]]
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        guard let session = try LiveWorkspaces.read(data).sessions(on: host).first else {
             throw PhrenKitError.validation("The workspace was created, but its session couldn't be opened. Find it under Live sessions.")
         }
         return session

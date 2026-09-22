@@ -29,6 +29,12 @@ and scrolls again.
 
 ### Fixed
 
+- Task rows, project groups and counts refresh only when their inputs change;
+  unchanged rows do not redraw on unrelated updates.
+- Code searches ignore late results from superseded queries. Failed grant
+  saves keep the editor open, and revoking a stale row cannot remove another grant.
+- Chat progress and pending questions follow explicit conversation resets,
+  preserving current state across older reconnect pages and missing-file placeholders.
 - Memory list rows: the project chip is back whenever the filter is not a single
   project, tasks keep their Active/Backlog/Done chip and date, and a row with
   nothing for the meta line no longer leaves a blank band under its text.
@@ -117,9 +123,9 @@ lock screen and Changes screen done properly.
   notes, tasks and topics as a filterable list. A search icon and two drop-down
   filters for kinds and projects sit above both; mode and filters are remembered.
   Tasks keep their tab.
-- The control kit adds a shared search field and a single-select chip row.
 - Approval results show as phren's own notice instead of a system alert.
-- A shared control kit (switches, option rows and groups, text segments, icon
+- A shared control kit (search fields, single-select chips, switches, option
+  rows and groups, text segments, icon
   buttons, action sheets, dialogs, steppers, screens, groups and rows) drawn
   by Phren instead of the system controls. The chat question card, Project
   Knobs and the schedule editor use it; `design/controls.md` is the contract.

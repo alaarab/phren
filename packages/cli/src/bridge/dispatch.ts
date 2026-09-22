@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { lstat, mkdir, readFile, readdir, realpath, rename, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { readProjectConfig } from "../project-config.js";
@@ -7,7 +7,7 @@ import { computerName } from "./computers.js";
 import { dispatchParentSchema, validateDispatchParent } from "./dispatch-tree.js";
 import { grantLabel, listGrants, matchGrant } from "./grants.js";
 import { hookPeers, peerRequest, type HookPeer } from "./peers.js";
-import { BridgeError, bridgeRoot, PROTOCOL, startingTargetSchema, targetSchema, type Json, type Target } from "./protocol.js";
+import { atomic, BridgeError, bridgeRoot, PROTOCOL, startingTargetSchema, targetSchema, type Json, type Target } from "./protocol.js";
 import { phrenStoreRoot } from "./transcripts.js";
 
 const text = (max: number) => z.string().min(1).max(max).refine(value => !!value.trim() && !/[\x00-\x1f\x7f]/.test(value));
@@ -45,8 +45,7 @@ export async function dispatchProjectDirectory(project: unknown): Promise<string
 async function save(receipt: Receipt): Promise<void> {
   const root = path.join(bridgeRoot(), "dispatches");
   await mkdir(root, { recursive: true, mode: 0o700 });
-  const file = path.join(root, `${receipt.id}.json`), temporary = `${file}.tmp`;
-  await writeFile(temporary, JSON.stringify(receipt), { mode: 0o600 }); await rename(temporary, file);
+  await atomic(path.join(root, `${receipt.id}.json`), receipt);
 }
 
 export async function dispatchStatus(): Promise<Receipt[]> {

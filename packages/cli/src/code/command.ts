@@ -15,8 +15,8 @@ import { findingsCitingSymbol, formatCitingFinding } from "./citations.js";
 /**
  * The `phren code` subcommands.
  *
- * Stage 1 shipped `index` and `status`. Stage 2 adds the read side:
- * `search`, `outline`, `refs`, `def` and `usage`, all thin formatters over
+ * `index` and `status` maintain the index. Read commands
+ * `search`, `outline`, `refs`, `def` and `usage` are thin formatters over
  * `query.ts`. The code module owns every one; the registry gate rejects them
  * while the module is disabled.
  */

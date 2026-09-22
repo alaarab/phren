@@ -483,8 +483,7 @@ struct AgentChatView: View {
                 // the request's own input plus the answers; Skip denies.
                 ChatQuestionCard(prompt: prompt, busy: model.answering || !active || !model.interactionConnected,
                                  title: "\(model.target?.providerName ?? "Claude") has a question", allowsTyping: true,
-                                 skip: {                     sendTask = Task { await model.answer(session, approval: approval, approve: false) }
-                }) { answers in
+                                 skip: { sendTask = Task { await model.answer(session, approval: approval, approve: false) } }) { answers in
                     guard let updated = try? prompt.answeredInput(input, answers: answers) else { return }
                     sendTask = Task { await model.answer(session, approval: approval, decision: .approve, updatedInput: updated) }
                 }

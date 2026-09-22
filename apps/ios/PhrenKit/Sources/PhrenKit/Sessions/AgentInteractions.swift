@@ -88,7 +88,8 @@ public struct AgentPromptChoice: Decodable, Equatable, Sendable {
     public func prompt(id: String) -> AgentQuestionPrompt? {
         let text = [title, body].compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }.joined(separator: "\n\n")
-        guard options.count >= 2, !text.isEmpty else { return nil }
+        guard (2...12).contains(options.count), !text.isEmpty, text.utf8.count <= 32_768,
+              options.allSatisfy({ !$0.label.isEmpty && $0.label.utf8.count <= 2_000 && $0.answerKey != nil }) else { return nil }
         return AgentQuestionPrompt(toolUseId: id, questions: [
             .init(question: text, options: options.map { .init(label: $0.label) }),
         ])

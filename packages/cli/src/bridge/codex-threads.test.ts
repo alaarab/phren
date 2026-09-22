@@ -44,7 +44,8 @@ describe("Codex thread store", () => {
     insert(1, { type: "userMessage", id: "u1", content: [{ type: "text", text: "Fix the build" }] });
     insert(2, { type: "reasoning", id: "r1", summary: [] });
     insert(3, { type: "commandExecution", id: "exec-1", command: "/bin/zsh -lc 'swift build'", cwd: "/home/sam/app", status: "inProgress" });
-    const file = await transcriptPath("codex", thread);
+    const [file, concurrent] = await Promise.all([transcriptPath("codex", thread), transcriptPath("codex", thread)]);
+    expect(concurrent).toBe(file);
     expect(file).toBe(await materializeCodexThread(thread));
     expect(file.startsWith(path.join(bridge, "codex-threads"))).toBe(true);
     let page = await new TranscriptReader(file, "codex").read();

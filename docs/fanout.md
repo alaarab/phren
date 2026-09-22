@@ -13,6 +13,7 @@ Each job is a directory under the store's private runtime root:
 <store>/.runtime/agent-fanouts/<job id>/
   manifest.json    # schemaVersion, id, parent, provider, taskLabel, worktree, eventLog, status, ...
   events.jsonl     # the worker's projected event log
+  stderr.log       # bounded tail inspected for OpenCode refusals
   exit.txt         # the launcher's recorded exit code
   blocked.json     # present only when a permission was refused (see below)
 ```
@@ -53,9 +54,10 @@ the denial happened.
 
 The launcher may record exit 0 even though the denied permission aborted the
 turn. The Hook treats a job with `blocked.json` as failed regardless of
-`exit.txt`: `/v1/subagents` reports the child with the reason
+`exit.txt`. The public `/v1/subagents` state is `completed` for terminal jobs,
+with the failure recorded in the reason
 `blocked: <type> <pattern>`, and a registered phone receives one push naming the
-worker and the reason.
+worker and the reason. Overlapping notification sweeps are coalesced.
 
 ## Archiving finished jobs
 
@@ -90,5 +92,7 @@ anything.
 In `opencode run`, OpenCode rejects some permissions itself (external_directory,
 doom_loop) before any plugin sees them and prints `permission requested: <type>
 (<pattern>); auto-rejecting` to stderr. The launcher captures stderr into the job
-directory, and the Hook reads the last such line from `stderr.log` when no
-`blocked.json` exists, reporting the job as failed with `blocked: <type> <pattern>`.
+directory, and the Hook reads only the final 16 KiB of `stderr.log` when no
+`blocked.json` exists. The last matching refusal becomes the failure reason
+`blocked: <type> <pattern>`. Explicit failed or cancelled manifest states are
+also preserved internally even when an exit code is absent.

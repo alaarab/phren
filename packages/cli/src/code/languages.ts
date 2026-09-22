@@ -162,15 +162,10 @@ function jsKind(def: SyntaxNode): SymbolKind | undefined {
   }
 }
 
-function jsRefine(kind: SymbolKind, def: SyntaxNode, containerTypes: ReadonlySet<string>): SymbolKind {
+function jsRefine(kind: SymbolKind, def: SyntaxNode): SymbolKind {
   if (kind === "variable") {
     const value = def.childForFieldName("value");
     if (value && (value.type === "arrow_function" || value.type === "function_expression")) return "function";
-  }
-  if (kind === "method" && !ancestorsInclude(def, containerTypes) && !ancestorsInclude(def, new Set(["interface_body", "object"]))) {
-    // A method_definition's parent is a class body; anything else (object
-    // literal) is still a method by grammar. Keep it.
-    return kind;
   }
   return kind;
 }
@@ -199,7 +194,9 @@ function swiftKind(def: SyntaxNode): SymbolKind | undefined {
     case "protocol_function_declaration":
       return "method";
     case "class_declaration": {
-      const head = def.text.trimStart().slice(0, 12);
+      const head = def.childForFieldName("declaration_kind")?.text
+        ?? def.children.find(child => ["struct", "enum", "extension", "class", "actor"].includes(child.type))?.text
+        ?? def.text.trimStart().slice(0, 12);
       if (head.startsWith("struct")) return "struct";
       if (head.startsWith("enum")) return "enum";
       if (head.startsWith("extension")) return undefined;
@@ -426,7 +423,7 @@ export const LANGUAGES: readonly LanguageSpec[] = [
     extensions: ["ts", "mts", "cts"],
     symbolsQuery: TS_SYMBOL_QUERY,
     kindOf: jsKind,
-    refine: (kind, def) => jsRefine(kind, def, TS_CONTAINERS),
+    refine: jsRefine,
     identifierTypes: JS_IDENTIFIERS,
     containerName: TS_CONTAINER_NAME,
     exported: jsExported,
@@ -437,7 +434,7 @@ export const LANGUAGES: readonly LanguageSpec[] = [
     extensions: ["tsx"],
     symbolsQuery: TS_SYMBOL_QUERY,
     kindOf: jsKind,
-    refine: (kind, def) => jsRefine(kind, def, TS_CONTAINERS),
+    refine: jsRefine,
     identifierTypes: JS_IDENTIFIERS,
     containerName: TS_CONTAINER_NAME,
     exported: jsExported,
@@ -448,7 +445,7 @@ export const LANGUAGES: readonly LanguageSpec[] = [
     extensions: ["js", "mjs", "cjs", "jsx"],
     symbolsQuery: JS_SYMBOL_QUERY,
     kindOf: jsKind,
-    refine: (kind, def) => jsRefine(kind, def, new Set(["class_declaration", "class"])),
+    refine: jsRefine,
     identifierTypes: JS_IDENTIFIERS,
     containerName: makeContainerName(new Set(["class_declaration", "class"]), node => childText(node, "name")),
     exported: jsExported,

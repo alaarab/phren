@@ -21,7 +21,7 @@ struct TaskListRow: Identifiable, Hashable {
     let project: String
     let task: PhrenTask
     var id: String { "\(storeId)/\(project)/\(task.stableId ?? task.id)" }
-    static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id && lhs.task == rhs.task }
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id && lhs.storeName == rhs.storeName && lhs.task == rhs.task }
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
@@ -51,7 +51,7 @@ struct TaskAgentRequest: Equatable {
 /// Task list: cross-store + cross-project in the Tasks tab, or scoped to one
 /// store's project inside project detail.
 struct TaskListView: View {
-    enum Scope {
+    enum Scope: Equatable {
         case all
         case project(storeId: String, project: String)
     }
@@ -100,9 +100,27 @@ struct TaskListView: View {
         return LocalStore.isReadOnlyProject(project)
     }
 
-    private var projectNames: [String] {
-        // Key paths can't traverse tuple elements — use a closure.
-        Array(Set(model.mergedTaskDocs.map { $0.doc.project })).sorted()
+    private struct StoreRevision: Equatable {
+        let id: String
+        let revision: UUID
+        let name: String
+    }
+    private struct RowsKey: Equatable {
+        let stores: [StoreRevision]
+        let storeFilter: String?
+        let scope: Scope
+        let project: String?
+        let query: String
+        let priority: PhrenTask.Priority?
+        let age: TaskAge
+        let sort: TaskSort
+        let status: TaskStatus
+    }
+    private var rowsKey: RowsKey {
+        RowsKey(stores: model.storeContexts.map {
+            StoreRevision(id: $0.id, revision: $0.snapshot.revision, name: $0.descriptor.displayName)
+        }, storeFilter: model.storeFilter, scope: scope, project: tasks.selectedProject,
+                query: tasks.query, priority: tasks.priority, age: tasks.age, sort: sort, status: status)
     }
 
     /// Add targets: every writable (store, project) pair. Derived from the
@@ -113,10 +131,8 @@ struct TaskListView: View {
     }
 
     var body: some View {
-        // Sorting and date parsing scale with the task count. Share one result
-        // across this render; the next observed change computes fresh rows.
         @Bindable var tasks = tasks
-        let visibleRows = tasks.rows(for: status, sort: sort, scope: scope, model: model)
+        let visibleRows = tasks.visibleRows
         let writableRows = visibleRows.filter { model.canWrite(storeId: $0.storeId, project: $0.project) }
         VStack(spacing: 0) {
             controls(visibleCount: visibleRows.count,
@@ -146,7 +162,7 @@ struct TaskListView: View {
                     // status's busiest work first, each with its own counts,
                     // foldable to skim the rest. The top All control folds or
                     // unfolds every section at once.
-                    let groups = tasks.groups(visible: visibleRows, scope: scope, model: model, status: status)
+                    let groups = tasks.visibleGroups
                     allSectionsControl(groups)
                     ForEach(groups) { group in
                         sectionHeader(group)
@@ -167,7 +183,7 @@ struct TaskListView: View {
                                 .font(.subheadline).foregroundStyle(PhrenTheme.textMuted)
                         }
                         .padding(.vertical, 10)
-                        let backlogCount = tasks.rows(in: .queue, sort: sort, scope: scope, model: model).count
+                        let backlogCount = tasks.backlogCount
                         if backlogCount > 0 {
                             Button("View backlog (\(backlogCount))") { status = .backlog }
                         }
@@ -192,7 +208,9 @@ struct TaskListView: View {
             if tasks.isSelecting { selectionActions }
         }
         .onChange(of: status) { _, _ in tasks.selectedIDs.removeAll() }
-        .onChange(of: visibleRows.map(\.id)) { _, ids in tasks.selectedIDs.formIntersection(ids) }
+        .onChange(of: rowsKey, initial: true) { _, _ in
+            tasks.update(status: status, sort: sort, scope: scope, model: model)
+        }
         .toolbar {
             if !isReadOnlyScope {
                 ToolbarItem(placement: .topBarLeading) {
@@ -397,7 +415,7 @@ struct TaskListView: View {
                     if !isProjectScoped {
                         Picker("Project", selection: $tasks.selectedProject) {
                             Text("All projects").tag(String?.none)
-                            ForEach(projectNames, id: \.self) { Text($0).tag(String?.some($0)) }
+                            ForEach(tasks.projectNames, id: \.self) { Text($0).tag(String?.some($0)) }
                         }
                         if model.hasMultipleStores {
                             Picker("Store", selection: $model.storeFilter) {
@@ -488,6 +506,7 @@ struct TaskListView: View {
                 if tasks.isSelecting { select(row) }
                 else { move([row], using: row.task.checked ? .start : .done) }
             }
+            .equatable()
             .padding(.horizontal, 12).padding(.vertical, 8)
             .sessionCard()
             .overlay(alignment: .leading) {
@@ -649,7 +668,12 @@ struct AddTaskSheet: View {
     }
 }
 
-struct TaskRow: View {
+struct TaskRow: View, Equatable {
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.row == rhs.row && lhs.showProject == rhs.showProject && lhs.showStore == rhs.showStore
+            && lhs.canWrite == rhs.canWrite && lhs.selection == rhs.selection
+    }
+
     let row: TaskListRow
     let showProject: Bool
     let showStore: Bool

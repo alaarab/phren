@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { AgentHooks } from "./agent-hooks.js";
+import { AgentHooks, conductorCall } from "./agent-hooks.js";
 import { validateTarget } from "./herdr.js";
 import type { ApprovalPushService } from "./push.js";
 import type { Target } from "./protocol.js";
@@ -85,7 +85,7 @@ describe("opencode file approvals", () => {
     await writeFile(requestFile(store), JSON.stringify({ id: "per_ext1", sessionID: session, type: "external_directory",
       title: "Allow external_directory?", message: "external_directory: /private/tmp/x",
       createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 30_000).toISOString() }));
-    await hooks.sweepOpencodeApprovals();
+    await Promise.all([hooks.sweepOpencodeApprovals(), hooks.sweepOpencodeApprovals()]);
     expect(push.sent).toHaveLength(1);
     expect(push.sent[0]).toMatchObject({ provider: "opencode", title: "Allow external_directory?", message: "external_directory: /private/tmp/x" });
     expect(push.sent[0].binding).toMatch(/^[0-9a-f-]{36}$/);
@@ -106,4 +106,12 @@ describe("opencode file approvals", () => {
     expect(JSON.parse(await readFile(answerFile(store), "utf8"))).toEqual({ id: "per_ext2", decision: "approve" });
     await expect(hooks.answerPush(push.sent[0].binding, "approve")).rejects.toThrow("no longer pending");
   });
+});
+
+it("recognizes conductor tool names without splitting hand_off", () => {
+  for (const tool of ["hand_off", "phren.hand_off", "mcp__phren__hand_off"]) {
+    expect(conductorCall(tool, { project: "demo" })).toEqual({ action: "hand_off", project: "demo" });
+  }
+  expect(conductorCall("mcp__phren__phren_admin", { action: "dispatch", project: "demo" }))
+    .toEqual({ action: "dispatch", project: "demo" });
 });

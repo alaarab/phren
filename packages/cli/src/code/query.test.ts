@@ -192,3 +192,13 @@ describe("code usage", () => {
     expect(result.value.bottom.some(entry => entry.name === "z")).toBe(false);
   });
 });
+
+it("does not resolve a member in a different container", async () => {
+  expect((await definition(store, "fixture", "Missing.length")).value).toBeUndefined();
+});
+
+it("searches dollar-prefixed identifiers without FTS syntax errors", async () => {
+  fs.appendFileSync(path.join(repo, "typescript/util.ts"), "\nexport function $helper() { return 1; }\n");
+  await indexProject(store, "fixture", { repoRoot: repo });
+  expect((await search(store, "fixture", "$helper")).value[0]?.name).toBe("$helper");
+});

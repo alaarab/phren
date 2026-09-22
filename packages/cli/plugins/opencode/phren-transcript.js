@@ -1,5 +1,5 @@
 // Installed by Phren Hook and replaced on every update. Copy it under another name to customize.
-import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 
@@ -7,7 +7,7 @@ const PHREN_STORE = "__PHREN_STORE__";
 const FLUSH_MS = 250;
 const MAX_TOOL_OUTPUT = 200_000;
 const STOP_REASONS = { stop: "end_turn", "tool-calls": "tool_use", length: "max_tokens" };
-const OPENCODE_SESSION = /^ses_[0-9A-Za-z]+$/;
+const OPENCODE_SESSION = /^ses_[0-9A-Za-z]{1,64}$/;
 const APPROVAL_POLL_MS = 200;
 const APPROVAL_DEADLINE_MS = 50_000;
 
@@ -78,7 +78,7 @@ function approvalPaths(sessionID) {
 
 function writeJsonAtomic(file, value) {
   const staging = `${file}.${process.pid}.tmp`;
-  writeFileSync(staging, JSON.stringify(value));
+  writeFileSync(staging, JSON.stringify(value), { mode: 0o600 });
   renameSync(staging, file);
 }
 
@@ -170,6 +170,7 @@ export const PhrenTranscriptPlugin = async () => {
   const sessions = new Map();
   const timers = new Map();
   const written = new Map();
+  const pendingApprovals = new Set();
 
   const sessionState = sessionID => {
     let state = sessions.get(sessionID);
@@ -190,13 +191,13 @@ export const PhrenTranscriptPlugin = async () => {
     const body = linesFor(state);
     const content = body.length ? body.join("\n") + "\n" : "";
     if (written.get(sessionID) === content) return;
-    written.set(sessionID, content);
     const directory = path.join(storeRoot(), ".runtime", "sessions");
     mkdirSync(directory, { recursive: true });
     const file = path.join(directory, `opencode-${sessionID}.events.jsonl`);
     const staging = `${file}.${process.pid}.tmp`;
-    writeFileSync(staging, content);
+    writeFileSync(staging, content, { mode: 0o600 });
     renameSync(staging, file);
+    written.set(sessionID, content);
   };
 
   const schedule = sessionID => {
@@ -224,7 +225,7 @@ export const PhrenTranscriptPlugin = async () => {
 
   return {
     "chat.message": async (input, output) => {
-      if (!input?.sessionID || !output?.message) return;
+      if (!OPENCODE_SESSION.test(text(input?.sessionID)) || !output?.message) return;
       rememberInfo(input.sessionID, output.message);
       for (const part of output.parts ?? []) rememberPart(input.sessionID, output.message.id, part);
     },
@@ -241,10 +242,15 @@ export const PhrenTranscriptPlugin = async () => {
         writeBlocked(input);
         return;
       }
-      let request, answer;
+      let request, answer, pendingSession;
       try {
         const sessionID = text(input?.sessionID), id = text(input?.id);
         if (!OPENCODE_SESSION.test(sessionID) || !id) { setStatus(output, "ask"); return; }
+        // A second request for this session belongs in the terminal until
+        // the existing phone request has finished.
+        if (pendingApprovals.has(sessionID)) { setStatus(output, "ask"); return; }
+        pendingApprovals.add(sessionID);
+        pendingSession = sessionID;
         const paths = approvalPaths(sessionID);
         request = paths.request; answer = paths.answer;
         mkdirSync(approvalDirectory(), { recursive: true });
@@ -258,6 +264,8 @@ export const PhrenTranscriptPlugin = async () => {
         while (Date.now() < deadline) {
           await sleep(APPROVAL_POLL_MS);
           try {
+            const info = lstatSync(answer);
+            if (!info.isFile() || info.size > 65_536) continue;
             const value = JSON.parse(readFileSync(answer, "utf8"));
             if (value && value.id === id) { decision = value.decision; break; }
           } catch {}
@@ -268,12 +276,13 @@ export const PhrenTranscriptPlugin = async () => {
       } finally {
         if (answer) removeFile(answer);
         if (request) removeFile(request);
+        if (pendingSession) pendingApprovals.delete(pendingSession);
       }
     },
     event: async ({ event }) => {
       const properties = event?.properties ?? {};
       const sessionID = typeof properties.sessionID === "string" ? properties.sessionID : properties.info?.sessionID ?? properties.part?.sessionID;
-      if (!sessionID) return;
+      if (!OPENCODE_SESSION.test(text(sessionID))) return;
       if (event.type === "message.updated") rememberInfo(sessionID, properties.info);
       else if (event.type === "message.part.updated") rememberPart(sessionID, properties.part?.messageID, properties.part);
       else if (event.type === "message.removed") {

@@ -25,6 +25,12 @@ final class AgentQueuedQuestionTests: XCTestCase {
         let keys = [AgentAnswerKey.altUp, choice.answerKey(selections: [0])].compactMap { $0 }
         XCTAssertEqual(keys.map(\.rawValue), ["AltUp", "1"])
     }
+    func testUnsupportedTerminalChoiceFallsBackToTerminal() {
+        let choice = AgentPromptChoice(title: "Choose", options: [
+            .init(label: "Continue", key: "1"), .init(label: "Unsupported", key: "F20"),
+        ])
+        XCTAssertNil(choice.prompt(id: "choice"))
+    }
     func testTerminalPromptWithoutQueuedDefaultsToFalse() throws {
         let prompt = try status(terminalPrompt: #"{"toolName":"Shell","message":"{\"command\":\"ls\"}"}"#).terminalPrompt
         XCTAssertFalse(try XCTUnwrap(prompt).queued)

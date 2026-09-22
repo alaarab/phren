@@ -55,8 +55,21 @@ final class AgentChatProgressTests: XCTestCase {
         progress.receive(try frame("append", [row(11, "task_started", ["started_at": 2000])], total: 12))
         XCTAssertNil(progress.usage)
         XCTAssertEqual(progress.startedAt, Date(timeIntervalSince1970: 2000))
-        progress.receive(try frame("backlog", [], total: 1))
+        progress.receive(try frame("backlog", [], total: 1, reset: true))
         XCTAssertNil(progress.phase); XCTAssertNil(progress.usage); XCTAssertNil(progress.startedAt)
+    }
+
+    func testReconnectKeepsProgressUntilAnExplicitReplacement() throws {
+        var progress = AgentChatProgress()
+        progress.receive(try frame("append", [row(19, "task_started", ["started_at": 2000])], total: 20))
+        progress.receive(try frame("backlog", [row(2, "task_complete")], total: 3))
+        XCTAssertEqual(progress.phase, .working)
+        XCTAssertEqual(progress.startedAt, Date(timeIntervalSince1970: 2000))
+        progress.receive(try frame("backlog", [], total: 0, reset: true))
+        XCTAssertEqual(progress.phase, .working)
+        progress.receive(try frame("backlog", [row(0, "task_complete")], total: 20, reset: true))
+        XCTAssertEqual(progress.phase, .finished)
+        XCTAssertNil(progress.startedAt)
     }
 
     func testCodexCachedInputIsIncludedAndCompletionAliasFinishes() throws {
@@ -99,7 +112,7 @@ final class AgentChatProgressTests: XCTestCase {
         var payload = fields; payload["type"] = type
         return ["line": line, "raw": ["type": "event_msg", "payload": payload]]
     }
-    private func frame(_ kind: String, _ rows: [[String: Any]], total: Int, source: String = "codex") throws -> AgentChatTranscript {
-        try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: ["type": kind, "source": source, "entries": rows, "totalLines": total]), source: source)
+    private func frame(_ kind: String, _ rows: [[String: Any]], total: Int, source: String = "codex", reset: Bool = false) throws -> AgentChatTranscript {
+        try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: ["type": kind, "source": source, "entries": rows, "totalLines": total, "reset": reset]), source: source)
     }
 }

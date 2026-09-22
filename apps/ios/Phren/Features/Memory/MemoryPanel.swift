@@ -62,6 +62,7 @@ struct MemoryPanel: View {
         // The list may have just replaced the map; let it lay out first.
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(60))
+            guard scrollTarget == target, !Task.isCancelled else { return }
             withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { proxy.scrollTo(target, anchor: .top) }
             scrollTarget = nil
         }

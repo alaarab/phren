@@ -40,15 +40,15 @@ final class TasksTests: XCTestCase {
 
         // Folding one project leaves the other open; tapping it again unfolds.
         demo.tap()
-        XCTAssertFalse(demoRow.waitForNonExistence(timeout: 2))
+        XCTAssertTrue(demoRow.waitForNonExistence(timeout: 2))
         XCTAssertTrue(apiRow.exists)
         demo.tap()
         XCTAssertTrue(demoRow.waitForExistence(timeout: 5))
 
         // All folds every visible section together, then unfolds them.
         app.buttons["tasks-section-all"].tap()
-        XCTAssertFalse(demoRow.waitForNonExistence(timeout: 2))
-        XCTAssertFalse(apiRow.waitForNonExistence(timeout: 2))
+        XCTAssertTrue(demoRow.waitForNonExistence(timeout: 2))
+        XCTAssertTrue(apiRow.waitForNonExistence(timeout: 2))
         XCTAssertTrue(demo.exists, "Folded headers stay put")
         attachUIScreenshot(app, "Tasks collapsed")
         app.buttons["tasks-section-all"].tap()
@@ -62,11 +62,11 @@ final class TasksTests: XCTestCase {
         XCTAssertTrue(search.waitForExistence(timeout: 5))
         search.tap()
         search.typeText("short follow-up")
-        XCTAssertFalse(api.waitForNonExistence(timeout: 2))
+        XCTAssertTrue(api.waitForNonExistence(timeout: 2))
         XCTAssertTrue(demo.waitForExistence(timeout: 5))
         XCTAssertTrue(demo.label.contains("6 queue"), "Counts ignore the search")
         XCTAssertTrue(app.buttons["task-detail:sample/brain/demo/dead0002"].exists)
-        XCTAssertFalse(demoRow.waitForNonExistence(timeout: 2))
+        XCTAssertTrue(demoRow.waitForNonExistence(timeout: 2))
     }
 
     /// A fold written to AppStorage survives leaving the tab and relaunching
@@ -84,14 +84,14 @@ final class TasksTests: XCTestCase {
         XCTAssertTrue(demo.waitForExistence(timeout: 5))
         XCTAssertTrue(demoRow.waitForExistence(timeout: 5))
         demo.tap()
-        XCTAssertFalse(demoRow.waitForNonExistence(timeout: 2))
+        XCTAssertTrue(demoRow.waitForNonExistence(timeout: 2))
 
         app.launchArguments = ["--ui-testing", "--workflow-fixture", "--tasks-keep-collapsed"]
         app.launch()
         XCTAssertTrue(app.tabBars.buttons["Tasks"].waitForExistence(timeout: 8))
         app.tabBars.buttons["Tasks"].tap()
         XCTAssertTrue(demo.waitForExistence(timeout: 5))
-        XCTAssertFalse(demoRow.waitForNonExistence(timeout: 2), "The fold is remembered")
+        XCTAssertTrue(demoRow.waitForNonExistence(timeout: 2), "The fold is remembered")
         XCTAssertTrue(app.buttons["task-detail:sample/brain/api/dead0201"].exists,
                       "A project that was never folded stays open")
         XCTAssertTrue(demo.label.contains("6 queue"), "Chips still report the folded section")

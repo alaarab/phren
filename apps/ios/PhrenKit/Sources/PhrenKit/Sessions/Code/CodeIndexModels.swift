@@ -1,6 +1,6 @@
 import Foundation
 
-/// Wire models for the `code` module's Hook routes (stage 3).
+/// Wire models for the `code` module's Hook routes.
 ///
 /// They mirror the TypeScript shapes in `packages/cli/src/code/query.ts` and
 /// `status.ts`: search hits, file outlines, a definition with its snippet,
@@ -101,7 +101,7 @@ public struct CodeOutlineEntry: Decodable, Equatable, Sendable, Identifiable {
     private enum CodingKeys: String, CodingKey { case name, kind, line, endLine, signature, doc, exported, uses, children }
 }
 
-/// The last change at a symbol's line: a hash of the git author and a date,
+/// The last commit touching a symbol's file: a hash of the git author and a date,
 /// never a name.
 public struct CodeBlame: Decodable, Equatable, Sendable {
     public let authorHash: String

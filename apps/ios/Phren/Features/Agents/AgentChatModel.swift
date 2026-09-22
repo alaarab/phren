@@ -435,7 +435,7 @@ final class AgentChatModel {
         // Older history must not resurrect a prompt whose answer fell outside
         // that page. A full snapshot or replacement carries the current
         // question lifecycle; a reconnect delta is partial and leaves it alone.
-        if frame.kind != .older { questionState.receive(frame.questionEvents, reset: frame.kind == .backlog && frame.reset) }
+        if frame.kind != .older { questionState.receive(frame.questionEvents, reset: frame.replacesConversation) }
         reveal.receive(frame, previous: messages, animated: animateReplies && hasTranscript)
         if frame.messages.contains(where: { $0.line > submittedAfterLine && $0.role != .user }) { awaitingReply = false }
         if !progressConnected, !frame.progressEvents.isEmpty { acceptProgress(frame) }

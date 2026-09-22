@@ -287,7 +287,7 @@ extension View {
 
     /// A small upper-case section label for the plain sessions list.
     func plainListSectionLabel() -> some View {
-        self.font(.caption.weight(.semibold)).foregroundStyle(PhrenTheme.textMuted).textCase(.uppercase).tracking(0.6)
+        self.plainListSectionTypography()
             .padding(.leading, 14).padding(.top, 8)
             .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 2, trailing: 0))
     }

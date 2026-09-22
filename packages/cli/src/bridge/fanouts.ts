@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -150,17 +150,24 @@ async function readBlocked(jobRoot: string): Promise<Blocked | undefined> {
  * plugin sees them, and only says so on stderr: `permission requested:
  * <type> (<pattern>); auto-rejecting`. The launcher captures stderr into the
  * job directory, so that line is the evidence when blocked.json is absent. */
-const REFUSED_LINE = /permission requested: ([a-z_]+) \(([^)]*)\); auto-rejecting/;
+const REFUSED_LINE = /permission requested: ([a-z_]+) \(([^)]*)\); auto-rejecting/g;
 async function readRefusedFromStderr(jobRoot: string): Promise<Blocked | undefined> {
   const file = await regularContainedFile(jobRoot, path.join(jobRoot, "stderr.log"), 4 * 1024 * 1024);
   if (!file) return undefined;
   try {
-    const text = await readFile(file, "utf8");
-    const tail = text.slice(-16_384);
-    const matches = [...tail.matchAll(new RegExp(REFUSED_LINE.source, "g"))];
-    const last = matches[matches.length - 1];
+    const handle = await open(file, "r");
+    let tail: string;
+    let at: string;
+    try {
+      const info = await handle.stat();
+      const buffer = Buffer.alloc(Math.min(info.size, 16_384));
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, Math.max(0, info.size - buffer.length));
+      tail = buffer.toString("utf8", 0, bytesRead);
+      at = info.mtime.toISOString();
+    } finally { await handle.close(); }
+    let last: RegExpMatchArray | undefined;
+    for (const match of tail.matchAll(REFUSED_LINE)) last = match;
     if (!last) return undefined;
-    const at = (await stat(file)).mtime.toISOString();
     return { type: last[1], pattern: last[2].slice(0, 500), message: `${last[1]}: ${last[2]}`.slice(0, 600), at };
   } catch { return undefined; }
 }
@@ -202,7 +209,7 @@ export async function fanoutChildren(parentProvider: Provider, parentSession: st
       const blocked = await readBlocked(jobRoot);
       children.push({ id, provider: manifest.provider, session: manifest.session, model: manifest.model, ...worktree, cwd: manifest.worktree,
         path: manifest.taskLabel, callId: `fanout:${id}`,
-        state: blocked ? "failed" : ["queued", "running"].includes(manifest.status) ? "running" : "completed",
+        state: blocked || manifest.status === "failed" || manifest.status === "cancelled" ? "failed" : ["queued", "running"].includes(manifest.status) ? "running" : "completed",
         ...(blocked ? { reason: blockedReason(blocked) } : {}), transcript, children: [] });
     } catch { /* Torn, old, or untrusted manifests do not become child agents. */ }
   }

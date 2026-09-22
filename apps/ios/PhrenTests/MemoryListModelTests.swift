@@ -36,7 +36,9 @@ final class MemoryListModelTests: XCTestCase {
 
         model.update(contents: [], kinds: [], projects: ["ledger"], query: "", searchResults: [])
         XCTAssertTrue(model.scopeIsEmpty)
-        XCTAssertEqual(model.rows.count, 1, "topic rows stay in view whatever the project filter")
+        XCTAssertTrue(model.rows.isEmpty)
+        model.update(contents: contents, kinds: [], projects: ["absent"], query: "", searchResults: [])
+        XCTAssertEqual(model.rows.map(\.kind), [.topic], "topic rows stay in view whatever the project filter")
 
         // A task draws its section chip (and usually its date) whatever the
         // filters, so its meta line is never empty; a bare finding with no
