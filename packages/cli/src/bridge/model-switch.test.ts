@@ -12,14 +12,20 @@ const astra = { id: "gpt-6-astra", name: "GPT-6-Astra", defaultReasoningEffort: 
 describe("model switch route transaction", () => {
   let switcher: ModelSwitcher, hooks: AgentHooks, stage: string, highlight: number;
   let missing: boolean, stuck: boolean, status: string, wrongFooter: boolean, draft: boolean, quick: boolean, missingEffort: boolean;
+  let effortReply: string | undefined;
   const sent = () => vi.mocked(rpc).mock.calls.filter(call => call[1] !== "agent.read").map(call => [call[1], call[2]]);
   beforeEach(() => {
     hooks = new AgentHooks();
     switcher = new ModelSwitcher(hooks, new ModelCatalog(async () => [astra], async () => [{ id: "claude-opus-5-5", name: "Opus 5.5" }]), 20);
     stage = "idle"; highlight = 0; missing = false; stuck = false; wrongFooter = false; draft = false; status = "idle"; quick = false; missingEffort = false;
+    effortReply = undefined;
     vi.mocked(validateTarget).mockReset().mockImplementation(async () => ({ terminal_id: "t1", agent_status: status }));
     vi.mocked(rpc).mockReset().mockImplementation(async (_server, method, params) => {
-      if (method === "agent.prompt") { stage = String(params?.text).includes("opus") ? "claude" : quick ? "quick" : "model"; return {}; }
+      if (method === "agent.prompt") {
+        const text = String(params?.text);
+        stage = text.startsWith("/effort") ? "claude-effort" : text.includes("opus") ? "claude" : quick ? "quick" : "model";
+        return {};
+      }
       if (method === "agent.send_keys") {
         for (const key of params?.keys as string[]) {
           if (key === "escape") stage = stage === "effort" ? "model" : "idle";
@@ -33,7 +39,9 @@ describe("model switch route transaction", () => {
         const labels = stage === "quick" ? ["Auto", "All models"] : stage === "model" ? ["GPT-5.6-Sol", missing ? "GPT-Other" : "GPT-6-Astra (current)"] : ["Low", missingEffort ? "Minimal" : "Medium (default)", "High", "Extra high"];
         const text = ["quick", "model", "effort"].includes(stage)
           ? `${stage === "effort" ? "Select Reasoning Level for GPT-6-Astra" : "Select Model"}\n\n${labels.map((label, i) => `${i === highlight ? "›" : " "} ${i + 1}. ${label}  Description`).join("\n")}\nPress enter to confirm or esc to go back`
-          : stage === "claude" ? "Set model to Opus 5.5\n❯\n"
+          // An older effort reply sits above this switch's model line.
+          : stage === "claude" ? "  ⎿  Set effort level to low (this session only): Quick\n> /model opus\n  ⎿  Set model to Opus 5.5\n❯\n"
+          : stage === "claude-effort" ? `  ⎿  Set effort level to low (this session only): Quick\n> /model opus\n  ⎿  Set model to Opus 5.5\n> /effort\n${effortReply === undefined ? "" : `  ⎿  ${effortReply}\n`}❯\n`
           : `›${draft ? " unfinished draft" : ""}\n${stage === "done" && !wrongFooter ? "gpt-6-astra" : "gpt-5.6-sol"} medium · 100% left`;
         return { read: { text } };
       }
@@ -107,6 +115,35 @@ describe("model switch route transaction", () => {
   it("sends Claude's alias once and verifies its confirmation", async () => {
     expect(await switcher.switch({ ...target, source: "claude" }, { model: "opus" })).toEqual({ ok: true, model: "claude-opus-5-5", name: "Opus 5.5" });
     expect(sent()).toEqual([["agent.prompt", { target: target.pane, text: "/model opus" }]]);
+  });
+  it("sets Claude's effort with /effort after the model and ignores an older reply", async () => {
+    effortReply = "Set effort level to high (saved as your default for new sessions): Comprehensive implementation";
+    expect(await switcher.switch({ ...target, source: "claude" }, { model: "opus", effort: "high" }))
+      .toEqual({ ok: true, model: "claude-opus-5-5", name: "Opus 5.5", effort: "high" });
+    expect(sent()).toEqual([
+      ["agent.prompt", { target: target.pane, text: "/model opus" }],
+      ["agent.prompt", { target: target.pane, text: "/effort high" }],
+    ]);
+  });
+  it("reports the level Claude's effort cap chose", async () => {
+    effortReply = "Effort 'max' exceeds the cap for claude-opus-5-5 set by your settings or organization; set to 'high' instead (this session only): Comprehensive";
+    await expect(switcher.switch({ ...target, source: "claude" }, { model: "opus", effort: "max" })).resolves.toMatchObject({ effort: "high" });
+  });
+  it.each([
+    ["CLAUDE_CODE_EFFORT_LEVEL=low overrides this session, clear it and high takes over", "overrides"],
+    ["Invalid argument: high. Valid options are: low, medium, auto", "did not set the effort"],
+  ])("fails when Claude answers %s", async (reply, message) => {
+    effortReply = reply;
+    await expect(switcher.switch({ ...target, source: "claude" }, { model: "opus", effort: "high" })).rejects.toThrow(message);
+  });
+  it("does not confirm Claude's effort without a reply", async () => {
+    await expect(switcher.switch({ ...target, source: "claude" }, { model: "opus", effort: "high" })).rejects.toThrow("effort confirmation");
+  });
+  it("refuses a Claude effort the catalogue does not list before typing", async () => {
+    switcher = new ModelSwitcher(hooks, new ModelCatalog(async () => [astra],
+      async () => [{ id: "claude-opus-5-5", name: "Opus 5.5", supportedReasoningEfforts: ["low", "medium", "high"] }]), 20);
+    await expect(switcher.switch({ ...target, source: "claude" }, { model: "opus", effort: "max" })).rejects.toMatchObject({ status: 422 });
+    expect(sent()).toEqual([]);
   });
   it("refuses OpenCode clearly without typing a fake command", async () => {
     await expect(switcher.switch({ ...target, source: "opencode" }, { model: "opencode/model" })).rejects.toThrow("/models picker");

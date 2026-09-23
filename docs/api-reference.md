@@ -159,6 +159,10 @@ the requested or default reasoning effort and verifies the new model in its
 status line. An unreadable menu, missing row, or unconfirmed result returns an
 error; open menus are escaped without interrupting a working or replacement
 session. Claude receives `/model <id-or-alias>` and must show its confirmation.
+With `effort`, Claude then receives `/effort <level>` and must answer "Set
+effort level to" below that confirmation (a cap's lower level is returned as
+`effort`); the level must be one the catalogue lists for the model, or low,
+medium, high, xhigh or max when it lists none.
 OpenCode returns 422 with a direction to use its terminal `/models` picker.
 
 A working pane returns 409 before any model command is typed. `/v1/prompt`
