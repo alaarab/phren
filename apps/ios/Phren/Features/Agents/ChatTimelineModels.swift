@@ -111,7 +111,37 @@ struct ChatTimelineEntry: Identifiable, Equatable {
         for (index, superseded) in AgentTodoPresentation.superseded(lists).enumerated() where superseded {
             entries[index].cardSuperseded = true
         }
-        return foldingReads ? foldReadRuns(entries) : entries
+        return foldingReads ? foldSameToolRuns(foldReadRuns(entries)) : entries
+    }
+
+    /// Two or more calls in a row of the same tool with the same kind of
+    /// input ("Shell ×2") become one pill that opens to each call. Calls
+    /// that changed files, carry pictures, went to the background or have a
+    /// card of their own keep their own row.
+    private static func foldSameToolRuns(_ entries: [Self]) -> [Self] {
+        var result: [Self] = [], run: [Self] = [], runTool: String?
+        func flush() {
+            if run.count >= 2 { result.append(.init(messages: run.flatMap(\.messages), kind: .readRun)) }
+            else { result.append(contentsOf: run) }
+            run.removeAll(keepingCapacity: true); runTool = nil
+        }
+        for entry in entries {
+            guard let tool = sameToolKey(entry) else { flush(); result.append(entry); continue }
+            if tool != runTool { flush(); runTool = tool }
+            run.append(entry)
+        }
+        flush()
+        return result
+    }
+
+    private static func sameToolKey(_ entry: Self) -> String? {
+        guard entry.kind == .activity, entry.phren == nil, entry.card == nil,
+              !entry.messages.contains(where: { $0.isChange || !$0.resultImages.isEmpty }),
+              let call = entry.messages.first(where: { $0.role == .tool && !$0.isToolResult }),
+              !ChatBackgroundJobs.isBackground(call) else { return nil }
+        let presentation = ToolPresentationCache.value(call)
+        guard presentation.patch == nil, !presentation.editsFiles else { return nil }
+        return presentation.title
     }
 
     /// Three or more calls in a row that only looked around become one row.
@@ -142,6 +172,10 @@ struct ChatReadRunPresentation: Equatable {
     let groups: [ChatTimelineEntry]
     let title: String
     let preview: String
+    /// Every call is the same tool ("Shell ×2"): its name, else nil.
+    let sameTool: String?
+    let status: ToolCardStatus
+    let spokenLabel: String
 
     init(_ messages: [AgentChatMessage]) {
         // The outer grouping has already established the run. Re-grouping
@@ -162,6 +196,12 @@ struct ChatReadRunPresentation: Equatable {
             + (counts.count > 3 ? " …" : "")
         // The last command, so the row still says where the agent got to.
         preview = calls.last.map { ToolPresentationCache.value($0).preview } ?? ""
+        sameTool = counts.count == 1 ? counts[0].name : nil
+        status = ChatToolSummary.status(messages)
+        let operations = groups.count == 1 ? "operation" : "operations"
+        // A run of one tool reads as that tool's calls; a mixed run as reads.
+        spokenLabel = "\(title), \(groups.count) \(sameTool == nil || sameTool == "Read" ? "read " : "")\(operations)"
+            + (status == .failed ? ", Failed" : "")
     }
 }
 
@@ -444,6 +484,11 @@ struct ChatToolSummary {
     let icon: String
     let preview: String
     let count: Int
+    /// How the calls stand: failed when any failed, running while any has
+    /// no result yet, otherwise done.
+    let status: ToolCardStatus
+    /// The preview names a file (a Read's path): drawn in the path color.
+    let previewIsPath: Bool
 
     init(_ messages: [AgentChatMessage]) {
         // What a call changed on disk is listed under it, not counted as a call.
@@ -451,8 +496,31 @@ struct ChatToolSummary {
         let presentations = calls.map(ToolPresentationCache.value)
         let names = presentations.map(\.title)
         title = Set(names).count == 1 ? names[0] : calls.isEmpty ? "Tool results" : "Activity"
-        icon = title == "Shell" ? "terminal" : title == "Browse" ? "globe" : title == "Patch" ? "pencil.line" : title == "Write" ? "doc.badge.plus" : "wrench.and.screwdriver"
+        icon = Self.icon(title)
         count = max(1, calls.isEmpty ? messages.count : calls.count)
         preview = presentations.last?.preview ?? messages.last.map { ToolPresentationCache.value($0).preview } ?? ""
+        status = Self.status(messages)
+        previewIsPath = preview.range(of: #"^[~.]?/?[\w.@-]+(?:/[\w.@-]+)+(?::\d+)?$"#, options: .regularExpression) != nil
+    }
+
+    static func icon(_ title: String) -> String {
+        switch title {
+        case "Shell": return "terminal"
+        case "Browse": return "globe"
+        case "Patch": return "pencil.line"
+        case "Write": return "doc.badge.plus"
+        case "Read": return "doc.text"
+        case "List": return "folder"
+        default: return "wrench.and.screwdriver"
+        }
+    }
+
+    static func status(_ messages: [AgentChatMessage]) -> ToolCardStatus {
+        let results = messages.filter(\.isToolResult)
+        if results.contains(where: ReadOnlyToolCall.failed) { return .failed }
+        let calls = messages.filter { $0.role == .tool && !$0.isToolResult && !$0.isChange }
+        let answered = Set(results.compactMap(\.toolCallID))
+        let open = calls.contains { call in call.toolCallID.map { !answered.contains($0) } ?? results.isEmpty }
+        return open || results.isEmpty ? .running : .done
     }
 }

@@ -120,6 +120,8 @@ private struct ChatTranscriptRow: View, Equatable {
         #endif
         if let activity = entry.turnActivity {
             ChatTurnActivityRow(activity: activity)
+        } else if let note = entry.messages.first, note.isNarration {
+            ChatNarrationRow(message: note).equatable()
         } else if let compaction = entry.messages.first, compaction.isCompaction {
             ChatCompactionRow(message: compaction).equatable()
         } else if let phren = entry.phren {
@@ -395,5 +397,36 @@ private struct ChatCompactionRow: View, Equatable {
                 }
             }
         }
+    }
+}
+
+/// Claude's narration between tool calls ("Checking the tests next"): a
+/// dim italic note, not the reply. One line with an ellipsis; a tap opens
+/// the whole note in place and another folds it.
+private struct ChatNarrationRow: View, Equatable {
+    let message: AgentChatMessage
+    @State private var expanded = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.message == rhs.message }
+    private var note: String { message.text.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    var body: some View {
+        Button {
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { expanded.toggle() }
+        } label: {
+            (Text("Thinking: ").fontWeight(.medium) + Text(expanded ? note : note.replacingOccurrences(of: "\n", with: " ")))
+                .italic()
+                .font(PhrenTypography.footnote).foregroundStyle(PhrenTheme.chatNote)
+                .lineLimit(expanded ? nil : 1).truncationMode(.tail)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: expanded)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Thinking: \(note)")
+        .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+        .accessibilityHint(expanded ? "Fold the note" : "Show the whole note")
+        .accessibilityIdentifier("chat-narration:\(message.id)")
     }
 }

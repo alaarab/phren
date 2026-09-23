@@ -96,7 +96,7 @@ struct ChatSelectableText: UIViewRepresentable {
         view.textContainerInset = .zero
         view.textContainer.lineFragmentPadding = 0
         view.adjustsFontForContentSizeCategory = false
-        view.linkTextAttributes = [.foregroundColor: UIColor(PhrenTheme.link)]
+        view.linkTextAttributes = [.foregroundColor: UIColor(PhrenTheme.chatPath)]
         view.delegate = context.coordinator
         view.pendingSelection = point ?? .zero
         view.selectsAll = point == nil

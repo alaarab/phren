@@ -335,4 +335,39 @@ final class AgentChatComposerTests: AgentChatUITestCase {
         XCTAssertTrue(composer.isHittable)
         XCTAssertTrue(paragraph.exists)
     }
+
+    @MainActor
+    func testTranscriptRisesAndFallsWithTheKeyboard() {
+        let app = launch(extra: ["--chat-long-history", "--chat-clear-drafts"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let box = app.descendants(matching: .any).matching(identifier: "chat-message-box").firstMatch
+        let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
+        let last = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Recent discussion 19.")).firstMatch
+        XCTAssertTrue(composer.waitForExistence(timeout: 8))
+        XCTAssertTrue(last.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.scrollViews["chat-transcript"].waitForExistence(timeout: 5))
+        // Let the opening pin settle at the end.
+        let settled = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in last.isHittable && last.frame.maxY <= box.frame.minY + 1 }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 5), .completed)
+        let resting = last.frame
+        capture(app, "Transcript before the keyboard")
+        composer.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        // The latest message rides up with the composer instead of going under the keyboard.
+        let raised = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            box.frame.minY < resting.maxY && last.frame.maxY <= box.frame.minY + 1 && last.isHittable
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [raised], timeout: 5), .completed,
+                       "Last message \(last.frame) must stay above the composer \(box.frame)")
+        XCTAssertLessThanOrEqual(box.frame.minY - last.frame.maxY, 40, "It stays right above the composer")
+        capture(app, "Transcript risen with the keyboard")
+        // Tapping the transcript hands the keyboard away; the transcript goes back down with it.
+        last.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+        let lowered = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            abs(last.frame.maxY - resting.maxY) <= 4 && last.frame.maxY <= box.frame.minY + 1
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [lowered], timeout: 5), .completed, "Last message \(last.frame), resting \(resting)")
+        capture(app, "Transcript after the keyboard hides")
+    }
 }

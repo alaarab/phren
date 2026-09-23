@@ -10,6 +10,13 @@ number counts up on its own.
 
 ### Changed
 
+- The agent chat's header sits on a solid band of the chat background, and the conversation fades out just below it, so no cut-off line shows beside or above the title while you scroll. A long title keeps both its start and its end, and the project, model and branch each shorten on their own, so a long project name no longer pushes the branch off the line.
+- A Claude chat's live line is Claude's own spinner line, "✻ Whirlpooling… (34s · ↓ 3.1k tokens · thinking)", with a small stop ring at its end that stops the turn like the composer's stop. The finished line says Claude's word in the past tense ("Brewed for 18m 18s") in dim italic. Codex and other agents keep today's line.
+- Claude's narration between tool calls reads as a dim italic "Thinking:" line, folded to one line until you tap it; the reply itself stays ordinary text.
+- Tool calls are quiet one-line pills that open in place and close again: other MCP servers' calls too, and a phren card folds to the same height. Two or more calls of the same tool in a row fold into one pill ("Shell ×2") that opens to each call, and a failed call shows a red mark at the end of its pill instead of the check.
+- Colors in the chat carry meaning: file paths and links in one color, the git branch in another, running and finished calls in their own, with phren purple kept for buttons and phren cards.
+- A chat opened at launch (from Siri, Spotlight or a restored screen) no longer shows the system bar's back button above its own header while it loads; a chat rebuilt for another session keeps the bar hidden too.
+- Opening the keyboard moves the conversation up with the message box, so the latest messages stay visible above it, and closing it (or dragging it down) moves the conversation back; reading earlier history keeps the same message in place.
 - GitHub Copilot chats end their turns again with Copilot 1.0.87, which no longer writes an idle event: a turn starts with your prompt and finishes at Copilot's final answer, so the chat stops showing the agent as working forever. A failed Copilot tool run is marked as failed.
 - Settings → Notifications says "Instant approval alerts need an APNs key on the computer" and names each connected computer whose Hook reports push as not configured, instead of implying that registering this phone was enough.
 - Changes has a Workers section: the repository's other worktrees, where sub-agents and fan-out workers keep their edits, each named by the worker's task (or its branch) with uncommitted files and commits ahead. A row opens the same list, diff, history and working tree bound to that worker's checkout. In the agent tree, a worker with its own worktree has a Changes button that opens it directly.

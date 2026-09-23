@@ -103,7 +103,13 @@ final class AgentChatModel {
     private(set) var timelineRevision = 0
     private(set) var replyPreview: AgentChatPreview?
     /// The harness's own word for the running turn (Claude's spinner verb).
-    private var harnessVerb: String?
+    private var harnessVerb: String? { didSet { if harnessVerb == nil { turnControl.spinner = nil } } }
+    /// The last harness verb each turn showed, by its start: the finished
+    /// line says it in the past tense ("Brewed for 18m 18s").
+    @ObservationIgnored private var turnVerbs: [Date: String] = [:]
+    /// Claude's live spinner fields and the activity line's stop ring. Only
+    /// the activity row observes it, so token updates redraw that row alone.
+    let turnControl = ChatTurnControl()
     @ObservationIgnored private var pendingPreview: AgentChatPreview?
     private(set) var backgroundJobs: [ChatBackgroundJob] = []
     private(set) var currentToolName: String?
@@ -118,7 +124,11 @@ final class AgentChatModel {
         let id = UUID(); preparationID = id
         let messages = history.messages
         let preview = pendingPreview
-        let activity = ChatActivityContext(turns: progress.turns, harnessVerb: harnessVerb, submittedAt: sentAt ?? preview?.turnStartedAt,
+        if let verb = harnessVerb, let turn = progress.turns.last, turn.phase == .working, let start = turn.startedAt {
+            turnVerbs[start] = verb
+        }
+        let activity = ChatActivityContext(turns: progress.turns, harnessVerb: harnessVerb, turnVerbs: turnVerbs,
+            submittedAt: sentAt ?? preview?.turnStartedAt,
             submittedAfterLine: submittedAfterLine, busy: isBusy || preview != nil,
             waiting: needsAnswer || approval != nil || question != nil || terminalPrompt != nil || passwordPrompt
                 || ["waiting", "blocked"].contains(liveActivity ?? ""))
@@ -354,7 +364,7 @@ final class AgentChatModel {
         history = .init(); progress = .init(); reveal.finish(); hasTranscript = false
         awaitingReply = false; sentAt = nil; liveActivity = nil; isCompacting = false; historyStalled = false; historyStalledSince = nil
         modelName = nil; modelEffort = nil; preferProgressActivity = false
-        transcriptContext = .init(); statusBranch = nil
+        transcriptContext = .init(); statusBranch = nil; turnVerbs = [:]
         connected = false; error = nil; deliveryError = nil
         sentImages = []; needsAnswer = false; approval = nil; questionState = AgentQuestionState()
         terminalPrompt = nil; passwordPrompt = false
@@ -403,7 +413,7 @@ final class AgentChatModel {
         connection.rejectedStreamTarget = nil
         progress = .init(); reveal.finish(); hasTranscript = false; awaitingReply = false; sentAt = nil; liveActivity = nil; isCompacting = false
         historyStalled = false; historyStalledSince = nil; modelName = nil; modelEffort = nil
-        transcriptContext = .init(); statusBranch = nil
+        transcriptContext = .init(); statusBranch = nil; turnVerbs = [:]
         draft = ""; attachments = []; sentImages = []; deliveryError = nil; needsAnswer = false
         terminalPrompt = nil; passwordPrompt = false
     }
@@ -535,6 +545,7 @@ final class AgentChatModel {
         let hadPreview = replyPreview != nil
         let verbChanged = frame.activityVerb != nil && frame.activityVerb != harnessVerb
         if let verb = frame.activityVerb { harnessVerb = verb }
+        if let spinner = frame.activity, spinner != turnControl.spinner { turnControl.spinner = spinner }
         if frame.updatesPreview { pendingPreview = frame.preview }
         else if frame.kind == .backlog || (frame.kind == .append && !frame.messages.isEmpty) { pendingPreview = nil }
         if frame.kind == .preview {

@@ -352,6 +352,9 @@ public struct AgentChatMessage: Equatable, Sendable, Identifiable {
     public var isQueued = false
     public var queueKey: String? = nil
     public var isToolError = false
+    /// Claude's narration between tool calls ("Checking the tests next"):
+    /// progress notes for the person watching, not the reply.
+    public var isNarration = false
     init(id: String, line: Int, role: Role, title: String?, text: String,
          imageBlocks: [Int] = [], resultImages: [ImageRef] = [], uploadImages: [String] = [], toolCallID: String? = nil) {
         self.id = id; self.line = line; self.role = role; self.title = title; self.text = text
@@ -456,6 +459,9 @@ public struct AgentChatTranscript: Equatable, Sendable {
     public var activityVerb: String? = nil
     /// A `/btw` side answer; only on a `side-answer` frame.
     public var sideAnswer: AgentSideAnswer? = nil
+    /// Claude's whole spinner line ("✻ Whirlpooling… (34s · ↓ 3.1k tokens ·
+    /// thinking)"), from a Hook that reads it.
+    public var activity: AgentChatSpinner? = nil
 
     /// `sidechain` reads a child agent's own transcript, where Claude marks
     /// every row `isSidechain`: those are that conversation's turns, not the
@@ -489,6 +495,7 @@ public struct AgentChatTranscript: Equatable, Sendable {
             guard updatesPreview, entries.isEmpty else { throw PhrenKitError.validation("A reply preview cannot contain messages.") }
             var frameValue = Self(kind: kind, messages: [], hasMore: false, totalLines: 0, startLine: nil, preview: preview, updatesPreview: true)
             frameValue.activityVerb = activityVerb(frame)
+            frameValue.activity = AgentChatSpinner(frame["activity"])
             return frameValue
         }
         guard entries.count <= 2_000 else { throw PhrenKitError.validation("The chat transcript is too large.") }
@@ -543,6 +550,7 @@ public struct AgentChatTranscript: Equatable, Sendable {
                                                uploadImages: part.uploadImages, toolCallID: toolCallID)
                 message.timestamp = Self.timestamp(raw)
                 message.isToolError = part.isToolError
+                message.isNarration = part.isNarration
                 if part.role == .user {
                     message.queueKey = (raw["phrenQueueKey"] as? String).flatMap { Self.validQueueKey($0) ? $0 : nil }
                 }
@@ -561,14 +569,13 @@ public struct AgentChatTranscript: Equatable, Sendable {
                     progressEvents: progressEvents, queueEvents: queueEvents, context: context,
                     preview: preview, updatesPreview: updatesPreview)
         value.activityVerb = activityVerb(frame)
+        value.activity = AgentChatSpinner(frame["activity"])
         return value
     }
 
     /// One capitalized word, as a spinner shows it; anything else is ignored.
     private static func activityVerb(_ frame: [String: Any]) -> String? {
-        guard let verb = frame["activityVerb"] as? String,
-              verb.range(of: #"^[A-Z][\p{L}'-]{1,30}$"#, options: .regularExpression) != nil else { return nil }
-        return verb
+        AgentChatSpinner.verb(frame["activityVerb"])
     }
 
     /// Foundation JSON strings can retain NSString storage. Walking a long
@@ -608,6 +615,8 @@ public struct AgentChatTranscript: Equatable, Sendable {
         var toolCallID: String? = nil
         var idIndex: Int? = nil
         var isToolError = false
+        /// Claude's narration: a note for the person watching, between tool calls.
+        var isNarration = false
     }
     /// At most this many pictures are drawn for one turn from the phone.
     static let maximumUploadImages = 8
@@ -865,7 +874,7 @@ public struct AgentChatTranscript: Equatable, Sendable {
                 if role == .user, Self.isTaskNotification(text) {
                     return Part(role: .tool, title: "Background notification", text: text, idIndex: idIndex)
                 }
-                return Part(role: role, text: text, idIndex: idIndex)
+                return Part(role: role, text: text, idIndex: idIndex, isNarration: role == .assistant && block["narration"] as? Bool == true)
             case "image": return Part(role: role, text: "[Image attachment]", imageBlocks: [index], idIndex: idIndex)
             case "tool_use": return Part(role: .tool, title: block["name"] as? String ?? "Tool", text: readable(block["input"]), toolCallID: block["id"] as? String, idIndex: idIndex)
             case "tool_result": return Part(role: .tool, title: "Tool result", text: text(block["content"]),

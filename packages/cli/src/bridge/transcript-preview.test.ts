@@ -114,6 +114,50 @@ describe("live reply previews", () => {
       .toBe("Filing it:");
   });
 
+  it("parses Claude's whole spinner line into its verb, time, tokens and thinking state", async () => {
+    const { parseClaudeSpinnerLine, claudeSpinner } = await import("./transcript-preview.js");
+    expect(parseClaudeSpinnerLine("✢ Pondering… (12s · ↑ 1.2k tokens · esc to interrupt)"))
+      .toEqual({ verb: "Pondering", elapsed: 12, tokens: { count: 1200, direction: "up" }, thinking: false });
+    expect(parseClaudeSpinnerLine("✽ Precipitating… (49s · thought for 4s)"))
+      .toEqual({ verb: "Precipitating", elapsed: 49, thinking: false, thoughtFor: 4 });
+    expect(parseClaudeSpinnerLine("✢ Crunching… (26s · ↓ 864 tokens)"))
+      .toEqual({ verb: "Crunching", elapsed: 26, tokens: { count: 864, direction: "down" }, thinking: false });
+    expect(parseClaudeSpinnerLine("* Whirlpooling… (27s · ↓ 2.3k tokens · thinking)"))
+      .toEqual({ verb: "Whirlpooling", elapsed: 27, tokens: { count: 2300, direction: "down" }, thinking: true });
+    expect(parseClaudeSpinnerLine("✻ Brewing… (1h 2m 3s · ↓ 12.4k tokens)")?.elapsed).toBe(3723);
+    expect(parseClaudeSpinnerLine("✻ Working… (esc to interrupt)")).toEqual({ verb: "Working", thinking: false });
+    // Reply text that merely looks like a bullet is not a spinner.
+    expect(parseClaudeSpinnerLine("* Update the docs (see below)")).toBeUndefined();
+    expect(parseClaudeSpinnerLine("* Reading… (the file)")).toBeUndefined();
+    expect(claudeSpinner("⏺ Reply\n✻ Old… (3s)\n* Whirlpooling… (34s · ↓ 3.1k tokens · thinking)\n❯")?.verb).toBe("Whirlpooling");
+  });
+
+  it("sends a frame when the spinner's tokens or thinking change, never for the clock alone", async () => {
+    let spinner = "✢ Crunching… (26s · ↓ 864 tokens)";
+    const pane = vi.fn(async () => `❯ Explain this\n⏺ Reading\n${spinner}\n❯`);
+    const stream = new TranscriptPreviewStream(target, pane);
+    stream.observe([user]);
+    expect(await stream.update("working", undefined, 0)).toEqual({ preview: { turnStartedAt: start, text: "Reading" } });
+    expect(stream.activity).toEqual({ verb: "Crunching", elapsed: 26, tokens: { count: 864, direction: "down" }, thinking: false });
+    spinner = "✢ Crunching… (27s · ↓ 864 tokens)";
+    expect(await stream.update("working", undefined, 600)).toBeUndefined();
+    spinner = "✢ Crunching… (28s · ↓ 1.1k tokens · thinking)";
+    expect(await stream.update("working", undefined, 1200)).toEqual({ preview: { turnStartedAt: start, text: "Reading" } });
+    expect(stream.activity).toMatchObject({ tokens: { count: 1100 }, thinking: true });
+    await stream.update("idle", undefined, 2000);
+    expect(stream.activity).toBeUndefined();
+  });
+
+  it("never previews a spinner line whatever its glyph", () => {
+    expect(claudePanePreview("❯ Explain this\n⏺ Checking.\n* Whirlpooling… (27s · ↓ 2.3k tokens · thinking)\n❯", "Explain this"))
+      .toBe("Checking.");
+    expect(claudePanePreview("❯ Explain this\n⏺ Checking.\n✦ Pondering… (12s · ↑ 1.2k tokens)\n❯", "Explain this"))
+      .toBe("Checking.");
+    // A reply's own bullet stays.
+    expect(claudePanePreview("❯ Explain this\n⏺ Two things:\n  * first (a)\n  * second\n❯", "Explain this"))
+      .toBe("Two things:\n* first (a)\n* second");
+  });
+
   it("strips chrome, prompts and spinners without showing old replies or tool output", () => {
     expect(claudePanePreview("❯ Previous\n⏺ Old reply\n❯ Explain this\n✻ Thinking…\n❯", "Explain this")).toBe("");
     expect(claudePanePreview("⏺ Old reply\n❯", "Explain this")).toBe("");

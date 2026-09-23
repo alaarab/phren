@@ -67,6 +67,7 @@ extension AgentChatModel {
                         let status = try AgentChatFixture.status(target)
                         passwordPrompt = status.passwordPrompt
                         historyStalled = status.historyStalled; historyStalledSince = status.historyStalledSince
+                        if statusBranch != status.branch { statusBranch = status.branch }
                         if !ProcessInfo.processInfo.arguments.contains("--chat-streaming") {
                             acceptActivity(try AgentChatFixture.panes(session).validate(target).agentStatus)
                         }

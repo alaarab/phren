@@ -31,7 +31,9 @@ enum PhrenTheme {
     static var phrenCardBorder: Color { Color(hex: palette.resolvedPhrenCardBorder) }
     static var phrenCardAccent: Color { Color(hex: palette.resolvedPhrenCardAccent) }
     static var link: Color { Color(hex: palette.link ?? palette.action) }
-    static var chatInlineCode: Color { Color(hex: palette.chatInlineCode ?? palette.link ?? palette.action) }
+    /// Inline code in chat is mostly paths and identifiers: the path color
+    /// unless the theme sets its own.
+    static var chatInlineCode: Color { Color(hex: palette.chatInlineCode ?? chatPathHex(palette)) }
 
     static var text: Color { Color(hex: palette.text) }
     static var textSecondary: Color { Color(hex: palette.secondary) }
@@ -86,6 +88,24 @@ enum PhrenTheme {
     static let chatNeutral = Color(hex: 0xA9AEB6)
     static let chatNeutralDim = Color(hex: 0x868B93)
     static let chatUserBubble = Color.white.opacity(0.08)
+
+    /// Colors that carry meaning in the transcript, one per kind of thing, so
+    /// phren purple stays the brand accent: a file path or link, a git
+    /// branch, a call still running, a call that finished. A light custom
+    /// theme gets the darker value of each for contrast.
+    static var chatPath: Color { Color(hex: chatPathHex(palette)) }
+    static func chatPathHex(_ palette: PhrenPalette) -> UInt32 { isLight(palette.chatCanvas) ? 0x1C62A8 : 0x7FB6F0 }
+    static var chatBranch: Color { adaptive(dark: 0xF0A06E, light: 0xA4501C) }
+    static var chatRunning: Color { adaptive(dark: 0xE8C07A, light: 0x8A5C00) }
+    static var chatFinished: Color { adaptive(dark: 0x8AC8AC, light: 0x2B7552) }
+    /// Past-tense notes: the finished turn line and Claude's narration.
+    static var chatNote: Color { adaptive(dark: 0x8B9098, light: 0x6B7079) }
+    private static var lightCanvas: Bool { isLight(palette.chatCanvas) }
+    private static func isLight(_ hex: UInt32) -> Bool {
+        let value = (Double((hex >> 16) & 255) * 0.2126 + Double((hex >> 8) & 255) * 0.7152 + Double(hex & 255) * 0.0722) / 255
+        return value > 0.55
+    }
+    private static func adaptive(dark: UInt32, light: UInt32) -> Color { Color(hex: lightCanvas ? light : dark) }
 
     // Aliases kept for call-site readability
     static let green = success

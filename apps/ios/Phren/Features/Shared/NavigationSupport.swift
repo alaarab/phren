@@ -148,8 +148,7 @@ private struct NavigationControllerBridge: UIViewControllerRepresentable {
         /// A foreground return or a dismissed sheet can restore it without a
         /// viewWillAppear of its own.
         func reassertHiddenNavigationBar() {
-            guard hidesNavigationBar, isViewLoaded, view.window != nil,
-                  let navigationController, isHosted(by: navigationController.topViewController),
+            guard hidesNavigationBar, let navigationController, isHosted(by: navigationController.topViewController),
                   !navigationController.isNavigationBarHidden else { return }
             navigationController.setNavigationBarHidden(true, animated: false)
         }
@@ -180,12 +179,22 @@ private struct NavigationControllerBridge: UIViewControllerRepresentable {
             if hidesNavigationBar { navigationController?.setNavigationBarHidden(true, animated: animated) }
             installIfNeeded()
         }
+        /// A destination restored or pushed at launch can reach its first
+        /// frame before this bridge has a navigation controller in
+        /// viewWillAppear; by now it has one, and the bar goes before drawing.
+        override func viewIsAppearing(_ animated: Bool) {
+            super.viewIsAppearing(animated)
+            reassertHiddenNavigationBar()
+        }
         override func viewWillDisappear(_ animated: Bool) {
             super.viewWillDisappear(animated)
             // Leaving (pop or push onward): give the next screen its bar back
             // unless it hides its own.
+            // A screen rebuilt in place (a new identity, no transition) is
+            // still the one on top: its bar stays hidden.
             if hidesNavigationBar, let navigationController,
-               navigationController.transitionCoordinator?.viewController(forKey: .to).map({ !$0.prefersPhrenHiddenNavigationBar }) ?? true {
+               !((navigationController.transitionCoordinator?.viewController(forKey: .to) ?? navigationController.topViewController)?
+                    .prefersPhrenHiddenNavigationBar ?? false) {
                 navigationController.setNavigationBarHidden(false, animated: animated)
             }
         }
@@ -193,6 +202,7 @@ private struct NavigationControllerBridge: UIViewControllerRepresentable {
             super.didMove(toParent: parent)
             parent?.phrenHidesNavigationBar = hidesNavigationBar
             if let screenTag { parent?.phrenScreenTag = screenTag }
+            if parent != nil { reassertHiddenNavigationBar() }
         }
         // Key commands are found by walking up from the first responder. With
         // no field focused there is none, so this zero-size controller stands

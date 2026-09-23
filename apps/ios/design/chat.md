@@ -17,12 +17,29 @@ Motion leaves a static arc. The clock ticks at 1 Hz in the row alone. Pin the
 row to the transcript width and a 24-point caption-scaled height, and reserve a
 104-point caption-scaled timer slot with monospaced digits. Seconds becoming
 minutes must never change the row frame or move the transcript. Pause the clock
-and arc while the scene is inactive. The row is one accessibility element with
+and arc while the scene is inactive. The line is one accessibility element with
 children ignored and identifier chat-activity.
 
-On completion, place one quiet line above the final reply: Thought for 27s
-without tools, Worked for 1m 12s with tools, or Stopped after 12s for a stopped
-turn. This line never spins and uses chat-activity-done. Persisted transcript
+For Claude the Hook reads the whole spinner line from the pane and sends it
+beside frames as `activity` (verb, elapsed seconds, tokens with direction,
+thinking, thought-for). The line then reads as Claude's does:
+`✻ Whirlpooling… (34s · ↓ 3.1k tokens · thinking)`, the glyph in the running
+color and turning once a second (static under Reduce Motion), the time from the
+phone's own clock. Only the activity row observes these fields, so a token
+update redraws that row alone. Codex and other harnesses keep the line above.
+
+A live line ends in a stop ring, `chat-activity-stop`: a 22-point track with
+the running arc around a stop square, in a 44-point target, so the live row is
+44 points high at every tick. It sends the same stop as the composer's stop
+button and is enabled whenever that stop would be, with or without a draft.
+The composer keeps its own stop.
+
+On completion, place one quiet dim italic line above the final reply: Thought
+for 27s without tools, Worked for 1m 12s with tools, or Stopped after 12s for a
+stopped turn. When the harness named the turn (Claude's last spinner verb for
+that turn, kept by its start), the line uses it in the past tense, Brewed for
+18m 18s, from a fixed map of Claude's words, and Worked for when the word is
+not in it. This line never spins and uses chat-activity-done. Persisted transcript
 startedAt and finishedAt supply the duration on reopening. A missing start or
 end gives no completed line. A local submit timestamp only fills the live gap
 before the harness acknowledges the turn; it never invents a saved duration.
@@ -137,10 +154,52 @@ The child transcript stays scoped to the child; the delivery receipt names the
 parent. A failed or uncertain send preserves the draft and never retries
 silently. Fields, send controls, notes and queue receipts use Phren surfaces,
 colors, wrapping text and 44-point action targets.
+## Narration
+
+Claude's narration between tool calls (text the Hook marks `narration: true`)
+is a dim italic `Thinking: …` line, not reply text. Folded it is one line with
+an ellipsis; a tap opens the whole note in place and another folds it. It has
+identifier `chat-narration:<message-id>`, value Collapsed or Expanded, and is
+never the reply the finished activity line sits above.
+
+## Tool pills
+
+Every call is a quiet 44-point pill while folded: icon, tool name, one-line
+summary and a status mark. The mark is amber for running, a green check for
+finished and the theme's danger mark for failed. A tap opens the full input and
+output in place; another tap folds it. Two or more calls in a row of the same
+tool with the same kind of input (not edits, pictures, background jobs or
+cards) fold into one pill, `Shell ×2`, that opens to each call; a failure
+inside shows the danger mark on the folded pill. Other MCP servers' calls use
+the same pill (`chat-mcp-card:<call-id>`), with the full reader behind
+`chat-mcp-open:<call-id>` once opened.
+
+Colors carry meaning in the transcript: `chatPath` for file paths and links,
+`chatBranch` for the repository branch, `chatRunning` and `chatFinished` for
+call state, `chatNote` for narration and the finished line. Each has a light
+value for light custom themes. Phren purple stays on buttons and phren cards.
+
+## Header and keyboard
+
+The header's capsule sits on a solid band of the chat canvas from the top of
+the screen to just below the capsule. The transcript starts below the header
+and its top 16 points fade into the canvas (`ChatHeaderFade`), so a row
+leaving the top dissolves instead of stopping at a hard edge; no row shows
+beside or above the title. The title truncates in the
+middle. Project, model and branch each truncate on their own: when the line is
+short, the widest part gives up width first, so the branch always keeps a
+share.
+
+The transcript's viewport keeps its bottom anchored when the keyboard resizes
+it, in the keyboard's own animation: the latest message rises with the
+composer and falls back when the keyboard hides or is dragged down, and a
+reader in history keeps the same message above the composer.
+
 ## Phren tool cards
 
-The card body toggles full input and output in place. Folded previews retain
-four body lines and the existing density. Expanded content wraps, is selectable,
+The card body toggles full input and output in place. Folded, the card is the
+height of a tool pill: the mark, verb, project chip, one line of result (the
+failure's reason when it failed) and its status. Expanded content wraps, is selectable,
 and has no height cap. The 0.18-second animation respects Reduce Motion.
 `chat-phren-card:<call-id>` remains the body control; its accessibility value
 is Folded or Expanded. `chat-phren-expanded:<call-id>` identifies the full text.

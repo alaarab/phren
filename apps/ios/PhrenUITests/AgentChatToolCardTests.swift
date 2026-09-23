@@ -36,7 +36,9 @@ final class AgentChatToolCardTests: AgentChatUITestCase {
         // Expanding unclamps the readable card; it never dumps raw input.
         XCTAssertGreaterThanOrEqual(card.frame.height, foldedHeight)
         XCTAssertFalse(app.staticTexts["Input"].exists)
-        for _ in 0..<12 where card.frame.minY < transcript.frame.minY { transcript.swipeDown() }
+        // The transcript runs under the header: bring the card's top out from behind it.
+        let headerBottom = app.staticTexts["chat-location"].frame.maxY + 20
+        for _ in 0..<12 where card.frame.minY < headerBottom { transcript.swipeDown() }
         card.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.05)).tap()
         XCTAssertEqual(card.value as? String, "Folded")
         let open = app.buttons["chat-phren-open:phren-task"]
@@ -181,8 +183,17 @@ final class AgentChatToolCardTests: AgentChatUITestCase {
         for card in [pull, panes, merge] { XCTAssertFalse(card.label.contains("{\""), card.label); XCTAssertFalse(card.label.contains("\":"), card.label) }
         XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-read-run:")).firstMatch.exists, "MCP calls never fold")
         XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-tool-group:")).firstMatch.exists, "Cards, not pills")
+        // Folded, each call is one quiet line; tapping opens it in place.
+        for card in [pull, panes, merge] { XCTAssertLessThanOrEqual(card.frame.height, 44.5, card.label) }
+        XCTAssertEqual(pull.value as? String, "Collapsed")
         capture(app, "Cards for other MCP servers")
         pull.tap()
+        XCTAssertEqual(pull.value as? String, "Expanded")
+        let open = app.buttons["chat-mcp-open:mcp-pr"]
+        XCTAssertTrue(open.waitForExistence(timeout: 5))
+        capture(app, "MCP call expanded in place")
+        for _ in 0..<4 where !open.isHittable { transcript.swipeUp() }
+        open.tap()
         XCTAssertTrue(app.buttons["chat-tool-output-wrap"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "pull_number")).firstMatch.exists)
         app.navigationBars.buttons.firstMatch.tap()
@@ -436,5 +447,48 @@ final class AgentChatToolCardTests: AgentChatUITestCase {
         XCTAssertTrue(app.buttons["chat-send"].exists)
         XCTAssertFalse(app.buttons["chat-stop"].exists)
         capture(app, "Native code card and stopped turn")
+    }
+
+    @MainActor
+    func testNarrationFoldsToALineAndSameToolCallsFoldWithTheirFailure() {
+        let app = launch(extra: ["--chat-narration"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let transcript = app.scrollViews["chat-transcript"]
+        XCTAssertTrue(transcript.waitForExistence(timeout: 8))
+        let note = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-narration:")).firstMatch
+        XCTAssertTrue(note.waitForExistence(timeout: 8))
+        XCTAssertTrue(note.label.hasPrefix("Thinking: I'll build first"), note.label)
+        XCTAssertEqual(note.value as? String, "Collapsed")
+        let foldedHeight = note.frame.height
+        XCTAssertLessThanOrEqual(foldedHeight, 30, "A narration note folds to one line")
+        // Two shell calls in a row are one pill; the failure shows at its end.
+        let pill = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label BEGINSWITH %@", "chat-read-run:", "Shell ×2")).firstMatch
+        XCTAssertTrue(pill.waitForExistence(timeout: 5))
+        XCTAssertTrue(pill.label.hasSuffix("Failed"), pill.label)
+        XCTAssertLessThanOrEqual(pill.frame.height, 44.5, "One line while folded")
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-tool-group:")).firstMatch.exists)
+        // The reply stays ordinary text.
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "The offset test fails")).firstMatch.exists)
+        capture(app, "Narration and a folded shell pill with a failure")
+        note.tap()
+        XCTAssertEqual(note.value as? String, "Expanded")
+        XCTAssertGreaterThan(note.frame.height, foldedHeight + 8, "The whole note opens in place")
+        pill.tap()
+        XCTAssertEqual(pill.value as? String, "Expanded")
+        let calls = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-tool-group:"))
+        XCTAssertTrue(calls.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertEqual(calls.count, 2)
+        XCTAssertTrue(calls.element(boundBy: 1).label.hasSuffix("Failed"), calls.element(boundBy: 1).label)
+        // Each call is a one-line pill that opens to its full input and output.
+        let failed = calls.element(boundBy: 1)
+        XCTAssertLessThanOrEqual(failed.frame.height, 44.5)
+        failed.tap()
+        XCTAssertEqual(failed.value as? String, "Expanded")
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-tool-input:")).firstMatch.waitForExistence(timeout: 5))
+        capture(app, "Narration and shell calls expanded")
+        failed.tap()
+        XCTAssertEqual(failed.value as? String, "Collapsed")
+        note.tap()
+        XCTAssertEqual(note.value as? String, "Collapsed")
     }
 }

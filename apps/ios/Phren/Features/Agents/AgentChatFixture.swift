@@ -133,6 +133,7 @@ import UniformTypeIdentifiers
     static func status(_ target: AgentChatTarget) throws -> AgentInteractionStatus {
         var value: [String: Any] = ["source": target.source, "session": target.sessionID,
                                     "passwordPrompt": flag("--chat-password") && !answered]
+        if flag("--chat-long-location") { value["branch"] = "feature/keep-branch-visible" }
         if flag("--chat-history-stalled") {
             value["historyStalled"] = true
             value["historyStalledSince"] = Date.now.addingTimeInterval(-2 * 3_600)
@@ -189,7 +190,9 @@ import UniformTypeIdentifiers
     /// payments service that ends in a saved finding.
     static var trailer: Bool { flag("--trailer-fixture") }
     /// Where the fixture's project lives on the computer.
-    static var root: String { trailer ? "/work/ledger" : tour ? "/work/phren" : "/work/phone" }
+    static var root: String {
+        trailer ? "/work/ledger" : tour ? "/work/phren" : flag("--chat-long-location") ? "/work/an-unusually-long-project-folder-name-for-the-header" : "/work/phone"
+    }
     static var image: AgentAttachment { picture(0) }
     /// `--chat-paste-image`: a screenshot waiting on the clipboard, as after
     /// taking one, so Paste in the composer can attach it.
@@ -339,8 +342,8 @@ import UniformTypeIdentifiers
         // A session launched from a project runs the harness that was picked.
         let launchedKind = launches.last.map(\.kind).flatMap { session.workspaceID == "w9" ? $0 : nil }
         let remote = flag("--agent-work-navigation") && session.host.id.uuidString.hasSuffix("000002")
-        let agent = remote ? "codex" : launchedKind ?? (flag("--chat-copilot") ? "copilot" : (trailer || flag("--chat-claude-queue") || flag("--chat-claude-image") || flag("--chat-read-images") || flag("--chat-approval-question") || flag("--chat-terminal-questions") || flag("--chat-agent-card") || flag("--chat-todos") || flag("--chat-plan-mode") || flag("--chat-web-tools") || flag("--chat-skill-chip") || flag("--chat-mcp-card") || flag("--chat-compaction") || flag("--chat-model-picker") || flag("--chat-phren-tools") || flag("--chat-side-answer")) ? "claude" : "codex")
-        var panes: [[String: Any]] = [["id": "\(session.workspaceID):p1", "label": "1", "title": tour ? "Ship the onboarding flow" : "Polish the phone app", "agent": agent,
+        let agent = remote ? "codex" : launchedKind ?? (flag("--chat-copilot") ? "copilot" : (trailer || flag("--chat-claude-queue") || flag("--chat-claude-image") || flag("--chat-read-images") || flag("--chat-approval-question") || flag("--chat-terminal-questions") || flag("--chat-agent-card") || flag("--chat-todos") || flag("--chat-plan-mode") || flag("--chat-web-tools") || flag("--chat-skill-chip") || flag("--chat-mcp-card") || flag("--chat-compaction") || flag("--chat-model-picker") || flag("--chat-phren-tools") || flag("--chat-side-answer") || flag("--chat-long-location") || flag("--chat-narration")) ? "claude" : "codex")
+        var panes: [[String: Any]] = [["id": "\(session.workspaceID):p1", "label": "1", "title": tour ? "Ship the onboarding flow" : flag("--chat-long-location") ? "Continue where the earlier session left off in Codex" : "Polish the phone app", "agent": agent,
                                      "agentStatus": ((flag("--chat-blocked") || flag("--chat-password") || flag("--chat-approval") || flag("--chat-approval-question") || flag("--chat-plan-mode") || flag("--chat-question")) && !answered) ? "blocked" : (flag("--chat-queue-completion") || flag("--chat-history-stalled") || (flag("--chat-working") && !stopped) ? "working" : "idle"), "sessionId": remote ? "00000000-0000-0000-0000-000000000042" : agent == "copilot" ? "00000000-0000-0000-0000-000000000023" : agent == "opencode" ? "ses_fixtureopencode" : "fixture-\(agent)-session", "cwd": root]]
         if flag("--starting-session-fixture") {
             panes[0]["startingToken"] = startingToken
@@ -375,7 +378,7 @@ import UniformTypeIdentifiers
             // Claude Code stamps `message.model` on assistant rows; with the
             // flag the session runs on the 1M variant, so the picker's check
             // mark has a real id to match exactly.
-            if target.source == "claude", flag("--chat-model-1m") { message["model"] = "claude-fable-5-1[1m]" }
+            if target.source == "claude", flag("--chat-model-1m") || flag("--chat-long-location") { message["model"] = "claude-fable-5-1[1m]" }
             let raw: [String: Any] = target.source == "copilot"
                 ? ["type": role + ".message", "data": ["content": text]]
                 : target.source == "opencode"
@@ -591,6 +594,18 @@ import UniformTypeIdentifiers
             claudeCall("phren-finding", "mcp__phren__add_finding", ["project": "ledger", "findingType": "pitfall", "finding": UITestFixtures.trailerFinding])
             claudeResult("phren-finding", "{\"ok\":true}")
             append("assistant", "Saved that to phren so the next session starts with it. Running the checkout suite again now.")
+        }
+        if flag("--chat-narration") {
+            // Claude's narration between calls, as the Hook marks it; two
+            // shell calls in a row, the second failing; then the reply.
+            entries.append(["line": firstLine + entries.count, "raw": ["type": "assistant", "message": ["role": "assistant", "content": [[
+                "type": "text", "narration": true,
+                "text": "I'll build first, then run the failing test on its own so the error is easy to read. If it is the date parser again, the fix is in the same file."]]]]])
+            claudeCall("narration-build", "Bash", ["command": "swift build", "description": "Build"])
+            claudeResult("narration-build", "Build complete!")
+            claudeCall("narration-test", "Bash", ["command": "swift test --filter DateParserTests", "description": "Run the date parser tests"])
+            claudeResult("narration-test", "error: DateParserTests.testOffsets failed", error: true)
+            append("assistant", "The offset test fails because the parser drops the minutes. I'll fix that next.")
         }
         if flag("--chat-agent-card") {
             // One agent back with a report longer than the card shows; one
@@ -909,6 +924,8 @@ import UniformTypeIdentifiers
             entries.append(["line": line, "raw": ["type": "event_msg", "payload": fields]])
         }
         message(0, "assistant", "Ready to stream a reply.")
+        // Claude's spinner line as the Hook sends it beside the frames.
+        var activity: [String: Any]?
         if let start = streamStarts[target.id], let text = sent.last(where: { $0.0 == target.id })?.1 {
             let elapsed = Date.now.timeIntervalSince(start)
             message(1, "user", text)
@@ -916,12 +933,25 @@ import UniformTypeIdentifiers
                 event(2, ["type": "task_started", "started_at": start.timeIntervalSince1970])
                 event(3, ["type": "token_count", "info": ["last_token_usage": ["input_tokens": 128, "output_tokens": 0]]])
             }
-            if elapsed >= (flag("--chat-activity-fixture") ? 10 : 5) {
+            if flag("--chat-spinner-fixture") {
+                // The ring's stop ends the turn in the next frame.
+                if stopped {
+                    if elapsed >= 2 {
+                        entries.append(["line": 4, "raw": ["type": "event_msg", "timestamp": Date.now.formatted(.iso8601), "payload": ["type": "turn_aborted"]]])
+                        message(5, "assistant", "Stopped at your request.")
+                    }
+                } else if elapsed < 12 {
+                    activity = ["verb": "Whirlpooling", "elapsed": Int(elapsed), "thinking": elapsed < 6,
+                                "tokens": ["count": elapsed < 6 ? 3_100 : 4_800, "direction": "down"]]
+                }
+            }
+            let replies = !(flag("--chat-spinner-fixture") && (stopped || elapsed < 12))
+            if replies, elapsed >= (flag("--chat-activity-fixture") ? 10 : 5) {
                 message(4, "assistant", flag("--chat-activity-fixture") ? "The activity fixture reply is ready." : streamingReply)
                 event(5, ["type": "token_count", "info": ["last_token_usage": ["input_tokens": 128, "output_tokens": 85]]])
             }
-            let duration: TimeInterval = flag("--chat-activity-fixture") ? 12 : 9
-            if elapsed >= duration { event(6, ["type": "task_complete", "completed_at": start.addingTimeInterval(duration).timeIntervalSince1970]) }
+            let duration: TimeInterval = flag("--chat-activity-fixture") ? 12 : flag("--chat-spinner-fixture") ? 14 : 9
+            if elapsed >= duration, !(flag("--chat-spinner-fixture") && stopped) { event(6, ["type": "task_complete", "completed_at": start.addingTimeInterval(duration).timeIntervalSince1970]) }
         }
         let totalLines = entries.count
         let previousLine = lastStreamLine[target.id] ?? -1
@@ -929,8 +959,13 @@ import UniformTypeIdentifiers
         // Match the hook: append each event once. Replaying the whole turn
         // every 500 ms keeps rebuilding open menus and prevents UI quiescence.
         let delta = kind == "backlog" ? entries : entries.filter { ($0["line"] as? Int ?? -1) > previousLine }
-        return try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: ["type": kind, "source": target.source,
-            "entries": delta, "startLine": 0, "totalLines": totalLines, "hasMore": false]), source: target.source)
+        if let activity, kind == "append", delta.isEmpty {
+            return try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: ["type": "preview", "source": target.source,
+                "preview": NSNull(), "activityVerb": "Whirlpooling", "activity": activity]), source: target.source)
+        }
+        var frame: [String: Any] = ["type": kind, "source": target.source, "entries": delta, "startLine": 0, "totalLines": totalLines, "hasMore": false]
+        if let activity { frame["activityVerb"] = "Whirlpooling"; frame["activity"] = activity }
+        return try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: frame), source: target.source)
     }
     private static func flag(_ flag: String) -> Bool { ProcessInfo.processInfo.arguments.contains(flag) }
 

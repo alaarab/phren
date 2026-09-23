@@ -107,6 +107,11 @@ private struct ModernChatFollowScroll<Content: View>: View {
     @State private var settlingUntil: Date?
     var body: some View {
         content
+            // When the keyboard (or an interactive drag of it) resizes the
+            // viewport, keep the message at the bottom edge where it is, in
+            // the keyboard's own animation: the transcript rises and falls
+            // with the composer, whether following the end or reading history.
+            .defaultScrollAnchor(.bottom, for: .sizeChanges)
             .scrollPosition($position)
             .onScrollPhaseChange { _, phase in
                 let driving = phase == .tracking || phase == .interacting || phase == .decelerating

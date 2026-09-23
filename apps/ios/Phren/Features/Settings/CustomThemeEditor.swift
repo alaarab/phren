@@ -138,7 +138,7 @@ enum ThemeColorField: String, CaseIterable, Identifiable {
         case .phrenCardSurface: return p.resolvedPhrenCardSurface
         case .phrenCardBorder: return p.resolvedPhrenCardBorder
         case .phrenCardAccent: return p.resolvedPhrenCardAccent
-        case .chatInlineCode: return p.chatInlineCode ?? p.link ?? p.action
+        case .chatInlineCode: return p.chatInlineCode ?? PhrenTheme.chatPathHex(p)
         }
     }
     func apply(_ color: UInt32, to p: inout PhrenPalette) {

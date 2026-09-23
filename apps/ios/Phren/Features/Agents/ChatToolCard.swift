@@ -62,7 +62,36 @@ extension View {
     }
 }
 
-enum ToolCardStatus { case running, done, failed }
+enum ToolCardStatus {
+    case running, done, failed
+    /// A card presentation's status (web, MCP, phren, skill), by its name.
+    init(_ status: some RawRepresentable<String>) {
+        self = status.rawValue == "failed" ? .failed : status.rawValue == "running" ? .running : .done
+    }
+}
+
+/// How a call stands, at the right end of its pill or card. Each state has
+/// its own color: running is amber, finished a quiet green
+/// check, failed the theme's danger mark.
+struct ToolStatusMark: View {
+    let status: ToolCardStatus
+    var size: CGFloat = 12
+    var body: some View {
+        Group {
+            switch status {
+            case .running:
+                // Still: a call whose turn was cut off never gets a result,
+                // and a spinner left turning in history would lie.
+                Image(systemName: "ellipsis").foregroundStyle(PhrenTheme.chatRunning).accessibilityLabel("Running")
+            case .done:
+                Image(systemName: "checkmark").foregroundStyle(PhrenTheme.chatFinished).accessibilityLabel("Completed")
+            case .failed:
+                Image(systemName: "exclamationmark.circle.fill").foregroundStyle(PhrenTheme.danger).accessibilityLabel("Failed")
+            }
+        }
+        .font(.system(size: size, weight: .semibold))
+    }
+}
 
 /// A glyph, the title, and how the call stands — the row every card opens with.
 struct ToolCardHeader<Trailing: View>: View {
@@ -83,18 +112,7 @@ struct ToolCardHeader<Trailing: View>: View {
                 .foregroundStyle(PhrenTheme.text).lineLimit(compact ? 1 : 2)
             Spacer(minLength: 0)
             trailing()
-            Group {
-                switch status {
-                case .running:
-                    Image(systemName: "ellipsis").foregroundStyle(PhrenTheme.phrenCardAccent).accessibilityLabel("Running")
-                case .done:
-                    Image(systemName: "checkmark").foregroundStyle(PhrenTheme.phrenCardAccent).accessibilityLabel("Completed")
-                case .failed:
-                    Image(systemName: "exclamationmark.circle").foregroundStyle(PhrenTheme.danger).accessibilityLabel("Failed")
-                case nil: EmptyView()
-                }
-            }
-            .font(.system(size: compact ? 12 : 15, weight: .medium))
+            if let status { ToolStatusMark(status: status, size: compact ? 12 : 15) }
         }
         .frame(height: compact ? 44 : nil)
     }

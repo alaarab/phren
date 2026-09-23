@@ -30,9 +30,12 @@ struct PhrenToolCard: View, Equatable {
             ZStack(alignment: .topTrailing) {
                 // The chevron is a sibling control, never a nested button.
                 Button(action: toggle) {
-                    preview(hasDestination: destination != nil)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
+                    Group {
+                        if model.isExpanded { preview(hasDestination: destination != nil) }
+                        else { folded(hasDestination: destination != nil) }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("chat-phren-card:\(callID)")
@@ -47,7 +50,7 @@ struct PhrenToolCard: View, Equatable {
                     .buttonStyle(.plain)
                     .accessibilityLabel(destination.label)
                     .accessibilityIdentifier("chat-phren-open:\(callID)")
-                    .offset(x: 10, y: -10)
+                    .offset(x: 10, y: model.isExpanded ? -10 : 0)
                 }
             }
             if model.isExpanded {
@@ -77,7 +80,7 @@ struct PhrenToolCard: View, Equatable {
                 .accessibilityIdentifier("chat-phren-expanded:\(callID)")
             }
         }
-        .toolCard()
+        .toolCard(collapsed: !model.isExpanded)
         .navigationDestination(item: $opened) { destination in
             switch destination {
             case .task(let row): TaskDetailsSheet(row: row)
@@ -98,6 +101,34 @@ struct PhrenToolCard: View, Equatable {
             Text(text).font(PhrenTypography.subheadline).foregroundStyle(PhrenTheme.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    /// The folded card: one line the height of a tool pill. The mark, the
+    /// verb, the project, the result in a line, and how the call stands.
+    private func folded(hasDestination: Bool) -> some View {
+        HStack(spacing: PhrenTheme.Space.small) {
+            Image("PhrenMark").resizable().scaledToFit().frame(width: 14, height: 14).accessibilityHidden(true)
+            Text(presentation.verb).font(PhrenTypography.footnote.weight(.semibold))
+                .foregroundStyle(PhrenTheme.text).lineLimit(1).layoutPriority(1)
+            if let project = presentation.project {
+                Text(project).font(.caption.weight(.medium)).lineLimit(1)
+                    .foregroundStyle(PhrenTheme.sessionProject)
+                    .padding(.horizontal, 7).padding(.vertical, 3)
+                    .background(PhrenTheme.sessionProject.opacity(0.1), in: Capsule())
+            }
+            Text(foldedSummary).font(.caption)
+                .foregroundStyle(presentation.status == .failed ? PhrenTheme.danger : PhrenTheme.textSecondary)
+                .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+            status
+            if hasDestination { Color.clear.frame(width: 16, height: 14).accessibilityHidden(true) }
+        }
+    }
+
+    /// What the call came to, in one line: the failure's reason, the
+    /// result, or the first line of what it wrote.
+    private var foldedSummary: String {
+        if presentation.status == .failed, let issue = presentation.issues.first { return issue }
+        return presentation.resultSummary ?? presentation.body.split(separator: "\n").first.map(String.init) ?? presentation.titles.first ?? ""
     }
 
     private func preview(hasDestination: Bool) -> some View {

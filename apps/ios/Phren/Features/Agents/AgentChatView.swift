@@ -141,6 +141,12 @@ struct AgentChatView: View {
     private var active: Bool {
         visible && scenePhase == .active && currentHost?.hasSameConnection(as: session.host) == true
     }
+    /// The activity line's stop ring works whenever the composer's stop would,
+    /// draft or not.
+    private var turnStopEnabled: Bool {
+        active && model.connected && model.isBusy && model.target?.isStarting != true
+            && !model.sending && !model.stopping && !model.answering
+    }
     private struct WorkingActivityObservation: Equatable {
         let project: String?
         let projectStoreID: String?
@@ -168,7 +174,10 @@ struct AgentChatView: View {
     private var content: some View {
         VStack(spacing: 0) {
             AgentChatHeader(session: session, model: model, project: project, active: active) { showingOptions = true }
+            // Rows scrolling up dissolve into the canvas under the header's
+            // solid band instead of stopping at a hard edge beside the title.
             transcript
+                .overlay(alignment: .top) { ChatHeaderFade() }
             ChatPendingInteraction(model: model, session: session, active: active, run: runAgentRequest)
             if !model.backgroundJobs.isEmpty {
                 ChatBackgroundJobsView(jobs: model.backgroundJobs)
@@ -197,6 +206,8 @@ struct AgentChatView: View {
         .confirmsWebLinks()
         .environment(\.openChatDiff) { fullDiff = $0 }
         .environment(\.openToolOutput) { fullToolOutput = $0 }
+        .environment(model.turnControl)
+        .environment(\.chatTurnStop, ChatTurnStop(enabled: turnStopEnabled) { sendTask = Task { await model.stop(session) } })
         .environment(\.chatChildAgents, model.target.flatMap { target in childAgents.isEmpty ? nil : ChatChildAgents(session: session, target: target, agents: childAgents) })
         .environment(textSelection)
         .onChange(of: messageMenu.request?.id) { _, id in

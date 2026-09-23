@@ -5,6 +5,8 @@ import PhrenKit
 struct ChatActivityContext: Equatable {
     var turns: [AgentChatProgress.Turn] = []
     var harnessVerb: String?
+    /// The last harness verb of each turn, by the turn's start.
+    var turnVerbs: [Date: String] = [:]
     var submittedAt: Date?
     var submittedAfterLine = -1
     var busy = false
@@ -17,6 +19,8 @@ struct ChatTurnActivity: Equatable {
     let finishedAt: Date?
     let phase: AgentChatProgress.Phase
     let verb: String
+    /// The verb is the harness's own (Claude's spinner word), not ours.
+    var fromHarness = false
     var isLive: Bool { phase == .working }
     var identifier: String { isLive ? "chat-activity" : "chat-activity-done" }
 
@@ -49,12 +53,17 @@ extension ChatTranscriptPreparation {
             if turn.phase == .working {
                 guard index == context.turns.count - 1, context.busy, !context.waiting else { continue }
                 live = .init(ownerID: owner.id, startedAt: start, finishedAt: nil, phase: .working,
-                             verb: context.harnessVerb ?? liveVerb(rows: rows, calls: calls))
+                             verb: context.harnessVerb ?? liveVerb(rows: rows, calls: calls), fromHarness: context.harnessVerb != nil)
             } else if turn.finishedAt != nil {
+                // Claude's own word in the past tense ("Brewed for"), "Worked
+                // for" when it is not a form we know; ours without one.
+                let said = context.turnVerbs[start]
+                let verb = turn.phase == .stopped ? "Stopped after"
+                    : said.map { "\(AgentChatSpinner.pastTense($0) ?? "Worked") for" } ?? (calls.isEmpty ? "Thought for" : "Worked for")
                 let activity = ChatTurnActivity(ownerID: owner.id, startedAt: start, finishedAt: turn.finishedAt, phase: turn.phase,
-                    verb: turn.phase == .stopped ? "Stopped after" : calls.isEmpty ? "Thought for" : "Worked for")
+                                                verb: verb, fromHarness: said != nil)
                 // The final assistant text is the reply; earlier text can be tool commentary.
-                let reply = rows.last { $0.role == .assistant && $0.localCommand == nil }
+                let reply = rows.last { $0.role == .assistant && $0.localCommand == nil && !$0.isNarration }
                 let anchor = reply ?? users.first { $0.line > owner.line }
                 let position = anchor.flatMap { anchor in entries.firstIndex { $0.messages.contains { $0.id == anchor.id } } } ?? entries.count
                 insertions[position, default: []].append(activityEntry(activity))
@@ -67,7 +76,8 @@ extension ChatTranscriptPreparation {
             let rows = messages.filter { $0.line > (owner?.line ?? context.submittedAfterLine) }
             let calls = rows.filter { $0.role == .tool && !$0.isToolResult && !$0.isChange && !$0.isCompaction }
             live = .init(ownerID: owner?.id ?? "submission:\(start.timeIntervalSince1970)", startedAt: start,
-                         finishedAt: nil, phase: .working, verb: context.harnessVerb ?? liveVerb(rows: rows, calls: calls))
+                         finishedAt: nil, phase: .working, verb: context.harnessVerb ?? liveVerb(rows: rows, calls: calls),
+                         fromHarness: context.harnessVerb != nil)
         }
         var result: [ChatTimelineEntry] = []
         for index in 0...entries.count {

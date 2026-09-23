@@ -113,6 +113,7 @@ struct ChatTranscriptPreparation {
         if entry.isActivity { return "chat-tool-group:\(entry.messages[0].id)" }
         if let message = entry.messages.first {
             if message.localCommand != nil { return "chat-command:\(message.id)" }
+            if message.isNarration { return "chat-narration:\(message.id)" }
             return "chat-message:\(message.id)"
         }
         return ""
@@ -129,7 +130,7 @@ struct ChatTranscriptPreparation {
         }
         if let card = entry.card { return card.offScreenLabel(callID: entry.callID) }
         if entry.isReadRun, let run = entry.readRun {
-            return "\(run.title), \(run.groups.count) read operations"
+            return run.spokenLabel
         }
         if entry.isActivity {
             let summary = ChatToolSummary(entry.messages)
@@ -139,6 +140,7 @@ struct ChatTranscriptPreparation {
             if let command = message.localCommand {
                 return command.kind == .output ? "Command output: \(command.text)" : "Command: \(command.text)"
             }
+            if message.isNarration { return "Thinking: \(ToolOutputPreview(message.text, lines: 4, characters: 400).text)" }
             let role = message.role == .user ? "Your message" : "Agent reply"
             let body = ToolOutputPreview(message.text, lines: 40, characters: 6_000).text
             return body.isEmpty ? role : "\(role): \(body)"

@@ -132,9 +132,11 @@ export function transcriptStreams(ctx: StreamContext) {
             resumeAfterLine = undefined;
             if (child === null) previews.observe(page.entries, page.reset);
             const preview = child === null ? await previews.update(pane.agent_status, reader.file) : undefined;
-            const activityVerb = previews.verb ? { activityVerb: previews.verb } : {};
-            if (first || page.entries.length || page.reset) send(client, { ...page, ...preview, ...activityVerb, type: first || page.reset ? "backlog" : "append", ...conversation });
-            else if (preview) send(client, { type: "preview", ...conversation, ...preview, ...activityVerb });
+            // `activityVerb` stays for phones that predate `activity`.
+            const activity = previews.activity ? { activityVerb: previews.activity.verb, activity: { ...previews.activity } }
+              : previews.verb ? { activityVerb: previews.verb } : {};
+            if (first || page.entries.length || page.reset) send(client, { ...page, ...preview, ...activity, type: first || page.reset ? "backlog" : "append", ...conversation });
+            else if (preview) send(client, { type: "preview", ...conversation, ...preview, ...activity });
           } else {
             let pendingApproval = agentHooks.approval(target);
             const pendingQuestions = target.source === "codex" ? await codexQuestions.pending(target).catch(() => undefined) : undefined;

@@ -79,15 +79,17 @@ struct ChatReadRun: View, Equatable {
                 withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { expanded.toggle() }
             } label: {
                 HStack(spacing: 7) {
-                    Image(systemName: "doc.text.magnifyingglass").font(.system(size: 14)).foregroundStyle(PhrenTheme.chatNeutralDim).frame(width: 14)
+                    Image(systemName: presentation.sameTool.map(ChatToolSummary.icon) ?? "doc.text.magnifyingglass")
+                        .font(.system(size: 14)).foregroundStyle(PhrenTheme.chatNeutralDim).frame(width: 14)
                     Text(title).fontWeight(.semibold).foregroundStyle(PhrenTheme.chatText).lineLimit(1)
                     Text(preview).foregroundStyle(PhrenTheme.chatNeutral).lineLimit(1).truncationMode(.middle)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                    ToolStatusMark(status: presentation.status)
                     Image(systemName: "chevron.down").font(.system(size: 12, weight: .semibold))
                         .rotationEffect(.degrees(expanded ? 180 : 0)).foregroundStyle(PhrenTheme.chatNeutralDim)
                 }.font(PhrenTypography.footnote).padding(.horizontal, 12).frame(height: 44)
             }.buttonStyle(.plain)
-                .accessibilityLabel("\(title), \(groups.count) read operations")
+                .accessibilityLabel(presentation.spokenLabel)
                 .accessibilityValue(expanded ? "Expanded" : "Collapsed")
                 .accessibilityIdentifier("chat-read-run:\(messages[0].id)")
             if expanded {
@@ -148,11 +150,10 @@ struct ChatToolActivity: View, Equatable {
                     Image(systemName: summary.icon).font(.system(size: 14)).foregroundStyle(PhrenTheme.chatNeutralDim).frame(width: 14)
                     Text(summary.title).fontWeight(.semibold).foregroundStyle(PhrenTheme.chatText).lineLimit(1)
                     if summary.count > 1 { Text("×\(summary.count)").foregroundStyle(PhrenTheme.chatNeutralDim) }
-                    Text(summary.preview).foregroundStyle(PhrenTheme.chatNeutral).lineLimit(1).truncationMode(.middle)
+                    Text(summary.preview).foregroundStyle(summary.previewIsPath ? PhrenTheme.chatPath : PhrenTheme.chatNeutral)
+                        .lineLimit(1).truncationMode(.middle)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    if messages.contains(where: \.isToolResult) {
-                        Image(systemName: "checkmark").font(.system(size: 12, weight: .medium)).foregroundStyle(PhrenTheme.chatNeutralDim)
-                    }
+                    ToolStatusMark(status: summary.status)
                     Image(systemName: "chevron.down").font(.system(size: 12, weight: .semibold))
                         .rotationEffect(.degrees(expanded ? 180 : 0)).foregroundStyle(PhrenTheme.chatNeutralDim)
                 }
@@ -160,7 +161,8 @@ struct ChatToolActivity: View, Equatable {
                 .padding(.horizontal, 12).frame(height: 44)
                 .contentShape(Rectangle())
             }.buttonStyle(.plain)
-                .accessibilityLabel("\(summary.title), \(summary.count) \(summary.count == 1 ? "operation" : "operations")")
+                .accessibilityLabel("\(summary.title), \(summary.count) \(summary.count == 1 ? "operation" : "operations")"
+                                    + (summary.status == .failed ? ", Failed" : ""))
                 .accessibilityValue(expanded ? "Expanded" : "Collapsed")
                 .accessibilityHint("Expand this call and its output")
                 .accessibilityIdentifier("chat-tool-group:\(messages[0].id)")

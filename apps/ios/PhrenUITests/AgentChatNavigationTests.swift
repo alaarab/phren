@@ -95,11 +95,13 @@ final class AgentChatNavigationTests: AgentChatUITestCase {
     func testCompactActivityAndDirectTerminalKeepConversationUsable() {
         let app = launch(extra: ["--chat-design"])
         app.buttons["live-chat:w7:w7:t9"].tap()
-        let group = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-tool-group:")).firstMatch
-        XCTAssertTrue(group.waitForExistence(timeout: 8))
-        XCTAssertEqual(group.label, "Shell, 1 operation")
-        XCTAssertEqual(group.value as? String, "Collapsed")
-        XCTAssertLessThanOrEqual(group.frame.height, 44, "The compact tool pill stays one row tall")
+        // Two shell calls in a row are one pill that opens to each call.
+        let run = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-read-run:")).firstMatch
+        XCTAssertTrue(run.waitForExistence(timeout: 8))
+        XCTAssertTrue(run.label.hasPrefix("Shell ×2, 2 operations"), run.label)
+        XCTAssertEqual(run.value as? String, "Collapsed")
+        XCTAssertLessThanOrEqual(run.frame.height, 44.5, "The compact tool pill stays one row tall")
+        let group = run
         let header = app.descendants(matching: .any).matching(identifier: "chat-header").firstMatch
         let messageBox = app.descendants(matching: .any).matching(identifier: "chat-message-box").firstMatch
         XCTAssertTrue(header.exists)
@@ -110,10 +112,14 @@ final class AgentChatNavigationTests: AgentChatUITestCase {
         XCTAssertFalse(app.staticTexts["All 4 timeline tests passed."].exists)
         XCTAssertFalse(app.buttons["Latest messages"].exists, "A settled conversation already at the bottom does not need a jump button")
         let introduction = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "I'll tighten the session header")).firstMatch
-        XCTAssertLessThanOrEqual(group.frame.minY - introduction.frame.maxY, 18, "Trailing transcript newlines must not add space above tools")
+        XCTAssertLessThanOrEqual(group.frame.minY - introduction.frame.maxY, 22, "Trailing transcript newlines must not add space above tools")
         capture(app, "Custom chat with compact activity")
         group.tap()
         XCTAssertEqual(group.value as? String, "Expanded")
+        let first = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-tool-group:")).element(boundBy: 0)
+        XCTAssertTrue(first.waitForExistence(timeout: 5))
+        XCTAssertEqual(first.label, "Shell, 1 operation")
+        first.tap()
         XCTAssertFalse(app.staticTexts["All 4 timeline tests passed."].exists, "Another tool must stay collapsed")
         XCTAssertTrue(app.staticTexts["3 files changed, 42 insertions(+), 18 deletions(-)"].exists)
         let second = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-tool-group:")).element(boundBy: 1)
@@ -245,5 +251,65 @@ final class AgentChatNavigationTests: AgentChatUITestCase {
         XCTAssertTrue(app.staticTexts["No agent in this tab"].waitForExistence(timeout: 5))
         app.buttons["chat-composer-terminal"].tap()
         XCTAssertTrue(app.otherElements["herdr-terminal-header"].waitForExistence(timeout: 8))
+    }
+
+    @MainActor
+    func testTranscriptScrollsUnderTheHeaderAndTheBranchStaysBesideALongProject() {
+        let app = launch(extra: ["--chat-long-location", "--chat-long-history"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let transcript = app.scrollViews["chat-transcript"]
+        XCTAssertTrue(transcript.waitForExistence(timeout: 8))
+        let header = app.descendants(matching: .any).matching(identifier: "chat-header").firstMatch
+        let location = app.staticTexts["chat-location"]
+        XCTAssertTrue(header.waitForExistence(timeout: 5))
+        XCTAssertTrue(location.waitForExistence(timeout: 8))
+        // Every part keeps a share of the line: the long project name cannot
+        // push the branch out. The fixture reports the branch's drawn width.
+        let report = app.staticTexts["chat-location-branch-width"]
+        var widths: [Int] = []
+        let branchShown = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            guard report.exists else { return false }
+            widths = report.label.split(separator: " ").compactMap { Int($0) }
+            return widths.count == 2 && widths[1] > 0 && widths[0] >= min(widths[1], 60)
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [branchShown], timeout: 8), .completed, "Branch drawn \(widths)")
+        XCTAssertTrue(location.label.contains("feature/keep-branch-visible"), location.label)
+        XCTAssertTrue(location.label.contains("an-unusually-long-project-folder-name-for-the-header"), location.label)
+        // Scroll into history so rows pass under the header.
+        transcript.swipeDown()
+        transcript.swipeUp()
+        // Rows stop under the header's solid band. Beside and above the
+        // capsule, from the top of the header to the location line, the
+        // screen is only the chat canvas: no cut-off transcript text.
+        let shot = XCUIScreen.main.screenshot().image
+        let scale = shot.scale
+        let top = header.frame.minY, bottom = location.frame.maxY + 6
+        var strips: [CGRect] = [CGRect(x: 1, y: top, width: 7, height: bottom - top),
+                                CGRect(x: app.frame.width - 8, y: top, width: 7, height: bottom - top)]
+        strips.append(CGRect(x: 1, y: top, width: app.frame.width - 2, height: 3))
+        XCTAssertTrue(ChatPixels.uniform(shot, strips.map { $0.applying(CGAffineTransform(scaleX: scale, y: scale)) }),
+                      "Transcript text shows beside or above the header")
+        capture(app, "Chat header while scrolled")
+    }
+}
+
+/// Reads a screenshot's pixels: whether every pixel in the given rects (in
+/// image pixels) is one color, give or take antialiasing noise.
+enum ChatPixels {
+    static func uniform(_ image: UIImage, _ rects: [CGRect]) -> Bool {
+        guard let cg = image.cgImage, let data = cg.dataProvider?.data, let bytes = CFDataGetBytePtr(data) else { return false }
+        let perRow = cg.bytesPerRow, perPixel = cg.bitsPerPixel / 8
+        var reference: (Int, Int, Int)?
+        for rect in rects {
+            for y in stride(from: Int(rect.minY), to: min(Int(rect.maxY), cg.height), by: 1) {
+                for x in stride(from: Int(rect.minX), to: min(Int(rect.maxX), cg.width), by: 1) {
+                    let offset = y * perRow + x * perPixel
+                    let pixel = (Int(bytes[offset]), Int(bytes[offset + 1]), Int(bytes[offset + 2]))
+                    guard let first = reference else { reference = pixel; continue }
+                    if abs(pixel.0 - first.0) + abs(pixel.1 - first.1) + abs(pixel.2 - first.2) > 24 { return false }
+                }
+            }
+        }
+        return reference != nil
     }
 }

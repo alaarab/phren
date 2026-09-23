@@ -56,7 +56,7 @@ struct ChatRichText: View, Equatable {
                                 if rowIndex == 0 { Divider().gridCellUnsizedAxes(.horizontal) }
                             }
                         }
-                        .tint(PhrenTheme.link)
+                        .tint(PhrenTheme.chatPath)
                     }
                     .padding(12).background(PhrenTheme.chatPanel, in: RoundedRectangle(cornerRadius: 14))
                     .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(PhrenTheme.border, lineWidth: 1))
@@ -98,7 +98,7 @@ private struct ChatParagraph: View {
         FileLinkedText(attributed: block.attributed)
             .font(.system(size: size, weight: block.heading ? .semibold : .regular, design: .monospaced))
             .foregroundStyle(PhrenTheme.chatText)
-            .lineSpacing(3).tint(PhrenTheme.link)
+            .lineSpacing(3).tint(PhrenTheme.chatPath)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
             .opacity(selecting == nil ? 1 : 0)

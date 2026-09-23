@@ -106,7 +106,9 @@ final class AgentChatTranscriptTests: AgentChatUITestCase {
         XCTAssertTrue(spinner.waitForExistence(timeout: 2))
         let conversation = app.scrollViews["chat-transcript"]
         XCTAssertTrue(conversation.exists)
-        XCTAssertEqual(spinner.frame.midY, conversation.frame.midY, accuracy: 12)
+        // Centered in the part of the conversation below the header.
+        let visibleTop = app.staticTexts["chat-location"].frame.maxY
+        XCTAssertEqual(spinner.frame.midY, (visibleTop + conversation.frame.maxY) / 2, accuracy: 30)
         XCTAssertEqual(spinner.frame.midX, conversation.frame.midX, accuracy: 12)
         capture(app, "Conversation loading centered above composer")
         XCTAssertTrue(app.staticTexts["The project screen is ready. What would you like to change?"].waitForExistence(timeout: 8))
@@ -140,7 +142,10 @@ final class AgentChatTranscriptTests: AgentChatUITestCase {
         let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
         composer.tap(); composer.typeText("Show me the reply")
         app.buttons["chat-send"].tap()
-        let activity = app.descendants(matching: .any).matching(identifier: "chat-activity").firstMatch
+        // The header's indicator, not the transcript's activity row: the
+        // transcript runs under the header, so match by the indicator's words.
+        let activity = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@ AND label IN %@", "chat-activity",
+            ["Waiting for agent…", "Receiving reply…", "Agent is working", "Finished", "Ready"])).firstMatch
         let header = app.descendants(matching: .any).matching(identifier: "chat-header").firstMatch
         XCTAssertTrue(activity.waitForExistence(timeout: 3))
         XCTAssertEqual(activity.label, "Waiting for agent…")
@@ -293,5 +298,53 @@ final class AgentChatTranscriptTests: AgentChatUITestCase {
         XCTAssertTrue(app.buttons["Latest messages"].waitForExistence(timeout: 5), "An upward drag should release follow")
         app.buttons["Latest messages"].tap()
         XCTAssertFalse(app.buttons["Latest messages"].waitForExistence(timeout: 2), "Returning to the bottom should re-engage follow")
+    }
+
+    /// Sends a prompt into the spinner fixture and returns the live row.
+    @MainActor private func startSpinnerTurn(_ app: XCUIApplication) -> XCUIElement {
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let transcript = app.scrollViews["chat-transcript"]
+        XCTAssertTrue(transcript.waitForExistence(timeout: 8))
+        let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
+        composer.tap(); composer.typeText("Show the spinner")
+        app.buttons["chat-send"].tap()
+        return transcript.descendants(matching: .any).matching(identifier: "chat-activity").firstMatch
+    }
+
+    @MainActor
+    func testClaudeSpinnerLineShowsItsFieldsAndItsRingStopsTheTurn() {
+        let app = launch(extra: ["--chat-streaming", "--chat-spinner-fixture", "--chat-clear-drafts"])
+        let live = startSpinnerTurn(app)
+        let spinner = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label BEGINSWITH %@ AND label CONTAINS %@ AND label CONTAINS %@",
+                                                                       "Whirlpooling… (", "↓ 3.1k tokens", "thinking)"), object: live)
+        XCTAssertEqual(XCTWaiter.wait(for: [spinner], timeout: 8), .completed, live.label)
+        let ring = app.buttons["chat-activity-stop"]
+        XCTAssertTrue(ring.waitForExistence(timeout: 3))
+        XCTAssertGreaterThanOrEqual(ring.frame.width, 44); XCTAssertGreaterThanOrEqual(ring.frame.height, 44)
+        XCTAssertLessThanOrEqual(abs(ring.frame.midY - live.frame.midY), 12, "The ring sits at the end of the activity line")
+        XCTAssertGreaterThan(ring.frame.minX, live.frame.midX)
+        XCTAssertTrue(app.buttons["chat-stop"].exists, "The composer keeps its own stop")
+        capture(app, "Activity line live with the stop ring")
+        ring.tap()
+        let done = app.descendants(matching: .any).matching(identifier: "chat-activity-done").firstMatch
+        XCTAssertTrue(done.waitForExistence(timeout: 8))
+        XCTAssertTrue(done.label.hasPrefix("Stopped after "), done.label)
+        XCTAssertTrue(app.staticTexts["Stopped at your request."].waitForExistence(timeout: 5))
+        XCTAssertFalse(live.exists)
+        XCTAssertFalse(ring.exists)
+    }
+
+    @MainActor
+    func testClaudeVerbFinishesTheTurnInThePastTense() {
+        let app = launch(extra: ["--chat-streaming", "--chat-spinner-fixture", "--chat-clear-drafts"])
+        let live = startSpinnerTurn(app)
+        // The thinking ends and the count grows; the clock keeps its own time.
+        let later = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label BEGINSWITH %@ AND label CONTAINS %@ AND NOT (label CONTAINS %@)",
+                                                                     "Whirlpooling… (", "↓ 4.8k tokens", "thinking"), object: live)
+        XCTAssertEqual(XCTWaiter.wait(for: [later], timeout: 12), .completed, live.label)
+        let done = app.descendants(matching: .any).matching(identifier: "chat-activity-done").firstMatch
+        XCTAssertTrue(done.waitForExistence(timeout: 15))
+        XCTAssertEqual(done.label, "Whirlpooled for 14s")
+        capture(app, "Activity line finished in the past tense")
     }
 }

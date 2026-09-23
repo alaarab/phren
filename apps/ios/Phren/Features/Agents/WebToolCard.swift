@@ -92,17 +92,7 @@ struct WebToolCard: View, Equatable {
         }
     }
 
-    @ViewBuilder private var status: some View {
-        switch presentation.status {
-        case .running:
-            Image(systemName: "ellipsis").font(.system(size: expanded ? 15 : 12, weight: .medium))
-                .foregroundStyle(PhrenTheme.phrenCardAccent).accessibilityLabel("Running")
-        case .succeeded:
-            Image(systemName: "checkmark").font(.system(size: expanded ? 15 : 12, weight: .medium))
-                .foregroundStyle(PhrenTheme.phrenCardAccent).accessibilityLabel("Completed")
-        case .failed:
-            Image(systemName: "exclamationmark.circle").font(.system(size: expanded ? 15 : 12, weight: .medium))
-                .foregroundStyle(PhrenTheme.danger).accessibilityLabel("Failed")
-        }
+    private var status: some View {
+        ToolStatusMark(status: ToolCardStatus(presentation.status), size: expanded ? 15 : 12)
     }
 }
