@@ -368,3 +368,63 @@ the app to go idle after every tap and swipe, so it is a UI test time, not a
 frame time; compare runs with each other, not with a device. App CPU time,
 cycles and instructions are the app process alone and are the better signal
 for rendering work: the six swipes keep the app busy for 4.7 s of CPU.
+
+## After 2a, 2026-09-22 (Hook polling)
+
+**Method.** The baseline's bench and scenarios, five minutes each, with two
+Hooks running side by side so both saw the same Herdr panes, the same live
+chat and the same host load: the baseline build and this round's build, each
+with its own temporary `PHREN_BRIDGE_HOME` and empty `PHREN_PATH`, neither of
+them the owner's installed Hook. The default Herdr server had three Claude
+panes, all reporting their session ids; five server directories. Load
+average 3.94 at the start and 4.51 at the end (it reached 20.9 during the
+chat window from other builds). A second four-minute run of this round's
+final build (overview, then chat; load 4.54 to 3.21) gave the same counts.
+
+| Per minute | idle before | idle after | chat before | chat after | overview before | overview after |
+|---|---:|---:|---:|---:|---:|---:|
+| Herdr calls, all | 72 | 22 | 277.2 | 129 | 151.8 | 29.8 |
+| `ping` | 60 | 10 | 60 | 10 | 60 | 10 |
+| `session.snapshot` | 12 | 12 | 131.6 | 20 | 31.8 | 19.8 |
+| `agent.read` | 0 | 0 | 85.6 | 99 | 0 | 0 |
+| `pane.process_info` | 0 | 0 | 0 | 0 | 60 | 0 |
+| Identity `reported` | 0 | 0 | 119.6 | 20 | 60 | 60 |
+| Git spawns (`branch`) | 0 | 0 | 0 | 0 | 15 | 0.6 |
+| CPU % of one core | 0.2 | 0.1 | 0.6 | 0.4 | 0.9 | 0.8 |
+| RSS MiB, mean / max | 77.9 / 197 | 52.6 / 80.4 | 91.7 / 143.5 | 105.2 / 186.6 | 116.1 / 169.5 | 99.4 / 155.2 |
+
+Overview polls took 173 ms on average before and 70 ms after (123 ms in the
+second run). Timer ticks are unchanged; the opencode sweep ran no times in
+any window after (the poll found no opencode pane in the held snapshots).
+
+What changed:
+
+- **Shared snapshot.** Chat and status streams revalidate against one
+  `session.snapshot` per Herdr server shared for `PHREN_SNAPSHOT_SHARE_MS`
+  (2.5 s), joined while in flight and never kept on failure; identities are
+  resolved once per shared snapshot. A pane that disappears or changes
+  conversation closes the stream within 2.5 s plus one tick, where it was one
+  tick. Sends, keys, launches and the overview take a fresh snapshot, and
+  every fresh one refreshes the shared copy. With one chat open: 131.6 to 20
+  a minute (6.6x); more chats add none.
+- **Probe skip.** The overview asks `pane.process_info` only for a pane whose
+  agent does not report its session id, and `paneChatState` reads a pane's
+  PIDs once instead of twice.
+- **Server list.** The activity timer reuses the running-server list for
+  30 s (`PHREN_SERVER_LIST_REUSE_MS`) and reuses a snapshot another reader
+  took in the last 4 s: `ping` 60 to 10 a minute (6x).
+- **Branch.** Past its ten seconds a cached branch is kept while the
+  repository's HEAD file reads the same, up to five minutes: 15 to 0.6 git
+  spawns a minute during overview.
+- **OpenCode sweep.** Request files are read asynchronously, and the 2 s
+  backup poll skips while nothing is held, the watcher is alive and the held
+  snapshots show no opencode pane.
+- **Periodic pull** (MCP server, not the Hook). The remote check already ran
+  once per configured interval; the 5 s tick that notices other clients'
+  pulls read HEAD twice per store and now reads it once unless a check ran.
+
+**Not met.** `agent.read` did not fall: the live preview still reads the
+pane at most twice a second while Herdr reports the agent working, and never
+on a status-only stream, but that status now comes from a snapshot up to
+2.5 s old, so a turn's reads can run up to 2.5 s past its end. The 85.6 to 99
+difference is that tail plus tick timing, not a new reader.
