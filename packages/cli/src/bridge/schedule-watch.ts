@@ -1,8 +1,7 @@
 import { open, stat } from "node:fs/promises";
-import { publicAssistant } from "./dispatch-reports.js";
 import { findPane, paneIdentity, snapshot } from "./herdr.js";
 import { readPaneText } from "./pane-text.js";
-import { object, objects, type Json } from "./protocol.js";
+import { object, objects, type Json, type Provider } from "./protocol.js";
 import { transcriptPath } from "./transcripts.js";
 import { stripTerminal } from "../terminal-text.js";
 import type { ScheduleHarness, ScheduleRunOutcome } from "./schedule-format.js";
@@ -58,6 +57,32 @@ export interface StartupWatchEnv {
 
 export interface FinalTurn { completed: boolean; lastAssistant?: string }
 
+/** The public text of one assistant row, without reasoning or tool output. */
+export function publicAssistant(raw: Json, source: Provider): string | undefined {
+  if (source === "codex") {
+    const payload = object(raw.payload);
+    if (raw.type !== "response_item" || payload.type !== "message" || payload.role !== "assistant" || payload.channel === "analysis") return;
+    const text = typeof payload.content === "string" ? payload.content : objects(payload.content)
+      .filter(block => ["text", "output_text"].includes(String(block.type))).map(block => String(block.text ?? "")).join("\n");
+    return text.trim() || undefined;
+  }
+  if (source === "claude") {
+    const message = object(raw.message);
+    if (raw.type !== "assistant" || message.role !== "assistant") return;
+    const text = typeof message.content === "string" ? message.content : objects(message.content)
+      .filter(block => block.type === "text").map(block => String(block.text ?? "")).join("\n");
+    return text.trim() || undefined;
+  }
+  if (source === "opencode") {
+    const data = object(raw.data), message = object(data.message);
+    if (raw.type !== "assistant/message" || message.role !== "assistant") return;
+    const text = typeof message.content === "string" ? message.content : objects(message.content)
+      .filter(block => block.type === "text").map(block => String(block.text ?? "")).join("\n");
+    return text.trim() || undefined;
+  }
+  return;
+}
+
 const FINAL_TURN_TAIL_BYTES = 512 * 1024;
 
 /** A turn's end as the harness writes it: Claude's end_turn reply or its
@@ -90,7 +115,8 @@ export function finalTurnFromLines(lines: readonly string[], source: ScheduleHar
   return { completed, ...(lastAssistant ? { lastAssistant } : {}) };
 }
 
-async function realFinalTurn(source: ScheduleHarness, sessionId: string | undefined): Promise<FinalTurn | undefined> {
+/** The final turn of a conversation, read from the tail of its transcript. */
+export async function readFinalTurn(source: ScheduleHarness, sessionId: string | undefined): Promise<FinalTurn | undefined> {
   if (!sessionId) return undefined;
   const file = await transcriptPath(source, sessionId).catch(() => undefined);
   if (!file) return undefined;
@@ -148,7 +174,7 @@ export async function watchHerdrRun(server: string, target: { workspaceId: strin
   const resolveSession = env.resolveSession ?? ((name: string, pane: Json) => paneIdentity(name, pane).catch(() => undefined));
   const transcriptStamp = env.transcriptStamp ?? realTranscriptStamp;
   const listPanes = env.panes ?? (async (name: string) => objects((await snapshot(name)).panes));
-  const finalTurn = env.finalTurn ?? realFinalTurn;
+  const finalTurn = env.finalTurn ?? readFinalTurn;
   let sessionId = startup.sessionId;
   let transcriptActive = false;
   let stamp: { size: number; mtimeMs: number } | undefined;
