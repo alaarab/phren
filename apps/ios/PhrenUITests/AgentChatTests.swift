@@ -1624,7 +1624,7 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(viewer.waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Screenshot.png"].exists)
         XCTAssertEqual(viewer.value as? String, "Fit")
-        app.buttons["image-viewer-close"].tap()
+        app.buttons["file-viewer-close"].tap()
         XCTAssertTrue(viewer.waitForNonExistence(timeout: 5))
         app.buttons["Remove Screenshot.png"].tap()
         XCTAssertFalse(app.buttons["Preview Screenshot.png"].exists)
@@ -1637,7 +1637,7 @@ final class AgentChatTests: XCTestCase {
         app.buttons["View attached Screenshot.png"].tap()
         XCTAssertTrue(viewer.waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Screenshot.png"].exists)
-        app.buttons["image-viewer-close"].tap()
+        app.buttons["file-viewer-close"].tap()
         XCTAssertTrue(viewer.waitForNonExistence(timeout: 5))
         capture(app, "Sent image in conversation")
         if app.buttons["Latest messages"].isHittable { app.buttons["Latest messages"].tap() }
