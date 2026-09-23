@@ -56,7 +56,7 @@ export function claudePanePreview(rendered: string, prompt: string, previous = "
     if (/^\s*[⏺●]/.test(line)) { reply.length = 0; writing = true; }
     if (!writing) continue;
     const clean = line.replace(/^\s*[⏺●]\s?/, "").replace(/[⠁-⣿✻✽✶✢✳]/gu, "");
-    if (/^\s*(?:↳|⎿|ctrl\+|shift\+|\? for shortcuts)/i.test(clean)) continue;
+    if (/^\s*(?:↳|⎿|ctrl\+|shift\+|\? for shortcuts)/i.test(clean) || claudeChrome(clean)) continue;
     reply.push(clean.replace(/^ {2}/, ""));
   }
   const text = unwrapTerminalLines(reply).trim().slice(0, MAX_TEXT);
@@ -65,6 +65,23 @@ export function claudePanePreview(rendered: string, prompt: string, previous = "
   const overlap = previous.lastIndexOf(text.split("\n", 1)[0].slice(0, 80));
   return overlap >= 0 && text.startsWith(previous.slice(overlap))
     ? (previous.slice(0, overlap) + text).slice(0, MAX_TEXT) : previous;
+}
+
+/**
+ * Claude Code's own screen text, never part of a reply: the update and
+ * restart notices, status lines it marks ✔ / ✗ / ⚠ / ※, tips, and the
+ * context and auto-accept hints drawn around the input box.
+ */
+export function claudeChrome(line: string): boolean {
+  const text = line.trim();
+  if (!text) return false;
+  return /^[✔✓✗✘⚠※]\s/.test(text)
+    || /\b(?:Update installed|Restart to update|Auto-update failed|Update available|Run \/doctor|Claude Code has been updated)\b/i.test(text)
+    || /^(?:Tip|Hint):\s/i.test(text)
+    || /^(?:⏵⏵|⏸)\s/.test(text)
+    || /\b(?:auto-accept edits|plan mode) (?:on|off)\b/i.test(text)
+    || /^Context left until auto-compact\b/i.test(text)
+    || /^(?:esc to (?:interrupt|cancel)|press esc)\b/i.test(text);
 }
 
 /** A block line that starts its own row even inside a paragraph: a list
