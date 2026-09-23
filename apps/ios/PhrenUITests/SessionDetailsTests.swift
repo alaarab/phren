@@ -34,7 +34,7 @@ final class SessionDetailsTests: XCTestCase {
     func testActivityOrdersWaitingAboveWorking() {
         let app = launch()
         capture(app, "Workspace cards")
-        app.segmentedControls.buttons["Activity"].tap()
+        app.buttons["host-session-view:activity"].tap()
         let waiting = app.buttons["live-detail:w8:w8:t1"]
         let working = app.buttons["live-detail:w7:w7:t9"]
         XCTAssertTrue(waiting.waitForExistence(timeout: 5))
