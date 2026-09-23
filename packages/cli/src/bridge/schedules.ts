@@ -9,7 +9,8 @@ import { finished as streamFinished } from "node:stream/promises";
 import * as yaml from "js-yaml";
 import { z } from "zod";
 import { fanoutRoot } from "./fanouts.js";
-import { noteOptionalReadFailure, paneIdentity, rpc, servers, snapshot } from "./herdr.js";
+import { findPane, paneIdentity, rpc, servers, snapshot } from "./herdr.js";
+import { readPaneText } from "./pane-text.js";
 import type { SchedulePush, SchedulePushKind, SchedulePushResult } from "./push.js";
 import { atomic, atomicInPrivateDir, BridgeError, bridgeRoot, object, objects, type Json } from "./protocol.js";
 import { transcriptPath } from "./transcripts.js";
@@ -515,7 +516,7 @@ async function launchInHerdr(server: string, context: ScheduleLaunchContext, lau
   await promptWhenReady(server, paneId, context.schedule.prompt, signal);
   let sessionId = typeof launched.sessionId === "string" ? launched.sessionId : undefined;
   for (let attempt = 0; attempt < 10 && !sessionId; attempt++) {
-    const pane = objects((await snapshot(server)).panes).find(item => item.workspace_id === workspaceId && item.tab_id === tabId && item.pane_id === paneId);
+    const pane = findPane(await snapshot(server), { workspace: workspaceId, tab: tabId, pane: paneId });
     if (pane) sessionId = await paneIdentity(server, pane).catch(() => undefined);
     if (!sessionId) await new Promise(resolve => setTimeout(resolve, 200));
   }
@@ -551,14 +552,8 @@ export function classifyStartupBlock(input: { elapsedMs: number; transcriptActiv
 }
 
 async function paneRecentLines(server: string, paneId: string): Promise<string[]> {
-  try {
-    const value = await rpc(server, "pane.read", { pane_id: paneId, source: "recent", lines: 40 });
-    const text = String(object(object(value).read).text ?? "");
-    return text.split(/\r?\n/);
-  } catch (error) {
-    noteOptionalReadFailure("Scheduled run pane read", `${server}/${paneId}`, error);
-    return [];
-  }
+  const text = await readPaneText(server, paneId, { method: "pane.read", source: "recent", lines: 40, what: "Scheduled run pane read" });
+  return text ? text.split(/\r?\n/) : [];
 }
 
 /** The watch loop's own words for a failure, instead of assuming Herdr went away. */
@@ -607,8 +602,7 @@ export async function watchHerdrRun(server: string, target: { workspaceId: strin
     await pause(1000);
     if (signal.aborted) break;
     try {
-      const pane = (await listPanes(server)).find(item => item.workspace_id === target.workspaceId
-        && item.tab_id === target.tabId && item.pane_id === target.paneId);
+      const pane = findPane({ panes: await listPanes(server) }, { workspace: target.workspaceId, tab: target.tabId, pane: target.paneId });
       if (!pane) return { status: "failed", reason: "The Herdr pane closed before the scheduled prompt finished." };
       const status = String(pane.agent_status);
       if (status === "idle") return { status: "finished" };

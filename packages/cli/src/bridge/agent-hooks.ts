@@ -9,7 +9,8 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { atomicInPrivateDir, BridgeError, bridgeRoot, object, objects, provider, serverName, sessionId, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
-import { herdrRoot, rpc, servers, snapshot, trustedDirectory, validateTarget } from "./herdr.js";
+import { findPane, herdrRoot, rpc, servers, snapshot, trustedDirectory, validateTarget } from "./herdr.js";
+import { readPaneText } from "./pane-text.js";
 import { capturesChanges, ToolChanges } from "./changes.js";
 import { phrenStoreRoot, unwrapPastedContent } from "./transcripts.js";
 import { archiveFinishedFanouts, blockedFanouts } from "./fanouts.js";
@@ -743,13 +744,8 @@ export class AgentHooks {
   }
   menuClosed(target: Target) { this.menus.delete(JSON.stringify(target)); }
   /** Read what the pane draws, stripping ANSI unless placeholder styling is needed. */
-  async paneLines(target: Target, stripAnsi = true): Promise<string> {
-    try {
-      const result = object(await rpc(target.server, "agent.read",
-        { target: target.pane, source: "visible", lines: 40, strip_ansi: stripAnsi }, undefined, 2_000));
-      const read = object(result.read ?? result);
-      return typeof read.text === "string" ? read.text : "";
-    } catch { return ""; }
+  paneLines(target: Target, stripAnsi = true): Promise<string> {
+    return readPaneText(target.server, target.pane, { method: "agent.read", source: "visible", lines: 40, stripAnsi, timeoutMs: 2_000 });
   }
   /** After the phone walks Codex's /permissions menu onto Full Access, the
    * agent draws a second "Enable full access?" confirmation. Watch the pane's
@@ -890,7 +886,7 @@ export class AgentHooks {
           res.statusCode = 404; res.end(JSON.stringify({ error: disabledHint("git") })); return;
         }
         const s = await snapshot(target.server);
-        const pane = objects(s.panes).find(p => p.pane_id === target.pane && p.tab_id === target.tab && p.workspace_id === target.workspace);
+        const pane = findPane(s, { workspace: target.workspace, tab: target.tab, pane: target.pane });
         if (!pane || (pane.agent && pane.agent !== target.source)) throw new Error("The pane changed");
         const info = object((await rpc(target.server, "pane.process_info", { pane_id: target.pane })).process_info);
         const pids = objects(info.foreground_processes).map(p => p.pid).filter(p => Number.isSafeInteger(p));
