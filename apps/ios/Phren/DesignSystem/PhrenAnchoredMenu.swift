@@ -19,68 +19,81 @@ struct PhrenMenuItem: Identifiable {
 }
 
 /// A compact card of actions that opens just above (or below) the view it is
-/// attached to, aligned to that view's leading edge. It overlays the anchor,
-/// so it changes neither the anchor's nor its parents' layout, and it draws
-/// above the rest of the screen. Tapping a row runs its action then closes;
-/// tapping anywhere else closes.
-private struct PhrenAnchoredMenuModifier: ViewModifier {
-    @Binding var isPresented: Bool
+/// attached to, aligned to that view's leading edge. The anchor only reports
+/// its bounds; the card is drawn by `phrenAnchoredMenuHost()` on a screen's
+/// root, because a parent's content shape (a composer row's, say) also bounds
+/// its children's hit testing and would swallow taps on a card drawn outside
+/// it. Tapping a row runs its action then closes; tapping anywhere else closes.
+struct PhrenAnchoredMenuRequest {
+    let anchor: Anchor<CGRect>
     let items: [PhrenMenuItem]
     let edge: VerticalEdge
     let identifier: String
+    let dismiss: () -> Void
+}
+
+struct PhrenAnchoredMenuKey: PreferenceKey {
+    static let defaultValue: [PhrenAnchoredMenuRequest] = []
+    static func reduce(value: inout [PhrenAnchoredMenuRequest], nextValue: () -> [PhrenAnchoredMenuRequest]) {
+        value.append(contentsOf: nextValue())
+    }
+}
+
+private struct PhrenAnchoredMenuHost: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// Rows plus the hairlines between them, so the card sits exactly `gap` off the anchor.
-    private var cardHeight: CGFloat { CGFloat(items.count) * 44 + CGFloat(max(0, items.count - 1)) * 0.5 }
-
     func body(content: Content) -> some View {
-        content
-            .overlay(alignment: .topLeading) {
-                if isPresented {
-                    GeometryReader { geometry in
-                        let above = edge == .top
-                        let gap: CGFloat = 8
-                        // Far larger than any screen, centered over the
-                        // anchor, so a tap anywhere outside dismisses.
-                        let spread: CGFloat = 2048
-                        ZStack(alignment: .topLeading) {
-                            Color.clear
-                                .frame(width: spread * 2, height: spread * 2)
-                                .offset(x: -spread, y: -spread)
-                                .contentShape(Rectangle())
-                                .onTapGesture { isPresented = false }
-                            menuCard
-                                .offset(x: 0, y: above ? -cardHeight - gap : geometry.size.height + gap)
-                                .transition(.scale(scale: 0.95, anchor: above ? .bottomLeading : .topLeading)
-                                    .combined(with: .opacity))
-                        }
+        content.overlayPreferenceValue(PhrenAnchoredMenuKey.self) { requests in
+            GeometryReader { proxy in
+                if let request = requests.last {
+                    let anchor = proxy[request.anchor]
+                    let above = request.edge == .top
+                    let gap: CGFloat = 8
+                    let height = Self.cardHeight(request.items)
+                    let x = min(max(anchor.minX, 8), max(8, proxy.size.width - Self.width - 8))
+                    ZStack(alignment: .topLeading) {
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .onTapGesture { request.dismiss() }
+                            .accessibilityHidden(true)
+                        card(request)
+                            .offset(x: x, y: above ? anchor.minY - height - gap : anchor.maxY + gap)
+                            .transition(.scale(scale: 0.95, anchor: above ? .bottomLeading : .topLeading)
+                                .combined(with: .opacity))
                     }
-                    .zIndex(50)
+                    .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
                 }
             }
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: isPresented)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: requests.count)
+        }
     }
 
-    private var menuCard: some View {
+    static let width: CGFloat = 240
+    /// Rows plus the hairlines between them, so the card sits exactly `gap` off the anchor.
+    static func cardHeight(_ items: [PhrenMenuItem]) -> CGFloat {
+        CGFloat(items.count) * 44 + CGFloat(max(0, items.count - 1)) * 0.5
+    }
+
+    private func card(_ request: PhrenAnchoredMenuRequest) -> some View {
         VStack(spacing: 0) {
-            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+            ForEach(Array(request.items.enumerated()), id: \.element.id) { index, item in
                 if index > 0 { Rectangle().fill(PhrenTheme.border).frame(height: 0.5) }
-                row(item)
+                row(item, request: request)
             }
         }
-        .frame(width: 240)
+        .frame(width: Self.width)
         .background(PhrenTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
             .strokeBorder(PhrenTheme.border, lineWidth: 0.5))
         .shadow(color: .black.opacity(0.25), radius: 12, y: 4)
         // A marker, not an identifier on the card: a container identifier
         // would replace the rows' own.
-        .phrenContainerMarker(identifier, label: "Menu")
+        .phrenContainerMarker(request.identifier, label: "Menu")
     }
 
-    private func row(_ item: PhrenMenuItem) -> some View {
+    private func row(_ item: PhrenMenuItem, request: PhrenAnchoredMenuRequest) -> some View {
         Button {
-            isPresented = false
+            request.dismiss()
             item.action()
         } label: {
             HStack(spacing: 12) {
@@ -100,13 +113,24 @@ private struct PhrenAnchoredMenuModifier: ViewModifier {
         .buttonStyle(.plain)
         .disabled(!item.isEnabled)
         .opacity(item.isEnabled ? 1 : 0.4)
-        .accessibilityIdentifier("\(identifier):\(item.id)")
+        .accessibilityIdentifier("\(request.identifier):\(item.id)")
     }
 }
 
 extension View {
+    /// Marks this view as the anchor of a menu; a screen root with
+    /// `phrenAnchoredMenuHost()` draws the card.
     func phrenAnchoredMenu(isPresented: Binding<Bool>, items: [PhrenMenuItem], edge: VerticalEdge = .top,
                            identifier: String) -> some View {
-        modifier(PhrenAnchoredMenuModifier(isPresented: isPresented, items: items, edge: edge, identifier: identifier))
+        anchorPreference(key: PhrenAnchoredMenuKey.self, value: .bounds) { anchor in
+            isPresented.wrappedValue
+                ? [PhrenAnchoredMenuRequest(anchor: anchor, items: items, edge: edge, identifier: identifier,
+                                            dismiss: { isPresented.wrappedValue = false })]
+                : []
+        }
     }
+
+    /// Draws any open `phrenAnchoredMenu` inside this view, above everything
+    /// in it. Put it on the screen's root.
+    func phrenAnchoredMenuHost() -> some View { modifier(PhrenAnchoredMenuHost()) }
 }

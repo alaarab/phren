@@ -173,7 +173,7 @@ struct AgentChatView: View {
     private var hasAgentPanes: Bool { model.panes.contains(where: isAgent) }
 
     var body: some View { ChatPerformance.measure("chat container") {
-        chatSheets(content).modifier(ChatMessageMenuPresenter(menu: messageMenu))
+        chatSheets(content.phrenAnchoredMenuHost()).modifier(ChatMessageMenuPresenter(menu: messageMenu))
     } }
     private var content: some View {
         VStack(spacing: 0) {
