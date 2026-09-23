@@ -138,7 +138,8 @@ Feature flags follow a convention: set to `0`, `false`, `off`, or `no` to disabl
 ### Phren Hook locations
 
 The optional iPhone helper is installed with `phren bridge install`; it uses
-`PHREN_BRIDGE_HOME` to override `~/.local/share/phren/bridge` for isolated tests,
+`PHREN_SPEECH_VOICE` to choose the ElevenLabs voice id for talk mode's spoken replies
+(`POST /v1/speech`; the default is River), `PHREN_BRIDGE_HOME` to override `~/.local/share/phren/bridge` for isolated tests,
 and `PHREN_HERDR_HOME` to override `~/.config/herdr`. Normal phone installations
 use the defaults. Transcript and callback settings respect `CODEX_HOME`,
 `CLAUDE_CONFIG_DIR`, and `COPILOT_HOME`. `PHREN_APPROVAL_HOLD_MS` overrides how
