@@ -279,6 +279,27 @@ an existing pane and never touches schedules or tasks. The Hook runs it once a
 day when `PHREN_CANARY_DAILY=1` is in its environment or after
 `phren canary --daily on` (`--daily off` stops it).
 
+### Spoken replies for talk mode
+
+The phone's talk mode reads an agent's replies aloud. `POST /v1/speech` with
+`{ "text": "…" }` (1 to 2,000 characters, usually one sentence) voices the text
+with ElevenLabs' `eleven_flash_v2_5` model and streams the audio back as raw
+16-bit little-endian mono PCM at 24 kHz (`X-Phren-Audio:
+pcm_s16le;rate=24000;channels=1`). The Hook advertises it as the `speech`
+capability.
+
+The key is read from `elevenlabs_api_key` in `~/.config/mina-trailer.json` on
+this computer, used only in the request to ElevenLabs, and never returned, even
+in errors. The voice is River (calm, neutral); set `PHREN_SPEECH_VOICE` in the
+Hook's environment to another ElevenLabs voice id. Failures answer JSON with a
+`code`: `speech-unconfigured` (503, no key), `speech-unreachable` (502),
+`speech-rejected` (502, key refused), `speech-quota` (402), `speech-voice` (502,
+unknown voice), `speech-invalid` (400), `speech-busy` (429) or `speech-failed`
+(502). ElevenLabs' own error text is not passed on. When the phone hangs up, the
+ElevenLabs request is cancelled. Each call is billed to that ElevenLabs account.
+When the route fails, or the phone is offline, the phone uses its best
+installed Apple voice.
+
 The helper exposes a private Unix socket, not a public HTTP port. SSH keys stay
 in the iPhone Keychain. Images and activity remain local to the computer; see the
 [protocol and storage limits](../apps/ios/AGENT_CONNECTIONS.md).

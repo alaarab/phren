@@ -42,6 +42,7 @@ import { gitRepository, paneRoute, uploadBody } from "./server-pane-routes.js";
 import { launchSession, workspaceAction } from "./server-launch.js";
 import type { TranscriptStreams } from "./server-stream.js";
 import { hookMetrics } from "./metrics.js";
+import { streamSpeech } from "./speech.js";
 
 /** The Hook's HTTP API over its Unix socket: module gating, the GET routes,
  * the POST routes that are not bound to one pane, and grant deletion. */
@@ -107,7 +108,7 @@ async function childActivity(source: Provider, session: string): Promise<ChildAc
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", shell: "ssh-pty", herdr: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, repositoryFiles: true, subagents: true, sideQuestions: true, dispatch: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, overviewStream: true };
+  files: true, repositoryFiles: true, subagents: true, sideQuestions: true, dispatch: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, overviewStream: true, speech: true };
 
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
@@ -412,6 +413,10 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           result = { runs: await scheduler!.history(input) };
         } else if (url.pathname === "/v1/canary") {
           result = await canary("manual");
+        } else if (url.pathname === "/v1/speech") {
+          // Audio, not JSON: the route writes its own response.
+          await streamSpeech(data, response);
+          return;
         } else if (url.pathname === "/v1/dispatch") {
           // `origin` is the caller's own pane, added by the MCP tool or CLI from Herdr's variables.
           const { origin, ...brief } = data;

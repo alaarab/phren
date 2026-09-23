@@ -2267,6 +2267,14 @@ schedules:
       expect((await api("/v1/health/details")).data.peers.computers[0]).toMatchObject({ name: "Linuxbox", reachable: true, listsBack: true });
     });
 
+    it("advertises speech and answers /v1/speech with a coded error when this computer has no ElevenLabs key", async () => {
+      expect((await api("/v1/health")).data.capabilities.speech).toBe(true);
+      const reply = await api("/v1/speech", { text: "Hello from the conductor." });
+      expect(reply.status).toBe(503);
+      expect(reply.data).toMatchObject({ code: "speech-unconfigured" });
+      expect((await api("/v1/speech", { text: "" })).status).toBe(400);
+    });
+
     it("runs the canary: launches and closes its own conductor, reads an idle transcript, never types into a pane", async () => {
       agentStatus = "idle";
       const run = await api("/v1/canary", {});
