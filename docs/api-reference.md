@@ -162,7 +162,21 @@ session. Claude receives `/model <id-or-alias>` and must show its confirmation.
 OpenCode returns 422 with a direction to use its terminal `/models` picker.
 
 A working pane returns 409 before any model command is typed. `/v1/prompt`
-also refuses every slash command while working. The phone offers
+also refuses every slash command while working, except Claude Code's
+`/btw <question>` side question, which is made to run beside a turn.
+
+`/v1/prompt` with `/btw <question>` on a Claude pane answers
+`{ ok: true, delivered: true, sideQuestion: { id } }` at once. Claude writes
+nothing of a side question to its session file, so the Hook reads the panel
+from the pane (scrolling a long answer to its end), closes it with Escape and
+sends the result on the conversation's `/v1/transcripts` stream as
+`{ type: "side-answer", source, session, id, question, state, answer? }`, with
+`state` one of `pending`, `answer`, `error` (no answer within 90 s, or the pane
+changed) or `cancelled` (closed in the terminal). The frame is sent only to a
+stream opened with `sideAnswers=1`, and never becomes a transcript row. While
+the question is open every other input to that pane returns 409, since typed
+keys would land in the panel. `POST /v1/side-question/dismiss { target, id }`
+cancels a pending question (closing its panel) or forgets an answered one. The phone offers
 `Switch after this turn`, holds only the model selection until the pane goes
 idle, allows cancellation, and displays a verified switch as a system row.
 An uncertain result is never retried automatically.
