@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { hookRequest } from "./client.js";
-import { handOff, listLiveSessions } from "./hand-off.js";
+import { handOff, listLiveSessions, notLinkedComputers } from "./hand-off.js";
 
 vi.mock("./client.js", () => ({ hookRequest: vi.fn() }));
 vi.mock("./grants.js", () => ({ listGrants: vi.fn(async () => []), matchGrant: vi.fn(), grantLabel: vi.fn() }));
@@ -47,4 +47,12 @@ it("lists registered computers that are not linked and how long each session has
     expect(live.notLinked).toEqual([{ name: "Linuxbox" }]);
     expect(live.enrolled).toBe(0);
   } finally { vi.useRealTimers(); vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }); }
+});
+
+it("counts a computer linked under any of its names: hostname label, Bonjour name or a peer's address", async () => {
+  const store = await mkdtemp(path.join(tmpdir(), "phren-names-"));
+  try {
+    await writeFile(path.join(store, "machines.yaml"), "Desk.example.net: home\nDesk: home\nlinuxbox-host: home\nWork-Laptop: work\n");
+    expect(notLinkedComputers(store, "Desk.example.net", ["Linuxbox", "linuxbox-host"])).toEqual([{ name: "Work-Laptop" }]);
+  } finally { await rm(store, { recursive: true, force: true }); }
 });
