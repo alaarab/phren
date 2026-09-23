@@ -44,6 +44,10 @@ struct CodeView: View {
     @State private var selected: CodeDossierTarget?
     @State private var loading = false
     @State private var reindexing = false
+    /// The computer answered that this project has no code index yet.
+    @State private var indexOff = false
+    @State private var turnOnError: String?
+    @State private var showMore = false
     @State private var errorText: String?
     @State private var showKinds = false
     @State private var showFiles = false
@@ -87,14 +91,16 @@ struct CodeView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
-                    if indexed {
-                        indexHeader
+                    if indexed && indexOff {
+                        offCard
+                    } else if indexed {
+                        statsLine
                         PhrenSearchField(text: $query, placeholder: directory.isEmpty ? "Search symbols" : "Search in \(directory)",
                                          identifier: "code-search", focus: $searchFocused)
                         PhrenTextSegment(items: Mode.allCases.map { PhrenOption(id: $0.rawValue.lowercased(), value: $0, title: $0.rawValue) },
                                          selection: $mode, identifier: "code-mode")
                     }
-                    scope
+                    if !directory.isEmpty { scope }
                     if !request.query.isEmpty || mode == .usage { filters }
                     if let errorText {
                         Text(errorText).font(PhrenTheme.Font.caption).foregroundStyle(PhrenTheme.warning)
@@ -123,11 +129,27 @@ struct CodeView: View {
             }
         }
         .background(PhrenTheme.bg)
-        .navigationTitle(indexed ? "Code" : project)
+        .navigationTitle(project)
         .navigationBarTitleDisplayMode(.inline)
         .overlay(alignment: .topLeading) {
             Color.clear.frame(width: 1, height: 1).accessibilityElement().accessibilityIdentifier("code-screen")
         }
+        .toolbar {
+            if indexed && !indexOff && status != nil {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showMore = true } label: {
+                        Image(systemName: "ellipsis").frame(width: 44, height: 44).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).foregroundStyle(PhrenTheme.text)
+                    .accessibilityLabel("Code options").accessibilityIdentifier("code-more")
+                }
+            }
+        }
+        .phrenActionSheet(isPresented: $showMore, title: "Code intelligence", actions: [
+            .init(id: "rebuild", title: reindexing ? "Rebuilding…" : "Rebuild index", icon: "arrow.clockwise",
+                  caption: "Phren keeps it up to date as files change; rebuild only if something looks stale.",
+                  isEnabled: !reindexing, handler: { Task { await reindex() } }),
+        ], identifier: "code-more-sheet")
         .phrenSingleSelectSheet(isPresented: $showKinds, title: "Symbol kind", options: kinds, selection: $kind, rowPrefix: "code-kind")
         .phrenActionSheet(isPresented: $showFiles, title: pickerDirectory.isEmpty ? "Usage by file" : pickerDirectory,
                           actions: fileActions, identifier: "code-file-picker")
@@ -148,26 +170,52 @@ struct CodeView: View {
         .onChange(of: mode) { _, _ in searchFocused = false }
     }
 
-    private var indexHeader: some View {
-        HStack(alignment: .top, spacing: PhrenTheme.Space.small) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(project).font(PhrenTheme.Font.body.weight(.semibold)).foregroundStyle(PhrenTheme.text)
-                if let statusError {
-                    Text(statusError).foregroundStyle(PhrenTheme.warning).accessibilityIdentifier("code-status-error")
-                } else if let status {
-                    Text("\(status.files) files · \(status.symbols) symbols").accessibilityIdentifier("code-index-counts")
-                    Text(status.languages.map { "\($0.language) (\($0.files))" }.joined(separator: " · "))
-                        .accessibilityIdentifier("code-languages")
-                    if let at = status.lastIndexedAt {
-                        Text("Indexed \(Date(timeIntervalSince1970: at / 1000).formatted(date: .abbreviated, time: .shortened))")
-                            .accessibilityIdentifier("code-indexed-at")
-                    }
+    /// One quiet line under the title: what the index holds and how fresh it is.
+    @ViewBuilder private var statsLine: some View {
+        if let statusError {
+            Text(statusError).font(PhrenTheme.Font.caption).foregroundStyle(PhrenTheme.warning)
+                .accessibilityIdentifier("code-status-error")
+        } else if let status {
+            HStack(spacing: 0) {
+                Text("\(status.files.formatted()) files · \(status.symbols.formatted()) symbols")
+                    .accessibilityIdentifier("code-index-counts")
+                if let at = status.lastIndexedAt {
+                    Text(" · updated \(Date(timeIntervalSince1970: at / 1000).formatted(.relative(presentation: .named)))")
+                        .accessibilityIdentifier("code-indexed-at")
                 }
-            }.font(PhrenTheme.Font.caption).foregroundStyle(PhrenTheme.textMuted)
-            Spacer(minLength: 0)
-            action(reindexing ? "Indexing…" : "Reindex", id: "code-reindex") { Task { await reindex() } }
-                .disabled(reindexing)
-        }.padding(12).sessionCard()
+                if reindexing { Text(" · rebuilding…") }
+            }
+            .font(PhrenTheme.Font.caption).foregroundStyle(PhrenTheme.textMuted).lineLimit(1)
+        }
+    }
+
+    /// The project has no index on this computer: offer to turn code
+    /// intelligence on, as an editor would. The Hook then keeps it current.
+    private var offCard: some View {
+        VStack(spacing: PhrenTheme.Space.small) {
+            Image(systemName: "curlybraces").font(.system(size: 26, weight: .medium)).foregroundStyle(PhrenTheme.accent)
+                .accessibilityHidden(true)
+            Text("Code intelligence is off").font(PhrenTheme.Font.body.weight(.semibold)).foregroundStyle(PhrenTheme.text)
+            Text("Turn it on to search symbols, jump to definitions and see usage. Phren keeps it up to date as files change.")
+                .font(PhrenTheme.Font.caption).foregroundStyle(PhrenTheme.textMuted).multilineTextAlignment(.center)
+            if let turnOnError {
+                Text(turnOnError).font(PhrenTheme.Font.caption).foregroundStyle(PhrenTheme.warning)
+                    .multilineTextAlignment(.center).accessibilityIdentifier("code-turn-on-error")
+            }
+            Button { Task { await turnOn() } } label: {
+                HStack(spacing: 8) {
+                    if reindexing { ProgressView().tint(PhrenTheme.onAccent) }
+                    Text(reindexing ? "Turning on…" : "Turn on").font(PhrenTheme.Font.subheadline.weight(.semibold))
+                }
+                .foregroundStyle(PhrenTheme.onAccent)
+                .padding(.horizontal, 20).frame(minHeight: 44)
+                .background(PhrenTheme.accent, in: Capsule())
+            }
+            .buttonStyle(.plain).disabled(reindexing)
+            .accessibilityIdentifier("code-turn-on")
+        }
+        .frame(maxWidth: .infinity).padding(PhrenTheme.Space.medium).sessionCard()
+        .accessibilityElement(children: .contain).accessibilityIdentifier("code-off")
     }
 
     private var scope: some View {
@@ -254,8 +302,6 @@ struct CodeView: View {
     private var recentContent: some View {
         Group {
             PhrenSectionHeader(title: "Recent symbols", count: recent.count)
-            Text("Symbols the index most recently saw change.")
-                .font(PhrenTheme.Font.caption).foregroundStyle(PhrenTheme.textMuted)
             if recent.isEmpty { empty("No recently indexed symbols.") }
             ForEach(recent) { entry in
                 symbolRow(entry.symbol, detail: "Change indexed \(Date(timeIntervalSince1970: entry.indexedAt / 1000).formatted(date: .abbreviated, time: .shortened))",
@@ -323,11 +369,23 @@ struct CodeView: View {
 
     @MainActor private func loadStatus() async {
         #if DEBUG && targetEnvironment(simulator)
-        if CodeFixture.enabled { status = CodeFixture.status; return }
+        if CodeFixture.enabled {
+            if ProcessInfo.processInfo.arguments.contains("--code-index-off") && status == nil { indexOff = true }
+            else { status = CodeFixture.status }
+            return
+        }
         #endif
         guard let host = hosts.first else { statusError = "Connect a computer with the code index enabled."; return }
-        do { status = try await PhrenConnection.codeStatus(host: host, privateKey: DeviceSSHKey.load(host.id), project: project, storeID: storeId); statusError = nil }
-        catch { statusError = error.localizedDescription }
+        do {
+            status = try await PhrenConnection.codeStatus(host: host, privateKey: DeviceSSHKey.load(host.id), project: project, storeID: storeId)
+            statusError = nil; indexOff = false
+        } catch {
+            // The Hook answers a project without an index with "No code index
+            // for …"; that is the off state, not an error to show.
+            let message = error.localizedDescription
+            if message.contains("No code index") { indexOff = true; statusError = nil }
+            else { statusError = message }
+        }
     }
 
     @MainActor private func load(_ requested: Request) async {
@@ -402,6 +460,15 @@ struct CodeView: View {
             let result = try await PhrenConnection.codeTree(host: host, privateKey: DeviceSSHKey.load(host.id), project: project, directory: pickerDirectory, storeID: storeId)
             try Task.checkCancellation(); pickerEntries = result
         } catch { if !Task.isCancelled { pickerEntries = []; pickerError = error.localizedDescription } }
+    }
+
+    /// Builds the first index. A project with no checkout on this computer
+    /// (the store's global memory, say) says so instead.
+    @MainActor private func turnOn() async {
+        turnOnError = nil
+        await reindex()
+        if let errorText { turnOnError = errorText; self.errorText = nil; return }
+        indexOff = false
     }
 
     @MainActor private func reindex() async {

@@ -44,9 +44,15 @@ final class CodeTests: XCTestCase {
         let folder = app.buttons["code-tree:typescript"]
         XCTAssertTrue(folder.waitForExistence(timeout: 8))
         XCTAssertTrue(app.buttons["code-tree:README.md"].exists, "Files the index never reads are listed too")
-        XCTAssertTrue(app.staticTexts["code-languages"].exists)
+        // One quiet stats line under the project title; rebuild lives in the ••• menu.
+        XCTAssertTrue(app.navigationBars["demo"].exists, "The project names the page")
+        XCTAssertTrue(app.staticTexts["code-index-counts"].exists)
         XCTAssertTrue(app.staticTexts["code-indexed-at"].exists)
-        XCTAssertTrue(app.buttons["code-reindex"].exists)
+        XCTAssertFalse(app.buttons["code-reindex"].exists, "No Reindex button on the page")
+        XCTAssertFalse(app.staticTexts["code-directory"].exists, "No scope label at the root")
+        app.buttons["code-more"].tap()
+        XCTAssertTrue(app.buttons["code-more-sheet:rebuild"].waitForExistence(timeout: 5))
+        app.buttons["code-more-sheet:rebuild"].tap()
         capture(app, "Code home tree")
         folder.tap()
         let file = app.buttons["code-tree:typescript/app.ts"]
@@ -197,9 +203,28 @@ final class CodeTests: XCTestCase {
     }
 
     @MainActor
-    private func launch() -> XCUIApplication {
+    func testProjectWithoutAnIndexOffersToTurnCodeIntelligenceOn() {
+        let app = launch(extra: ["--code-index-off"])
+        tap(app.buttons["project:sample/brain:demo"])
+        let codeCell = app.buttons["project-code-row"]
+        XCTAssertTrue(codeCell.waitForExistence(timeout: 8))
+        codeCell.tap()
+        let turnOn = app.buttons["code-turn-on"]
+        XCTAssertTrue(turnOn.waitForExistence(timeout: 8), "An unindexed project offers to turn code intelligence on")
+        XCTAssertFalse(app.textFields["code-search"].exists, "Symbol search waits for the index")
+        XCTAssertFalse(app.staticTexts["code-error"].exists, "No raw error text or HTTP status")
+        XCTAssertTrue(app.buttons["code-tree:typescript"].exists, "Files stay browsable without an index")
+        capture(app, "Code intelligence off")
+        turnOn.tap()
+        XCTAssertTrue(app.staticTexts["code-index-counts"].waitForExistence(timeout: 8), "Turning on builds the index")
+        XCTAssertFalse(turnOn.exists)
+        capture(app, "Code intelligence on")
+    }
+
+    @MainActor
+    private func launch(extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["--ui-testing", "--code-fixture"]
+        app.launchArguments = ["--ui-testing", "--code-fixture"] + extra
         app.launch()
         XCTAssertTrue(app.tabBars.buttons["Projects"].waitForExistence(timeout: 10))
         app.tabBars.buttons["Projects"].tap()
