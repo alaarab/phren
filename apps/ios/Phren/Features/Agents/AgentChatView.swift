@@ -57,25 +57,15 @@ struct AgentChatView: View {
     @State private var localSite: WebServerSelection?
     @State private var turnChanges: ChatTurnChanges?
     @State private var fullToolOutput: FullToolOutput?
-    @State private var historyTask: Task<Void, Never>?
-    @State private var atBottom = true
-    @State private var nearHistoryTop = false
-    /// Older pages pulled in without a scroll in between; a scroll resets it.
-    @State private var historyChain = 0
-    @State private var paginationReady = false
-    @State private var requestedHistoryLine: Int?
-    /// Content and viewport stay separate so keyboard layout is never mistaken
-    /// for transcript growth, while every requested pin has a real lower bound.
-    @State private var scrollHeight: CGFloat = 0
-    @State private var transcriptContentHeight: CGFloat = 0
-    @State private var scrollMetrics = ChatScrollMetrics(contentHeight: 0, viewportHeight: 0, offsetY: 0)
-    @State private var scrollPinRequest: ChatPinRequest?
     /// A send grows the transcript, resigns the composer and resizes the
     /// viewport in one frame. The pin that follows waits for layout and then
     /// for the keyboard animation; no other pin runs inside that transition.
     @State private var sendScrollToken = 0
-    @State private var sendScrollTask: Task<Void, Never>?
     @State private var suppressComposingPin = false
+    /// The project this pane's folder belongs to. Kept here and set by
+    /// `ChatModelObservers` when it changes, so the screen does not observe
+    /// the pane list the model refreshes every few seconds.
+    @State private var project: SessionProject?
     @State private var fellBackToTerminal = false
     @State private var composing = false
     /// The one paragraph showing native text selection, if any.
@@ -135,11 +125,14 @@ struct AgentChatView: View {
     private var currentHost: LiveHost? {
         preferencesStore.preferences?.hosts.first { $0.id == session.host.id }
     }
-    private var project: SessionProject? {
+    /// The project for the chosen pane's folder. Read by `ChatModelObservers`,
+    /// which stores it in `project` when it changes.
+    private var currentProject: SessionProject? {
         let pane = model.panes.first { $0.id == model.target?.paneID }
         let cwd = pane?.cwd ?? (model.panes.count == 1 ? session.tab.cwd : nil)
         return preferencesStore.preferences?.projectMatch(hostID: session.host.id, cwd: cwd, projects: appModel.sessionProjects)?.project
     }
+    private var hostMatches: Bool { currentHost?.hasSameConnection(as: session.host) == true }
     private var codeOrigin: SessionCodeContext? {
         guard let project, let target = model.target, !target.isStarting else { return nil }
         return SessionCodeContext(storeID: project.storeID, project: project.name, host: session.host, target: target)
@@ -147,27 +140,13 @@ struct AgentChatView: View {
     private var active: Bool {
         visible && scenePhase == .active && currentHost?.hasSameConnection(as: session.host) == true
     }
-    /// The activity line's stop ring works whenever the composer's stop would,
-    /// draft or not.
-    private var turnStopEnabled: Bool {
-        active && model.connected && model.isBusy && model.target?.isStarting != true
-            && !model.sending && !model.stopping && !model.answering
-    }
-    private struct WorkingActivityObservation: Equatable {
-        let project: String?
-        let projectStoreID: String?
-        let provider: String?
-        let branch: String?
-        let activity: String?
-        let toolName: String?
-        let toolDetail: String?
-    }
-    private var workingActivityObservation: WorkingActivityObservation {
-        WorkingActivityObservation(project: project?.name, projectStoreID: project?.storeID,
-                                   provider: model.target?.source ?? session.tab.agent,
-                                   branch: model.branch ?? session.tab.branch,
-                                   activity: model.activityPhase == .working ? "working" : model.liveActivity ?? session.tab.agentStatus,
-                                   toolName: model.currentToolName, toolDetail: model.currentToolDetail)
+    private var transcriptActions: ChatTranscriptActions {
+        ChatTranscriptActions(
+            reconnect: { refresh = UUID() },
+            choosePane: { pane in model.choose(pane, session: session); refresh = UUID() },
+            openTerminal: { pane in commandDestination = .init(paneID: pane.id, menu: false) },
+            preview: { previewImage = $0 },
+            isAgent: isAgent)
     }
     private func isAgent(_ pane: AgentChatPanes.Pane) -> Bool {
         (try? pane.target(hostID: session.host.id, workspaceID: session.workspaceID, tabID: session.tab.id, muxID: session.host.muxID)) != nil
@@ -182,12 +161,13 @@ struct AgentChatView: View {
             AgentChatHeader(session: session, model: model, project: project, active: active) { showingOptions = true }
             // Rows scrolling up dissolve into the canvas under the header's
             // solid band instead of stopping at a hard edge beside the title.
-            transcript
+            ChatTranscriptPane(session: session, model: model, active: active, hostMatches: hostMatches, project: project,
+                               textSelection: textSelection, composing: $composing,
+                               suppressComposingPin: $suppressComposingPin, sendScrollToken: sendScrollToken,
+                               childAgents: childAgents, actions: transcriptActions)
                 .overlay(alignment: .top) { ChatHeaderFade() }
             ChatPendingInteraction(model: model, session: session, active: active, run: runAgentRequest)
-            if !model.backgroundJobs.isEmpty {
-                ChatBackgroundJobsView(jobs: model.backgroundJobs)
-            }
+            ChatBackgroundJobsSlot(timeline: model.timelineState)
             ChatPendingQueue(model: model, session: session, active: active, run: runAgentRequest) { composing = true }
             if let preview = dictation.preview {
                 DictationCleanupPreviewCard(
@@ -197,14 +177,8 @@ struct AgentChatView: View {
                 )
                 .padding(.horizontal, 12).padding(.top, 6)
             }
-            if let side = model.visibleSideAnswer {
-                ChatSideAnswerCard(side: side) { model.dismissSideAnswer(session) }
-                    .padding(.horizontal, 12).padding(.top, 6)
-            }
-            if model.historyStalled {
-                ChatHistoryStalledNotice(since: model.historyStalledSince) { launchingNewThread = true }
-                    .disabled(project == nil)
-            }
+            ChatSideAnswerSlot(model: model, session: session)
+            ChatHistoryStalledSlot(model: model, projectKnown: project != nil) { launchingNewThread = true }
             composerBar
                 .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         }
@@ -226,8 +200,6 @@ struct AgentChatView: View {
         }
         .environment(\.openToolOutput) { fullToolOutput = $0 }
         .environment(model.turnControl)
-        .environment(\.chatTurnStop, ChatTurnStop(enabled: turnStopEnabled) { sendTask = Task { await model.stop(session) } })
-        .environment(\.chatChildAgents, model.target.flatMap { target in childAgents.isEmpty ? nil : ChatChildAgents(session: session, target: target, agents: childAgents) })
         .environment(textSelection)
         .chatAttachmentSources(source: $attachmentSource, canAdd: model.attachments.count < ChatAttachmentLimit.maximum,
                                add: { item in if model.target == attachmentTarget { model.add(item) } },
@@ -262,7 +234,7 @@ struct AgentChatView: View {
                 }
             }.zIndex(20)
         }
-        .interactiveDismissDisabled(model.hasMore || model.loadingHistory)
+        .modifier(ChatDismissGuard(model: model))
         .toolbar(.hidden, for: .navigationBar)
         // Pushed inside a tab, the chat is a full-height screen: the tab bar
         // would otherwise sit under the composer.
@@ -301,33 +273,23 @@ struct AgentChatView: View {
                 NotificationCenter.default.post(name: .phrenReassertNavigationBarHidden, object: nil)
             }
         }
-        .onChange(of: model.restoringDraft) { _, _ in acceptIncomingAttachments() }
-        .onChange(of: model.approval?.id) { _, id in if id != nil { composing = false } }
-        .onChange(of: model.attachments.count) { _, _ in acceptIncomingAttachments() }
-        .onChange(of: requestedChild, initial: true) { _, _ in openRequestedChildIfReady() }
-        .onChange(of: workingActivityObservation, initial: true) { _, value in
-            Task {
-                await SessionWorkingActivityController.shared.observe(
-                    session: session, project: value.project, projectStoreID: value.projectStoreID,
-                    provider: value.provider,
-                    branch: value.branch, activity: value.activity, toolName: value.toolName,
-                    toolDetail: value.toolDetail
-                )
-            }
+        // Every model-driven side effect lives in this invisible view, so the
+        // screen itself observes almost nothing the model changes.
+        .background {
+            ChatModelObservers(model: model, session: session, active: active, currentProject: { currentProject },
+                               project: $project, composing: $composing,
+                               acceptIncoming: acceptIncomingAttachments,
+                               loaded: fallBackToTerminalIfShellOnly(loaded:),
+                               refreshChildAgents: refreshChildAgents,
+                               stop: { sendTask = Task { await model.stop(session) } })
         }
-        .onDisappear { visible = false; sendTask?.cancel(); historyTask?.cancel(); dictation.cancelCleanupTask(); model.flushDrafts() }
-        .onChange(of: scenePhase) { _, phase in if phase != .active { sendTask?.cancel(); historyTask?.cancel(); model.flushDrafts() } }
-        .onChange(of: currentHost) { _, _ in sendTask?.cancel(); historyTask?.cancel() }
+        .onChange(of: requestedChild, initial: true) { _, _ in openRequestedChildIfReady() }
+        .onDisappear { visible = false; sendTask?.cancel(); dictation.cancelCleanupTask(); model.flushDrafts() }
+        .onChange(of: scenePhase) { _, phase in if phase != .active { sendTask?.cancel(); model.flushDrafts() } }
+        .onChange(of: currentHost) { _, _ in sendTask?.cancel() }
         .onChange(of: reduceMotion || voiceOver, initial: true) { _, instant in
             model.animateReplies = !instant
             if instant { model.reveal.finish() }
-        }
-        .task(id: active && model.reveal.isRevealing) {
-            guard active else { return }
-            while model.reveal.isRevealing && !Task.isCancelled {
-                do { try await Task.sleep(for: .milliseconds(33)) } catch { return }
-                model.reveal.advance()
-            }
         }
         .navigationDestination(item: $commandDestination) { destination in
             HerdrTerminalView(host: session.host, session: session, target: destination.menu ? model.target : nil,
@@ -337,206 +299,6 @@ struct AgentChatView: View {
             if previous != nil && current == nil {
                 // Commands chosen in the live menu can replace the session too.
                 model.chooseAnother(); refresh = UUID()
-            }
-        }
-    }
-
-    /// The conversation: the scroll view, its history paging and the pins
-    /// that keep it following the latest reply.
-    private var transcript: some View {
-        ScrollViewReader { proxy in
-            transcriptScroll(proxy)
-        }
-    }
-
-    private func transcriptScroll(_ proxy: ScrollViewProxy) -> some View {
-        ScrollView {
-            VStack(spacing: 0) {
-                transcriptRows(proxy)
-                // The scroll marker is not a message: it must not add
-                // another inter-message gap below the final reply.
-                GeometryReader { geometry in
-                    Color.clear.preference(key: ChatBottomPosition.self, value: geometry.frame(in: .named("chat-scroll")).maxY)
-                }.frame(height: 1).id("chat-bottom")
-            }
-            .padding(.horizontal, 18).padding(.top, 6).padding(.bottom, 6)
-            .frame(minHeight: scrollHeight, alignment: .bottom)
-            .background(GeometryReader { geometry in
-                Color.clear.preference(key: ChatContentHeight.self, value: geometry.size.height)
-            })
-        }
-        .accessibilityIdentifier("chat-transcript")
-        .contentShape(Rectangle())
-        .simultaneousGesture(TapGesture().onEnded {
-            guard !textSelection.preventsTranscriptScrolling else {
-                textSelection.transcriptTapped()
-                return
-            }
-            composing = false
-            textSelection.transcriptTapped()
-        })
-        .modifier(ChatHistoryScrollObserver { near in
-            if near && !nearHistoryTop && model.historyError != nil { requestedHistoryLine = nil }
-            if near != nearHistoryTop { historyChain = 0 }
-            nearHistoryTop = near
-            loadHistoryIfNeeded(proxy)
-        })
-        .task(id: active && model.connected) {
-            paginationReady = false
-            guard active, model.connected else { return }
-            // Let the first backlog settle at the bottom before deciding
-            // whether the viewport needs an earlier page.
-            do { try await Task.sleep(for: .milliseconds(350)) } catch { return }
-            paginationReady = true
-            loadHistoryIfNeeded(proxy)
-        }
-        .onChange(of: model.history.startLine) { _, _ in loadHistoryIfNeeded(proxy, automatic: true) }
-        .onPreferenceChange(ChatContentHeight.self) { transcriptContentHeight = $0 }
-        .scrollDismissesKeyboard(textSelection.preventsTranscriptScrolling ? .never : .interactively)
-        .scrollDisabled(textSelection.preventsTranscriptScrolling)
-        .coordinateSpace(name: "chat-scroll")
-        .background(GeometryReader { geometry in
-            Color.clear.onAppear { scrollHeight = geometry.size.height }
-                .onChange(of: geometry.size.height) { _, height in
-                    guard abs(height - scrollHeight) > 0.5 else { return }
-                    scrollHeight = height
-                }
-        })
-        .modifier(ChatFollowScroll(viewport: scrollHeight, contentHeight: transcriptContentHeight,
-                                   following: atBottom, pinRequest: scrollPinRequest,
-                                   selectionActive: textSelection.preventsTranscriptScrolling) { _, new, userDriven in
-            scrollMetrics = new
-            textSelection.scrolled(to: new.offsetY)
-            let near = new.distanceFromBottom <= ChatFollow.threshold
-            if userDriven {
-                if near != atBottom { atBottom = near }
-            } else if near, !atBottom {
-                atBottom = true
-            }
-        })
-        .task {
-            pinToBottom(proxy)
-            for delay in [60, 200, 500] {
-                do { try await Task.sleep(for: .milliseconds(delay)) } catch { return }
-                guard atBottom else { return }
-                pinToBottom(proxy)
-            }
-        }
-        .overlay {
-            if (model.loading && model.messages.isEmpty) || (model.timeline.isEmpty && !model.messages.isEmpty) {
-                ProgressView()
-                    .tint(PhrenTheme.chatNeutral)
-                    .accessibilityLabel("Opening conversation")
-                    .accessibilityIdentifier("chat-opening-spinner")
-            }
-        }
-        .overlay(alignment: .bottomTrailing) {
-            if !atBottom || model.history.hasNewer {
-                Button {
-                    if model.history.hasNewer {
-                        historyTask?.cancel(); historyTask = nil; requestedHistoryLine = nil
-                        model.showLatest(); refresh = UUID()
-                    }
-                    withAnimation { proxy.scrollTo("chat-bottom", anchor: .bottom) }
-                } label: {
-                    Image(systemName: "arrow.down").frame(width: 40, height: 40).background(PhrenTheme.surfaceRaised, in: Circle())
-                }.accessibilityLabel("Latest messages").padding(12)
-            }
-        }
-        .onChange(of: model.target?.id) { _, _ in
-            historyTask?.cancel(); historyTask = nil; requestedHistoryLine = nil
-            textSelection.end()
-            pinToBottom(proxy)
-        }
-        .onChange(of: model.timeline.last?.id) { _, _ in
-            if #unavailable(iOS 18.0), atBottom && !model.loadingHistory {
-                pinToBottom(proxy, animated: true)
-            }
-        }
-        .onChange(of: model.reveal.revision) { _, _ in
-            if #unavailable(iOS 18.0), atBottom && !model.loadingHistory { pinToBottom(proxy) }
-        }
-        .onChange(of: model.imagesByMessage) { _, _ in
-            if #unavailable(iOS 18.0), atBottom && !model.loadingHistory { pinToBottom(proxy) }
-        }
-        .onChange(of: model.reconnectRevision) { _, _ in
-            if atBottom && !model.loadingHistory { pinToBottom(proxy) }
-        }
-        .onChange(of: composing) { _, _ in
-            // A send resigns focus in the same frame it appends its
-            // row; pinAfterSend owns that scroll, so this transition
-            // must not also enqueue one against an unlaid row.
-            guard !suppressComposingPin else { return }
-            // The keyboard's safe-area change keeps the bottom
-            // anchored on its own, so a view already at the end needs
-            // no help; pinning it again fights the transaction and,
-            // against a lazy stack's estimate, throws the transcript
-            // past its end. Only a view that had drifted is pulled
-            // back, without animation (reduce motion included).
-            guard atBottom, !model.loadingHistory,
-                  scrollMetrics.distanceFromBottom > 8 else { return }
-            pinToBottom(proxy)
-        }
-        .onChange(of: sendScrollToken) { _, _ in pinAfterSend(proxy) }
-    }
-
-    /// The rows inside the scroll view: pane choice, connection notices,
-    /// history paging, the transcript itself and the status lines under it.
-    private func transcriptRows(_ proxy: ScrollViewProxy) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if model.target == nil && !model.loading {
-                ChatPanePicker(panes: model.panes, isAgent: isAgent,
-                               choose: { pane in model.choose(pane, session: session); refresh = UUID() },
-                               openTerminal: { pane in commandDestination = .init(paneID: pane.id, menu: false) })
-            }
-            if let error = model.error { connectionIssue(error, retry: !model.connected && model.target != nil) }
-            if currentHost?.hasSameConnection(as: session.host) != true {
-                connectionIssue("This computer's connection changed. Reopen chat from the current session list.")
-            }
-            if model.hasMore {
-                VStack(spacing: 8) {
-                    if model.loadingHistory { ProgressView().accessibilityLabel("Loading earlier messages") }
-                    else if model.historyError != nil {
-                        Button("Retry loading earlier messages") {
-                            requestedHistoryLine = nil
-                            loadHistoryIfNeeded(proxy)
-                        }.font(.caption)
-                    }
-                }
-                .frame(maxWidth: .infinity, minHeight: 24)
-                .background(GeometryReader { geometry in
-                    Color.clear.preference(key: ChatHistoryPosition.self, value: geometry.frame(in: .named("chat-scroll")).minY)
-                })
-                .accessibilityIdentifier("chat-history")
-            }
-            ChatTranscriptRows(revision: model.timelineRevision, entries: model.timeline,
-                               revealed: model.reveal.visible, revealRevision: model.reveal.revision,
-                               images: model.imagesByMessage, session: session, target: model.target,
-                               active: active, viewportHeight: scrollHeight,
-                               preview: { previewImage = $0 }).equatable()
-            if let notice = model.modelSwitchNotice {
-                Text(notice).font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .accessibilityIdentifier("chat-model-system-row")
-            }
-            if let pending = model.deferredModel {
-                PhrenOptionRow(title: "Switch after this turn", caption: pending.name + " · Tap to cancel", icon: "clock") {
-                    model.cancelModelSwitch()
-                }
-                .disabled(model.switchingModel)
-                .phrenIdentifier("chat-model-pending")
-            }
-            if let preview = model.replyPreview {
-                ChatReplyPreviewRow(preview: preview)
-            }
-            if model.target?.isStarting == true {
-                Text(session.tab.isConductor
-                     ? "Starting the conductor with \(model.target?.providerName ?? "agent")…"
-                     : "Starting \(model.target?.providerName ?? "agent") in \(session.projectDisplayName(project?.name))…")
-                    .foregroundStyle(PhrenTheme.textMuted).padding(.top, 24)
-                    .accessibilityIdentifier("chat-starting")
-            } else if model.connected && model.messages.isEmpty {
-                Text("Ready for your message.").foregroundStyle(PhrenTheme.textMuted).padding(.top, 24)
             }
         }
     }
@@ -553,7 +315,6 @@ struct AgentChatView: View {
     /// tasks. Split from `content` so the type checker finishes.
     private func chatSheets<V: View>(_ content: V) -> some View {
         content
-        .onChange(of: model.loading) { _, loading in fallBackToTerminalIfShellOnly(loaded: !loading) }
         .onChange(of: anySheetPresented) { _, presented in
             guard !presented else { return }
             DispatchQueue.main.async {
@@ -618,7 +379,6 @@ struct AgentChatView: View {
             guard active else { return }
             await model.run(session)
         }
-        .task(id: childAgentsIdentity) { await refreshChildAgents() }
     }
 
     private func refreshChildAgents() async {
@@ -688,87 +448,12 @@ struct AgentChatView: View {
         fellBackToTerminal = true
         commandDestination = .init(paneID: first.id, menu: false)
     }
-    /// Re-read the spawned agents when the conversation or its transcript changes.
-    private var childAgentsIdentity: String { (model.target?.id ?? "") + ":" + String(model.timelineRevision) }
 
     private func openAgentDrawer() {
         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.22)) { showingAgentSwitcher = true }
     }
     private func closeAgentDrawer() {
         withAnimation(reduceMotion ? nil : .easeIn(duration: 0.18)) { showingAgentSwitcher = false }
-    }
-
-    /// Pages loaded back to back without a scroll in between. A page of
-    /// nothing but lifecycle rows may need a second, but a chain past a few
-    /// means the anchor scroll isn't taking and the top stays "near" — left
-    /// alone that pulls the whole history and hangs the phone.
-    private static let automaticHistoryPages = 3
-
-    private func pinToBottom(_ proxy: ScrollViewProxy, animated: Bool = false) {
-        DispatchQueue.main.async {
-            guard !textSelection.preventsTranscriptScrolling, scrollMetrics.bottomOffset > 0.5 else { return }
-            if #available(iOS 18.0, *) {
-                scrollPinRequest = ChatPinRequest(animated: animated)
-            } else if animated {
-                withAnimation { proxy.scrollTo("chat-bottom", anchor: .bottom) }
-            } else {
-                proxy.scrollTo("chat-bottom", anchor: .bottom)
-            }
-        }
-    }
-
-    /// The pin that follows a send. The sent row grows the transcript and the
-    /// composer's resignation closes the keyboard in the same frame, so a pin
-    /// resolved then can target a row the lazy stack has not laid out. Wait one
-    /// run loop for the row, pin, then pin once more when the keyboard
-    /// animation has finished. `pinToBottom` holds each target to the content
-    /// end (the clamped numeric offset on iOS 18, the bottom marker before it).
-    private func pinAfterSend(_ proxy: ScrollViewProxy) {
-        sendScrollTask?.cancel()
-        sendScrollTask = Task { @MainActor in
-            await Task.yield()
-            suppressComposingPin = false
-            guard atBottom, !model.loadingHistory else { return }
-            pinToBottom(proxy)
-            do { try await Task.sleep(for: .milliseconds(350)) } catch { return }
-            guard atBottom, !model.loadingHistory else { return }
-            pinToBottom(proxy)
-        }
-    }
-
-    private func loadHistoryIfNeeded(_ proxy: ScrollViewProxy, automatic: Bool = false) {
-        guard active, paginationReady, model.connected, model.hasMore, !model.loadingHistory,
-              historyTask == nil, nearHistoryTop, !automatic || historyChain < Self.automaticHistoryPages,
-              let line = model.history.startLine, line > 0, requestedHistoryLine != line else { return }
-        if automatic { historyChain += 1 } else { historyChain = 0 }
-        requestedHistoryLine = line
-        let anchor = model.timeline.first?.id
-        let target = model.target
-        historyTask = Task {
-            await model.loadOlder(session)
-            guard !Task.isCancelled, model.target == target else {
-                if model.target == target { historyTask = nil; requestedHistoryLine = nil }
-                return
-            }
-            await Task.yield()
-            if let anchor {
-                // Older rows can fold the anchor into a read run under another
-                // id; scroll to whichever entry holds that message now.
-                let entries = model.timeline
-                let row = entries.first { $0.id == anchor || $0.messages.contains { $0.id == anchor } }?.id ?? anchor
-                var transaction = Transaction(); transaction.disablesAnimations = true
-                withTransaction(transaction) { proxy.scrollTo(row, anchor: .top) }
-            }
-            // A page may contain only lifecycle events. Recheck after layout
-            // settles so it can continue without another scroll gesture.
-            do { try await Task.sleep(for: .milliseconds(100)) } catch {
-                if model.target == target { historyTask = nil; requestedHistoryLine = nil }
-                return
-            }
-            guard model.target == target else { return }
-            historyTask = nil
-            loadHistoryIfNeeded(proxy, automatic: true)
-        }
     }
 
     private var runningChildAgentCount: Int { childAgents.reduce(0) { $0 + $1.runningCount } }
@@ -783,18 +468,6 @@ struct AgentChatView: View {
         case .showUsage: showingUsage = true
         case .addContext: showingContext = true
         }
-    }
-
-    private func connectionIssue(_ message: String, retry: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label(message, systemImage: "wifi.exclamationmark")
-            if retry {
-                Button("Reconnect", systemImage: "arrow.clockwise") { refresh = UUID() }
-                    .font(.footnote.weight(.semibold)).foregroundStyle(PhrenTheme.cyan)
-                    .accessibilityIdentifier("chat-reconnect")
-            }
-        }
-        .font(.footnote).foregroundStyle(PhrenTheme.warning).padding(12).phrenCard()
     }
 
     /// Runs one agent request as the send task, so leaving the chat cancels it.

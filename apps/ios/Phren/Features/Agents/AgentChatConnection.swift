@@ -30,6 +30,18 @@ final class AgentChatConnection {
     @ObservationIgnored var statusTask: Task<Void, Never>?
     @ObservationIgnored var progressTask: Task<Void, Never>?
     @ObservationIgnored var progressConnected = false
+    @ObservationIgnored private var panesSleeper: Task<Void, Never>?
+
+    /// The pane poll's wait; `wakePanes()` ends it early.
+    func pausePanes(_ duration: Duration) async {
+        let sleeper = Task { _ = try? await Task.sleep(for: duration) }
+        panesSleeper = sleeper
+        await withTaskCancellationHandler { await sleeper.value } onCancel: { sleeper.cancel() }
+        if panesSleeper == sleeper { panesSleeper = nil }
+    }
+
+    /// Read the pane list now: a stream dropped, or the chat needs it.
+    func wakePanes() { panesSleeper?.cancel() }
 
     func shouldBeginStream(_ target: AgentChatTarget) -> Bool {
         !target.isStarting && streamTarget != target && rejectedStreamTarget != target
@@ -62,16 +74,22 @@ extension AgentChatModel {
                         guard self.target == target, connection.generation == run, connection.statusGeneration == statusRun else { return }
                         asyncQuestionsSupported = !ProcessInfo.processInfo.arguments.contains("--chat-question-unsupported")
                         if ProcessInfo.processInfo.arguments.contains("--chat-question-unsupported") { questionsSupported = false }
-                        approval = try AgentChatFixture.approval(target)
-                        terminalPrompt = AgentChatFixture.terminalPrompt(target)
+                        let fixtureApproval = try AgentChatFixture.approval(target)
+                        if approval != fixtureApproval { approval = fixtureApproval }
+                        let fixturePrompt = AgentChatFixture.terminalPrompt(target)
+                        if terminalPrompt != fixturePrompt { terminalPrompt = fixturePrompt }
                         let status = try AgentChatFixture.status(target)
-                        passwordPrompt = status.passwordPrompt
-                        historyStalled = status.historyStalled; historyStalledSince = status.historyStalledSince
+                        if passwordPrompt != status.passwordPrompt { passwordPrompt = status.passwordPrompt }
+                        if historyStalled != status.historyStalled { historyStalled = status.historyStalled }
+                        if historyStalledSince != status.historyStalledSince { historyStalledSince = status.historyStalledSince }
                         if statusBranch != status.branch { statusBranch = status.branch }
                         if !ProcessInfo.processInfo.arguments.contains("--chat-streaming") {
-                            acceptActivity(try AgentChatFixture.panes(session).validate(target).agentStatus)
+                            let pane = try AgentChatFixture.panes(session).validate(target)
+                            acceptActivity(pane.agentStatus)
+                            let answer = pane.needsAnswer || approval != nil
+                            if needsAnswer != answer { needsAnswer = answer; if answer, awaitingReply { awaitingReply = false } }
                         }
-                        interactionConnected = true
+                        if !interactionConnected { interactionConnected = true }
                         await ApprovalActivityController.shared.sync(approval, session: session, target: target)
                         try await Task.sleep(for: .milliseconds(250))
                         continue
@@ -81,19 +99,29 @@ extension AgentChatModel {
                         try Task.checkCancellation()
                         guard self.target == target, connection.generation == run, connection.statusGeneration == statusRun else { return }
                         if awaitingReply, liveActivity != "working", status.activity == "working" { awaitingReply = false }
-                        approval = status.approval.flatMap { ApprovalActivityController.shared.wasHandled($0, target: target) ? nil : $0 }
+                        // A status tick repeats most fields; assign only what
+                        // changed, so an unchanged tick redraws nothing.
+                        let reported = status.approval.flatMap { ApprovalActivityController.shared.wasHandled($0, target: target) ? nil : $0 }
+                        if approval != reported { approval = reported }
                         if terminalPrompt != status.terminalPrompt { terminalPrompt = status.terminalPrompt }
-                        passwordPrompt = status.passwordPrompt
+                        if passwordPrompt != status.passwordPrompt { passwordPrompt = status.passwordPrompt }
                         if let prompts = status.pendingQuestions { questionState.replaceAsync(prompts) }
-                        capabilities = status.capabilities
-                        questionsSupported = status.questionsSupported; asyncQuestionsSupported = status.asyncQuestionsSupported
-                        acceptActivity(status.activity); interactionConnected = true
-                        isCompacting = status.compacting
-                        historyStalled = status.historyStalled; historyStalledSince = status.historyStalledSince
+                        if capabilities != status.capabilities { capabilities = status.capabilities }
+                        if questionsSupported != status.questionsSupported { questionsSupported = status.questionsSupported }
+                        if asyncQuestionsSupported != status.asyncQuestionsSupported { asyncQuestionsSupported = status.asyncQuestionsSupported }
+                        acceptActivity(status.activity)
+                        // The status carries the pane's own state, so a prompt
+                        // shows without waiting for the pane list.
+                        let answer = ["blocked", "waiting"].contains(status.activity ?? "") || approval != nil
+                        if needsAnswer != answer { needsAnswer = answer; if answer, awaitingReply { awaitingReply = false } }
+                        if !interactionConnected { interactionConnected = true }
+                        if isCompacting != status.compacting { isCompacting = status.compacting }
+                        if historyStalled != status.historyStalled { historyStalled = status.historyStalled }
+                        if historyStalledSince != status.historyStalledSince { historyStalledSince = status.historyStalledSince }
                         acceptReportedModel(status.modelName)
                         if statusBranch != status.branch { statusBranch = status.branch }
-                        if approval != nil || ["waiting", "blocked"].contains(status.activity ?? "") { awaitingReply = false }
-                        statusError = nil
+                        if awaitingReply, approval != nil || ["waiting", "blocked"].contains(status.activity ?? "") { awaitingReply = false }
+                        if statusError != nil { statusError = nil }
                         await ApprovalActivityController.shared.sync(approval, session: session, target: target)
                     }
                 } catch is CancellationError {
@@ -105,6 +133,7 @@ extension AgentChatModel {
                 }
                 guard !Task.isCancelled, self.target == target, connection.generation == run, connection.statusGeneration == statusRun else { return }
                 approval = nil; terminalPrompt = nil; interactionConnected = false; isCompacting = false
+                connection.wakePanes()
                 passwordPrompt = false
                 historyStalled = false; historyStalledSince = nil
                 do { try await Task.sleep(for: .seconds(3)) } catch { return }

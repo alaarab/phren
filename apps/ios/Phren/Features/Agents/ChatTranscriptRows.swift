@@ -1,12 +1,65 @@
 import PhrenKit
 import SwiftUI
 
-/// Every materialized row's frame in the transcript's scroll space, so the
-/// stack can tell which rows still sit near the viewport.
-private struct ChatRowFramesKey: PreferenceKey {
-    static let defaultValue: [String: CGRect] = [:]
-    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
-        value.merge(nextValue()) { _, new in new }
+/// Where each drawn row sits in the transcript's content, and which
+/// viewport-high band the scroll offset is in. Rows report their frame only
+/// when their size or position in the content changes, never on a scroll
+/// frame, and the band moves once per screen scrolled, so folding far rows
+/// costs nothing while the finger moves.
+@Observable @MainActor
+final class ChatRowLayout {
+    static let coordinateSpace = "chat-content"
+    /// `floor(offset / viewport)`: the screen the scroll offset is in.
+    private(set) var band = 0
+    /// Moves after a layout pass that changed some row's frame, or the viewport.
+    private(set) var revision = 0
+    @ObservationIgnored private(set) var viewport: CGFloat = 0
+    @ObservationIgnored private var frames: [String: CGRect] = [:]
+    @ObservationIgnored private var revisionPending = false
+
+    func scrolled(offsetY: CGFloat, viewport: CGFloat) {
+        guard viewport > 0.5 else { return }
+        if abs(self.viewport - viewport) > 0.5 { self.viewport = viewport; scheduleRevision() }
+        let band = Int((max(0, offsetY) / viewport).rounded(.down))
+        if band != self.band { self.band = band }
+    }
+
+    func record(_ id: String, frame: CGRect) {
+        guard !frame.isNull, frame.height > 0 else { return }
+        if let old = frames[id], abs(old.minY - frame.minY) < 0.5, abs(old.height - frame.height) < 0.5 { return }
+        frames[id] = frame
+        scheduleRevision()
+    }
+
+    /// Rows more than two screens from the band that have a measured frame.
+    /// A row never measured is drawn in full first.
+    func distant(_ entries: [ChatTimelineEntry]) -> [String: CGFloat] {
+        guard viewport > 0.5 else { return [:] }
+        let top = CGFloat(band - 2) * viewport, bottom = CGFloat(band + 3) * viewport
+        var result: [String: CGFloat] = [:]
+        for entry in entries {
+            guard let frame = frames[entry.id], frame.maxY < top || frame.minY > bottom else { continue }
+            result[entry.id] = frame.height
+        }
+        return result
+    }
+
+    /// Drops frames of rows no longer in the transcript.
+    func retain(_ entries: [ChatTimelineEntry]) {
+        guard frames.count > entries.count else { return }
+        let ids = Set(entries.map(\.id))
+        frames = frames.filter { ids.contains($0.key) }
+    }
+
+    private func scheduleRevision() {
+        guard !revisionPending else { return }
+        revisionPending = true
+        // One revision per layout pass, however many rows moved in it.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.revisionPending = false
+            self.revision &+= 1
+        }
     }
 }
 
@@ -24,6 +77,34 @@ private struct ChatRowPlaceholder: View {
     }
 }
 
+/// The main chat's rows, read straight from the timeline and reveal state:
+/// a new row or a revealed word redraws this and the rows that changed, not
+/// the chat around it.
+struct ChatLiveTranscriptRows: View, Equatable {
+    let timeline: AgentChatTimelineState
+    let reveal: ChatTextReveal
+    let layout: ChatRowLayout
+    let session: LiveAgentSession
+    let target: AgentChatTarget?
+    let active: Bool
+    let preview: (ChatAttachmentDraft) -> Void
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.timeline === rhs.timeline && lhs.reveal === rhs.reveal && lhs.layout === rhs.layout
+            && lhs.session.id == rhs.session.id && lhs.target == rhs.target && lhs.active == rhs.active
+    }
+    var body: some View {
+        let entries = timeline.entries
+        // Read so a band or layout change recomputes folding here.
+        let _ = (layout.band, layout.revision)
+        ChatTranscriptRows(revision: timeline.revision, entries: entries,
+                           revealed: reveal.visible, revealRevision: reveal.revision,
+                           images: timeline.imagesByMessage, session: session, target: target,
+                           active: active, distant: layout.distant(entries), layout: layout,
+                           preview: preview).equatable()
+            .onChange(of: timeline.revision) { _, _ in layout.retain(entries) }
+    }
+}
+
 /// Plain values isolate transcript layout from connection, composer, usage,
 /// and scroll-position changes in the observable chat model.
 struct ChatTranscriptRows: View, Equatable {
@@ -35,58 +116,46 @@ struct ChatTranscriptRows: View, Equatable {
     let session: LiveAgentSession
     let target: AgentChatTarget?
     let active: Bool
-    /// The scroll viewport's height, from the chat screen; zero disables
-    /// placeholder folding (the child-agent transcript stays fully drawn).
-    var viewportHeight: CGFloat = 0
+    /// Far rows to draw as placeholders, with their measured heights. Empty
+    /// draws every row (the child-agent transcript).
+    var distant: [String: CGFloat] = [:]
+    /// Where rows report their frames; nil for a transcript that never folds.
+    var layout: ChatRowLayout? = nil
     let preview: (ChatAttachmentDraft) -> Void
-    /// Rows more than two screens away that have a measured height draw as
-    /// placeholders; the first layout measures every loaded row.
-    @State private var distant: Set<String> = []
-    @State private var heights: [String: CGFloat] = [:]
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.revision == rhs.revision && lhs.revealRevision == rhs.revealRevision
             && lhs.images == rhs.images && lhs.session.id == rhs.session.id
-            && lhs.target == rhs.target && lhs.active == rhs.active && lhs.viewportHeight == rhs.viewportHeight
+            && lhs.target == rhs.target && lhs.active == rhs.active && lhs.distant == rhs.distant
     }
     var body: some View {
         ChatPerformance.measure("transcript rows") {
-            // Measure every loaded row before folding it. LazyVStack estimates
-            // unseen rows from the visible ones, which puts an uneven chat's
-            // bottom beyond its actual last reply.
+            // Every loaded row is laid out (a VStack, not a lazy stack) so the
+            // content height is real; far rows fold to measured placeholders.
             VStack(alignment: .leading, spacing: PhrenDensity.transcriptRowSpacing) {
                 ForEach(entries) { entry in
                     ChatTranscriptRow(entry: entry, revealedText: revealed[entry.id], images: images[entry.id] ?? [],
                                       session: session, target: target, active: active, preview: preview,
-                                      distantHeight: distant.contains(entry.id) ? heights[entry.id] : nil)
+                                      distantHeight: distant[entry.id])
                         .equatable().id(entry.id)
-                        .background {
-                            GeometryReader { geometry in
-                                Color.clear.preference(key: ChatRowFramesKey.self,
-                                                       value: [entry.id: geometry.frame(in: .named("chat-scroll"))])
-                            }
-                        }
+                        .modifier(ChatRowFrameReporter(id: entry.id, layout: layout))
                 }
             }
-            .onPreferenceChange(ChatRowFramesKey.self) { measure($0) }
         }
     }
+}
 
-    /// Fold a row once it is two screens beyond the viewport and its height is
-    /// known from an earlier pass; a row coming back inside is drawn in full
-    /// again. Only materialized rows update their measurements, so a
-    /// placeholder never feeds its own height back in.
-    private func measure(_ frames: [String: CGRect]) {
-        guard viewportHeight > 0 else { return }
-        let slack = viewportHeight * 2
-        var nextHeights = heights.filter { frames[$0.key] != nil }
-        var nextDistant = Set<String>()
-        for (id, frame) in frames where !frame.isNull && frame.height > 0 {
-            let far = frame.maxY < -slack || frame.minY > viewportHeight + slack
-            if !distant.contains(id) { nextHeights[id] = frame.height }
-            if far, nextHeights[id] != nil { nextDistant.insert(id) }
+/// Reports a row's frame in the transcript content when it changes.
+private struct ChatRowFrameReporter: ViewModifier {
+    let id: String
+    let layout: ChatRowLayout?
+    func body(content: Content) -> some View {
+        if let layout {
+            content.onGeometryChange(for: CGRect.self) { $0.frame(in: .named(ChatRowLayout.coordinateSpace)) } action: { frame in
+                layout.record(id, frame: frame)
+            }
+        } else {
+            content
         }
-        if nextHeights != heights { heights = nextHeights }
-        if nextDistant != distant { distant = nextDistant }
     }
 }
 

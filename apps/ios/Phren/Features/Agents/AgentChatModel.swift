@@ -72,6 +72,10 @@ final class AgentChatModel {
     let connection = AgentChatConnection()
     /// Held and handed-off messages.
     let outbox = AgentChatOutbox()
+    /// The prepared transcript rows; only the transcript pane observes it.
+    let timelineState = AgentChatTimelineState()
+    /// The draft and its delivery; only the composer observes it.
+    let composer = AgentChatComposerState()
 
     init() {
         outbox.onChange = { [weak self] items in
@@ -102,11 +106,23 @@ final class AgentChatModel {
     var history = AgentChatHistory() {
         didSet {
             if history.messages != oldValue.messages { prepareTranscript() }
+            // Set only on a real change, so the pane hears nothing else.
+            let state = timelineState
+            if state.historyStartLine != history.startLine { state.historyStartLine = history.startLine }
+            if state.hasMore != history.hasMore { state.hasMore = history.hasMore }
+            if state.hasNewer != history.hasNewer { state.hasNewer = history.hasNewer }
+            if state.hasMessages == history.messages.isEmpty { state.hasMessages = !history.messages.isEmpty }
         }
     }
-    private(set) var timeline: [ChatTimelineEntry] = []
-    private(set) var timelineRevision = 0
-    private(set) var replyPreview: AgentChatPreview?
+    private(set) var timeline: [ChatTimelineEntry] {
+        get { timelineState.entries } set { timelineState.entries = newValue }
+    }
+    private(set) var timelineRevision: Int {
+        get { timelineState.revision } set { timelineState.revision = newValue }
+    }
+    private(set) var replyPreview: AgentChatPreview? {
+        get { timelineState.replyPreview } set { if timelineState.replyPreview != newValue { timelineState.replyPreview = newValue } }
+    }
     /// The harness's own word for the running turn (Claude's spinner verb).
     private var harnessVerb: String? { didSet { if harnessVerb == nil { turnControl.spinner = nil } } }
     /// The last harness verb each turn showed, by its start: the finished
@@ -116,10 +132,18 @@ final class AgentChatModel {
     /// the activity row observes it, so token updates redraw that row alone.
     let turnControl = ChatTurnControl()
     @ObservationIgnored private var pendingPreview: AgentChatPreview?
-    private(set) var backgroundJobs: [ChatBackgroundJob] = []
-    private(set) var currentToolName: String?
-    private(set) var currentToolDetail: String?
-    private(set) var imagesByMessage: [String: [ChatAttachmentDraft]] = [:]
+    private(set) var backgroundJobs: [ChatBackgroundJob] {
+        get { timelineState.backgroundJobs } set { if timelineState.backgroundJobs != newValue { timelineState.backgroundJobs = newValue } }
+    }
+    private(set) var currentToolName: String? {
+        get { timelineState.currentToolName } set { if timelineState.currentToolName != newValue { timelineState.currentToolName = newValue } }
+    }
+    private(set) var currentToolDetail: String? {
+        get { timelineState.currentToolDetail } set { if timelineState.currentToolDetail != newValue { timelineState.currentToolDetail = newValue } }
+    }
+    private(set) var imagesByMessage: [String: [ChatAttachmentDraft]] {
+        get { timelineState.imagesByMessage } set { if timelineState.imagesByMessage != newValue { timelineState.imagesByMessage = newValue } }
+    }
     @ObservationIgnored private var preparation = ChatTranscriptPreparation()
     @ObservationIgnored private var preparationTask: Task<Void, Never>?
     @ObservationIgnored private var preparationID = UUID()
@@ -193,7 +217,10 @@ final class AgentChatModel {
     }
     func acceptActivity(_ activity: String?) {
         guard let activity else { return }
-        if ["idle", "done", "waiting", "blocked"].contains(activity) { pendingPreview = nil; replyPreview = nil; harnessVerb = nil }
+        if ["idle", "done", "waiting", "blocked"].contains(activity) {
+            pendingPreview = nil; replyPreview = nil
+            if harnessVerb != nil { harnessVerb = nil }
+        }
         // A repeated terminal snapshot must not overwrite a newer transcript
         // completion. Only an actual status transition changes precedence.
         if liveActivity != activity {
@@ -201,8 +228,7 @@ final class AgentChatModel {
             if ["working", "idle", "done", "waiting", "blocked"].contains(activity) { awaitingReply = false }
         }
         let changed = liveActivity != activity
-        liveActivity = activity
-        if changed { startDeferredModelSwitch() }
+        if changed { liveActivity = activity; startDeferredModelSwitch() }
         scheduleDrain()
     }
     var modelName: String?
@@ -284,10 +310,10 @@ final class AgentChatModel {
     var messages: [AgentChatMessage] { history.messages }
     var hasMore: Bool { history.hasMore }
     var error: String?
-    var deliveryError: String?
+    var deliveryError: String? { get { composer.deliveryError } set { composer.deliveryError = newValue } }
     var loading = true
     var connected = false
-    var sending = false
+    var sending: Bool { get { composer.sending } set { composer.sending = newValue } }
     var loadingHistory = false
     var stopping = false
     var needsAnswer = false { didSet { if needsAnswer != oldValue { prepareTranscript() } } }
@@ -300,16 +326,28 @@ final class AgentChatModel {
     var terminalPrompt: AgentTerminalPrompt? { didSet { if terminalPrompt != oldValue { prepareTranscript() } } }
     /// True while the pane's own terminal is reading a password.
     var passwordPrompt = false { didSet { if passwordPrompt != oldValue { prepareTranscript() } } }
-    var deliveryStatus: String?
-    var draftStorageError: String?
+    var deliveryStatus: String? { get { composer.deliveryStatus } set { composer.deliveryStatus = newValue } }
+    var draftStorageError: String? { get { composer.draftStorageError } set { composer.draftStorageError = newValue } }
     private(set) var restoringDraft = false
     private var draftSaveTask: Task<Void, Never>?
     private var draftSaveImmediate = false
     private var draftLoadTask: Task<Void, Never>?
     private var draftGeneration = UUID()
     private var draftRevision: UInt64 = 0
-    var draft = "" { didSet { if !restoringDraft, let target { AgentChatDrafts.text[target.id] = draft; persistDraft() } } }
-    var attachments: [ChatAttachmentDraft] = [] { didSet { if !restoringDraft, let target { AgentChatDrafts.attachments[target.id] = attachments; persistDraft() } } }
+    var draft: String {
+        get { composer.draft }
+        set {
+            composer.draft = newValue
+            if !restoringDraft, let target { AgentChatDrafts.text[target.id] = newValue; persistDraft() }
+        }
+    }
+    var attachments: [ChatAttachmentDraft] {
+        get { composer.attachments }
+        set {
+            composer.attachments = newValue
+            if !restoringDraft, let target { AgentChatDrafts.attachments[target.id] = newValue; persistDraft() }
+        }
+    }
     var sentImages: [ChatAttachmentDraft] = [] { didSet { matchSentImages() } }
     /// Claude's `/btw` answer for the open conversation (AgentChatModel+SideAnswer).
     var sideAnswer: ChatSideAnswerState?
@@ -383,6 +421,7 @@ final class AgentChatModel {
         terminalPrompt = nil; passwordPrompt = false
         outbox.reconciledRows = AgentChatQueues.reconciledRows[chosen.id] ?? []
         queue = AgentChatQueues.items[chosen.id] ?? []
+        connection.wakePanes()
     }
     private func persistDraft(immediately: Bool = false) {
         guard !restoringDraft, let target else { return }
@@ -456,7 +495,8 @@ final class AgentChatModel {
                 let list = try await Self.fetchPanes(session)
                 try Task.checkCancellation()
                 guard connection.generation == run else { return }
-                panes = list.panes
+                // A poll that changed nothing must not redraw anything.
+                if panes != list.panes { panes = list.panes }
                 if target == nil {
                     let supported = panes.filter { (try? $0.target(hostID: session.host.id, workspaceID: session.workspaceID, tabID: session.tab.id, muxID: session.host.muxID)) != nil }
                     if supported.count == 1 { choose(supported[0], session: session) }
@@ -465,18 +505,25 @@ final class AgentChatModel {
                 if let target, target.isStarting { newlyAttached = try list.attachedTarget(for: target) }
                 if let newlyAttached, !sending { attachStartingTarget(newlyAttached) }
                 if let target, newlyAttached == nil || !sending {
-                    needsAnswer = try list.validate(target).needsAnswer || approval != nil
+                    let answer = try list.validate(target).needsAnswer || approval != nil
+                    if needsAnswer != answer { needsAnswer = answer }
                     if !interactionConnected { acceptActivity(try list.validate(target).agentStatus) }
-                    if needsAnswer { awaitingReply = false }
-                    if target.isStarting { connected = true; error = nil }
+                    if needsAnswer, awaitingReply { awaitingReply = false }
+                    if target.isStarting { if !connected { connected = true }; if error != nil { error = nil } }
                     else if shouldBeginStream(target) { beginStream(session, target: target, run: run) }
                 }
-                loading = false
+                if loading { loading = false }
             } catch {
                 guard !Task.isCancelled, connection.generation == run else { return }
                 handleConnectionFailure(error)
             }
-            do { try await Task.sleep(for: .seconds(target?.isStarting == true ? 2 : 3)) } catch { return }
+            // With the transcript and status streams both live, they carry
+            // activity, prompts and a closed pane; the pane list is read
+            // again only to notice added or removed panes. Until then, and
+            // while a session starts, it is what the chat has.
+            let settled = connected && interactionConnected && target?.isStarting == false
+            await connection.pausePanes(target?.isStarting == true ? .seconds(2) : settled ? .seconds(15) : .seconds(3))
+            if Task.isCancelled { return }
         }
     }
 
@@ -516,6 +563,8 @@ final class AgentChatModel {
             self.error = error.localizedDescription
         } else {
             connection.streamTarget = nil; self.error = "Reconnecting… \(error.localizedDescription)"
+            // The pane loop reopens the stream; do not leave it asleep.
+            connection.wakePanes()
         }
     }
 
@@ -575,15 +624,20 @@ final class AgentChatModel {
         if frame.kind != .older { questionState.receive(frame.questionEvents, reset: frame.replacesConversation) }
         reveal.receive(frame, previous: messages, animated: animateReplies && hasTranscript && !hadPreview)
         // phren's own hook output lands with the person's turn, not as the reply.
-        if frame.messages.contains(where: { $0.line > submittedAfterLine && $0.role != .user && !$0.isHookContext }) { awaitingReply = false }
+        if awaitingReply, frame.messages.contains(where: { $0.line > submittedAfterLine && $0.role != .user && !$0.isHookContext }) { awaitingReply = false }
         if !connection.progressConnected, !frame.progressEvents.isEmpty || frame.replacesConversation { acceptProgress(frame) }
         acceptContext(frame)
         // A backlog after the transcript was already showing is a reconnect
         // (the phone slept, the link dropped). The rows are re-laid out from
         // scratch, which leaves the scroll offset pointing somewhere earlier
         // in the conversation; the view re-pins if it was following the end.
-        if frame.kind == .backlog, hasTranscript { reconnectRevision &+= 1 }
-        mergeHistory(frame); hasTranscript = true; connected = true; receivedAt = .now; error = nil; loading = false
+        let reconnecting = frame.kind == .backlog && hasTranscript
+        if mergeHistory(frame), reconnecting { reconnectRevision &+= 1 }
+        hasTranscript = true; receivedAt = .now
+        // Every frame lands here; only a real change may redraw the chat.
+        if !connected { connected = true }
+        if error != nil { error = nil }
+        if loading { loading = false }
         if messages == previousMessages { replyPreview = pendingPreview }
         reconcileHandedOffQueue()
         scheduleDrain()
@@ -596,10 +650,13 @@ final class AgentChatModel {
         acceptReportedModel(transcriptContext.modelName)
     }
 
-    private func mergeHistory(_ frame: AgentChatTranscript) {
+    /// True when the frame changed the history.
+    @discardableResult private func mergeHistory(_ frame: AgentChatTranscript) -> Bool {
         var updated = history
         updated.receive(frame)
-        if updated != history { history = updated }
+        guard updated != history else { return false }
+        history = updated
+        return true
     }
 
     func acceptProgress(_ frame: AgentChatTranscript) {

@@ -5,6 +5,9 @@ import SwiftUI
 /// the activity row observes this, so a token update redraws that row alone.
 @MainActor @Observable final class ChatTurnControl {
     var spinner: AgentChatSpinner?
+    /// The stop ring's state and action, set by the chat screen's observers
+    /// when it changes, so only this row observes it.
+    var stop: ChatTurnStop?
 }
 
 /// The activity line's stop ring: the same stop the composer's button sends.
@@ -14,17 +17,13 @@ struct ChatTurnStop: Equatable {
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.enabled == rhs.enabled }
 }
 
-extension EnvironmentValues {
-    @Entry var chatTurnStop: ChatTurnStop? = nil
-}
-
 /// One quiet line. Only this leaf ticks; transcript preparation never sees the clock.
 struct ChatTurnActivityRow: View {
     let activity: ChatTurnActivity
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.chatTurnStop) private var stop
     @Environment(ChatTurnControl.self) private var control: ChatTurnControl?
+    private var stop: ChatTurnStop? { control?.stop }
     @ScaledMetric(relativeTo: .footnote) private var timerWidth: CGFloat = 112
     @ScaledMetric(relativeTo: .footnote) private var rowHeight: CGFloat = 24
 
