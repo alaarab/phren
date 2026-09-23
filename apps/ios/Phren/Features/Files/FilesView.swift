@@ -227,27 +227,60 @@ private struct RepositoryLocationsView: View {
     }
 }
 
+/// Source with line numbers. Rows are built lazily as they scroll into view,
+/// and each line's colors come from `CodeHighlighting`'s cache, so a render
+/// colors only the lines that are new on screen, never the whole file.
 struct CodeTextView: View {
     let code: String
     let language: SyntaxTokenizer.Language
 
     var body: some View {
-        let lines = code.components(separatedBy: "\n")
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
-                HStack(alignment: .top, spacing: 10) {
-                    Text("\(index + 1)")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(PhrenTheme.textDim)
-                        .frame(width: 36, alignment: .trailing)
-                    Text(CodeHighlighting.highlighted(line.isEmpty ? " " : line, language: language))
-                        .font(.system(.footnote, design: .monospaced))
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: true, vertical: false)
-                }
-                .padding(.vertical, 0.5)
+        let layout = CodeTextLayout.of(code)
+        LazyVStack(alignment: .leading, spacing: 0) {
+            // The longest line, drawn at zero height, holds the width steady:
+            // lazy rows alone would widen the horizontal scroll as they load.
+            Text(layout.longest).font(PhrenTypography.monoFootnote).fixedSize()
+                .frame(height: 0).padding(.leading, 46).hidden().accessibilityHidden(true)
+            ForEach(layout.lines.indices, id: \.self) { index in
+                CodeTextLine(number: index + 1, line: layout.lines[index], language: language)
             }
         }
         .padding(.vertical, PhrenTheme.Space.small).padding(.horizontal, 10)
+    }
+}
+
+private struct CodeTextLine: View {
+    let number: Int
+    let line: String
+    let language: SyntaxTokenizer.Language
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Text("\(number)")
+                .font(PhrenTypography.monoCaption2)
+                .foregroundStyle(PhrenTheme.textDim)
+                .frame(width: 36, alignment: .trailing)
+            Text(CodeHighlighting.highlighted(line.isEmpty ? " " : line, language: language))
+                .font(PhrenTypography.monoFootnote)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: true, vertical: false)
+        }
+        .padding(.vertical, 0.5)
+    }
+}
+
+/// The file split into lines once per distinct text, not once per render.
+private struct CodeTextLayout {
+    let lines: [String]
+    let longest: String
+
+    @MainActor private static var last: (code: String, layout: CodeTextLayout)?
+
+    @MainActor static func of(_ code: String) -> CodeTextLayout {
+        if let last, last.code == code { return last.layout }
+        let lines = code.components(separatedBy: "\n")
+        let layout = CodeTextLayout(lines: lines, longest: lines.max { $0.count < $1.count } ?? "")
+        last = (code, layout)
+        return layout
     }
 }
