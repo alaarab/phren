@@ -44,12 +44,21 @@ struct ChatComposer: UIViewRepresentable {
         // Applying an external draft/focus change must not publish SwiftUI
         // state from inside updateUIView. User gestures still report inline.
         view.selectionActivityChanged = nil
-        view.font = .monospacedSystemFont(ofSize: size, weight: .regular)
-        view.textColor = UIColor(PhrenTheme.chatText)
-        view.tintColor = UIColor(PhrenTheme.cyan)
-        view.autocorrectionType = ChatSettings.autocorrects ? .yes : .no
-        view.isEditable = enabled
-        view.isSelectable = enabled
+        // Assign only what changed. Setting a focused UITextView's font or
+        // colors re-lays out its text and scrolls the caret back into view,
+        // so every chat update undid the person's scroll through a long draft.
+        let font = UIFont.monospacedSystemFont(ofSize: size, weight: .regular)
+        if view.font != font { view.font = font }
+        // UIColor(Color) is a new object each time; compare the theme colors.
+        let colors = [PhrenTheme.chatText, PhrenTheme.cyan]
+        if context.coordinator.appliedColors != colors {
+            context.coordinator.appliedColors = colors
+            view.textColor = UIColor(colors[0]); view.tintColor = UIColor(colors[1])
+        }
+        let autocorrection: UITextAutocorrectionType = ChatSettings.autocorrects ? .yes : .no
+        if view.autocorrectionType != autocorrection { view.autocorrectionType = autocorrection }
+        if view.isEditable != enabled { view.isEditable = enabled }
+        if view.isSelectable != enabled { view.isSelectable = enabled }
         view.accessibilityLabel = placeholder
         view.pasteImages = pasteImages
         if view.text != text {
@@ -90,6 +99,7 @@ struct ChatComposer: UIViewRepresentable {
 
     @MainActor final class Coordinator: NSObject, UITextViewDelegate {
         var parent: ChatComposer
+        var appliedColors: [Color] = []
         init(_ parent: ChatComposer) { self.parent = parent }
         func textViewDidBeginEditing(_ textView: UITextView) {
             if !parent.focused { parent.focused = true }
