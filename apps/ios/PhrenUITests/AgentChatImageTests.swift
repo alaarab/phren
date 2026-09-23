@@ -166,6 +166,46 @@ final class AgentChatImageTests: AgentChatUITestCase {
         capture(app, "System photo picker attachment")
     }
 
+    /// Pick, add, reopen, pick another: the second session starts with
+    /// nothing selected and the first photo is not added twice. Needs at
+    /// least two photos in the simulator's library (`xcrun simctl addmedia`).
+    @MainActor
+    func testReopenedPhotoPickerStartsEmptyAndAddsOnlyTheNewPhoto() throws {
+        let app = launch()
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        XCTAssertTrue(app.staticTexts["The project screen is ready. What would you like to change?"].waitForExistence(timeout: 5))
+        let previews = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Preview Image."))
+        func pick(_ index: Int) throws {
+            app.buttons["Add attachment"].tap()
+            app.buttons["chat-attach-menu:photos"].tap()
+            let picker = app.scrollViews["photosView_content_scroll_view"]
+            XCTAssertTrue(picker.waitForExistence(timeout: 8))
+            let introduction = picker.buttons["Close"].firstMatch
+            if introduction.exists { introduction.tap() }
+            let photos = picker.images
+            guard photos.element(boundBy: 1).waitForExistence(timeout: 8) else {
+                throw XCTSkip("Seed the UI test simulator with two photos to exercise the system picker")
+            }
+            // Photos' remote grid exposes its image frame but not AX hit testing.
+            photos.element(boundBy: index).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            let done = app.navigationBars["Photos"].buttons["Done"]
+            if done.waitForExistence(timeout: 3) { done.tap() } else { app.buttons["Add"].firstMatch.tap() }
+        }
+        try pick(0)
+        XCTAssertTrue(previews.firstMatch.waitForExistence(timeout: 10))
+        XCTAssertEqual(previews.count, 1)
+        try pick(1)
+        let two = NSPredicate { _, _ in previews.count == 2 }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: two, object: nil)], timeout: 10), .completed,
+                       "The second session adds only the newly picked photo")
+        // With the old bound selection the first photo came back with the
+        // second, so the count passed through 2 on its way to 3.
+        let duplicate = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in previews.count > 2 }, object: nil)
+        duplicate.isInverted = true
+        XCTAssertEqual(XCTWaiter.wait(for: [duplicate], timeout: 3), .completed, "The first photo is not added again")
+        capture(app, "Two photos from two picker sessions")
+    }
+
     @MainActor
     func testImageAttachmentCanBeRemovedPreviewedAndSent() {
         let app = launch()

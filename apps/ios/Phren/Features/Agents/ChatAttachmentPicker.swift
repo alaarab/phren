@@ -121,6 +121,9 @@ private struct ChatAttachmentSourceModifier: ViewModifier {
 
     private func handlePhotos(_ items: [PhotosPickerItem]) {
         guard !items.isEmpty else { return }
+        // Each picker session starts empty: a selection left bound here would
+        // show preselected next time and hand the same photos back again.
+        photos = []
         Task { @MainActor in
             do {
                 for item in items {
