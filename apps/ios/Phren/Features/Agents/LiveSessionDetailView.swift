@@ -158,13 +158,11 @@ struct LiveSessionDetailView: View {
             }
             .navigationTitle("Session details")
             .navigationBarTitleDisplayMode(.inline)
-            // Pushed over the list, this page is what's on screen, and SwiftUI
-            // cancels the list's polling task when it disappears. Keep the
-            // computer's monitor running from here; the list picks it back up
-            // when it reappears.
+            // The overview owns the computer's stream or poll; reached without
+            // the list (Spotlight, a link), start it from here.
             .task(id: host) {
-                guard let host else { return }
-                await monitor.keepRunning(host: host)
+                guard host != nil, let hosts = preferences?.hosts else { return }
+                SessionOverviewMonitor.shared.ensureRunning(hosts: hosts)
             }
             .onChange(of: session?.tab.cwd) { _, _ in
                 copiedFolder = false

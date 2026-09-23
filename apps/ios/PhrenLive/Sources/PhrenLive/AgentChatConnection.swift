@@ -284,6 +284,8 @@ struct GatewayRequest: Sendable {
     var terminalRows = 24
     var timeoutSeconds: Int?
     static let workspaces = Self(path: "/v1/workspaces?watchApprovals=1")
+    /// The pushed overview; the socket stays open while the phone watches.
+    static let overview = Self(path: "/v1/overview?watchApprovals=1", webSocket: true, streaming: true)
     static func panes(_ workspace: String, _ tab: String) -> Self {
         Self(path: path("/v1/workspaces/panes", ["groupId": workspace, "childId": tab]))
     }
@@ -373,7 +375,7 @@ struct GatewayRequest: Sendable {
         return Self(path: "/v1/prompt", body: try targetBody(target, fields: ["text": text]))
     }
     func scoped(to host: LiveHost) -> Self {
-        guard path.hasPrefix("/v1/workspaces") else { return self }
+        guard path.hasPrefix("/v1/workspaces") || path.hasPrefix("/v1/overview") else { return self }
         var copy = self
         var parts = URLComponents(string: path)!
         var items = parts.queryItems ?? []; items.removeAll { $0.name == "mux" }

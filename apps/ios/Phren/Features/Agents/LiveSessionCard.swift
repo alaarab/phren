@@ -23,8 +23,9 @@ struct LiveSessionCard: View, Equatable {
     /// tripped UIKit's batch-update check.
     let onClose: (SessionCloseRequest, _ confirm: Bool) -> Void
     @Environment(\.sessionCardMenu) private var openSessionMenu
-    @State private var childTarget: AgentChatTarget?
-    @State private var childAgents: [AgentChild] = []
+    private var childTarget: AgentChatTarget? { SessionSubagentStore.shared.entry(session).target }
+    private var childAgents: [AgentChild] { SessionSubagentStore.shared.entry(session).agents }
+    private struct SubagentFollow: Equatable { let session: LiveAgentSession.ID; let busy: Bool }
     @State private var showingChildAgents = false
     @State private var showingCloseAction = false
 
@@ -103,30 +104,9 @@ struct LiveSessionCard: View, Equatable {
         .sheet(isPresented: $showingChildAgents) {
             if let childTarget { ChatSubagentsView(session: session, target: childTarget, agents: childAgents) }
         }
-        .task(id: session.id) {
-            while !Task.isCancelled {
-                PerformanceCounters.bump("poll.card-subagents")
-                do {
-                    if let snapshot = try await SessionSubagentSnapshot.load(session) {
-                        childTarget = snapshot.target; childAgents = snapshot.agents
-                        let computers = AgentChild.runningRows(snapshot.agents).compactMap { $0.agent.computer?.name }
-                        await SessionWorkingActivityController.shared.observeSubagents(
-                            session: session, count: snapshot.agents.reduce(0) { $0 + $1.runningCount },
-                            computers: computers)
-                    } else {
-                        childTarget = nil; childAgents = []
-                        await SessionWorkingActivityController.shared.observeSubagents(
-                            session: session, count: session.tab.runningChildren)
-                    }
-                } catch {
-                    if !Task.isCancelled {
-                        childTarget = nil; childAgents = []
-                        await SessionWorkingActivityController.shared.observeSubagents(
-                            session: session, count: session.tab.runningChildren)
-                    }
-                }
-                try? await Task.sleep(for: .seconds(10))
-            }
+        // One shared read per session, with the drawer and the details.
+        .task(id: SubagentFollow(session: session.id, busy: session.tab.runningChildren > 0 || session.tab.isConductor)) {
+            await SessionSubagentStore.shared.follow(session)
         }
     }
 }

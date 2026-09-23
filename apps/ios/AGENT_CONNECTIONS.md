@@ -143,6 +143,12 @@ Unbound or conflicting identities remain unavailable for chat and attachments.
   plugin mirrors its session to `opencode-<session>.events.jsonl` in the same
   event shape phren-agent uses. opencode loads plugins at startup, so a session
   started before the install has no transcript or session id until restarted.
+- `WS /v1/overview?watchApprovals=1`: the `/v1/workspaces` overview pushed
+  when it changes, with a heartbeat every 20 s otherwise. The phone polls
+  `/v1/workspaces` once per contact; when that answer advertises
+  `capabilities.overviewStream`, it holds this socket instead of polling and
+  goes back to 10 s polls only while the socket is down (a socket that fails
+  at once is retried after 30 s, backing off to 5 minutes).
 - `WS /v1/status`: exact-conversation activity, pending approval, capabilities,
   and the pane's current git `branch` (read on the computer, cached ~10s).
   The model name comes from the transcript instead: Claude rows carry

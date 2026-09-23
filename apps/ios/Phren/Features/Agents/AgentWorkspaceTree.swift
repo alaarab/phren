@@ -195,8 +195,8 @@ private struct AgentWorkspaceSessionRow: View {
     let choose: (LiveAgentSession) -> Void
     let openChild: (AgentChild) -> Void
     let openSessionChild: (LiveAgentSession, AgentChatTarget, AgentChild) -> Void
-    @State private var snapshotChildren: [AgentChild] = []
-    @State private var snapshotTarget: AgentChatTarget?
+    private var snapshotChildren: [AgentChild] { SessionSubagentStore.shared.entry(item).agents }
+    private var snapshotTarget: AgentChatTarget? { SessionSubagentStore.shared.entry(item).target }
     @Environment(\.liveSessionPreferences) private var preferencesStore
 
     private var children: [AgentChild] { currentChildren ?? snapshotChildren }
@@ -227,15 +227,8 @@ private struct AgentWorkspaceSessionRow: View {
         }
         .task(id: RefreshID(session: item.id, isCurrent: currentChildren != nil)) {
             guard currentChildren == nil else { return }
-            while !Task.isCancelled {
-                PerformanceCounters.bump("poll.drawer-subagents")
-                if let snapshot = try? await SessionSubagentSnapshot.load(item), !Task.isCancelled {
-                    snapshotTarget = snapshot.target
-                    snapshotChildren = snapshot.agents
-                }
-                do { try await Task.sleep(for: .seconds(10)) }
-                catch { return }
-            }
+            // The same read the session's card follows, shared.
+            await SessionSubagentStore.shared.follow(item)
         }
     }
 

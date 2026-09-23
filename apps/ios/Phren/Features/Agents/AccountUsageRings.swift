@@ -29,11 +29,9 @@ struct AccountUsageRings: View {
         .accessibilityIdentifier("all-account-usage")
         .task(id: RefreshID(hosts: hosts, active: phase == .active)) {
             guard phase == .active else { return }
-            repeat {
-                PerformanceCounters.bump("poll.usage-rings")
+            await LiveRefresh.shared.every(.seconds(60), key: "usage:rings:\(hosts.map(\.id.uuidString).joined(separator: ","))") {
                 for host in hosts { _ = try? await cache.refresh(host) }
-                do { try await Task.sleep(for: .seconds(60)) } catch { return }
-            } while !Task.isCancelled
+            }
         }
     }
     private struct RefreshID: Equatable { let hosts: [LiveHost]; let active: Bool }

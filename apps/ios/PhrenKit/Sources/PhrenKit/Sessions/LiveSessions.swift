@@ -16,6 +16,8 @@ public struct LiveCapabilities: Codable, Equatable, Sendable {
     public let webPreview: String?
     public let approvalPush: String?
     public let providers: [String]?
+    /// The Hook pushes the overview over `/v1/overview` instead of being polled.
+    public let overviewStream: Bool?
 
     public enum Feature: String, Sendable { case tasks, schedules, changes, dispatch, codeMap, code }
     public func allows(_ feature: Feature) -> Bool {
@@ -228,6 +230,12 @@ public struct LiveWorkspaces: Codable, Equatable, Sendable {
             focus.workspaceID == workspace && (tab == nil || focus.tabID == tab) ? nil : focus
         }
         return Self(kind: kind, groups: groups, focus: focus, computer: computer, phren: phren)
+    }
+
+    /// The same overview with the Hook's newer self-report (load, gateway
+    /// timing), as an overview stream's heartbeat carries it.
+    public func updating(info: LiveHookInfo) -> Self {
+        Self(kind: kind, groups: groups, focus: focus, computer: computer, phren: info)
     }
 
     private static let requiringHookKey = CodingUserInfoKey(rawValue: "Phren.requiresHookEnvelope")!

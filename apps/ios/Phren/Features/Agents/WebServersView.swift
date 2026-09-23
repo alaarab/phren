@@ -92,20 +92,16 @@ private struct WebServerSection: View {
         .sheet(isPresented: $editing) { NavigationStack { LiveHostEditor(existing: host) } }
         .task(id: PollID(host: host, refresh: refresh, active: phase == .active && !editing)) {
             guard phase == .active, !editing else { return }
-            repeat {
-                PerformanceCounters.bump("poll.web-servers")
+            await LiveRefresh.shared.every(.seconds(15), key: "web-servers:\(host.id):\(refresh)") {
                 loading = true
                 do {
                     let result = try await fetch()
-                    try Task.checkCancellation()
                     servers = result; message = nil
                 } catch {
-                    guard !Task.isCancelled else { return }
                     message = error.localizedDescription
                 }
                 loading = false
-                do { try await Task.sleep(for: .seconds(15)) } catch { return }
-            } while !Task.isCancelled
+            }
         }
     }
 

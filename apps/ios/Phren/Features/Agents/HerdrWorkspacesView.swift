@@ -6,7 +6,6 @@ struct HerdrWorkspacesView: View {
     let hostID: UUID
     @Environment(\.liveSessionPreferences) private var preferencesStore
     @Environment(\.scenePhase) private var scenePhase
-    @State private var snapshot: LiveWorkspaces?
     @State private var servers: [PhrenConnection.HerdrServer] = []
     @State private var error: String?
     @State private var busy = false
@@ -22,6 +21,10 @@ struct HerdrWorkspacesView: View {
     @State private var showingServers = false
     @State private var actionTarget: RowAction?
     private var host: LiveHost? { preferencesStore.preferences?.hosts.first { $0.id == hostID } }
+    /// The overview's monitor for this computer: the workspaces arrive over
+    /// its stream (or poll), not a second loop of this screen's own.
+    private var monitor: LiveHostMonitor? { SessionOverviewMonitor.shared.computers.first { $0.host.id == hostID }?.monitor }
+    private var snapshot: LiveWorkspaces? { monitor?.snapshot }
     private var active: Bool { visible && scenePhase == .active }
     private struct Edit: Identifiable {
         var id = UUID()
@@ -53,7 +56,7 @@ struct HerdrWorkspacesView: View {
                     .accessibilityIdentifier("herdr-server")
                     NavigationLink { HerdrTerminalView(host: host) } label: { Label("Open Herdr terminal", systemImage: "terminal") }
                 }
-                if let error { Section { Text(error).font(.footnote).foregroundStyle(PhrenTheme.warning) } }
+                if let error = error ?? monitor?.message { Section { Text(error).font(.footnote).foregroundStyle(PhrenTheme.warning) } }
                 if let snapshot {
                     // One tree: workspaces as plain rows you can fold, their
                     // tabs beneath with the harness mark, the state on the
@@ -157,10 +160,12 @@ struct HerdrWorkspacesView: View {
         .phrenActionSheet(isPresented: $actionTarget.isPresent(), title: rowActionTitle, actions: rowActions,
                           identifier: "herdr-row-actions")
         .onAppear { visible = true }.onDisappear { visible = false; action?.cancel() }
-        .onChange(of: host) { _, _ in snapshot = nil; servers = []; action?.cancel() }
+        .onChange(of: host) { _, _ in servers = []; action?.cancel() }
         .onChange(of: scenePhase) { _, phase in if phase != .active { action?.cancel() } }
         .task(id: Run(host: host, active: active, refresh: refresh)) {
             guard active, let host else { return }
+            if let hosts = preferencesStore.preferences?.hosts { SessionOverviewMonitor.shared.ensureRunning(hosts: hosts) }
+            monitor?.refreshNow()
             do {
                 #if DEBUG && targetEnvironment(simulator)
                 if AgentChatFixture.enabled {
@@ -169,12 +174,7 @@ struct HerdrWorkspacesView: View {
                 #else
                 servers = try await PhrenConnection.herdrServers(host: host, privateKey: DeviceSSHKey.load(host.id))
                 #endif
-                while !Task.isCancelled {
-                    PerformanceCounters.bump("poll.herdr-workspaces")
-                    let value = try await LiveHostMonitor.fetch(host)
-                    try Task.checkCancellation(); snapshot = value; error = nil
-                    try await Task.sleep(for: .seconds(3))
-                }
+                error = nil
             } catch { if !Task.isCancelled { self.error = error.localizedDescription } }
         }
         .refreshable { refresh = UUID() }
@@ -265,6 +265,11 @@ private struct HerdrPanesView: View {
     @State private var creating = false
     @State private var createTask: Task<Void, Never>?
     private var active: Bool { visible && scenePhase == .active && preferencesStore.preferences?.hosts.first(where: { $0.id == session.host.id }) == session.host }
+    private var overviewTab: LiveWorkspaces.Tab? {
+        SessionOverviewMonitor.shared.computers.first { $0.host.id == session.host.id }?.monitor.snapshot?
+            .groups.first { $0.id == session.workspaceID }?.children.first { $0.id == session.tab.id }
+    }
+    private struct PanesRead: Equatable { let active: Bool; let tab: LiveWorkspaces.Tab? }
     var body: some View {
         PhrenList {
             Section {
@@ -305,15 +310,13 @@ private struct HerdrPanesView: View {
         }
         .onAppear { visible = true }.onDisappear { visible = false; createTask?.cancel() }
         .onChange(of: scenePhase) { _, phase in if phase != .active { createTask?.cancel() } }
-        .task(id: active) {
+        // Read when the overview's row for this tab changes (a pane added,
+        // closed or retitled shows there first), not on a timer.
+        .task(id: PanesRead(active: active, tab: overviewTab)) {
             guard active else { return }
             do {
-                while !Task.isCancelled {
-                    PerformanceCounters.bump("poll.herdr-panes")
-                    let result = try await AgentChatModel.fetchPanes(session)
-                    try Task.checkCancellation(); panes = result.panes; error = nil
-                    try await Task.sleep(for: .seconds(3))
-                }
+                let result = try await AgentChatModel.fetchPanes(session)
+                try Task.checkCancellation(); panes = result.panes; error = nil
             } catch { if !Task.isCancelled { self.error = error.localizedDescription } }
         }
     }

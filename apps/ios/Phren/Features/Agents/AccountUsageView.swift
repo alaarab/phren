@@ -382,20 +382,16 @@ private struct AccountUsagePoller: View {
                     print("[PhrenPerformance] usage open from cache: \(String(format: "%.3f", (CFAbsoluteTimeGetCurrent() - openedAt) * 1_000)) ms")
                 }
                 #endif
-                repeat {
-                    PerformanceCounters.bump("poll.usage-screen")
+                await LiveRefresh.shared.every(.seconds(30), key: "usage:\(host.id):\(refresh)") {
                     loading = cache.snapshot(for: host) == nil
                     do {
                         _ = try await cache.refresh(host, force: refresh != lastRefresh)
-                        try Task.checkCancellation()
                         lastRefresh = refresh; error = nil
                     } catch {
-                        guard !Task.isCancelled else { return }
                         self.error = error.localizedDescription
                     }
                     loading = false
-                    do { try await Task.sleep(for: .seconds(30)) } catch { return }
-                } while !Task.isCancelled
+                }
             }
     }
 }

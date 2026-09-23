@@ -53,10 +53,8 @@ final class LocalNotificationMonitor {
         foreground = Task {
             approvals.retireExpired()
             await hostsChanged()
-            while !Task.isCancelled {
-                PerformanceCounters.bump("poll.notifications")
-                await poll(includeApprovals: false)
-                do { try await Task.sleep(for: .seconds(30)) } catch { return }
+            await LiveRefresh.shared.every(.seconds(30), key: "notifications") { [weak self] in
+                await self?.poll(includeApprovals: false)
             }
         }
     }

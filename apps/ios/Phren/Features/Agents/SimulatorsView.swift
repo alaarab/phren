@@ -81,19 +81,17 @@ struct SimulatorScreen: View {
         }
         .task(id: phase) {
             guard phase == .active else { return }
-            while !Task.isCancelled {
-                PerformanceCounters.bump("poll.simulator")
+            await LiveRefresh.shared.every(.seconds(interval), key: "simulator:\(host.id):\(simulator.udid):\(interval)") {
                 do {
                     #if DEBUG && targetEnvironment(simulator)
-                    if AgentChatFixture.enabled { image = Self.fixtureImage; try await Task.sleep(for: .seconds(interval)); continue }
+                    if AgentChatFixture.enabled { image = Self.fixtureImage; return }
                     #endif
                     let data = try await PhrenConnection.simulatorScreenshot(host: host, privateKey: DeviceSSHKey.load(host.id), udid: simulator.udid)
                     let decoded = await Task.detached(priority: .userInitiated) {
                         UIImage(data: data)?.preparingForDisplay()
                     }.value
                     if let decoded { image = decoded; failed = false } else { failed = true }
-                } catch { if !Task.isCancelled { failed = image == nil } }
-                try? await Task.sleep(for: .seconds(interval))
+                } catch { failed = image == nil }
             }
         }
     }

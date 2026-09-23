@@ -6,9 +6,9 @@ struct LiveHostView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.liveSessionPreferences) private var livePreferences
-    @State private var monitor = LiveHostMonitor()
+    /// Only for a computer the overview does not hold (removed meanwhile).
+    @State private var detached = LiveHostMonitor()
     @State private var editing = false
-    @State private var refreshID = UUID()
     @State private var localError: String?
     @State private var mode: SessionViewMode = .workspaces
     @State private var selected: LiveAgentSession?
@@ -21,6 +21,11 @@ struct LiveHostView: View {
     }
     private var preferences: LiveSessionPreferences? { livePreferences.preferences }
     private var host: LiveHost? { preferences?.hosts.first { $0.id == hostID } }
+    /// The overview's own monitor for this computer: the page shows what the
+    /// Agents list holds, over the same stream or poll, not a second one.
+    private var monitor: LiveHostMonitor {
+        SessionOverviewMonitor.shared.computers.first { $0.host.id == hostID }?.monitor ?? detached
+    }
     private var sessions: [LiveAgentSession] {
         guard let host else { return [] }
         return monitor.snapshot?.sessions(on: host) ?? []
@@ -104,21 +109,17 @@ struct LiveHostView: View {
                 Button("Connection settings", systemImage: "gearshape") { editing = true }.disabled(host == nil)
             }
         }
-        .onChange(of: host) { _, _ in
-            monitor.snapshot = nil
-            monitor.lastUpdated = nil
-            monitor.message = nil
-            monitor.fingerprint = nil
-        }
         .sheet(isPresented: $editing) {
             if let host { NavigationStack { LiveHostEditor(existing: host) } }
         }
         .navigationDestination(item: $selected) { selection in
             LiveSessionDetailView(sessionID: selection.id, monitor: monitor)
         }
-        .task(id: PollIdentity(host: host, active: scenePhase == .active && !editing, refresh: refreshID)) {
-            guard scenePhase == .active, !editing, let host else { return }
-            await monitor.run(host: host)
+        .task(id: PollIdentity(host: host, active: scenePhase == .active && !editing)) {
+            guard scenePhase == .active, !editing, host != nil, let hosts = preferences?.hosts else { return }
+            // Reached from outside Agents (Spotlight, a link), the overview
+            // may not be running yet.
+            SessionOverviewMonitor.shared.ensureRunning(hosts: hosts)
         }
     }
 
@@ -141,7 +142,7 @@ struct LiveHostView: View {
                     }
                 }.font(.caption).foregroundStyle(PhrenTheme.textMuted)
                 Spacer(minLength: 0)
-                Button { refreshID = UUID() } label: {
+                Button { monitor.refreshNow() } label: {
                     Image(systemName: "arrow.clockwise").frame(width: 44, height: 44)
                 }.buttonStyle(.plain).foregroundStyle(PhrenTheme.textMuted)
                     .accessibilityLabel("Refresh now").disabled(monitor.refreshing)
@@ -217,6 +218,5 @@ struct LiveHostView: View {
     private struct PollIdentity: Equatable {
         let host: LiveHost?
         let active: Bool
-        let refresh: UUID
     }
 }

@@ -31,7 +31,8 @@ import { AccountUsageReader } from "./usage.js";
 import { createScheduleLauncher, Scheduler, scheduleRunsFile } from "./schedules.js";
 import { dailyCanaryDue, runCanary } from "./canary.js";
 import { defaultPhrenPath } from "../shared.js";
-import { capabilitiesForModules, createRouteHandler, type HookInfo, requireRoute } from "./server-routes.js";
+import { capabilitiesForModules, createRouteHandler, type HookInfo, requireRoute, selectedServer, workspacesReader } from "./server-routes.js";
+import { overviewStream } from "./server-overview.js";
 import { transcriptStreams } from "./server-stream.js";
 import { launchSession } from "./server-launch.js";
 import { localNames } from "./computer-names.js";
@@ -122,6 +123,12 @@ export async function serve(version: string): Promise<void> {
   if (modules.has("git")) await rm(path.join(root, "changes-scratch"), { recursive: true, force: true });
   const streams = transcriptStreams({ modules, agentHooks, codexQuestions, sideQuestions, info, activeCapabilities });
   const { stream } = streams;
+  // The phone's overview, pushed over a WebSocket when it changes.
+  const overview = overviewStream({
+    read: workspacesReader({ modules, info, agentHooks, journal, tabActivity, contextUsage }),
+    info: () => ({ ...info, capabilities: info.capabilities }),
+    renew: server => agentHooks.overview.renew(server),
+  });
   const http = createServer(createRouteHandler({ version, modules, info, computerID, scheduleStore, scheduler, dispatches, agentHooks,
     journal, tabActivity, contextUsage, modelCatalog, modelSwitcher, sideQuestions, accountUsage, codexQuestions, launches, locatedDirectories,
     fanoutMessages, canary, streams, returns }));
@@ -130,14 +137,17 @@ export async function serve(version: string): Promise<void> {
   http.on("upgrade", (request, socket, head) => {
     try {
       const url = new URL(request.url || "/", "http://phren.local");
-      if (!["/v1/transcripts", "/v1/status"].includes(url.pathname) || url.origin !== "http://phren.local") { socket.destroy(); return; }
+      if (!["/v1/transcripts", "/v1/status", "/v1/overview"].includes(url.pathname) || url.origin !== "http://phren.local") { socket.destroy(); return; }
       requireRoute(modules, "WS", url.pathname);
+      // Parsed before the upgrade: an invalid server name is refused as the other routes refuse it.
+      const overviewServer = url.pathname === "/v1/overview" ? selectedServer(url) : undefined;
       ws.handleUpgrade(request, socket, head, client => {
         while (ws.clients.size > 16) {
           const oldest = ws.clients.values().next().value!;
           oldest.close(1008, "Too many connections; reconnect"); oldest.terminate();
           ws.clients.delete(oldest);
         }
+        if (overviewServer !== undefined) { overview(client, overviewServer, url.searchParams.get("watchApprovals") === "1"); return; }
         void stream(client, url).catch(() => client.close(1011, "Conversation unavailable; refresh"));
       });
     } catch { socket.destroy(); }

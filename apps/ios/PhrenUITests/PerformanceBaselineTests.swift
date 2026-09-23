@@ -107,9 +107,21 @@ final class PerformanceBaselineTests: XCTestCase {
     /// preference reads and decodes).
     @MainActor
     func testAgentsIdleWork() {
+        agentsIdle("agents", extra: [])
+    }
+
+    /// The same, with each fixture computer pushing its overview the way a
+    /// current Hook's `/v1/overview` stream does, instead of being polled.
+    @MainActor
+    func testAgentsIdleWorkStreaming() {
+        agentsIdle("agents-stream", extra: ["--overview-stream-fixture"])
+    }
+
+    @MainActor
+    private func agentsIdle(_ name: String, extra: [String]) {
         let app = XCUIApplication()
         app.launchEnvironment["PHREN_PERFORMANCE_LOG"] = "1"
-        app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--all-sessions-fixture", "--native-chat-fixture", "--session-pins-reset"]
+        app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--all-sessions-fixture", "--native-chat-fixture", "--session-pins-reset"] + extra
         let card = app.buttons["overview-chat:\(mac):herdr:default:w1:w1:t1"]
         // The first launch after an install can open on the introduction;
         // a second launch opens the list.
@@ -122,7 +134,7 @@ final class PerformanceBaselineTests: XCTestCase {
             app.terminate()
         }
         XCTAssertTrue(card.exists)
-        reportIdle("agents", app)
+        reportIdle(name, app)
     }
 
     /// Ten idle seconds on a computer's page, where every card had its own
@@ -160,7 +172,10 @@ final class PerformanceBaselineTests: XCTestCase {
     }
 
     @MainActor
-    private func reportIdle(_ name: String, _ app: XCUIApplication, seconds: UInt32 = 10) {
+    /// Ten seconds unless `PHREN_PERF_IDLE_SECONDS` (TEST_RUNNER_PHREN_PERF_IDLE_SECONDS)
+    /// asks for a longer window, which slow polls need to show up in.
+    private func reportIdle(_ name: String, _ app: XCUIApplication,
+                            seconds: UInt32 = UInt32(ProcessInfo.processInfo.environment["PHREN_PERF_IDLE_SECONDS"] ?? "") ?? 10) {
         sleep(2)
         let before = counters(app)
         sleep(seconds)

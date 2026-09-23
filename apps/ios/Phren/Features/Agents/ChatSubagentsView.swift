@@ -92,13 +92,8 @@ struct ChatSubagentsView: View {
             next.observe(fresh, scope: scope, now: .now)
             historyData = (try? JSONEncoder().encode(next)) ?? historyData
         }
-        .task {
-            while !Task.isCancelled {
-                PerformanceCounters.bump("tick.subagents-now")
-                now = .now
-                try? await Task.sleep(for: .seconds(30))
-            }
-        }
+        // Ages and the finished linger move every thirty seconds.
+        .task { await LiveRefresh.shared.every(.seconds(30), key: "subagents-age:\(target.id)") { now = .now } }
     }
 
     private func treeRow(_ row: AgentTreeRow) -> some View {
@@ -452,11 +447,50 @@ struct SessionSubagentSnapshot {
     }
 }
 
+/// A session's sub-agent tree, read once for every view that shows it (its
+/// card, its row in the agent drawer, its details) through `LiveRefresh`.
+/// Every ten seconds while the session has running children or conducts,
+/// every thirty otherwise.
+@Observable @MainActor
+final class SessionSubagentStore {
+    static let shared = SessionSubagentStore()
+    struct Entry: Equatable {
+        var target: AgentChatTarget?
+        var agents: [AgentChild] = []
+    }
+    private(set) var entries: [LiveAgentSession.ID: Entry] = [:]
+
+    func entry(_ session: LiveAgentSession) -> Entry { entries[session.id] ?? Entry() }
+
+    /// Keeps this session's tree current while the calling task lives.
+    func follow(_ session: LiveAgentSession) async {
+        let busy = session.tab.runningChildren > 0 || session.tab.isConductor
+        await LiveRefresh.shared.every(.seconds(busy ? 10 : 30), key: "subagents:\(session.id)") { [weak self] in
+            await self?.load(session)
+        }
+    }
+
+    private func load(_ session: LiveAgentSession) async {
+        let loaded: SessionSubagentSnapshot?
+        do { loaded = try await SessionSubagentSnapshot.load(session) } catch { loaded = nil }
+        let entry = loaded.map { Entry(target: $0.target, agents: $0.agents) } ?? Entry()
+        if entries[session.id] != entry { entries[session.id] = entry }
+        if let loaded {
+            let computers = AgentChild.runningRows(loaded.agents).compactMap { $0.agent.computer?.name }
+            await SessionWorkingActivityController.shared.observeSubagents(
+                session: session, count: loaded.agents.reduce(0) { $0 + $1.runningCount }, computers: computers)
+        } else {
+            await SessionWorkingActivityController.shared.observeSubagents(session: session, count: session.tab.runningChildren)
+        }
+    }
+}
+
 struct SessionSubagentsCard: View {
     let session: LiveAgentSession
-    @State private var target: AgentChatTarget?
-    @State private var agents: [AgentChild] = []
     @State private var showing = false
+    private var store: SessionSubagentStore { .shared }
+    private var target: AgentChatTarget? { store.entry(session).target }
+    private var agents: [AgentChild] { store.entry(session).agents }
 
     private var total: Int { agents.reduce(0) { $0 + $1.agentCount } }
     private var running: Int { agents.reduce(0) { $0 + $1.runningCount } }
@@ -487,15 +521,7 @@ struct SessionSubagentsCard: View {
                     .sheet(isPresented: $showing) { ChatSubagentsView(session: session, target: target, agents: agents) }
             }
         }
-        .task(id: session.id) {
-            while !Task.isCancelled {
-                PerformanceCounters.bump("poll.session-subagents")
-                if let snapshot = try? await SessionSubagentSnapshot.load(session) {
-                    target = snapshot.target; agents = snapshot.agents
-                }
-                try? await Task.sleep(for: .seconds(10))
-            }
-        }
+        .task(id: session.id) { await store.follow(session) }
     }
 }
 
@@ -687,15 +713,13 @@ struct ChildAgentTranscriptView: View {
         #if DEBUG && targetEnvironment(simulator)
         if AgentChatFixture.enabled { return }
         #endif
-        while !Task.isCancelled {
-            PerformanceCounters.bump("poll.worker-messages")
+        await LiveRefresh.shared.every(.seconds(2), key: "worker-messages:\(target.id):\(child)") {
             do {
                 messages = try await PhrenConnection.childAgentMessages(host: session.host,
                     privateKey: DeviceSSHKey.load(session.host.id), target: target, child: child)
                 if messages.contains(where: { $0.status == .running }) { delivery = "Continuing this worker" }
                 else if messages.last?.status == .completed { delivery = "Worker finished" }
             } catch { /* Keep acknowledged receipts through a transient disconnect. */ }
-            do { try await Task.sleep(for: .seconds(2)) } catch { return }
         }
     }
 

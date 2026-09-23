@@ -34,6 +34,15 @@ final class LiveHostMonitor {
     @ObservationIgnored private var publishing: Task<Void, Never>?
     @ObservationIgnored private let approvals = OverviewApprovalMonitor()
     @ObservationIgnored private var approvalRefresh: Task<Void, Never>?
+    /// Opens the Hook's pushed overview; nil where there is none to open.
+    @ObservationIgnored private let openStream: ((LiveHost) -> AsyncThrowingStream<LiveOverviewFrame, Error>)?
+    /// The overview is arriving over the Hook's stream rather than polls.
+    private(set) var streaming = false
+    @ObservationIgnored private var streamHost: LiveHost?
+    @ObservationIgnored private var streamFailures = 0
+    @ObservationIgnored private var streamRetryAt = Date.distantPast
+    @ObservationIgnored private var sleeper: Task<Void, Never>?
+    @ObservationIgnored private var oneShot: Task<Void, Never>?
 
     private func updateFreshness() {
         let now = Date.now
@@ -52,7 +61,22 @@ final class LiveHostMonitor {
 
     /// Fetch again now rather than at the end of the poll interval — after a
     /// close, a launch, anything the person just did to the computer.
-    func refreshNow() { refreshRequested = true }
+    func refreshNow() {
+        refreshRequested = true
+        sleeper?.cancel()
+        // The stream pushes changes on its own within seconds; a request for
+        // now still reads once, beside it.
+        if streaming, let host = streamHost {
+            oneShot?.cancel()
+            let run = generation
+            oneShot = Task { [weak self] in
+                guard let value = try? await self?.fetchSnapshot(host, self?.lastUpdated) else { return }
+                guard let self, !Task.isCancelled, self.generation == run else { return }
+                self.accept(value, host: host)
+                self.onSnapshotChanged?()
+            }
+        }
+    }
 
     /// The app came back to the foreground: reach this computer again now and
     /// keep its cached rows shown as refreshing, not stale, until the answer
@@ -63,19 +87,6 @@ final class LiveHostMonitor {
         onSnapshotChanged?()
     }
 
-    /// For a screen pushed over the list: take over polling as soon as the
-    /// list's own task is cancelled (that happens after this screen appears),
-    /// and keep going until this screen leaves.
-    func keepRunning(host: LiveHost) async {
-        while !Task.isCancelled {
-            if polling {
-                do { try await Task.sleep(for: .milliseconds(200)) } catch { return }
-            } else {
-                await run(host: host)
-            }
-        }
-    }
-
     /// Herdr confirmed a close: drop the tab (or workspace) from the snapshot
     /// at once, then fetch so the truth replaces the guess.
     func closed(workspace: String, tab: String?) {
@@ -84,8 +95,95 @@ final class LiveHostMonitor {
         refreshNow()
     }
 
-    init(pollInterval: Duration = .seconds(10), fetch: @escaping (LiveHost, Date?) async throws -> LiveWorkspaces = { try await LiveHostMonitor.fetch($0, previousUpdate: $1) }) {
-        self.pollInterval = pollInterval; self.fetchSnapshot = fetch
+    init(pollInterval: Duration = .seconds(10),
+         fetch: @escaping (LiveHost, Date?) async throws -> LiveWorkspaces = { try await LiveHostMonitor.fetch($0, previousUpdate: $1) },
+         stream: ((LiveHost) -> AsyncThrowingStream<LiveOverviewFrame, Error>)? = LiveHostMonitor.defaultStream) {
+        self.pollInterval = pollInterval; self.fetchSnapshot = fetch; self.openStream = stream
+    }
+
+    /// Waits up to `duration`; `refreshNow()` ends the wait early.
+    private func pause(_ duration: Duration) async {
+        let sleeper = Task { _ = try? await Task.sleep(for: duration) }
+        self.sleeper = sleeper
+        await withTaskCancellationHandler { await sleeper.value } onCancel: { sleeper.cancel() }
+        if self.sleeper == sleeper { self.sleeper = nil }
+    }
+
+    @ObservationIgnored private var approvalsCheckedAt = Date.distantPast
+
+    /// Reads held permission requests again: on every change, and every ten
+    /// seconds while a tab reports one, since a new request can replace an
+    /// old one without changing the overview.
+    private func refreshApprovals(_ value: LiveWorkspaces, host: LiveHost, changed: Bool) {
+        let sessions = value.sessions(on: host)
+        guard changed || (sessions.contains { $0.tab.approvalPending == true } && Date().timeIntervalSince(approvalsCheckedAt) >= 10)
+        else { return }
+        approvalsCheckedAt = Date()
+        approvalRefresh?.cancel()
+        approvalRefresh = Task {
+            await ApprovalActivityController.shared.reconcile(host: host, sessions: sessions)
+            await approvals.refresh(sessions)
+        }
+    }
+
+    /// A successful overview, from a poll or the stream.
+    private func accept(_ value: LiveWorkspaces, host: LiveHost) {
+        let changed = snapshot != value
+        refreshApprovals(value, host: host, changed: changed)
+        if changed {
+            snapshot = value
+            // UI publication must not wait for Spotlight/WidgetKit disk
+            // writes or ActivityKit. Coalesce obsolete side effects.
+            publishing?.cancel()
+            publishing = Task {
+                await Task.yield()
+                guard !Task.isCancelled else { return }
+                let sessions = value.sessions(on: host)
+                SpotlightIndex.shared.refreshSessions(sessions, on: host)
+                await WidgetBridge.publishSessions(sessions, on: host)
+            }
+        }
+        lastUpdated = Date()
+        if message != nil { message = nil }
+        if fingerprint != nil { fingerprint = nil }
+    }
+
+    /// Whether this answer came from a Hook that pushes its overview.
+    private func pushes(_ value: LiveWorkspaces?) -> Bool {
+        #if DEBUG && targetEnvironment(simulator)
+        if Self.fixtureStream { return true }
+        #endif
+        return value?.capabilities?.overviewStream == true
+    }
+
+    /// Holds the Hook's overview stream open, applying each frame, until it
+    /// ends. Returns how long it stayed open.
+    private func follow(host: LiveHost, run: UUID) async -> TimeInterval {
+        guard let openStream else { return 0 }
+        let opened = Date()
+        PerformanceCounters.bump("stream.overview-open")
+        streaming = true; streamHost = host
+        defer { if generation == run { streaming = false; streamHost = nil } }
+        do {
+            for try await frame in openStream(host) {
+                guard generation == run, !Task.isCancelled else { break }
+                PerformanceCounters.bump("stream.overview-frames")
+                switch frame {
+                case .overview(let value):
+                    accept(value, host: host)
+                case .heartbeat(let info):
+                    lastUpdated = Date()
+                    if message != nil { message = nil }
+                    if let info, let current = snapshot, current.phren != info { snapshot = current.updating(info: info) }
+                    if let current = snapshot { refreshApprovals(current, host: host, changed: false) }
+                }
+                onSnapshotChanged?()
+            }
+        } catch {
+            // A dropped stream is not an unreachable computer: the next poll
+            // says whether it still answers.
+        }
+        return Date().timeIntervalSince(opened)
     }
 
     func run(host: LiveHost, onFirstRefresh: (@MainActor () -> Void)? = nil) async {
@@ -103,26 +201,7 @@ final class LiveHostMonitor {
                 let value = try await fetchSnapshot(host, lastUpdated)
                 try Task.checkCancellation()
                 guard generation == run else { return }
-                snapshot = value
-                approvalRefresh?.cancel()
-                approvalRefresh = Task {
-                    let sessions = value.sessions(on: host)
-                    await ApprovalActivityController.shared.reconcile(host: host, sessions: sessions)
-                    await approvals.refresh(sessions)
-                }
-                lastUpdated = Date()
-                message = nil
-                fingerprint = nil
-                // UI publication must not wait for Spotlight/WidgetKit disk
-                // writes or ActivityKit. Coalesce obsolete side effects.
-                publishing?.cancel()
-                publishing = Task {
-                    await Task.yield()
-                    guard !Task.isCancelled else { return }
-                    let sessions = value.sessions(on: host)
-                    SpotlightIndex.shared.refreshSessions(sessions, on: host)
-                    await WidgetBridge.publishSessions(sessions, on: host)
-                }
+                accept(value, host: host)
             } catch {
                 guard !Task.isCancelled, generation == run else { return }
                 message = (error as? LiveConnectionError)?.localizedDescription
@@ -149,14 +228,61 @@ final class LiveHostMonitor {
             }
             #endif
             if fingerprint != nil { return }
-            // Sleep in slices so refreshNow() cuts the wait short.
-            refreshRequested = false
-            let slices = max(1, Int(pollInterval / .milliseconds(250)))
-            for _ in 0..<slices where !refreshRequested {
-                do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+            // A Hook that pushes its overview keeps one socket open and this
+            // loop waits on it; polling resumes only while the stream is down.
+            if message == nil, openStream != nil, pushes(snapshot), Date() >= streamRetryAt {
+                refreshRequested = false
+                let lasted = await follow(host: host, run: run)
+                guard !Task.isCancelled, generation == run else { return }
+                // A stream that failed at once backs off before the next try,
+                // so a Hook that cannot hold one is simply polled.
+                streamFailures = lasted < 30 ? streamFailures + 1 : 0
+                streamRetryAt = streamFailures == 0 ? .now
+                    : .now.addingTimeInterval(min(300, 30 * Double(streamFailures)))
+                if refreshRequested || streamFailures == 0 { continue }
             }
+            refreshRequested = false
+            await pause(pollInterval)
+            if Task.isCancelled { return }
         }
     }
+
+    /// The Hook's `/v1/overview` stream for a real computer. UI tests poll
+    /// their fixtures unless `--overview-stream-fixture` asks for a stream.
+    static let defaultStream: ((LiveHost) -> AsyncThrowingStream<LiveOverviewFrame, Error>)? = {
+        #if DEBUG && targetEnvironment(simulator)
+        if AppModel.isUITesting { return fixtureStream ? { fixtureOverviewStream($0) } : nil }
+        #endif
+        return { host in
+            do { return PhrenConnection.overviewUpdates(host: host, privateKey: try DeviceSSHKey.load(host.id)) }
+            catch { return AsyncThrowingStream { $0.finish(throwing: error) } }
+        }
+    }()
+
+    #if DEBUG && targetEnvironment(simulator)
+    static let fixtureStream = AppModel.isUITesting && ProcessInfo.processInfo.arguments.contains("--overview-stream-fixture")
+
+    /// What a Hook's stream does, over the fixtures: read the overview every
+    /// two and a half seconds, send it when it changed, heartbeat otherwise.
+    private static func fixtureOverviewStream(_ host: LiveHost) -> AsyncThrowingStream<LiveOverviewFrame, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                var last: LiveWorkspaces?, sentAt = Date.distantPast, previous: Date?
+                do {
+                    while !Task.isCancelled {
+                        let value = try await fetch(host, previousUpdate: previous)
+                        previous = .now
+                        if value != last { continuation.yield(.overview(value)); last = value; sentAt = .now }
+                        else if Date().timeIntervalSince(sentAt) >= 20 { continuation.yield(.heartbeat(nil)); sentAt = .now }
+                        try await Task.sleep(for: .milliseconds(2_500))
+                    }
+                    continuation.finish()
+                } catch { continuation.finish(throwing: error) }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+    #endif
 
     static func fetch(_ host: LiveHost, previousUpdate: Date? = nil) async throws -> LiveWorkspaces {
         #if DEBUG && targetEnvironment(simulator)
