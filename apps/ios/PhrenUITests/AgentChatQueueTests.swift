@@ -105,6 +105,9 @@ final class AgentChatQueueTests: AgentChatUITestCase {
         app.buttons["agent-drawer-search-toggle"].tap()
         XCTAssertTrue(app.textFields["agent-drawer-search"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["Finding your agents…"].exists, "The drawer reuses the revealed overview")
+        // Search replaces the icon row; Cancel brings the order icons back.
+        app.buttons["agent-drawer-search-cancel"].tap()
+        XCTAssertFalse(app.textFields["agent-drawer-search"].waitForExistence(timeout: 1))
         app.buttons["agent-drawer-order-recent"].tap()
         capture(app, "Recent sessions drawer")
         app.buttons["agent-drawer-order-list"].tap()
