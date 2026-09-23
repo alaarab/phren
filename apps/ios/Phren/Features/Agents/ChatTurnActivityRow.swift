@@ -63,9 +63,7 @@ struct ChatTurnActivityRow: View {
         let elapsed = ChatTurnActivity.duration(now.timeIntervalSince(activity.startedAt))
         HStack(spacing: PhrenTheme.Space.small) {
             if let spinner {
-                // Claude's glyph turns once a second, as its own spinner does.
-                Text(reduceMotion ? "✻\u{FE0E}" : Self.glyphs[Int(now.timeIntervalSince(activity.startedAt)) % Self.glyphs.count])
-                    .foregroundStyle(PhrenTheme.chatRunning).frame(width: 12).accessibilityHidden(true)
+                ClaudeSpinnerGlyph(reduceMotion: reduceMotion)
                 Text(spinner.verb + "…").foregroundStyle(PhrenTheme.textMuted).lineLimit(1).layoutPriority(1)
                 Text("(" + ([elapsed] + spinner.details).joined(separator: " · ") + ")")
                     .monospacedDigit().foregroundStyle(PhrenTheme.chatNeutralDim).lineLimit(1)
@@ -104,8 +102,30 @@ struct ChatTurnActivityRow: View {
         .accessibilityIdentifier(activity.identifier)
     }
 
+}
+
+/// Claude's spinner glyph, turning at its terminal pace (about eight frames a
+/// second, forward then back) on a clock of its own, so only this glyph
+/// redraws between the row's once-a-second ticks.
+struct ClaudeSpinnerGlyph: View {
+    let reduceMotion: Bool
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: Self.frame, paused: reduceMotion)) { context in
+            Text(reduceMotion ? Self.glyphs[4] : Self.glyphs[Self.index(at: context.date)])
+                .foregroundStyle(PhrenTheme.chatRunning).frame(width: 12).accessibilityHidden(true)
+        }
+    }
+
+    static let frame: TimeInterval = 0.12
     // Text presentation: without the selector some of these draw as emoji.
-    private static let glyphs = ["·", "✢", "✶", "✻", "✽"].map { $0 + "\u{FE0E}" }
+    static let glyphs = ["·", "✢", "✳", "✶", "✻", "✽"].map { $0 + "\u{FE0E}" }
+    /// Forward then back without repeating the ends: 0 1 2 3 4 5 4 3 2 1.
+    static func index(at date: Date) -> Int {
+        let cycle = glyphs.count * 2 - 2
+        let step = Int(date.timeIntervalSinceReferenceDate / frame) % cycle
+        return step < glyphs.count ? step : cycle - step
+    }
 }
 
 /// A small ring at the end of the live line: a turning arc around a stop
