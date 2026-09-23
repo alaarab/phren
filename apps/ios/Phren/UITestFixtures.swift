@@ -47,6 +47,9 @@ enum UITestFixtures {
         // Each UI-test launch starts with no recently used models, so the
         // picker's order is the catalogue's until a test picks one.
         defaults.removeObject(forKey: ChatModelPickerSheet.recentKey)
+        // Dismissed worker failures are phone-side history; a dismissal from
+        // an earlier run would otherwise hide the fixture's recent failure.
+        defaults.removeObject(forKey: ChatSubagentsView.historyKey)
         if arguments.contains("--session-pins-reset"), let saved = defaults.data(forKey: preferencesKey) {
             var data = saved
             for id in try LiveSessionPreferences.read(saved).pinnedSessions {

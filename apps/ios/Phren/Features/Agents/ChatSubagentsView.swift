@@ -11,7 +11,8 @@ struct ChatSubagentsView: View {
     @State private var selected: AgentWorkNavigation?
     /// A worker whose own worktree the Hook knows, opened straight into Changes.
     @State private var changesChild: String?
-    @AppStorage("agent-work.history.v1") private var historyData = Data()
+    static let historyKey = "agent-work.history.v1"
+    @AppStorage(Self.historyKey) private var historyData = Data()
     @State private var now = Date.now
     @State private var finishedExpanded = false
     @State private var cleared: Set<String> = []
