@@ -341,7 +341,9 @@ export async function archiveFinishedFanouts(env: NodeJS.ProcessEnv = process.en
       } else if (!manifest) {
         basis = exit;
       } else continue;
-      if (age > 0 ? now - basis <= age : now < basis) continue;
+      // An explicit "now" (age 0) archives every finished job; comparing against
+      // the exit stamp raced file times a millisecond ahead of the clock.
+      if (age > 0 && now - basis <= age) continue;
       moves.push({ name, basis });
       if (dryRun) continue;
       await mkdir(archive, { recursive: true, mode: 0o700 });
