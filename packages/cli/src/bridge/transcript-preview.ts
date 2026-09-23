@@ -47,7 +47,7 @@ export function claudePanePreview(rendered: string, prompt: string, previous = "
   };
   for (const [index, line] of body.entries()) {
     if (/^\s*[❯>]/.test(line) || /esc(?:ape)? to interrupt/i.test(line)) break;
-    if (/^\s*[✻✽✶✢✳·⠁-⣿]/u.test(line)) continue;
+    if (/^\s*[✻✽✶✢✳✦·⠁-⣿]/u.test(line) || parseClaudeSpinnerLine(line)) continue;
     // A running tool group ("⏺ Running 2 agents…") and a tool call
     // ("⏺ Bash(ls)", "⏺ phren - search (MCP)(…)") are not reply
     // text; it lands as its own entry a moment later.
@@ -67,14 +67,65 @@ export function claudePanePreview(rendered: string, prompt: string, previous = "
     ? (previous.slice(0, overlap) + text).slice(0, MAX_TEXT) : previous;
 }
 
-/** The word Claude's own spinner shows ("✻ Pondering… (12s · esc to interrupt)"). */
-export function claudeSpinnerVerb(rendered: string): string | undefined {
+/** Claude's spinner line, as structured fields: the verb, the turn's elapsed
+ * seconds, the token count and its direction, and whether it is thinking.
+ * "✻ Whirlpooling… (27s · ↓ 2.3k tokens · thinking)". */
+export interface ClaudeSpinner {
+  verb: string;
+  elapsed?: number;
+  tokens?: { count: number; direction: "up" | "down" };
+  thinking: boolean;
+  /** "thought for 4s": how long the finished thinking took. */
+  thoughtFor?: number;
+}
+
+const SPINNER_LINE = /^\s*[✻✽✶✢✳✦·*⠁-⣿]\s+([A-Z][\p{L}'-]{1,30})(?:…|\.\.\.)\s*\(([^)]*)\)/u;
+
+function spinnerSeconds(text: string): number | undefined {
+  const match = /^(?:(\d{1,4})h\s*)?(?:(\d{1,4})m\s*)?(?:(\d{1,5})s)?$/.exec(text.trim());
+  if (!match || (!match[1] && !match[2] && !match[3])) return undefined;
+  return Number(match[1] ?? 0) * 3600 + Number(match[2] ?? 0) * 60 + Number(match[3] ?? 0);
+}
+
+/** One spinner line, or undefined for anything else. The parenthesis must
+ * start with a time or say "esc to interrupt", as Claude's does. */
+export function parseClaudeSpinnerLine(line: string): ClaudeSpinner | undefined {
+  const match = SPINNER_LINE.exec(line);
+  if (!match) return undefined;
+  const parts = match[2].split("·").map(part => part.trim()).filter(Boolean);
+  if (!/^\d/.test(parts[0] ?? "") && !parts.some(part => /esc to interrupt/i.test(part))) return undefined;
+  const spinner: ClaudeSpinner = { verb: match[1], thinking: false };
+  for (const part of parts) {
+    const seconds = spinnerSeconds(part);
+    const tokens = /^([↑↓])\s*(\d{1,6}(?:[.,]\d{1,3})?)\s*([kKmM]?)\s+tokens?$/.exec(part);
+    const thought = /^thought for (.+)$/i.exec(part);
+    if (seconds !== undefined && spinner.elapsed === undefined) spinner.elapsed = seconds;
+    else if (tokens) {
+      const scale = /k/i.test(tokens[3]) ? 1_000 : /m/i.test(tokens[3]) ? 1_000_000 : 1;
+      const count = Math.round(Number(tokens[2].replace(",", ".")) * scale);
+      if (Number.isFinite(count) && count <= 1e9) spinner.tokens = { count, direction: tokens[1] === "↑" ? "up" : "down" };
+    } else if (/^thinking\b/i.test(part)) spinner.thinking = true;
+    else if (thought) {
+      const value = spinnerSeconds(thought[1]);
+      if (value !== undefined) spinner.thoughtFor = value;
+    }
+  }
+  return spinner;
+}
+
+/** The newest spinner line on screen. */
+export function claudeSpinner(rendered: string): ClaudeSpinner | undefined {
   const lines = stripTerminal(rendered).split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {
-    const match = /^\s*[✻✽✶✢✳✦·*⠁-⣿]\s+([A-Z][\p{L}'-]{1,30})(?:…|\.\.\.)\s*\((?:\d|.*esc to interrupt)/u.exec(lines[i]);
-    if (match) return match[1];
+    const spinner = parseClaudeSpinnerLine(lines[i]);
+    if (spinner) return spinner;
   }
   return undefined;
+}
+
+/** The word Claude's own spinner shows ("✻ Pondering… (12s · esc to interrupt)"). */
+export function claudeSpinnerVerb(rendered: string): string | undefined {
+  return claudeSpinner(rendered)?.verb;
 }
 
 export function readPreviewPane(target: Target): Promise<string> {
@@ -139,8 +190,12 @@ export class TranscriptPreviewStream {
   private landed = false;
   private ended = false;
   /** Claude's own spinner word for the running turn, sent beside frames as
-   * `activityVerb`; older phones ignore the field. */
+   * `activityVerb` for older phones. */
   verb: string | undefined;
+  /** The whole spinner line for the running turn, sent as `activity`;
+   * phones without it ignore the field. */
+  activity: ClaudeSpinner | undefined;
+  private sentActivity = "";
   private lastRead = -Infinity;
   private lastSent = -Infinity;
   private current: TranscriptPreview | null = null;
@@ -170,13 +225,13 @@ export class TranscriptPreviewStream {
       if (raw.type === "user" && !raw.phrenQueued && !raw.isMeta && !blocks.some(b => b.type === "tool_result")) {
         const prompt = typeof message.content === "string" ? message.content : blocks.filter(b => b.type === "text").map(b => String(b.text ?? "")).join("\n");
         if (prompt.trim() && typeof raw.timestamp === "string" && Number.isFinite(Date.parse(raw.timestamp))) {
-          this.startedAt = raw.timestamp; this.prompt = prompt; this.landed = false; this.ended = false; this.wasWorking = false; this.verb = undefined;
+          this.startedAt = raw.timestamp; this.prompt = prompt; this.landed = false; this.ended = false; this.wasWorking = false; this.verb = undefined; this.activity = undefined;
         }
       } else if (this.startedAt && ((raw.type === "assistant" && message.stop_reason === "end_turn")
         || (raw.type === "system" && raw.subtype === "turn_duration"))) {
         // The transcript says the turn is over before the shared snapshot
         // (up to 2.5 s old) stops saying "working": stop reading the pane now.
-        this.landed = true; this.ended = true; this.verb = undefined;
+        this.landed = true; this.ended = true; this.verb = undefined; this.activity = undefined;
       } else if (this.startedAt && (raw.type === "assistant" || blocks.some(b => b.type === "tool_result"))) this.landed = true;
     }
   }
@@ -198,15 +253,21 @@ export class TranscriptPreviewStream {
         const pane = await this.pane();
         const text = this.landed ? "" : claudePanePreview(pane, this.prompt,
           this.current?.turnStartedAt === this.startedAt ? this.current.text : "");
-        this.verb = claudeSpinnerVerb(pane) ?? this.verb;
+        const spinner = claudeSpinner(pane);
+        if (spinner) { this.activity = spinner; this.verb = spinner.verb; }
         if (text) next = { turnStartedAt: this.startedAt, text };
       }
-    } else if (this.target.source === "claude" && this.wasWorking) { this.landed = true; this.ended = true; this.verb = undefined; }
+    } else if (this.target.source === "claude" && this.wasWorking) { this.landed = true; this.ended = true; this.verb = undefined; this.activity = undefined; }
     const sentAt = now ?? Date.now();
-    if (next?.text === this.current?.text && next?.turnStartedAt === this.current?.turnStartedAt) return undefined;
-    if (next && sentAt - this.lastSent < PREVIEW_INTERVAL_MS) return undefined;
-    this.current = next;
-    if (next) this.lastSent = sentAt;
+    // The phone ticks the clock itself: only the verb, tokens and thinking
+    // state are worth a frame of their own.
+    const activity = this.activity ? JSON.stringify({ ...this.activity, elapsed: undefined }) : "";
+    const previewChanged = next?.text !== this.current?.text || next?.turnStartedAt !== this.current?.turnStartedAt;
+    const activityChanged = activity !== this.sentActivity;
+    if (!previewChanged && !activityChanged) return undefined;
+    if ((next || !previewChanged) && sentAt - this.lastSent < PREVIEW_INTERVAL_MS) return undefined;
+    this.current = next; this.sentActivity = activity;
+    if (next || activityChanged) this.lastSent = sentAt;
     return { preview: next };
   }
 }
