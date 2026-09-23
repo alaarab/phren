@@ -37,7 +37,7 @@ final class CodeTests: XCTestCase {
     @MainActor
     func testCodeOpensOnTheCheckoutAndFileNamesReachDossier() {
         let app = launch()
-        app.buttons["project:sample/brain:demo"].tap()
+        tap(app.buttons["project:sample/brain:demo"])
         let codeCell = app.buttons["project-code-row"]
         XCTAssertTrue(codeCell.waitForExistence(timeout: 8))
         codeCell.tap()
@@ -65,7 +65,7 @@ final class CodeTests: XCTestCase {
     @MainActor
     func testBrowsesNestedFilesJumpsByOutlineAndFollowsDefinitionAcrossFiles() {
         let app = launch()
-        app.buttons["project:sample/brain:demo"].tap()
+        tap(app.buttons["project:sample/brain:demo"])
         let codeCell = app.buttons["project-code-row"]
         XCTAssertTrue(codeCell.waitForExistence(timeout: 8))
         codeCell.tap()
@@ -105,7 +105,7 @@ final class CodeTests: XCTestCase {
     @MainActor
     func testRecentOpensTheFileAtTheSymbolAndMediaKeepsTheFileViewer() {
         let app = launch()
-        app.buttons["project:sample/brain:demo"].tap()
+        tap(app.buttons["project:sample/brain:demo"])
         let codeCell = app.buttons["project-code-row"]
         XCTAssertTrue(codeCell.waitForExistence(timeout: 8))
         codeCell.tap()
@@ -133,7 +133,7 @@ final class CodeTests: XCTestCase {
         tap(host)
         tap(app.buttons["host-files"])
         tap(app.buttons["files-projects:A1000000-0000-0000-0000-000000000001"])
-        tap(app.buttons["repository-project:demo"])
+        tap(app.buttons["repository-project:sample/brain:demo"])
         XCTAssertTrue(app.buttons["code-tree:typescript"].waitForExistence(timeout: 8), "The computer's project files open in the code browser")
         tap(app.buttons["code-tree:README.md"])
         XCTAssertTrue(app.descendants(matching: .any)["code-file:README.md"].firstMatch.waitForExistence(timeout: 8))
@@ -149,7 +149,7 @@ final class CodeTests: XCTestCase {
     @MainActor
     func testUsagePagesThroughMiddleAndHotColdJumpWithinRanking() {
         let app = launch()
-        app.buttons["project:sample/brain:demo"].tap()
+        tap(app.buttons["project:sample/brain:demo"])
         let codeCell = app.buttons["project-code-row"]
         XCTAssertTrue(codeCell.waitForExistence(timeout: 8))
         codeCell.tap()

@@ -186,7 +186,7 @@ struct RepositoryProjectsView: View {
             ForEach(model.mergedProjects.filter { $0.project.name != "global" }) { item in
                 NavigationLink { RepositoryLocationsView(host: host, storeId: item.storeId, project: item.project.name) } label: {
                     Label(item.project.name, systemImage: "folder")
-                }.phrenIdentifier("repository-project:\(item.project.name)")
+                }.phrenIdentifier("repository-project:\(item.storeId):\(item.project.name)")
             }
         }.navigationTitle(host.name).phrenScreen()
     }

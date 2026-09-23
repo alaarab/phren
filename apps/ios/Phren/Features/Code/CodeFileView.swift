@@ -137,6 +137,8 @@ struct CodeFileView: View {
                 }
                 .padding(.vertical, PhrenTheme.Space.small).padding(.trailing, 14)
             }
+            // A short file starts at the top, not centered in the 2D scroll.
+            .defaultScrollAnchor(.topLeading)
             .tint(PhrenTheme.accent)
             .environment(\.openURL, OpenURLAction(handler: open))
             .onChange(of: scroll) { _, request in
