@@ -4,6 +4,19 @@ import * as path from "path";
 import { execFileSync, spawnSync, spawn } from "child_process";
 import { PhrenResult, writeRootManifest } from "./shared.js";
 
+/** The run's sandbox store path, set by test-global-setup. */
+const SANDBOX_PHREN_PATH = process.env.PHREN_PATH;
+
+/**
+ * Put PHREN_PATH back to the run's sandbox store. Use this rather than
+ * deleting PHREN_PATH: with it unset, findPhrenPath walks up from the checkout
+ * and can reach the developer's real ~/.phren, where the logger then writes.
+ */
+export function resetTestPhrenPath(): void {
+  if (SANDBOX_PHREN_PATH === undefined) delete process.env.PHREN_PATH;
+  else process.env.PHREN_PATH = SANDBOX_PHREN_PATH;
+}
+
 export function initTestPhrenRoot(
   phrenDir: string,
   options: {

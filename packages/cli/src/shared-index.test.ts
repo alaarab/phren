@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import * as yaml from "js-yaml";
-import { makeTempDir, writeFile, grantAdmin } from "./test-helpers.js";
+import { makeTempDir, writeFile, grantAdmin, resetTestPhrenPath } from "./test-helpers.js";
 import { writeProjectTopics } from "./project-topics.js";
 import {
   buildIndex,
@@ -45,14 +45,14 @@ function makeProject(phrenDir: string, name: string, files: Record<string, strin
 }
 
 beforeEach(() => {
-  delete process.env.PHREN_PATH;
+  resetTestPhrenPath();
   delete process.env.PHREN_PROFILE;
   delete process.env.PHREN_DEBUG;
   delete process.env.PROJECTS_DIR;
 });
 
 afterEach(() => {
-  delete process.env.PHREN_PATH;
+  resetTestPhrenPath();
   delete process.env.PHREN_PROFILE;
   delete process.env.PHREN_DEBUG;
   delete process.env.PHREN_ACTOR;

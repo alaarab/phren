@@ -40,6 +40,13 @@ function sandboxHomeDir(): void {
   sandboxHome = fs.mkdtempSync(path.join(os.tmpdir(), "phren-test-home-"));
   process.env.HOME = sandboxHome;
   process.env.USERPROFILE = sandboxHome;
+  // findPhrenPath walks up from the cwd before it tries $HOME/.phren. The
+  // checkout usually sits under the developer's real home, so that walk found
+  // their real ~/.phren and the logger appended every test's errors to its
+  // .runtime/debug.log. Naming the sandbox's own store skips the walk and
+  // resolves exactly as on a clean CI machine: the sandbox store if a test
+  // makes one, otherwise no store. A test that needs the walk clears this.
+  process.env.PHREN_PATH = path.join(sandboxHome, ".phren");
 }
 
 export async function teardown(): Promise<void> {

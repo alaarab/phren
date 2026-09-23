@@ -15,6 +15,7 @@ import { phrenStoreRoot, unwrapPastedContent } from "./transcripts.js";
 import { archiveFinishedFanouts, blockedFanouts } from "./fanouts.js";
 import { ensureGrant, listGrants, matchGrant, type Grant } from "./grants.js";
 import { ApprovalPushService } from "./push.js";
+import { intervalFromEnv } from "./limits.js";
 
 const APPROVAL_SWEEP_MS = 2_000;
 const APPROVAL_DEBOUNCE_MS = 100;
@@ -24,6 +25,8 @@ const APPROVAL_HOLD_MS = (() => {
   const value = Number(process.env.PHREN_APPROVAL_HOLD_MS);
   return Number.isFinite(value) && value >= 50 && value <= 60_000 ? Math.floor(value) : 55_000;
 })();
+/** A pane's terminal dialog is read at most once per this window. */
+const DIALOG_READ_MS = intervalFromEnv("PHREN_DIALOG_THROTTLE_MS", 3_000);
 const FANOUT_SWEEP_MS = 5_000;
 const FANOUT_ARCHIVE_MS = 60 * 60 * 1000;
 
@@ -620,7 +623,7 @@ export class AgentHooks {
     // Refresh those before publishing the approval, even while it is held.
     if (held && target.source === "codex") {
       const now = Date.now();
-      if (now - (this.dialogReads.get(key) ?? 0) < 3_000) return;
+      if (now - (this.dialogReads.get(key) ?? 0) < DIALOG_READ_MS) return;
       this.dialogReads.set(key, now);
       const prompt = permissionPrompt(held.tool, held.input, await this.paneLines(target));
       if ([...this.pending.values()].includes(held)) {
@@ -642,7 +645,7 @@ export class AgentHooks {
       return;
     }
     const now = Date.now();
-    if (now - (this.dialogReads.get(key) ?? 0) < 3_000) return;
+    if (now - (this.dialogReads.get(key) ?? 0) < DIALOG_READ_MS) return;
     this.dialogReads.set(key, now);
     while (this.dialogReads.size > 128) this.dialogReads.delete(this.dialogReads.keys().next().value!);
     const text = await this.paneLines(target);

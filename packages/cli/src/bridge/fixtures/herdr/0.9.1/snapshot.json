@@ -1,0 +1,359 @@
+{
+  "id": "fixture-1",
+  "result": {
+    "type": "session_snapshot",
+    "snapshot": {
+      "version": "0.9.1",
+      "protocol": 22,
+      "focused_workspace_id": "w13",
+      "focused_tab_id": "w13:t2",
+      "focused_pane_id": "w13:p2",
+      "workspaces": [
+        {
+          "workspace_id": "w13",
+          "number": 1,
+          "label": "phren",
+          "focused": true,
+          "pane_count": 1,
+          "tab_count": 1,
+          "active_tab_id": "w13:t2",
+          "agent_status": "working"
+        },
+        {
+          "workspace_id": "w1P",
+          "number": 2,
+          "label": "app",
+          "focused": false,
+          "pane_count": 2,
+          "tab_count": 2,
+          "active_tab_id": "w1P:t2",
+          "agent_status": "done"
+        },
+        {
+          "workspace_id": "w1S",
+          "number": 3,
+          "label": "worker",
+          "focused": false,
+          "pane_count": 1,
+          "tab_count": 1,
+          "active_tab_id": "w1S:t1",
+          "agent_status": "idle"
+        }
+      ],
+      "tabs": [
+        {
+          "tab_id": "w13:t2",
+          "workspace_id": "w13",
+          "number": 2,
+          "label": "3",
+          "focused": true,
+          "pane_count": 1,
+          "agent_status": "working"
+        },
+        {
+          "tab_id": "w1P:t1",
+          "workspace_id": "w1P",
+          "number": 1,
+          "label": "1",
+          "focused": false,
+          "pane_count": 1,
+          "agent_status": "idle"
+        },
+        {
+          "tab_id": "w1P:t2",
+          "workspace_id": "w1P",
+          "number": 2,
+          "label": "3",
+          "focused": false,
+          "pane_count": 1,
+          "agent_status": "done"
+        },
+        {
+          "tab_id": "w1S:t1",
+          "workspace_id": "w1S",
+          "number": 1,
+          "label": "1",
+          "focused": false,
+          "pane_count": 1,
+          "agent_status": "idle"
+        }
+      ],
+      "panes": [
+        {
+          "pane_id": "w13:p2",
+          "terminal_id": "term_65bfee7e1c2ad1",
+          "workspace_id": "w13",
+          "tab_id": "w13:t2",
+          "focused": true,
+          "cwd": "/home/sam/Projects/phren",
+          "foreground_cwd": "/home/sam/Projects/phren",
+          "agent": "claude",
+          "terminal_title": "◑ Desk session 1",
+          "terminal_title_stripped": "Desk session 1",
+          "agent_status": "working",
+          "agent_session": {
+            "source": "herdr:claude",
+            "agent": "claude",
+            "kind": "id",
+            "value": "00000001-1111-4111-8111-111111111111"
+          },
+          "scroll": {
+            "offset_from_bottom": 0,
+            "max_offset_from_bottom": 0,
+            "viewport_rows": 52
+          },
+          "revision": 5
+        },
+        {
+          "pane_id": "w1P:p1",
+          "terminal_id": "term_65bfee7e1f1752",
+          "workspace_id": "w1P",
+          "tab_id": "w1P:t1",
+          "focused": false,
+          "cwd": "/home/sam/Projects/app",
+          "foreground_cwd": "/home/sam/Projects/app",
+          "agent": "claude",
+          "terminal_title": "✳ Desk session 2",
+          "terminal_title_stripped": "Desk session 2",
+          "agent_status": "idle",
+          "agent_session": {
+            "source": "herdr:claude",
+            "agent": "claude",
+            "kind": "id",
+            "value": "00000002-1111-4111-8111-111111111111"
+          },
+          "scroll": {
+            "offset_from_bottom": 0,
+            "max_offset_from_bottom": 0,
+            "viewport_rows": 40
+          },
+          "revision": 7
+        },
+        {
+          "pane_id": "w1P:p2",
+          "terminal_id": "term_65c0e285a19393",
+          "workspace_id": "w1P",
+          "tab_id": "w1P:t2",
+          "focused": false,
+          "cwd": "/home/sam/Projects/plugins",
+          "foreground_cwd": "/home/sam/Projects/plugins",
+          "agent": "claude",
+          "terminal_title": "✳ Desk session 3",
+          "terminal_title_stripped": "Desk session 3",
+          "agent_status": "done",
+          "agent_session": {
+            "source": "herdr:claude",
+            "agent": "claude",
+            "kind": "id",
+            "value": "00000003-1111-4111-8111-111111111111"
+          },
+          "scroll": {
+            "offset_from_bottom": 0,
+            "max_offset_from_bottom": 0,
+            "viewport_rows": 40
+          },
+          "revision": 23828
+        },
+        {
+          "pane_id": "w1S:p1",
+          "terminal_id": "term_65c1aee16017b6",
+          "workspace_id": "w1S",
+          "tab_id": "w1S:t1",
+          "focused": false,
+          "cwd": "/tmp/work",
+          "foreground_cwd": "/tmp/work",
+          "agent": "codex",
+          "agent_status": "idle",
+          "scroll": {
+            "offset_from_bottom": 0,
+            "max_offset_from_bottom": 1,
+            "viewport_rows": 45
+          },
+          "revision": 0
+        }
+      ],
+      "layouts": [
+        {
+          "workspace_id": "w13",
+          "tab_id": "w13:t2",
+          "zoomed": false,
+          "area": {
+            "x": 0,
+            "y": 0,
+            "width": 57,
+            "height": 45
+          },
+          "focused_pane_id": "w13:p2",
+          "panes": [
+            {
+              "pane_id": "w13:p2",
+              "focused": true,
+              "rect": {
+                "x": 0,
+                "y": 0,
+                "width": 57,
+                "height": 45
+              }
+            }
+          ],
+          "splits": []
+        },
+        {
+          "workspace_id": "w1P",
+          "tab_id": "w1P:t1",
+          "zoomed": false,
+          "area": {
+            "x": 0,
+            "y": 0,
+            "width": 57,
+            "height": 45
+          },
+          "focused_pane_id": "w1P:p1",
+          "panes": [
+            {
+              "pane_id": "w1P:p1",
+              "focused": true,
+              "rect": {
+                "x": 0,
+                "y": 0,
+                "width": 57,
+                "height": 45
+              }
+            }
+          ],
+          "splits": []
+        },
+        {
+          "workspace_id": "w1P",
+          "tab_id": "w1P:t2",
+          "zoomed": false,
+          "area": {
+            "x": 0,
+            "y": 0,
+            "width": 57,
+            "height": 45
+          },
+          "focused_pane_id": "w1P:p2",
+          "panes": [
+            {
+              "pane_id": "w1P:p2",
+              "focused": true,
+              "rect": {
+                "x": 0,
+                "y": 0,
+                "width": 57,
+                "height": 45
+              }
+            }
+          ],
+          "splits": []
+        },
+        {
+          "workspace_id": "w1S",
+          "tab_id": "w1S:t1",
+          "zoomed": false,
+          "area": {
+            "x": 0,
+            "y": 0,
+            "width": 57,
+            "height": 45
+          },
+          "focused_pane_id": "w1S:p1",
+          "panes": [
+            {
+              "pane_id": "w1S:p1",
+              "focused": true,
+              "rect": {
+                "x": 0,
+                "y": 0,
+                "width": 57,
+                "height": 45
+              }
+            }
+          ],
+          "splits": []
+        }
+      ],
+      "agents": [
+        {
+          "terminal_id": "term_65bfee7e1c2ad1",
+          "agent": "claude",
+          "terminal_title": "◑ Desk session 1",
+          "terminal_title_stripped": "Desk session 1",
+          "agent_status": "working",
+          "agent_session": {
+            "source": "herdr:claude",
+            "agent": "claude",
+            "kind": "id",
+            "value": "00000001-1111-4111-8111-111111111111"
+          },
+          "workspace_id": "w13",
+          "tab_id": "w13:t2",
+          "pane_id": "w13:p2",
+          "focused": true,
+          "state_change_seq": 578,
+          "cwd": "/home/sam/Projects/phren",
+          "foreground_cwd": "/home/sam/Projects/phren",
+          "revision": 5
+        },
+        {
+          "terminal_id": "term_65bfee7e1f1752",
+          "agent": "claude",
+          "terminal_title": "✳ Desk session 2",
+          "terminal_title_stripped": "Desk session 2",
+          "agent_status": "idle",
+          "agent_session": {
+            "source": "herdr:claude",
+            "agent": "claude",
+            "kind": "id",
+            "value": "00000002-1111-4111-8111-111111111111"
+          },
+          "workspace_id": "w1P",
+          "tab_id": "w1P:t1",
+          "pane_id": "w1P:p1",
+          "focused": false,
+          "state_change_seq": 551,
+          "cwd": "/home/sam/Projects/app",
+          "foreground_cwd": "/home/sam/Projects/app",
+          "revision": 7
+        },
+        {
+          "terminal_id": "term_65c0e285a19393",
+          "agent": "claude",
+          "terminal_title": "✳ Desk session 3",
+          "terminal_title_stripped": "Desk session 3",
+          "agent_status": "done",
+          "agent_session": {
+            "source": "herdr:claude",
+            "agent": "claude",
+            "kind": "id",
+            "value": "00000003-1111-4111-8111-111111111111"
+          },
+          "workspace_id": "w1P",
+          "tab_id": "w1P:t2",
+          "pane_id": "w1P:p2",
+          "focused": false,
+          "state_change_seq": 577,
+          "cwd": "/home/sam/Projects/plugins",
+          "foreground_cwd": "/home/sam/Projects/plugins",
+          "revision": 23828
+        },
+        {
+          "terminal_id": "term_65c1aee16017b6",
+          "name": "worker",
+          "agent": "codex",
+          "agent_status": "idle",
+          "workspace_id": "w1S",
+          "tab_id": "w1S:t1",
+          "pane_id": "w1S:p1",
+          "focused": false,
+          "interactive_ready": true,
+          "state_change_seq": 579,
+          "cwd": "/tmp/work",
+          "foreground_cwd": "/tmp/work",
+          "revision": 0
+        }
+      ]
+    }
+  }
+}

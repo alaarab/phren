@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
-import { makeTempDir, grantAdmin, writeFile } from "../test-helpers.js";
+import { makeTempDir, grantAdmin, writeFile, resetTestPhrenPath } from "../test-helpers.js";
 
 // Real store, real appendReviewQueue — only git is faked.
 vi.mock("../utils.js", async (importOriginal) => {
@@ -73,7 +73,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  delete process.env.PHREN_PATH;
+  resetTestPhrenPath();
   delete process.env.PHREN_MEMORY_AUTO_ACCEPT;
   delete process.env.PHREN_PROACTIVITY_FINDINGS;
   tmp.cleanup();

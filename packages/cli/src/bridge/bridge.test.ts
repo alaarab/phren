@@ -1,10 +1,10 @@
 import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
-import { realpathSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { appendFile, chmod, mkdir, mkdtemp, open, readFile, realpath as realpathAsync, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { request } from "node:http";
-import { createServer as createNetServer, type Server } from "node:net";
+import { createConnection, createServer as createNetServer, type Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -28,9 +28,72 @@ const hookBundle = path.resolve(process.env.PHREN_TEST_HOOK_BUNDLE || "packages/
 const target = { server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p1", source: "codex", session };
 const row = (text: string) => ({ type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text }] } });
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-const permissionsMenu = (highlight: number | undefined) => "Choose permissions\n"
-  + ["Read only", "Ask for approval", "Full access"].map((label, index) =>
-    `${index === highlight ? "›" : " "} ${index + 1}. ${label}`).join("\n") + "\nPress enter to confirm\n";
+/** Resolves once `condition` holds, or after `timeoutMs` so the caller's own expectation reports the miss. */
+async function waitFor(condition: () => unknown, timeoutMs = 2_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!(await condition()) && Date.now() < deadline) await sleep(10);
+}
+
+// Real tools, recorded (see fixtures/): the fake Herdr answers in these shapes
+// and the fake Codex pane draws these screens.
+const HERDR_VERSION = "0.9.1";
+const recorded = (file: string) => readFileSync(new URL(`./fixtures/${file}`, import.meta.url), "utf8");
+const herdrSchema = JSON.parse(recorded(`herdr/${HERDR_VERSION}/schema.json`)).schemas;
+const recordedSnapshot = JSON.parse(recorded(`herdr/${HERDR_VERSION}/snapshot.json`)).result.snapshot;
+type SchemaNode = { $ref?: string; properties?: Record<string, SchemaNode>; required?: string[]; enum?: unknown[];
+  type?: string | string[]; items?: SchemaNode; anyOf?: SchemaNode[]; oneOf?: SchemaNode[] };
+function schemaNode(node: SchemaNode): SchemaNode {
+  while (node.$ref) {
+    const [, group, name] = /^#\/schemas\/([^/]+)\/\$defs\/(.+)$/.exec(node.$ref)!;
+    node = herdrSchema[group].$defs[name];
+  }
+  return node;
+}
+/** Where `value` departs from a recorded Herdr type: a missing required key,
+ * a key Herdr never sends, or a value outside its enum. */
+function herdrShapeProblems(node: SchemaNode, value: unknown, at = "$"): string[] {
+  node = schemaNode(node);
+  const branches = node.anyOf ?? node.oneOf;
+  if (branches) {
+    const results = branches.map(branch => herdrShapeProblems(branch, value, at));
+    return results.find(problems => !problems.length) ?? results[0];
+  }
+  if (value === undefined || value === null) {
+    const types = Array.isArray(node.type) ? node.type : node.type ? [node.type] : [];
+    return !types.length || types.includes("null") ? [] : [`${at} is missing`];
+  }
+  if (node.enum) return node.enum.includes(value) ? [] : [`${at} ${JSON.stringify(value)} is not one of ${node.enum.join(", ")}`];
+  if (node.items && Array.isArray(value)) return value.flatMap((item, index) => herdrShapeProblems(node.items!, item, `${at}[${index}]`));
+  if (!node.properties || typeof value !== "object") return [];
+  const record = value as Record<string, unknown>, properties = node.properties;
+  return [
+    ...(node.required ?? []).filter(key => record[key] === undefined).map(key => `${at}.${key} is required`),
+    ...Object.keys(record).filter(key => record[key] !== undefined && !(key in properties)).map(key => `${at}.${key} is not a Herdr field`),
+    ...Object.keys(record).filter(key => key in properties).flatMap(key => herdrShapeProblems(properties[key], record[key], `${at}.${key}`)),
+  ];
+}
+/** Herdr's own reason for refusing a request before reading it: an unknown
+ * method, a missing parameter or a value outside its enum. */
+function herdrRequestProblem(method: string, params: Record<string, unknown> | undefined): string | undefined {
+  const entry = (herdrSchema.request.oneOf as SchemaNode[]).find(candidate => (candidate.properties!.method as { const?: string }).const === method);
+  if (!entry) return `invalid request: unknown variant \`${method}\``;
+  const shape = schemaNode(entry.properties!.params);
+  const missing = (shape.required ?? []).find(key => params?.[key] === undefined);
+  if (missing) return `invalid request: missing field \`${missing}\``;
+  for (const [key, property] of Object.entries(shape.properties ?? {})) {
+    const choices = schemaNode(property).enum;
+    if (choices && params?.[key] !== undefined && !choices.includes(params[key])) return `invalid request: unknown variant \`${String(params[key])}\``;
+  }
+  return undefined;
+}
+/** Codex 0.155.1's /permissions menu as recorded, with the cursor on `highlight` (none when undefined). */
+const recordedPermissionsMenu = recorded("codex/0.155.1/permissions-menu.txt").replace(/^› /m, "  ");
+const permissionsMenu = (highlight: number | undefined) => highlight === undefined ? recordedPermissionsMenu
+  : recordedPermissionsMenu.replace(new RegExp(`^  ${highlight + 1}\\. `, "m"), `› ${highlight + 1}. `);
+const fullAccessConfirmation = recorded("codex/0.155.1/full-access-confirmation.txt");
+/** The same confirmation with shortcut keys on its rows, as Codex draws its approval rows. */
+const keyedFullAccessConfirmation = fullAccessConfirmation
+  .replace("Yes, continue anyway  ", "Yes, continue anyway (1)  ").replace("Cancel                ", "Cancel (esc)          ");
 
 describe("Phren Hook boundaries", () => {
   it("splits numbered option descriptions without changing labels or answer keys", () => {
@@ -51,9 +114,12 @@ describe("Phren Hook boundaries", () => {
   });
 
   it("records keyless menu highlights and refuses an unreadable or ambiguous cursor", () => {
-    expect(visibleTerminalChoice(permissionsMenu(0))).toEqual({ title: "Choose permissions", highlightedIndex: 0,
-      options: [{ label: "Read only", key: "1", hasKey: false },
-        { label: "Ask for approval", key: "2", hasKey: false }, { label: "Full access", key: "3", hasKey: false }] });
+    expect(visibleTerminalChoice(permissionsMenu(0))).toMatchObject({ title: "Update Model Permissions", highlightedIndex: 0,
+      options: [{ label: "Ask for approval (current)", key: "1", hasKey: false },
+        { label: "Approve for me", key: "2", hasKey: false }, { label: "Full Access", key: "3", hasKey: false }] });
+    // The fake's cursor sits where Codex drew it after two Down presses.
+    expect(visibleTerminalChoice(recorded("codex/0.155.1/permissions-menu-full-access.txt")))
+      .toEqual(visibleTerminalChoice(permissionsMenu(2)));
     expect(visibleTerminalChoice(permissionsMenu(undefined))).toBeUndefined();
     expect(visibleTerminalChoice(permissionsMenu(0).replace("  2.", "› 2."))).toBeUndefined();
     for (const marker of [">", "❯", "›", "▸", "▶", "»", "•", "*"]) {
@@ -338,7 +404,8 @@ describe("Phren Hook boundaries", () => {
     // The project has an edit still in the working tree and one already committed.
     await writeFile(path.join(project, "a.txt"), "two\n");
     await writeFile(path.join(project, "b.txt"), "b\n"); await git(project, "add", "b.txt"); await git(project, "commit", "-q", "-m", "add b");
-    const previousHome = process.env.HOME; process.env.HOME = home;
+    const previousHome = process.env.HOME, previousStore = process.env.PHREN_PATH;
+    process.env.HOME = home; process.env.PHREN_PATH = store;
     try {
       const diff = await repositoryDiff(project, ["~/.phren/app", path.join(project, "b.txt")]) as {
         root: string; files: { path: string; status: string; sections: { id: string; kind: string; patch: string; note?: string }[] }[];
@@ -357,7 +424,10 @@ describe("Phren Hook boundaries", () => {
       expect(diff.related[0].files[0].sections[0].note).toMatch(/phren: capture finding/);
       // Nothing named: the same shape as before, without the related list.
       expect(await repositoryDiff(project)).not.toHaveProperty("related");
-    } finally { process.env.HOME = previousHome; }
+    } finally {
+      process.env.HOME = previousHome;
+      if (previousStore === undefined) delete process.env.PHREN_PATH; else process.env.PHREN_PATH = previousStore;
+    }
   });
 });
 
@@ -380,6 +450,34 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
   let paneAgent = "codex";
   let paneCwd: string | undefined;
   let remoteHook: ChildProcess | undefined;
+  // The Hook's identity cache (2 s) and terminal-dialog throttle (3 s), shortened so tests do not wait them out.
+  const IDENTITY_CACHE_MS = 200, DIALOG_THROTTLE_MS = 300;
+  /** Agent names by pane: real Herdr keeps them in the snapshot's agents list, never on the pane. */
+  let agentNames = new Map<string, string>();
+  const herdrSockets = new Set<Socket>();
+  // The fake's snapshot, built in the recorded Herdr shape (see herdrShapeProblems).
+  const paneInfo = (workspace: string, tab: string, pane: string, terminal: string, cwd: unknown): Record<string, unknown> =>
+    ({ pane_id: pane, terminal_id: terminal, workspace_id: workspace, tab_id: tab, focused: false, cwd, foreground_cwd: cwd, agent_status: "unknown", revision: 0 });
+  const tabInfo = (workspace: string, tab: string, label: unknown, number: number): Record<string, unknown> =>
+    ({ tab_id: tab, workspace_id: workspace, number, label, focused: false, pane_count: 1, agent_status: "unknown" });
+  const workspaceInfo = (workspace: string, label: unknown, number: number): Record<string, unknown> =>
+    ({ workspace_id: workspace, number, label, focused: false, pane_count: 1, tab_count: 1, active_tab_id: `${workspace}:t1`, agent_status: "unknown" });
+  const mainPane = (): Record<string, unknown> => ({ ...paneInfo("w1", "w1:t1", "w1:p1", terminalID, paneCwd ?? root),
+    agent: paneAgent, agent_status: agentStatus,
+    agent_session: reportIdentity ? { source: `herdr:${paneAgent}`, agent: paneAgent, kind: "id", value: current } : undefined });
+  const agentInfo = (pane: Record<string, unknown>): Record<string, unknown> => ({ terminal_id: pane.terminal_id,
+    name: agentNames.get(String(pane.pane_id)), agent: pane.agent, agent_status: pane.agent_status, agent_session: pane.agent_session,
+    workspace_id: pane.workspace_id, tab_id: pane.tab_id, pane_id: pane.pane_id, focused: pane.focused,
+    cwd: pane.cwd, foreground_cwd: pane.foreground_cwd, revision: pane.revision });
+  function fakeSnapshot(): Record<string, unknown> {
+    const panes = [mainPane(), ...extraPanes];
+    // A tab or workspace reports the status of the agent it holds.
+    const status = (match: (pane: Record<string, unknown>) => boolean) => panes.find(p => match(p) && p.agent)?.agent_status ?? "unknown";
+    return { version: recordedSnapshot.version, protocol: recordedSnapshot.protocol,
+      workspaces: [workspaceInfo("w1", "Project", 1), ...extraWorkspaces].map(w => ({ ...w, agent_status: status(p => p.workspace_id === w.workspace_id) })),
+      tabs: [tabInfo("w1", "w1:t1", "1", 1), ...extraTabs].map(t => ({ ...t, agent_status: status(p => p.tab_id === t.tab_id) })),
+      panes, layouts: [], agents: panes.filter(p => p.agent).map(agentInfo) };
+  }
   function api(url: string, body?: unknown, method?: string): Promise<{ status: number; data: any }> {
     return new Promise((resolve, reject) => {
       const payload = body === undefined ? undefined : JSON.stringify(body);
@@ -389,6 +487,17 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
         let data = ""; res.on("data", bytes => data += bytes); res.on("end", () => resolve({ status: res.statusCode!, data: JSON.parse(data) }));
       });
       req.on("error", reject); req.end(payload);
+    });
+  }
+  /** One request straight to the fake Herdr socket, answered as Herdr answers it. */
+  function herdrCall(method: string, params: Record<string, unknown>): Promise<any> {
+    return new Promise((resolve, reject) => {
+      const client = createConnection(path.join(root, "herdr/herdr.sock"));
+      let data = "";
+      client.on("connect", () => client.write(JSON.stringify({ id: "fixture", method, params }) + "\n"));
+      client.on("data", bytes => data += bytes);
+      client.on("end", () => resolve(JSON.parse(data.split("\n")[0])));
+      client.on("error", reject);
     });
   }
   /** A GET whose body is bytes, not JSON. */
@@ -403,7 +512,7 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
   function resetVars(): void {
     paneCwd = undefined; commands = []; current = session; agentStatus = "working"; reportIdentity = true; foregroundPID = process.pid; terminalID = "term-one"; log = ""; holdSnapshot = false; releaseSnapshot = undefined;
     replaceBeforeMutation = false; deliveries = [];
-    extraWorkspaces = []; extraTabs = []; extraPanes = []; failAgentStart = false; promptNotReady = 0; helperPIDs = []; remoteHook = undefined;
+    extraWorkspaces = []; extraTabs = []; extraPanes = []; agentNames = new Map(); failAgentStart = false; promptNotReady = 0; helperPIDs = []; remoteHook = undefined;
     paneLines = ""; drawConfirmation = false; paneAgent = "codex";
     confirmationHasKeys = true;
     menuHighlight = undefined; confirmedMenuRow = undefined; ignoredMenuMoves = 0; menuPane = permissionsMenu;
@@ -427,17 +536,32 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     await mkdir(path.join(root, "codex/sessions/2026/09/10"), { recursive: true });
     await resetRecord();
     herdr = createNetServer(socket => {
+      herdrSockets.add(socket); socket.on("close", () => herdrSockets.delete(socket));
       socket.on("error", () => { /* A cancelled client may close before the fixture's reply. */ });
       let pending = ""; socket.on("data", bytes => {
         pending += bytes;
         if (!pending.includes("\n")) return;
         const req = JSON.parse(pending.split("\n")[0]); commands.push(req);
+        // Herdr's error envelope: a string code and its own message. A request
+        // its schema rejects is answered before it is read, with an empty id.
+        const fail = (code: string, message: string, id: string = req.id) =>
+          socket.end(JSON.stringify({ id, error: { code, message } }) + "\n");
+        const invalid = herdrRequestProblem(req.method, req.params);
+        if (invalid) { fail("invalid_request", invalid, ""); return; }
+        const panes = () => [mainPane(), ...extraPanes];
+        const agentTarget = typeof req.params?.target === "string" ? req.params.target : undefined;
+        if (agentTarget !== undefined && !panes().some(p => p.pane_id === agentTarget || agentNames.get(String(p.pane_id)) === agentTarget)) {
+          fail("agent_not_found", `agent target ${agentTarget} not found`); return;
+        }
+        if (["pane.read", "pane.process_info"].includes(req.method) && !panes().some(p => p.pane_id === req.params.pane_id)) {
+          fail("pane_not_found", `pane ${req.params.pane_id} not found`); return;
+        }
         if (req.method === "agent.prompt" && promptNotReady > 0) {
           promptNotReady--;
-          socket.end(JSON.stringify({ id: req.id, error: { code: "agent_not_ready", message: `agent ${req.params.target} is not an active named agent` } }) + "\n"); return;
+          fail("agent_not_ready", `agent ${req.params.target} is not an active named agent`); return;
         }
         if (["agent.prompt", "agent.send_keys"].includes(req.method)) {
-          // Herdr 0.8.2/protocol 20 and 0.9.0 resolve the current pane occupant.
+          // Herdr 0.8.2/protocol 20 and 0.9.x resolve the current pane occupant.
           // Replace it at dispatch, after every possible snapshot preflight.
           // Unknown params cannot bind an expected session in that contract.
           if (replaceBeforeMutation) current = "bbbbbbbb-1111-4111-8111-111111111111";
@@ -449,48 +573,63 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
               if (ignoredMenuMoves > 0) ignoredMenuMoves--;
               else for (const key of arrows) menuHighlight = Math.max(0, Math.min(2, menuHighlight + (key === "down" ? 1 : -1)));
               paneLines = menuPane(loseMenuHighlight ? undefined : menuHighlight);
-              if (replaceMenuAfterMove) paneLines = paneLines.replace("Choose permissions", "Choose a different setting");
+              if (replaceMenuAfterMove) paneLines = paneLines.replace("Update Model Permissions", "Choose a different setting");
             }
             if (sent.includes("enter")) { confirmedMenuRow = menuHighlight; paneLines = ""; menuHighlight = undefined; }
           }
-          // A fake Codex pane: Enter on the permissions menu draws Full Access's
-          // second confirmation; another Enter clears it.
+          // A Codex pane: Enter on the permissions menu draws Full Access's
+          // recorded second confirmation; another Enter clears it.
           if (drawConfirmation && sent.includes("enter")) {
-            paneLines = paneLines.startsWith("Enable full access?") ? ""
-              : confirmationHasKeys ? "Enable full access?\n› 1. Yes, continue anyway (1)\n2. Cancel (esc)\n"
-              : "Enable full access?\n› 1. Yes, continue anyway\n2. Cancel\n";
+            paneLines = paneLines.includes("Enable full access?") ? ""
+              : confirmationHasKeys ? keyedFullAccessConfirmation : fullAccessConfirmation;
           }
           if (sent.includes("1")) paneLines = "";
         }
-        // Herdr's create calls answer {ok} and the new workspace/tab/pane show
-        // up in the next snapshot; agent.start marks the pane's agent.
+        // Herdr's create calls answer with the new workspace/tab and its root
+        // pane, which also show up in the next snapshot; agent.start answers
+        // at once and names the agent in the snapshot's agents list.
+        let created: Record<string, unknown> | undefined;
         if (req.method === "workspace.create") {
           const wid = `w${9 + extraWorkspaces.length}`;
-          extraWorkspaces.push({ workspace_id: wid, label: req.params.label });
-          extraTabs.push({ tab_id: `${wid}:t1`, workspace_id: wid, label: "1" });
-          extraPanes.push({ pane_id: `${wid}:p1`, tab_id: `${wid}:t1`, workspace_id: wid, terminal_id: `term-${wid}`, cwd: req.params.cwd });
+          extraWorkspaces.push(workspaceInfo(wid, req.params.label, extraWorkspaces.length + 2));
+          extraTabs.push(tabInfo(wid, `${wid}:t1`, "1", 1));
+          extraPanes.push(paneInfo(wid, `${wid}:t1`, `${wid}:p1`, `term-${wid}`, req.params.cwd));
+          created = { type: "workspace_created", workspace: extraWorkspaces.at(-1), tab: extraTabs.at(-1), root_pane: extraPanes.at(-1) };
         } else if (req.method === "tab.create") {
           const wid = req.params.workspace_id, n = extraTabs.filter(t => t.workspace_id === wid).length + 2;
-          extraTabs.push({ tab_id: `${wid}:t${n}`, workspace_id: wid, label: req.params.label });
-          extraPanes.push({ pane_id: `${wid}:p${n}`, tab_id: `${wid}:t${n}`, workspace_id: wid, terminal_id: `term-${wid}-${n}`, cwd: req.params.cwd });
+          extraTabs.push(tabInfo(wid, `${wid}:t${n}`, req.params.label, n));
+          extraPanes.push(paneInfo(wid, `${wid}:t${n}`, `${wid}:p${n}`, `term-${wid}-${n}`, req.params.cwd));
+          created = { type: "tab_created", tab: extraTabs.at(-1), root_pane: extraPanes.at(-1) };
         } else if (req.method === "agent.start") {
-          const target = extraPanes.find(p => p.pane_id === req.params.pane_id);
-          if (failAgentStart || !target) { socket.end(JSON.stringify({ id: req.id, error: { code: 1, message: "agent not detected" } }) + "\n"); return; }
-          if (blockAgentStart) {
-            target.agent = req.params.kind; target.agent_name = req.params.name; target.agent_status = "blocked";
-            socket.end(JSON.stringify({ id: req.id, error: { code: "agent_not_ready", message: `agent ${req.params.name} is blocked during startup` } }) + "\n"); return;
+          const timeout = req.params.timeout_ms;
+          if (typeof timeout === "number" && (timeout <= 3_000 || timeout > 300_000)) {
+            fail("invalid_agent_timeout", "agent start timeout must be greater than 3000ms and at most 300000ms"); return;
           }
-          target.agent = req.params.kind; target.agent_name = req.params.name; target.agent_status = "idle";
+          const target = extraPanes.find(p => p.pane_id === req.params.pane_id);
+          if (!target) { fail("agent_pane_not_found", `agent target pane ${req.params.pane_id} not found`); return; }
+          if (failAgentStart) { fail("agent_pane_busy", `agent target pane ${req.params.pane_id} is not an available shell`); return; }
+          agentNames.set(String(target.pane_id), req.params.name);
+          target.agent = req.params.kind;
+          if (blockAgentStart) {
+            target.agent_status = "blocked";
+            fail("agent_not_ready", `agent ${req.params.name} is blocked during startup and is not ready for prompts`); return;
+          }
+          target.agent_status = "idle";
+          created = { type: "agent_started", agent: agentInfo(target), argv: [req.params.kind, ...(req.params.args ?? [])] };
         }
-        const pane = { pane_id: "w1:p1", tab_id: "w1:t1", workspace_id: "w1", terminal_id: terminalID, agent: paneAgent, agent_status: agentStatus,
-          agent_session: reportIdentity ? { kind: "id", agent: paneAgent, value: current } : undefined, cwd: paneCwd ?? root };
-        const snapshot = { panes: [pane, ...extraPanes], workspaces: [{ workspace_id: "w1", label: "Project" }, ...extraWorkspaces],
-          tabs: [{ tab_id: "w1:t1", workspace_id: "w1", label: "1" }, ...extraTabs] };
-        const answer = () => socket.end(JSON.stringify({ id: req.id, result: req.method === "session.snapshot" ? { snapshot }
-          : req.method === "pane.process_info" ? { process_info: { foreground_processes: [{ pid: foregroundPID }, ...helperPIDs.map(pid => ({ pid }))] } }
-          : req.method === "agent.read" ? { type: "pane_read", read: { pane_id: "w1:p1", workspace_id: "w1", tab_id: "w1:t1",
-            source: "visible", format: "text", text: paneLines, revision: 1, truncated: false } }
-          : { ok: true } }) + "\n");
+        const readPane = (paneId: string) => {
+          const pane = panes().find(p => p.pane_id === paneId || agentNames.get(String(p.pane_id)) === paneId)!;
+          return { type: "pane_read", read: { pane_id: pane.pane_id, workspace_id: pane.workspace_id, tab_id: pane.tab_id,
+            source: req.params.source, format: req.params.format ?? "text", text: pane.pane_id === "w1:p1" ? paneLines : "", revision: 0, truncated: false } };
+        };
+        const answer = () => socket.end(JSON.stringify({ id: req.id, result: created
+          ?? (req.method === "session.snapshot" ? { type: "session_snapshot", snapshot: fakeSnapshot() }
+          : req.method === "pane.process_info" ? { type: "pane_process_info", process_info: { pane_id: req.params.pane_id,
+            foreground_processes: [{ pid: foregroundPID }, ...helperPIDs.map(pid => ({ pid }))] } }
+          : req.method === "agent.read" ? readPane(req.params.target)
+          : req.method === "pane.read" ? readPane(req.params.pane_id)
+          : req.method === "agent.prompt" ? { type: "agent_prompted", agent: agentInfo(panes().find(p => p.pane_id === agentTarget || agentNames.get(String(p.pane_id)) === agentTarget)!) }
+          : { type: "ok" }) }) + "\n");
         if (holdSnapshot && req.method === "session.snapshot") { holdSnapshot = false; releaseSnapshot = answer; }
         else answer();
       });
@@ -502,16 +641,27 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     hook = spawn(process.execPath, [hookBundle, "serve"], { env: { ...process.env,
       PATH: `${path.join(root, "bin")}:${process.env.PATH}`, PHREN_PATH: path.join(root, ".phren"),
       HOME: root, PHREN_BRIDGE_HOME: path.join(root, "bridge"), PHREN_HERDR_HOME: path.join(root, "herdr"), CODEX_HOME: path.join(root, "codex"),
-      PHREN_APPROVAL_HOLD_MS: "2500" }, stdio: ["ignore", "ignore", "pipe"] });
+      PHREN_APPROVAL_HOLD_MS: "2500", PHREN_IDENTITY_CACHE_MS: String(IDENTITY_CACHE_MS), PHREN_DIALOG_THROTTLE_MS: String(DIALOG_THROTTLE_MS) },
+      stdio: ["ignore", "ignore", "pipe"] });
     hook.stderr!.on("data", bytes => log += bytes);
     let ready = false;
-    for (let i = 0; i < 80; i++) { try { ready = (await api("/v1/health")).status === 200; } catch { /* startup */ } if (ready) break; await sleep(25); }
+    await waitFor(async () => ready = await api("/v1/health").then(r => r.status === 200, () => false));
     expect(ready, log).toBe(true);
+  }
+  /** SIGTERM, then SIGKILL when a Hook still has not exited three seconds later. */
+  async function stopHook(child: ChildProcess | undefined, name: string): Promise<void> {
+    if (!child || child.exitCode !== null || child.signalCode !== null) return;
+    const exited = once(child, "exit");
+    child.kill("SIGTERM");
+    const escalate = setTimeout(() => { console.warn(`${name} ignored SIGTERM for 3 s; killing it`); child.kill("SIGKILL"); }, 3_000);
+    await exited; clearTimeout(escalate);
   }
   async function stopFixture(): Promise<void> {
     releaseSnapshot?.();
-    if (hook && hook.exitCode === null) { hook.kill("SIGTERM"); await once(hook, "exit"); }
-    if (remoteHook && remoteHook.exitCode === null) { remoteHook.kill("SIGTERM"); await once(remoteHook, "exit"); }
+    await stopHook(hook, "Hook");
+    await stopHook(remoteHook, "Remote Hook");
+    // A client that never hung up must not hold the fake Herdr open.
+    for (const socket of herdrSockets) socket.destroy();
     if (herdr) await new Promise<void>(resolve => herdr.close(() => resolve()));
     if (root) await rm(root, { recursive: true, force: true });
   }
@@ -544,15 +694,48 @@ socket.on('close', () => process.exit(0));
       HOME: root, PHREN_PATH: path.join(root, "remote-store"), PHREN_BRIDGE_HOME: remoteRoot,
       PHREN_HERDR_HOME: path.join(root, "herdr"), CODEX_HOME: path.join(root, "codex") }, stdio: ["ignore", "ignore", "pipe"] });
     remoteHook.stderr!.on("data", bytes => log += bytes);
-    for (let i = 0; i < 80; i++) {
-      if (await stat(path.join(remoteRoot, "hook.sock")).catch(() => undefined)) return;
-      await sleep(25);
-    }
-    throw new Error(`Remote Hook did not start: ${log}`);
+    await waitFor(() => stat(path.join(remoteRoot, "hook.sock")).catch(() => undefined), 2_000);
+    if (!await stat(path.join(remoteRoot, "hook.sock")).catch(() => undefined)) throw new Error(`Remote Hook did not start: ${log}`);
   }
 
   describe("shared fixture", () => {
     beforeEach(async () => { resetVars(); await resetRecord(); });
+    it("answers in the shapes recorded from real Herdr", async () => {
+      const shape = (name: string) => ({ $ref: `#/schemas/success_response/$defs/${name}` });
+      // The recording itself and the fake's snapshot, before and after a launch.
+      expect(herdrShapeProblems(shape("SessionSnapshot"), recordedSnapshot)).toEqual([]);
+      expect(herdrShapeProblems(shape("SessionSnapshot"), fakeSnapshot())).toEqual([]);
+      const created = await herdrCall("workspace.create", { label: "Shape check", cwd: root, focus: false });
+      expect(herdrShapeProblems(shape("PaneInfo"), created.result.root_pane)).toEqual([]);
+      const started = await herdrCall("agent.start", { name: "shape-check", kind: "codex", pane_id: created.result.root_pane.pane_id, timeout_ms: 45_000 });
+      expect(herdrShapeProblems(shape("AgentInfo"), started.result.agent)).toEqual([]);
+      const snapshot = fakeSnapshot();
+      expect(herdrShapeProblems(shape("SessionSnapshot"), snapshot)).toEqual([]);
+      // Real Herdr names an agent only in its agents list, never on the pane.
+      expect((snapshot.panes as Record<string, unknown>[]).some(p => "agent_name" in p)).toBe(false);
+      expect((snapshot.agents as Record<string, unknown>[]).find(a => a.pane_id === created.result.root_pane.pane_id)?.name).toBe("shape-check");
+      expect((await herdrCall("agent.start", { name: "late", kind: "codex", pane_id: created.result.root_pane.pane_id, timeout_ms: 3_000 })).error)
+        .toEqual({ code: "invalid_agent_timeout", message: "agent start timeout must be greater than 3000ms and at most 300000ms" });
+      // Every error envelope the fake can send has Herdr's string code.
+      const errors = JSON.parse(recorded(`herdr/${HERDR_VERSION}/errors.json`)) as { request: { method: string; params: Record<string, unknown> }; response: unknown }[];
+      for (const { response } of errors) expect(herdrShapeProblems(herdrSchema.error_response, response)).toEqual([]);
+      // The fake refuses a malformed request with Herdr's own words.
+      const unread = errors.find(e => e.request.method === "agent.read" && !("source" in e.request.params))!;
+      expect(String((unread.response as { error: { message: string } }).error.message))
+        .toContain(herdrRequestProblem("agent.read", unread.request.params)!);
+      expect(await herdrCall("agent.read", { target: "w1:p1" })).toMatchObject({ id: "", error: { code: "invalid_request" } });
+      expect(await herdrCall("pane.read", { pane_id: "w404:p1", source: "recent" })).toMatchObject({ error: { code: "pane_not_found" } });
+      expect(await herdrCall("agent.prompt", { target: "nobody", text: "x" })).toMatchObject({ error: { code: "agent_not_found" } });
+      // pane.read and agent.read answer with the recorded read's fields.
+      const responses = JSON.parse(recorded(`herdr/${HERDR_VERSION}/responses.json`));
+      for (const [method, params] of [["pane.read", { pane_id: "w1:p1", source: "recent", lines: 40 }], ["agent.read", { target: "w1:p1", source: "visible" }]] as const) {
+        const answer = await herdrCall(method, params);
+        expect(herdrShapeProblems(shape("PaneReadResult"), answer.result.read), method).toEqual([]);
+        expect(Object.keys(answer.result.read).sort()).toEqual(Object.keys(responses[method].response.result.read).sort());
+        expect(answer.result.type).toBe(responses[method].response.result.type);
+      }
+    });
+
     it("discovers workspaces through a private protocol without any TCP helper", async () => {
       const checkout = path.join(root, "Projects", "browser-test");
       await mkdir(checkout, { recursive: true });
@@ -821,7 +1004,7 @@ schedules:
       expect(launched.status, JSON.stringify(launched.data)).toBe(200);
       expect(launched.data).toMatchObject({ workspaceId: "w1", tabId: "w1:t2", paneId: "w1:p2", agent: "codex" });
       expect(commands.find(c => c.method === "tab.create")?.params).toMatchObject({ workspace_id: "w1", label: "second", cwd: await realpathAsync(root) });
-      expect(commands.find(c => c.method === "agent.start")?.params).toMatchObject({ name: "codex-here", pane_id: "w1:p2", timeout_ms: 3_000 });
+      expect(commands.find(c => c.method === "agent.start")?.params).toMatchObject({ name: "codex-here", pane_id: "w1:p2", timeout_ms: 3_001 });
     });
 
     it("reports a failed agent start without hiding the workspace it created", async () => {
@@ -858,9 +1041,11 @@ schedules:
         handles.push(await open(record, "r"));
         handles.push(await open(childRecord, "r"));
         const discover = async () => (await api("/v1/workspaces/panes?groupId=w1&childId=w1:t1")).data.panes[0].sessionId;
+        // An earlier test's lifecycle callback bound this pane; start unbound.
+        const folder = path.join(root, "bridge/bindings/default");
+        await rm(folder, { recursive: true, force: true });
         expect(await discover()).toBeUndefined();
         const binding = { terminal: "term-one", source: "codex", session, pids: [process.pid] };
-        const folder = path.join(root, "bridge/bindings/default");
         await mkdir(folder, { recursive: true });
         const bind = (value: typeof binding) => writeFile(path.join(folder, "w1%3Ap1.json"), JSON.stringify(value));
         for (const wrong of [
@@ -870,10 +1055,11 @@ schedules:
           { ...binding, session: "cccccccc-1111-4111-8111-111111111111" },
         ]) {
           await bind(wrong);
-          expect(await discover()).toBeUndefined();
+          await sleep(IDENTITY_CACHE_MS + 50);
+          expect(await discover(), JSON.stringify(wrong)).toBeUndefined();
         }
         await bind(binding);
-        await sleep(2100);
+        await sleep(IDENTITY_CACHE_MS + 50);
         expect(await discover()).toBe(session);
         const page = await api("/v1/transcripts/history?" + new URLSearchParams({ ...target, beforeLine: "2" }));
         expect(page.status).toBe(200);
@@ -884,7 +1070,7 @@ schedules:
         // Once the parent's descriptor closes, its old binding must not override
         // the sole conversation still held by the current process.
         await handles[0].close();
-        await sleep(2100);
+        await sleep(IDENTITY_CACHE_MS + 50);
         expect(await discover()).toBe(child);
         expect((await api("/v1/prompt", { target, text: "stale parent" })).status).toBe(409);
       } finally { await Promise.all(handles.map(handle => handle.close())); }
@@ -954,7 +1140,7 @@ schedules:
         const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
         const frames: any[] = []; socket.on("message", data => frames.push(JSON.parse(data.toString())));
         await once(socket, "open");
-        for (let i = 0; i < 80 && !frames.length; i++) await sleep(25);
+        await waitFor(() => frames.length, 2_000);
         socket.terminate();
         return frames[0].agentStatus;
       };
@@ -993,7 +1179,7 @@ schedules:
       const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
       const frames: any[] = []; socket.on("message", data => frames.push(JSON.parse(data.toString())));
       await once(socket, "open");
-      for (let i = 0; i < 80 && !frames.length; i++) await sleep(25);
+      await waitFor(() => frames.length, 2_000);
       expect(frames[0].agentStatus).toMatchObject({ status: "blocked", terminalPrompt: { toolName: "Shell" } });
       expect(frames[0].agentStatus.terminalPrompt.message).toContain("xcrun simctl list runtimes");
       // The command and its options ride along for the phone's question card.
@@ -1005,14 +1191,14 @@ schedules:
       const again = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
       const later: any[] = []; again.on("message", data => later.push(JSON.parse(data.toString())));
       await once(again, "open");
-      for (let i = 0; i < 80 && !later.length; i++) await sleep(25);
+      await waitFor(() => later.length, 2_000);
       expect(later[0].agentStatus.terminalPrompt).toMatchObject({ toolName: "Shell" });
       again.terminate();
       expect((await api("/v1/keys", { target, keys: ["y"] })).status).toBe(200);
       const cleared = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
       const last: any[] = []; cleared.on("message", data => last.push(JSON.parse(data.toString())));
       await once(cleared, "open");
-      for (let i = 0; i < 80 && !last.length; i++) await sleep(25);
+      await waitFor(() => last.length, 2_000);
       expect(last[0].agentStatus.terminalPrompt).toBeUndefined();
       cleared.terminate();
     });
@@ -1032,7 +1218,7 @@ schedules:
         const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
         const frames: any[] = []; socket.on("message", data => frames.push(JSON.parse(data.toString())));
         await once(socket, "open");
-        for (let i = 0; i < 80 && !frames.length; i++) await sleep(25);
+        await waitFor(() => frames.length, 2_000);
         expect(frames[0].agentStatus.terminalPrompt).toMatchObject({
           toolName: "Question", message: "Deploy as-is?", queued: true,
           choice: { title: "Deploy as-is?",
@@ -1051,7 +1237,7 @@ schedules:
         const cleared = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
         const last: any[] = []; cleared.on("message", data => last.push(JSON.parse(data.toString())));
         await once(cleared, "open");
-        for (let i = 0; i < 80 && !last.length; i++) await sleep(25);
+        await waitFor(() => last.length, 2_000);
         expect(last[0].agentStatus.terminalPrompt).toBeUndefined();
         cleared.terminate();
       } finally {
@@ -1143,7 +1329,7 @@ schedules:
       const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
       const frames: any[] = []; socket.on("message", data => frames.push(JSON.parse(data.toString())));
       await once(socket, "open");
-      for (let i = 0; i < 80 && !frames.length; i++) await sleep(25);
+      await waitFor(() => frames.length, 2_000);
       expect(frames[0].agentStatus.terminalPrompt).toMatchObject({ toolName: "Permissions",
         choice: { title: "Apply the permission change?",
           options: [{ label: "Yes, continue anyway", key: "1" }, { label: "Cancel", key: "2" }] } });
@@ -1164,7 +1350,7 @@ schedules:
     });
 
     it("publishes a Claude terminal numbered dialog, answers it with Enter, and drops it when the pane works", async () => {
-      paneAgent = "claude"; agentStatus = "waiting";
+      paneAgent = "claude"; agentStatus = "blocked";
       paneLines = "Parser aborted (timeout, resource limit, or over-length)\n"
         + "Do you want to proceed?\n"
         + "> 1. Yes\n"
@@ -1176,12 +1362,12 @@ schedules:
         const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(claude)}`);
         const frames: any[] = []; socket.on("message", data => frames.push(JSON.parse(data.toString())));
         await once(socket, "open");
-        for (let i = 0; i < 80 && !frames.length; i++) await sleep(25);
+        await waitFor(() => frames.length, 2_000);
         socket.terminate();
         return frames[0].agentStatus;
       };
       // No PermissionRequest fired: the Hook reads the pane and finds the dialog.
-      expect(await status()).toMatchObject({ status: "waiting", terminalPrompt: {
+      expect(await status()).toMatchObject({ status: "blocked", terminalPrompt: {
         toolName: "Question", message: "Do you want to proceed?",
         choice: { title: "Do you want to proceed?",
           options: [{ label: "Yes", key: "1" },
@@ -1191,9 +1377,9 @@ schedules:
       // The pane leaves waiting: the card goes with it, dialog or not.
       agentStatus = "working";
       expect((await status()).terminalPrompt).toBeUndefined();
-      // Still drawn, still waiting: the dialog is read again past the three second window.
-      agentStatus = "waiting";
-      await sleep(3_100);
+      // Still drawn, still waiting: the dialog is read again past the throttle window.
+      agentStatus = "blocked";
+      await sleep(DIALOG_THROTTLE_MS + 50);
       expect((await status()).terminalPrompt).toMatchObject({ choice: { title: "Do you want to proceed?" } });
       // The phone sends the option's digit; the Hook appends Enter to submit it.
       expect((await api("/v1/keys", { target: claude, keys: ["1"] })).status).toBe(200);
@@ -1203,7 +1389,7 @@ schedules:
     });
 
     it("publishes a Codex terminal choice from the pane's numbered dialog and answers it with the option's key", async () => {
-      agentStatus = "waiting";
+      agentStatus = "blocked";
       // Scrollback above the question must not become part of it.
       paneLines = "ence\n"
         + "Utility Live 12 ...\n"
@@ -1221,7 +1407,7 @@ schedules:
         const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
         const frames: any[] = []; socket.on("message", data => frames.push(JSON.parse(data.toString())));
         await once(socket, "open");
-        for (let i = 0; i < 80 && !frames.length; i++) await sleep(25);
+        await waitFor(() => frames.length, 2_000);
         socket.terminate();
         return frames[0].agentStatus;
       };
@@ -1257,7 +1443,7 @@ schedules:
         const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
         const frames: any[] = []; socket.on("message", data => frames.push(JSON.parse(data.toString())));
         await once(socket, "open");
-        for (let i = 0; i < 80 && !frames.length; i++) await sleep(25);
+        await waitFor(() => frames.length, 2_000);
         socket.terminate();
         return frames[0].agentStatus;
       }
@@ -1268,7 +1454,7 @@ schedules:
         { from: 2, to: 0, ignored: 0, sent: [["up", "up"], ["enter"]] },
         { from: 0, to: 2, ignored: 1, sent: [["down", "down"], ["down", "down"], ["enter"]] },
       ])("answers row $to from row $from with $ignored missed moves", async ({ from, to, ignored, sent }) => {
-        agentStatus = "waiting"; menuHighlight = from; ignoredMenuMoves = ignored;
+        agentStatus = "blocked"; menuHighlight = from; ignoredMenuMoves = ignored;
         paneLines = permissionsMenu(menuHighlight);
         expect((await status()).terminalPrompt.choice).toMatchObject({ highlightedIndex: from });
         const answered = await api("/v1/keys", { target, keys: [String(to + 1)] });
@@ -1282,7 +1468,7 @@ schedules:
       });
 
       it("reads a highlight that moved since the card was published", async () => {
-        agentStatus = "waiting"; menuHighlight = 0; paneLines = permissionsMenu(menuHighlight);
+        agentStatus = "blocked"; menuHighlight = 0; paneLines = permissionsMenu(menuHighlight);
         await status();
         menuHighlight = 1; paneLines = permissionsMenu(menuHighlight);
         expect((await api("/v1/keys", { target, keys: ["3"] })).status).toBe(200);
@@ -1291,13 +1477,13 @@ schedules:
       });
 
       it("publishes no choice when a menu has no readable highlight", async () => {
-        agentStatus = "waiting"; paneLines = permissionsMenu(undefined);
+        agentStatus = "blocked"; paneLines = permissionsMenu(undefined);
         expect((await status()).terminalPrompt?.choice).toBeUndefined();
         expect(commands.filter(c => c.method === "agent.send_keys")).toEqual([]);
       });
 
       it.each(["stuck", "lost", "changed", "missing"])("does not confirm a %s highlight", async mode => {
-        agentStatus = "waiting"; menuHighlight = 0; paneLines = permissionsMenu(menuHighlight);
+        agentStatus = "blocked"; menuHighlight = 0; paneLines = permissionsMenu(menuHighlight);
         await status();
         ignoredMenuMoves = mode === "stuck" ? 2 : 0;
         loseMenuHighlight = mode === "lost";
@@ -1313,15 +1499,15 @@ schedules:
     });
 
     it("flags a terminal password prompt only while the pane is reading one", async () => {
-      agentStatus = "waiting";
+      agentStatus = "blocked";
       paneLines = "This command will run with elevated privileges.\nPassword:";
-      // The previous test's pane read is inside the three second window.
-      await sleep(3_100);
+      // The previous test's pane read may be inside the throttle window.
+      await sleep(DIALOG_THROTTLE_MS + 50);
       const status = async () => {
         const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
         const frames: any[] = []; socket.on("message", data => frames.push(JSON.parse(data.toString())));
         await once(socket, "open");
-        for (let i = 0; i < 80 && !frames.length; i++) await sleep(25);
+        await waitFor(() => frames.length, 2_000);
         socket.terminate();
         return frames[0].agentStatus;
       };
@@ -1454,13 +1640,13 @@ schedules:
       const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/transcripts?${query}`);
       const frames: any[] = []; socket.on("message", data => frames.push(JSON.parse(data.toString())));
       await once(socket, "open");
-      for (let i = 0; i < 60 && !frames.length; i++) await sleep(25);
+      await waitFor(() => frames.length, 1_500);
       expect(frames[0].type).toBe("backlog"); expect(JSON.stringify(frames[0])).toContain("First message");
       await appendFile(record, JSON.stringify(row("Second message")) + "\n");
-      for (let i = 0; i < 60 && frames.length < 2; i++) await sleep(25);
+      await waitFor(() => frames.length >= 2, 1_500);
       expect(frames[1].type).toBe("append"); expect(JSON.stringify(frames[1])).toContain("Second message"); expect(JSON.stringify(frames[1])).not.toContain("First message");
       await appendFile(record, JSON.stringify({ type: "event_msg", payload: { type: "token_count", info: { last_token_usage: { input_tokens: 9, output_tokens: 3 } } } }) + "\n");
-      for (let i = 0; i < 60 && frames.length < 3; i++) await sleep(25);
+      await waitFor(() => frames.length >= 3, 1_500);
       expect(JSON.stringify(frames[2])).toContain('"output_tokens":3');
       const closed = once(socket, "close"); current = "bbbbbbbb-1111-4111-8111-111111111111"; await closed;
     });
@@ -1470,7 +1656,7 @@ schedules:
       const first = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/transcripts?${query}`);
       const opening: any[] = []; first.on("message", data => opening.push(JSON.parse(data.toString())));
       await once(first, "open");
-      for (let i = 0; i < 60 && !opening.length; i++) await sleep(25);
+      await waitFor(() => opening.length, 1_500);
       expect(opening[0]).toMatchObject({ type: "backlog", totalLines: 2 });
       const disconnected = once(first, "close"); first.terminate(); await disconnected;
 
@@ -1479,7 +1665,7 @@ schedules:
       const frames: any[] = []; resumed.on("message", data => frames.push(JSON.parse(data.toString())));
       try {
         await once(resumed, "open");
-        for (let i = 0; i < 60 && !frames.length; i++) await sleep(25);
+        await waitFor(() => frames.length, 1_500);
         expect(frames[0]).toMatchObject({ type: "backlog", totalLines: 4 });
         expect(frames[0].entries.map((entry: any) => entry.line)).toEqual([2, 3]);
         expect(JSON.stringify(frames[0])).not.toContain("First message");
@@ -1493,7 +1679,7 @@ schedules:
       const first = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/transcripts?${query}`);
       const opening: any[] = []; first.on("message", data => opening.push(JSON.parse(data.toString())));
       await once(first, "open");
-      for (let i = 0; i < 60 && !opening.length; i++) await sleep(25);
+      await waitFor(() => opening.length, 1_500);
       expect(opening[0]).toMatchObject({ type: "backlog", totalLines: 2 });
       const disconnected = once(first, "close"); first.terminate(); await disconnected;
 
@@ -1503,7 +1689,7 @@ schedules:
       const frames: any[] = []; resumed.on("message", data => frames.push(JSON.parse(data.toString())));
       try {
         await once(resumed, "open");
-        for (let i = 0; i < 60 && !frames.length; i++) await sleep(25);
+        await waitFor(() => frames.length, 1_500);
         expect(frames[0]).toMatchObject({ type: "backlog", reset: true, totalLines: 1 });
         expect(frames[0].entries.map((entry: any) => entry.line)).toEqual([0]);
         expect(JSON.stringify(frames[0])).toContain("Replacement message");
@@ -1519,11 +1705,11 @@ schedules:
       const frames: any[] = []; socket.on("message", data => frames.push(JSON.parse(data.toString())));
       const closed = once(socket, "close");
       await once(socket, "open");
-      for (let i = 0; i < 60 && !frames.length; i++) await sleep(25);
+      await waitFor(() => frames.length, 1_500);
       expect(frames[0]).toMatchObject({ type: "backlog", entries: [], totalLines: 0, session });
       expect(socket.readyState).toBe(WebSocket.OPEN);
       await writeFile(record, JSON.stringify({ type: "session_meta", payload: { id: session } }) + "\n" + JSON.stringify(row("First message")) + "\n");
-      for (let i = 0; i < 160 && frames.length < 2; i++) await sleep(25);
+      await waitFor(() => frames.length >= 2, 4_000);
       expect(frames[1].type).toBe("backlog"); expect(JSON.stringify(frames[1])).toContain("First message");
       current = "bbbbbbbb-1111-4111-8111-111111111111"; await closed;
     });
@@ -1546,18 +1732,18 @@ schedules:
       const frames: any[] = []; socket.on("message", data => frames.push(JSON.parse(data.toString())));
       try {
         await once(socket, "open");
-        for (let i = 0; i < 80 && !frames.length; i++) await sleep(25);
+        await waitFor(() => frames.length, 2_000);
         // The opening page is the child's recent rows, named by the public id.
         expect(frames[0]).toMatchObject({ type: "backlog", source: "codex", session: id, hasMore: true });
         expect(frames[0].entries).toHaveLength(60);
         expect(JSON.stringify(frames[0])).toContain("Child step 69");
         expect(JSON.stringify(frames[0])).not.toContain(child);
         await appendFile(childFile, JSON.stringify(row("Child step 70")) + "\n");
-        for (let i = 0; i < 80 && frames.length < 2; i++) await sleep(25);
+        await waitFor(() => frames.length >= 2, 2_000);
         expect(frames[1]).toMatchObject({ type: "append", session: id });
         expect(JSON.stringify(frames[1])).toContain("Child step 70"); expect(JSON.stringify(frames[1])).not.toContain("Child step 69");
         socket.send(JSON.stringify({ type: "older", beforeLine: frames[0].startLine }));
-        for (let i = 0; i < 80 && !frames.some(f => f.type === "older"); i++) await sleep(25);
+        await waitFor(() => frames.some(f => f.type === "older"), 2_000);
         const older = frames.find(f => f.type === "older");
         expect(older).toMatchObject({ session: id, startLine: 0, hasMore: false });
         expect(JSON.stringify(older)).toContain("Child step 0");
@@ -1592,14 +1778,14 @@ schedules:
       const frames: any[] = []; socket.on("message", data => frames.push(JSON.parse(data.toString())));
       try {
         await once(socket, "open");
-        for (let i = 0; i < 80 && !frames.length; i++) await sleep(10);
+        await waitFor(() => frames.length, 800);
         expect(frames[0].type).toBe("backlog");
         holdSnapshot = true;
-        for (let i = 0; i < 150 && !releaseSnapshot; i++) await sleep(10);
+        await waitFor(() => releaseSnapshot, 1_500);
         expect(releaseSnapshot).toBeDefined();
         socket.send(JSON.stringify({ type: "older", beforeLine: 1 }));
         await sleep(30); releaseSnapshot!(); releaseSnapshot = undefined;
-        for (let i = 0; i < 80 && !frames.some(f => f.type === "older"); i++) await sleep(10);
+        await waitFor(() => frames.some(f => f.type === "older"), 800);
         expect(frames.find(f => f.type === "older")).toMatchObject({ entries: [], startLine: 0, hasMore: false });
       } finally { socket.terminate(); }
     });
@@ -1635,7 +1821,7 @@ schedules:
       const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
       const frames: any[] = []; socket.on("message", bytes => frames.push(JSON.parse(bytes.toString())));
       await once(socket, "open");
-      for (let i = 0; i < 60 && !frames.length; i++) await sleep(25);
+      await waitFor(() => frames.length, 1_500);
       const reply = new Promise<any>((resolve, reject) => {
         const payload = JSON.stringify({ target, event: "PermissionRequest", tool: "Bash", input: { command: "fixture-command",
           options: [{ label: "Yes, proceed", key: "y" }, { label: "No, and tell Codex what to do differently", key: "esc" }] } });
@@ -1644,7 +1830,7 @@ schedules:
           let data = ""; res.on("data", bytes => data += bytes); res.on("end", () => resolve(JSON.parse(data)));
         }); req.on("error", reject); req.end(payload);
       });
-      for (let i = 0; i < 100 && !frames.some(f => f.agentStatus.pendingApproval); i++) await sleep(25);
+      await waitFor(() => frames.some(f => f.agentStatus.pendingApproval), 2_500);
       const approval = frames.find(f => f.agentStatus.pendingApproval)?.agentStatus.pendingApproval;
       expect(approval?.message).toContain("fixture-command");
       // A held Codex approval publishes its choices for the phone's question card.
@@ -1660,7 +1846,7 @@ schedules:
     });
 
     it("holds MCP arguments as details and answers the matching terminal choices with their own keys", async () => {
-      agentStatus = "waiting";
+      agentStatus = "blocked";
       const sentence = "Allow the phren MCP server to run tool phren_admin?";
       // Codex marks the highlighted row; without a cursor the Hook refuses to
       // answer a menu whose rows carry no keys of their own, and the phone's
@@ -1675,7 +1861,7 @@ schedules:
       const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
       const frames: any[] = []; socket.on("message", bytes => frames.push(JSON.parse(bytes.toString())));
       await once(socket, "open");
-      for (let i = 0; i < 60 && !frames.length; i++) await sleep(25);
+      await waitFor(() => frames.length, 1_500);
       const input = { action: "read_skill", name: "m4l-improve" };
       const reply = new Promise<any>((resolve, reject) => {
         const payload = JSON.stringify({ target, event: "PermissionRequest", tool: "mcp__phren__phren_admin", input });
@@ -1684,7 +1870,7 @@ schedules:
           let data = ""; res.on("data", bytes => data += bytes); res.on("end", () => resolve(JSON.parse(data)));
         }); req.on("error", reject); req.end(payload);
       });
-      for (let i = 0; i < 100 && !frames.some(f => f.agentStatus.pendingApproval?.choice); i++) await sleep(25);
+      await waitFor(() => frames.some(f => f.agentStatus.pendingApproval?.choice), 2_500);
       const approval = frames.find(f => f.agentStatus.pendingApproval?.choice)?.agentStatus.pendingApproval;
       expect(approval?.title).toBe(sentence);
       expect(JSON.parse(approval.details)).toEqual(input);
@@ -1712,7 +1898,7 @@ schedules:
       const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
       const frames: any[] = []; socket.on("message", bytes => frames.push(JSON.parse(bytes.toString())));
       await once(socket, "open");
-      for (let i = 0; i < 60 && !frames.length; i++) await sleep(25);
+      await waitFor(() => frames.length, 1_500);
       const callback = (tool: string, input: unknown) => new Promise<any>((resolve, reject) => {
         const payload = JSON.stringify({ target, event: "PermissionRequest", tool, input });
         const req = request({ socketPath: path.join(root, "bridge/agent.sock"), path: "/hook", method: "POST",
@@ -1721,7 +1907,7 @@ schedules:
         }); req.on("error", reject); req.end(payload);
       });
       const pendingApproval = async (after: number) => {
-        for (let i = 0; i < 100 && !frames.slice(after).some(f => f.agentStatus.pendingApproval); i++) await sleep(25);
+        await waitFor(() => frames.slice(after).some(f => f.agentStatus.pendingApproval), 2_500);
         return frames.slice(after).find(f => f.agentStatus.pendingApproval)?.agentStatus.pendingApproval;
       };
       // A shell approval never takes answers.
@@ -1767,7 +1953,7 @@ schedules:
       const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
       const frames: any[] = []; socket.on("message", bytes => frames.push(JSON.parse(bytes.toString())));
       await once(socket, "open");
-      for (let i = 0; i < 60 && !frames.length; i++) await sleep(25);
+      await waitFor(() => frames.length, 1_500);
       const reply = new Promise<any>((resolve, reject) => {
         const payload = JSON.stringify({ target, event: "PermissionRequest", tool: "AskUserQuestion", input: { questions } });
         const req = request({ socketPath: path.join(root, "bridge/agent.sock"), path: "/hook", method: "POST",
@@ -1776,7 +1962,7 @@ schedules:
         }); req.on("error", reject); req.end(payload);
       });
       // The watch holds the request; the phone sees the approval until it times out.
-      for (let i = 0; i < 120 && !frames.some(f => f.agentStatus?.pendingApproval); i++) await sleep(25);
+      await waitFor(() => frames.some(f => f.agentStatus?.pendingApproval), 3_000);
       expect(frames.find(f => f.agentStatus?.pendingApproval)?.agentStatus.pendingApproval.toolName).toBe("AskUserQuestion");
       expect(await reply).toEqual({});
       const prompt = async (after: number) => {
@@ -1802,12 +1988,9 @@ schedules:
       const beforeCleared = frames.length;
       expect((await api("/v1/keys", { target, keys: ["1"] })).status).toBe(200);
       expect(commands.filter(c => c.method === "agent.send_keys").map(c => c.params.keys).at(-1)).toEqual(["1", "enter"]);
-      let cleared = false;
-      for (let i = 0; i < 200 && !cleared; i++) {
-        cleared = frames.slice(beforeCleared).some(f => f.agentStatus && f.agentStatus.terminalPrompt === undefined);
-        await sleep(25);
-      }
-      expect(cleared).toBe(true);
+      const cleared = () => frames.slice(beforeCleared).some(f => f.agentStatus && f.agentStatus.terminalPrompt === undefined);
+      await waitFor(cleared, 5_000);
+      expect(cleared()).toBe(true);
       socket.close(); await once(socket, "close");
     }, 20_000);
 
@@ -1824,15 +2007,12 @@ schedules:
       await api("/v1/workspaces?watchApprovals=1");
       const reply = callback();
       let pending = false;
-      for (let i = 0; i < 60 && !pending; i++) {
-        await sleep(25);
-        pending = (await api("/v1/workspaces")).data.groups.some((g: any) => g.children.some((t: any) => t.approvalPending));
-      }
+      await waitFor(async () => pending = (await api("/v1/workspaces")).data.groups.some((g: any) => g.children.some((t: any) => t.approvalPending)), 1_500);
       expect(pending).toBe(true);
       const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
       const frames: any[] = []; socket.on("message", bytes => frames.push(JSON.parse(bytes.toString())));
       await once(socket, "open");
-      for (let i = 0; i < 60 && !frames.some(f => f.agentStatus.pendingApproval); i++) await sleep(25);
+      await waitFor(() => frames.some(f => f.agentStatus.pendingApproval), 1_500);
       const approval = frames.find(f => f.agentStatus.pendingApproval)?.agentStatus.pendingApproval;
       expect(approval?.actionId).toBeTruthy();
       expect((await api("/v1/approvals/answer", { target, actionId: approval.actionId, decision: "approve" })).status).toBe(200);
@@ -2088,7 +2268,7 @@ schedules:
       }
       holdSnapshot = true;
       const first = api("/v1/workspaces/create", { cwd: root, label: "x" });
-      for (let i = 0; i < 100 && !releaseSnapshot; i++) await sleep(10);
+      await waitFor(() => releaseSnapshot, 1_000);
       expect(releaseSnapshot).toBeDefined();
       expect((await api("/v1/workspaces/launch", { cwd: root, label: "y", kind: "codex" })).status).toBe(429);
       releaseSnapshot!(); releaseSnapshot = undefined; expect((await first).status).toBe(200);
@@ -2150,7 +2330,7 @@ schedules:
       const frames: any[] = []; socket.on("message", data => frames.push(JSON.parse(data.toString())));
       try {
         await once(socket, "open");
-        for (let i = 0; i < 80 && !frames.length; i++) await sleep(10);
+        await waitFor(() => frames.length, 800);
         expect(frames[0]).toMatchObject({ type: "backlog", startLine: 390, totalLines: 450, hasMore: true });
         expect(frames[0].entries).toHaveLength(60);
       } finally { socket.terminate(); }

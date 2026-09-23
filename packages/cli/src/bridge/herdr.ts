@@ -9,6 +9,7 @@ import { BridgeError, id, object, objects, requestID, serverName, provider, sess
 import { logger } from "../logger.js";
 import { recordedSession } from "./agent-hooks.js";
 import { tabActivityKey } from "./tab-activity.js";
+import { intervalFromEnv } from "./limits.js";
 
 const exec = promisify(execFile);
 export function herdrRoot(): string { return process.env.PHREN_HERDR_HOME || path.join(homedir(), ".config/herdr"); }
@@ -154,6 +155,8 @@ async function processLogs(pids: number[]): Promise<string[]> {
 }
 
 interface PaneIdentity { sessionId?: string; noTranscriptLogs: boolean }
+/** How long a pane's process-based identity probe is reused. */
+const IDENTITY_CACHE_MS = intervalFromEnv("PHREN_IDENTITY_CACHE_MS", 2_000);
 const identities = new Map<string, { at: number; result: Promise<PaneIdentity> }>();
 const identityKey = (server: string, pane: Json, pids: number[]) => JSON.stringify([server, pane.pane_id, pane.terminal_id, pids, pane.agent]);
 export async function paneIdentity(server: string, pane: Json, fresh = false): Promise<string | undefined> {
@@ -162,7 +165,7 @@ export async function paneIdentity(server: string, pane: Json, fresh = false): P
   const pids = await foregroundPids(server, pane);
   const key = identityKey(server, pane, pids);
   const cached = identities.get(key);
-  if (!fresh && cached && Date.now() - cached.at < 2_000) return (await cached.result).sessionId;
+  if (!fresh && cached && Date.now() - cached.at < IDENTITY_CACHE_MS) return (await cached.result).sessionId;
   const result = identityFromProcesses(server, pane, pids);
   if (identities.size >= 128) identities.delete(identities.keys().next().value!);
   identities.set(key, { at: Date.now(), result });
@@ -204,7 +207,7 @@ export async function paneChatState(server: string, pane: Json): Promise<Json> {
   // Reuse the same two-second identity probe as context/overview polling;
   // discovering a new chat must not run lsof again for every list refresh.
   const evidence = identities.get(identityKey(server, pane, pids));
-  const starting = !sessionId && !!startingToken && !!evidence && Date.now() - evidence.at < 2_000 && (await evidence.result).noTranscriptLogs;
+  const starting = !sessionId && !!startingToken && !!evidence && Date.now() - evidence.at < IDENTITY_CACHE_MS && (await evidence.result).noTranscriptLogs;
   return { sessionId, ...(startingToken ? { startingToken } : {}), ...(starting ? { starting: true } : {}) };
 }
 
