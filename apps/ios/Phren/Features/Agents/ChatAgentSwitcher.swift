@@ -95,6 +95,7 @@ struct ChatAgentSwitcher: View {
             }
             .padding(.horizontal, 12)
             .frame(height: 44)
+            .padding(.vertical, 6)
             .background(PhrenTheme.chatCanvas)
             .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: isSearching)
         }
