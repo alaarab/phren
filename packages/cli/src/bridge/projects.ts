@@ -4,7 +4,7 @@ import { promisify } from "node:util";
 import { request } from "node:http";
 import { userInfo } from "node:os";
 import { homeDir } from "../home-paths.js";
-import { realpath, stat } from "node:fs/promises";
+import { readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { phrenStoreRoot } from "./transcripts.js";
 import { locateProject } from "./locate.js";
@@ -110,12 +110,49 @@ export async function repositoryDiff(cwd: string, touched: unknown[] = [], allow
   return { branch, root, launchPath: cwd, files, ...(related.length ? { related } : {}) };
 }
 
-/** The pane's current branch for the chat header. Cached briefly per
- * directory: the status stream asks every 1.5s and a branch rarely moves. */
-const branches = new Map<string, { at: number; value?: string }>();
+/** The HEAD file of the repository holding `cwd` (`.git/HEAD`, or a linked
+ * worktree's through its `.git` file), found without spawning git. */
+export async function headFile(cwd: string): Promise<string | undefined> {
+  let directory = cwd;
+  for (let depth = 0; depth < 64; depth++) {
+    const dotGit = path.join(directory, ".git");
+    const info = await stat(dotGit).catch(() => undefined);
+    if (info?.isDirectory()) return path.join(dotGit, "HEAD");
+    if (info?.isFile()) {
+      const match = /^gitdir:\s*(.+)$/m.exec(await readFile(dotGit, "utf8").catch(() => ""));
+      return match ? path.join(path.resolve(directory, match[1].trim()), "HEAD") : undefined;
+    }
+    const parent = path.dirname(directory);
+    if (parent === directory) return undefined;
+    directory = parent;
+  }
+  return undefined;
+}
+async function headState(cwd: string): Promise<string | undefined> {
+  const file = await headFile(cwd);
+  if (!file) return undefined;
+  const text = await readFile(file, "utf8").catch(() => undefined);
+  return text === undefined ? undefined : `${file}\n${text}`;
+}
+
+/** How long a branch is reused outright, and the longest it is kept while
+ * the repository's HEAD file reads the same. */
+const BRANCH_FRESH_MS = 10_000, BRANCH_MAX_MS = 300_000;
+/** The pane's current branch for the chat header and the overview cards.
+ * Cached per directory: the status stream asks every 1.5s, the overview every
+ * 3s, and a branch rarely moves. Past ten seconds the cached branch is kept
+ * while HEAD's file and contents are unchanged (a checkout rewrites it), so
+ * `git branch` runs again only after a switch or after five minutes. */
+const branches = new Map<string, { at: number; checked: number; head?: string; value?: string }>();
 export async function repositoryBranch(cwd: string): Promise<string | undefined> {
   const cached = branches.get(cwd);
-  if (cached && Date.now() - cached.at < 10_000) return cached.value;
+  const now = Date.now();
+  if (cached && now - cached.checked < BRANCH_FRESH_MS) return cached.value;
+  const head = await headState(cwd);
+  if (cached && head !== undefined && head === cached.head && now - cached.at < BRANCH_MAX_MS) {
+    cached.checked = now;
+    return cached.value;
+  }
   let value: string | undefined;
   try {
     countGit("branch");
@@ -125,7 +162,7 @@ export async function repositoryBranch(cwd: string): Promise<string | undefined>
     value = stdout.trim().slice(0, 200) || undefined;
   } catch { value = undefined; }
   if (branches.size >= 64) branches.delete(branches.keys().next().value!);
-  branches.set(cwd, { at: Date.now(), value });
+  branches.set(cwd, { at: Date.now(), checked: Date.now(), head, value });
   return value;
 }
 
