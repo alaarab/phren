@@ -269,7 +269,12 @@ final class AgentChatSubagentTests: AgentChatUITestCase {
         XCTAssertEqual(app.staticTexts["child-session-note"].label, "Messages go directly to this agent session.")
         let field = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 8)); field.tap(); field.typeText("Continue parser checks")
-        app.buttons["chat-send"].tap()
+        // The parent chat stays in the tree under the agents sheet with its
+        // own (empty, disabled) composer; the child session's Send is the
+        // one the draft enabled.
+        let send = app.buttons.matching(NSPredicate(format: "identifier == %@ AND enabled == true", "chat-send"))
+        XCTAssertEqual(send.count, 1)
+        send.firstMatch.tap()
         XCTAssertTrue(app.staticTexts["Continue parser checks"].waitForExistence(timeout: 8))
         XCTAssertFalse(app.staticTexts["child-composer-note"].exists)
         capture(app, "Pane child full chat")
