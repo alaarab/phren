@@ -5,7 +5,7 @@ import { applyHighlight, startIntroStagger } from "./nodes.js";
 import { mascotMoveTo, spawnLookupPulse } from "./mascot.js";
 import { syncProjectNavActive } from "./project-nav.js";
 import { refreshProjectPanel } from "./project-panel.js";
-import { frameSelection, moveCamera, restoreSelectionCamera } from "./selection-camera.js";
+import { anchorCamera, followLayout, frameSelection, moveCamera, restoreSelectionCamera } from "./selection-camera.js";
 
 let projectPaneTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -40,7 +40,19 @@ export function flyToNode(fgNode: FGNode, duration: number): void {
   if (dir.lengthSq() < 1) dir.set(0.4, 0.35, 1);
   dir.normalize().multiplyScalar(distance);
   const camPos = nodePos.clone().add(dir);
+  anchorCamera(fgNode.id);
   moveCamera(camPos, nodePos, duration);
+}
+
+/**
+ * The layout was recomputed for a new node set (a Focus neighbourhood, a
+ * refresh, a filter or a delete), which moves nodes. Keep the camera on the
+ * node it was sent to rather than on the spot where that node used to be.
+ */
+export function followLayoutChange(): void {
+  const id = followLayout();
+  const fgNode = id ? state.fgNodeById.get(id) : null;
+  if (fgNode) flyToNode(fgNode, 500);
 }
 
 export function screenPosFor(nodeId: string): { x: number; y: number } | null {
@@ -68,8 +80,17 @@ export function notifyClear(): void {
   state.selectionClearCallbacks.forEach((callback) => callback());
 }
 
-export function onNodeClick(fgNode: FGNode): void {
-  selectNode(fgNode.id);
+/**
+ * A tap or click on the canvas. force-graph reports the object it last
+ * hovered, but it refreshes hover on a throttled render tick, and a touch
+ * moves no pointer before it lands, so a tap resolved to the node under the
+ * previous tap. Pick at the event's own position instead.
+ */
+export function onCanvasClick(event: MouseEvent | undefined, hovered: FGNode | null): void {
+  const rect = event && state.container?.getBoundingClientRect();
+  const id = rect ? getNodeAt(event.clientX - rect.left, event.clientY - rect.top)?.id ?? null : hovered?.id ?? null;
+  if (id && state.fgNodeById.has(id)) selectNode(id);
+  else if (state.selectedNodeId || state.focusedProjectId) clearSelection();
 }
 
 export function onNodeRightClick(fgNode: FGNode, event: MouseEvent): void {
@@ -180,15 +201,24 @@ export function getNodeAt(x: number, y: number): NodeDetail | null {
   const raycaster = new THREE.Raycaster();
   raycaster.setFromCamera(ndc, state.fg.camera());
   const hits = raycaster.intersectObjects(state.fg.scene().children, true);
+  // Dot sprites are square quads larger than the glow they draw, so a nearer
+  // neighbour's quad can cover the dot under the finger. Of the nodes hit,
+  // take the one whose centre is closest to the point on screen.
+  let best: { id: string; distance: number } | null = null;
   for (const hit of hits) {
     let obj: THREE.Object3D | null = hit.object;
     while (obj) {
       const id = obj.userData?.phrenNodeId;
-      if (typeof id === "string") return nodeDetail(id);
+      if (typeof id === "string") {
+        const at = screenPosFor(id);
+        const distance = at ? Math.hypot(at.x - x, at.y - y) : Infinity;
+        if (!best || distance < best.distance) best = { id, distance };
+        break;
+      }
       obj = obj.parent;
     }
   }
-  return null;
+  return best ? nodeDetail(best.id) : null;
 }
 
 // ── Intro sequence ──────────────────────────────────────────────────────
@@ -238,6 +268,7 @@ const FIT_PADDING = 48;
 export function fitCameraToGraph(duration: number): void {
   const fg = state.fg;
   if (!fg) return;
+  anchorCamera(null);
   const fit = computeFitCamera();
   if (!fit) {
     fg.zoomToFit(duration, FIT_PADDING);

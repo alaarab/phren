@@ -88,7 +88,10 @@ from the main actor and keeps one web view as selection changes.
 On the phone, the dossier sits above the tab bar. Selecting a node centers it
 in the uncovered space above the card, leaving 24 points between that space
 and the dossier. Card height and viewport changes update the camera position.
-Zoom preserves this placement. Closing the dossier restores the view saved
+Zoom preserves this placement. The layout depends on the nodes shown, so
+Focus, a refresh, a filter or a delete moves nodes; the camera follows the
+selected or revealed node to its new place until you move the camera. Taps
+pick the node at the tap's own position. Closing the dossier restores the view saved
 before the first selection; stepping between nodes keeps that saved view.
 
 Camera movement takes 0.18 seconds or happens immediately with Reduce Motion.

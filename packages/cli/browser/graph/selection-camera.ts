@@ -8,6 +8,10 @@ export type SelectionViewport = { bottomInset: number; topInset?: number; gap?: 
 let viewport: SelectionViewport | null = null;
 let previousPose: Pose | null = null;
 let selectedId: string | null = null;
+// The node the camera was last sent to (a selection or a reveal). A new
+// payload or filter lays the graph out again and moves every node, so the
+// camera follows this node there until the user takes the camera.
+let anchorId: string | null = null;
 let following = false;
 let interacting = false;
 let animation = 0;
@@ -70,6 +74,7 @@ export function frameSelection(nodeId: string): boolean {
   stopCameraMotion();
   if (!previousPose) previousPose = cameraPose();
   selectedId = nodeId;
+  anchorId = nodeId;
   following = !interacting;
   state.firstSettle = false;
   state.introPlayed = true;
@@ -98,10 +103,33 @@ export function recenterSelection(duration = 180, pose?: Pose): void {
   moveCamera(target.clone().addScaledVector(back, depth), target, duration);
 }
 
+/** A fly-to (reveal, desktop selection) keeps this node on camera across relayouts. */
+export function anchorCamera(nodeId: string | null): void {
+  anchorId = nodeId;
+}
+
+/**
+ * Called after the layout has placed the current node set. Returns the node a
+ * fly-to host should move to, or null when the camera stays: nothing was
+ * anchored, the user has the camera, the node is gone, or a framed selection
+ * has already been recentred here.
+ */
+export function followLayout(): string | null {
+  if (!anchorId || interacting || !state.fg) return null;
+  const node = state.fgNodeById.get(anchorId);
+  if (!node || node.x == null) return null;
+  if (viewport && selectedId === anchorId) {
+    recenterSelection();
+    return null;
+  }
+  return anchorId;
+}
+
 export function restoreSelectionCamera(): void {
   const previous = previousPose;
   previousPose = null;
   selectedId = null;
+  anchorId = null;
   following = false;
   if (previous && !interacting) moveCamera(previous.position, previous.target, 180);
   else stopCameraMotion();
@@ -110,6 +138,7 @@ export function restoreSelectionCamera(): void {
 export function beginCameraInteraction(): void {
   interacting = true;
   following = false;
+  anchorId = null;
   // An initial layout callback must not start the intro over a user's gesture.
   state.firstSettle = false;
   state.introPlayed = true;
@@ -133,6 +162,7 @@ export function disposeSelectionCamera(): void {
   stopCameraMotion();
   previousPose = null;
   selectedId = null;
+  anchorId = null;
   following = false;
   interacting = false;
 }
