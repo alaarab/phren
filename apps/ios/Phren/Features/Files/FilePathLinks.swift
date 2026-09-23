@@ -101,10 +101,15 @@ struct FileLinkedText: View {
     @Environment(\.fileLinkContext) private var context
     @State private var existing: Set<String> = []
     @State private var opened: FileViewerItem?
+    /// The surrounding link policy, such as the chat's website confirmation.
+    @Environment(\.openURL) private var inherited
     var body: some View {
         Text(ChatInlineCode.tinted(FilePathLinks.linked(attributed, existing: existing)))
             .environment(\.openURL, OpenURLAction { url in
-                guard url.scheme == "phren-file" else { return .systemAction }
+                // Only file links are ours. Every other link goes through the
+                // screen's own policy; `.systemAction` would skip the chat's
+                // "Open website?" confirmation and its scheme filter.
+                guard url.scheme == "phren-file" else { inherited(url); return .handled }
                 guard let context, let path = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "path" })?.value,
                       existing.contains(path) else { return .discarded }
                 opened = FileViewerItem(host: context.host, file: FileLinkChecks.file(path, context: context))
