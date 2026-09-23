@@ -83,7 +83,7 @@ function cachedTokenize(text: string): string[] {
   const key = createHash("sha256").update(text).digest("hex").slice(0, 16);
   const hit = tokenCache.get(key);
   if (hit) return hit;
-  const tokens = tokenize(text);
+  const tokens = stemmedTerms(text);
   if (tokenCache.size >= MAX_TOKEN_CACHE) {
     // Evict oldest entry
     tokenCache.delete(tokenCache.keys().next().value ?? "");
@@ -116,10 +116,8 @@ function loadCosineFallbackWindow(
   return rows?.[0]?.values ?? [];
 }
 
-/**
- * Tokenize text into non-stop-word tokens for TF-IDF computation, with stemming.
- */
-function tokenize(text: string): string[] {
+/** Punctuation-free, stop-word-free, Porter-stemmed terms for TF-IDF scoring. */
+function stemmedTerms(text: string): string[] {
   return text
     .toLowerCase()
     .replace(/[^\w\s]/g, " ")
@@ -136,7 +134,7 @@ function tokenize(text: string): string[] {
  *   Pass the real total when docs is a pre-filtered subset so IDF scores are not inflated.
  */
 function tfidfCosine(docs: string[], query: string, corpusN?: number): number[] {
-  const queryTokens = tokenize(query);
+  const queryTokens = stemmedTerms(query);
   if (queryTokens.length === 0) return docs.map(() => 0);
 
   // Collect all unique terms from query + all docs (use cached tokenization for repeated content)
