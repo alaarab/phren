@@ -3,12 +3,12 @@ import { disabledHint } from "../modules/registry.js";
 import { activateModules as moduleSnapshot, type ModuleSnapshot } from "../modules/runtime.js";
 import { logger } from "../logger.js";
 import { request, createServer, type Server, type ServerResponse } from "node:http";
-import { mkdir, writeFile, readFile, opendir, rename, chmod, unlink, lstat } from "node:fs/promises";
+import { mkdir, readFile, opendir, chmod, unlink, lstat } from "node:fs/promises";
 import { lstatSync, readFileSync, watch, type FSWatcher } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { BridgeError, bridgeRoot, object, objects, provider, serverName, sessionId, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
+import { atomicInPrivateDir, BridgeError, bridgeRoot, object, objects, provider, serverName, sessionId, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
 import { herdrRoot, rpc, servers, snapshot, trustedDirectory, validateTarget } from "./herdr.js";
 import { capturesChanges, ToolChanges } from "./changes.js";
 import { phrenStoreRoot, unwrapPastedContent } from "./transcripts.js";
@@ -818,10 +818,7 @@ export class AgentHooks {
       if (!file) throw new BridgeError(400, "Invalid conversation identity.");
       await validateTarget(target);
       if (opencodeRequest(target.session)?.id !== id) throw new BridgeError(409, "This approval is no longer pending.");
-      await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
-      const temporary = file + "." + randomUUID();
-      await writeFile(temporary, JSON.stringify({ id, decision }), { mode: 0o600, flag: "wx" });
-      await rename(temporary, file);
+      await atomicInPrivateDir(file, JSON.stringify({ id, decision }));
       this.opencode.delete(id); this.pushBindings.dropAction(id);
       return;
     }
@@ -898,11 +895,8 @@ export class AgentHooks {
         const info = object((await rpc(target.server, "pane.process_info", { pane_id: target.pane })).process_info);
         const pids = objects(info.foreground_processes).map(p => p.pid).filter(p => Number.isSafeInteger(p));
         if (!pids.length) throw new Error("No foreground process");
-        const file = bindingPath(target.server, target.pane); await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
-        const temporary = file + "." + randomUUID();
-        await writeFile(temporary, JSON.stringify({ terminal: pane.terminal_id, source: target.source, session: target.session, pids,
-          workspace: target.workspace, tab: target.tab }), { mode: 0o600, flag: "wx" });
-        await rename(temporary, file);
+        await atomicInPrivateDir(bindingPath(target.server, target.pane), JSON.stringify({ terminal: pane.terminal_id, source: target.source,
+          session: target.session, pids, workspace: target.workspace, tab: target.tab }));
         // What a shell call changed on disk: snapshot before, diff after.
         const input = typeof body.input === "string" ? { patch: body.input } : object(body.input), command = [input.command, input.cmd].find(v => typeof v === "string") as string | undefined;
         // A shell call by name, or any tool whose input is a command line —

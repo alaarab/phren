@@ -1,12 +1,12 @@
 import { execFile, spawn } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, open, readFile, readdir, realpath, rename, stat, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { lstat, open, readFile, readdir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { claudeConfigDir, homeDir } from "../home-paths.js";
 import path from "node:path";
 import { promisify } from "node:util";
 import { fanoutRoot } from "./fanouts.js";
-import { bridgeRoot, type Json, object } from "./protocol.js";
+import { atomicInPrivateDir, bridgeRoot, type Json, object } from "./protocol.js";
 import { stripTerminal } from "../terminal-text.js";
 
 const exec = promisify(execFile);
@@ -725,10 +725,7 @@ export async function captureClaudeUsage(original: string): Promise<void> {
     const rate_limits = Object.fromEntries(snapshot.windows.map(w => [w.id, {
       used_percentage: w.usedPercent, resets_at: w.resetsAt ? Date.parse(w.resetsAt) / 1000 : undefined,
     }]));
-    const file = claudeFile(), temporary = file + "." + randomUUID();
-    await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
-    await writeFile(temporary, JSON.stringify({ rate_limits, updatedAt: snapshot.updatedAt }), { mode: 0o600, flag: "wx" });
-    await rename(temporary, file);
+    await atomicInPrivateDir(claudeFile(), JSON.stringify({ rate_limits, updatedAt: snapshot.updatedAt }));
   } catch { /* Status line rendering must survive unavailable usage storage. */ }
   const previous = object(JSON.parse(Buffer.from(original, "base64").toString()));
   if (typeof previous.command === "string") {

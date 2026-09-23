@@ -1,9 +1,9 @@
-import { createPrivateKey, randomUUID, sign } from "node:crypto";
-import { readFile, rename, stat, writeFile } from "node:fs/promises";
+import { createPrivateKey, sign } from "node:crypto";
+import { readFile, stat } from "node:fs/promises";
 import { connect } from "node:http2";
 import path from "node:path";
 import { z } from "zod";
-import { bridgeRoot } from "./protocol.js";
+import { atomic, bridgeRoot } from "./protocol.js";
 
 const deviceSchema = z.object({
   deviceID: z.string().uuid(),
@@ -151,9 +151,7 @@ export class ApprovalPushService {
   get status() { return { supported: true, configured: this.sender !== undefined, devices: this.devices.length }; }
   async register(value: unknown) {
     this.devices = upsertPushDevice(this.devices, value);
-    const temporary = `${this.devicesFile}.${randomUUID()}`;
-    await writeFile(temporary, JSON.stringify(this.devices), { mode: 0o600, flag: "wx" });
-    await rename(temporary, this.devicesFile);
+    await atomic(this.devicesFile, JSON.stringify(this.devices));
   }
   async notify(value: ApprovalPush): Promise<boolean> {
     if (!this.sender || !this.devices.length) return false;

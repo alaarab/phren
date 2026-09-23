@@ -3,16 +3,14 @@ import * as path from "path";
 import { errorMessage } from "../utils.js";
 // The experimental agent imports the sessions directory from here.
 export { sessionsDir } from "../phren-paths.js";
+import { atomicWriteText } from "../phren-paths.js";
 
 /**
  * Write JSON to a file atomically using temp-file + rename.
  * Ensures the parent directory exists before writing.
  */
 export function atomicWriteJson(filePath: string, data: unknown): void {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  const tmpPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2) + "\n");
-  fs.renameSync(tmpPath, filePath);
+  atomicWriteText(filePath, JSON.stringify(data, null, 2) + "\n");
 }
 
 // ── Session state types & helpers (shared between MCP tools and hooks) ───────

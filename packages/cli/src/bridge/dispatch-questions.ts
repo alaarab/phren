@@ -1,9 +1,9 @@
-import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, open, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { lstat, mkdir, open, readFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { dispatchDestinationSchema } from "./dispatch-headless.js";
-import { BridgeError, bridgeRoot, object, objects, type Json } from "./protocol.js";
+import { atomicInPrivateDir, BridgeError, bridgeRoot, object, objects, type Json } from "./protocol.js";
 
 const uuid = z.string().uuid();
 const timestamp = z.string().datetime({ offset: true });
@@ -67,11 +67,8 @@ async function createStored(file: string, value: unknown): Promise<boolean> {
   finally { await handle.close(); }
 }
 
-async function replaceStored(file: string, value: unknown): Promise<void> {
-  await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
-  const temporary = `${file}.${randomUUID()}.tmp`;
-  await writeFile(temporary, JSON.stringify(value, null, 2) + "\n", { mode: 0o600, flag: "wx" });
-  try { await rename(temporary, file); } finally { await unlink(temporary).catch(() => {}); }
+function replaceStored(file: string, value: unknown): Promise<void> {
+  return atomicInPrivateDir(file, JSON.stringify(value, null, 2) + "\n");
 }
 
 function statusObject(value: unknown): Json {
