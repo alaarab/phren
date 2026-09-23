@@ -6,7 +6,7 @@ import { BridgeError, object, objects, type Json } from "./protocol.js";
  * AskUserQuestion's questions and answers. Pure functions over text and input. */
 
 /** The terminal keys an agent's own dialog accepts. Kept in step with
- * `ANSWER_KEYS` in server.ts; "p" is Codex's "don't ask again" answer. */
+ * `ANSWER_KEYS` in server-pane-routes.ts; "p" is Codex's "don't ask again" answer. */
 const choiceKeys = new Set(["Escape", "Enter", "Up", "Down", "Tab", "y", "n", "p", "1", "2", "3", "4", "5", "6", "7", "8", "9"]);
 /** A question asks in a few lines; more than this is scrollback above it. */
 const QUESTION_LINES = 12;
