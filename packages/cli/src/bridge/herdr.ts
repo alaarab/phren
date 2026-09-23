@@ -85,16 +85,88 @@ export async function rpc(server: string, method: string, params: Json = {}, sig
   });
 }
 
+/** How long the activity timer reuses the list of running Herdr servers
+ * before pinging every server directory again. */
+export const SERVER_LIST_REUSE_MS = intervalFromEnv("PHREN_SERVER_LIST_REUSE_MS", 30_000, 0, 600_000);
+let serverList: { at: number; value: Promise<Json[]> } | undefined;
+/** The names the last `servers()` found running. */
+let knownServers: string[] | undefined;
+/** The running servers, reusing a list at most `maxAgeMs` old. For
+ * background work only: a route that answers the phone calls `servers()`. */
+export async function recentServers(maxAgeMs = SERVER_LIST_REUSE_MS): Promise<Json[]> {
+  if (serverList && Date.now() - serverList.at < maxAgeMs) return serverList.value;
+  const value = servers();
+  serverList = { at: Date.now(), value };
+  value.catch(() => { if (serverList?.value === value) serverList = undefined; });
+  return value;
+}
+
 export async function servers(): Promise<Json[]> {
   const names = ["default", ...(await readdir(path.join(herdrRoot(), "sessions")).catch(() => [])).filter(n => serverName.safeParse(n).success)].slice(0, 64);
   const results = await Promise.all(names.map(async name => {
     try { await rpc(name, "ping"); return { id: `herdr:${name}`, kind: "herdr", session: name, running: true }; }
     catch { return null; }
   }));
-  return results.filter((v): v is NonNullable<typeof v> => v !== null);
+  const running = results.filter((v): v is NonNullable<typeof v> => v !== null);
+  knownServers = running.map(server => server.session);
+  return running;
 }
 
-export async function snapshot(server: string): Promise<Json> { return object((await rpc(server, "session.snapshot")).snapshot); }
+/** How old a shared `session.snapshot` may be for readers that poll: open
+ * chat and status streams, the overview and the activity timer. */
+export const SNAPSHOT_SHARE_MS = intervalFromEnv("PHREN_SNAPSHOT_SHARE_MS", 2_500, 0, 10_000);
+const sharedSnapshots = new Map<string, { at: number; value: Json }>();
+const inFlightSnapshots = new Map<string, Promise<Json>>();
+
+/** A fresh snapshot. Its answer also becomes the shared one, so pollers reuse it. */
+export async function snapshot(server: string): Promise<Json> {
+  const started = Date.now();
+  const value = object((await rpc(server, "session.snapshot")).snapshot);
+  const current = sharedSnapshots.get(server);
+  // A slower request that started before the current answer never replaces it.
+  if (!current || current.at <= started) {
+    if (!current && sharedSnapshots.size >= 64) sharedSnapshots.delete(sharedSnapshots.keys().next().value!);
+    sharedSnapshots.set(server, { at: Date.now(), value });
+  }
+  return value;
+}
+
+/**
+ * One `session.snapshot` per server shared by every poller: an answer less
+ * than `maxAgeMs` old is reused and concurrent callers join the request in
+ * flight, so N open chats and the overview cost one snapshot per window, not
+ * one each. A pane that disappears or changes identity shows in the next
+ * snapshot, at most `maxAgeMs` after the change. Failures are never kept.
+ * Anything about to act on a pane (a send, a key, a launch) calls `snapshot`.
+ */
+export async function sharedSnapshot(server: string, maxAgeMs = SNAPSHOT_SHARE_MS): Promise<Json> {
+  const cached = sharedSnapshots.get(server);
+  if (cached && Date.now() - cached.at < maxAgeMs) return cached.value;
+  const pending = inFlightSnapshots.get(server);
+  if (pending) return pending;
+  const value = snapshot(server).finally(() => { if (inFlightSnapshots.get(server) === value) inFlightSnapshots.delete(server); });
+  inFlightSnapshots.set(server, value);
+  return value;
+}
+
+/**
+ * Every pane on the running servers, from snapshots already held and no older
+ * than `maxAgeMs`, without asking Herdr; undefined unless the server list is
+ * known and every listed server has such a snapshot.
+ */
+export function knownPanes(maxAgeMs: number): Json[] | undefined {
+  if (!knownServers) return undefined;
+  const panes: Json[] = [];
+  for (const name of knownServers) {
+    const held = sharedSnapshots.get(name);
+    if (!held || Date.now() - held.at >= maxAgeMs) return undefined;
+    panes.push(...objects(held.value.panes));
+  }
+  return panes;
+}
+
+/** For tests: forget every shared snapshot and the server list. */
+export function resetSharedHerdrState(): void { sharedSnapshots.clear(); inFlightSnapshots.clear(); serverList = undefined; knownServers = undefined; }
 /** The agent's Herdr name. Newer Herdr keeps it in `agents[].name` rather
  * than on the pane (`agent_name`); read either. */
 export function paneAgentName(s: Json, pane: Json | undefined): string | undefined {
@@ -177,18 +249,23 @@ interface PaneIdentity { sessionId?: string; noTranscriptLogs: boolean }
 const IDENTITY_CACHE_MS = intervalFromEnv("PHREN_IDENTITY_CACHE_MS", 2_000);
 const identities = new Map<string, { at: number; result: Promise<PaneIdentity> }>();
 const identityKey = (server: string, pane: Json, pids: number[]) => JSON.stringify([server, pane.pane_id, pane.terminal_id, pids, pane.agent]);
-export async function paneIdentity(server: string, pane: Json, fresh = false): Promise<string | undefined> {
+/** The pane's identity and, when it had to look, the foreground PIDs it read,
+ * so a caller that also needs them does not ask Herdr a second time. */
+async function resolveIdentity(server: string, pane: Json, fresh: boolean): Promise<{ sessionId?: string; pids?: number[] }> {
   const reported = object(pane.agent_session);
-  if (reported.kind === "id" && reported.agent === pane.agent && typeof reported.value === "string" && sessionId.safeParse(reported.value).success) { countIdentity("reported"); return reported.value; }
+  if (reported.kind === "id" && reported.agent === pane.agent && typeof reported.value === "string" && sessionId.safeParse(reported.value).success) { countIdentity("reported"); return { sessionId: reported.value }; }
   const pids = await foregroundPids(server, pane);
   const key = identityKey(server, pane, pids);
   const cached = identities.get(key);
-  if (!fresh && cached && Date.now() - cached.at < IDENTITY_CACHE_MS) { countIdentity("cached"); return (await cached.result).sessionId; }
+  if (!fresh && cached && Date.now() - cached.at < IDENTITY_CACHE_MS) { countIdentity("cached"); return { sessionId: (await cached.result).sessionId, pids }; }
   countIdentity(fresh ? "probe-fresh" : "probe");
   const result = identityFromProcesses(server, pane, pids);
   if (identities.size >= 128) identities.delete(identities.keys().next().value!);
   identities.set(key, { at: Date.now(), result });
-  return (await result).sessionId;
+  return { sessionId: (await result).sessionId, pids };
+}
+export async function paneIdentity(server: string, pane: Json, fresh = false): Promise<string | undefined> {
+  return (await resolveIdentity(server, pane, fresh)).sessionId;
 }
 async function identityFromProcesses(server: string, pane: Json, pids: number[]): Promise<PaneIdentity> {
   const files = await processLogs(pids);
@@ -213,10 +290,14 @@ async function identityFromProcesses(server: string, pane: Json, pids: number[])
 const startingKey = randomBytes(32);
 /** Bind first-send permission to the actual terminal/process, never a cwd or
  * a guessed conversation. Tokens expire naturally when the Hook/process restarts. */
-export async function paneChatState(server: string, pane: Json): Promise<Json> {
+export async function paneChatState(server: string, pane: Json, options: { tokenWhenIdentified?: boolean } = {}): Promise<Json> {
   if (!provider.safeParse(pane.agent).success) return {};
-  const sessionId = await paneIdentity(server, pane);
-  const pids = await foregroundPids(server, pane);
+  const identity = await resolveIdentity(server, pane, false);
+  const sessionId = identity.sessionId;
+  // A pane whose conversation is known is not starting, so a caller that
+  // reads only `sessionId` and `starting` (the overview) needs no PIDs.
+  if (sessionId && options.tokenWhenIdentified === false) return { sessionId };
+  const pids = identity.pids ?? await foregroundPids(server, pane);
   // The token binds to the agent's own process, the oldest in the pane's
   // foreground group. Helpers it spawns while starting up (Codex forks
   // several in its first seconds) must not turn the phone's first send away.
@@ -265,10 +346,28 @@ export async function validateStartingTarget(target: StartingTarget): Promise<Js
   return pane;
 }
 
-export async function validateTarget(target: Target, sending = false, refreshIdentity = sending): Promise<Json> {
-  const s = await snapshot(target.server);
+/** Identities already resolved for a shared snapshot's pane objects, so every
+ * stream reading the same snapshot resolves a pane once. */
+const sharedIdentities = new WeakMap<Json, Promise<string | undefined>>();
+/**
+ * The target's pane, only while it still runs the target's conversation.
+ * `sharedWithinMs` lets a poller (a stream tick) accept a shared snapshot up
+ * to that old; sends, keys and every other mutation keep a fresh one.
+ */
+export async function validateTarget(target: Target, sending = false, refreshIdentity = sending, sharedWithinMs = 0): Promise<Json> {
+  const shared = sharedWithinMs > 0 && !sending && !refreshIdentity;
+  const s = shared ? await sharedSnapshot(target.server, sharedWithinMs) : await snapshot(target.server);
   const pane = findPane(s, target);
-  if (!pane || await paneIdentity(target.server, pane, refreshIdentity) !== target.session) throw new BridgeError(409, "This pane's conversation changed. Reopen the chat.");
+  let identity: Promise<string | undefined> | undefined;
+  if (pane && shared) {
+    identity = sharedIdentities.get(pane);
+    if (!identity) {
+      identity = paneIdentity(target.server, pane);
+      sharedIdentities.set(pane, identity);
+      identity.catch(() => sharedIdentities.delete(pane));
+    }
+  } else if (pane) identity = paneIdentity(target.server, pane, refreshIdentity);
+  if (!pane || await identity !== target.session) throw new BridgeError(409, "This pane's conversation changed. Reopen the chat.");
   if (sending && ["blocked", "waiting", "unknown"].includes(String(pane.agent_status))) throw new BridgeError(409, "This agent needs input in the terminal first.");
   return pane;
 }
