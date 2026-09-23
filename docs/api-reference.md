@@ -59,9 +59,13 @@ CLI equivalent:
 ### `live_sessions`
 
 List every live agent session on this computer and each enrolled computer:
-computer, project (none for a conductor), harness, status, role, branch, model
-and the `target` that `hand_off` takes. Computers that could not be reached come
-back in `unreachable`; `enrolled` counts this Hook's peers, and `peerError`
+computer, project (none for a conductor), harness, status, `idleFor` (seconds
+since the tab last changed, when the Hook has seen it change), role, branch,
+model and the `target` that `hand_off` takes. Computers that could not be
+reached come back in `unreachable`. Computers registered in the store's
+`machines.yaml` but not linked in `hooks.yaml` come back in
+`notLinked: [{ name }]`: their sessions were not checked, which is not the same
+as nothing running there. `enrolled` counts this Hook's peers, and `peerError`
 says why none were read when `hooks.yaml` is broken. No parameters. In the
 core profile use `phren_admin(action: "live_sessions")`.
 

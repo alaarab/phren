@@ -5,6 +5,9 @@ import { projectName } from "./dispatch.js";
 import { grantLabel, listGrants, matchGrant } from "./grants.js";
 import { hookPeers, optionalHookPeers, peerRequest, type HookPeer } from "./peers.js";
 import { BridgeError, object, objects, sessionId, targetSchema, type Json, type Target } from "./protocol.js";
+import { canonicalComputer } from "./schedules.js";
+import { findPhrenPath } from "../phren-paths.js";
+import { listMachines } from "../profile-store.js";
 
 const promptText = z.string().min(1).max(32768).refine(value => !/[\x00-\x08\x0b-\x1f\x7f]/.test(value));
 
@@ -53,19 +56,23 @@ export async function handOff(input: unknown): Promise<{ ok: boolean; delivered:
 export interface LiveSession {
   computer: string; local: boolean; project?: string; label?: string; title?: string; agent?: string;
   status?: string; role?: string; branch?: string; model?: string; target?: Target;
+  /** Seconds since the tab last changed, when the Hook has seen it change. */
+  idleFor?: number;
 }
 
-function sessionsFrom(overview: Json, computer: string, local: boolean): LiveSession[] {
+function sessionsFrom(overview: Json, computer: string, local: boolean, now = Date.now()): LiveSession[] {
   const sessions: LiveSession[] = [];
   for (const group of objects(overview.groups)) for (const tab of objects(group.children)) {
     if (typeof tab.agent !== "string") continue;
     const target = targetSchema.safeParse(tab.target);
     const cwd = typeof tab.cwd === "string" ? tab.cwd : "";
     const text = (value: unknown) => typeof value === "string" && value ? value : undefined;
+    const changedAt = typeof tab.lastChangedAt === "string" ? Date.parse(tab.lastChangedAt) : NaN;
     // A conductor sits in the store, not a project.
     sessions.push({ computer, local, project: tab.role === "conductor" ? undefined : text(cwd.split("/").filter(Boolean).at(-1)), label: text(group.label),
       title: text(tab.title), agent: tab.agent, status: text(tab.agentStatus), role: text(tab.role),
-      branch: text(tab.branch), model: text(tab.model), ...(target.success ? { target: target.data } : {}) });
+      branch: text(tab.branch), model: text(tab.model), ...(target.success ? { target: target.data } : {}),
+      ...(Number.isFinite(changedAt) ? { idleFor: Math.max(0, Math.floor((now - changedAt) / 1000)) } : {}) });
   }
   return sessions;
 }
@@ -73,7 +80,26 @@ function sessionsFrom(overview: Json, computer: string, local: boolean): LiveSes
 /** Every live agent the conductor could hand work to: this computer's Herdr
  * overview plus each enrolled computer's, read through its verified Hook.
  * An unreachable computer is reported, never silently dropped. */
-export async function listLiveSessions(): Promise<{ sessions: LiveSession[]; unreachable: { computer: string; error: string }[]; enrolled: number; peerError?: string }> {
+/** Computers the store registers (machines.yaml) that this Hook has no
+ * verified connection to, so their sessions cannot be listed from here. */
+export function notLinkedComputers(store: string | null, here: string, linked: readonly string[]): { name: string }[] {
+  if (!store) return [];
+  const machines = listMachines(store);
+  if (!machines.ok) return [];
+  const known = new Set([here, ...linked].map(canonicalComputer));
+  return Object.keys(machines.data).filter(name => !known.has(canonicalComputer(name))).sort().map(name => ({ name }));
+}
+
+export interface LiveSessions {
+  sessions: LiveSession[];
+  unreachable: { computer: string; error: string }[];
+  /** Registered in the store but not linked in hooks.yaml: unknown, not idle. */
+  notLinked: { name: string }[];
+  enrolled: number;
+  peerError?: string;
+}
+
+export async function listLiveSessions(options: { store?: string | null } = {}): Promise<LiveSessions> {
   const health = await hookRequest("/v1/health");
   const here = typeof object(health.computer).name === "string" ? String(object(health.computer).name) : "this computer";
   const sessions = sessionsFrom(await hookRequest("/v1/workspaces"), here, true);
@@ -87,5 +113,7 @@ export async function listLiveSessions(): Promise<{ sessions: LiveSession[]; unr
       unreachable.push({ computer: peer.name, error: error instanceof Error ? error.message : "Unreachable." });
     }
   }));
-  return { sessions, unreachable, enrolled: peers.length, ...(peerError ? { peerError } : {}) };
+  const store = options.store !== undefined ? options.store : findPhrenPath();
+  const notLinked = notLinkedComputers(store, here, peers.map(peer => peer.name));
+  return { sessions, unreachable, notLinked, enrolled: peers.length, ...(peerError ? { peerError } : {}) };
 }

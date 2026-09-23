@@ -4,7 +4,7 @@ import { tmpdir, homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
-import { ARCHIVE_MAX_FOLDERS, archiveFinishedFanouts, fanoutChildren, visibleCodexExecEvent, visibleOpenCodeRunEvent } from "./fanouts.js";
+import { ARCHIVE_MAX_FOLDERS, archiveFinishedFanouts, fanoutChildren, parseFanoutArchiveFlags, visibleCodexExecEvent, visibleOpenCodeRunEvent } from "./fanouts.js";
 import type { ChangedFile } from "./changes.js";
 import { object, objects } from "./protocol.js";
 
@@ -373,5 +373,49 @@ describe("fan-out archive sweep", () => {
     expect(await present(path.join(archive, "kept-001"))).toBe(true);
     expect(await present(path.join(archive, "job-in"))).toBe(true);
     expect((await readdir(archive))).toHaveLength(ARCHIVE_MAX_FOLDERS);
+  });
+
+  it("archives one parent's finished jobs at any age, with the sweep's own safety checks", async () => {
+    const { root, env, live, archive } = await store();
+    const other = "bbbbbbbb-2222-4222-8222-222222222222";
+    const justNow = new Date(Date.now() - 60_000).toISOString();
+    await archiveJob(root, "job-mine", { manifest: { status: "completed", finishedAt: justNow } });
+    await archiveJob(root, "job-mine-running", { exit: false });
+    await archiveJob(root, "job-mine-locked", { manifest: { status: "completed", finishedAt: justNow } });
+    await mkdir(path.join(live, "job-mine-locked", "message-lock"));
+    await archiveJob(root, "job-mine-queued", { manifest: { status: "completed", finishedAt: justNow } });
+    await mkdir(path.join(live, "job-mine-queued", "messages"));
+    await writeFile(path.join(live, "job-mine-queued", "messages", "2026-09-22T12-00-00-000Z-a.queued.json"), "{}");
+    await archiveJob(root, "job-theirs", { manifest: { status: "completed", finishedAt: justNow, parent: { provider: "codex", session: other } } });
+    await archiveJob(root, "job-orphan", { manifest: null, exitAgeMs: 40 * HOUR_MS });
+
+    expect(await archiveFinishedFanouts(env, { parent: { session: parent, provider: "claude" }, olderThanMs: 0 })).toEqual({ moved: [], deleted: 0 });
+    const result = await archiveFinishedFanouts(env, { parent: { session: parent }, olderThanMs: 0 });
+    expect(result).toEqual({ moved: ["job-mine"], deleted: 0 });
+    expect(await present(path.join(archive, "job-mine"))).toBe(true);
+    for (const kept of ["job-mine-running", "job-mine-locked", "job-mine-queued", "job-theirs", "job-orphan"]) {
+      expect(await present(path.join(live, kept))).toBe(true);
+    }
+  });
+
+  it("takes a shorter age than 24 hours", async () => {
+    const { root, env, live, archive } = await store();
+    await archiveJob(root, "job-hour", { manifest: { status: "failed", finishedAt: new Date(Date.now() - HOUR_MS).toISOString() } });
+    await archiveJob(root, "job-minute", { manifest: { status: "completed", finishedAt: new Date(Date.now() - 60_000).toISOString() } });
+    expect(await archiveFinishedFanouts(env, { olderThanMs: 30 * 60_000 })).toEqual({ moved: ["job-hour"], deleted: 0 });
+    expect(await present(path.join(archive, "job-hour"))).toBe(true);
+    expect(await present(path.join(live, "job-minute"))).toBe(true);
+  });
+});
+
+describe("phren bridge fanouts archive flags", () => {
+  it("reads --parent and --older-than and refuses anything else", () => {
+    expect(parseFanoutArchiveFlags([])).toEqual({});
+    expect(parseFanoutArchiveFlags(["--parent", parent, "--older-than", "15", "--dry-run"]))
+      .toEqual({ parent: { session: parent }, olderThanMs: 15 * 60_000, dryRun: true });
+    expect(() => parseFanoutArchiveFlags(["--parent"])).toThrow(/Usage: phren bridge fanouts archive/);
+    expect(() => parseFanoutArchiveFlags(["--parent", "../x"])).toThrow(/Usage/);
+    expect(() => parseFanoutArchiveFlags(["--older-than", "-5"])).toThrow(/Usage/);
+    expect(() => parseFanoutArchiveFlags(["--all"])).toThrow(/Usage/);
   });
 });

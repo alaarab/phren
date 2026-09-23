@@ -7,7 +7,7 @@ import { agentHook } from "./agent-hooks.js";
 import { provider } from "./protocol.js";
 import { AccountUsageReader, captureClaudeUsage } from "./usage.js";
 import { acceptComputer, enrollComputer } from "./computers.js";
-import { ARCHIVE_MAX_FOLDERS, archiveFinishedFanouts } from "./fanouts.js";
+import { ARCHIVE_MAX_FOLDERS, archiveFinishedFanouts, FANOUTS_ARCHIVE_USAGE, parseFanoutArchiveFlags } from "./fanouts.js";
 
 export async function runBridge(args: string[], version: string): Promise<number> {
   switch (args[0]) {
@@ -20,12 +20,10 @@ export async function runBridge(args: string[], version: string): Promise<number
       break;
     }
     case "fanouts": {
-      const flags = args.slice(2);
-      if (args[1] !== "archive" || flags.some(flag => flag !== "--dry-run")) {
-        throw new Error("Usage: phren bridge fanouts archive [--dry-run]");
-      }
-      const dryRun = flags.includes("--dry-run");
-      const { moved, deleted } = await archiveFinishedFanouts(process.env, { dryRun });
+      if (args[1] !== "archive") throw new Error(FANOUTS_ARCHIVE_USAGE);
+      const options = parseFanoutArchiveFlags(args.slice(2));
+      const dryRun = options.dryRun ?? false;
+      const { moved, deleted } = await archiveFinishedFanouts(process.env, options);
       const doing = dryRun ? "Would archive" : "Archived";
       const removal = dryRun ? "would delete" : "deleted";
       console.log(`${doing} ${moved.length} fan-out job(s); ${removal} ${deleted} past the ${ARCHIVE_MAX_FOLDERS}-folder cap.`);
