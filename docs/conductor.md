@@ -98,11 +98,14 @@ phren dispatch Desk demo --harness codex --label Checks --prompt 'Run the assign
 phren dispatch status
 ```
 
-`dispatch` accepts an enrolled computer name or `anywhere`, a project slug,
-harness (`codex`, `claude`, `opencode`), optional model, label and prompt. The
-remote Hook resolves the project's checkout. Callers do not pass a checkout
-path. `anywhere` chooses the least busy responding peer, with names breaking
-ties. Capacity preflight requires a compatible Hook and the configured Herdr
+`dispatch` accepts an enrolled computer name, this computer's own name (its
+hostname, the hostname's first label, its Bonjour name, or `local`) or
+`anywhere`, a project slug, harness (`codex`, `claude`, `opencode`), optional
+model, label and prompt. The receiving Hook resolves the project's checkout.
+Callers do not pass a checkout path. This computer needs no `hooks.yaml` entry
+and no SSH enrollment: its placement goes through its own Hook's socket, and
+the returns loop reads its workers in process. `anywhere` chooses the least
+busy responding computer, this one included, with names breaking ties. Capacity preflight requires a compatible Hook and the configured Herdr
 server. Peers that fail it sit out and are named with their reason in the
 receipt's `skipped` list (and in the error when none is left). Placement
 currently requires Herdr.

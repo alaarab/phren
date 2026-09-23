@@ -4,6 +4,7 @@ import { dispatchStatus, updateReceipt, type OriginPane, type Receipt, type Work
 import { findPane, paneIdentity, sharedSnapshot } from "./herdr.js";
 import { handOff } from "./hand-off.js";
 import { hookPeers, peerRequest, type HookPeer } from "./peers.js";
+import { isLocalComputer } from "./dispatch-hosts.js";
 import { objects, startingTargetSchema, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
 import { ownerQuestion, readFinalTurn, type FinalTurn } from "./schedule-watch.js";
 
@@ -168,6 +169,9 @@ export function returnRow(receipt: Receipt): Json {
 export interface DispatchReturnsOptions {
   peers?: () => Promise<HookPeer[]>;
   request?: typeof peerRequest;
+  /** Worker states on this computer, for dispatches placed here without SSH. */
+  localWorkers?: (input: Json) => Promise<{ workers: unknown[] }>;
+  isLocal?: (computer: string) => boolean;
   /** A recent Herdr snapshot of a local server, to see whether the dispatching agent is idle. */
   snapshot?: (server: string) => Promise<Json>;
   identity?: (server: string, pane: Json) => Promise<string | undefined>;
@@ -182,6 +186,8 @@ const originKey = (origin: OriginPane & { terminal: string }) => JSON.stringify(
 export class DispatchReturns {
   private readonly peers: () => Promise<HookPeer[]>;
   private readonly request: typeof peerRequest;
+  private readonly localWorkers: (input: Json) => Promise<{ workers: unknown[] }>;
+  private readonly isLocal: (computer: string) => boolean;
   private readonly snapshot: (server: string) => Promise<Json>;
   private readonly identity: (server: string, pane: Json) => Promise<string | undefined>;
   private readonly deliver: (target: Target, text: string) => Promise<{ delivered: boolean }>;
@@ -193,6 +199,8 @@ export class DispatchReturns {
   constructor(options: DispatchReturnsOptions = {}) {
     this.peers = options.peers ?? hookPeers;
     this.request = options.request ?? peerRequest;
+    this.localWorkers = options.localWorkers ?? (input => workerStates(input));
+    this.isLocal = options.isLocal ?? (computer => isLocalComputer(computer));
     this.snapshot = options.snapshot ?? (server => sharedSnapshot(server, SNAPSHOT_AGE_MS));
     this.identity = options.identity ?? ((server, pane) => paneIdentity(server, pane));
     this.deliver = options.deliver ?? ((target, text) => handOff({ target, text }));
@@ -217,12 +225,15 @@ export class DispatchReturns {
     const byComputer = new Map<string, Receipt[]>();
     for (const receipt of open) byComputer.set(receipt.computer, [...byComputer.get(receipt.computer) ?? [], receipt]);
     await Promise.all([...byComputer].map(async ([computer, receipts]) => {
+      // A dispatch placed on this computer is read here, without SSH.
       const peer = peers.find(candidate => candidate.name === computer);
-      if (!peer) return;
+      const local = !peer && this.isLocal(computer);
+      if (!peer && !local) return;
       for (let start = 0; start < receipts.length; start += 64) {
         const batch = receipts.slice(start, start + 64);
+        const input = { targets: batch.map(receipt => receipt.target!) };
         // An unreachable peer records nothing: silence is not a transition.
-        const answer = await this.request(peer, "/v1/dispatch/workers", { targets: batch.map(receipt => receipt.target!) }).catch(() => undefined);
+        const answer: Json | undefined = await (peer ? this.request(peer, "/v1/dispatch/workers", input) : this.localWorkers(input) as Promise<Json>).catch(() => undefined);
         const workers = objects(answer?.workers);
         if (workers.length !== batch.length) continue;
         for (const [index, receipt] of batch.entries()) {
