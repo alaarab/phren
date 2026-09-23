@@ -15,6 +15,10 @@ public struct PhrenToolPresentation: Equatable, Sendable {
     public let fields: [Field]
     public let resultSummary: String?
     public let titles: [String]
+    /// Several tasks or findings in one call, one per row; empty for one.
+    public let items: [String]
+    /// The raw tool name as the agent called it ("mcp__phren__add_task").
+    public let toolName: String
     public let status: Status
     /// Full content is separate from the bounded preview used by folded cards.
     public let fullInput: String
@@ -122,6 +126,10 @@ public struct PhrenToolPresentation: Equatable, Sendable {
             summary = Self.nonempty(Self.firstLine(data["title"] ?? data["content"] ?? data["text"] ?? envelope["message"] ?? response ?? ""))
         }
         resultSummary = summary; titles = resultTitles
+        toolName = name
+        // A call that adds several at once lists them, instead of one comma-joined line.
+        let listKey = ["item", "task", "finding"].first { (values[$0] as? [Any])?.count ?? 0 > 1 }
+        items = listKey.map { key in (values[key] as? [Any] ?? []).prefix(50).map { Self.plain($0) }.filter { !$0.isEmpty } } ?? []
         issues = failed ? (envelope["issues"] as? [[String: Any]] ?? []).prefix(6).compactMap { issue in
             guard let message = issue["message"] as? String, !message.isEmpty else { return nil }
             let path = Self.plain(issue["path"] ?? "")

@@ -48,6 +48,7 @@ struct CodeView: View {
     @State private var indexOff = false
     @State private var turnOnError: String?
     @State private var showMore = false
+    @State private var confirmingOff = false
     @State private var errorText: String?
     @State private var showKinds = false
     @State private var showFiles = false
@@ -149,7 +150,14 @@ struct CodeView: View {
             .init(id: "rebuild", title: reindexing ? "Rebuilding…" : "Rebuild index", icon: "arrow.clockwise",
                   caption: "Phren keeps it up to date as files change; rebuild only if something looks stale.",
                   isEnabled: !reindexing, handler: { Task { await reindex() } }),
+            .init(id: "turn-off", title: "Turn off", icon: "power", role: .destructive, handler: { confirmingOff = true }),
         ], identifier: "code-more-sheet")
+        .phrenDialog(isPresented: $confirmingOff, title: "Turn off code intelligence?",
+                     message: "Phren stops keeping \(project)'s symbol index and deletes it. Files stay browsable, and you can turn it on again.",
+                     actions: [
+                        .init(id: "off", title: "Turn off", role: .destructive, accessibilityIdentifier: "code-turn-off-confirm") { Task { await turnOff() } },
+                        .init(id: "cancel", title: "Cancel", role: .cancel) {},
+                     ], identifier: "code-turn-off-dialog")
         .phrenSingleSelectSheet(isPresented: $showKinds, title: "Symbol kind", options: kinds, selection: $kind, rowPrefix: "code-kind")
         .phrenActionSheet(isPresented: $showFiles, title: pickerDirectory.isEmpty ? "Usage by file" : pickerDirectory,
                           actions: fileActions, identifier: "code-file-picker")
@@ -460,6 +468,17 @@ struct CodeView: View {
             let result = try await PhrenConnection.codeTree(host: host, privateKey: DeviceSSHKey.load(host.id), project: project, directory: pickerDirectory, storeID: storeId)
             try Task.checkCancellation(); pickerEntries = result
         } catch { if !Task.isCancelled { pickerEntries = []; pickerError = error.localizedDescription } }
+    }
+
+    @MainActor private func turnOff() async {
+        #if DEBUG && targetEnvironment(simulator)
+        if CodeFixture.enabled { status = nil; indexOff = true; revision += 1; return }
+        #endif
+        guard let host = hosts.first else { errorText = "Connect a computer to change code intelligence."; return }
+        do {
+            try await PhrenConnection.codeDisable(host: host, privateKey: DeviceSSHKey.load(host.id), project: project, storeID: storeId)
+            status = nil; indexOff = true; revision += 1
+        } catch { errorText = error.localizedDescription }
     }
 
     /// Builds the first index. A project with no checkout on this computer

@@ -128,6 +128,20 @@ describe("code module gate", () => {
   });
 });
 
+describe("turning code intelligence off", () => {
+  it("deletes the project's index so nothing rebuilds it, and turning on builds it again", async () => {
+    await routes.reindex("fixture");
+    expect((await routes.status("fixture")).symbols).toBeGreaterThan(0);
+    expect(await routes.disable("fixture")).toEqual({ project: "fixture", disabled: true });
+    await expect(routes.status("fixture")).rejects.toThrow(/No code index/);
+    await routes.reindex("fixture");
+    expect((await routes.status("fixture")).symbols).toBeGreaterThan(0);
+  });
+  it("refuses a project name that is not one", async () => {
+    await expect(routes.disable("../fixture")).rejects.toThrow();
+  });
+});
+
 describe("code re-index on change", () => {
   it("re-indexes a changed file incrementally", async () => {
     const file = path.join(repo, "typescript/util.ts");

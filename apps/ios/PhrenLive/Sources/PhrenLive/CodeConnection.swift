@@ -87,6 +87,17 @@ extension PhrenConnection {
         return try CodeStatus.read(await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: request))
     }
 
+    /// Turns code intelligence off for a project: its index is deleted and
+    /// nothing rebuilds it until it is turned on again.
+    public static func codeDisable(host: LiveHost, privateKey: Data, project: String, storeID: String? = nil) async throws {
+        try host.validate()
+        var fields = ["project": try codeProject(project)]
+        if let storeID { fields["store"] = storeID }
+        var request = GatewayRequest(path: "/v1/code/disable", body: try JSONEncoder().encode(fields))
+        request.method = "POST"
+        _ = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: request)
+    }
+
     public static func codeNote(host: LiveHost, privateKey: Data, note: CodeNoteRequest) async throws -> CodeNoteResult {
         try host.validate()
         var request = GatewayRequest(path: "/v1/code/note", body: try JSONEncoder().encode(note))

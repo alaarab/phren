@@ -10,6 +10,7 @@ struct PhrenToolCard: View, Equatable {
     @Environment(\.liveSessionPreferences) private var preferencesStore
     @State private var model = PhrenToolCardModel()
     @State private var opened: PhrenToolCardModel.Destination?
+    @State private var showingRaw = false
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.presentation == rhs.presentation && lhs.messages == rhs.messages && lhs.session == rhs.session
     }
@@ -50,7 +51,8 @@ struct PhrenToolCard: View, Equatable {
                     .buttonStyle(.plain)
                     .accessibilityLabel(destination.label)
                     .accessibilityIdentifier("chat-phren-open:\(callID)")
-                    .offset(x: 10, y: model.isExpanded ? -10 : 0)
+                    // One place whether folded or open, so nothing jumps.
+                    .offset(x: 10, y: -8)
                 }
             }
             if model.isExpanded {
@@ -71,6 +73,7 @@ struct PhrenToolCard: View, Equatable {
                             fullText("Raw error", PhrenToolPresentation.readable(raw))
                         }
                     }
+                    rawCall
                 }
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
@@ -91,6 +94,46 @@ struct PhrenToolCard: View, Equatable {
         }
     }
 
+    /// The call exactly as the agent made it: tool name, full input and full
+    /// output. Folded under one quiet line so the card's own view stays the default.
+    @ViewBuilder private var rawCall: some View {
+        Button {
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { showingRaw.toggle() }
+        } label: {
+            HStack(spacing: 4) {
+                Text("Raw call").font(PhrenTypography.caption.weight(.semibold))
+                Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold))
+                    .rotationEffect(.degrees(showingRaw ? 90 : 0))
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(PhrenTheme.textMuted)
+            .frame(minHeight: 32).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityValue(showingRaw ? "Expanded" : "Collapsed")
+        .accessibilityIdentifier("chat-phren-raw:\(callID)")
+        if showingRaw {
+            let raw = "\(presentation.toolName)\n\nInput\n\(presentation.fullInput)" + (presentation.fullOutput.map { "\n\nOutput\n\($0)" } ?? "")
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text(presentation.toolName).font(PhrenTypography.monoCaption.weight(.semibold)).foregroundStyle(PhrenTheme.text)
+                    Spacer(minLength: 0)
+                    Button { ChatClipboard.copy(raw) } label: {
+                        Image(systemName: "doc.on.doc").font(.system(size: 13)).frame(width: 44, height: 32).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).foregroundStyle(PhrenTheme.textMuted)
+                    .accessibilityLabel("Copy raw call").accessibilityIdentifier("chat-phren-raw-copy:\(callID)")
+                }
+                fullText("Input", presentation.fullInput)
+                if let output = presentation.fullOutput { fullText("Output", output) }
+            }
+            .padding(10)
+            .background(PhrenTheme.chatPanel, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.small, style: .continuous))
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("chat-phren-raw-body:\(callID)")
+        }
+    }
+
     private func toggle() {
         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { model.toggle() }
     }
@@ -98,7 +141,7 @@ struct PhrenToolCard: View, Equatable {
     private func fullText(_ title: String, _ text: String) -> some View {
         VStack(alignment: .leading, spacing: PhrenTheme.Space.xs) {
             Text(title).font(PhrenTypography.caption.weight(.semibold)).foregroundStyle(PhrenTheme.textMuted)
-            Text(text).font(PhrenTypography.subheadline).foregroundStyle(PhrenTheme.textSecondary)
+            Text(text).font(PhrenTypography.monoFootnote).foregroundStyle(PhrenTheme.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
@@ -128,6 +171,9 @@ struct PhrenToolCard: View, Equatable {
     /// result, or the first line of what it wrote.
     private var foldedSummary: String {
         if presentation.status == .failed, let issue = presentation.issues.first { return issue }
+        if !presentation.items.isEmpty {
+            return "\(presentation.items.count) \(presentation.verb.localizedCaseInsensitiveContains("finding") ? "findings" : "tasks")"
+        }
         return presentation.resultSummary ?? presentation.body.split(separator: "\n").first.map(String.init) ?? presentation.titles.first ?? ""
     }
 
@@ -152,22 +198,38 @@ struct PhrenToolCard: View, Equatable {
                 status
                 if hasDestination { Color.clear.frame(width: 16, height: 14).accessibilityHidden(true) }
             }
-            if !presentation.body.isEmpty {
-                Text(presentation.body).font(.subheadline).foregroundStyle(PhrenTheme.textSecondary)
+            if !presentation.items.isEmpty {
+                // One row per task or finding the call added.
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(Array(presentation.items.enumerated()), id: \.offset) { index, item in
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text("\(index + 1)").foregroundStyle(PhrenTheme.phrenCardAccent)
+                                .frame(minWidth: 14, alignment: .trailing)
+                            Text(item).foregroundStyle(PhrenTheme.textSecondary)
+                                .lineLimit(model.isExpanded ? nil : 2)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .accessibilityIdentifier("chat-phren-item:\(callID):\(index)")
+                    }
+                }
+                .font(PhrenTypography.monoFootnote)
+            } else if !presentation.body.isEmpty {
+                // The chat's own monospace, a step smaller than the reply.
+                Text(presentation.body).font(PhrenTypography.monoFootnote).foregroundStyle(PhrenTheme.textSecondary)
                     .lineLimit(model.bodyLineLimit).frame(maxWidth: .infinity, alignment: .leading)
             }
             ForEach(Array(presentation.fields.enumerated()), id: \.offset) { _, field in
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(field.name).foregroundStyle(PhrenTheme.textMuted).lineLimit(model.isExpanded ? nil : 1)
                     Text(field.value).foregroundStyle(PhrenTheme.textSecondary).lineLimit(model.isExpanded ? nil : 2)
-                }.font(.caption)
+                }.font(PhrenTypography.caption)
             }
             if let summary = presentation.resultSummary {
                 Text(summary).font(.caption.weight(.medium)).lineLimit(model.isExpanded ? nil : 2)
                     .foregroundStyle(presentation.status == .failed ? PhrenTheme.danger : PhrenTheme.phrenCardAccent)
             }
             ForEach(Array(presentation.titles.enumerated()), id: \.offset) { _, title in
-                Text("· \(title)").font(.caption).foregroundStyle(PhrenTheme.textSecondary).lineLimit(model.isExpanded ? nil : 1)
+                Text("· \(title)").font(PhrenTypography.monoCaption).foregroundStyle(PhrenTheme.textSecondary).lineLimit(model.isExpanded ? nil : 1)
             }
         }
     }
