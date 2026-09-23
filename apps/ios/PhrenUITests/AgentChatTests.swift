@@ -1217,7 +1217,8 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(app.buttons["View conversation image"].waitForExistence(timeout: 8))
         app.buttons["View conversation image"].tap()
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "image-viewer").firstMatch.waitForExistence(timeout: 5))
-        app.buttons["image-viewer-close"].tap()
+        // A file on the computer opens in the file viewer, which wraps the image viewer.
+        app.buttons["file-viewer-close"].tap()
         app.buttons["chat-diff"].tap()
         // The header's Changes screen: staged, unstaged and untracked files
         // in List mode, the change itself in Diff mode.

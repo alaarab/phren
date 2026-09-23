@@ -15,7 +15,7 @@ final class ConductorEntryTests: XCTestCase {
         XCTAssertTrue(role.waitForExistence(timeout: 5))
         XCTAssertTrue((role.value as? String ?? "").contains("Conductor"))
         XCTAssertTrue((role.value as? String ?? "").contains("Claude Opus"))
-        XCTAssertTrue((role.value as? String ?? "").contains("high"))
+        XCTAssertTrue((role.value as? String ?? "").contains("High"))
         role.tap()
         XCTAssertTrue(app.buttons["launch-role:conductor"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["launch-role:conductor"].isSelected)
@@ -34,7 +34,7 @@ final class ConductorEntryTests: XCTestCase {
         XCTAssertTrue(role.waitForExistence(timeout: 5))
         XCTAssertTrue((role.value as? String ?? "").contains("Conductor"))
         XCTAssertTrue((role.value as? String ?? "").contains("Codex"))
-        XCTAssertTrue((role.value as? String ?? "").contains("low"))
+        XCTAssertTrue((role.value as? String ?? "").contains("Low"))
         app.buttons["launch-computer"].tap()
         let teamComputer = app.buttons["launch-computer:A1000000-0000-0000-0000-000000000001"]
         XCTAssertTrue(teamComputer.waitForExistence(timeout: 5))

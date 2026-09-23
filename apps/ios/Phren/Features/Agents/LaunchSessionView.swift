@@ -87,7 +87,9 @@ struct LaunchSessionView: View {
     }
     private var conductorSummary: String {
         let harnessName = harness.map { $0 == .claude ? "Claude" : $0.title } ?? kind.capitalized
-        let modelTitle = chosenModel?.name ?? (modelName.isEmpty ? nil : modelName)
+        // Before the computer's list arrives, name a known model the way its menu does.
+        let modelTitle = chosenModel?.name ?? AgentModelChoice.choices(source: kind).first { $0.argument == modelName }?.name
+            ?? (modelName.isEmpty ? nil : modelName)
         return ["Conductor", [harnessName, modelTitle].compactMap { $0 }.joined(separator: " "), effort.title]
             .joined(separator: " · ")
     }

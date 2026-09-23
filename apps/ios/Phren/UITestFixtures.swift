@@ -166,9 +166,9 @@ enum UITestFixtures {
                     let remote = try LiveHost(id: hostIDs[1], name: "Linuxbox", address: "linuxbox.invalid", username: "sam",
                                               hookComputerID: hookIDs[1], fingerprint: "SHA256:" + String(repeating: "B", count: 43))
                     defaults.set(try LiveSessionPreferences.saving(remote, in: defaults.data(forKey: preferencesKey)!), forKey: preferencesKey)
-                    ConductorLaunchSettings.save(storeID: "sample/brain", harness: .claude, model: "opus",
+                    ConductorLaunchSettings.save(storeID: "sample/brain", harness: .claude, model: "claude-opus-5",
                                                  effort: .high, hostID: remote.id, project: "phone")
-                    ConductorLaunchSettings.save(storeID: "team/brain", harness: .codex, model: "gpt-5",
+                    ConductorLaunchSettings.save(storeID: "team/brain", harness: .codex, model: "gpt-5.6-sol",
                                                  effort: .low, hostID: hostIDs[0], project: "demo")
                 }
                 if arguments.contains("--all-sessions-fixture") {
