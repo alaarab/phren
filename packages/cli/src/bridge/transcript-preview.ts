@@ -16,7 +16,10 @@ export function claudePanePreview(rendered: string, prompt: string, previous = "
   const raw = stripTerminal(rendered).split("\n");
   // The rule above the input box can carry the session title
   // ("───── Claude sesh ─"); it ends the reply, it is never part of it.
-  const lines = raw.map(line => /[─━═]{3,}/.test(line) && !/^\s*[│┃║]/.test(line) ? "❯" : line.replace(/[\u2500-\u257f]/g, "").trimEnd());
+  // A narrow pane leaves the titled rule a single dash ("…title… ─"), so a
+  // line that ends in a rule dash right above the input prompt ends it too.
+  const lines = raw.map((line, index) => (/[─━═]{3,}/.test(line) && !/^\s*[│┃║]/.test(line))
+    || (/[─━═]\s*$/.test(line) && /^\s*[❯>]\s*$/.test(raw[index + 1] ?? "")) ? "❯" : line.replace(/[\u2500-\u257f]/g, "").trimEnd());
   const firstPrompt = prompt.trim().split(/\r?\n/)[0]?.trim();
   if (!firstPrompt) return "";
   let start = -1;
@@ -49,7 +52,7 @@ export function claudePanePreview(rendered: string, prompt: string, previous = "
     // ("⏺ Bash(ls)", "⏺ phren - search (MCP)(…)") are not reply
     // text; it lands as its own entry a moment later.
     if (/^\s*[⏺●]\s*[\w.:-]+(?: - [\w.:-]+)?(?: \(MCP\))?\(/.test(line) || (/^\s*[⏺●]/.test(line) && toolBlock(index))
-      || /^\s*[⏺●]\s*(?:Running|Calling|Reading|Searching|Writing|Editing|Fetching) .*(?:…|\.\.\.)\s*$/.test(line)) { writing = false; continue; }
+      || /^\s*[⏺●]\s*(?:Running|Calling|Reading|Searching|Writing|Editing|Fetching|Updating|Listing|Creating)\b[^.!?]*(?:…|\.\.\.)/.test(line)) { writing = false; continue; }
     if (/^\s*[⏺●]/.test(line)) { reply.length = 0; writing = true; }
     if (!writing) continue;
     const clean = line.replace(/^\s*[⏺●]\s?/, "").replace(/[⠁-⣿✻✽✶✢✳]/gu, "");

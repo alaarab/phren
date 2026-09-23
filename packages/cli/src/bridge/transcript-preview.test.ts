@@ -72,6 +72,9 @@ describe("live reply previews", () => {
     // Claude's sub-agent group: a running line and its tree never reach the preview.
     expect(claudePanePreview("❯ Explain this\n⏺ Starting the first wave.\n⏺ Running 2 agents…\n   ├─ Plan 1.4: failures · 0 tool uses\n   └─ Plan 1.5: tests · 0 tool uses\n✻ Spinning… (54s)\n❯", "Explain this"))
       .toBe("Starting the first wave.");
+    // A narrow pane: the titled rule keeps one dash, and a running call carries a suffix.
+    expect(claudePanePreview("❯ Explain this\n⏺ Filing it:\n⏺ Calling phren… (ctrl+o to expand)\n✢ Crunching… (26s)\n Claude sesh in herdr on pjren js not in co… ─\n❯\n─────", "Explain this"))
+      .toBe("Filing it:");
   });
 
   it("strips chrome, prompts and spinners without showing old replies or tool output", () => {
