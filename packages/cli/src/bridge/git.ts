@@ -90,10 +90,22 @@ async function collect(root: string) {
   return { branch, upstream, ahead, behind, staged, unstaged, stagedStats, unstagedStats, untracked };
 }
 
+/** The remote's default branch as its `HEAD` records it. With no recorded
+ * `HEAD`, `main` and `master` are treated as default so the guard errs on the
+ * side of asking. */
+export async function defaultBranch(root: string, remote = "origin"): Promise<string | null> {
+  const head = (await git(root, "symbolic-ref", "--quiet", "--short", `refs/remotes/${remote}/HEAD`).catch(() => "")).trim();
+  if (head.startsWith(remote + "/")) return head.slice(remote.length + 1);
+  const branches = new Set((await git(root, "for-each-ref", "--format=%(refname:short)", "refs/heads").catch(() => "")).split("\n").filter(Boolean));
+  return branches.has("main") ? "main" : branches.has("master") ? "master" : null;
+}
+
 export interface GitStatusFile { path: string; status: string; staged: boolean; additions: number; deletions: number }
 export interface GitStatus {
   branch: string; upstream: string | null; ahead: number; behind: number;
   staged: number; unstaged: number; untracked: number; additions: number; deletions: number; files: GitStatusFile[];
+  /** The branch a push guards: the upstream remote's `HEAD`, else `main`/`master`. */
+  defaultBranch: string | null;
 }
 
 async function repository(cwd: string): Promise<string> {
@@ -108,6 +120,7 @@ export async function gitStatus(cwd: string): Promise<GitStatus> {
   const root = await repository(cwd);
   treeCache.delete(root);
   const data = await collect(root);
+  const fallback = await defaultBranch(root, data.upstream?.split("/")[0] || "origin");
   const files: GitStatusFile[] = [];
   for (const [file, status] of data.staged) {
     const counts = data.stagedStats.get(file) ?? { additions: 0, deletions: 0 };
@@ -121,7 +134,8 @@ export async function gitStatus(cwd: string): Promise<GitStatus> {
   const additions = files.reduce((total, file) => total + file.additions, 0);
   const deletions = files.reduce((total, file) => total + file.deletions, 0);
   return { branch: data.branch, upstream: data.upstream ?? null, ahead: data.ahead, behind: data.behind,
-    staged: data.staged.size, unstaged: data.unstaged.size, untracked: data.untracked.length, additions, deletions, files };
+    staged: data.staged.size, unstaged: data.unstaged.size, untracked: data.untracked.length, additions, deletions, files,
+    defaultBranch: fallback };
 }
 
 /** The repository's remotes, so a branch ref can be told from a remote-tracking
@@ -194,22 +208,62 @@ export async function gitBranches(cwd: string): Promise<Json> {
   return { current, local, remote };
 }
 
+const ghEnv = () => ({ ...process.env, GIT_CONFIG_NOSYSTEM: "1", GH_PROMPT_DISABLED: "1", GH_NO_UPDATE_NOTIFIER: "1" });
+
+/** A check rollup as one word: any failure fails, anything unfinished is
+ * pending, and only finished successes (or skips) pass. No checks is null. */
+export function checkRollup(items: unknown): "passing" | "failing" | "pending" | null {
+  if (!Array.isArray(items) || !items.length) return null;
+  let pending = false;
+  for (const raw of items) {
+    const item = raw && typeof raw === "object" ? raw as Json : {};
+    const conclusion = String(item.conclusion ?? "").toUpperCase(), state = String(item.state ?? "").toUpperCase();
+    const status = String(item.status ?? "").toUpperCase();
+    if (["FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE"].includes(conclusion) || ["FAILURE", "ERROR"].includes(state)) return "failing";
+    // A commit status has a state; a check run has a status and, once
+    // completed, a conclusion.
+    if (state && !status) { if (state !== "SUCCESS") pending = true; }
+    else if (status !== "COMPLETED") pending = true;
+  }
+  return pending ? "pending" : "passing";
+}
+
+/** The checked-out branch's pull request in any state, with its checks, or
+ * null when the branch has none (or gh cannot say). */
+async function currentPull(root: string, branch: string): Promise<Json | null> {
+  try {
+    const { stdout } = await exec("gh", ["pr", "view", "--json", "number,title,url,state,isDraft,headRefName,baseRefName,statusCheckRollup"], {
+      cwd: root, timeout: 15_000, maxBuffer: 4_194_304, env: ghEnv(),
+    });
+    const pull = JSON.parse(stdout || "null");
+    if (!pull || typeof pull !== "object" || typeof pull.number !== "number" || pull.headRefName !== branch) return null;
+    return { number: pull.number, title: String(pull.title ?? ""), url: String(pull.url ?? ""), head: branch,
+      base: String(pull.baseRefName ?? ""), draft: pull.isDraft === true, state: String(pull.state ?? ""), checks: checkRollup(pull.statusCheckRollup) };
+  } catch { return null; }
+}
+
 /** Open pull requests through `gh`, or `{ available: false }` when the tool is
- * missing or not signed in. A failure is a normal answer, never an error. */
+ * missing or not signed in. A failure is a normal answer, never an error.
+ * `current` is the checked-out branch's own pull request in any state (open,
+ * draft, merged or closed) with its checks, which the session card shows. */
 export async function gitPulls(cwd: string): Promise<Json> {
   const root = await repository(cwd);
+  const branch = (await git(root, "branch", "--show-current").catch(() => "")).trim();
   try {
-    const { stdout } = await exec("gh", ["pr", "list", "--json", "number,title,headRefName,baseRefName,author,url,isDraft,state,updatedAt", "--limit", "50"], {
-      cwd: root, timeout: 15_000, maxBuffer: 4_194_304, env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1" },
-    });
+    const [{ stdout }, current] = await Promise.all([
+      exec("gh", ["pr", "list", "--json", "number,title,headRefName,baseRefName,author,url,isDraft,state,updatedAt", "--limit", "50"], {
+        cwd: root, timeout: 15_000, maxBuffer: 4_194_304, env: ghEnv(),
+      }),
+      branch ? currentPull(root, branch) : Promise.resolve(null),
+    ]);
     const parsed = JSON.parse(stdout || "[]");
     const pulls = (Array.isArray(parsed) ? parsed : []).map((pull: Json) => {
       const author = pull.author && typeof pull.author === "object" ? pull.author as Json : {};
       return { number: pull.number, title: pull.title, head: pull.headRefName, base: pull.baseRefName,
         author: String(author.login ?? author.name ?? ""), url: pull.url, draft: pull.isDraft === true, state: pull.state, updated: pull.updatedAt };
     });
-    return { available: true, pulls };
-  } catch { return { available: false, pulls: [] }; }
+    return { available: true, pulls, branch: branch || null, current };
+  } catch { return { available: false, pulls: [], branch: branch || null, current: null }; }
 }
 
 /** A repo-relative tree path, or the repository root for `""`. */
@@ -241,6 +295,8 @@ async function repositoryPath(root: string, raw: unknown, allowRoot = false): Pr
 type TreeEntry = { name: string; path: string; kind: "dir" | "file"; status?: string; fileCount?: number; ignored?: true };
 type TreeSnapshot = { version: string; levels: Map<string, TreeEntry[]> };
 const treeCache = new Map<string, { head: string; expires: number; snapshot: Promise<TreeSnapshot> }>();
+/** Drop the cached tree after a write (commit, push) outside this module. */
+export function invalidateTree(root: string): void { treeCache.delete(root); }
 const TREE_TTL_MS = 2_000;
 
 /** Build directory children once, without diff hunks, line counts or upstream walks. */

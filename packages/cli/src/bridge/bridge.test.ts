@@ -2437,6 +2437,40 @@ schedules:
       } finally { await rm(path.join(root, ".git"), { recursive: true, force: true }); await rm(path.join(root, ".claude"), { recursive: true, force: true }); }
     });
 
+    it("commits and pushes a listed worktree to a bare remote through the git routes", async () => {
+      const git = (...args: string[]) => execFileAsync("git", ["-c", "user.name=sam", "-c", "user.email=sam@example.com", "-C", root, ...args]);
+      const remote = path.join(root, "remote.git");
+      await execFileAsync("git", ["init", "-q", "--bare", "-b", "main", remote]);
+      await git("init", "-q", "-b", "main"); await writeFile(path.join(root, "base.txt"), "one\n");
+      await git("add", "base.txt"); await git("commit", "-qm", "start");
+      await git("remote", "add", "origin", remote); await git("push", "-q", "-u", "origin", "main");
+      const worker = path.join(root, ".claude/worktrees/agent-y");
+      await git("worktree", "add", "-q", "-b", "worktree-agent-y", worker);
+      await execFileAsync("git", ["-C", worker, "config", "user.name", "sam"]);
+      await execFileAsync("git", ["-C", worker, "config", "user.email", "sam@example.com"]);
+      await writeFile(path.join(worker, "base.txt"), "one\ntwo\n");
+      try {
+        const row = (await api("/v1/git/worktrees", { target })).data.worktrees.find((item: any) => item.path === ".claude/worktrees/agent-y");
+        expect((await api("/v1/git/commit", { target, worktree: row.id, message: "Worker change" })).status).toBe(409);
+        expect((await api("/v1/git/stage", { target, worktree: row.id, paths: ["base.txt"] })).status).toBe(200);
+        expect((await api("/v1/git/commit", { target, worktree: row.id, message: "" })).status).toBe(400);
+        const commit = await api("/v1/git/commit", { target, worktree: row.id, message: "Worker change" });
+        expect(commit.data, JSON.stringify(commit.data)).toMatchObject({ ok: true, subject: "Worker change", branch: "worktree-agent-y" });
+        // The pane's own checkout is untouched; the commit is on the worker's branch.
+        expect((await git("log", "-1", "--format=%s", "main")).stdout.trim()).toBe("start");
+        const push = await api("/v1/git/push", { target, worktree: row.id });
+        expect(push.data, JSON.stringify(push.data)).toMatchObject({ ok: true, upstream: "origin/worktree-agent-y", setUpstream: true });
+        expect((await execFileAsync("git", ["--git-dir", remote, "log", "-1", "--format=%s", "worktree-agent-y"])).stdout.trim()).toBe("Worker change");
+        // The pane itself is on main, the default branch: refused without the confirm flag.
+        const refused = await api("/v1/git/push", { target });
+        expect(refused.status).toBe(409);
+        expect(refused.data.error).toMatch(/default branch/);
+        expect((await api("/v1/git/push", { target, worktree: "f".repeat(32) })).status).toBe(404);
+      } finally {
+        for (const entry of [".git", ".claude", "remote.git", "base.txt"]) await rm(path.join(root, entry), { recursive: true, force: true });
+      }
+    });
+
     it("serves a requested history page without sending a recent backlog", async () => {
       await writeFile(record, Array.from({ length: 450 }, (_, i) => JSON.stringify(row(`Message ${i}`))).join("\n") + "\n");
       // Opening a conversation is a light page: 60 rows, the newest ones;
