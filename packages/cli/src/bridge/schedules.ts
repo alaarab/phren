@@ -15,6 +15,7 @@ import { transcriptPath } from "./transcripts.js";
 import { logger } from "../logger.js";
 import { getProjectSourcePath } from "../project-config.js";
 import { defaultPhrenPath, getProjectDirs } from "../shared.js";
+import { stripTerminal } from "../terminal-text.js";
 
 export const SCHEDULE_EVERY = ["interval", "daily", "weekly", "once", "cron"] as const;
 export const SCHEDULE_HARNESSES = ["claude", "codex", "opencode"] as const;
@@ -543,17 +544,11 @@ async function promptWhenReady(server: string, paneId: string, text: string, sig
   }
 }
 
-function stripTerminalEscapes(line: string): string {
-  return line.replace(/\r/g, "")
-    .replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, "")
-    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "");
-}
-
 export function classifyStartupBlock(input: { elapsedMs: number; transcriptActive: boolean; status: unknown; lines: readonly string[] }): string | undefined {
   if (input.elapsedMs < STARTUP_BLOCK_WINDOW_MS || input.elapsedMs > STARTUP_BLOCK_WINDOW_MS + STARTUP_BLOCK_WINDOW_OPEN_MS) return undefined;
   if (input.transcriptActive) return undefined;
   if (!STARTUP_BLOCK_STATUSES.includes(String(input.status))) return undefined;
-  const lines = input.lines.map(line => stripTerminalEscapes(line).trim()).filter(Boolean);
+  const lines = input.lines.map(line => stripTerminal(line).trim()).filter(Boolean);
   const text = lines.slice(-STARTUP_PROMPT_TAIL_LINES).join("\n");
   if (!text || !STARTUP_PROMPT_MARKER.test(text)) return undefined;
   return text.slice(0, 4000);

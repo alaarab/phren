@@ -3,6 +3,7 @@ import { AgentHooks, visibleTerminalChoice } from "./agent-hooks.js";
 import { rpc, validateTarget } from "./herdr.js";
 import { ModelCatalog, type AgentModel } from "./models.js";
 import { BridgeError, type Json, type Target } from "./protocol.js";
+import { stripTerminal } from "../terminal-text.js";
 
 export const MODEL_BUSY = "This agent is working. The model switch can happen when the turn ends. Choose Switch after this turn.";
 
@@ -15,12 +16,11 @@ const request = z.object({ model: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._\[\]
   effort: z.enum(["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]).optional() });
 const cleanLabel = (label: string) => label.replace(/\s*\((?:current|default|recommended)\)/gi, "").trim().toLowerCase();
 const effortLabel = (label: string) => cleanLabel(label).replace(/^extra\s+high$/, "xhigh");
-const plain = (text: string) => text.replace(/\x1b\[[0-9;]*m/g, "");
 
 /** Empty prompts can draw a dim placeholder. Only ANSI evidence that every
  * character after the prompt is dim distinguishes that from a person's draft. */
 function emptyComposer(line: string): boolean {
-  if (!/^\s*[›❯>]\s*/.test(plain(line))) return false;
+  if (!/^\s*[›❯>]\s*/.test(stripTerminal(line))) return false;
   let dim = false, prompt = false;
   for (const token of line.match(/\x1b\[[0-9;]*m|[^\x1b]/g) ?? []) {
     if (token.startsWith("\x1b")) {
@@ -41,10 +41,10 @@ function emptyComposer(line: string): boolean {
  * in history, a menu, or the startup banner must never confirm a switch. */
 export function codexModelStatus(text: string, model: AgentModel): boolean {
   const lines = text.split(/\r?\n/).reverse();
-  const composer = lines.findIndex(line => /^\s*[›❯>]/.test(plain(line)));
-  if (composer < 0 || !emptyComposer(lines[composer]) || visibleTerminalChoice(plain(text))) return false;
+  const composer = lines.findIndex(line => /^\s*[›❯>]/.test(stripTerminal(line)));
+  if (composer < 0 || !emptyComposer(lines[composer]) || visibleTerminalChoice(stripTerminal(text))) return false;
   return lines.slice(0, composer).filter(line => line.trim()).slice(0, 4).some(line => {
-    const footer = plain(line).trim().toLowerCase();
+    const footer = stripTerminal(line).trim().toLowerCase();
     return [model.id, model.name].some(name => {
       const lower = name.toLowerCase();
       return footer === lower || footer.startsWith(lower + " ") || footer.startsWith(lower + " ·");
@@ -106,8 +106,8 @@ export class ModelSwitcher {
       if (target.source === "claude" && chosenEffort) throw new BridgeError(422, "Choose Claude's reasoning effort in its terminal.");
       const before = await this.hooks.paneLines(target, false);
       // Preserve a person's draft and any pre-existing menu. Never clear it.
-      const composer = before.split(/\r?\n/).reverse().find(line => /^\s*[›❯>]/.test(plain(line)));
-      if (!composer || !emptyComposer(composer) || visibleTerminalChoice(plain(before))) {
+      const composer = before.split(/\r?\n/).reverse().find(line => /^\s*[›❯>]/.test(stripTerminal(line)));
+      if (!composer || !emptyComposer(composer) || visibleTerminalChoice(stripTerminal(before))) {
         throw new BridgeError(409, "The terminal has a draft or an unreadable prompt. Open terminal before switching models.");
       }
       await validate(true);
@@ -145,7 +145,7 @@ export class ModelSwitcher {
         await keys(["enter"]);
         await waitFor(text => codexModelStatus(text, model) ? true : undefined, "the new model in Codex's status line", true);
       } else {
-        await waitFor(text => text !== plain(before) && text.split(/\r?\n/).some(line => {
+        await waitFor(text => text !== stripTerminal(before) && text.split(/\r?\n/).some(line => {
           const output = line.trim().replace(/^[⏺●]\s*/, "");
           return output.toLowerCase().startsWith("set model to ") && [model.name, model.id, id].some(name => {
             const result = output.slice("Set model to ".length).toLowerCase();

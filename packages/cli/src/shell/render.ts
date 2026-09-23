@@ -1,5 +1,7 @@
 // ── ANSI utilities ──────────────────────────────────────────────────────────
 
+import { stripTerminal } from "../terminal-text.js";
+
 const ESC = "\x1b[";
 export const RESET  = `${ESC}0m`;
 export const BOLD   = `${ESC}1m`;
@@ -39,9 +41,8 @@ export function separator(width = 50): string {
   return style.dim("━".repeat(Math.max(1, width)));
 }
 
-export function stripAnsi(s: string): string {
-  return s.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "");
-}
+/** The shell's name for {@link stripTerminal}. */
+export const stripAnsi = stripTerminal;
 
 // ── Display width ────────────────────────────────────────────────────────────
 
