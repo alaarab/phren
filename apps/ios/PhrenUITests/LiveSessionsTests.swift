@@ -228,13 +228,21 @@ final class LiveSessionsTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--session-details-fixture",
                                "--session-pins-reset", "--sessions-layout-count=\(count)"] + extra
-        app.launch()
-        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 8))
-        app.tabBars.buttons["Agents"].tap()
-        XCTAssertTrue(app.navigationBars["Live sessions"].waitForExistence(timeout: 5))
         let ready = count == 0 ? app.staticTexts["sessions-empty"]
             : app.staticTexts["Polish the phone app"].firstMatch
-        XCTAssertTrue(ready.waitForExistence(timeout: 10))
+        // The first launch on a freshly booted simulator can come up before
+        // the fixture bootstrap installs the test computer (Agents shows only
+        // Add computer) and stays that way; a relaunch always lands, as in
+        // AgentChatUITestCase.launch and TerminalInteractionTests.
+        for attempt in 0..<2 {
+            app.launch()
+            XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 8))
+            app.tabBars.buttons["Agents"].tap()
+            XCTAssertTrue(app.navigationBars["Live sessions"].waitForExistence(timeout: 5))
+            if ready.waitForExistence(timeout: attempt == 0 ? 10 : 20) { break }
+            if attempt == 0 { app.terminate() }
+        }
+        XCTAssertTrue(ready.exists)
         return app
     }
 
