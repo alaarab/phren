@@ -240,8 +240,20 @@ final class LiveHostMonitor {
 }
 
 extension LiveHostMonitor {
+    /// How long an answer reads as live: 90 seconds. UI tests may shorten it
+    /// with `--live-fresh-seconds=N` so the stale state needs no 90 second wait.
+    static let freshSeconds: TimeInterval = {
+        #if DEBUG
+        if AppModel.isUITesting, let flag = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--live-fresh-seconds=") }),
+           let seconds = TimeInterval(flag.dropFirst("--live-fresh-seconds=".count)), seconds > 0 {
+            return seconds
+        }
+        #endif
+        return 90
+    }()
+
     func isFresh(at date: Date) -> Bool {
-        lastUpdated.map { date.timeIntervalSince($0) < 90 } == true
+        lastUpdated.map { date.timeIntervalSince($0) < Self.freshSeconds } == true
     }
 
     /// Fresh, or still making first contact since the app became active.

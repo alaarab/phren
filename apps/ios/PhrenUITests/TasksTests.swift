@@ -6,7 +6,7 @@ import XCTest
 /// and the existing filters still running inside the sections.
 final class TasksTests: XCTestCase {
     @MainActor
-    func testRowAndSwipeStartOpenLaunchSheetAndCancelKeepsBacklog() {
+    func testRowSwipeAndSelectionStartOfferTheLaunchSheetAndCancelKeepsBacklog() {
         let app = launchTaskFixture()
         let task = app.buttons["task-detail:sample/brain/demo/dead0001"]
         XCTAssertTrue(task.waitForExistence(timeout: 5))
@@ -31,6 +31,36 @@ final class TasksTests: XCTestCase {
         XCTAssertFalse(app.staticTexts["task-move-notice"].exists)
         chooseTaskStatus("active", in: app)
         XCTAssertTrue(task.waitForNonExistence(timeout: 5), "Cancel must never move the task to Active")
+
+        // Same launch: Start is offered for one selected task and not several.
+        chooseTaskStatus("backlog", in: app)
+        let first = app.buttons["task-detail:sample/brain/demo/dead0001"]
+        let second = app.buttons["task-detail:sample/brain/demo/dead0002"]
+        XCTAssertTrue(first.waitForExistence(timeout: 5))
+        app.buttons["task-selection-mode"].tap()
+        first.tap()
+        let bulkStart = app.buttons["task-bulk-Start"]
+        XCTAssertTrue(bulkStart.waitForExistence(timeout: 5))
+        bulkStart.tap()
+        assertTaskLaunchAndCancel(in: app)
+        XCTAssertTrue(first.waitForExistence(timeout: 5))
+        XCTAssertTrue(bulkStart.waitForExistence(timeout: 5), "Cancel preserves the single selection")
+        revealByScrolling(second, in: app)
+        second.tap()
+        XCTAssertTrue(bulkStart.waitForNonExistence(timeout: 3))
+        XCTAssertFalse(app.buttons["task-actions:sample/brain/demo/dead0001"].exists)
+        XCTAssertTrue(app.buttons["task-bulk-Move to Active"].isEnabled)
+        XCTAssertTrue(app.buttons["task-bulk-Done"].isEnabled)
+        XCTAssertTrue(app.buttons["task-bulk-Backlog"].exists)
+        attachUIScreenshot(app, "Several selected tasks offer moves only")
+        app.buttons["task-bulk-Move to Active"].tap()
+        XCTAssertTrue(app.staticTexts["task-move-notice"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["task-move-notice"].label, "2 tasks moved to Active")
+        app.buttons["task-move-follow"].tap()
+        revealByScrolling(first, in: app)
+        XCTAssertTrue(first.waitForExistence(timeout: 5))
+        revealByScrolling(second, in: app)
+        XCTAssertTrue(second.waitForExistence(timeout: 5))
     }
 
     @MainActor
@@ -71,38 +101,6 @@ final class TasksTests: XCTestCase {
         app.buttons["task-actions:sample/brain/demo/dead0001"].tap()
         XCTAssertTrue(app.buttons["task-actions-sheet:move-active"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["task-actions-sheet:start"].exists, "Reopen completed work with a move")
-    }
-
-    @MainActor
-    func testStartIsAvailableForOneSelectedTaskAndAbsentForSeveral() {
-        let app = launchTaskFixture()
-        let first = app.buttons["task-detail:sample/brain/demo/dead0001"]
-        let second = app.buttons["task-detail:sample/brain/demo/dead0002"]
-        XCTAssertTrue(first.waitForExistence(timeout: 5))
-        app.buttons["task-selection-mode"].tap()
-        first.tap()
-        let start = app.buttons["task-bulk-Start"]
-        XCTAssertTrue(start.waitForExistence(timeout: 5))
-        start.tap()
-        assertTaskLaunchAndCancel(in: app)
-        XCTAssertTrue(first.waitForExistence(timeout: 5))
-        XCTAssertTrue(start.waitForExistence(timeout: 5), "Cancel preserves the single selection")
-        revealByScrolling(second, in: app)
-        second.tap()
-        XCTAssertTrue(start.waitForNonExistence(timeout: 3))
-        XCTAssertFalse(app.buttons["task-actions:sample/brain/demo/dead0001"].exists)
-        XCTAssertTrue(app.buttons["task-bulk-Move to Active"].isEnabled)
-        XCTAssertTrue(app.buttons["task-bulk-Done"].isEnabled)
-        XCTAssertTrue(app.buttons["task-bulk-Backlog"].exists)
-        attachUIScreenshot(app, "Several selected tasks offer moves only")
-        app.buttons["task-bulk-Move to Active"].tap()
-        XCTAssertTrue(app.staticTexts["task-move-notice"].waitForExistence(timeout: 5))
-        XCTAssertEqual(app.staticTexts["task-move-notice"].label, "2 tasks moved to Active")
-        app.buttons["task-move-follow"].tap()
-        revealByScrolling(first, in: app)
-        XCTAssertTrue(first.waitForExistence(timeout: 5))
-        revealByScrolling(second, in: app)
-        XCTAssertTrue(second.waitForExistence(timeout: 5))
     }
 
     @MainActor

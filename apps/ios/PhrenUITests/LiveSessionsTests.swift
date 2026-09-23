@@ -27,7 +27,9 @@ final class LiveSessionsTests: XCTestCase {
     @MainActor
     func testConnectionSetupProjectGraphAndStaleStatus() {
         let app = XCUIApplication()
-        app.launchArguments = ["--ui-testing", "--live-sessions-fixture", "--live-sessions-offline"]
+        // Answers read as live for 30 seconds instead of 90, so the stale
+        // check below does not idle for a minute and a half.
+        app.launchArguments = ["--ui-testing", "--live-sessions-fixture", "--live-sessions-offline", "--live-fresh-seconds=30"]
         app.launch()
         XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 8))
         app.tabBars.buttons["Agents"].tap()
@@ -74,8 +76,8 @@ final class LiveSessionsTests: XCTestCase {
         XCTAssertTrue(app.webViews.staticTexts["DEMO"].firstMatch.waitForExistence(timeout: 20))
         app.buttons["graph-back"].tap()
         app.navigationBars["Session details"].buttons.element(boundBy: 0).tap()
-        // A snapshot reads as live for 90s after its last successful update;
-        // wait past that window for the disconnected fixture to go stale.
+        // A snapshot reads as live for the window after its last successful
+        // update; wait past it for the disconnected fixture to go stale.
         let stale = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Showing previous status")).firstMatch
         XCTAssertTrue(stale.waitForExistence(timeout: 100))
         // The card's last line only says what the section can't: Stale.
@@ -177,26 +179,23 @@ final class LiveSessionsTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Connect project memory"].waitForExistence(timeout: 5))
     }
 
+    /// A session card's swipe still offers Close in the custom scroll layout;
+    /// then, in the same launch, a computer's page switches Workspaces and
+    /// Activity with phren's text segment, and closing from session details
+    /// asks through a phren dialog with an explicit Keep.
     @MainActor
-    func testSessionSwipeStillOffersCloseInCustomScrollLayout() {
+    func testSessionSwipeCloseComputerViewSegmentAndDetailCloseDialog() {
         let app = launchLayout(count: 1)
         let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "overview-chat:")).firstMatch
         XCTAssertTrue(card.isHittable)
         card.swipeLeft()
         XCTAssertFalse(app.buttons["chat-close"].exists, "Swiping must not open the conversation")
-        let close = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "overview-close:")).firstMatch
-        XCTAssertTrue(close.waitForExistence(timeout: 5))
+        let swipeClose = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "overview-close:")).firstMatch
+        XCTAssertTrue(swipeClose.waitForExistence(timeout: 5))
         capture(app, "Sessions swipe close")
         card.swipeRight()
-        XCTAssertFalse(close.exists)
-    }
+        XCTAssertFalse(swipeClose.exists)
 
-    /// A computer's page switches Workspaces and Activity with phren's text
-    /// segment, and closing from session details asks through a phren dialog
-    /// with an explicit Keep.
-    @MainActor
-    func testComputerViewSegmentAndDetailCloseDialog() {
-        let app = launchLayout(count: 1)
         let computer = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "live-host:")).firstMatch
         for _ in 0..<4 where !computer.isHittable { app.scrollViews["sessions-scroll"].swipeUp() }
         XCTAssertTrue(computer.waitForExistence(timeout: 10)); computer.tap()

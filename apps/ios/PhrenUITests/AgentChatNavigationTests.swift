@@ -49,10 +49,8 @@ final class AgentChatNavigationTests: AgentChatUITestCase {
         // keyboard can time out outright on a busy host; the retry below is
         // the same keystroke, not a weaker check.
         app.typeKey(XCUIKeyboardKey.escape, modifierFlags: [])
-        sleep(1)
-        for _ in 0..<2 where !row.exists {
+        for _ in 0..<2 where !row.waitForExistence(timeout: 1) {
             app.typeKey("[", modifierFlags: .command)
-            sleep(1)
         }
         XCTAssertTrue(row.waitForExistence(timeout: 5), "Escape or ⌘[ should go back")
     }
@@ -209,6 +207,9 @@ final class AgentChatNavigationTests: AgentChatUITestCase {
         XCTAssertFalse(app.buttons["Open workspace link"].exists)
         capture(app, "Native agent conversation in Phren")
         app.buttons["Chat options"].tap()
+        // A session offers only native chat and terminal actions.
+        XCTAssertTrue(app.buttons["Project memory"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Open in Moshi"].exists)
         app.buttons["Project memory"].tap()
         XCTAssertTrue(app.navigationBars["phone · brain"].waitForExistence(timeout: 5))
     }
@@ -244,24 +245,5 @@ final class AgentChatNavigationTests: AgentChatUITestCase {
         XCTAssertTrue(app.staticTexts["No agent in this tab"].waitForExistence(timeout: 5))
         app.buttons["chat-composer-terminal"].tap()
         XCTAssertTrue(app.otherElements["herdr-terminal-header"].waitForExistence(timeout: 8))
-    }
-
-    @MainActor
-    func testSessionHasOnlyNativeChatAndTerminalActions() {
-        let app = launch()
-        app.buttons["live-chat:w7:w7:t9"].tap()
-        XCTAssertTrue(app.buttons["chat-close"].waitForExistence(timeout: 5))
-        app.buttons["Chat options"].tap()
-        XCTAssertFalse(app.buttons["Open in Moshi"].exists)
-    }
-
-    @MainActor
-    func testProjectMenuOpensNativeChat() {
-        let app = launch()
-        let found = app.buttons["live-chat:w7:w7:t9"]
-        XCTAssertTrue(found.waitForExistence(timeout: 10))
-        found.tap()
-        XCTAssertTrue(app.buttons["chat-close"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["The project screen is ready. What would you like to change?"].waitForExistence(timeout: 5))
     }
 }

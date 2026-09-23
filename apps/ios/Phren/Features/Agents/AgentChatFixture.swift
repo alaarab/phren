@@ -805,14 +805,23 @@ import UniformTypeIdentifiers
     /// The catalogue the Hook would report for this harness: Codex's
     /// app-server list, Claude Code's own `/model` menu with the default
     /// first, nothing for a harness with no built-in list.
+    /// Codex rows carry the app-server's effort levels; Claude's carry none,
+    /// so its picker shows the low/medium/high fallback.
     static func models(source: String) -> [AgentModelChoice] {
-        AgentModelChoice.choices(source: source)
+        AgentModelChoice.choices(source: source).map { choice in
+            guard source == "codex" else { return choice }
+            var listed = choice
+            listed.efforts = ["low", "medium", "high", "xhigh"]
+            listed.defaultEffort = "medium"
+            return listed
+        }
     }
 
     /// `--chat-models-delayed` holds the picker on its loading row for a
     /// beat, so a test can photograph the wait before the list arrives;
     /// `--chat-models-fail` fails the route instead, for the built-in rows.
-    static func switchModel(_ target: AgentChatTarget, model: String) async throws -> AgentModelSwitch {
+    /// Codex confirms an effort from its catalogue, as the Hook does.
+    static func switchModel(_ target: AgentChatTarget, model: String, effort: String? = nil) async throws -> AgentModelSwitch {
         if flag("--chat-working"), !stopped { throw AgentModelSwitchError.working }
         if target.source == "opencode" {
             throw PhrenKitError.validation("OpenCode uses an interactive /models picker. Open terminal to switch models; remote selection cannot yet be verified.")
@@ -820,8 +829,16 @@ import UniformTypeIdentifiers
         guard let choice = models(source: target.source).first(where: { $0.argument == model }) else {
             throw PhrenKitError.validation("That model is not in the computer's catalogue.")
         }
-        let data = try JSONSerialization.data(withJSONObject: ["ok": true, "model": choice.argument, "name": choice.name])
-        return try AgentModelSwitch.read(data)
+        var reply: [String: Any] = ["ok": true, "model": choice.argument, "name": choice.name]
+        if target.source == "codex" {
+            guard let chosen = effort ?? choice.defaultEffort, choice.efforts.contains(chosen) else {
+                throw PhrenKitError.validation("The catalogue does not confirm that reasoning effort. Refresh the model list.")
+            }
+            reply["effort"] = chosen
+        } else if let effort {
+            reply["effort"] = effort
+        }
+        return try AgentModelSwitch.read(JSONSerialization.data(withJSONObject: reply))
     }
 
     static var modelsDelayed: Bool { flag("--chat-models-delayed") }

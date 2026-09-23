@@ -552,9 +552,10 @@ struct AgentChatView: View {
             }
         }
         .sheet(isPresented: $showingModelPicker) {
-            ChatModelPickerSheet(source: model.target?.source ?? "", current: model.modelName, host: session.host,
-                                 choose: { argument in try await model.switchModel(session, argument: argument) },
-                                 deferChoice: { argument in model.deferModelSwitch(session, argument: argument) })
+            ChatModelPickerSheet(source: model.target?.source ?? "", current: model.modelName,
+                                 currentEffort: model.modelEffort, host: session.host,
+                                 choose: { argument, effort in try await model.switchModel(session, argument: argument, effort: effort) },
+                                 deferChoice: { argument, effort in model.deferModelSwitch(session, argument: argument, effort: effort) })
         }
         .sheet(isPresented: $showingUsage) { ChatUsageSheet(model: model) { showingUsage = false } }
         .sheet(isPresented: $showingSecret) { ChatSecretSheet(model: model, session: session) }

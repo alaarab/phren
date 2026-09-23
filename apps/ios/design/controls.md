@@ -591,6 +591,13 @@ chooser. Ids: `<identifier>` on the button, `<identifier>:<value>` on rows,
 and `<identifier>-loading` on the loading row unless the owner supplies its
 own `loadingIdentifier` (the chat picker's `model-loading`).
 
+`below` draws owner rows directly under one option's row, never inside it.
+The chat `/model` picker uses it for effort: a model row chooses without
+switching, its levels appear under it as radio rows indented 32 to the model's
+title under a caption "Effort" (`model-effort:<level>`, the catalogue default
+chipped, the current effort checked when known), and a level switches. The
+session's own model keeps a `current` chip once another row is chosen.
+
 ## PhrenColorButton and phrenColorSheet
 
 A color swatch is a plain 44-point Button with a label and stable identifier.

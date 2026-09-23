@@ -186,10 +186,12 @@ final class AgentChatModel {
     var modelSwitchNotice: String?
     private var modelBeforeSwitch: String?
     private(set) var switchingModel = false
-    private(set) var deferredModel: (target: AgentChatTarget, argument: String, name: String)?
+    /// The effort this phone last set with a model switch; nil when unknown.
+    private(set) var modelEffort: String?
+    private(set) var deferredModel: (target: AgentChatTarget, argument: String, name: String, effort: String?)?
     private var deferredModelSession: LiveAgentSession?
 
-    func switchModel(_ session: LiveAgentSession, argument: String) async throws {
+    func switchModel(_ session: LiveAgentSession, argument: String, effort: String? = nil) async throws {
         guard let expected = target, !expected.isStarting, !switchingModel else {
             throw PhrenKitError.validation("Wait for the current model switch or session startup to finish.")
         }
@@ -198,24 +200,24 @@ final class AgentChatModel {
         let receipt: AgentModelSwitch
         #if DEBUG && targetEnvironment(simulator)
         if AgentChatFixture.enabled {
-            receipt = try await AgentChatFixture.switchModel(expected, model: argument)
+            receipt = try await AgentChatFixture.switchModel(expected, model: argument, effort: effort)
         } else {
-            receipt = try await PhrenConnection.switchModel(host: session.host, privateKey: try DeviceSSHKey.load(session.host.id), target: expected, model: argument)
+            receipt = try await PhrenConnection.switchModel(host: session.host, privateKey: try DeviceSSHKey.load(session.host.id), target: expected, model: argument, effort: effort)
         }
         #else
-        receipt = try await PhrenConnection.switchModel(host: session.host, privateKey: try DeviceSSHKey.load(session.host.id), target: expected, model: argument)
+        receipt = try await PhrenConnection.switchModel(host: session.host, privateKey: try DeviceSSHKey.load(session.host.id), target: expected, model: argument, effort: effort)
         #endif
         guard target == expected else { return }
         modelBeforeSwitch = transcriptContext.modelName
-        modelName = receipt.model
+        modelName = receipt.model; modelEffort = receipt.effort
         modelSwitchNotice = "Switched to \(receipt.name)"
         deferredModel = nil; deferredModelSession = nil
     }
 
-    func deferModelSwitch(_ session: LiveAgentSession, argument: String) {
+    func deferModelSwitch(_ session: LiveAgentSession, argument: String, effort: String? = nil) {
         guard let target else { return }
         let name = AgentModelChoice.choices(source: target.source).first { $0.argument == argument }?.name ?? argument
-        deferredModel = (target, argument, name)
+        deferredModel = (target, argument, name, effort)
         deferredModelSession = session
         startDeferredModelSwitch()
     }
@@ -230,7 +232,7 @@ final class AgentChatModel {
               ["idle", "done"].contains(liveActivity ?? ""), !switchingModel else { return }
         Task {
             guard deferredModel?.argument == pending.argument, target == pending.target, !switchingModel else { return }
-            do { try await switchModel(session, argument: pending.argument) }
+            do { try await switchModel(session, argument: pending.argument, effort: pending.effort) }
             catch AgentModelSwitchError.working {
                 // A new turn won the race. Only a fresh idle transition retries.
                 if target == pending.target { liveActivity = "working" }
@@ -351,7 +353,7 @@ final class AgentChatModel {
         pendingPreview = nil; replyPreview = nil; harnessVerb = nil
         history = .init(); progress = .init(); reveal.finish(); hasTranscript = false
         awaitingReply = false; sentAt = nil; liveActivity = nil; isCompacting = false; historyStalled = false; historyStalledSince = nil
-        modelName = nil; preferProgressActivity = false
+        modelName = nil; modelEffort = nil; preferProgressActivity = false
         transcriptContext = .init(); statusBranch = nil
         connected = false; error = nil; deliveryError = nil
         sentImages = []; needsAnswer = false; approval = nil; questionState = AgentQuestionState()
@@ -400,7 +402,7 @@ final class AgentChatModel {
         target = nil; history = .init(); connected = false; queue = []; outbox.drainTask?.cancel(); outbox.drainTask = nil
         connection.rejectedStreamTarget = nil
         progress = .init(); reveal.finish(); hasTranscript = false; awaitingReply = false; sentAt = nil; liveActivity = nil; isCompacting = false
-        historyStalled = false; historyStalledSince = nil; modelName = nil
+        historyStalled = false; historyStalledSince = nil; modelName = nil; modelEffort = nil
         transcriptContext = .init(); statusBranch = nil
         draft = ""; attachments = []; sentImages = []; deliveryError = nil; needsAnswer = false
         terminalPrompt = nil; passwordPrompt = false

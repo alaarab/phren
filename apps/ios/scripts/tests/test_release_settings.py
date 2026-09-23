@@ -150,5 +150,30 @@ class ReadXcconfigTests(unittest.TestCase):
         self.assertIsNone(release.read_xcconfig(self.path, "DEVELOPMENT_TEAM"))
 
 
+class ResolvedBuildSettingsTests(unittest.TestCase):
+    """The main checkout's settings reuse a project this run already generated."""
+
+    def run_with(self, checkout, generated):
+        listing = '[{"target": "Phren", "buildSettings": {"DEVELOPMENT_TEAM": "REMOTE"}}]'
+        calls = []
+
+        def fake_run(command, **kwargs):
+            calls.append(command)
+            return subprocess.CompletedProcess(command, 0, stdout=listing, stderr="")
+
+        with mock.patch.object(release.subprocess, "run", side_effect=fake_run):
+            settings = release.resolved_build_settings(checkout, [], generated=generated)
+        self.assertEqual(settings["DEVELOPMENT_TEAM"], "REMOTE")
+        return [command[0] for command in calls]
+
+    def test_an_already_generated_checkout_is_not_generated_again(self):
+        with tempfile.TemporaryDirectory() as checkout:
+            self.assertEqual(self.run_with(Path(checkout), (Path(checkout),)), ["xcodebuild"])
+
+    def test_another_checkout_is_generated_before_reading_its_settings(self):
+        with tempfile.TemporaryDirectory() as checkout, tempfile.TemporaryDirectory() as other:
+            self.assertEqual(self.run_with(Path(checkout), (Path(other),)), ["xcodegen", "xcodebuild"])
+
+
 if __name__ == "__main__":
     unittest.main()

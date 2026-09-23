@@ -604,9 +604,14 @@ xcodegen generate      # produces Phren.xcodeproj from project.yml
 open Phren.xcodeproj   # build & run the Phren scheme
 ```
 
-The app target bundles the shared graph renderer during every build. A clean
-checkout therefore includes the renderer automatically, including in CI;
-`Phren/Resources/graph/phren-graph.js` remains generated and gitignored.
+The app target bundles the shared graph renderer in a pre-build phase that
+runs when one of its inputs changed: the sources listed in
+`scripts/graph-inputs.xcfilelist`, the bundler and `pnpm-lock.yaml` (or a
+missing output). A clean checkout therefore includes the renderer
+automatically, including in CI, and an unchanged build skips node;
+`Phren/Resources/graph/phren-graph.js` remains generated and gitignored. The
+bundler rewrites the list from esbuild's metafile when run by hand; commit it
+when it changes (`graph-bundle-size.test.ts` fails on drift).
 
 ### Install directly on a paired iPhone
 

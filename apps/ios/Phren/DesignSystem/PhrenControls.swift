@@ -606,6 +606,9 @@ struct PhrenSingleSelectSheet<Value: Hashable>: View {
     var loadingIdentifier: String? = nil
     var message: String? = nil
     var footer: AnyView? = nil
+    /// Owner rows drawn directly under one option's row, such as the chat
+    /// picker's effort levels under the chosen model. Nil for most options.
+    var below: ((Value) -> AnyView?)? = nil
     /// Runs after the selection is set, before the card dismisses.
     var onSelect: ((Value) -> Void)? = nil
     var dismissOnSelect = true
@@ -639,6 +642,7 @@ struct PhrenSingleSelectSheet<Value: Hashable>: View {
                                 select(option)
                             }
                             .phrenIdentifier("\(rowPrefix):\(option.id)")
+                            if let rows = below?(option.value) { rows }
                         }
                     }
                     if let footer { footer }

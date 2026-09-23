@@ -9,15 +9,24 @@ import SwiftUI
 /// as its own row) and the default marked with a chip. The built-in
 /// per-harness names stand in only when there is no computer to ask or the
 /// route fails or answers empty, each row marked "built-in" beside its
-/// default chip, and a field for any other id sits at the bottom. Choosing
-/// (row or typed id) asks the Hook to switch and verify the model.
+/// default chip, and a field for any other id sits at the bottom.
+///
+/// For Claude and Codex a model row does not switch on its own: it becomes
+/// the chosen model and its effort levels appear under it (the catalogue's
+/// own levels, low/medium/high when the harness reports none, the current
+/// effort checked when known). Choosing a level asks the Hook to switch and
+/// verify the model with that effort. A typed id switches without one.
 struct ChatModelPickerSheet: View {
     static let recentKey = "chat.model.recent.v1"
+    /// The harnesses whose model switch also sets an effort.
+    static let effortSources: Set<String> = ["claude", "codex"]
+    static let fallbackEfforts = ["low", "medium", "high"]
     let source: String
     let current: String?
+    var currentEffort: String? = nil
     var host: LiveHost? = nil
-    let choose: (String) async throws -> Void
-    let deferChoice: (String) -> Void
+    let choose: (String, String?) async throws -> Void
+    let deferChoice: (String, String?) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var custom = ""
     /// What the computer reports. Until it answers the list is empty with a
@@ -27,7 +36,10 @@ struct ChatModelPickerSheet: View {
     @State private var failed = false
     @State private var switching = false
     @State private var switchError: String?
-    @State private var waitingChoice: String?
+    @State private var waitingChoice: (argument: String, effort: String?)?
+    /// The model row tapped, whose effort levels show under it. Nil keeps
+    /// the session's own model chosen.
+    @State private var chosenModel: String?
 
     private var choices: [AgentModelChoice] {
         if let reported { return reported }
@@ -46,6 +58,7 @@ struct ChatModelPickerSheet: View {
     }
     /// The built-in fallback is on screen: each of its rows is marked so.
     private var isFallback: Bool { reported == nil && !isLoading }
+    private var takesEffort: Bool { Self.effortSources.contains(source) }
     private var customArgument: String? {
         let token = custom.trimmingCharacters(in: .whitespacesAndNewlines)
         return AgentModelChoice.command(for: token) == nil ? nil : token
@@ -60,21 +73,39 @@ struct ChatModelPickerSheet: View {
                         caption: choice.description, trailing: trailingChip(choice))
         }
     }
-    /// The row the card checks: the session's reported model matched to at
-    /// most one choice (exact id first, so the 1M variant keeps its own mark),
-    /// recomputed as the computer's report arrives. The card owns the write;
-    /// choosing a row sends through `onSelect`.
+    /// The session's reported model matched to at most one choice (exact id
+    /// first, so the 1M variant keeps its own mark), recomputed as the
+    /// computer's report arrives.
+    private var markedCurrent: String? {
+        AgentModelChoice.markedChoice(current: current, in: orderedChoices)?.argument
+    }
+    /// The row the card checks: the tapped model, else the session's own.
+    /// The card owns the write; choosing a row goes through `onSelect`.
     private var currentSelection: Binding<String> {
-        Binding(get: { AgentModelChoice.markedChoice(current: current, in: orderedChoices)?.argument ?? "__none__" }, set: { _ in })
+        Binding(get: { chosenModel ?? markedCurrent ?? "__none__" }, set: { _ in })
     }
     /// `default` for the catalogue's default; in the fallback both chips can
-    /// share the slot, so the built-in default stays identifiable.
+    /// share the slot, so the built-in default stays identifiable. `current`
+    /// keeps the session's model identifiable once another row is chosen.
     private func trailingChip(_ choice: AgentModelChoice) -> AnyView? {
-        guard isFallback else { return choice.isDefault ? AnyView(PhrenChip(text: "default")) : nil }
+        var chips: [String] = []
+        if choice.isDefault { chips.append("default") }
+        if isFallback { chips.append("built-in") }
+        if let chosenModel, chosenModel != choice.argument, choice.argument == markedCurrent { chips.append("current") }
+        guard !chips.isEmpty else { return nil }
         return AnyView(HStack(spacing: PhrenTheme.Space.xs) {
-            if choice.isDefault { PhrenChip(text: "default") }
-            PhrenChip(text: "built-in")
+            ForEach(chips, id: \.self) { PhrenChip(text: $0) }
         })
+    }
+
+    /// The chosen model's own effort levels, else the three every harness takes.
+    static func efforts(for choice: AgentModelChoice?) -> [String] {
+        guard let listed = choice?.efforts, !listed.isEmpty else { return fallbackEfforts }
+        return listed
+    }
+
+    static func effortTitle(_ level: String) -> String {
+        PhrenConnection.LaunchEffort(rawValue: level)?.title ?? level.capitalized
     }
 
     var body: some View {
@@ -83,7 +114,10 @@ struct ChatModelPickerSheet: View {
                                loadingLabel: host.map { "Loading models from \($0.name)" } ?? "Loading models from the computer",
                                loadingIdentifier: "model-loading",
                                footer: AnyView(switchFooter),
-                               onSelect: { argument in commit(argument) },
+                               below: { argument in effortRows(under: argument) },
+                               onSelect: { argument in
+                                   if takesEffort { chosenModel = argument; switchError = nil } else { commit(argument, effort: nil) }
+                               },
                                dismissOnSelect: false,
                                dismiss: { dismiss() })
         .disabled(switching)
@@ -92,12 +126,36 @@ struct ChatModelPickerSheet: View {
         .task { await loadFromComputer() }
     }
 
+    /// Effort levels under the chosen model, indented to its title. The
+    /// current effort is checked when this phone knows it; the catalogue's
+    /// default carries its chip. A level switches the model with it.
+    private func effortRows(under argument: String) -> AnyView? {
+        guard takesEffort, waitingChoice == nil, argument == (chosenModel ?? markedCurrent) else { return nil }
+        let choice = orderedChoices.first { $0.argument == argument }
+        let levels = Self.efforts(for: choice)
+        return AnyView(VStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
+            Text("Effort")
+                .font(PhrenTypography.caption.weight(.semibold)).foregroundStyle(PhrenTheme.textMuted)
+                .accessibilityAddTraits(.isHeader)
+            ForEach(levels, id: \.self) { level in
+                PhrenOptionRow(title: Self.effortTitle(level), selected: level == currentEffort,
+                               trailing: level == choice?.defaultEffort ? AnyView(PhrenChip(text: "default")) : nil) {
+                    commit(argument, effort: level)
+                }
+                .phrenIdentifier("model-effort:\(level)")
+            }
+        }
+        .padding(.leading, 32)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Effort for \(choice?.name ?? argument)"))
+    }
+
     private var customField: some View {
         HStack(spacing: PhrenTheme.Space.small) {
             PhrenTextField("model id", text: $custom, identifier: "chat-model-custom", monospaced: true)
                 .textInputAutocapitalization(.never).autocorrectionDisabled()
-                .onSubmit { if let token = customArgument { commit(token) } }
-            Button("Use") { if let token = customArgument { commit(token) } }
+                .onSubmit { if let token = customArgument { commit(token, effort: nil) } }
+            Button("Use") { if let token = customArgument { commit(token, effort: nil) } }
                 .font(PhrenTypography.body.weight(.medium))
                 .foregroundStyle(PhrenTheme.accent)
                 .frame(minWidth: 44, minHeight: 44)
@@ -143,10 +201,10 @@ struct ChatModelPickerSheet: View {
                 Text(switchError).font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
                     .accessibilityIdentifier("chat-model-error")
             }
-            if let argument = waitingChoice {
+            if let waiting = waitingChoice {
                 PhrenOptionRow(title: "Switch after this turn", icon: "clock") {
-                    remember(argument)
-                    deferChoice(argument)
+                    remember(waiting.argument)
+                    deferChoice(waiting.argument, waiting.effort)
                     dismiss()
                 }
                 .phrenIdentifier("chat-model-after-turn")
@@ -166,18 +224,18 @@ struct ChatModelPickerSheet: View {
         AppRuntime.defaults.set(store.raw, forKey: Self.recentKey)
     }
 
-    private func commit(_ argument: String) {
+    private func commit(_ argument: String, effort: String?) {
         guard !switching, AgentModelChoice.command(for: argument) != nil else { return }
         switching = true; waitingChoice = nil; switchError = nil
         Task {
             defer { switching = false }
             do {
-                try await choose(argument)
+                try await choose(argument, effort)
                 remember(argument)
                 dismiss()
             } catch AgentModelSwitchError.working {
                 switchError = "This agent is working. The model can switch when the turn ends."
-                waitingChoice = argument
+                waitingChoice = (argument, effort)
             } catch {
                 switchError = error.localizedDescription
             }

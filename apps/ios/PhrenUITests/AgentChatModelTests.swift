@@ -13,6 +13,7 @@ final class AgentChatModelTests: AgentChatUITestCase {
         let terra = app.buttons["model-option:gpt-5.6-terra"]
         XCTAssertTrue(terra.waitForExistence(timeout: 5))
         terra.tap()
+        chooseEffort("medium", in: app)
         let afterTurn = app.buttons["chat-model-after-turn"]
         if !afterTurn.isHittable { app.swipeUp() }
         XCTAssertTrue(afterTurn.waitForExistence(timeout: 5))
@@ -38,6 +39,7 @@ final class AgentChatModelTests: AgentChatUITestCase {
         let terra = app.buttons["model-option:gpt-5.6-terra"]
         XCTAssertTrue(terra.waitForExistence(timeout: 5))
         terra.tap()
+        chooseEffort("high", in: app)
         let afterTurn = app.buttons["chat-model-after-turn"]
         XCTAssertTrue(afterTurn.waitForExistence(timeout: 5))
         afterTurn.tap()
@@ -65,7 +67,16 @@ final class AgentChatModelTests: AgentChatUITestCase {
         XCTAssertTrue(app.buttons["model-option:gpt-6-astra"].label.contains("Our most capable"))
         XCTAssertFalse(app.buttons["model-loading"].exists, "The catalogue has answered; no loading row remains")
         capture(app, "Model picker")
+        // A model row chooses; its effort levels open under it, the
+        // catalogue's own for Codex, and a level switches.
         terra.tap()
+        let xhigh = app.buttons["model-effort:xhigh"]
+        XCTAssertTrue(xhigh.waitForExistence(timeout: 5), "Codex lists its own levels")
+        XCTAssertTrue(terra.isSelected, "The chosen model carries the mark")
+        XCTAssertGreaterThan(xhigh.frame.minY, terra.frame.maxY, "The levels sit under the chosen model")
+        XCTAssertTrue(app.buttons["model-effort:medium"].label.contains("default"))
+        capture(app, "Model picker effort")
+        xhigh.tap()
         let switched = app.staticTexts["chat-model-system-row"]
         XCTAssertTrue(switched.waitForExistence(timeout: 8))
         XCTAssertEqual(switched.label, "Switched to GPT-5.6-Terra")
@@ -77,6 +88,8 @@ final class AgentChatModelTests: AgentChatUITestCase {
         XCTAssertTrue(app.buttons["chat-options-model"].waitForExistence(timeout: 5))
         app.buttons["chat-options-model"].tap()
         XCTAssertTrue(app.buttons["model-option:gpt-5.6-sol"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["model-effort:xhigh"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["model-effort:xhigh"].isSelected, "The effort just set is preselected")
         app.buttons["model-option-done"].tap()
     }
 
@@ -144,6 +157,9 @@ final class AgentChatModelTests: AgentChatUITestCase {
         let haiku = app.buttons["model-option:claude-haiku-4-5-20251001"]
         XCTAssertTrue(haiku.waitForExistence(timeout: 5))
         haiku.tap()
+        XCTAssertTrue(app.buttons["model-effort:high"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["model-effort:xhigh"].exists, "No catalogue levels: low, medium and high")
+        chooseEffort("medium", in: app)
         let switched = app.staticTexts["chat-model-system-row"]
         XCTAssertTrue(switched.waitForExistence(timeout: 8))
         XCTAssertEqual(switched.label, "Switched to Haiku 4.5")
@@ -161,5 +177,13 @@ final class AgentChatModelTests: AgentChatUITestCase {
         XCTAssertLessThan(fable.frame.minY, app.buttons["model-option:claude-opus-5"].frame.minY,
                           "The catalogue tail keeps its order behind the recent lead")
         app.buttons["model-option-done"].tap()
+    }
+
+    @MainActor
+    private func chooseEffort(_ level: String, in app: XCUIApplication) {
+        let row = app.buttons["model-effort:\(level)"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "The chosen model offers \(level)")
+        if !row.isHittable { app.swipeUp() }
+        row.tap()
     }
 }

@@ -105,9 +105,14 @@ def find_main_worktree():
     return main_root / relative
 
 
-def resolved_build_settings(checkout, settings):
-    """The Phren target's build settings as xcodebuild resolves them in `checkout`."""
-    subprocess.run(["xcodegen", "generate"], cwd=checkout, check=True)
+def resolved_build_settings(checkout, settings, *, generated=()):
+    """The Phren target's build settings as xcodebuild resolves them in `checkout`.
+
+    A checkout listed in `generated` already has a project from this run's
+    `xcodegen generate`, so it is not generated a second time.
+    """
+    if Path(checkout).resolve() not in {Path(path).resolve() for path in generated}:
+        subprocess.run(["xcodegen", "generate"], cwd=checkout, check=True)
     resolved = json.loads(subprocess.run(
         ["xcodebuild", "-project", "Phren.xcodeproj", "-scheme", "Phren", "-configuration", "Release",
          "-showBuildSettings", "-json", *settings],
@@ -161,7 +166,9 @@ def main() -> None:
         # Only reached when no Local.xcconfig supplies the value; resolving the
         # main checkout's settings is the slowest source, so keep it lazy.
         if "value" not in remote_cache:
-            remote_cache["value"] = resolved_build_settings(main_worktree, settings) if main_worktree else {}
+            remote_cache["value"] = (
+                resolved_build_settings(main_worktree, settings, generated=(root,)) if main_worktree else {}
+            )
         return remote_cache["value"]
 
     team, team_source = resolve_setting(
