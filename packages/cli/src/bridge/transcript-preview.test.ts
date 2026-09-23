@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { logger } from "../logger.js";
-import { claudePanePreview, CodexRolloutPreview, readPreviewPane, TranscriptPreviewStream } from "./transcript-preview.js";
+import { claudePanePreview, CodexRolloutPreview, readPreviewPane, TranscriptPreviewStream, unwrapTerminalLines } from "./transcript-preview.js";
 import { TranscriptReader } from "./transcripts.js";
 import type { Target } from "./protocol.js";
 
@@ -227,5 +227,49 @@ describe("live reply previews", () => {
     await expect(readFile(file + ".preview.json")).rejects.toThrow();
     expect((await new TranscriptReader(file, "opencode").read()).entries).toHaveLength(2);
     expect(await readFile(file, "utf8")).toContain("Hello world");
+  });
+});
+
+describe("unwrapTerminalLines", () => {
+  it("joins a paragraph the terminal wrapped at the pane width", () => {
+    const pane = [
+      "You mean the project's Code section. Right now it",
+      "lists indexed files and symbols, but you can't open",
+      "a file and read it.",
+      "",
+      "Starting a worker on it:",
+    ];
+    expect(unwrapTerminalLines(pane)).toBe(
+      "You mean the project's Code section. Right now it lists indexed files and symbols, but you can't open a file and read it.\n\nStarting a worker on it:");
+  });
+
+  it("keeps list items, their wrapped continuations, short lines and fenced code apart", () => {
+    const pane = [
+      "Three things changed in the chat screen today:",
+      "- the header keeps the branch beside a very long",
+      "  project name",
+      "- taps land",
+      "```",
+      "const answer = computeTheAnswerForTheWholeScreen(42)",
+      "return answer",
+      "```",
+      "Done.",
+    ];
+    expect(unwrapTerminalLines(pane).split("\n")).toEqual([
+      "Three things changed in the chat screen today:",
+      "- the header keeps the branch beside a very long project name",
+      "- taps land",
+      "```",
+      "const answer = computeTheAnswerForTheWholeScreen(42)",
+      "return answer",
+      "```",
+      "Done.",
+    ]);
+  });
+
+  it("flows a wrapped reply in the Claude pane preview", () => {
+    const pane = "❯ Explain this\n⏺ The preview comes from the terminal, where every line\n  is wrapped to the pane, so it needs joining.\n✻ Pondering… (3s)\n❯";
+    expect(claudePanePreview(pane, "Explain this"))
+      .toBe("The preview comes from the terminal, where every line is wrapped to the pane, so it needs joining.");
   });
 });

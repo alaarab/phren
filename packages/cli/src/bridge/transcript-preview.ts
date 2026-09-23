@@ -59,12 +59,46 @@ export function claudePanePreview(rendered: string, prompt: string, previous = "
     if (/^\s*(?:↳|⎿|ctrl\+|shift\+|\? for shortcuts)/i.test(clean)) continue;
     reply.push(clean.replace(/^ {2}/, ""));
   }
-  const text = reply.join("\n").trim().slice(0, MAX_TEXT);
+  const text = unwrapTerminalLines(reply).trim().slice(0, MAX_TEXT);
   if (!scrolled) return text;
   if (text.startsWith(previous)) return text;
   const overlap = previous.lastIndexOf(text.split("\n", 1)[0].slice(0, 80));
   return overlap >= 0 && text.startsWith(previous.slice(overlap))
     ? (previous.slice(0, overlap) + text).slice(0, MAX_TEXT) : previous;
+}
+
+/** A block line that starts its own row even inside a paragraph: a list
+ * item, heading, quote, table row or code fence. */
+/** No terminal pane Claude draws in is narrower than this. */
+const MIN_WRAP_WIDTH = 40;
+const BLOCK_START = /^\s*(?:[-*+•]\s|\d+[.)]\s|#{1,6}\s|>|\||```|~~~)/;
+
+/**
+ * Undoes the terminal's word wrap. Claude draws a paragraph wrapped to the
+ * pane's width, so the phone would show each wrap as a hard break. A line is
+ * joined to the next when the next line's first word would not have fitted
+ * on it, which is exactly what a soft wrap looks like; the widest line
+ * stands in for the pane width, and below 40 columns nothing is joined. Blank lines, block starts and fenced code
+ * keep their breaks.
+ */
+export function unwrapTerminalLines(lines: readonly string[]): string {
+  const width = Math.max(0, ...lines.map(line => line.length));
+  // Too narrow to be a pane's wrap: short replies keep their own lines.
+  if (width < MIN_WRAP_WIDTH) return lines.join("\n");
+  const out: string[] = [];
+  let fenced = false;
+  lines.forEach((line, index) => {
+    const fence = /^\s*(?:```|~~~)/.test(line);
+    const before = index > 0 ? lines[index - 1] : undefined;
+    const firstWord = line.trimStart().split(/\s/, 1)[0] ?? "";
+    const wrapped = !fenced && !fence && before !== undefined && out.length > 0
+      && before.trim() !== "" && line.trim() !== "" && !BLOCK_START.test(line)
+      && before.trimEnd().length + 1 + firstWord.length > width;
+    if (wrapped) out[out.length - 1] += " " + line.trim();
+    else out.push(line);
+    if (fence) fenced = !fenced;
+  });
+  return out.join("\n");
 }
 
 /** Claude's spinner line, as structured fields: the verb, the turn's elapsed
