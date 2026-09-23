@@ -391,6 +391,7 @@ import UniformTypeIdentifiers
         }
         if flag("--chat-queue-completion") { return try queueCompletionTranscript(target) }
         if flag("--chat-streaming") { return try streamingTranscript(target) }
+        if flag("--talk-fixture") { return try talkTranscript(target) }
         var entries: [[String: Any]] = []
         func append(_ role: String, _ text: String) {
             var message: [String: Any] = ["role": role, "content": text]
@@ -905,9 +906,42 @@ import UniformTypeIdentifiers
         }
         if flag("--chat-send-fails") { throw LiveConnectionError.disconnected }
         sent.append((target.id, text))
+        talkSentAt.append(.now)
         askSide(text)
         if flag("--starting-session-fixture"), target.isStarting { startingAttachedAt = Date.now.addingTimeInterval(3) }
         if flag("--chat-streaming") { streamStarts[target.id] = .now }
+    }
+    static var talkSentAt: [Date] = []
+    /// Talk mode's conversation: each message gets a Codex turn that ends a
+    /// second and a half later with a reply (the first with a code block,
+    /// which is not read aloud).
+    private static func talkTranscript(_ target: AgentChatTarget) throws -> AgentChatTranscript {
+        let kind = streamed.insert(target.id).inserted ? "backlog" : "append"
+        var entries: [[String: Any]] = []
+        func message(_ line: Int, _ role: String, _ text: String) {
+            entries.append(["line": line, "raw": ["type": "response_item", "payload": ["type": "message", "role": role, "content": text]]])
+        }
+        func event(_ line: Int, _ type: String) {
+            entries.append(["line": line, "raw": ["type": "event_msg", "payload": ["type": type]]])
+        }
+        message(0, "assistant", "Ready when you are.")
+        let replies = ["Two commits landed in atlas today.\n\n```swift\nlet parser = Parser()\n```\n\nBoth fix the parser.",
+                       "Running the tests now. I'll tell you when they finish."]
+        for (index, (id, text)) in sent.enumerated() where id == target.id {
+            let base = 1 + index * 4
+            message(base, "user", text)
+            event(base + 1, "task_started")
+            if index < talkSentAt.count, Date.now.timeIntervalSince(talkSentAt[index]) >= 1.5 {
+                message(base + 2, "assistant", replies[min(index, replies.count - 1)])
+                event(base + 3, "task_complete")
+            }
+        }
+        let previousLine = lastStreamLine[target.id] ?? -1
+        let last = entries.compactMap { $0["line"] as? Int }.max() ?? 0
+        lastStreamLine[target.id] = last
+        return try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: ["type": kind, "source": target.source,
+            "entries": kind == "backlog" ? entries : entries.filter { ($0["line"] as? Int ?? -1) > previousLine },
+            "totalLines": last + 1, "hasMore": false]), source: target.source)
     }
     /// The terminal keeps reporting working after Codex's actual completion.
     /// Each queued prompt is acknowledged and finished in the next frame.

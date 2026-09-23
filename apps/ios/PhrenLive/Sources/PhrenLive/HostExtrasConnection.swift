@@ -92,6 +92,15 @@ extension PhrenConnection {
         return try JSONDecoder().decode(HookHealth.Canary.self, from: data)
     }
 
+    /// One sentence voiced by the computer (ElevenLabs, with the key kept on
+    /// the computer): raw 16-bit little-endian mono PCM at 24 kHz.
+    public static func speech(host: LiveHost, privateKey: Data, text: String) async throws -> Data {
+        try host.validate()
+        let body = try JSONSerialization.data(withJSONObject: ["text": text])
+        return try await fetchData(host: host, key: .init(rawRepresentation: privateKey),
+                                   request: GatewayRequest(path: "/v1/speech", body: body, maximumResponseBytes: 8_388_608, timeoutSeconds: 30))
+    }
+
     public static func simulators(host: LiveHost, privateKey: Data) async throws -> [HostSimulator] {
         try host.validate()
         let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: GatewayRequest(path: "/v1/simulators"))

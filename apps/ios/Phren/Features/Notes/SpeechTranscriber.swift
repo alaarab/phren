@@ -218,6 +218,19 @@ final class SpeechTranscriber: DictationRecognizing {
         if !keepingAudioSession { stopCapture() }
     }
 
+    /// Plays `player` through the microphone's own engine, so voice
+    /// processing hears what plays and cancels it from the input. False
+    /// while the microphone is closed.
+    func attach(_ player: AVAudioPlayerNode, format: AVAudioFormat) -> Bool {
+        guard capturing, audioEngine.isRunning else { return false }
+        if player.engine !== audioEngine {
+            player.engine?.detach(player)
+            audioEngine.attach(player)
+            audioEngine.connect(player, to: audioEngine.mainMixerNode, format: format)
+        }
+        return true
+    }
+
     // MARK: Microphone
 
     private func startCapture() throws {

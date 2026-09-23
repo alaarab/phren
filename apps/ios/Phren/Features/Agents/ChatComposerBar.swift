@@ -35,6 +35,7 @@ struct ChatComposerActions {
     let showChildAgents: () -> Void
     let enterSecret: () -> Void
     let toggleDictation: () -> Void
+    let toggleTalk: () -> Void
     let primary: () -> Void
     let openCommandMenu: () -> Void
     let pasteImages: ([NSItemProvider]) -> Void
@@ -63,6 +64,7 @@ struct ChatComposerBar: View {
     let active: Bool
     @Binding var composing: Bool
     let dictation: ChatDictationController
+    let talk: TalkModeController
     let textSelection: ChatTextSelection
     let childAgentsError: String?
     let runningChildAgentCount: Int
@@ -312,6 +314,13 @@ struct ChatComposerBar: View {
             }.accessibilityLabel(dictating ? "Stop dictation" : "Dictate message")
                 .accessibilityIdentifier("chat-dictate")
                 .disabled(model.target == nil || model.sending)
+            Button(action: actions.toggleTalk) {
+                Image(systemName: talk.isOn ? "waveform.circle.fill" : "waveform.circle").font(.system(size: 19))
+                    .foregroundStyle(talk.isOn ? PhrenTheme.accent : PhrenTheme.chatText)
+                    .frame(width: 36, height: 40).contentShape(Rectangle().inset(by: -2))
+            }.accessibilityLabel(talk.isOn ? "Stop talking" : "Talk")
+                .accessibilityIdentifier("chat-talk")
+                .disabled(model.target == nil && !talk.isOn)
             Button(action: actions.primary) {
                 Group {
                     if model.sending || model.stopping { ProgressView().tint(PhrenTheme.chatPanel) }

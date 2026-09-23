@@ -37,6 +37,7 @@ struct AgentChatView: View {
     @State private var attachmentError: String?
     @State private var dictation = ChatDictationController()
     private var dictating: Bool { dictation.isRecording }
+    @State private var talk = TalkModeController()
     @State private var showingAgentSwitcher = false
     @State private var launchingNewThread = false
     @State private var showingUsage = false
@@ -76,6 +77,12 @@ struct AgentChatView: View {
     }
     private func stopDictation() {
         dictation.stop(model: model) { sendDictationIfRequested() }
+    }
+
+    private func toggleTalk() {
+        if talk.isOn { talk.stop(); return }
+        if dictating { stopDictation() }
+        talk.start(TalkModeController.chat(model: model, session: session))
     }
 
     private func sendDictationIfRequested() {
@@ -176,6 +183,9 @@ struct AgentChatView: View {
                     keepOriginal: { dictation.resolvePreview(useTightened: false, model: model) { sendDictationIfRequested() } }
                 )
                 .padding(.horizontal, 12).padding(.top, 6)
+            }
+            if talk.isOn || talk.failure != nil {
+                TalkStatusBar(talk: talk).padding(.horizontal, 12).padding(.top, 6)
             }
             ChatSideAnswerSlot(model: model, session: session)
             ChatHistoryStalledSlot(model: model, projectKnown: project != nil) { launchingNewThread = true }
@@ -321,8 +331,8 @@ struct AgentChatView: View {
                 NotificationCenter.default.post(name: .phrenReassertNavigationBarHidden, object: nil)
             }
         }
-        .onChange(of: scenePhase) { _, phase in if phase != .active { stopDictation() } }
-        .onDisappear { dictation.tearDown() }
+        .onChange(of: scenePhase) { _, phase in if phase != .active { stopDictation(); talk.stop() } }
+        .onDisappear { dictation.tearDown(); talk.stop() }
         .sheet(isPresented: $showingOptions) {
             ChatOptionsSheet(session: session, model: model, project: project, indexedCode: indexedCode,
                              fallbackStoreID: appModel.storeDescriptors.first?.id,
@@ -477,7 +487,7 @@ struct AgentChatView: View {
 
     private var composerBar: some View {
         ChatComposerBar(model: model, session: session, active: active, composing: $composing,
-                        dictation: dictation, textSelection: textSelection,
+                        dictation: dictation, talk: talk, textSelection: textSelection,
                         childAgentsError: childAgentsError, runningChildAgentCount: runningChildAgentCount,
                         actions: ChatComposerActions(
                             run: runAgentRequest,
@@ -486,7 +496,8 @@ struct AgentChatView: View {
                             switchAgent: { showingAgentSwitcher = true },
                             showChildAgents: { showingChildAgents = true },
                             enterSecret: { showingSecret = true },
-                            toggleDictation: { if dictating { stopDictation() } else { startDictation() } },
+                            toggleDictation: { if dictating { stopDictation() } else { talk.stop(); startDictation() } },
+                            toggleTalk: toggleTalk,
                             primary: primaryAction,
                             openCommandMenu: openCommandMenu,
                             pasteImages: pasteImages),
