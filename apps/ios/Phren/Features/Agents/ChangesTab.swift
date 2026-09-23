@@ -18,6 +18,8 @@ struct ChangesTab: View {
     @State private var busy: String?
     @State private var discardTarget: GitStatus.File?
     @State private var loadTask: Task<Void, Never>?
+    /// The file a tap in List asked Diff to show: its path and staged side.
+    @State private var openFile: ChangesDiffList.Focus?
 
     init(session: LiveAgentSession, target: AgentChatTarget, child: String?, worktree: String? = nil) {
         self.session = session
@@ -91,6 +93,7 @@ struct ChangesTab: View {
                 .padding(.horizontal, PhrenTheme.Space.medium)
             ForEach(rows) { file in
                 ChangesFileRow(file: file, busy: busy != nil,
+                              onOpen: { open(file) },
                               onRevert: { discardTarget = file },
                               onStage: { stage(file) })
                 Divider().overlay(PhrenTheme.border)
@@ -107,7 +110,7 @@ struct ChangesTab: View {
             if sections.isEmpty {
                 emptyState("No text changes to show", icon: "doc.text.magnifyingglass")
             } else {
-                ChangesDiffList(sections: sections, wrap: wrap, busy: busy != nil,
+                ChangesDiffList(sections: sections, wrap: wrap, busy: busy != nil, focus: openFile,
                                 statusFor: { path, staged in (changes.status?.files ?? []).first { $0.path == path && $0.staged == staged } },
                                 onStage: { path, staged in stage(path: path, staged: staged) },
                                 refresh: { changes.reload(); reload() })
@@ -147,6 +150,12 @@ struct ChangesTab: View {
             .init(id: "discard", title: "Discard", role: .destructive) { discard(target) },
             .init(id: "cancel", title: "Cancel", role: .cancel) {},
         ]
+    }
+
+    /// A tapped file opens in Diff, scrolled to its section.
+    private func open(_ file: GitStatus.File) {
+        openFile = .init(path: file.path, staged: file.staged)
+        mode = "diff"
     }
 
     private func stage(_ file: GitStatus.File) {
@@ -238,21 +247,31 @@ struct ChangesFileRow: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let file: GitStatus.File
     var busy = false
+    var onOpen: (() -> Void)? = nil
     let onRevert: () -> Void
     let onStage: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
-            ChangesStatusDot(status: file.status)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(file.path)
-                    .font(PhrenTypography.monoFootnote)
-                    .foregroundStyle(PhrenTheme.text)
-                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1).truncationMode(.middle)
-                if dynamicTypeSize > .large { counts }
+            Button { onOpen?() } label: {
+                HStack(spacing: 10) {
+                    ChangesStatusDot(status: file.status)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(file.path)
+                            .font(PhrenTypography.monoFootnote)
+                            .foregroundStyle(PhrenTheme.text)
+                            .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1).truncationMode(.middle)
+                        if dynamicTypeSize > .large { counts }
+                    }
+                    Spacer(minLength: 6)
+                    if dynamicTypeSize <= .large { counts }
+                }
+                .frame(minHeight: PhrenDensity.changesRowHeight)
+                .contentShape(Rectangle())
             }
-            Spacer(minLength: 6)
-            if dynamicTypeSize <= .large { counts }
+            .buttonStyle(.plain).disabled(onOpen == nil)
+            .accessibilityLabel("\(file.path), show diff")
+            .accessibilityIdentifier("changes-open:\(file.path)")
             Button(action: onRevert) {
                 Image(systemName: "arrow.uturn.backward")
                     .font(PhrenTheme.Font.subheadline.weight(.semibold)).foregroundStyle(PhrenTheme.textMuted)
@@ -291,9 +310,13 @@ struct ChangesFileRow: View {
 }
 
 struct ChangesDiffList: View {
+    /// A file to bring to the top once its section is laid out.
+    struct Focus: Equatable { let path: String; let staged: Bool }
+
     let sections: [ChangesDiffSection]
     let wrap: Bool
     let busy: Bool
+    var focus: Focus? = nil
     let statusFor: (String, Bool) -> GitStatus.File?
     let onStage: (String, Bool) -> Void
     let refresh: () -> Void
@@ -305,6 +328,7 @@ struct ChangesDiffList: View {
                     LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
                         ForEach(sections) { section in
                             Section {
+                                Color.clear.frame(height: 0).id(anchorID(section))
                                 ForEach(items(section.document)) { item in
                                     switch item {
                                     case .fold(let fold):
@@ -328,6 +352,13 @@ struct ChangesDiffList: View {
                     .padding(.bottom, 24)
                 }
                 .defaultScrollAnchor(.topLeading)
+            }
+            .task(id: focus) {
+                guard let focus, let section = sections.first(where: { $0.path == focus.path && $0.staged == focus.staged })
+                        ?? sections.first(where: { $0.path == focus.path }) else { return }
+                // One pass for the lazy stack to lay out, then jump.
+                await Task.yield()
+                proxy.scrollTo(anchorID(section), anchor: .top)
             }
         }
         .phrenScreen()
@@ -390,6 +421,8 @@ struct ChangesDiffList: View {
     private func gutterNumberWidth(_ document: DiffDocument) -> CGFloat {
         DiffPalette.numberWidth(forDigits: document.widestNumber.count)
     }
+
+    private func anchorID(_ section: ChangesDiffSection) -> String { "\(section.id):top" }
 
     private func rowID(_ section: ChangesDiffSection, _ row: DiffDocument.Row) -> String {
         "\(section.id):row\(row.id)"

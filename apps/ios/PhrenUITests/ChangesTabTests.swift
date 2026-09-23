@@ -33,6 +33,25 @@ final class ChangesTabTests: XCTestCase {
     }
 
     @MainActor
+    func testTappingAFileInListOpensItsDiff() {
+        let app = launchChanges()
+        let list = app.buttons["changes-mode-list"]
+        XCTAssertTrue(list.waitForExistence(timeout: 10))
+        list.tap()
+        // The last file in the diff, so opening it has to scroll.
+        let row = app.buttons.matching(identifier: "changes-open:Sources/App/Settings.swift").firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 8), "A changed file row opens its diff")
+        row.tap()
+        XCTAssertTrue(app.buttons["changes-mode-diff"].isSelected, "Tapping a file switches to Diff")
+        let header = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@", "changes-diff-header:", "Sources/App/Settings.swift")).firstMatch
+        XCTAssertTrue(header.waitForExistence(timeout: 10))
+        XCTAssertTrue(header.isHittable, "The tapped file's diff is on screen")
+        XCTAssertLessThan(header.frame.minY, app.frame.height / 2, "The tapped file's diff is brought to the top")
+        attachUIScreenshot(app, "File opened from List")
+    }
+
+    @MainActor
     func testChangesDiffModeDrawsFoldBarAndGutter() {
         let app = launchChanges()
         let diffMode = app.buttons["changes-mode-diff"]
