@@ -32,7 +32,7 @@ Users want:
 | Profiles | ✅ | Machine→profile mapping, project filtering |
 | Git sync | ✅ | Stop hook: commit + push, pull with markdown merge |
 | Scope isolation | ✅ | Memory scopes (researcher/builder/shared) |
-| Conflict resolution | ✅ | Auto-merge for FINDINGS.md and tasks.md |
+| Conflict resolution | ✅ | tasks.md merged per task id against the merge base; generated `## Now` and `What phren knows` blocks take the incoming side; FINDINGS.md and the task archive union-merge; any other conflict aborts and names its files |
 
 ## Design Principles (from review)
 

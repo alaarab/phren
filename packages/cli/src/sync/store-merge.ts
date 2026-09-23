@@ -1,4 +1,4 @@
-import { autoMergeConflicts } from "../content/validate.js";
+import { resolveStoreConflicts } from "./conflict-resolve.js";
 import { gitOperationRecovery, inProgressGitOperation } from "./git-state.js";
 
 export interface GitResult { ok: boolean; output: string; error?: string }
@@ -49,8 +49,10 @@ async function abortMerge(cwd: string, git: RunStoreGit): Promise<boolean> {
 
 /**
  * Fetch and integrate a store's configured upstream without rebasing local
- * commits. The only automatic conflict resolutions are the store's union-safe
- * markdown files. Every failed merge is aborted before returning.
+ * commits. Conflicts in tasks.md (per task id against the merge base), the
+ * generated summary and topic blocks, findings and the task archive resolve
+ * automatically (see conflict-resolve.ts). Any other conflict aborts the
+ * merge and names its files.
  */
 export async function mergeStoreUpstream(cwd: string, options: StoreMergeOptions): Promise<StoreMergeResult> {
   const { git } = options;
@@ -120,12 +122,13 @@ export async function mergeStoreUpstream(cwd: string, options: StoreMergeOptions
       committedLocalWrites,
     };
   }
-  if (initialConflicts.length > 0 && autoMergeConflicts(cwd)) {
+  if (initialConflicts.length > 0 && resolveStoreConflicts(cwd).unresolved.length === 0) {
     const commit = await git(cwd, ["-c", "commit.gpgsign=false", "commit", "--no-edit"]);
     if (commit.ok) {
       return {
         status: "updated",
-        detail: "Store merged with the remote and union-merged store markdown.",
+        detail: `Store merged with the remote; resolved conflicts in ${initialConflicts.join(", ")}.`,
+        conflicts: initialConflicts,
         committedLocalWrites,
       };
     }
@@ -145,7 +148,7 @@ export async function mergeStoreUpstream(cwd: string, options: StoreMergeOptions
   if (conflicts.length > 0) {
     return {
       status: "conflict",
-      detail: `Manual resolution is required for: ${conflicts.join(", ")}`,
+      detail: `Merge aborted; manual resolution is required for: ${conflicts.join(", ")}`,
       conflicts,
       committedLocalWrites,
     };
