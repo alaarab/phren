@@ -37,7 +37,8 @@ export function logSyncOutcome(
   source: string,
   outcome: { ok: boolean; detail?: string; counts?: AheadBehind },
 ): void {
-  const reason = firstLine(outcome.detail);
+  // Long enough for a conflict detail to keep its whole file list.
+  const reason = firstLine(outcome.detail, 1000);
   appendSyncLog(phrenPath, source, `${outcome.ok ? "ok" : "failed"}${reason ? ` ${reason}` : ""}${formatCounts(outcome.counts)}`);
 }
 
