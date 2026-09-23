@@ -30,6 +30,7 @@ import { childAgentTree, historicalImage, publicChildAgents, refreshTranscript, 
 import { listUploads, saveUpload, uploadImage } from "./uploads.js";
 import type { ModelCatalog } from "./models.js";
 import type { ModelSwitcher } from "./model-switch.js";
+import type { SideQuestions } from "./side-questions.js";
 import { currentModel, currentStep } from "./steps.js";
 import type { AccountUsageReader } from "./usage.js";
 import type { Scheduler } from "./schedules.js";
@@ -73,6 +74,7 @@ export interface RouteContext {
   contextUsage: WorkspaceContextUsage;
   modelCatalog: ModelCatalog;
   modelSwitcher: ModelSwitcher;
+  sideQuestions: SideQuestions;
   accountUsage: AccountUsageReader;
   codexQuestions: CodexQuestions;
   launches: LaunchLimiter;
@@ -103,7 +105,7 @@ async function childActivity(source: Provider, session: string): Promise<ChildAc
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", shell: "ssh-pty", herdr: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, repositoryFiles: true, subagents: true, dispatch: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true };
+  files: true, repositoryFiles: true, subagents: true, sideQuestions: true, dispatch: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true };
 
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));

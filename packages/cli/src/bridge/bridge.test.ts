@@ -1359,6 +1359,39 @@ schedules:
       expect(paneLines).toBe("");
     });
 
+    it("asks Claude's /btw beside a working turn and streams the panel's answer as a side-answer frame", async () => {
+      paneAgent = "claude"; agentStatus = "working"; paneLines = "";
+      const claude = { ...target, source: "claude" as const };
+      const question = "in ten short numbered points, why is the sky blue?";
+      const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/transcripts?${new URLSearchParams({ ...claude, sideAnswers: "1" })}`);
+      const frames: any[] = []; socket.on("message", data => frames.push(JSON.parse(data.toString())));
+      await once(socket, "open");
+      await waitFor(() => frames.length);
+      try {
+        // Other slash commands still wait for the turn to end.
+        expect((await api("/v1/prompt", { target: claude, text: "/compact" })).status).toBe(409);
+        const asked = await api("/v1/prompt", { target: claude, text: `/btw ${question}` });
+        expect(asked.status, JSON.stringify(asked.data)).toBe(200);
+        const id = asked.data.sideQuestion.id;
+        expect(commands.filter(c => c.method === "agent.prompt").map(c => c.params.text)).toEqual([`/btw ${question}`]);
+        // The panel owns the terminal's keys until it closes.
+        expect((await api("/v1/prompt", { target: claude, text: "another message" })).status).toBe(409);
+        paneLines = recorded("claude/2.1.280/btw-panel-answering.txt");
+        await waitFor(() => frames.some(f => f.type === "side-answer" && f.state === "pending"), 3_000);
+        paneLines = recorded("claude/2.1.280/btw-panel.txt");
+        await waitFor(() => commands.some(c => c.method === "agent.send_keys" && (c.params.keys as string[]).includes("esc")), 5_000);
+        paneLines = "";
+        await waitFor(() => frames.some(f => f.type === "side-answer" && f.state === "answer"), 3_000);
+        const answer = frames.find(f => f.type === "side-answer" && f.state === "answer");
+        expect(answer).toMatchObject({ type: "side-answer", source: "claude", session, id, question });
+        expect(answer.answer).toMatch(/^1\. Sunlight looks white, but it\n {3}contains every color/);
+        // Nothing of it entered the transcript, and the pane takes input again.
+        expect(frames.filter(f => f.type === "append")).toEqual([]);
+        expect((await api("/v1/side-question/dismiss", { target: claude, id })).status).toBe(200);
+        expect((await api("/v1/side-question/dismiss", { target: claude, id })).status).toBe(404);
+      } finally { socket.terminate(); }
+    });
+
     it("publishes a Claude terminal numbered dialog, answers it with Enter, and drops it when the pane works", async () => {
       paneAgent = "claude"; agentStatus = "blocked";
       paneLines = "Parser aborted (timeout, resource limit, or over-length)\n"
