@@ -102,6 +102,20 @@ export function paneAgentName(s: Json, pane: Json | undefined): string | undefin
   return typeof named?.name === "string" ? named.name : undefined;
 }
 
+/** Every agent name in use on a server, in either Herdr shape. */
+export function agentNames(s: Json): Set<string> {
+  return new Set([...objects(s.panes), ...objects(s.agents)].map(item => String(item.agent_name ?? item.name ?? "")));
+}
+
+/** A pane's place in a snapshot, and optionally the agent that must be running in it. */
+export interface PaneAddress { workspace: string; tab: string; pane: string; source?: string }
+
+/** The snapshot's pane at `address`; with a `source`, only while that agent runs there. */
+export function findPane(s: Json, address: PaneAddress): Json | undefined {
+  return objects(s.panes).find(p => p.pane_id === address.pane && p.tab_id === address.tab && p.workspace_id === address.workspace
+    && (address.source === undefined || p.agent === address.source));
+}
+
 /** A conductor's Herdr name: "conductor", or "conductor-" plus its label. */
 export function isConductorName(name: string | undefined): boolean {
   return name === "conductor" || !!name?.startsWith("conductor-");
@@ -227,7 +241,7 @@ export async function panes(server: string, workspace: string, tab: string): Pro
  * trust, a login) is exactly what the phone answers with a key. */
 export async function startingPane(target: StartingTarget): Promise<Json> {
   const s = await snapshot(target.server);
-  const pane = objects(s.panes).find(p => p.pane_id === target.pane && p.tab_id === target.tab && p.workspace_id === target.workspace && p.agent === target.source);
+  const pane = findPane(s, target);
   if (!pane) throw new BridgeError(409, "This agent pane changed. Reopen the chat.");
   const state = await paneChatState(target.server, pane);
   if (state.sessionId || state.startingToken !== target.startingToken) throw new BridgeError(409, "This starting agent changed. Reopen the chat.");
@@ -236,7 +250,7 @@ export async function startingPane(target: StartingTarget): Promise<Json> {
 
 export async function validateStartingTarget(target: StartingTarget): Promise<Json> {
   const s = await snapshot(target.server);
-  const pane = objects(s.panes).find(p => p.pane_id === target.pane && p.tab_id === target.tab && p.workspace_id === target.workspace && p.agent === target.source);
+  const pane = findPane(s, target);
   if (!pane) throw new BridgeError(409, "This agent pane changed. Reopen the chat.");
   // Force fresh process/log evidence before a mutation.
   if (await paneIdentity(target.server, pane, true)) throw new BridgeError(409, "The conversation is ready. Wait for chat to attach before sending.");
@@ -248,7 +262,7 @@ export async function validateStartingTarget(target: StartingTarget): Promise<Js
 
 export async function validateTarget(target: Target, sending = false, refreshIdentity = sending): Promise<Json> {
   const s = await snapshot(target.server);
-  const pane = objects(s.panes).find(p => p.pane_id === target.pane && p.tab_id === target.tab && p.workspace_id === target.workspace && p.agent === target.source);
+  const pane = findPane(s, target);
   if (!pane || await paneIdentity(target.server, pane, refreshIdentity) !== target.session) throw new BridgeError(409, "This pane's conversation changed. Reopen the chat.");
   if (sending && ["blocked", "waiting", "unknown"].includes(String(pane.agent_status))) throw new BridgeError(409, "This agent needs input in the terminal first.");
   return pane;
