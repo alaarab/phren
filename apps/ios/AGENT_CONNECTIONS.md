@@ -135,7 +135,11 @@ Unbound or conflicting identities remain unavailable for chat and attachments.
 - `POST /v1/model`: verified model selection by `{ target, model, effort? }`.
   Codex walks its model and effort menus; Claude uses its alias command.
   OpenCode returns a clear refusal directing the person to `/models` in the
-  terminal. Working panes reject model changes and all slash prompts with 409.
+  terminal. Working panes reject model changes and all slash prompts with 409,
+  except Claude's `/btw <question>`, whose answer arrives on the live
+  transcript socket (opened with `sideAnswers=1`) as a `side-answer` frame and
+  shows on a card above the composer. `POST /v1/side-question/dismiss` cancels
+  or forgets one.
   The phone can hold a cancellable selection until idle and shows successful
   switches as system rows without adding a user message.
 - Working harnesses accept steering immediately through the validated prompt

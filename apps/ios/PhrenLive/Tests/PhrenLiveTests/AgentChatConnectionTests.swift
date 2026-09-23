@@ -101,6 +101,19 @@ final class AgentChatConnectionTests: XCTestCase {
         XCTAssertEqual(components.queryItems?.first { $0.name == "afterLine" }?.value, "41")
     }
 
+    func testLiveStreamAsksForSideAnswersAndDismissNamesOne() throws {
+        let target = try AgentChatTarget(hostID: UUID(), workspaceID: "w", tabID: "w:t", paneID: "w:p", source: "claude", sessionID: "fixture")
+        let live = try XCTUnwrap(URLComponents(string: GatewayRequest.transcript(target, streaming: true).path))
+        XCTAssertEqual(live.queryItems?.first { $0.name == "sideAnswers" }?.value, "1")
+        XCTAssertNil(URLComponents(string: GatewayRequest.transcript(target, beforeLine: 9).path)?.queryItems?.first { $0.name == "sideAnswers" })
+        let id = "3de86345-892c-4d34-bfdb-3116041d3d13"
+        let request = try GatewayRequest.dismissSideAnswer(target, id: id)
+        XCTAssertEqual(request.path, "/v1/side-question/dismiss")
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(request.body)) as? [String: Any])
+        XCTAssertEqual(body["id"] as? String, id)
+        XCTAssertThrowsError(try GatewayRequest.dismissSideAnswer(target, id: "../keys"))
+    }
+
     func testPromptEncodingKeepsTextOutOfTerminalCommands() throws {
         let target = try AgentChatTarget(hostID: UUID(), workspaceID: "w7", tabID: "w7:t1", paneID: "w7:p2", source: "claude", sessionID: "fixture")
         let text = "Review `file.swift`\n$(not-a-command) \"quoted\""

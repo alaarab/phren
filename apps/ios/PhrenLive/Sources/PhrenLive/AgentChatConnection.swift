@@ -92,6 +92,13 @@ extension PhrenConnection {
     }
 
     /// Only Escape is exposed. The caller cannot supply terminal key sequences.
+    /// Dismiss a `/btw` side answer. A pending one is cancelled and its
+    /// terminal panel closed; an answered one stops being delivered.
+    public static func dismissSideAnswer(host: LiveHost, privateKey: Data, target: AgentChatTarget, id: String) async throws {
+        guard !target.isStarting, target.hostID == host.id && target.muxID == host.muxID else { throw PhrenKitError.validation("The chat belongs to another computer.") }
+        _ = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: try GatewayRequest.dismissSideAnswer(target, id: id))
+    }
+
     public static func stopChatTurn(host: LiveHost, privateKey: Data, target: AgentChatTarget) async throws {
         guard !target.isStarting, target.hostID == host.id && target.muxID == host.muxID else { throw PhrenKitError.validation("The chat belongs to another computer.") }
         // The Hook refuses Escape unless the agent is still working.
@@ -287,6 +294,8 @@ struct GatewayRequest: Sendable {
     static func transcript(_ target: AgentChatTarget, streaming: Bool = false, beforeLine: Int? = nil, afterLine: Int? = nil) -> Self {
         var query = targetQuery(target)
         if let afterLine { query["afterLine"] = String(afterLine) }
+        // The live stream also carries `/btw` side answers; older Hooks ignore the flag.
+        if streaming { query["sideAnswers"] = "1" }
         return Self(path: path("/v1/transcripts", query), webSocket: true, streaming: streaming, beforeLine: beforeLine)
     }
     static func history(_ target: AgentChatTarget, beforeLine: Int) -> Self {
@@ -320,6 +329,10 @@ struct GatewayRequest: Sendable {
     }
     static func upload(_ attachment: AgentAttachment, target: AgentChatTarget) throws -> Self {
         Self(path: "/v1/upload", body: try targetBody(target, fields: ["name": attachment.uploadName, "data": attachment.data.base64EncodedString()]))
+    }
+    static func dismissSideAnswer(_ target: AgentChatTarget, id: String) throws -> Self {
+        guard UUID(uuidString: id) != nil else { throw PhrenKitError.validation("That side answer is not valid.") }
+        return Self(path: "/v1/side-question/dismiss", body: try targetBody(target, fields: ["id": id]))
     }
     static func stop(_ target: AgentChatTarget) throws -> Self {
         Self(path: "/v1/keys", body: try targetBody(target, fields: ["keys": ["Escape"]]))

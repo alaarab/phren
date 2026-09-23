@@ -338,7 +338,7 @@ import UniformTypeIdentifiers
         // A session launched from a project runs the harness that was picked.
         let launchedKind = launches.last.map(\.kind).flatMap { session.workspaceID == "w9" ? $0 : nil }
         let remote = flag("--agent-work-navigation") && session.host.id.uuidString.hasSuffix("000002")
-        let agent = remote ? "codex" : launchedKind ?? (flag("--chat-copilot") ? "copilot" : (trailer || flag("--chat-claude-queue") || flag("--chat-claude-image") || flag("--chat-read-images") || flag("--chat-approval-question") || flag("--chat-terminal-questions") || flag("--chat-agent-card") || flag("--chat-todos") || flag("--chat-plan-mode") || flag("--chat-web-tools") || flag("--chat-skill-chip") || flag("--chat-mcp-card") || flag("--chat-compaction") || flag("--chat-model-picker") || flag("--chat-phren-tools")) ? "claude" : "codex")
+        let agent = remote ? "codex" : launchedKind ?? (flag("--chat-copilot") ? "copilot" : (trailer || flag("--chat-claude-queue") || flag("--chat-claude-image") || flag("--chat-read-images") || flag("--chat-approval-question") || flag("--chat-terminal-questions") || flag("--chat-agent-card") || flag("--chat-todos") || flag("--chat-plan-mode") || flag("--chat-web-tools") || flag("--chat-skill-chip") || flag("--chat-mcp-card") || flag("--chat-compaction") || flag("--chat-model-picker") || flag("--chat-phren-tools") || flag("--chat-side-answer")) ? "claude" : "codex")
         var panes: [[String: Any]] = [["id": "\(session.workspaceID):p1", "label": "1", "title": tour ? "Ship the onboarding flow" : "Polish the phone app", "agent": agent,
                                      "agentStatus": ((flag("--chat-blocked") || flag("--chat-password") || flag("--chat-approval") || flag("--chat-approval-question") || flag("--chat-plan-mode") || flag("--chat-question")) && !answered) ? "blocked" : (flag("--chat-queue-completion") || flag("--chat-history-stalled") || (flag("--chat-working") && !stopped) ? "working" : "idle"), "sessionId": remote ? "00000000-0000-0000-0000-000000000042" : agent == "copilot" ? "00000000-0000-0000-0000-000000000023" : agent == "opencode" ? "ses_fixtureopencode" : "fixture-\(agent)-session", "cwd": root]]
         if flag("--starting-session-fixture") {
@@ -850,6 +850,7 @@ import UniformTypeIdentifiers
         }
         if flag("--chat-send-fails") { throw LiveConnectionError.disconnected }
         sent.append((target.id, text))
+        askSide(text)
         if flag("--starting-session-fixture"), target.isStarting { startingAttachedAt = Date.now.addingTimeInterval(3) }
         if flag("--chat-streaming") { streamStarts[target.id] = .now }
     }

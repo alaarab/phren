@@ -182,6 +182,10 @@ struct AgentChatView: View {
                 )
                 .padding(.horizontal, 12).padding(.top, 6)
             }
+            if let side = model.visibleSideAnswer {
+                ChatSideAnswerCard(side: side) { model.dismissSideAnswer(session) }
+                    .padding(.horizontal, 12).padding(.top, 6)
+            }
             if model.historyStalled {
                 ChatHistoryStalledNotice(since: model.historyStalledSince) { launchingNewThread = true }
                     .disabled(project == nil)
@@ -809,7 +813,9 @@ struct AgentChatView: View {
         dictation.dropCleanup()
         sendTask = Task {
             if dictating { dictation.session.updateDraft(model.draft) }
-            let isCommand = AgentSlashCommand.isCommand(model.draft), pane = model.target?.paneID
+            // A /btw side question answers on its own card; it opens no terminal.
+            let isCommand = AgentSlashCommand.isCommand(model.draft)
+                && AgentSideAnswer.question(source: model.target?.source ?? "", text: model.draft) == nil, pane = model.target?.paneID
             await model.send(session, consumeDraft: dictating ? { [dictation, model] in dictation.restartSegment(model: model) } : nil)
             if model.deliveryError == nil, !isCommand { PhrenAppShortcuts.donateMessage(to: session) }
             if isCommand, handoffCommands, model.deliveryError == nil, let pane {

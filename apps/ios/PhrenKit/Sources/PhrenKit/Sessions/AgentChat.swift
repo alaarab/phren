@@ -420,7 +420,7 @@ public struct AgentChatPreview: Equatable, Sendable {
 }
 
 public struct AgentChatTranscript: Equatable, Sendable {
-    public enum Kind: String, Sendable { case backlog, append, older, preview }
+    public enum Kind: String, Sendable { case backlog, append, older, preview, sideAnswer = "side-answer" }
     public enum LimitError: Error, LocalizedError, Sendable {
         case tooManyMessages
         public var errorDescription: String? {
@@ -454,6 +454,8 @@ public struct AgentChatTranscript: Equatable, Sendable {
     /// The harness's own word for the running turn (Claude's spinner:
     /// "Pondering"), when the computer reads one.
     public var activityVerb: String? = nil
+    /// A `/btw` side answer; only on a `side-answer` frame.
+    public var sideAnswer: AgentSideAnswer? = nil
 
     /// `sidechain` reads a child agent's own transcript, where Claude marks
     /// every row `isSidechain`: those are that conversation's turns, not the
@@ -465,6 +467,11 @@ public struct AgentChatTranscript: Equatable, Sendable {
               session == nil || frame["session"] as? String == session,
               frame["entries"] == nil || frame["entries"] is [[String: Any]] else {
             throw PhrenKitError.validation("The computer returned an unsupported chat transcript.")
+        }
+        if kind == .sideAnswer {
+            var frameValue = Self(kind: kind, messages: [], hasMore: false, totalLines: 0, startLine: nil)
+            frameValue.sideAnswer = try AgentSideAnswer.read(frame)
+            return frameValue
         }
         // The helper omits entries when a new conversation has only metadata.
         let entries = frame["entries"] as? [[String: Any]] ?? []

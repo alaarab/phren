@@ -10,6 +10,7 @@ number counts up on its own.
 
 ### Changed
 
+- Claude chats suggest `/btw` for a quick side question. It sends even while Claude is working, and the answer shows on a card above the message box, marked as not part of the conversation, with Copy and Dismiss. Dismissing a question that is still being answered cancels it on the computer.
 - The live reply preview uses the chat's monospaced font, so a reply no longer changes typeface when the finished message replaces it.
 - Schedule history shows a run that finished by asking you something as "needs you" with the question, in the waiting color, instead of as a failure.
 - The agent tree folds finished workers into one "N finished" row you can open, and Clear finished archives that chat's finished workers on the computer right away instead of after a day.

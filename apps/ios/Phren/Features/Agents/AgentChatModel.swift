@@ -286,6 +286,9 @@ final class AgentChatModel {
     var draft = "" { didSet { if !restoringDraft, let target { AgentChatDrafts.text[target.id] = draft; persistDraft() } } }
     var attachments: [ChatAttachmentDraft] = [] { didSet { if !restoringDraft, let target { AgentChatDrafts.attachments[target.id] = attachments; persistDraft() } } }
     var sentImages: [ChatAttachmentDraft] = [] { didSet { matchSentImages() } }
+    /// Claude's `/btw` answer for the open conversation (AgentChatModel+SideAnswer).
+    var sideAnswer: ChatSideAnswerState?
+    var dismissedSideAnswers: Set<String> = []
     /// Working activity drives Stop and the timer, never prompt delivery.
     var isBusy: Bool { !needsAnswer && approval == nil && (awaitingReply || isCompacting || (target?.isStarting != true && activityPhase == .working)) }
     var pendingReason: String? {
@@ -503,6 +506,7 @@ final class AgentChatModel {
                         guard self.target == target, connection.generation == run else { return }
                         let frame = try AgentChatFixture.transcript(target)
                         if frame.kind != .append || !frame.messages.isEmpty || !frame.progressEvents.isEmpty || !frame.queueEvents.isEmpty { accept(frame) }
+                        if let side = try AgentChatFixture.sideAnswerFrame(target) { accept(side) }
                         try await Task.sleep(for: .milliseconds(500))
                     }
                     return
@@ -525,6 +529,7 @@ final class AgentChatModel {
         }
     }
     func accept(_ frame: AgentChatTranscript) {
+        if frame.kind == .sideAnswer { if let side = frame.sideAnswer { receiveSideAnswer(side) }; return }
         let hadPreview = replyPreview != nil
         let verbChanged = frame.activityVerb != nil && frame.activityVerb != harnessVerb
         if let verb = frame.activityVerb { harnessVerb = verb }

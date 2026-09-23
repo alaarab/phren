@@ -16,7 +16,7 @@ public enum AgentSlashCommand {
         let names: [String]
         switch source {
         case "codex": names = ["/model", "/permissions", "/diff", "/review", "/status", "/skills", "/compact", "/resume", "/new", "/mcp"]
-        case "claude": names = ["/help", "/model", "/permissions", "/context", "/usage", "/skills", "/compact", "/resume", "/clear", "/mcp"]
+        case "claude": names = ["/help", "/btw", "/model", "/permissions", "/context", "/usage", "/skills", "/compact", "/resume", "/clear", "/mcp"]
         case "copilot": names = ["/help", "/model", "/agent", "/context", "/usage", "/skills", "/compact", "/resume", "/clear", "/mcp"]
         // experimental/agent/src/commands.ts — the ones worth a tap on a phone.
         case "phren": names = ["/help", "/model", "/provider", "/plan", "/context", "/cost", "/diff", "/review", "/compact", "/resume", "/permissions", "/clear"]
@@ -47,6 +47,7 @@ public enum AgentSlashCommand {
             case "/agent": detail = "Choose an agent"
             case "/context": detail = "Inspect conversation context"
             case "/usage": detail = "See account usage"
+            case "/btw": detail = "Ask a side question while it works"
             default: detail = "Open in the agent"
             }
             return Command(name: name, detail: detail)
