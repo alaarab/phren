@@ -18,6 +18,31 @@ final class TouchTerminalView: TerminalView, UIGestureRecognizerDelegate, UIEdit
     var onBoundsChanged: (() -> Void)?
     private var lastTerminalSize = CGSize.zero
 
+    /// A synthesized double tap (UI automation, assistive input) delivers its
+    /// second touch in the same instant as the first lift, before UIKit has
+    /// reset the tap recognizer, so only the view sees that touch. Treat it
+    /// as the second tap here; a physical second tap reaches the recognizer.
+    private weak var tapRecognizer: UIGestureRecognizer?
+    private var missedSecondTap: UITouch?
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if touches.count == 1, let touch = touches.first, touch.tapCount == 2, let tapRecognizer,
+           touch.gestureRecognizers?.contains(where: { $0 === tapRecognizer }) != true {
+            missedSecondTap = touch
+        }
+        super.touchesBegan(touches, with: event)
+    }
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if let missed = missedSecondTap, touches.contains(missed) {
+            missedSecondTap = nil
+            secondTap()
+        }
+        super.touchesEnded(touches, with: event)
+    }
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if let missed = missedSecondTap, touches.contains(missed) { missedSecondTap = nil }
+        super.touchesCancelled(touches, with: event)
+    }
     override func layoutSubviews() {
         super.layoutSubviews()
         let size = bounds.size
@@ -88,6 +113,7 @@ final class TouchTerminalView: TerminalView, UIGestureRecognizerDelegate, UIEdit
         tap.require(toFail: wheel)
         tap.require(toFail: pinch)
         addGestureRecognizer(tap)
+        tapRecognizer = tap
         addInteraction(editMenu)
         updateScrollGestures()
         accessibilityHint = "Tap controls and links. Double tap to paste text or an image. Swipe to scroll. Pinch to resize text. Hold to select. Use the keyboard button to type."
@@ -205,13 +231,17 @@ final class TouchTerminalView: TerminalView, UIGestureRecognizerDelegate, UIEdit
                       height: max(1, frame.height / CGFloat(max(1, core.rows))))
     }
 
+    /// The second tap of a double tap pastes, unless the first one opened a
+    /// link or ended a selection.
+    private func secondTap() {
+        if canPasteOnSecondTap, !hasActiveSelection { paste(nil) }
+        canPasteOnSecondTap = false
+    }
+
     @objc private func tapTerminal(_ gesture: TerminalTapGestureRecognizer) {
         guard gesture.state == .ended else { return }
         if gesture.touchTapCount > 1 {
-            if gesture.touchTapCount == 2, canPasteOnSecondTap, !hasActiveSelection {
-                paste(nil)
-            }
-            canPasteOnSecondTap = false
+            if gesture.touchTapCount == 2 { secondTap() } else { canPasteOnSecondTap = false }
             return
         }
         canPasteOnSecondTap = false
