@@ -465,3 +465,137 @@ The remaining reads are the turns still running. How much this saves
 depends on how long a pane keeps reporting working after its transcript
 ended the turn; on a session that works without pause it saves only the
 tail of each turn.
+
+## After 2b, 2026-09-23 (phone)
+
+**Method.** `PhrenUITests/PerformanceBaselineTests` on the iPhone 17 Pro
+simulator, debug build, `PHREN_PERFORMANCE_LOG=1`, serially. Before is
+main at `4abb855c`; the counter rows were taken on the same code with only
+the counters added (`34fd7e35`). The timed tests are unchanged from the
+baseline above. The new `...Work` tests read `PerformanceCounters` (PhrenKit)
+through a one-point accessibility probe that computes its value when XCUITest
+reads it, so the probe adds no redraws. They print `PHREN_COUNT` lines: the
+change over a 10 s idle window (60 s with `TEST_RUNNER_PHREN_PERF_IDLE_SECONDS=60`)
+or over three swipes down and three up. `ScrollHitchProbe` runs a display link
+only while the chat's scroll phase is not idle and counts frames that arrived
+more than half a frame late, and the time past their deadline. Load average
+was 12 to 23 for the before timings, 98 falling to 16 for the after timings
+(other workers were building), and 3 to 18 for the counters.
+
+| Timed (mean of 5) | Clock s, before | after | App CPU s, before | after | Instructions kI, before | after |
+|---|---:|---:|---:|---:|---:|---:|
+| Open heavy chat | 1.663 | 1.711 | 0.664 | 0.570 | 7,100,260 | 5,800,512 |
+| Heavy chat, 3 swipes down and 3 up | 15.702 | 16.162 | 4.689 | 4.439 | 33,206,028 | 26,047,432 |
+| Open Agents, all-sessions fixture | 1.499 | 1.469 | 0.456 | 0.246 | 3,297,285 | 1,799,525 |
+
+| Heavy chat, six swipes | before | after |
+|---|---:|---:|
+| Chat screen bodies | 41 | 0 |
+| Transcript rows bodies | 10 | 6 |
+| Preference reads | 662 | 0 |
+| Code lines colored | 161 | 0 |
+| Hitches | 39 | 8 (8 in a second run) |
+| Hitch time, ms | 860 | 208 (177) |
+| Frames drawn while moving | 836 | 877 (839) |
+| Touch-down to rest, per swipe, ms | 2,500 | 2,502 (2,395) |
+
+**Swipe target not met, and why.** The plan asked for a heavy-fixture swipe
+under 0.5 s, from 2.5 s. The 2.5 s is how long the transcript keeps moving:
+XCUITest's swipe is a fling, and UIScrollView decelerates for about 2.3 s
+after it (about 146 frames per swipe, drawn the whole time). The app is not
+busy for those seconds and no rendering change shortens them; changing the
+deceleration would change how scrolling feels. What rendering controls is
+the frames it misses while moving: hitch time fell from 860 to 208 ms over
+six swipes (57 to 14 ms per second of scrolling; Apple treats under 10 as
+smooth), with no chat screen redraws and no preference reads. The remaining
+CPU (4.4 s) is mostly laying out and drawing the non-lazy transcript as it
+moves, plus XCUITest's accessibility snapshots of it between steps.
+
+| Idle, per second (10 s windows) | Agents before | after | Computer page before | after | Heavy chat before | after |
+|---|---:|---:|---:|---:|---:|---:|
+| Clock ticks and timeline redraws | 2.2 | 0 | 7.0 | 0 | 6.8 | 0 |
+| Chat screen bodies | | | | | 4.2 | 0 |
+| Preference reads | 0.6 | 0 | 0.6 | 0 | 67.5 | 0 |
+| Code lines colored | | | | | 8.8 | 0 |
+
+The heavy chat's idle redraws were the chat screen re-running its body four
+times a second (it read about 40 model fields, and the fixture's stream
+touched some of them), each body reading preferences about 16 times, and
+the computer page underneath still ticking its cards.
+
+| Reads of the Hook, per minute | before | after |
+|---|---:|---:|
+| Agents, 2 computers: overview | 12 | 0 streamed (6 heartbeat frames), 12 polled on an older Hook |
+| Agents, 4 cards: sub-agent trees (2 requests each) | 24 | 8 |
+| Computer page, 1 computer: overview | 12 | 6 |
+| Computer page, 3 cards: sub-agent trees | 18 | 6 |
+| Heavy chat: pane list | 24 | 4 |
+
+Before is the 10 s window's count times six; after is a 60 s window. The
+computer page read its computer twice because it ran a monitor of its own
+beside the overview's.
+
+**Loops.** Before, 14 loops polled the Hook: the overview per computer
+(10 s), the chat's pane list (3 s), project sessions (10 s, every computer
+again), each session card's sub-agents (10 s), each drawer row's sub-agents
+(10 s), session details' sub-agents (10 s), Herdr workspaces (3 s, the
+overview again) and its panes (3 s), web servers (15 s), a simulator screen
+(1 to 4 s), account usage rings (60 s) and screen (30 s), a worker's messages
+(2 s) and reminders (30 s). After, three loops read the Hook:
+
+1. The overview, per computer: the Hook's `/v1/overview` stream, with a 10 s
+   poll only while the stream is down or the Hook predates it. Agents, a
+   computer's page, session details, project sessions and Herdr workspaces
+   all read it; a Herdr tab's panes are read when its overview row changes.
+2. The chat's pane list, per open chat: 15 s while the transcript and status
+   streams are both live (they carry activity, prompts and a closed pane),
+   3 s otherwise and 2 s while a session starts.
+3. `LiveRefresh`: one timer that sleeps until the next job is due, for what
+   the Hook does not push: account usage, web servers, a simulator screen,
+   sub-agent trees (one read per session for its card, drawer row and
+   details, every 10 s while it has running children or conducts, else 30 s),
+   a worker's messages and scheduled-prompt reminders. Jobs with one key
+   share a run; a job never overlaps itself.
+
+What remains outside them: GitHub store sync (`SyncEngine`, 7 s, not the
+Hook), the 3 s approval check that runs only inside a background lease of at
+most 150 s, the chat's transcript and status WebSockets, and `AppClock`, a
+1 s clock that runs only while an elapsed-time label is on screen. Account
+usage's 30 s and the stalled-history notice's 60 s timelines were left.
+
+**Hook side.** The stream takes no Herdr snapshots of its own: it reads the
+shared one at most one tick (5 s) old, which the activity timer refreshes
+every 5 s. It rebuilds the overview (branches, context, models, steps) when
+that snapshot changed or every 10 s, the cadence phones polled at, and sends
+nothing when the rows are unchanged. `bench-hook.mjs` was not rerun for this
+round.
+
+**Code viewer.** `CodeTextView` colored every line of the file in its body.
+It now builds rows lazily, splits the file once per distinct text, and colors
+through a cache keyed by language and text (also used by diffs, chat code
+fences and the text file viewer). A 2,000-line Swift file: coloring every line
+took 61.3 ms per render before; the first render now colors 49 lines and a
+second render none (`CodeHighlightingTests`, debug simulator).
+
+**Preferences.** Twenty-five screens read `sessions.live.preferences.v1`
+through `@AppStorage` and `LiveSessionPreferences.read` in computed
+properties. All views now read `LiveSessionPreferencesStore`, decoded once
+per change of the stored bytes; only event-time code (intents, widget,
+notification handlers) reads defaults directly.
+
+### Rules that keep the phone fast
+
+- A view body reads no preference JSON. Use `LiveSessionPreferencesStore`.
+- Only `ClockText` (and `SessionRelativeTimeLabel`) reads `AppClock`. Do not
+  add a `TimelineView` or `Timer` for a state that changes on an event;
+  publish the state when it changes, as `LiveHostMonitor.fresh` does.
+- A screen does not start its own poll loop. Read the overview from
+  `SessionOverviewMonitor.shared`, and put any other periodic read in
+  `LiveRefresh` with a key other screens can share.
+- `AgentChatView.body` reads no model field. A new chat view takes the
+  sub-model it draws (`timelineState`, `composer`, `connection`, `outbox`)
+  and a new side effect goes in `ChatModelObservers`. Assign a model field
+  only when its value changed.
+- Color code through `CodeHighlighting`, whose cache makes a repeat free.
+- Run `PerformanceBaselineTests` with `TEST_RUNNER_PHREN_RUN_PERF=1` before
+  and after a change to these paths and compare the `PHREN_COUNT` lines.

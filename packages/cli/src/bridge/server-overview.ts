@@ -1,6 +1,6 @@
 import { WebSocket } from "ws";
 import { logger } from "../logger.js";
-import { sharedSnapshot, SNAPSHOT_SHARE_MS } from "./herdr.js";
+import { sharedSnapshot } from "./herdr.js";
 import { intervalFromEnv } from "./limits.js";
 import { countTick } from "./metrics.js";
 import { type Json, MAX_FRAME } from "./protocol.js";
@@ -11,18 +11,19 @@ import { streamCloseReason } from "./server-stream.js";
  * The `/v1/overview` WebSocket: the same overview `GET /v1/workspaces`
  * answers, pushed to the phone when it changes, so a phone keeps one socket
  * per computer open instead of polling. Each tick reads the shared Herdr
- * snapshot (the one open chats and the activity timer already take), so a
- * connected phone adds no snapshots of its own. The overview is rebuilt when
- * that snapshot changed or `OVERVIEW_REFRESH_MS` has passed (branches, models
- * and steps live outside the snapshot), and sent only when it differs from
- * the last one sent. With nothing to send, a heartbeat every
+ * snapshot at most one tick old: the activity timer takes one every five
+ * seconds (and open chats every 2.5), so a connected phone adds no Herdr
+ * snapshots of its own, and a status change reaches it within one tick. The
+ * overview is rebuilt when that snapshot changed or `OVERVIEW_REFRESH_MS` has
+ * passed (branches, models and steps live outside the snapshot), and sent
+ * only when it differs from the last one sent. With nothing to send, a heartbeat every
  * `OVERVIEW_HEARTBEAT_MS` carries the Hook's info and tells the phone the
  * overview it holds is still current.
  *
  * Frames: `{ type: "overview", ...workspaces, phren }` and
  * `{ type: "heartbeat", phren }`.
  */
-export const OVERVIEW_TICK_MS = intervalFromEnv("PHREN_OVERVIEW_TICK_MS", SNAPSHOT_SHARE_MS, 250, 60_000);
+export const OVERVIEW_TICK_MS = intervalFromEnv("PHREN_OVERVIEW_TICK_MS", 5_000, 250, 60_000);
 export const OVERVIEW_REFRESH_MS = intervalFromEnv("PHREN_OVERVIEW_REFRESH_MS", 10_000, 1_000, 120_000);
 export const OVERVIEW_HEARTBEAT_MS = intervalFromEnv("PHREN_OVERVIEW_HEARTBEAT_MS", 20_000, 1_000, 60_000);
 
