@@ -7,7 +7,8 @@ import { readProjectConfig } from "../project-config.js";
 import { computerName } from "./computers.js";
 import { dispatchParentSchema, validateDispatchParent } from "./dispatch-tree.js";
 import { grantLabel, listGrants, matchGrant } from "./grants.js";
-import { hookPeers, peerRequest, type HookPeer } from "./peers.js";
+import { hookPeers } from "./peers.js";
+import { isLocalComputer, localHost, peerHost, type DispatchHost } from "./dispatch-hosts.js";
 import { atomic, BridgeError, bridgeRoot, id, PROTOCOL, provider, serverName, startingTargetSchema, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
 import { phrenStoreRoot } from "./transcripts.js";
 
@@ -125,11 +126,13 @@ export async function dispatchStatus(): Promise<Receipt[]> {
   return receipts.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
-async function capacity(peer: HookPeer): Promise<{ working: number; computerId: string }> {
-  const value = await peerRequest(peer, "/v1/dispatch/capacity");
+async function capacity(host: DispatchHost): Promise<{ working: number; computerId: string }> {
+  const value = await host.request("/v1/dispatch/capacity");
   const result = z.object({ product: z.literal("phren-hook"), protocol: z.literal(PROTOCOL), working: z.number().int().nonnegative(),
     servers: z.array(z.string()), computer: z.object({ id: z.string().uuid() }).passthrough() }).parse(value);
-  if (!result.servers.includes(peer.server)) throw new BridgeError(503, "Herdr is not running on the selected computer. Headless dispatch is not installed yet.");
+  // This computer places on whichever Herdr server its own Hook runs.
+  if (host.local && !result.servers.includes(host.server) && result.servers[0]) host.server = result.servers[0];
+  if (!result.servers.includes(host.server)) throw new BridgeError(503, "Herdr is not running on the selected computer. Headless dispatch is not installed yet.");
   return { working: result.working, computerId: result.computer.id };
 }
 
@@ -139,13 +142,13 @@ async function capacity(peer: HookPeer): Promise<{ working: number; computerId: 
  * for a few seconds before giving up; the pane ids from the launch are enough
  * to find it.
  */
-async function settledTarget(peer: HookPeer, launched: Json, harness: string): Promise<Json | undefined> {
+async function settledTarget(peer: DispatchHost, launched: Json, harness: string): Promise<Json | undefined> {
   const workspace = launched.workspaceId, tab = launched.tabId, pane = launched.paneId;
   if (typeof workspace !== "string" || typeof tab !== "string" || typeof pane !== "string") return undefined;
   for (let attempt = 0; attempt < 15; attempt++) {
     await new Promise(resolve => setTimeout(resolve, 1_000));
     try {
-      const result = await peerRequest(peer, `/v1/workspaces/panes?server=${encodeURIComponent(peer.server)}&groupId=${encodeURIComponent(workspace)}&childId=${encodeURIComponent(tab)}`);
+      const result = await peer.request(`/v1/workspaces/panes?server=${encodeURIComponent(peer.server)}&groupId=${encodeURIComponent(workspace)}&childId=${encodeURIComponent(tab)}`);
       const found = (Array.isArray(result.panes) ? result.panes : []).find((p: Json) => p && typeof p === "object" && (p as Json).id === pane) as Json | undefined;
       const session = found?.sessionId;
       if (typeof session === "string" && session) return { server: peer.server, workspace, tab, pane, source: harness, session };
@@ -163,7 +166,9 @@ export interface DispatchIdentity {
 
 export class DispatchService {
   private active = false;
-  constructor(private readonly identity?: DispatchIdentity) {}
+  /** `local` is this computer as a dispatch destination (its own Hook's
+   * socket); tests replace it so they never reach a real Hook. */
+  constructor(private readonly identity?: DispatchIdentity, private readonly local: () => DispatchHost = () => localHost()) {}
   /** `originValue` is the local pane the request came from, as its agent's
    * Herdr variables name it; a pane without a running agent is left out. */
   async dispatch(input: unknown, originValue?: unknown): Promise<Json> {
@@ -176,8 +181,13 @@ export class DispatchService {
         await validateDispatchParent(data, this.identity.computerID, this.identity.validateParentTarget);
       }
       if ((await receiptNames(path.join(bridgeRoot(), "dispatches"))).length >= 1024) throw new BridgeError(429, "Dispatch history is full. Archive old receipts before dispatching again.");
-      const peers = await hookPeers();
-      let peer: HookPeer | undefined;
+      // This computer needs no hooks.yaml entry, so a missing file only
+      // matters when the dispatch names another computer.
+      const here = this.local();
+      const toLocal = data.computer !== "anywhere" && isLocalComputer(data.computer, here.names);
+      const enrolled = await hookPeers().catch(error => { if (toLocal || data.computer === "anywhere") return []; throw error; });
+      const peers: DispatchHost[] = [...enrolled.map(candidate => peerHost(candidate)), here];
+      let peer: DispatchHost | undefined;
       let remoteComputerID: string | undefined;
       const skipped: Skipped[] = [];
       if (data.computer === "anywhere") {
@@ -195,7 +205,7 @@ export class DispatchService {
         remoteComputerID = selected?.computerId;
         if (!peer) throw new BridgeError(503, "No enrolled computer with a running Herdr is connected.", skipped.length ? { skipped } : undefined);
       } else {
-        peer = peers.find(candidate => candidate.name === data.computer);
+        peer = toLocal ? peers.find(candidate => candidate.local) : peers.find(candidate => !candidate.local && candidate.name === data.computer);
         if (!peer) throw new BridgeError(404, "Unknown computer. Add its verified connection to hooks.yaml.");
         remoteComputerID = (await capacity(peer)).computerId;
       }
@@ -208,13 +218,13 @@ export class DispatchService {
         ...(grant ? { granted: grantLabel(grant) } : {}), ...(skipped.length ? { skipped } : {}), ...(origin ? { origin } : {}) };
       await save(receipt);
       try {
-        const launched = await peerRequest(peer, `/v1/workspaces/launch?server=${encodeURIComponent(peer.server)}`,
+        const launched = await peer.request(`/v1/workspaces/launch?server=${encodeURIComponent(peer.server)}`,
           { project: data.project, kind: data.harness, model: data.model, label: data.label });
         const target = remoteTarget.parse(launched.target ?? await settledTarget(peer, launched, data.harness));
         if (target.source !== data.harness || target.server !== peer.server) throw new BridgeError(502, "The remote Hook returned a different launch target.");
         receipt.target = target;
         receipt.state = "sending"; receipt.updatedAt = new Date().toISOString(); await save(receipt);
-        const result = await peerRequest(peer, "/v1/prompt", { target: receipt.target, text: prompt });
+        const result = await peer.request("/v1/prompt", { target: receipt.target, text: prompt });
         receipt.state = result.ok === true && result.deliveryUncertain !== true ? "accepted" : "uncertain";
       } catch (error) {
         receipt.state = receipt.state === "launching" && error instanceof BridgeError && [400, 404, 429].includes(error.status) ? "failed" : "uncertain";
