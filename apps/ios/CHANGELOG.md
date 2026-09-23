@@ -25,6 +25,9 @@ number counts up on its own.
 - Development: an unchanged build no longer runs the graph bundler. Its build phase runs only when a source the bundle reads, the bundler or the lockfile changed (the list lives in `scripts/graph-inputs.xcfilelist` and a test fails when it drifts). `scripts/release.py` runs `xcodegen generate` once instead of twice when it releases from the main checkout. Several UI tests share a launch instead of relaunching, wait for elements instead of sleeping, and the stale-status test uses a 30 second live window instead of waiting out 90 seconds.
 - Claude chats suggest `/btw` for a quick side question. It sends even while Claude is working, and the answer shows on a card above the message box, marked as not part of the conversation, with Copy and Dismiss. Dismissing a question that is still being answered cancels it on the computer.
 - The live reply preview uses the chat's monospaced font, so a reply no longer changes typeface when the finished message replaces it.
+- A long draft in the agent chat's message box stays where you scrolled it; any update to the chat had jumped it back to the cursor.
+- Holding a selection handle or the cursor at the top or bottom edge of the message box scrolls a long draft, so a selection can reach lines beyond the four on screen.
+- Double tapping the terminal pastes when the second tap arrives at the instant the first one lifts, as synthesized taps do; the second tap had been dropped.
 - Tapping a file in a computer's Files list opens it in the file viewer again; the tap had done nothing.
 - The file viewer's PDF page buttons, media transport and text page buttons keep their own names for VoiceOver instead of all reading as the viewer.
 - File paths in a chat reply become tappable once the computer confirms them, also when the path is written as code. The first, unlinked rendering of the paragraph had been reused.

@@ -2,8 +2,9 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
-/// Phren's draft editor. UITextView owns caret movement, selection handles,
-/// the loupe and edge autoscroll, including drafts taller than four lines.
+/// Phren's draft editor. UITextView owns caret movement, selection handles
+/// and the loupe; ChatSelectionTextView adds edge autoscroll so a selection
+/// reaches drafts taller than four lines.
 struct ChatComposer: UIViewRepresentable {
     @Binding var text: String
     @Binding var focused: Bool
@@ -165,6 +166,7 @@ class ChatSelectionTextView: UITextView {
 
     @discardableResult override func resignFirstResponder() -> Bool {
         let result = super.resignFirstResponder()
+        stopEdgeAutoscroll()
         selectionDidChange()
         return result
     }
@@ -236,6 +238,53 @@ class ChatSelectionTextView: UITextView {
 
     @objc private func selectionGestureChanged(_ gesture: UIGestureRecognizer) {
         selectionDidChange()
+        updateEdgeAutoscroll(gesture)
+    }
+
+    // MARK: Edge autoscroll
+
+    /// UIKit does not scroll this capped editor while a selection handle or
+    /// the caret is held past its top or bottom edge, so a selection could not
+    /// reach lines beyond the four on screen. Scroll it here and carry the
+    /// moving end of the selection to the edge line.
+    private var autoscrollLink: CADisplayLink?
+    private weak var autoscrollGesture: UIGestureRecognizer?
+
+    private func edgeDirection(_ gesture: UIGestureRecognizer) -> CGFloat {
+        guard isFirstResponder, hasScrollableDraft, gesture.state == .began || gesture.state == .changed else { return 0 }
+        let y = gesture.location(in: self).y
+        if y > bounds.maxY - 4, contentOffset.y < contentSize.height - bounds.height { return 1 }
+        if y < bounds.minY + 4, contentOffset.y > 0 { return -1 }
+        return 0
+    }
+
+    private func updateEdgeAutoscroll(_ gesture: UIGestureRecognizer) {
+        if edgeDirection(gesture) != 0 {
+            autoscrollGesture = gesture
+            guard autoscrollLink == nil else { return }
+            let link = CADisplayLink(target: self, selector: #selector(autoscrollTick))
+            link.add(to: .main, forMode: .common)
+            autoscrollLink = link
+        } else if autoscrollGesture == nil || autoscrollGesture === gesture {
+            stopEdgeAutoscroll()
+        }
+    }
+
+    private func stopEdgeAutoscroll() {
+        autoscrollLink?.invalidate(); autoscrollLink = nil; autoscrollGesture = nil
+    }
+
+    @objc private func autoscrollTick() {
+        guard let gesture = autoscrollGesture else { return stopEdgeAutoscroll() }
+        let direction = edgeDirection(gesture)
+        guard direction != 0 else { return stopEdgeAutoscroll() }
+        let step = direction * max(2, (font?.lineHeight ?? 17) / 4)
+        contentOffset.y = min(max(0, contentSize.height - bounds.height), max(0, contentOffset.y + step))
+        let edge = CGPoint(x: gesture.location(in: self).x, y: direction > 0 ? bounds.maxY - 2 : bounds.minY + 2)
+        guard let range = selectedTextRange, let position = closestPosition(to: edge) else { return }
+        if range.isEmpty { selectedTextRange = textRange(from: position, to: position) }
+        else if direction > 0 { selectedTextRange = textRange(from: range.start, to: position) }
+        else { selectedTextRange = textRange(from: position, to: range.end) }
     }
 
     func selectionDidChange() {
