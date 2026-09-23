@@ -90,6 +90,7 @@ number counts up on its own.
 
 ### Fixed
 
+- A chat attachment that reached the computer reports success. When another request on the same SSH connection failed (a stream that ended, a poll that timed out), the phone closed the connection under the upload, which then said "Attachment upload didn't finish" (tcpShutdown) although the file was already stored. A failed request now only takes its connection out of use: requests already running on it finish first, and new requests open a fresh connection.
 - Project numbers tell the truth. The number beside a project in the Memory
   graph counted only the recent findings the graph drew (the CLI keeps 20 live
   and archives the rest, so many projects read exactly 20) and ignored the

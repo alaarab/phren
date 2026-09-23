@@ -28,10 +28,19 @@ enum GatewayTiming {
 /// (long-lived transcript and terminal streams count) a request gets a
 /// dedicated connection instead of an open failure. A connection that closes
 /// or goes idle leaves the pool; the next request reconnects.
+///
+/// A failed exchange retires its connection instead of closing it: the next
+/// request dials again, while exchanges already running on it (an upload whose
+/// reply is on its way) finish first. Closing it at once cut those off with
+/// `tcpShutdown` after the Hook had already stored the file.
 final class GatewayConnections: @unchecked Sendable {
     static let shared = GatewayConnections()
     static let maximumChildren = 8
     static let idleSeconds: Int64 = 90
+    /// How long a retired connection keeps channels still in flight. Longer
+    /// than an upload's deadline, and it bounds how long a stream or terminal
+    /// stays on a connection that may be dead.
+    static let drainSeconds: Int64 = 65
 
     /// Channel bookkeeping is confined to the connection's event loop.
     final class Connection: @unchecked Sendable {
@@ -41,6 +50,8 @@ final class GatewayConnections: @unchecked Sendable {
         let pooled: Bool
         fileprivate(set) var children = 0
         fileprivate var idle: Scheduled<Void>?
+        /// Takes no new channels; closes when the last one finishes or the drain ends.
+        fileprivate var retired = false
         init(loop: EventLoop, channel: Channel, ssh: NIOSSHHandler, pooled: Bool) {
             self.loop = loop; self.channel = channel; self.ssh = ssh; self.pooled = pooled
         }
@@ -92,7 +103,17 @@ final class GatewayConnections: @unchecked Sendable {
     func release(_ connection: Connection, healthy: Bool) {
         connection.loop.execute {
             connection.children = max(0, connection.children - 1)
-            if !connection.pooled || !healthy {
+            if !healthy && !connection.retired {
+                connection.retired = true
+                self.remove(connection)
+                connection.idle?.cancel()
+                connection.idle = connection.loop.scheduleTask(in: .seconds(Self.drainSeconds)) {
+                    connection.channel.close(promise: nil)
+                }
+            }
+            if !connection.pooled || connection.retired {
+                guard connection.children == 0 else { return }
+                connection.idle?.cancel(); connection.idle = nil
                 connection.channel.close(promise: nil)
                 self.remove(connection)
                 return
@@ -185,7 +206,7 @@ extension GatewayConnections.Connection {
     /// Claims a child slot when the connection is alive and has room.
     fileprivate func reserve() async throws -> Bool {
         try await loop.submit {
-            guard self.channel.isActive, self.children < GatewayConnections.maximumChildren else { return false }
+            guard self.channel.isActive, !self.retired, self.children < GatewayConnections.maximumChildren else { return false }
             self.children += 1
             self.idle?.cancel(); self.idle = nil
             return true
