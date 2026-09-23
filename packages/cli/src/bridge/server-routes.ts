@@ -12,6 +12,7 @@ import { homeDir } from "../home-paths.js";
 import { resolveCodeStore, CodeRoutes } from "./code-routes.js";
 import type { WorkspaceContextUsage } from "./context.js";
 import { type DispatchService, dispatchProjectDirectory, dispatchStatus } from "./dispatch.js";
+import { type DispatchReturns, workerStates } from "./dispatch-returns.js";
 import { remoteChildren } from "./dispatch-tree.js";
 import { addGrant, listGrants, removeGrant } from "./grants.js";
 import { optionalHookPeers, peerRequest } from "./peers.js";
@@ -68,6 +69,7 @@ export interface RouteContext {
   scheduleStore: string;
   scheduler?: Scheduler;
   dispatches?: DispatchService;
+  returns?: DispatchReturns;
   agentHooks: AgentHooks;
   journal: ActivityJournal;
   tabActivity: TabActivityStore;
@@ -325,7 +327,8 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
               const { peers, peerError: reason } = await optionalHookPeers();
               peerError = reason;
               remote = await remoteChildren({ provider: target.source, session: target.session, computer: computerID },
-                await dispatchStatus(), async receipt => {
+                // A worker whose turn finished shows as a completed lead.
+                (await dispatchStatus()).map(receipt => receipt.worker?.state === "done" ? { ...receipt, status: "completed" } : receipt), async receipt => {
                   const peer = peers.find(candidate => candidate.name === receipt.computer);
                   const remoteTarget = targetSchema.safeParse(receipt.target);
                   if (!peer || !remoteTarget.success) return;
@@ -389,7 +392,13 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         } else if (url.pathname === "/v1/canary") {
           result = await canary("manual");
         } else if (url.pathname === "/v1/dispatch") {
-          result = await dispatches!.dispatch(data);
+          // `origin` is the caller's own pane, added by the MCP tool or CLI from Herdr's variables.
+          const { origin, ...brief } = data;
+          result = await dispatches!.dispatch(brief, origin);
+        } else if (url.pathname === "/v1/dispatch/workers") {
+          result = await workerStates(data);
+        } else if (url.pathname === "/v1/dispatch/returns") {
+          result = { returns: await ctx.returns!.take() };
         } else if (url.pathname === "/v1/conductor/grants") {
           result = { ok: true, grant: await addGrant(data) };
         } else if (url.pathname === "/v1/push/register") {

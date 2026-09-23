@@ -216,6 +216,7 @@ export const REGISTRY: Command[] = [
     name: "dispatch", topic: "core", usage: "phren dispatch <computer|anywhere> <project> --label <label> --prompt <brief> [--harness codex|claude|opencode] [--model <model>]",
     summary: "Dispatch a worker brief through Phren Hook",
     subcommands: [{ name: "status", usage: "phren dispatch status", summary: "List local dispatch receipts" },
+      { name: "returns", usage: "phren dispatch returns", summary: "List unread worker returns (done, needs you, blocked, gone) and mark them read" },
       { name: "sessions", usage: "phren dispatch sessions", summary: "List live agent sessions on this and every enrolled computer" }],
     run: async args => (await import("./bridge/dispatch-command.js")).runDispatch(args),
   },

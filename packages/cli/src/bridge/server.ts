@@ -16,10 +16,11 @@ import { startChangeRetention } from "./changes.js";
 import { CodeReindexer, CodeRoutes } from "./code-routes.js";
 import { WorkspaceContextUsage } from "./context.js";
 import { DispatchService } from "./dispatch.js";
-import { recentServers, sharedSnapshot, validateTarget } from "./herdr.js";
+import { DispatchReturns } from "./dispatch-returns.js";
+import { findPane, recentServers, sharedSnapshot, snapshot, validateTarget } from "./herdr.js";
 import { LaunchLimiter } from "./limits.js";
 import { locateProject } from "./locate.js";
-import { BridgeError, bridgeRoot, objects, PROTOCOL, socketPath } from "./protocol.js";
+import { BridgeError, bridgeRoot, objects, PROTOCOL, provider, socketPath } from "./protocol.js";
 import { CodexQuestions } from "./questions.js";
 import { TabActivityStore } from "./tab-activity.js";
 import { childAgentTree } from "./transcripts.js";
@@ -52,8 +53,15 @@ export async function serve(version: string): Promise<void> {
   catch { computerID = randomUUID(); await writeFile(identityFile, computerID, { flag: "wx", mode: 0o600 }); }
   const launches = new LaunchLimiter();
   const dispatches = modules.has("conductor")
-    ? new DispatchService({ computerID, validateParentTarget: target => validateTarget(target, false, true) })
+    ? new DispatchService({ computerID, validateParentTarget: target => validateTarget(target, false, true),
+      originAgent: async origin => {
+        const pane = findPane(await snapshot(origin.server), origin);
+        const agent = provider.safeParse(pane?.agent);
+        return agent.success && typeof pane?.terminal_id === "string" ? { agent: agent.data, terminal: pane.terminal_id } : undefined;
+      } })
     : undefined;
+  // Follows what dispatched workers do and tells the dispatching agent.
+  const returns = dispatches ? new DispatchReturns() : undefined;
   const locatedDirectories = new Set<string>();
   const journal = new ActivityJournal();
   const agentHooks = new AgentHooks(undefined, modules);
@@ -116,7 +124,7 @@ export async function serve(version: string): Promise<void> {
   const { stream } = streams;
   const http = createServer(createRouteHandler({ version, modules, info, computerID, scheduleStore, scheduler, dispatches, agentHooks,
     journal, tabActivity, contextUsage, modelCatalog, modelSwitcher, sideQuestions, accountUsage, codexQuestions, launches, locatedDirectories,
-    fanoutMessages, canary, streams }));
+    fanoutMessages, canary, streams, returns }));
   http.requestTimeout = 20_000; http.headersTimeout = 10_000; http.maxHeadersCount = 32;
   const ws = new WebSocketServer({ noServer: true, maxPayload: 65_536, perMessageDeflate: false });
   http.on("upgrade", (request, socket, head) => {
@@ -161,6 +169,9 @@ export async function serve(version: string): Promise<void> {
         }
         catch { /* A disconnected computer keeps its previous local activity. */ }
       }
+      // Dispatch returns ride this tick and its shared snapshots. The returns
+      // loop throttles its own peer polls and never holds up activity.
+      void returns?.tick();
     })().finally(() => { recording = false; }).catch(() => {});
   }, 5000);
   await new Promise<void>(resolve => {

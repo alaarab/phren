@@ -35,7 +35,7 @@ Outside the pnpm workspace:
 
 | File | Purpose |
 |------|---------|
-| `packages/cli/src/index.ts` | Entry point: top-level invocation routing + MCP server (69 tools registered; the `core` profile exposes 10, see `src/mcp/profile.ts`) |
+| `packages/cli/src/index.ts` | Entry point: top-level invocation routing + MCP server (70 tools registered; the `core` profile exposes 10, see `src/mcp/profile.ts`) |
 | `packages/cli/src/tools/summaries.ts` | MCP tools `get_topic_summaries` / `set_topic_summary`: the agent reads a topic's bullets and stores its own paragraph, under the invented-identifier check; driven by the `/phren-summarize` skill |
 | `packages/cli/src/content/summarize.ts` | The archive's shape: `## Now` blocks at the top of `reference/topics/*.md` (structural, or LLM prose with `--llm`), the `What phren knows` block in `summary.md` the hook injects once per session, and the split of oversized topic files into `<topic>.older.md`. Run by `phren maintain summarize` and by background maintenance. |
 | `packages/cli/src/store-weight.ts` | Words per kind across the store and the median hook injection size; behind `phren status`'s weight line and doctor's `context-cost` check |
@@ -74,6 +74,7 @@ Outside the pnpm workspace:
 | `packages/cli/src/bridge/git.ts` | Read-only Git data for the phone's Changes screen (`status`, `log`, `branches`, `pulls`, `tree` with optional ignored entries) plus stage/unstage/discard, all bound to the pane's repository, a spawned child's worktree or a listed worktree. |
 | `packages/cli/src/bridge/git-worktrees.ts` | `/v1/git/worktrees`: the repository's other worktrees with ahead/behind, uncommitted count and the worker editing there, and the resolution of a phone's opaque worktree id against that listing. |
 | `packages/cli/src/bridge/dispatch.ts` | Conductor placement: the `dispatch` MCP tool schema and `DispatchService`, which validates verified peers, picks a named or least-busy `anywhere` computer, launches over pinned SSH, sends one prompt, and stores durable receipts. |
+| `packages/cli/src/bridge/dispatch-returns.ts` | The conductor's returns loop: the receiving Hook's `workerStates` (from the shared Herdr snapshot and the transcript readers) and the dispatching Hook's `DispatchReturns`, which polls each peer once per 15 s, records done / needs-you / blocked / gone in the receipts, serves `dispatch_returns`, and types a rate-limited notice into an idle dispatching agent. |
 | `packages/cli/src/bridge/computers.ts` | Computer enrollment: creates or reuses the ed25519 dispatch key and prints or accepts the `restrict,pty` `authorized_keys` line. |
 | `packages/cli/src/bridge/peers.ts` | The Hook's verified SSH peer directory (`hooks.yaml`, pinned host keys, at most 32 peers) and one bounded OpenSSH process per request through `phren-hook v1 pipe`. |
 | `packages/cli/src/bridge/codex-threads.ts` | Codex 0.155 thread-history compatibility: materializes `thread_history_1.sqlite` into a rollout-shaped JSONL so existing transcript readers keep working, and flags a working pane whose history stopped advancing (`threadHealth`). |
