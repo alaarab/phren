@@ -289,7 +289,7 @@ import UIKit
         // A session launched from a project runs the harness that was picked.
         let launchedKind = launches.last.map(\.kind).flatMap { session.workspaceID == "w9" ? $0 : nil }
         let remote = flag("--agent-work-navigation") && session.host.id.uuidString.hasSuffix("000002")
-        let agent = remote ? "codex" : launchedKind ?? (flag("--chat-opencode") ? "opencode" : flag("--chat-copilot") ? "copilot" : (trailer || flag("--chat-claude-queue") || flag("--chat-claude-image") || flag("--chat-read-images") || flag("--chat-approval-question") || flag("--chat-agent-card") || flag("--chat-todos") || flag("--chat-plan-mode") || flag("--chat-web-tools") || flag("--chat-skill-chip") || flag("--chat-mcp-card") || flag("--chat-compaction") || flag("--chat-density") || flag("--chat-model-picker") || flag("--chat-phren-tools")) ? "claude" : "codex")
+        let agent = remote ? "codex" : launchedKind ?? (flag("--chat-copilot") ? "copilot" : (trailer || flag("--chat-claude-queue") || flag("--chat-claude-image") || flag("--chat-read-images") || flag("--chat-approval-question") || flag("--chat-agent-card") || flag("--chat-todos") || flag("--chat-plan-mode") || flag("--chat-web-tools") || flag("--chat-skill-chip") || flag("--chat-mcp-card") || flag("--chat-compaction") || flag("--chat-model-picker") || flag("--chat-phren-tools")) ? "claude" : "codex")
         var panes: [[String: Any]] = [["id": "\(session.workspaceID):p1", "label": "1", "title": tour ? "Ship the onboarding flow" : "Polish the phone app", "agent": agent,
                                      "agentStatus": ((flag("--chat-blocked") || flag("--chat-password") || flag("--chat-approval") || flag("--chat-approval-question") || flag("--chat-plan-mode") || flag("--chat-question")) && !answered) ? "blocked" : (flag("--chat-queue-completion") || flag("--chat-history-stalled") || (flag("--chat-working") && !stopped) ? "working" : "idle"), "sessionId": remote ? "00000000-0000-0000-0000-000000000042" : agent == "copilot" ? "00000000-0000-0000-0000-000000000023" : agent == "opencode" ? "ses_fixtureopencode" : "fixture-\(agent)-session", "cwd": root]]
         if flag("--starting-session-fixture") {
@@ -660,27 +660,6 @@ import UIKit
         }
         if flag("--chat-markdown") { append("assistant", "# Changes\nHere is the fix in `packages/cli/src/bridge/projects.ts`, using `lsof -Fpcn`:\n```swift\nlet color = \"cyan\"\n```\nReady to test.") }
         if flag("--chat-link") { append("assistant", "[Open linked page](https://example.org/phren-fixture)") }
-        if flag("--chat-density") {
-            // A fixed conversation covering every row the density pass touches:
-            // user bubbles, assistant text, a folded read run, a shell pill, an
-            // edit card, a background job and a subagent card.
-            append("user", "Fold the reads and keep the cards.")
-            append("assistant", "Looking at the project now.")
-            for index in 0..<3 {
-                claudeCall("density-read-\(index)", "Read", ["file_path": "/work/phone/Sources/File\(index).swift"])
-                claudeResult("density-read-\(index)", "let value = \(index)")
-            }
-            append("assistant", "Reads done; checking the tree.")
-            claudeCall("density-shell", "Bash", ["command": "git status --short", "description": "Check the tree"])
-            claudeResult("density-shell", " M Sources/App.swift")
-            claudeCall("density-edit", "Edit", ["file_path": root + "/Sources/App.swift", "old_string": "let accent = green", "new_string": "let accent = purple"])
-            claudeResult("density-edit", "The file \(root)/Sources/App.swift has been updated.")
-            claudeCall("density-bg", "Bash", ["command": "swift test", "description": "Run the suite", "run_in_background": true])
-            claudeResult("density-bg", "Command running in background with ID: density-bg")
-            claudeCall("density-agent", "Task", ["description": "Audit the timeline", "subagent_type": "Explore", "prompt": "Read the timeline and report which calls fold."])
-            claudeResult("density-agent", "# Audit\n\n- Reads fold\n- Cards stay\n\nFinal audit marker.")
-            append("assistant", "All set.")
-        }
         // Real transcripts retain the tool call after it is answered. Keep its
         // line stable so the reply appends instead of reusing a tool message ID.
         if flag("--chat-async-question") || flag("--chat-question-unsupported") {
@@ -1019,7 +998,7 @@ import UIKit
         if flag("--enroll-fails") { throw PhrenKitError.validation("git clone failed: the fixture said no.") }
         let folder = directory ?? "/Users/fixture/Projects/" + (cloneURL?.split(separator: "/").last.map { $0.replacingOccurrences(of: ".git", with: "") } ?? "repo")
         let name = String(folder.split(separator: "/").last ?? "repo")
-        return .init(project: name, directory: folder, cloned: cloneURL != nil, store: flag("--enroll-unpushed") ? "committed" : "pushed", storeDetail: flag("--enroll-unpushed") ? "no remote configured" : nil)
+        return .init(project: name, directory: folder, cloned: cloneURL != nil, store: "pushed", storeDetail: nil)
     }
     /// The Hook's `/v1/git/log` answer for the Changes screen: three commits
     /// with local, remote and head refs, and an uncommitted summary. Ages are

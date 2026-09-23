@@ -676,7 +676,6 @@ struct NotesTab: View {
     @State private var showAdd = false
     @State private var editing: Note?
     @State private var promoting: Note?
-    @State private var showVoiceCapture = false
     /// Same collapsed-by-default treatment as findings (Task: findings
     /// unscannable when one entry fills the screen) — notes use the same
     /// plain VStack(text + metadata) row shape, so the fix is mechanical.
@@ -690,13 +689,6 @@ struct NotesTab: View {
 
     /// Same rule as `FindingsTab`: a read-only tier shows no way to write.
     private var isReadOnly: Bool { LocalStore.isReadOnlyProject(project) }
-
-    /// This tab's project, pre-selected — the mic button next to + only
-    /// appears when this specific (store, project) pair is writable.
-    private var voiceCaptureTarget: VoiceCaptureTarget? {
-        guard model.canWrite(storeId: storeId, project: project) else { return nil }
-        return VoiceCaptureTarget(storeId: storeId, storeName: model.storeName(for: storeId), project: project)
-    }
 
     private var groupedByDay: [(date: String, items: [Note])] {
         let groups = Dictionary(grouping: notes, by: \.date)
@@ -787,11 +779,6 @@ struct NotesTab: View {
             TextEntrySheet(title: "Add note", confirmLabel: "Add") { text, _ in
                 let now = AppModel.nowNoteTimestamp()
                 await model.perform(.addNote(project: project, date: now.date, time: now.time, text: text), in: storeId)
-            }
-        }
-        .sheet(isPresented: $showVoiceCapture) {
-            if let voiceCaptureTarget {
-                VoiceCaptureView(targets: [voiceCaptureTarget], preselected: voiceCaptureTarget)
             }
         }
         .sheet(item: $editing) { note in

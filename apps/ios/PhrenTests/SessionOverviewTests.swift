@@ -109,12 +109,12 @@ final class SessionOverviewTests: XCTestCase {
         let model = SessionOverviewMonitor { LiveHostMonitor { _, _ in snapshot } }
         let run = Task { await model.run(hosts: [computer]) }
         await eventually { model.ready }
-        _ = model.groups(at: .now, query: "", preferences: nil, projects: [])
+        _ = model.groups(at: .now, preferences: nil, projects: [])
         let firstCount = model.groupComputationCount
-        _ = model.groups(at: .now.addingTimeInterval(1), query: "", preferences: nil, projects: [])
+        _ = model.groups(at: .now.addingTimeInterval(1), preferences: nil, projects: [])
         XCTAssertEqual(model.groupComputationCount, firstCount, "The one-second freshness clock must reuse snapshot grouping")
-        _ = model.groups(at: .now, query: "working", preferences: nil, projects: [])
-        XCTAssertEqual(model.groupComputationCount, firstCount + 1, "A query change must invalidate grouping")
+        _ = model.groups(at: .now, preferences: nil, projects: [SessionProject(storeID: "work/brain", name: "phone")])
+        XCTAssertEqual(model.groupComputationCount, firstCount + 1, "A project change must invalidate grouping")
         run.cancel(); await run.value
     }
 
@@ -136,7 +136,7 @@ final class SessionOverviewTests: XCTestCase {
         next.cancel(); await next.value
     }
 
-    func testSameSessionIDsOnTwoComputersStayDistinctAndSearchFindsHostAndProject() async throws {
+    func testSameSessionIDsOnTwoComputersStayDistinct() async throws {
         let first = try host("Mac"), second = try host("Linux")
         let working = try snapshot("working"), waiting = try snapshot("waiting")
         let model = SessionOverviewMonitor { LiveHostMonitor { host, _ in host.id == first.id ? working : waiting } }
@@ -145,7 +145,6 @@ final class SessionOverviewTests: XCTestCase {
         let result = groups(model)
         XCTAssertEqual(result.map(\.title), ["Working", "Needs input"])
         XCTAssertEqual(Set(result.flatMap(\.sessions).map(\.id)).count, 2)
-        XCTAssertEqual(groups(model, query: "Linux Project").flatMap(\.sessions).map(\.host.id), [second.id])
         run.cancel(); await run.value
     }
 
@@ -156,7 +155,7 @@ final class SessionOverviewTests: XCTestCase {
         let run = Task { await model.run(hosts: [first, second]) }
         await eventually { model.connectedCount(at: .now) == 2 }
         let filter = AgentFocusFilter(computerID: second.id, storeID: nil, label: "Work")
-        let result = model.groups(at: .now, query: "", preferences: nil, projects: [], focusFilter: filter)
+        let result = model.groups(at: .now, preferences: nil, projects: [], focusFilter: filter)
         XCTAssertEqual(result.flatMap(\.sessions).map(\.host.id), [second.id])
         run.cancel(); await run.value
     }
@@ -211,8 +210,6 @@ final class SessionOverviewTests: XCTestCase {
         XCTAssertEqual(pinned.first?.sessions.map(\.id), [selected])
         XCTAssertEqual(pinned.last?.sessions.map(\.host.id), [first.id])
         XCTAssertEqual(pinned.flatMap(\.sessions).count, 2, "A pin must move a session, not duplicate it")
-        XCTAssertEqual(groups(model, query: "Mac", preferences: preferences).map(\.title), ["Working"])
-        XCTAssertEqual(groups(model, query: "Linux", preferences: preferences).first?.sessions.map(\.id), [selected])
 
         data = try LiveSessionPreferences.setPinned(false, for: selected, in: data)
         let unpinned = groups(model, preferences: try LiveSessionPreferences.read(data))
@@ -305,8 +302,8 @@ final class SessionOverviewTests: XCTestCase {
         next.cancel(); await next.value
     }
 
-    private func groups(_ model: SessionOverviewMonitor, query: String = "", preferences: LiveSessionPreferences? = nil) -> [SessionOverviewMonitor.Group] {
-        model.groups(at: .now, query: query, preferences: preferences, projects: [])
+    private func groups(_ model: SessionOverviewMonitor, preferences: LiveSessionPreferences? = nil) -> [SessionOverviewMonitor.Group] {
+        model.groups(at: .now, preferences: preferences, projects: [])
     }
     private func host(_ name: String) throws -> LiveHost { try LiveHost(name: name, address: name.lowercased() + ".invalid", username: "fixture") }
     private func snapshot(_ status: String) throws -> LiveWorkspaces {

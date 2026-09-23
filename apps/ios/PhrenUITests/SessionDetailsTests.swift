@@ -31,7 +31,7 @@ final class SessionDetailsTests: XCTestCase {
     }
 
     @MainActor
-    func testSearchAndActivityKeepTheMatchingSession() {
+    func testActivityOrdersWaitingAboveWorking() {
         let app = launch()
         capture(app, "Workspace cards")
         app.segmentedControls.buttons["Activity"].tap()
@@ -40,14 +40,6 @@ final class SessionDetailsTests: XCTestCase {
         XCTAssertTrue(waiting.waitForExistence(timeout: 5))
         XCTAssertLessThan(waiting.frame.minY, working.frame.minY)
         capture(app, "Activity grouped by state")
-        let search = app.searchFields.firstMatch
-        search.tap()
-        search.typeText("deployment")
-        XCTAssertTrue(waiting.waitForExistence(timeout: 5))
-        XCTAssertFalse(working.exists)
-        search.typeText(" unmatched")
-        XCTAssertTrue(app.staticTexts["No matching sessions"].waitForExistence(timeout: 5))
-        XCTAssertFalse(waiting.exists)
     }
 
     @MainActor

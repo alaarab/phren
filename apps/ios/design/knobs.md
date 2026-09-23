@@ -14,7 +14,6 @@ Components (all existing):
 | `sessionCard()` | SessionCardContent.swift | every row: a flat rounded fill, no border, no separators |
 | `plainListSectionLabel()` | SessionCardContent.swift | the category headers |
 | `PhrenSingleSelect` | PhrenControls.swift | each enumeration: a 44pt pill that opens a check-row sheet |
-| `PhrenColorDotRow` | PhrenControls.swift | the name colour dots |
 | `PhrenDialog` | PhrenControls.swift | the Reset confirmation |
 
 Tokens through `PhrenTheme` and `PhrenTypography` only. Rows are 12pt padded,
@@ -42,7 +41,7 @@ what it affects, and its control:
   `knob:<key>`, sheet rows `knob:<key>:<value>`. The first row is always
   "Inherit global" (nil), which removes the key so the global setting
   applies; the sheet closes on the choice.
-- **Name colour** is the title and caption above a `PhrenColorDotRow`
+- **Name color** is the title and caption above a row of 28pt dots
   (ids `knob:nameColour:<colour>`). It saves to phone-local defaults and
   never reaches the file.
 

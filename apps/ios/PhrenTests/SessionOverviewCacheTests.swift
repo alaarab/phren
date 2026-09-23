@@ -22,7 +22,7 @@ final class SessionOverviewCacheTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
         await cache.save(record, force: true)
         XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path), "A queued save must not recreate forgotten data")
-        let loaded = await cache.load(hosts: [host], preferences: nil, query: "", focusFilter: nil)
+        let loaded = await cache.load(hosts: [host], preferences: nil, focusFilter: nil)
         XCTAssertNil(loaded)
     }
 
@@ -39,15 +39,14 @@ final class SessionOverviewCacheTests: XCTestCase {
         await cache.save(.init(savedAt: now, hosts: [.init(host: host, snapshot: snapshot, lastUpdated: now)], screen: screen, preferences: nil))
         // A separate instance exercises disk decoding, not an in-memory hit.
         let reader = SessionOverviewDiskCache(directory: directory)
-        let restored = await reader.load(hosts: [host], preferences: nil, query: "", focusFilter: nil, now: now.addingTimeInterval(59))
+        let restored = await reader.load(hosts: [host], preferences: nil, focusFilter: nil, now: now.addingTimeInterval(59))
         XCTAssertEqual(restored?.screen, screen)
         XCTAssertEqual(restored?.hosts.first?.snapshot, snapshot)
-        let expired = await reader.load(hosts: [host], preferences: nil, query: "", focusFilter: nil, now: now.addingTimeInterval(60))
+        let expired = await reader.load(hosts: [host], preferences: nil, focusFilter: nil, now: now.addingTimeInterval(60))
         XCTAssertNil(expired)
         var changed = host; changed.herdrSession = "other"
-        let wrongHost = await reader.load(hosts: [changed], preferences: nil, query: "", focusFilter: nil, now: now)
-        let wrongQuery = await reader.load(hosts: [host], preferences: nil, query: "different", focusFilter: nil, now: now)
-        XCTAssertNil(wrongHost); XCTAssertNil(wrongQuery)
+        let wrongHost = await reader.load(hosts: [changed], preferences: nil, focusFilter: nil, now: now)
+        XCTAssertNil(wrongHost)
 
         let model = SessionOverviewMonitor(diskCache: reader) {
             LiveHostMonitor { _, _ in try await Task.sleep(for: .seconds(30)); return snapshot }

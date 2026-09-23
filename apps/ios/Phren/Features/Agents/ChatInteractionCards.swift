@@ -2,66 +2,7 @@ import Foundation
 import PhrenKit
 import SwiftUI
 
-struct ChatApprovalCard<Terminal: View>: View {
-    let approval: AgentApproval
-    let busy: Bool
-    @ViewBuilder let terminal: () -> Terminal
-    let answer: (ApprovalDecision) -> Void
-    @Environment(\.dynamicTypeSize) private var typeSize
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("Permission needed", systemImage: "hand.raised").font(.caption.weight(.semibold)).foregroundStyle(PhrenTheme.warning)
-                .accessibilityIdentifier("chat-approval")
-            Text(approval.title ?? approval.toolName ?? "Allow this action?").font(.headline).lineLimit(2)
-            if let explanation = approval.explanation {
-                Text(explanation).font(.subheadline).lineLimit(4).textSelection(.enabled)
-            }
-            if let message = approval.message, !message.isEmpty {
-                PhrenDisclosure(title: "Action details") {
-                    ScrollView { Text(message).font(.caption.monospaced()).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.frame(maxHeight: 220)
-                }
-            }
-            terminal().buttonStyle(.bordered).frame(maxWidth: .infinity)
-            if approval.conductor != nil { grantAnswers }
-            if typeSize.isAccessibilitySize {
-                VStack(spacing: 12) { deny; approve }.disabled(busy)
-            } else {
-                HStack { deny; Spacer(); approve }.disabled(busy)
-            }
-            if busy { ProgressView() }
-        }.padding(12).phrenCard().accessibilityElement(children: .contain)
-    }
-    /// Grant-scoped answers the Hook writes into `conductor.yaml` while still
-    /// approving this call. "Allow for this project" is hidden when the call
-    /// has no project to scope a grant to.
-    @ViewBuilder private var grantAnswers: some View {
-        if let conductor = approval.conductor {
-            VStack(spacing: 8) {
-                if conductor.project != nil {
-                    Button { answer(.allowProject) } label: {
-                        Text("Allow for this project").lineLimit(1).frame(maxWidth: .infinity, minHeight: 32)
-                    }.buttonStyle(.bordered).accessibilityIdentifier("chat-approval-allow-project")
-                }
-                Button { answer(.allowEverywhere) } label: {
-                    Text("Allow everywhere").lineLimit(1).frame(maxWidth: .infinity, minHeight: 32)
-                }.buttonStyle(.bordered).accessibilityIdentifier("chat-approval-allow-everywhere")
-            }.disabled(busy)
-        }
-    }
-    private var deny: some View {
-        Button(role: .destructive) { answer(.deny) } label: {
-            Text("Deny").lineLimit(1).frame(maxWidth: .infinity, minHeight: 32)
-        }.buttonStyle(.bordered).accessibilityIdentifier("chat-approval-deny")
-    }
-    private var approve: some View {
-        Button { answer(.approve) } label: {
-            Text("Approve").lineLimit(1).frame(maxWidth: .infinity, minHeight: 32)
-        }.buttonStyle(.borderedProminent).tint(PhrenTheme.cyan).accessibilityIdentifier("chat-approval-approve")
-    }
-}
-
 /// In-chat permissions use the same header and radio rows as choice questions.
-/// The compact approval card above remains available to non-chat surfaces.
 struct ChatApprovalQuestionCard: View {
     let approval: AgentApproval
     let providerName: String

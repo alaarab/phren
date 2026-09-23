@@ -53,3 +53,6 @@ packages/vscode/scratch/vscode-webview.html
 .scratch/
 
 packages/code/dist/
+
+# Packed tarballs (npm pack output)
+*.tgz

@@ -1,7 +1,6 @@
 import * as fs from "fs";
 import {
   addTask,
-  completeTask,
   readTasks,
   resolveTaskItem,
   updateTask,
@@ -12,7 +11,6 @@ import { getProactivityLevelForTask, shouldAutoCaptureTaskForLevel, hasExecution
 import { getWorkflowPolicy } from "../shared/governance.js";
 import { debugLog, sessionMarker } from "../shared.js";
 import { errorMessage } from "../utils.js";
-import { incrementSessionTasksCompleted } from "../tools/session.js";
 
 export type TaskMode = "off" | "manual" | "suggest" | "auto";
 
@@ -71,8 +69,10 @@ const CONVERSATIONAL_FILLER_RE = /\b(?:lmao|lmfao|rofl|lol+|haha+|idk|idc|tbh|ng
 // is the terminal's bookkeeping; the text inside is what the person typed.
 const PASTED_CONTENT_WRAPPER_RE = /<pasted_content\b[^>]*>\n?([\s\S]*?)\n?<\/pasted_content\b[^>]*>/g;
 // Frames another agent or the harness put in the prompt: a cross-session message, a
-// delivery/idle notice, a task notification, a system reminder. Not the person's request.
-const AGENT_FRAME_RE = /<\/?(?:cross-session-message|task-notification|system-reminder|phren-notice|command-name|command-message)\b|\[Cross-session (?:delivery|idle) notice\]/i;
+// sub-agent hand-back, a delivery/idle notice, a task or system notification, a system
+// reminder. Not the person's request. Matched anywhere, since a harness may put the
+// person's own words inside or after one of these, and a frame is never worth a task.
+const AGENT_FRAME_RE = /<\/?(?:agent-message|cross-session-message|task-notification|system-reminder|system-notification|phren-notice|command-name|command-message)\b|\[(?:SYSTEM NOTIFICATION|Cross-session (?:delivery|idle) notice)\b/i;
 // A reply to the agent — "Yep /herdr the phren agent is there" — starts with an
 // acknowledgement and asks for nothing; a question ends with one.
 const REPLY_OPENER_RE = /^(?:yep|yeah|yes|yup|ya|nah|no|nope|ok|okay|right|correct|exactly|indeed|true|sure|fine|agreed|(?:just\s+)?curious|(?:i(?:'|’)?m\s+)?wondering|i wonder)\b/i;
@@ -330,6 +330,12 @@ export function handleTaskPromptLifecycle(args: {
   if (mode === "off" || mode === "manual" || !args.project || !args.sessionId) {
     return { mode, noticeLines: [] };
   }
+  // A sub-agent hand-back, a system notification or a harness reminder arrives as a
+  // prompt but nobody typed it: it never creates, moves or reuses a task.
+  if (isAgentFramePrompt(args.prompt)) {
+    debugLog(`task lifecycle skipped ${args.project}: machine-originated prompt`);
+    return { mode, noticeLines: [] };
+  }
   const prompt = unwrapPromptFrames(args.prompt);
   // Suppression takes absolute priority — user explicitly said not to create a task.
   if (hasSuppressTaskIntent(prompt)) {
@@ -442,12 +448,10 @@ export function finalizeTaskSession(args: {
 
   const match = state.stableId ? `bid:${state.stableId}` : state.item;
   if (args.status === "saved-local" || args.status === "saved-pushed" || args.status === "no-upstream") {
-    const completed = completeTask(args.phrenPath, state.project, match);
-    if (!completed.ok) {
-      debugLog(`task lifecycle complete ${state.project}: ${completed.error}`);
-      return;
-    }
-    incrementSessionTasksCompleted(args.phrenPath, 1, state.sessionId, state.project);
+    // A saved turn is not finished work. The Stop hook runs after every turn, so
+    // completing here marked real work Done as soon as the next prompt came in.
+    // The task stays where it is; completion is explicit. Detaching it keeps the
+    // next prompt from rewriting its context unless that prompt matches it.
     clearTaskSessionState(args.phrenPath, args.sessionId);
     return;
   }

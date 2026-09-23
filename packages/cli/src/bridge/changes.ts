@@ -32,7 +32,7 @@ export function homeDirectory(env: NodeJS.ProcessEnv = process.env): string {
 
 const NAMED = /(?<![\w@:/])(?:~\/|\.\/|\/)[\w.@+~-]+(?:\/[\w.@+~-]+)*/g;
 /** The places a command names — the same rule the phone applies. */
-export const FILE_TOOLS = new Set(["write", "edit", "multiedit", "notebookedit", "apply_patch", "str_replace_editor", "create_file", "replace_string_in_file", "multi_replace_string_in_file"]);
+const FILE_TOOLS = new Set(["write", "edit", "multiedit", "notebookedit", "apply_patch", "str_replace_editor", "create_file", "replace_string_in_file", "multi_replace_string_in_file"]);
 export function capturesChanges(tool: string, input: Json): boolean {
   return SHELL_TOOLS.has(tool) || FILE_TOOLS.has(tool.split(".").at(-1)!.toLowerCase()) || typeof input.command === "string" || typeof input.cmd === "string";
 }
@@ -61,7 +61,7 @@ async function git(cwd: string, args: string[], extra: NodeJS.ProcessEnv = {}, s
 
 /** The repository holding `target` (a file, a folder, or something not yet
  * created), confined to the user's home; undefined otherwise. */
-export async function repositoryOf(target: string, cwd: string, home = homeDirectory(), signal?: AbortSignal): Promise<string | undefined> {
+async function repositoryOf(target: string, cwd: string, home = homeDirectory(), signal?: AbortSignal): Promise<string | undefined> {
   const absolute = target === "~" || target.startsWith("~/") ? path.join(home, target.slice(1)) : path.resolve(cwd, target);
   let existing = absolute;
   while (!(await stat(existing).catch(() => undefined))) {

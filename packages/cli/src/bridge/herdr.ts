@@ -11,7 +11,7 @@ import { tabActivityKey } from "./tab-activity.js";
 
 const exec = promisify(execFile);
 export function herdrRoot(): string { return process.env.PHREN_HERDR_HOME || path.join(homedir(), ".config/herdr"); }
-export function herdrSocket(server: string): string {
+function herdrSocket(server: string): string {
   serverName.parse(server);
   return path.join(herdrRoot(), ...(server === "default" ? [] : ["sessions", server]), "herdr.sock");
 }

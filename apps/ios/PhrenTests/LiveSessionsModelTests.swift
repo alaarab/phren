@@ -55,20 +55,17 @@ final class LiveSessionsModelTests: XCTestCase {
         XCTAssertNil(index.byHost[second.id])
     }
 
-    func testSetupActionsFollowMemoryConnectionWithoutChangingSessionSearchOrComputers() throws {
+    func testSetupActionsFollowMemoryConnectionWithoutChangingComputers() throws {
         let model = LiveSessionsModel(overview: SessionOverviewMonitor())
         let computer = try host("Desk")
         let preferences = try LiveSessionPreferences.read(LiveSessionPreferences.saving(computer, in: Data()))
-        model.setQuery("phone")
         model.update(preferences: preferences, projects: [], metadataReady: true, memoryConnected: false)
         XCTAssertEqual(model.setupActions, [.connectMemory])
         XCTAssertEqual(model.hosts.map(\.id), [computer.id])
-        XCTAssertEqual(model.configuration.query, "phone")
 
         model.update(preferences: preferences, projects: [], metadataReady: true, memoryConnected: true)
         XCTAssertEqual(model.setupActions, [.skills, .instructions])
         XCTAssertEqual(model.hosts.map(\.id), [computer.id])
-        XCTAssertEqual(model.configuration.query, "phone")
 
         model.update(preferences: preferences, projects: [], metadataReady: true, memoryConnected: false)
         XCTAssertEqual(model.setupActions, [.connectMemory], "Disconnecting must remove destinations that require memory")

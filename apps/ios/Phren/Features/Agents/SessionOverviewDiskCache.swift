@@ -25,13 +25,13 @@ actor SessionOverviewDiskCache {
 
     init(directory: URL) { self.directory = directory }
 
-    func load(hosts: [LiveHost], preferences: LiveSessionPreferences?, query: String,
+    func load(hosts: [LiveHost], preferences: LiveSessionPreferences?,
               focusFilter: AgentFocusFilter?, now: Date = .now) -> Record? {
         guard hosts.allSatisfy({ !forgottenHosts.contains($0.id) }), let url = file(hosts), let data = try? Data(contentsOf: url), data.count <= 8_388_608,
               let record = try? JSONDecoder().decode(Record.self, from: data), record.version == 1,
               (0..<60).contains(now.timeIntervalSince(record.savedAt)),
               record.hosts.map(\.host).sorted(by: Self.ordered) == hosts.sorted(by: Self.ordered),
-              record.preferences == preferences, record.screen.query == query, record.screen.focusFilter == focusFilter
+              record.preferences == preferences, record.screen.focusFilter == focusFilter
         else { return nil }
         // Do not revive the green status of a snapshot that aged out while
         // the process was gone, even if the cached screen was recently saved.

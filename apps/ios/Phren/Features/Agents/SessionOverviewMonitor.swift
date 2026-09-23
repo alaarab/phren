@@ -18,7 +18,6 @@ final class SessionOverviewMonitor {
     }
 
     struct Configuration: Equatable {
-        var query = ""
         var preferences: LiveSessionPreferences? = nil
         var projects: [SessionProject] = []
         var focusFilter: AgentFocusFilter? = nil
@@ -44,7 +43,6 @@ final class SessionOverviewMonitor {
         var projects: [LiveAgentSession.ID: String] = [:]
         var pinned: Set<LiveAgentSession.ID> = []
         var focusFilter: AgentFocusFilter? = nil
-        var query = ""
         var memoryReady = true
         var memoryConnected = true
         var preferencesReadable = true
@@ -128,7 +126,7 @@ final class SessionOverviewMonitor {
             await seedCacheFixture(diskCache, hosts: hosts)
             #endif
             let restored = await diskCache.load(hosts: hosts, preferences: configuration.preferences,
-                query: configuration.query, focusFilter: configuration.focusFilter)
+                focusFilter: configuration.focusFilter)
             guard generation == run, !Task.isCancelled else { return }
             if let restored {
                 for computer in computers {
@@ -211,13 +209,13 @@ final class SessionOverviewMonitor {
     private func publish(first: Bool = false) {
         guard ready, !refreshingCachedScreen else { return }
         let started = CFAbsoluteTimeGetCurrent(), date = Date.now
-        let groups = groups(at: date, query: configuration.query, preferences: configuration.preferences,
+        let groups = groups(at: date, preferences: configuration.preferences,
                             projects: configuration.projects, focusFilter: configuration.focusFilter)
         var value = Screen(groups: groups, computers: computers.map {
             ComputerRow(host: $0.host, connecting: $0.monitor.isConnecting,
                         fresh: $0.monitor.isFresh(at: date), message: $0.monitor.message,
                         needsVerification: $0.monitor.fingerprint != nil, slow: $0.monitor.slowToAnswer)
-        }, focusFilter: configuration.focusFilter, query: configuration.query, memoryReady: configuration.metadataReady,
+        }, focusFilter: configuration.focusFilter, memoryReady: configuration.metadataReady,
            memoryConnected: configuration.memoryConnected, preferencesReadable: configuration.preferences != nil)
         for session in groups.flatMap(\.sessions) {
             value.projects[session.id] = configuration.preferences?.projectMatch(hostID: session.host.id,
@@ -241,7 +239,7 @@ final class SessionOverviewMonitor {
         #endif
     }
 
-    func groups(at date: Date, query: String, preferences: LiveSessionPreferences?, projects: [SessionProject],
+    func groups(at date: Date, preferences: LiveSessionPreferences?, projects: [SessionProject],
                 focusFilter: AgentFocusFilter? = nil) -> [Group] {
         guard ready else { return [] }
         // Freshness is the one clock-driven input: it flips a computer's
@@ -251,15 +249,13 @@ final class SessionOverviewMonitor {
         let key = GroupCacheKey(revisions: computers.map {
             .init(id: $0.id, message: $0.monitor.message,
                   snapshot: $0.monitor.snapshot, live: $0.monitor.isLive(at: date))
-        }, query: query, preferences: preferences, projects: projects, focusFilter: focusFilter)
+        }, preferences: preferences, projects: projects, focusFilter: focusFilter)
         if let cachedGroups, cachedGroups.key == key { return cachedGroups.value }
         let started = CFAbsoluteTimeGetCurrent()
         var live: [LiveAgentSession] = [], previous: [LiveAgentSession] = []
         for computer in computers {
             let sessions = (computer.monitor.snapshot?.sessions(on: computer.host) ?? []).filter { session in
-                guard focusFilter?.includes(session, preferences: preferences, projects: projects) != false else { return false }
-                let project = preferences?.projectMatch(hostID: computer.id, cwd: session.tab.cwd, projects: projects)
-                return session.matches(query, projectName: project?.project.name)
+                focusFilter?.includes(session, preferences: preferences, projects: projects) != false
             }
             // While a computer is still being reached its cached sessions keep
             // their activity groups instead of dropping to "Last seen".
@@ -327,7 +323,6 @@ final class SessionOverviewMonitor {
     }
     private struct GroupCacheKey: Equatable {
         let revisions: [Revision]
-        let query: String
         let preferences: LiveSessionPreferences?
         let projects: [SessionProject]
         let focusFilter: AgentFocusFilter?

@@ -329,8 +329,7 @@ struct LiveSessionsView: View {
             if screen.computers.contains(where: \.connecting) {
                 HStack { ProgressView(); Text("Finding sessions…") }.font(.subheadline)
             } else {
-                Text(!screen.query.isEmpty ? "No matching sessions"
-                     : screen.connectedCount == 0 && screen.computers.contains(where: { $0.message != nil })
+                Text(screen.connectedCount == 0 && screen.computers.contains(where: { $0.message != nil })
                      ? "No computers connected" : "No sessions running on the connected computers")
                     .font(.subheadline).foregroundStyle(PhrenTheme.textMuted)
                     .accessibilityIdentifier("sessions-empty")
@@ -606,17 +605,6 @@ final class LiveHostMonitor {
                 }
                 return try LiveWorkspaces.read(Data(#"{"kind":"herdr","groups":[{"id":"w7","label":"Phone work","children":[{"id":"w7:t9","label":"1","title":"Polish the phone app","agent":"codex","agentStatus":"working","cwd":"/work/phone/src","agentPaneCount":2,"paneCount":3}]},{"id":"w8","label":"Other work","children":[{"id":"w8:t1","label":"1","title":"Choose the deployment target","agent":"claude","agentStatus":"waiting","cwd":"/work/other"}]},{"id":"w9","label":"Shell","children":[{"id":"w9:t1","label":"1"}]}]}"#.utf8))
             }
-            if ProcessInfo.processInfo.arguments.contains("--observed-live-session-ids") {
-                // Match the reported shape: every workspace's first tab is
-                // labelled "1", IDs include uppercase letters, and order changes.
-                var groups = [
-                    #"{"id":"w7","label":"Phone work","children":[{"id":"w7:t1","label":"1","cwd":"/work/phone"}]}"#,
-                    #"{"id":"wC","label":"Other work","children":[{"id":"wC:t1","label":"1","cwd":"/work/other"}]}"#,
-                    #"{"id":"w2","label":"Third work","children":[{"id":"w2:t1","label":"1","cwd":"/work/third"}]}"#,
-                ]
-                if previousUpdate != nil { groups.reverse() }
-                return try LiveWorkspaces.read(Data((#"{"kind":"herdr","groups":["# + groups.joined(separator: ",") + "]}").utf8))
-            }
             let extra = ProcessInfo.processInfo.arguments.contains("--multiple-project-sessions")
                 ? #",{"id":"w7:t10","label":"Review phone changes","agent":"claude","agentStatus":"waiting","cwd":"/work/phone"}"# : ""
             return try LiveWorkspaces.read(Data((#"{"kind":"herdr","groups":[{"id":"w7","label":"Phone work","children":[{"id":"w7:t9","label":"Build phone app","agent":"codex","agentStatus":"working","cwd":"/work/phone/src","sessionId":"not-a-server"}"# + extra + #"]},{"id":"w8","label":"Other work","children":[{"id":"w8:t1","label":"Unrelated session","cwd":"/work/other"}]}]}"#).utf8))
@@ -677,8 +665,8 @@ private struct LiveHostView: View {
                         sessionCards(pinned)
                     }
                     if visible.isEmpty {
-                        PhrenEmptyState(title: sessions.isEmpty ? "No sessions running" : "No matching sessions",
-                                        message: sessions.isEmpty ? "Open a workspace on this computer to see it here." : "Try a title, project, agent, or folder name.")
+                        PhrenEmptyState(title: "No sessions running",
+                                        message: "Open a workspace on this computer to see it here.")
                             .frame(maxWidth: .infinity)
                     } else {
                         switch mode {
@@ -865,21 +853,6 @@ extension LiveHostMonitor {
     /// The phone is reaching this computer, or has not heard from it yet.
     /// A fresh computer is live even while a poll is in flight.
     var isConnecting: Bool { !isFresh(at: .now) && message == nil && (refreshing || awaitingAnswer) }
-}
-
-private struct SessionStatusIcon: View {
-    let activity: LiveWorkspaces.Tab.Activity
-    let fresh: Bool
-    private var color: Color { fresh ? activity.color : PhrenTheme.textMuted }
-    var body: some View {
-        Image(systemName: activity.icon)
-            .font(.system(size: 17, weight: .semibold))
-            .foregroundStyle(color)
-            .frame(width: 44, height: 44)
-            .background(color.opacity(0.12), in: Circle())
-            .overlay(Circle().strokeBorder(color.opacity(0.35), lineWidth: 1))
-            .accessibilityHidden(true)
-    }
 }
 
 /// A close asked for from a card, answered by the list that owns the dialog.

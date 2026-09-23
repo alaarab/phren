@@ -35,7 +35,6 @@ final class LiveSessionsModel {
         }
     }
 
-    private(set) var query = ""
     private(set) var focusFilter = AgentFocusFilterStore.load()
     private(set) var refreshID = UUID()
     var adding = false
@@ -97,7 +96,7 @@ final class LiveSessionsModel {
     }
 
     var configuration: SessionOverviewMonitor.Configuration {
-        .init(query: query, preferences: preferences, projects: projects, focusFilter: focusFilter,
+        .init(preferences: preferences, projects: projects, focusFilter: focusFilter,
               metadataReady: metadataReady, memoryConnected: memoryConnected)
     }
 
@@ -125,12 +124,6 @@ final class LiveSessionsModel {
         self.projects = projects
         self.metadataReady = metadataReady
         self.memoryConnected = memoryConnected
-        overview.configure(configuration)
-    }
-
-    func setQuery(_ value: String) {
-        guard value != query else { return }
-        query = value
         overview.configure(configuration)
     }
 
