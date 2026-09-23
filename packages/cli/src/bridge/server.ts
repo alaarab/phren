@@ -11,6 +11,7 @@ import { WebSocketServer } from "ws";
 import { ActivityJournal } from "./activity.js";
 import { countTick } from "./metrics.js";
 import { AgentHooks } from "./agent-hooks.js";
+import { approvalPushCapability } from "./push.js";
 import { startChangeRetention } from "./changes.js";
 import { CodeReindexer, CodeRoutes } from "./code-routes.js";
 import { WorkspaceContextUsage } from "./context.js";
@@ -56,6 +57,10 @@ export async function serve(version: string): Promise<void> {
   const locatedDirectories = new Set<string>();
   const journal = new ActivityJournal();
   const agentHooks = new AgentHooks(undefined, modules);
+  // Push is offered only once an APNs sender loaded; phones may still register.
+  if ("approvalPush" in activeCapabilities) {
+    Object.defineProperty(activeCapabilities, "approvalPush", { enumerable: true, get: () => approvalPushCapability(agentHooks.push.status) });
+  }
   const modelCatalog = new ModelCatalog();
   const modelSwitcher = new ModelSwitcher(agentHooks, modelCatalog);
   const sideQuestions = new SideQuestions();

@@ -1,6 +1,11 @@
-import { describe, expect, it } from "vitest";
-import { approvalPushPayload, scheduleCollapseId, schedulePushPayload, upsertPushDevice } from "./push.js";
+import { generateKeyPairSync } from "node:crypto";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { approvalPushCapability, approvalPushPayload, ApprovalPushService, scheduleCollapseId, schedulePushPayload, upsertPushDevice } from "./push.js";
 import { PushBindingStore } from "./agent-hooks.js";
+import { approvalPushCheck } from "./command.js";
 
 describe("approval push payload", () => {
   it("contains only a generic alert and opaque expiring binding", () => {
@@ -88,5 +93,50 @@ describe("push bindings", () => {
     bindings.add("one", { action: "a", expiresAt: 200 }); bindings.add("two", { action: "b", expiresAt: 200 });
     bindings.add("three", { action: "c", expiresAt: 200 });
     expect(bindings.size).toBe(2); expect(bindings.consume("one")).toBeUndefined();
+  });
+});
+
+describe("push honesty", () => {
+  const scratchRoots: string[] = [];
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    await Promise.all(scratchRoots.splice(0).map(root => rm(root, { recursive: true, force: true })));
+  });
+  async function bridgeHome() {
+    const root = await mkdtemp(path.join(tmpdir(), "phren-push-"));
+    scratchRoots.push(root);
+    vi.stubEnv("PHREN_BRIDGE_HOME", root);
+    vi.stubEnv("PHREN_APNS_CONFIG", "");
+    return root;
+  }
+  const device = { deviceID: "6fd8c056-032d-4219-97d7-a506d672ccf2", hostID: "73d445d1-4b31-43fc-9185-65b60c6f7125",
+    token: "a".repeat(64), environment: "production", kinds: ["approval"] };
+
+  it("accepts a phone without apns.json but reports push as not configured", async () => {
+    const root = await bridgeHome();
+    const push = new ApprovalPushService();
+    await push.start();
+    await push.register(device);
+    expect(push.status).toEqual({ supported: true, configured: false, devices: 1 });
+    expect(push.available).toBe(false);
+    expect(approvalPushCapability(push.status)).toBeUndefined();
+    const check = approvalPushCheck({ capabilities: { approvals: true } });
+    expect(check.configured).toBe(false);
+    for (const part of [path.join(root, "apns.json"), '"keyId"', '"teamId"', '"topic":"com.phren.ios"', '"privateKeyPath"', "phren bridge install"]) {
+      expect(check.warning).toContain(part);
+    }
+  });
+
+  it("offers direct-apns once apns.json and its key load", async () => {
+    const root = await bridgeHome();
+    const { privateKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+    await writeFile(path.join(root, "AuthKey_ABCDE12345.p8"), privateKey.export({ type: "pkcs8", format: "pem" }), { mode: 0o600 });
+    await writeFile(path.join(root, "apns.json"), JSON.stringify({ keyId: "ABCDE12345", teamId: "TEAM123456", topic: "com.phren.ios",
+      privateKeyPath: "AuthKey_ABCDE12345.p8" }), { mode: 0o600 });
+    const push = new ApprovalPushService();
+    await push.start();
+    expect(push.status.configured).toBe(true);
+    expect(approvalPushCapability(push.status)).toBe("direct-apns");
+    expect(approvalPushCheck({ capabilities: { approvalPush: "direct-apns" } })).toEqual({ configured: true });
   });
 });
