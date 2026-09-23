@@ -7,7 +7,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { BridgeError, id, object, objects, requestID, serverName, provider, sessionId, type Json, type Target, type StartingTarget } from "./protocol.js";
 import { logger } from "../logger.js";
-import { recordedSession } from "./agent-hooks.js";
+import { recordedSession } from "./agent-hook-stores.js";
 import { tabActivityKey } from "./tab-activity.js";
 import { intervalFromEnv } from "./limits.js";
 
