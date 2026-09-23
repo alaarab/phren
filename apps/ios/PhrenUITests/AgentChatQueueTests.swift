@@ -245,7 +245,13 @@ final class AgentChatQueueTests: AgentChatUITestCase {
         app.buttons["live-chat:w7:w7:t9"].tap()
         XCTAssertTrue(app.staticTexts["The project screen is ready. What would you like to change?"].waitForExistence(timeout: 5))
         app.buttons["Chat options"].tap()
-        app.buttons["Add project context"].tap()
+        // Repository changes, linking and the model now share the options
+        // sheet, so the Project section's last row starts below the medium fold.
+        let addContext = app.buttons["Add project context"]
+        let projectMemory = app.buttons["Project memory"]
+        XCTAssertTrue(projectMemory.waitForExistence(timeout: 5))
+        for _ in 0..<3 where !(addContext.exists && addContext.isHittable) { projectMemory.swipeUp() }
+        addContext.tap()
         XCTAssertTrue(app.navigationBars["Project context"].waitForExistence(timeout: 5))
         app.buttons["[decision] Keep phone sessions connected to project memory"].tap()
         let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
