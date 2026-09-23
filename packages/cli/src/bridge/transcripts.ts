@@ -3,6 +3,7 @@ import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
+import { codexHome, claudeConfigDir } from "../home-paths.js";
 import path from "node:path";
 import { withTranscriptIndex } from "./transcript-index.js";
 import { BridgeError, object, objects, sessionId, type Json, type Provider, type Target } from "./protocol.js";
@@ -415,8 +416,8 @@ async function findPatternMatches(root: string, pattern: string): Promise<string
 
 export async function transcriptPath(source: Provider, session: string): Promise<string> {
   if (!sessionId.safeParse(session).success) throw new BridgeError(400, "Invalid conversation identity.");
-  const base = source === "codex" ? path.join(process.env.CODEX_HOME || path.join(homedir(), ".codex"), "sessions")
-    : source === "claude" ? path.join(process.env.CLAUDE_CONFIG_DIR || path.join(homedir(), ".claude"), "projects")
+  const base = source === "codex" ? path.join(codexHome(), "sessions")
+    : source === "claude" ? path.join(claudeConfigDir(), "projects")
     : source === "phren" || source === "opencode" ? path.join(phrenStoreRoot(), ".runtime", "sessions")
     : path.join(process.env.COPILOT_HOME || path.join(homedir(), ".copilot"), "session-state");
   const root = await realpath(base).catch(() => base);

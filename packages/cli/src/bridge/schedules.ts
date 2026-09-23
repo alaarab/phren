@@ -2,7 +2,8 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
-import { hostname, homedir } from "node:os";
+import { hostname } from "node:os";
+import { codexHome } from "../home-paths.js";
 import path from "node:path";
 import { finished as streamFinished } from "node:stream/promises";
 import * as yaml from "js-yaml";
@@ -706,7 +707,7 @@ function tomlQuote(value: string): string {
 }
 
 export async function ensureCodexDirTrusted(cwd: string): Promise<void> {
-  const directory = process.env.CODEX_HOME || path.join(homedir(), ".codex");
+  const directory = codexHome();
   const file = path.join(directory, "config.toml");
   let text = "";
   try { text = await readFile(file, "utf8"); }
