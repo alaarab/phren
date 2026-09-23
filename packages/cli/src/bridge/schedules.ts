@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
-import { mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat } from "node:fs/promises";
 import { hostname } from "node:os";
 import { codexHome } from "../home-paths.js";
 import path from "node:path";
@@ -11,7 +11,7 @@ import { z } from "zod";
 import { fanoutRoot } from "./fanouts.js";
 import { noteOptionalReadFailure, paneIdentity, rpc, servers, snapshot } from "./herdr.js";
 import type { SchedulePush, SchedulePushKind, SchedulePushResult } from "./push.js";
-import { atomic, BridgeError, bridgeRoot, object, objects, type Json } from "./protocol.js";
+import { atomic, atomicInPrivateDir, BridgeError, bridgeRoot, object, objects, type Json } from "./protocol.js";
 import { transcriptPath } from "./transcripts.js";
 import { logger } from "../logger.js";
 import { getProjectSourcePath } from "../project-config.js";
@@ -191,12 +191,7 @@ export async function writeScheduleDocument(projectDir: string, schedules: Sched
   if (schedules.length > MAX_SCHEDULES) throw new Error(`A project can have at most ${MAX_SCHEDULES} schedules.`);
   schedules.forEach(parseSchedule);
   const text = yaml.dump({ ...original, version: 1, schedules }, { lineWidth: 1000, noRefs: true, sortKeys: false });
-  await atomicWrite(schedulePath(projectDir), text);
-}
-
-async function atomicWrite(file: string, text: string): Promise<void> {
-  await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
-  await atomic(file, text);
+  await atomicInPrivateDir(schedulePath(projectDir), text);
 }
 
 export function canonicalComputer(value: string): string {
@@ -324,7 +319,7 @@ export async function readScheduleRuns(file: string): Promise<ScheduleRun[]> {
 
 export async function writeScheduleRuns(file: string, runs: ScheduleRun[]): Promise<void> {
   const kept = runs.slice(-MAX_RUNS);
-  await atomicWrite(file, kept.map(run => JSON.stringify(run)).join("\n") + (kept.length ? "\n" : ""));
+  await atomicInPrivateDir(file, kept.map(run => JSON.stringify(run)).join("\n") + (kept.length ? "\n" : ""));
 }
 
 export class Scheduler {
@@ -738,13 +733,11 @@ export async function ensureCodexDirTrusted(cwd: string): Promise<void> {
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const metadata = await stat(file).catch(() => undefined);
   const mode = metadata ? metadata.mode & 0o777 : 0o600;
-  const temporary = `${file}.${randomUUID()}`;
-  await writeFile(temporary, next, { mode, flag: "wx" });
-  try { await rename(temporary, file); } finally { await unlink(temporary).catch(() => {}); }
+  await atomic(file, next, mode);
 }
 
 async function writeManifest(jobDir: string, manifest: Record<string, unknown>): Promise<void> {
-  await atomicWrite(path.join(jobDir, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
+  await atomicInPrivateDir(path.join(jobDir, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
 }
 
 export function newScheduleId(existing: Iterable<string>): string {

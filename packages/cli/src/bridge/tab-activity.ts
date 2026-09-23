@@ -1,7 +1,7 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { bridgeRoot, object, objects, type Json } from "./protocol.js";
+import { atomicInPrivateDir, bridgeRoot, object, objects, type Json } from "./protocol.js";
 
 const digest = (text: string) => createHash("sha256").update(text).digest("hex");
 type Stamp = { signature: string; lastChangedAt: string };
@@ -69,10 +69,7 @@ export class TabActivityStore {
   private async persist() {
       if (this.dirty) {
         try {
-          await mkdir(path.dirname(this.file), { recursive: true, mode: 0o700 });
-          const temporary = this.file + ".tmp";
-          await writeFile(temporary, JSON.stringify({ version: 1, entries: Object.fromEntries(this.entries) }), { mode: 0o600 });
-          await rename(temporary, this.file);
+          await atomicInPrivateDir(this.file, JSON.stringify({ version: 1, entries: Object.fromEntries(this.entries) }));
           this.dirty = false;
         } catch {
           // A full/unwritable disk must not hide live sessions. Keep the clock

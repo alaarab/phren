@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { rename, unlink, writeFile } from "node:fs/promises";
+import { mkdir, rename, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { z } from "zod";
@@ -57,6 +57,12 @@ export async function atomic(file: string, value: unknown, mode = 0o600): Promis
   } finally {
     await unlink(temporary).catch(() => {});
   }
+}
+
+/** {@link atomic}, first creating the file's directory (0700 where it is new). */
+export async function atomicInPrivateDir(file: string, value: unknown, mode?: number): Promise<void> {
+  await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+  await atomic(file, value, mode);
 }
 
 export function targetFromURL(url: URL): Target {
