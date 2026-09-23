@@ -150,6 +150,7 @@ struct AgentChatView: View {
     @State private var openedChild: AgentWorkNavigation?
     @State private var previewImage: ChatAttachmentDraft?
     @State private var assigningProject = false
+    @State private var showingChanges = false
     @State private var fullDiff: ChatFullDiff?
     @State private var fullToolOutput: FullToolOutput?
     @State private var historyTask: Task<Void, Never>?
@@ -366,7 +367,9 @@ struct AgentChatView: View {
                                 ChatReplyPreviewRow(preview: preview)
                             }
                             if model.target?.isStarting == true {
-                                Text("Starting \(model.target?.providerName ?? "agent") in \(session.projectDisplayName(project?.name))…")
+                                Text(session.tab.isConductor
+                                     ? "Starting the conductor with \(model.target?.providerName ?? "agent")…"
+                                     : "Starting \(model.target?.providerName ?? "agent") in \(session.projectDisplayName(project?.name))…")
                                     .foregroundStyle(PhrenTheme.textMuted).padding(.top, 24)
                                     .accessibilityIdentifier("chat-starting")
                             } else if model.connected && model.messages.isEmpty {
@@ -616,6 +619,13 @@ struct AgentChatView: View {
         .navigationDestination(item: $fullDiff) { FileDiffView(file: $0.file, section: $0.section) }
         .environment(\.fileLinkContext, model.target.map { FileLinkContext(host: session.host, target: $0) })
         .navigationDestination(item: $fullToolOutput) { FullToolOutputView(output: $0) }
+        .navigationDestination(isPresented: $showingChanges) {
+            if let target = model.target {
+                // Besides the pane's tree: whatever the session's commands
+                // wrote elsewhere — the phren store, a sibling checkout.
+                AgentChangesView(session: session, target: target, codeOrigin: codeOrigin)
+            }
+        }
         .onAppear {
             if !initialized {
                 initialized = true
@@ -1031,57 +1041,29 @@ struct AgentChatView: View {
                 }
                 .accessibilityElement(children: .contain)
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 4) {
-                    if session.tab.isConductor {
-                        Text("Conductor").foregroundStyle(PhrenTheme.accent)
-                        Text("·")
-                    }
+                if session.tab.isConductor {
+                    // The conductor works in the phren store, not a project:
+                    // its name is the whole title, and there is no path to show.
+                    Text("Conductor").foregroundStyle(PhrenTheme.accent)
+                        .font(PhrenTypography.subheadline.weight(.semibold)).lineLimit(1)
+                } else {
                     Text(selectedPane?.displayTitle ?? session.projectDisplayName(project?.name))
                         .foregroundStyle(selectedPane == nil && project != nil
                                          ? PhrenTheme.projectColor(storeId: project!.storeID, project: project!.name)
                                          : PhrenTheme.chatText)
-                }
-                .font(PhrenTypography.subheadline.weight(.semibold)).lineLimit(1)
-                HStack(spacing: 4) {
-                    if session.usesFolderFallback(mappedProject: project?.name) { Image(systemName: "folder").font(.caption2) }
-                    Text(chatLocationProject).foregroundStyle(chatLocationColor).lineLimit(1)
-                    if !chatLocationTail.isEmpty { Text(" · " + chatLocationTail).lineLimit(1) }
-                    if project == nil, session.tab.cwd != nil {
-                        Button("Link to project", systemImage: "link") { assigningProject = true }
-                            .labelStyle(.iconOnly).frame(width: 28, height: 24)
-                            .accessibilityIdentifier("chat-link-project")
+                        .font(PhrenTypography.subheadline.weight(.semibold)).lineLimit(1)
+                    HStack(spacing: 4) {
+                        if session.usesFolderFallback(mappedProject: project?.name) { Image(systemName: "folder").font(.caption2) }
+                        // The path keeps its width; the model and branch truncate first.
+                        Text(chatLocationProject).foregroundStyle(chatLocationColor).lineLimit(1).layoutPriority(1)
+                        if !chatLocationTail.isEmpty { Text(" · " + chatLocationTail).lineLimit(1) }
                     }
+                        .font(PhrenTypography.caption2).foregroundStyle(PhrenTheme.chatNeutral)
+                        .accessibilityLabel(chatLocationSpoken).accessibilityIdentifier("chat-location")
                 }
-                    .font(PhrenTypography.caption2).foregroundStyle(PhrenTheme.chatNeutral)
-                    .accessibilityLabel(chatLocationSpoken).accessibilityIdentifier("chat-location")
-            }.frame(maxWidth: .infinity, alignment: .leading)
-            if session.tab.isConductor {
-                NavigationLink {
-                    ConductorGrantsView(host: session.host, storeId: project?.storeID ?? appModel.storeDescriptors.first?.id)
-                } label: {
-                    Text("Grants")
-                        .font(PhrenTypography.caption.weight(.semibold))
-                        .foregroundStyle(PhrenTheme.accent)
-                        .padding(.horizontal, PhrenTheme.Space.small)
-                        .frame(minHeight: 32)
-                        .background(PhrenTheme.surfaceRaised, in: Capsule())
-                        .frame(minWidth: 44, minHeight: 44)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .phrenIdentifier("chat-conductor-grants")
-            }
-            if let target = model.target,
-               (model.capabilities ?? session.capabilities)?.allows(.changes) ?? true {
-                NavigationLink {
-                    // Besides the pane's tree: whatever the session's commands
-                    // wrote elsewhere — the phren store, a sibling checkout.
-                    AgentChangesView(session: session, target: target, codeOrigin: codeOrigin)
-                } label: {
-                    Image(systemName: "arrow.triangle.branch").font(.system(size: 17)).frame(width: 40, height: 44).contentShape(Rectangle())
-                        .foregroundStyle(PhrenTheme.chatText)
-                }.accessibilityLabel("Repository changes").accessibilityIdentifier("chat-diff")
-            }
+            }.frame(maxWidth: .infinity, alignment: .leading).layoutPriority(1)
+            // Grants, repository changes and project linking live in the
+            // options sheet: on a phone the title and location need the width.
             chatOptions
         }
         .buttonStyle(.plain).foregroundStyle(PhrenTheme.chatText)
@@ -1096,15 +1078,23 @@ struct AgentChatView: View {
         }
     }
 
+    /// Repository changes, when the pane allows them. Not for the conductor:
+    /// its tree is the phren store, which the changes screen has no use for.
+    private var canShowChanges: Bool {
+        !session.tab.isConductor && model.target != nil
+            && ((model.capabilities ?? session.capabilities)?.allows(.changes) ?? true)
+    }
+
     private var chatOptions: some View {
         Button { showingOptions = true } label: { Image(systemName: "ellipsis").frame(width: 36, height: 44).contentShape(Rectangle()) }
             .accessibilityLabel("Chat options").accessibilityIdentifier("chat-options")
     }
 
-    /// Only what has no home elsewhere on this screen: the terminal,
-    /// repository changes, slash commands, dictation and reconnecting all
-    /// live in the header, the composer, or the connection notice. A sheet,
-    /// not a menu: the header's menu never opened on the phone.
+    /// Only what has no home elsewhere on this screen: the terminal, slash
+    /// commands, dictation and reconnecting live in the composer or the
+    /// connection notice. The header keeps only its title, so grants,
+    /// repository changes and project linking are here. A sheet, not a
+    /// menu: the header's menu never opened on the phone.
     private var chatOptionsSheet: some View {
         NavigationStack {
             PhrenList {
@@ -1115,6 +1105,18 @@ struct AgentChatView: View {
                             ConductorGrantsView(host: session.host, storeId: project?.storeID ?? appModel.storeDescriptors.first?.id)
                         } label: { Label("Grants", systemImage: "checkmark.seal") }
                         .accessibilityIdentifier("chat-options-grants")
+                    }
+                    if canShowChanges {
+                        // Pushed on the chat's own stack at full height, as
+                        // it was from the header.
+                        Button { afterOptions { showingChanges = true } } label: {
+                            Label("Repository changes", systemImage: "arrow.triangle.branch")
+                        }
+                        .accessibilityIdentifier("chat-diff")
+                    }
+                    if !session.tab.isConductor, project == nil, session.tab.cwd != nil {
+                        Button { afterOptions { assigningProject = true } } label: { Label("Link to project", systemImage: "link") }
+                            .accessibilityIdentifier("chat-link-project")
                     }
                     if model.panes.filter({ (try? $0.target(hostID: session.host.id, workspaceID: session.workspaceID, tabID: session.tab.id, muxID: session.host.muxID)) != nil }).count > 1 {
                         Button { afterOptions { model.chooseAnother(); refresh = UUID() } } label: { Label("Choose another agent", systemImage: "person.2") }

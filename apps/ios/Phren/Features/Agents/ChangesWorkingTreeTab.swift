@@ -24,6 +24,8 @@ struct ChangesWorkingTreeTab: View {
     @State private var loading: Set<String> = []
     @State private var error: String?
     @State private var opened: FileViewerItem?
+    @State private var openedDiff: DiffTarget?
+    @State private var openTask: Task<Void, Never>?
     @State private var loadTask: Task<Void, Never>?
     @State private var childTasks: [String: Task<Void, Never>] = [:]
 
@@ -32,6 +34,14 @@ struct ChangesWorkingTreeTab: View {
         self.target = target
         self.child = child
         self.codeOrigin = codeOrigin
+    }
+
+    private struct DiffTarget: Identifiable, Hashable {
+        let file: AgentRepositoryDiff.File
+        let section: AgentRepositoryDiff.Section
+        var id: String { section.id }
+        static func == (lhs: DiffTarget, rhs: DiffTarget) -> Bool { lhs.id == rhs.id }
+        func hash(into hasher: inout Hasher) { hasher.combine(id) }
     }
 
     var body: some View {
@@ -67,6 +77,7 @@ struct ChangesWorkingTreeTab: View {
         }
         .accessibilityIdentifier("changes-tree")
         .fullScreenCover(item: $opened) { FileViewer(item: $0) }
+        .navigationDestination(item: $openedDiff) { FileDiffView(file: $0.file, section: $0.section) }
         .sheet(item: $dossier) { symbol in
             if let origin = codeOrigin {
                 CodeSymbolDossier(storeId: origin.storeID, project: origin.project, symbol: symbol.name,
@@ -80,7 +91,7 @@ struct ChangesWorkingTreeTab: View {
         .onChange(of: model.revision) { _, _ in reload() }
         .onAppear { if tree == nil { reload() } }
         .onDisappear {
-            loadTask?.cancel()
+            loadTask?.cancel(); openTask?.cancel()
             for task in childTasks.values { task.cancel() }
             childTasks = [:]; loading = []
         }
@@ -226,10 +237,40 @@ struct ChangesWorkingTreeTab: View {
         }
     }
 
-    /// Open contents for every file, including unchanged and ignored output.
+    /// A changed file opens its diff, as in any source control view; every
+    /// other file, unchanged or ignored, opens its contents.
     private func openEntry(_ entry: GitWorkingTree.Entry) {
         guard !entry.isDirectory else { return }
-        opened = FileViewerItem(host: session.host, file: RemoteFile(path: entry.path, target: target, child: child))
+        if let status = entry.status, status != .unknown, status != .changed {
+            openTask?.cancel()
+            openTask = Task { await openDiff(entry) }
+        } else {
+            opened = FileViewerItem(host: session.host, file: RemoteFile(path: entry.path, target: target, child: child))
+        }
+    }
+
+    private func openDiff(_ entry: GitWorkingTree.Entry) async {
+        do {
+            let result: AgentRepositoryDiff
+            #if DEBUG && targetEnvironment(simulator)
+            if AgentChatFixture.enabled {
+                result = try AgentChatFixture.gitDiff()
+            } else {
+                result = try await PhrenConnection.repositoryDiff(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, paths: [entry.path], child: child)
+            }
+            #else
+            result = try await PhrenConnection.repositoryDiff(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, paths: [entry.path], child: child)
+            #endif
+            try Task.checkCancellation()
+            let files = result.files + (result.related?.flatMap(\.files) ?? [])
+            guard let file = files.first(where: { $0.path == entry.path }) else { return }
+            let section = file.sections.first(where: { $0.kind == "unstaged" }) ?? file.sections.first
+                ?? (file.status.trimmingCharacters(in: .whitespaces) == "??" ? AgentRepositoryDiff.Section(id: "untracked:\(file.path)", kind: "unstaged") : nil)
+            guard let section else { return }
+            openedDiff = DiffTarget(file: file, section: section)
+        } catch {
+            if !Task.isCancelled { self.error = error.localizedDescription }
+        }
     }
 
     private func message(_ title: String, detail: String?) -> some View {

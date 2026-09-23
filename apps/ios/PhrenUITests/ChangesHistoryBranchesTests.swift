@@ -8,8 +8,7 @@ final class ChangesHistoryBranchesTests: XCTestCase {
     func testHistoryAndBranchesTabs() {
         let app = launch(extra: ["--chat-diffs"])
         app.buttons["live-chat:w7:w7:t9"].tap()
-        XCTAssertTrue(app.buttons["chat-diff"].waitForExistence(timeout: 10))
-        app.buttons["chat-diff"].tap()
+        openRepositoryChanges(in: app)
 
         let history = app.buttons["changes-tab-history"]
         XCTAssertTrue(history.waitForExistence(timeout: 8), "The Changes screen shows a History tab")

@@ -107,8 +107,7 @@ final class ChangesTabTests: XCTestCase {
         host.tap()
         XCTAssertTrue(app.buttons["live-chat:w7:w7:t9"].waitForExistence(timeout: 10))
         app.buttons["live-chat:w7:w7:t9"].tap()
-        XCTAssertTrue(app.buttons["chat-diff"].waitForExistence(timeout: 8))
-        app.buttons["chat-diff"].tap()
+        openRepositoryChanges(in: app)
         return app
     }
 

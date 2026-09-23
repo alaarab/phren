@@ -1219,7 +1219,7 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "image-viewer").firstMatch.waitForExistence(timeout: 5))
         // A file on the computer opens in the file viewer, which wraps the image viewer.
         app.buttons["file-viewer-close"].tap()
-        app.buttons["chat-diff"].tap()
+        openRepositoryChanges(in: app)
         // The header's Changes screen: staged, unstaged and untracked files
         // in List mode, the change itself in Diff mode.
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "changes-header").firstMatch.waitForExistence(timeout: 5))
@@ -1267,7 +1267,7 @@ final class AgentChatTests: XCTestCase {
         let app = launch(extra: ["--chat-diffs"])
         app.buttons["live-chat:w7:w7:t9"].tap()
         XCTAssertTrue(app.scrollViews["chat-transcript"].waitForExistence(timeout: 8))
-        app.buttons["chat-diff"].tap()
+        openRepositoryChanges(in: app)
         let status = app.descendants(matching: .any).matching(identifier: "changes-status-line").firstMatch
         XCTAssertTrue(status.waitForExistence(timeout: 8))
         XCTAssertEqual(status.label, "main · 2 unstaged · 1 untracked · 3 +12 -3")
@@ -1509,10 +1509,10 @@ final class AgentChatTests: XCTestCase {
         // Expanded: the command, its output, then the same folded files.
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "open(p,'w').write(s)")).firstMatch.waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["chat-patch-file:phone/FINDINGS.md"].waitForExistence(timeout: 3))
-        // The header's diff screen covers the whole tree, plus every place the
-        // session's commands wrote to.
-        app.buttons["chat-diff"].tap()
-        // The header's Changes screen covers the pane's whole tree: the
+        // The options sheet's Changes screen covers the whole tree, plus every
+        // place the session's commands wrote to.
+        openRepositoryChanges(in: app)
+        // The Changes screen covers the pane's whole tree: the
         // shell edit is an unstaged file in List mode and a diff in Diff mode.
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "changes-header").firstMatch.waitForExistence(timeout: 5))
         XCTAssertEqual(app.staticTexts["changes-title"].label, "Uncommitted changes")

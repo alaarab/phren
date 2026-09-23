@@ -65,20 +65,28 @@ final class ConductorEntryTests: XCTestCase {
     }
 
     @MainActor
-    func testGrantsOpensDirectlyFromConductorChatHeader() {
+    func testGrantsOpensFromConductorChatOptions() {
         let app = launch(extra: ["--conductor-running-fixture", "--conductor-grants-fixture"])
         let card = app.buttons["overview-chat:\(conductorKey)"]
         XCTAssertTrue(card.waitForExistence(timeout: 10)); card.tap()
-        let grants = app.buttons["chat-conductor-grants"]
+        // The conductor's header is its name and the options button only:
+        // no store path, no changes, no grants control.
+        let options = app.buttons["chat-options"]
+        XCTAssertTrue(options.waitForExistence(timeout: 8))
+        XCTAssertTrue(options.isHittable)
+        XCTAssertFalse(app.staticTexts["chat-location"].exists)
+        XCTAssertFalse(app.buttons["chat-diff"].exists)
+        XCTAssertFalse(app.buttons["chat-conductor-grants"].exists)
+        attachUIScreenshot(app, "Conductor header")
+        options.tap()
+        let grants = app.buttons["chat-options-grants"]
         XCTAssertTrue(grants.waitForExistence(timeout: 8))
-        XCTAssertTrue(grants.isHittable)
-        XCTAssertTrue(app.buttons["chat-options"].exists)
-        XCTAssertFalse(app.buttons["chat-options-grants"].exists)
-        attachUIScreenshot(app, "Conductor header Grants control")
+        XCTAssertFalse(app.buttons["chat-diff"].exists)
+        XCTAssertFalse(app.buttons["chat-link-project"].exists)
         grants.tap()
         XCTAssertTrue(app.buttons["conductor-grant-add"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.buttons["conductor-grant-revoke:0"].exists)
-        attachUIScreenshot(app, "Grants reached from the conductor header")
+        attachUIScreenshot(app, "Grants reached from the conductor's chat options")
     }
 
     @MainActor

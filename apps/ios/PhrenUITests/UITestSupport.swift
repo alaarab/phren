@@ -37,6 +37,17 @@ extension XCTestCase {
         item.tap()
     }
 
+    /// Repository changes live in the chat's options sheet, not its header.
+    @MainActor
+    func openRepositoryChanges(in app: XCUIApplication) {
+        let options = app.buttons["chat-options"]
+        XCTAssertTrue(options.waitForExistence(timeout: 8))
+        options.tap()
+        let changes = app.buttons["chat-diff"]
+        XCTAssertTrue(changes.waitForExistence(timeout: 10))
+        changes.tap()
+    }
+
     @MainActor
     func waitForWorkflowStore(in app: XCUIApplication) {
         let projects = app.tabBars.buttons["Projects"]
