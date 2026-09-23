@@ -71,7 +71,7 @@ non-variables and report the candidate count. Search accepts `--kind` and
 MCP results are compact text. The full profile exposes the five tools directly;
 the core profile reaches enabled tools through `phren_admin`. Hook adds JSON
 routes for indexed files, scoped search, paged usage, recent changes, batched
-outline counts, reindexing and notes. See the complete
+outline counts, one file's resolved references, reindexing and notes. See the complete
 [route table](api-reference.md#hook-routes).
 
 ## Refresh and phone
@@ -82,17 +82,25 @@ Recorded changes also check HEAD; a change to it requests a full refresh of
 that indexed checkout. This is not a general filesystem watcher; edits outside
 recorded changes may require `phren code index`.
 
-The phone's Code screen opens on indexed files. Its header shows file and symbol
-counts, languages, index time and Reindex. Folders show descendant file and
-symbol totals; files open their source-ordered outlines. Search accepts a
-directory scope and a kind filter, including Type for classes, structs, enums,
-interfaces and aliases.
+The phone's Code screen is the project's one code browser. Its header shows
+file and symbol counts, languages, index time and Reindex. Files lists every
+entry of the checkout through `/v1/projects/files`, including files the index
+never reads, with symbol counts from the index beside indexed ones. A text
+file opens in the code viewer with syntax colors, up to the files route's
+2 MiB; a larger file says so and offers the paged file viewer. Pictures,
+video, audio, PDF and CSV open in the file viewer. For an indexed file the
+viewer has its outline, and the names `/v1/code/file-references` and the
+outline resolve are tappable: each opens the symbol's dossier, whose Go to
+definition and reference rows open the file at that line, in this file or
+another. Search accepts a directory scope and a kind filter, including Type
+for classes, structs, enums, interfaces and aliases.
 
 Usage is the full paged ranking, including variables and symbols with no
 resolved references. Kind, directory and file filters apply to the same list;
 Hot and Cold jump to its first and last pages. Bars share the filtered list's
-maximum. Recent lists the 30 symbols the index last saw change. A symbol opens
-its definition, source snippet, last Git change, references and cited findings.
+maximum. Recent lists the 30 symbols the index last saw change; each opens its
+file at the symbol. A search or usage row opens the symbol's definition, source
+snippet, last Git change, references and cited findings.
 
 Code also opens from a session's Changes band and chat header actions when its
 computer has an index. These entries retain that computer, store, project and
@@ -100,7 +108,13 @@ session as the note recipient. The Working tree keeps expanded folders and
 loaded children across refreshes and tab switches. Batched outline summaries
 add symbol counts and leading kinds; a file's symbol chip opens its first
 declaration's file-qualified dossier. A missing index leaves the ordinary tree
-usable.
+usable. An unchanged or ignored text file opens in the same code viewer, read
+from the pane's repository.
+
+A computer's Files page (Project files) and the Memory tab's Files list open a
+project into the same browser, on the checkout that computer located; with more
+than one checkout they list them first. Without the code module the browser
+still lists and opens every file, without search, Usage or Recent.
 
 ## Findings linked to code
 

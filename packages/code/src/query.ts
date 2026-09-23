@@ -569,3 +569,33 @@ export async function recentSymbols(store: string, project: string, directory?: 
   });
   return { ...result, value: result.value ?? [] };
 }
+
+export interface FileReference {
+  /** Line in the requested file where the name is used. */
+  line: number;
+  kind: string;
+  name: string;
+  /** The resolved declaration, as a file-qualified symbol query. */
+  symbol: string;
+  file: string;
+  targetLine: number;
+  targetKind: string;
+}
+
+/** Every resolved reference made from one file, in line order, with the
+ * declaration each resolves to. The phone makes those names tappable in its
+ * code viewer; declarations in the file itself come from `outline`. */
+export async function fileReferences(store: string, project: string, filePath: string, limit = 5000): Promise<QueryResult<FileReference[]>> {
+  const result = await withCodeDb(store, project, db => rowsOf(db,
+    `SELECT r.line, r.kind, s.name, s.parent, s.file, s.line, s.kind FROM "references" r
+     JOIN symbols s ON s.id = r.symbol_id WHERE r.file = ?
+     ORDER BY r.line ASC, s.name ASC, s.id ASC LIMIT ?`, [filePath, Math.max(1, Math.min(5000, Math.trunc(limit)))])
+    .map(row => {
+      const parent = row[3] === null || row[3] === undefined ? "" : stringAt(row, 3);
+      const file = stringAt(row, 4);
+      return { line: numberAt(row, 0), kind: stringAt(row, 1), name: stringAt(row, 2),
+        symbol: `${file}::${parent ? parent + "." : ""}${stringAt(row, 2)}`,
+        file, targetLine: numberAt(row, 5), targetKind: stringAt(row, 6) };
+    }));
+  return { ...result, value: result.value ?? [] };
+}

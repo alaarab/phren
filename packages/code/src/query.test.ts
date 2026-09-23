@@ -4,7 +4,7 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeTempDir } from "../../cli/src/test-helpers.js";
 import { indexProject } from "./indexer.js";
-import { definition, outline, references, search, usage } from "./query.js";
+import { definition, fileReferences, outline, references, search, usage } from "./query.js";
 import { openCodeDatabase, rowsOf } from "./store.js";
 
 const FIXTURES = path.join(__dirname, "__fixtures__");
@@ -158,6 +158,20 @@ describe("code outline", () => {
     const result = await outline(store, "fixture", "typescript/missing.ts");
     expect(result.available).toBe(true);
     expect(result.value).toEqual([]);
+  });
+});
+
+describe("file references", () => {
+  it("lists a file's resolved uses in line order with their declarations", async () => {
+    const result = await fileReferences(store, "fixture", "typescript/util.ts");
+    expect(result.available).toBe(true);
+    const add = result.value.find(entry => entry.name === "add" && entry.line === 5);
+    expect(add).toMatchObject({ symbol: "typescript/app.ts::add", file: "typescript/app.ts", targetKind: "function" });
+    expect(add!.targetLine).toBeGreaterThan(0);
+    const length = result.value.find(entry => entry.name === "length");
+    expect(length?.symbol).toBe("typescript/app.ts::Point.length");
+    for (let i = 1; i < result.value.length; i++) expect(result.value[i - 1].line).toBeLessThanOrEqual(result.value[i].line);
+    expect((await fileReferences(store, "fixture", "typescript/missing.ts")).value).toEqual([]);
   });
 });
 

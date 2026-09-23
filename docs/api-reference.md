@@ -1050,6 +1050,7 @@ writes. A missing index returns 404 with the `phren code index` command.
 | `GET /v1/code/search` | `q`, optional `kind`, `directory`, `limit` (1-500, default 20) | `{project, query, symbols}` ranked by exact name, prefix, full-text relevance and usage. |
 | `GET /v1/code/outline` | `path`, relative file path | `{project, path, entries}` in source order with nested members. |
 | `GET /v1/code/outline-summary` | `paths`, a JSON array of 1-200 relative paths | `{project, entries}` with symbol totals and up to three leading kinds per file or directory, including descendants. Duplicate paths are collapsed. |
+| `GET /v1/code/file-references` | `path`, relative file path | `{project, path, references}`: every resolved use made from that file, in line order, each with `line`, `kind`, `name`, the declaration as a file-qualified `symbol` (`file::Container.name`), its `file`, `targetLine` and `targetKind`. At most 5000 rows. The phone's code viewer makes these names tappable. |
 | `GET /v1/code/definition` | `symbol` | `{project, definition}` with declaration, snippet, last Git change and `findings` citing the symbol. |
 | `GET /v1/code/references` | `symbol`, optional `limit` (1-500, default 200) | `{project, references}` with resolved references grouped by file. |
 | `GET /v1/code/usage` | `top` (1-100, default 10) | `{project, usage: {hot, cold}}`, the older compact ranking. |

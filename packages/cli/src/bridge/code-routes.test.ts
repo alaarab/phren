@@ -302,3 +302,13 @@ it("reports a completed no-change scan separately from symbol recency", async ()
   expect(before.entries.length).toBeGreaterThan(0);
   expect(before.entries.every(row => row.file.startsWith("typescript/"))).toBe(true);
 });
+
+it("lists a file's resolved references with file-qualified declarations", async () => {
+  const result = await routes.fileReferences("fixture", "typescript/util.ts");
+  expect(result.path).toBe("typescript/util.ts");
+  expect(result.references.find(entry => entry.name === "add")).toMatchObject({ symbol: "typescript/app.ts::add", file: "typescript/app.ts" });
+  expect((await routes.definition("fixture", result.references[0].symbol)).definition.symbol.file).toBe(result.references[0].file);
+  expect((await routes.fileReferences("fixture", "typescript/missing.ts")).references).toEqual([]);
+  for (const bad of ["../escape", "/absolute", "a//b", "a\\b", ""]) await expect(routes.fileReferences("fixture", bad)).rejects.toThrow();
+  await expect(routes.fileReferences("missing", "file.ts")).rejects.toMatchObject({ status: 404 });
+});
