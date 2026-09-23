@@ -975,7 +975,8 @@ schedules:
       expect(page.status).toBe(200);
       const files = page.data.entries.find((entry: any) => entry.raw.phren_changes)?.raw.phren_changes["write-one"];
       expect(files.find((f: any) => f.path === "new.txt").patch).toContain("+hello from Write");
-      expect(files.find((f: any) => f.path === ".env")).toMatchObject({ patch: "", redacted: true });
+      // A Write changed only the file it names; the .env beside it is not its change.
+      expect(files.map((f: any) => f.path)).toEqual(["new.txt"]);
       expect(JSON.stringify(page.data)).not.toContain("SECRET");
     });
 
