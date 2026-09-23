@@ -113,10 +113,12 @@ final class DictationSession {
         guard segmentID == id else { return }
         switch event {
         case .partial(let text):
-            keepTranscript(text)
+            // The long-form model revises its guess, shorter as well as longer.
+            partial = text
             publishDraft()
         case .finished(let text):
-            keepTranscript(text)
+            // The old recogniser can finish with an empty or truncated result.
+            if text.count >= partial.count { partial = text }
             endSegment()
             commitPartial()
             beginSegment()
@@ -135,11 +137,6 @@ final class DictationSession {
                 onFailure?(message)
             }
         }
-    }
-
-    private func keepTranscript(_ text: String) {
-        // Some requests finish with an empty or truncated final result.
-        if text.count >= partial.count { partial = text }
     }
 
     private func endSegment() {

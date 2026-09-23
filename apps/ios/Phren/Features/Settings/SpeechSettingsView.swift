@@ -7,6 +7,7 @@ enum SpeechSettings {
     static let localeKey = "speech.locale.v1"              // "" = the phone's language
     static let replacementsKey = "speech.replacements.v1"  // JSON [[from, to]]
     static let cleanupKey = "speech.apple-intelligence-cleanup.v1"
+    static let projectsKey = "speech.vocabulary.projects.v1"  // [String], from the stores
 
     static func cleanupEnabled(in defaults: UserDefaults = AppRuntime.defaults) -> Bool {
         defaults.bool(forKey: cleanupKey)
@@ -23,6 +24,27 @@ enum SpeechSettings {
         }
         set { AppRuntime.defaults.set(try? JSONEncoder().encode(newValue.map { [$0.from, $0.to] }), forKey: replacementsKey) }
     }
+    /// Words the recogniser should prefer over similar-sounding ones: the
+    /// app's name, the stores' project names and every replacement target.
+    static func vocabulary(in defaults: UserDefaults = AppRuntime.defaults) -> [String] {
+        let projects = defaults.stringArray(forKey: projectsKey) ?? []
+        let spoken = projects.flatMap { name in
+            let words = name.split(whereSeparator: { $0 == "-" || $0 == "_" || $0 == "." }).map(String.init)
+            return words.count > 1 ? [name, words.joined(separator: " ")] : [name]
+        }
+        var seen = Set<String>()
+        return (["phren"] + spoken + replacements.map(\.to))
+            .filter { !$0.isEmpty && seen.insert($0.lowercased()).inserted }
+    }
+
+    /// Called whenever the stores are read; the recogniser picks the names
+    /// up at its next start.
+    static func rememberProjects(_ names: [String], in defaults: UserDefaults = AppRuntime.defaults) {
+        let sorted = Array(Set(names)).sorted()
+        guard defaults.stringArray(forKey: projectsKey) != sorted else { return }
+        defaults.set(sorted, forKey: projectsKey)
+    }
+
     /// The transcript with every replacement applied, whole words only, case-insensitive.
     static func apply(_ text: String) -> String {
         replacements.reduce(text) { result, pair in

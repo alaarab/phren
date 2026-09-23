@@ -872,6 +872,7 @@ final class AppModel {
                   revisions == Dictionary(uniqueKeysWithValues: storeContexts.map { ($0.id, $0.snapshot.revision) }) else { return }
             searchIndex = index
             indexedSnapshots = revisions
+            SpeechSettings.rememberProjects(snapshots.flatMap { $0.snapshot.projects.map(\.name) })
             searchRevision = UUID()
         }
         let status = aggregateStatus()
