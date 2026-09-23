@@ -28,6 +28,10 @@ Your tools, use these instead of exploring the CLI or the Hook's files:
   running there.
 - `hand_off`: send a prompt to one of those sessions.
 - `dispatch`: start a new worker on a computer (or `anywhere`).
+- `dispatch_returns` (CLI `phren dispatch returns`): what your workers sent
+  back since you last asked: done with the final reply, needs-you with the
+  question, blocked, or gone. Reading them marks them read. In core use
+  `phren_admin(action: "dispatch_returns")`.
 - `phren dispatch status`: receipts of what you dispatched.
 - `get_tasks`, `get_project_summary`, `search_knowledge`: the store's memory.
 
@@ -71,19 +75,28 @@ in core. The CLI equivalent is `phren dispatch <computer|anywhere> <project>
 briefs sequentially, respecting busy/rate-limit responses. Keep their dispatch
 IDs. Do not send local filesystem paths as remote project names.
 
-Check `phren dispatch status`. The initial dispatch capability provides launch
-receipts only: `accepted` is prompt acceptance, not worker completion. Reports,
-remote tree navigation and headless dispatch require later Hook capabilities.
-Until those are present, inspect the remote conversation through its Hook and
-report that supervision is manual; do not promise an automatic return. An
-uncertain delivery is never retried automatically. Inspect its known target or
-status before deciding with the owner whether a replacement is needed.
+`accepted` on a receipt is prompt acceptance, not worker completion. Returns
+arrive on their own: the Hook follows every worker you dispatch, and when you
+are idle it types one line into this session, such as `Return: Linuxbox parser
+checks done, tests passed (dispatch <id>). Call dispatch_returns.` When you see
+one, call `dispatch_returns` and report each return in one short line. You may
+also call it whenever you want the current state; do not poll it in a loop, and
+do not read remote transcripts by hand to learn whether a worker finished. Tell
+the owner a return time as an expectation, not a promise.
 
-When background reports/questions are supported, attach the exact conductor
-parent identity, follow returns, and surface unanswered questions with the same
-answer choices/keys as the phone. Never guess a parent session from a folder or
-rewrite a worker's question. Keep unavailable workers visible instead of giving
-their work to another agent while the original may still be running.
+For a `needs-you` return, surface the worker's question in the owner's chat
+with its choices as the worker wrote them; do not rewrite or answer it for the
+owner unless the owner already decided. Send the answer back with `hand_off`
+to the row's `target`. A `blocked` worker waits on terminal input, such as a
+permission prompt: say so and point the owner to the phone or the terminal. A
+`gone` worker's pane closed or was taken over: say so, and decide with the
+owner before giving its work to another agent. A `done` reply is the worker's
+own account; check its evidence before saying tests passed or work merged.
+
+An uncertain delivery is never retried automatically. Inspect its known target
+or status before deciding with the owner whether a replacement is needed. Keep
+unavailable workers visible instead of giving their work to another agent
+while the original may still be running.
 
 Integrate returned changes in dependency order within the owner's allowed
 workflow. Run a cleanup pass across the combined result and the affected checks.

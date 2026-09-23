@@ -19,6 +19,18 @@ function herdrSocket(server: string): string {
   return path.join(herdrRoot(), ...(server === "default" ? [] : ["sessions", server]), "herdr.sock");
 }
 
+/** The Herdr pane this process runs in, from the variables Herdr sets for
+ * every pane: the server its socket belongs to plus the pane's ids. */
+export function herdrPaneFromEnv(env: NodeJS.ProcessEnv = process.env): { server: string; workspace: string; tab: string; pane: string } | undefined {
+  if (env.HERDR_ENV !== "1" || !env.HERDR_SOCKET_PATH) return undefined;
+  const socket = path.resolve(env.HERDR_SOCKET_PATH), root = path.resolve(herdrRoot());
+  const server = socket === path.join(root, "herdr.sock") ? "default"
+    : socket.startsWith(path.join(root, "sessions") + path.sep) ? path.basename(path.dirname(socket)) : undefined;
+  const { HERDR_WORKSPACE_ID: workspace, HERDR_TAB_ID: tab, HERDR_PANE_ID: pane } = env;
+  if (!server || !workspace || !tab || !pane) return undefined;
+  return { server, workspace, tab, pane };
+}
+
 /** A socket failure keeps its errno so "not running", "stale socket" and "permissions" stay distinct. */
 export function herdrSocketError(error: Error): BridgeError {
   const code = (error as NodeJS.ErrnoException).code;

@@ -8,7 +8,7 @@ import { watch, type FSWatcher } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { atomicInPrivateDir, BridgeError, bridgeRoot, object, objects, provider, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
-import { findPane, herdrRoot, knownPanes, rpc, servers, snapshot, trustedDirectory, validateTarget } from "./herdr.js";
+import { findPane, herdrPaneFromEnv, knownPanes, rpc, servers, snapshot, trustedDirectory, validateTarget } from "./herdr.js";
 import { readPaneText } from "./pane-text.js";
 import { capturesChanges, ToolChanges } from "./changes.js";
 import { phrenStoreRoot, unwrapPastedContent } from "./transcripts.js";
@@ -696,9 +696,7 @@ export async function agentHook(source: Provider) {
   provider.parse(source);
   // A missing helper must never prevent the coding agent from running.
   if (process.env.HERDR_ENV !== "1" || !process.env.HERDR_SOCKET_PATH) return;
-  const socket = path.resolve(process.env.HERDR_SOCKET_PATH), root = path.resolve(herdrRoot());
-  const server = socket === path.join(root, "herdr.sock") ? "default"
-    : socket.startsWith(path.join(root, "sessions") + path.sep) ? path.basename(path.dirname(socket)) : undefined;
+  const server = herdrPaneFromEnv()?.server;
   if (!server) return;
   let input = "";
   for await (const chunk of process.stdin) { input += chunk.toString(); if (input.length > 1_048_576) return; }

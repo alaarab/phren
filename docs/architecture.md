@@ -2,7 +2,7 @@
 
 How project memory flows through the system, from user prompt to repo-backed state and back into bounded retrieval.
 
-Current public surface: 69 MCP tools across 16 modules, exposed through two profiles: `core` (10 tools, the default) and `full`; see `api-reference.md`.
+Current public surface: 70 MCP tools across 16 modules, exposed through two profiles: `core` (10 tools, the default) and `full`; see `api-reference.md`.
 
 ## System Overview
 
@@ -27,7 +27,7 @@ Claude / Copilot / Cursor / Codex
                 v
 +---------------+---------------+
 | MCP Server (phren-mcp)       |
-| 69 tools · core profile: 10  |
+| 70 tools · core profile: 10  |
 +---------------+---------------+
                 |
                 v
@@ -338,5 +338,7 @@ and sends independent worker briefs across enrolled computers. The first slice
 covers enrollment and placement: a reusable restricted dispatch key, pinned SSH
 peers in the Hook's private `hooks.yaml`, `POST /v1/dispatch` with named or
 `anywhere` placement, durable receipts, the `dispatch` MCP tool, and the
-`phren dispatch` command. Reports, remote tree rows and headless workers are
-later work packages. See [Conductor](conductor.md).
+`phren dispatch` command. The returns loop follows each dispatched worker to
+done, needs-you, blocked or gone, keeps its final reply in the receipt, serves
+unread returns through `dispatch_returns`, and tells an idle dispatching agent
+in one line. See [Conductor](conductor.md).

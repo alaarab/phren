@@ -1,6 +1,6 @@
 # MCP API Reference
 
-Phren exposes 69 MCP tools across 16 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the seven built-in [Modules](modules.md). **`core`**, the default, exposes the seven memory tools plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default ten. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
+Phren exposes 70 MCP tools across 16 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the seven built-in [Modules](modules.md). **`core`**, the default, exposes the seven memory tools plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default ten. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
 
 ## Core profile
 
@@ -50,11 +50,39 @@ label, timestamps, state, remote target when known, grant match (`granted`), and
 `accepted` means first-prompt acceptance, not task completion. `uncertain` means
 delivery might have occurred; never retry it automatically. Receipts are available
 through `phren dispatch status`. Remote leads and their workers appear in
-`/v1/subagents`. The headless receiver, question relay and report outbox have
-internal adapters but are not wired into dispatch placement.
+`/v1/subagents`. When the call comes from an agent running in a Herdr pane,
+the receipt keeps that pane as `origin` for return notices. After placement
+the Hook follows the worker (see `dispatch_returns`), and receipts gain
+`worker` (its last observed state) and `returned` (the latest return).
 
 CLI equivalent:
 `phren dispatch Desk phren --harness codex --label 'Checks' --prompt 'Run the assigned checks'`.
+
+### `dispatch_returns`
+
+List unread returns from dispatched workers, oldest first, and mark them read.
+No parameters. In the core profile use `phren_admin(action: "dispatch_returns")`.
+
+A return is recorded when a worker's pane changes to one of these states:
+
+| State | Meaning |
+|-------|---------|
+| `done` | The worker finished its turn. `reply` holds its final reply from the transcript, at most 4000 UTF-8 bytes (`truncated` when cut). |
+| `needs-you` | The worker finished by asking the owner something. `question` holds the question line, `reply` the whole reply. |
+| `blocked` | The worker waits on terminal input, such as a permission prompt. |
+| `gone` | The worker's pane closed or another conversation took it over. |
+
+Each row carries `id` (the dispatch ID), `computer`, `project`, `label`,
+`harness`, `state`, `at` and the worker's `target` for `hand_off`. A worker
+that takes more work after `done` and finishes again produces a new return.
+The dispatching Hook asks each enrolled computer about its open dispatches at
+most every 15 seconds, in one request per computer. Dispatches are followed
+for 24 hours or until the worker is gone. When the dispatching agent is idle,
+the Hook also types one line into it, at most once every two minutes, for
+example `Return: Linuxbox parser checks done, tests passed (dispatch <id>).
+Call dispatch_returns.` It never types into a working agent.
+
+CLI equivalent: `phren dispatch returns`.
 
 ### `live_sessions`
 

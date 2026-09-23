@@ -74,7 +74,9 @@ WebSockets on the same socket.
 | --- | --- |
 | `GET /v1/health` | Protocol, capabilities, computer identity. |
 | `POST /v1/dispatch` | Place a worker brief on an enrolled computer over pinned SSH. Returns a durable receipt and remote target; never automatically retries a mutation. |
-| `GET /v1/dispatch`, `/v1/dispatch/capacity` | Local placement receipts; running Herdr servers and working-agent count for scheduling. These are not worker completion reports. |
+| `GET /v1/dispatch`, `/v1/dispatch/capacity` | Local placement receipts, with each worker's last observed state and latest return; running Herdr servers and working-agent count for scheduling. |
+| `POST /v1/dispatch/workers` | Receiving side of the returns loop: the state of up to 64 dispatched targets from the shared Herdr snapshot, plus a stopped worker's final reply (at most 4000 bytes). Keeps no dispatch state. |
+| `POST /v1/dispatch/returns` | Unread worker returns (done, needs-you, blocked, gone), marked read as they are returned. |
 | `GET /v1/muxes` | Running Herdr servers. |
 | `GET /v1/workspaces`, `/v1/workspaces/panes` | Workspace overview, pane identity, context, branch, activity and watched approvals. |
 | `POST /v1/workspaces/launch` | Create a workspace/tab and start the selected agent. Accepts the phone's `cwd` or a mutually exclusive `project` slug resolved from this computer's registered sourcePath. Returns a session or starting `target` when identity is available. |
