@@ -1114,11 +1114,7 @@ final class AppModel {
     /// the App Intents capture path, which may have no model at all, stamps
     /// notes exactly the way the capture sheet does.
     static func nowNoteTimestamp() -> (date: String, time: String) {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(identifier: "UTC")
-        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
-        let iso = formatter.string(from: Date())
+        let iso = PhrenDateFormats.utc("yyyy-MM-dd'T'HH:mm:ss").string(from: Date())
         return (String(iso.prefix(10)), String(iso.suffix(8)))
     }
 }

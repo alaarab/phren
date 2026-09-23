@@ -15,8 +15,7 @@ struct CustomThemeEditor: View {
                 ThemePreview(name: theme.name.isEmpty ? "Your theme" : theme.name,
                              detail: "Live preview", palette: theme.palette)
                 VStack(alignment: .leading, spacing: 12) {
-                    TextField("Theme name", text: $theme.name).font(.headline)
-                        .accessibilityIdentifier("theme-name")
+                    PhrenTextField("Theme name", text: $theme.name, identifier: "theme-name")
                     Button { showingPresets = true } label: {
                         Label("Start from a preset", systemImage: "square.on.square").font(.subheadline)
                             .frame(minHeight: 44)
@@ -100,10 +99,10 @@ private struct ThemeColorRow: View {
             Spacer(minLength: PhrenTheme.Space.small)
             HStack(spacing: 1) {
                 Text("#").foregroundStyle(PhrenTheme.textDim)
-                TextField("RRGGBB", text: $hex)
+                PhrenTextField("RRGGBB", text: $hex, identifier: "theme-color-\(field.id)",
+                               monospaced: true, surface: .bare)
                     .textInputAutocapitalization(.characters).autocorrectionDisabled()
-                    .frame(width: 72).accessibilityLabel("\(field.rawValue) hex")
-                    .accessibilityIdentifier("theme-color-\(field.id)")
+                    .frame(width: 80).accessibilityLabel("\(field.rawValue) hex")
             }.font(.system(.caption, design: .monospaced))
         }.padding(14)
         .onChange(of: hex) { _, raw in

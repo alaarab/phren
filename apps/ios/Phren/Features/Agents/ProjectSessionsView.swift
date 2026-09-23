@@ -68,7 +68,7 @@ struct ProjectSessionsView: View {
     var openChat = false
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
-    @AppStorage("sessions.live.preferences.v1") private var data = Data()
+    @Environment(\.liveSessionPreferences) private var livePreferences
     @State private var discovery = ProjectSessionDiscovery()
     @State private var visible = false
     @State private var refreshID = UUID()
@@ -78,7 +78,7 @@ struct ProjectSessionsView: View {
     @State private var launching = false
     @State private var agentChoice: ProjectAgentChoice?
 
-    private var preferences: LiveSessionPreferences? { try? LiveSessionPreferences.read(data) }
+    private var preferences: LiveSessionPreferences? { livePreferences.preferences }
     private var target: SessionProject { SessionProject(storeID: storeID, name: project) }
     private var matches: [LiveAgentSession] {
         let preferences = preferences
@@ -171,7 +171,7 @@ struct ProjectSessionsView: View {
                 .disabled(!fresh || (assign && session.tab.cwd == nil))
                 .accessibilityIdentifier("discovered-session:\(session.host.id):\(session.workspaceID):\(session.tab.id)")
                 SessionPinButton(session: session, pinned: preferences?.isPinned(session.id) == true,
-                                 identifierPrefix: "discovered", data: $data)
+                                 identifierPrefix: "discovered", data: livePreferences.binding)
             }
             .sessionCard()
         }
@@ -188,8 +188,10 @@ struct ProjectSessionsView: View {
                 return
             }
             if assign, let cwd = current.tab.cwd {
-                data = try LiveSessionPreferences.assigning(hostID: session.host.id, directory: cwd,
-                                                            storeID: storeID, project: project, in: data)
+                try livePreferences.update {
+                    try LiveSessionPreferences.assigning(hostID: session.host.id, directory: cwd,
+                                                         storeID: storeID, project: project, in: $0)
+                }
             }
             if openChat { chatSession = current; return }
             terminalSession = current

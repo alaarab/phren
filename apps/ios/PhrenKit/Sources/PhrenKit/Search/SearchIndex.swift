@@ -45,10 +45,7 @@ public struct SearchIndex: Sendable {
     public init(snapshots: [(store: String, snapshot: LocalStore.Snapshot)]) {
         // Dates are immutable for this index. Parse them once with a shared
         // formatter; only their age changes between searches.
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(identifier: "UTC")
-        formatter.dateFormat = "yyyy-MM-dd"
+        let formatter = PhrenDateFormats.utc("yyyy-MM-dd")
 
         func doc(id: String, store: String, project: String, kind: DocKind,
                  text: String, date: String?, typeTag: String?) -> Doc {

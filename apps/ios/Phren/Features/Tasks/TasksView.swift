@@ -144,21 +144,8 @@ struct TaskListView: View {
                      writableCount: writableRows.filter { !collapsedProjects.contains($0.project) }.count)
             if let moveNotice { moveNoticeLine(moveNotice) }
             if tasks.showSearch && !tasks.isSelecting {
-                HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(PhrenTheme.textMuted)
-                    TextField("Search tasks", text: $tasks.query)
-                        .focused($searchFocused)
-                        .submitLabel(.search)
-                        .onSubmit { searchFocused = false }
-                        .accessibilityIdentifier("task-search-field")
-                    if !tasks.query.isEmpty {
-                        Button { tasks.query = "" } label: { Image(systemName: "xmark.circle.fill") }
-                            .accessibilityLabel("Clear search")
-                    }
-                }
-                .font(.callout)
-                .padding(10)
-                .background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+                PhrenSearchField(text: $tasks.query, placeholder: "Search tasks", identifier: "task-search-field",
+                                 focus: $searchFocused, onSubmit: { searchFocused = false })
                 .padding(.horizontal, 16)
                 .padding(.bottom, 6)
             }
@@ -750,7 +737,7 @@ struct AddTaskSheet: View {
     var body: some View {
         NavigationStack {
             PhrenForm {
-                TextField("Task", text: $text, axis: .vertical)
+                PhrenTextField("Task", text: $text, axis: .vertical, surface: .bare)
                     .lineLimit(2...6)
                 if fixedTarget == nil {
                     PhrenSingleSelect(options: targetOptions, selection: $selectedTarget,
@@ -994,7 +981,7 @@ struct TaskEditSheet: View {
     var body: some View {
         NavigationStack {
             PhrenForm {
-                TextField("Task", text: $text, axis: .vertical)
+                PhrenTextField("Task", text: $text, axis: .vertical, surface: .bare)
                     .lineLimit(2...6)
                 PhrenSwitch("Pinned", isOn: $pinned)
                 PhrenStepSlider(options: priorityOptions, selection: $priority, identifier: "task-priority")

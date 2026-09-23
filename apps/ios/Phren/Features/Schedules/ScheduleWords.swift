@@ -122,20 +122,10 @@ enum ScheduleWords {
     }
 
     private static func clock(_ date: Date, calendar: Calendar) -> String {
-        let formatter = DateFormatter()
-        formatter.calendar = calendar
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = calendar.timeZone
-        formatter.dateFormat = "HH:mm"
-        return formatter.string(from: date)
+        PhrenDateFormats.fixed("HH:mm", timeZone: calendar.timeZone, calendar: calendar).string(from: date)
     }
 
     private static func onceDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = .current
-        formatter.dateFormat = "MMM d"
-        return formatter.string(from: date)
+        PhrenDateFormats.fixed("MMM d").string(from: date)
     }
 }

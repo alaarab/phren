@@ -20,4 +20,19 @@ public enum ISO8601Dates {
         if let date = try? whole.parse(text) { return date }
         return text.count == 10 ? try? dateOnly.parse(text) : nil
     }
+
+    // ISO8601DateFormatter rounds a parsed .456 second where ISO8601FormatStyle
+    // can truncate it to .455, so writing goes through the formatter, built once.
+    private static let writerFractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+    private static let writerWhole = ISO8601DateFormatter()
+
+    /// `2026-09-10T12:00:00.123Z` with `fractionalSeconds`, else
+    /// `2026-09-10T12:00:00Z`. Always UTC.
+    public static func string(from date: Date, fractionalSeconds: Bool = false) -> String {
+        (fractionalSeconds ? writerFractional : writerWhole).string(from: date)
+    }
 }

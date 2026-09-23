@@ -83,9 +83,9 @@ struct SpeechSettingsView: View {
                 }
                 .onDelete { offsets in replacements.remove(atOffsets: offsets); SpeechSettings.replacements = replacements }
                 HStack {
-                    TextField("Heard", text: $newFrom).accessibilityIdentifier("speech-replacement-from")
+                    PhrenTextField("Heard", text: $newFrom, identifier: "speech-replacement-from", surface: .bare)
                     Image(systemName: "arrow.right").font(.caption).foregroundStyle(PhrenTheme.textMuted)
-                    TextField("Meant", text: $newTo).accessibilityIdentifier("speech-replacement-to")
+                    PhrenTextField("Meant", text: $newTo, identifier: "speech-replacement-to", surface: .bare)
                     Button("Add") {
                         replacements.append((from: newFrom.trimmingCharacters(in: .whitespaces), to: newTo.trimmingCharacters(in: .whitespaces)))
                         SpeechSettings.replacements = replacements; newFrom = ""; newTo = ""

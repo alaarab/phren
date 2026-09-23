@@ -168,11 +168,11 @@ struct ProjectKnobsView: View {
                 }
                 HStack(spacing: 1) {
                     Text("#").foregroundStyle(PhrenTheme.textDim)
-                    TextField("RRGGBB", text: $nameColourHex)
+                    PhrenTextField("RRGGBB", text: $nameColourHex, identifier: "knob:nameColour:hex",
+                                   monospaced: true, surface: .bare)
                         .textInputAutocapitalization(.characters).autocorrectionDisabled()
-                        .frame(width: 72)
+                        .frame(width: 80)
                         .onSubmit { if let hex = ProjectNameColor.normalized(nameColourHex) { chooseNameColour(.hex(hex)) } }
-                        .accessibilityIdentifier("knob:nameColour:hex")
                 }
                 .font(PhrenTypography.monoCaption)
                 Spacer()

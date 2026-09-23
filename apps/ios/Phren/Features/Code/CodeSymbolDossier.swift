@@ -114,11 +114,7 @@ struct CodeSymbolDossier: View {
                 .phrenContainerMarker("code-dossier-snippet", label: "Definition")
             if selectedLine != nil {
                 VStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
-                    TextField("Note", text: $note, axis: .vertical).lineLimit(2...8)
-                        .font(PhrenTheme.Font.body).foregroundStyle(PhrenTheme.text)
-                        .padding(PhrenTheme.Space.medium).frame(minHeight: 44)
-                        .background(PhrenTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium))
-                        .accessibilityIdentifier("code-note")
+                    PhrenTextField("Note", text: $note, identifier: "code-note", axis: .vertical).lineLimit(2...8)
                     HStack {
                         if let noteStatus { Text(noteStatus).font(PhrenTheme.Font.caption).foregroundStyle(PhrenTheme.textSecondary) }
                         Spacer()

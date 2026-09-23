@@ -435,6 +435,22 @@ children to hide): `screen-search`, for example `memory-search`; the clear
 button is `screen-search:clear` with the label "Clear search". Dynamic Type
 grows the row; the clear target never shrinks.
 
+## PhrenTextField and PhrenSecureField
+
+Purpose: every other text input. `PhrenTextField("Placeholder", text:, identifier:)`
+takes an optional `axis: .vertical` for a growing field, `monospaced` for
+paths, hex and ids, and an optional owner focus. PhrenSecureField is the
+same shape for passwords and tokens, with no autocorrection,
+autocapitalization or echo.
+
+Geometry: 44 minimum height, body (or monoBody) text, textDim placeholder,
+cyan caret. `surface: .raised` (default) draws surfaceRaised radius 12 with
+12 horizontal padding, for fields on an open screen; `.bare` draws nothing,
+for a field inside a Form row or a card that already has a surface.
+Disabled is 0.45 opacity with no input. The body is the field itself, so the
+caller's keyboard, submit, lineLimit and accessibility identifier modifiers
+reach it; the identifier is `screen-field:name` or an existing one.
+
 ## PhrenChipRow<Value: Hashable>
 
 Purpose: choose exactly one of a short, flat set drawn as chips: Memory's

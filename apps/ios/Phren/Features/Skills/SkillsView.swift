@@ -379,9 +379,10 @@ private struct NewSkillSheet: View {
         NavigationStack {
             PhrenForm {
                 Section("Skill") {
-                    TextField("skill-name", text: $name).autocorrectionDisabled().textInputAutocapitalization(.never)
+                    PhrenTextField("skill-name", text: $name, surface: .bare)
+                        .autocorrectionDisabled().textInputAutocapitalization(.never)
                     if let nameError { Text(nameError).font(.caption).foregroundStyle(.red) }
-                    TextField("When should an agent use this skill?", text: $summary, axis: .vertical)
+                    PhrenTextField("When should an agent use this skill?", text: $summary, axis: .vertical, surface: .bare)
                 }
                 Section("Location") {
                     if stores.count > 1 {

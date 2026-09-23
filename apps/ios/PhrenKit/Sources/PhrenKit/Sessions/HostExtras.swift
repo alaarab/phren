@@ -38,7 +38,7 @@ public struct HostFile: Equatable, Sendable, Identifiable, Decodable {
     public let modified: String
     public var id: String { path }
     public init(name: String, path: String, size: Int, modified: String) { self.name = name; self.path = path; self.size = size; self.modified = modified }
-    public var modifiedDate: Date? { ISO8601DateFormatter().date(from: modified) ?? ISO8601Dates.parse(modified) }
+    public var modifiedDate: Date? { ISO8601Dates.parse(modified) }
 
     public static func readSnapshot(_ data: Data) throws -> [Self] {
         guard data.count <= 1_048_576 else { throw PhrenKitError.validation("The file list is too large.") }

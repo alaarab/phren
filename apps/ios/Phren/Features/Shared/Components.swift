@@ -192,7 +192,7 @@ struct TextEntrySheet: View {
         NavigationStack {
             PhrenForm {
                 Section {
-                    TextField("Text", text: $text, axis: .vertical)
+                    PhrenTextField("Text", text: $text, axis: .vertical, surface: .bare)
                         .lineLimit(3...12)
                 }
                 if showsTypePicker {

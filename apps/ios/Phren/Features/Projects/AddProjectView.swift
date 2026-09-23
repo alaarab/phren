@@ -81,9 +81,9 @@ struct AddProjectView: View {
                     switch mode {
                     case .existing:
                         Section {
-                            TextField("/path/to/repository", text: $directory)
-                                .font(.system(.body, design: .monospaced)).autocorrectionDisabled().textInputAutocapitalization(.never)
-                                .accessibilityIdentifier("add-project-folder")
+                            PhrenTextField("/path/to/repository", text: $directory, identifier: "add-project-folder",
+                                           monospaced: true, surface: .bare)
+                                .autocorrectionDisabled().textInputAutocapitalization(.never)
                             if loading && repos[host.id] == nil {
                                 HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Asking \(host.name) for its repositories…") }
                                     .font(.caption).foregroundStyle(PhrenTheme.textMuted)
@@ -107,10 +107,10 @@ struct AddProjectView: View {
                         }
                     case .clone:
                         Section {
-                            TextField("https://github.com/owner/repo", text: $cloneURL)
-                                .font(.system(.body, design: .monospaced)).autocorrectionDisabled().textInputAutocapitalization(.never)
+                            PhrenTextField("https://github.com/owner/repo", text: $cloneURL, identifier: "add-project-url",
+                                           monospaced: true, surface: .bare)
+                                .autocorrectionDisabled().textInputAutocapitalization(.never)
                                 .keyboardType(.URL)
-                                .accessibilityIdentifier("add-project-url")
                         } header: { Text("Repository URL") } footer: {
                             Text("\(host.name) clones it into its projects folder with its own git credentials, then adds it to phren.")
                         }

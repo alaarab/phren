@@ -392,16 +392,8 @@ public enum PersistedState {
 
     /// ISO 8601 *basic* format — the extended one's `:` has no business in a
     /// filename, and this still sorts lexicographically.
-    private static let stampFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(identifier: "UTC")
-        formatter.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
-        return formatter
-    }()
-
     private static func timestamp() -> String {
-        stampFormatter.string(from: Date())
+        PhrenDateFormats.utc("yyyyMMdd'T'HHmmss'Z'").string(from: Date())
     }
 
     private static func location(of defaultsKey: String) -> String {

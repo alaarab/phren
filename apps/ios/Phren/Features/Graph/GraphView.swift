@@ -184,8 +184,7 @@ struct GraphView: View {
             NavigationStack {
                 PhrenScreen {
                     PhrenGroup("Name") {
-                        TextField(suggestedViewName, text: $savedViewName)
-                            .accessibilityIdentifier("graph-view-name")
+                        PhrenTextField(suggestedViewName, text: $savedViewName, identifier: "graph-view-name")
                     }
                 }
                 .navigationTitle("Save graph view")
@@ -283,14 +282,8 @@ struct GraphView: View {
             }
 
             if showingSearch {
-                HStack {
-                    TextField("Search findings, tasks, projects", text: $query)
-                        .textFieldStyle(.roundedBorder).focused($searchFocused)
-                        .autocorrectionDisabled().submitLabel(.search)
-                    if !query.isEmpty {
-                        Button { query = "" } label: { Label("Clear search", systemImage: "xmark.circle.fill").labelStyle(.iconOnly) }
-                    }
-                }
+                PhrenSearchField(text: $query, placeholder: "Search findings, tasks, projects",
+                                 identifier: "graph-search", focus: $searchFocused)
             }
         }.padding(.horizontal).padding(.bottom, 12)
     }

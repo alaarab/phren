@@ -156,7 +156,13 @@ final class LiveSessionsTests: XCTestCase {
         let app = launchLayout(count: 6)
         app.buttons["sessions-more"].tap()
         app.buttons["sessions-more-sheet:add-computer"].tap()
-        XCTAssertTrue(app.textFields["live-host-name"].waitForExistence(timeout: 5))
+        let name = app.textFields["live-host-name"]
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        for id in ["live-host-address", "live-host-port", "live-host-username"] {
+            XCTAssertTrue(app.textFields[id].exists, "The host editor's \(id) is a phren text field")
+        }
+        name.tap(); name.typeText("Desk")
+        XCTAssertEqual(name.value as? String, "Desk")
         capture(app, "Add computer from Sessions More")
     }
 
@@ -183,6 +189,39 @@ final class LiveSessionsTests: XCTestCase {
         capture(app, "Sessions swipe close")
         card.swipeRight()
         XCTAssertFalse(close.exists)
+    }
+
+    /// A computer's page switches Workspaces and Activity with phren's text
+    /// segment, and closing from session details asks through a phren dialog
+    /// with an explicit Keep.
+    @MainActor
+    func testComputerViewSegmentAndDetailCloseDialog() {
+        let app = launchLayout(count: 1)
+        let computer = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "live-host:")).firstMatch
+        for _ in 0..<4 where !computer.isHittable { app.scrollViews["sessions-scroll"].swipeUp() }
+        XCTAssertTrue(computer.waitForExistence(timeout: 10)); computer.tap()
+        let workspaces = app.buttons["host-session-view:workspaces"], activity = app.buttons["host-session-view:activity"]
+        XCTAssertTrue(workspaces.waitForExistence(timeout: 10))
+        XCTAssertTrue(workspaces.isSelected)
+        XCTAssertFalse(app.segmentedControls.firstMatch.exists, "No system segmented control")
+        XCTAssertGreaterThanOrEqual(activity.frame.height, 44)
+        activity.tap()
+        XCTAssertTrue(activity.isSelected); XCTAssertFalse(workspaces.isSelected)
+        capture(app, "Computer view activity segment")
+        let details = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "live-detail:")).firstMatch
+        XCTAssertTrue(details.waitForExistence(timeout: 10)); details.tap()
+        let close = app.buttons["session-detail-close"]
+        XCTAssertTrue(close.waitForExistence(timeout: 10))
+        for _ in 0..<4 where !close.isHittable { app.swipeUp() }
+        close.tap()
+        let keep = app.buttons["session-detail-close-dialog:keep"]
+        XCTAssertTrue(keep.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["session-detail-close-dialog:close"].exists)
+        XCTAssertEqual(app.sheets.count, 0, "Not a system confirmation dialog")
+        capture(app, "Session details close dialog")
+        keep.tap()
+        XCTAssertTrue(keep.waitForNonExistence(timeout: 3))
+        XCTAssertTrue(close.exists, "Keep leaves the session open")
     }
 
     @MainActor

@@ -63,17 +63,7 @@ struct FilesView: View {
                         }
                     }
                 }
-                HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(PhrenTheme.textMuted)
-                    TextField("Filter files", text: $query)
-                        .autocorrectionDisabled().textInputAutocapitalization(.never)
-                    if !query.isEmpty {
-                        Button { query = "" } label: { Image(systemName: "xmark.circle.fill") }
-                            .foregroundStyle(PhrenTheme.textMuted)
-                    }
-                }
-                .font(.callout).padding(10)
-                .background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+                PhrenSearchField(text: $query, placeholder: "Filter files", identifier: "files-filter")
 
                 if let active = activeStoreId {
                     let groups = grouped(paths(for: active))

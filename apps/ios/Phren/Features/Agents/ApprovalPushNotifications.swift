@@ -201,7 +201,7 @@ enum ApprovalPushNotifications {
         guard let value = userInfo["phren"] as? [String: Any], let bindingText = value["binding"] as? String,
               let binding = UUID(uuidString: bindingText), let hostText = value["host"] as? String,
               let hostID = UUID(uuidString: hostText), let expiration = value["expiresAt"] as? String,
-              let expiresAt = ISO8601DateFormatter().date(from: expiration), expiresAt > .now,
+              let expiresAt = ISO8601Dates.parse(expiration), expiresAt > .now,
               let host = (try? LiveSessionPreferences.read(AppRuntime.defaults.data(forKey: "sessions.live.preferences.v1") ?? Data()))?.hosts.first(where: { $0.id == hostID }),
               let key = try? DeviceSSHKey.load(host.id) else { return }
         try? await PhrenConnection.answerApprovalPush(host: host, privateKey: key, binding: binding, approve: approve)

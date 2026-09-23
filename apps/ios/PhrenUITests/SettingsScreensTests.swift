@@ -47,9 +47,14 @@ final class SettingsScreensTests: XCTestCase {
         }
 
         open("settings-fonts", title: "Fonts & Size")
-        let stepper = app.steppers["font-size-stepper"]
-        XCTAssertTrue(stepper.waitForExistence(timeout: 3))
-        stepper.buttons.element(boundBy: 1).tap()
+        let plus = app.buttons["font-size-stepper:plus"]
+        XCTAssertTrue(plus.waitForExistence(timeout: 3))
+        let sizeValue = app.staticTexts["font-size-stepper:value"]
+        let before = Int(sizeValue.label) ?? 0
+        plus.tap()
+        XCTAssertEqual(Int(sizeValue.label), min(24, before + 1), "The phren stepper raises the size by one point")
+        XCTAssertTrue(app.buttons["font-size-stepper:minus"].isEnabled)
+        attachUIScreenshot(app, "Fonts and size")
         XCTAssertTrue(app.staticTexts["font-sample"].exists)
         XCTAssertTrue(app.buttons["font-choice:system"].exists)
         XCTAssertTrue(app.buttons["font-download:JetBrainsMono-Regular.ttf"].exists)

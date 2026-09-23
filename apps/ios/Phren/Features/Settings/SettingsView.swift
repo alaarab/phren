@@ -512,9 +512,7 @@ private struct CaptureLogRow: View {
     }
 
     private var relativeTime: String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: entry.at, relativeTo: now)
+        PhrenDateFormats.relative(entry.at, to: now)
     }
 
     private var stateColor: Color {
@@ -599,9 +597,7 @@ private struct StoreHealthCard: View {
 
     private var lastSyncText: String {
         guard let last = context.status.lastSyncedAt else { return "not synced yet" }
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return "synced \(formatter.localizedString(for: last, relativeTo: now))"
+        return "synced \(PhrenDateFormats.relative(last, to: now))"
     }
 
     var body: some View {

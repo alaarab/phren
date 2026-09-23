@@ -23,6 +23,7 @@ struct PhrenApp: App {
         WindowGroup {
             RootView()
                 .environment(model)
+                .environment(\.liveSessionPreferences, LiveSessionPreferencesStore.shared)
                 .defaultAppStorage(AppRuntime.defaults)
                 .tint(PhrenTheme.navigation)
                 .foregroundStyle(PhrenTheme.text)

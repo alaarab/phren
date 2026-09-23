@@ -133,12 +133,9 @@ struct TerminalFontSettingsView: View {
     var body: some View {
         PhrenList {
             Section("Terminal text") {
-                HStack {
-                    Label("Font size", systemImage: "textformat.size")
-                    Spacer()
-                    Stepper("\(Int(size.rounded()))pt", value: $size, in: 6...24, step: 1)
-                        .frame(maxWidth: 170).accessibilityIdentifier("font-size-stepper")
-                }
+                PhrenStepperField(title: "Font size (pt)",
+                                  value: Binding(get: { Int(size.rounded()) }, set: { size = Double($0) }),
+                                  range: 6...24, identifier: "font-size-stepper")
                 Text("Sample: fn main() { let x = 0; } → ≠ ~")
                     .font(Font(TerminalFonts.font(size: max(6, size)))).foregroundStyle(PhrenTheme.text)
                     .lineLimit(1).minimumScaleFactor(0.6).accessibilityIdentifier("font-sample")

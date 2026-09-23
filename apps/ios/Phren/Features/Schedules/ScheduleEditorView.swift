@@ -269,15 +269,7 @@ struct ScheduleEditorView: View {
 
     private var nameGroup: some View {
         PhrenGroup("Name", identifier: "schedule-group:name") {
-            TextField("Nightly test sweep", text: $name)
-                .focused($typing)
-                .font(PhrenTypography.body)
-                .foregroundStyle(PhrenTheme.text)
-                .padding(.horizontal, PhrenTheme.Space.medium)
-                .frame(minHeight: 44)
-                .background(PhrenTheme.surfaceRaised,
-                            in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.questionOption, style: .continuous))
-                .accessibilityIdentifier("schedule-name")
+            PhrenTextField("Nightly test sweep", text: $name, identifier: "schedule-name", focus: $typing)
                 .onChange(of: name) { _, value in if value.count > 80 { name = String(value.prefix(80)) } }
         }
     }
@@ -334,16 +326,9 @@ struct ScheduleEditorView: View {
     }
 
     private var modelCustomField: some View {
-        TextField("Model id", text: $customModel)
-            .font(PhrenTypography.monoSubheadline)
-            .foregroundStyle(PhrenTheme.text)
+        PhrenTextField("Model id", text: $customModel, identifier: "schedule-model-custom", monospaced: true)
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
-            .padding(.horizontal, PhrenTheme.Space.medium)
-            .frame(minHeight: 44)
-            .background(PhrenTheme.surfaceRaised,
-                        in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.questionOption, style: .continuous))
-            .accessibilityIdentifier("schedule-model-custom")
             .onChange(of: customModel) { _, value in
                 let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
                 modelID = trimmed.isEmpty ? nil : trimmed
@@ -382,15 +367,9 @@ struct ScheduleEditorView: View {
                 }
             case .cron:
                 fieldRow("Cron") {
-                    TextField("0 7 * * 1-5", text: $cron)
-                        .font(PhrenTypography.monoSubheadline)
+                    PhrenTextField("0 7 * * 1-5", text: $cron, identifier: "schedule-cron", monospaced: true)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                        .padding(.horizontal, PhrenTheme.Space.medium)
-                        .frame(minHeight: 44)
-                        .background(PhrenTheme.surfaceRaised,
-                                    in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.questionOption, style: .continuous))
-                        .accessibilityIdentifier("schedule-cron")
                 }
                 cronPreview
             }

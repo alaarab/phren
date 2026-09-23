@@ -17,7 +17,7 @@ struct LaunchSessionView: View {
     var onTaskMoved: ((TaskListRow, PhrenTask.Section) -> Void)? = nil
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    @AppStorage("sessions.live.preferences.v1") private var data = Data()
+    @Environment(\.liveSessionPreferences) private var livePreferences
     @AppStorage("launch.kind.v1") private var kind = "codex"
     @State private var hostID: UUID?
     @State private var showComputers = false
@@ -93,7 +93,7 @@ struct LaunchSessionView: View {
         return ["Conductor", [harnessName, modelTitle].compactMap { $0 }.joined(separator: " "), effort.title]
             .joined(separator: " · ")
     }
-    private var preferences: LiveSessionPreferences? { try? LiveSessionPreferences.read(data) }
+    private var preferences: LiveSessionPreferences? { livePreferences.preferences }
     private var hosts: [LiveHost] { preferences?.hosts ?? [] }
     private var registry: MachineRegistry { model.machineRegistry(storeId: storeID) }
     private var selectedHost: LiveHost? { hosts.first { $0.id == hostID } }
@@ -197,11 +197,9 @@ struct LaunchSessionView: View {
 
                 if role != .conductor {
                 PhrenGroup("Folder on that computer") {
-                    TextField("/path/to/\(project)", text: Binding(get: { folder }, set: { folder = $0; folderEdited = true }))
-                        .font(.system(.body, design: .monospaced)).autocorrectionDisabled().textInputAutocapitalization(.never)
-                        .padding(PhrenTheme.Space.medium)
-                        .background(PhrenTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.questionOption))
-                        .accessibilityIdentifier("launch-folder")
+                    PhrenTextField("/path/to/\(project)", text: Binding(get: { folder }, set: { folder = $0; folderEdited = true }),
+                                   identifier: "launch-folder", monospaced: true)
+                        .autocorrectionDisabled().textInputAutocapitalization(.never)
                     if let host = selectedHost {
                         if locating && located[host.id] == nil {
                             HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Asking \(host.name) where \(project) is…") }
@@ -531,7 +529,9 @@ struct LaunchSessionView: View {
             ProjectAgentRecents.record(storeID: storeID, project: project, hostID: host.id)
             // Remember the folder for this project on this computer, so the
             // next session is found without asking.
-            data = (try? LiveSessionPreferences.assigning(hostID: host.id, directory: cwd, storeID: storeID, project: project, in: data)) ?? data
+            try? livePreferences.update {
+                try LiveSessionPreferences.assigning(hostID: host.id, directory: cwd, storeID: storeID, project: project, in: $0)
+            }
             if let request = taskRequest {
                 status = "Sending task to \(harness.title)…"
                 do {

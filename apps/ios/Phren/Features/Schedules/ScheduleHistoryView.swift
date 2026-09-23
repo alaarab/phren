@@ -185,10 +185,5 @@ struct ScheduleHistoryView: View {
 
     private var harnessName: String { ScheduleWords.harnessName(schedule.harness) }
 
-    private static let startedFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "MMM d, HH:mm"
-        return formatter
-    }()
+    private static var startedFormatter: DateFormatter { PhrenDateFormats.fixed("MMM d, HH:mm") }
 }

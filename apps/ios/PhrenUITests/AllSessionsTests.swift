@@ -238,16 +238,23 @@ final class AllSessionsTests: XCTestCase {
         let target = row(app, host: mac, tab: "w1:t2")
         XCTAssertTrue(target.waitForExistence(timeout: 15))
         target.press(forDuration: 1.2)
-        let link = app.buttons["Link to project"].exists ? app.buttons["Link to project"] : app.buttons["Change project"]
+        // The hold opens phren's action sheet, not a system context menu.
+        XCTAssertTrue(app.descendants(matching: .any)["overview-session-actions"].waitForExistence(timeout: 5))
+        let link = app.buttons["overview-session-actions:link"]
         XCTAssertTrue(link.waitForExistence(timeout: 5))
-        let rename = app.buttons["Rename workspace"]
+        XCTAssertTrue(["Link to project", "Change project"].contains(link.label))
+        XCTAssertTrue(app.buttons["overview-session-actions:close-workspace"].exists)
+        capture(app, "Session actions sheet")
+        let rename = app.buttons["overview-session-actions:rename"]
         XCTAssertTrue(rename.exists)
         rename.tap()
-        XCTAssertTrue(app.alerts["Rename workspace"].waitForExistence(timeout: 5))
-        let field = app.alerts["Rename workspace"].textFields.firstMatch
+        // Renaming is a small phren editor with a labelled field, not an alert.
+        let field = app.textFields["overview-rename-field"]
         XCTAssertTrue(field.waitForExistence(timeout: 5))
         XCTAssertFalse((field.value as? String ?? "").isEmpty, "The field starts with the current workspace name")
-        app.buttons["Cancel"].tap()
+        XCTAssertFalse(app.buttons["overview-rename-confirm"].isEnabled, "An unchanged name cannot be saved")
+        capture(app, "Rename workspace editor")
+        app.buttons["overview-rename-cancel"].tap()
         XCTAssertTrue(field.waitForNonExistence(timeout: 3))
         target.press(forDuration: 1.2)
         XCTAssertTrue(link.waitForExistence(timeout: 5)); link.tap()

@@ -171,9 +171,8 @@ struct PATSignInSheet: View {
             PhrenForm {
                 Section {
                     Link("Create a token on GitHub", destination: URL(string: "https://github.com/settings/personal-access-tokens/new")!)
-                    SecureField("github_pat_… or ghp_…", text: $token)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
+                    PhrenSecureField("github_pat_… or ghp_…", text: $token, identifier: "onboarding-token",
+                                     monospaced: true, surface: .bare)
                 } header: {
                     Text("Personal access token")
                 } footer: {
@@ -334,7 +333,7 @@ struct RepoPickerList: View {
                 }
             }
             Section {
-                TextField("owner/repo", text: $manualEntry)
+                PhrenTextField("owner/repo", text: $manualEntry, identifier: "onboarding-manual-repo", surface: .bare)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                 Button("Open") {

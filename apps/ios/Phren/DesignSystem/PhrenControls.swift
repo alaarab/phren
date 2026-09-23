@@ -1286,6 +1286,99 @@ struct PhrenSearchField: View {
     }
 }
 
+/// Where a text field sits: on its own raised surface (the default, the
+/// PhrenSearchField shape), or bare inside a row or card that already draws one.
+enum PhrenFieldSurface { case raised, bare }
+
+/// A one-line (or growing, with `axis: .vertical`) text input in phren's
+/// field shape: body text, a muted placeholder, cyan caret, 44 minimum height,
+/// surfaceRaised radius 12 unless `surface` is `.bare`. The body is the field
+/// itself, so the caller's keyboard, autocapitalization, submit, disabled and
+/// accessibility identifier modifiers reach it. `identifier` is optional for
+/// that reason; keyboard focus needs the `focus` binding.
+struct PhrenTextField: View {
+    let placeholder: String
+    @Binding var text: String
+    var identifier: String? = nil
+    var axis: Axis = .horizontal
+    var monospaced = false
+    var surface: PhrenFieldSurface = .raised
+    var focus: FocusState<Bool>.Binding? = nil
+    @Environment(\.isEnabled) private var isEnabled
+
+    init(_ placeholder: String, text: Binding<String>, identifier: String? = nil, axis: Axis = .horizontal,
+         monospaced: Bool = false, surface: PhrenFieldSurface = .raised, focus: FocusState<Bool>.Binding? = nil) {
+        self.placeholder = placeholder
+        self._text = text
+        self.identifier = identifier
+        self.axis = axis
+        self.monospaced = monospaced
+        self.surface = surface
+        self.focus = focus
+    }
+
+    var body: some View {
+        focused(TextField(placeholder, text: $text,
+                          prompt: Text(placeholder).foregroundStyle(PhrenTheme.textDim), axis: axis))
+        .phrenFieldStyle(monospaced: monospaced, surface: surface, enabled: isEnabled)
+        .modifier(PhrenOptionalIdentifier(identifier: identifier))
+    }
+
+    @ViewBuilder private func focused<Field: View>(_ field: Field) -> some View {
+        if let focus { field.focused(focus) } else { field }
+    }
+}
+
+/// PhrenTextField's secure sibling for passwords and tokens: the same shape,
+/// no autocorrection or autocapitalization, nothing echoed.
+struct PhrenSecureField: View {
+    let placeholder: String
+    @Binding var text: String
+    var identifier: String? = nil
+    var monospaced = false
+    var surface: PhrenFieldSurface = .raised
+    @Environment(\.isEnabled) private var isEnabled
+
+    init(_ placeholder: String, text: Binding<String>, identifier: String? = nil,
+         monospaced: Bool = false, surface: PhrenFieldSurface = .raised) {
+        self.placeholder = placeholder
+        self._text = text
+        self.identifier = identifier
+        self.monospaced = monospaced
+        self.surface = surface
+    }
+
+    var body: some View {
+        SecureField(placeholder, text: $text, prompt: Text(placeholder).foregroundStyle(PhrenTheme.textDim))
+            .textInputAutocapitalization(.never).autocorrectionDisabled()
+            .phrenFieldStyle(monospaced: monospaced, surface: surface, enabled: isEnabled)
+            .modifier(PhrenOptionalIdentifier(identifier: identifier))
+    }
+}
+
+private struct PhrenOptionalIdentifier: ViewModifier {
+    let identifier: String?
+    func body(content: Content) -> some View {
+        if let identifier { content.phrenIdentifier(identifier) } else { content }
+    }
+}
+
+private extension View {
+    func phrenFieldStyle(monospaced: Bool, surface: PhrenFieldSurface, enabled: Bool) -> some View {
+        let raised = surface == .raised
+        return self
+            .font(monospaced ? PhrenTypography.monoBody : PhrenTypography.body)
+            .foregroundStyle(PhrenTheme.text).tint(PhrenTheme.cyan)
+            .padding(.horizontal, raised ? PhrenTheme.Space.medium : 0)
+            .padding(.vertical, raised ? PhrenTheme.Space.small + 2 : 0)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .background(raised ? PhrenTheme.surfaceRaised : .clear,
+                        in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.questionOption, style: .continuous))
+            .contentShape(Rectangle())
+            .opacity(enabled ? 1 : 0.45)
+    }
+}
+
 /// Single-select chips in one horizontal row that scrolls, the selected chip
 /// scrolled into view; at accessibility sizes (or `wraps`) they wrap instead.
 /// A chip is 32 points tall inside a 44-point target.

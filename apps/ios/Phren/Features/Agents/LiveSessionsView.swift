@@ -5,7 +5,7 @@ import SwiftUI
 struct LiveSessionsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
-    @AppStorage("sessions.live.preferences.v1") private var data = Data()
+    @Environment(\.liveSessionPreferences) private var livePreferences
     @State private var sessions = LiveSessionsModel()
     private var overview: SessionOverviewMonitor { sessions.overview }
     @State private var selected: OverviewSelection?
@@ -40,7 +40,7 @@ struct LiveSessionsView: View {
         static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
         func hash(into hasher: inout Hasher) { hasher.combine(id) }
     }
-    private var preferences: LiveSessionPreferences? { try? LiveSessionPreferences.read(data) }
+    private var preferences: LiveSessionPreferences? { livePreferences.preferences }
     private var hosts: [LiveHost] { preferences?.hosts ?? [] }
 
     private struct OverviewSelection: Identifiable, Hashable {
@@ -212,9 +212,10 @@ struct LiveSessionsView: View {
         .onChange(of: sessions.hookAssociations, initial: true) { _, associations in
             for association in associations where preferences?.hosts.first(where: { $0.id == association.hostID })?.hookComputerID != association.computerID {
                 do {
-                    data = try LiveSessionPreferences.associating(hostID: association.hostID,
-                                                                  hookComputerID: association.computerID,
-                                                                  in: data)
+                    try livePreferences.update {
+                        try LiveSessionPreferences.associating(hostID: association.hostID,
+                                                               hookComputerID: association.computerID, in: $0)
+                    }
                 } catch { /* Keep the verified connection unchanged when an identity conflicts. */ }
             }
         }
@@ -623,7 +624,7 @@ final class LiveHostMonitor {
 private struct LiveHostView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
-    @AppStorage("sessions.live.preferences.v1") private var data = Data()
+    @Environment(\.liveSessionPreferences) private var livePreferences
     @State private var monitor = LiveHostMonitor()
     @State private var editing = false
     @State private var refreshID = UUID()
@@ -637,7 +638,7 @@ private struct LiveHostView: View {
     private enum SessionViewMode: String, CaseIterable {
         case workspaces = "Workspaces", activity = "Activity"
     }
-    private var preferences: LiveSessionPreferences? { try? LiveSessionPreferences.read(data) }
+    private var preferences: LiveSessionPreferences? { livePreferences.preferences }
     private var host: LiveHost? { preferences?.hosts.first { $0.id == hostID } }
     private var sessions: [LiveAgentSession] {
         guard let host else { return [] }
@@ -650,11 +651,12 @@ private struct LiveHostView: View {
             LazyVStack(alignment: .leading, spacing: 10) {
                 connectionCard
                 if monitor.snapshot != nil && host != nil {
-                    Picker("Session view", selection: $mode) {
-                        ForEach(SessionViewMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                    .padding(.vertical, 4)
+                    PhrenTextSegment(items: SessionViewMode.allCases.map {
+                                         PhrenOption(id: $0.rawValue.lowercased(), value: $0, title: $0.rawValue)
+                                     },
+                                     selection: $mode, identifier: "host-session-view")
+                        .accessibilityLabel("Session view")
+                        .padding(.vertical, 4)
 
                     let visible = visible
                     let preferences = preferences
@@ -808,7 +810,7 @@ private struct LiveHostView: View {
         guard var host, host.fingerprint == nil else { return }
         do {
             host.fingerprint = fingerprint
-            data = try LiveSessionPreferences.saving(host, in: data)
+            try livePreferences.update { try LiveSessionPreferences.saving(host, in: $0) }
             monitor.fingerprint = nil
             let verifiedHost = host
             Task { await associateVerifiedIdentity(for: verifiedHost) }
@@ -819,11 +821,11 @@ private struct LiveHostView: View {
         do {
             guard let identity = try await PhrenConnection.computerIdentity(
                 host: host, privateKey: DeviceSSHKey.load(host.id)
-            ), let saved = (try? LiveSessionPreferences.read(data))?.hosts.first(where: { $0.id == host.id }),
+            ), let saved = livePreferences.preferences?.hosts.first(where: { $0.id == host.id }),
                saved.hasSameConnection(as: host) else { return }
-            data = try LiveSessionPreferences.associating(hostID: host.id,
-                                                          hookComputerID: identity.id,
-                                                          in: data)
+            try livePreferences.update {
+                try LiveSessionPreferences.associating(hostID: host.id, hookComputerID: identity.id, in: $0)
+            }
         } catch { localError = error.localizedDescription }
     }
 
@@ -865,13 +867,45 @@ struct SessionCloseRequest: Identifiable {
     var id: String { "\(session.id.hostID):\(session.workspaceID):\(scope == .tab ? session.tab.id : "*")" }
 }
 
-/// The one confirmation dialog for closing sessions from a list, plus the
-/// error alert. On Herdr's confirmation the card leaves at once and the
-/// computer is asked again right away.
+/// A card's hold (or its "Session actions" accessibility action) asks the
+/// list that owns the surfaces for the session's actions.
+struct SessionCardMenuRequest: Identifiable {
+    let session: LiveAgentSession
+    /// The project the card shows, which decides Link or Change.
+    let project: String?
+    /// The card's identifier prefix, `overview` or `live`.
+    let prefix: String
+    var id: String { "\(prefix):\(session.accessibilityKey)" }
+}
+
+private struct SessionCardMenuKey: EnvironmentKey {
+    static let defaultValue: ((SessionCardMenuRequest) -> Void)? = nil
+}
+
+extension EnvironmentValues {
+    /// Set by `SessionCloseDialogs`: opens the list's action sheet for a card.
+    var sessionCardMenu: ((SessionCardMenuRequest) -> Void)? {
+        get { self[SessionCardMenuKey.self] }
+        set { self[SessionCardMenuKey.self] = newValue }
+    }
+}
+
+/// The list's one set of session surfaces: the card actions sheet (link a
+/// project, rename the workspace, close the tab or workspace), the close
+/// confirmation, the workspace rename editor and their error dialogs. A
+/// surface per card inside a list that re-renders every second presented for
+/// the wrong row, so the list owns them and cards only ask. On Herdr's
+/// confirmation the card leaves at once and the computer is asked again right
+/// away.
 private struct SessionCloseDialogs: ViewModifier {
     @Binding var request: SessionCloseRequest?
     @Binding var error: String?
     let monitor: (LiveAgentSession) -> LiveHostMonitor?
+    @Environment(\.liveSessionPreferences) private var livePreferences
+    @State private var menu: SessionCardMenuRequest?
+    @State private var assigning: SessionCardMenuRequest?
+    @State private var renaming: SessionCardMenuRequest?
+    @State private var renameError: String?
 
     /// Close on the computer, then take the card out of the list at once and
     /// ask that computer again so the truth replaces the guess.
@@ -897,23 +931,129 @@ private struct SessionCloseDialogs: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .confirmationDialog(request?.scope == .workspace ? "Close the whole workspace?" : "Close this tab?",
-                                isPresented: $request.isPresent(), titleVisibility: .visible, presenting: request) { what in
-                Button(what.scope == .workspace ? "Close workspace" : "Close tab", role: .destructive) {
-                    Self.perform(what, monitor: monitor(what.session)) { error = $0 }
+            .environment(\.sessionCardMenu) { menu = $0 }
+            .phrenActionSheet(isPresented: $menu.isPresent(), title: menu?.session.tab.displayTitle ?? "Session",
+                              actions: menuActions, identifier: "\(menu?.prefix ?? "session")-session-actions")
+            .phrenDialog(isPresented: $request.isPresent(),
+                         title: request?.scope == .workspace ? "Close the whole workspace?" : "Close this tab?",
+                         message: closeMessage, actions: closeActions, identifier: "session-close-dialog")
+            .phrenDialog(isPresented: $error.isPresent(), title: "Couldn't close", message: error ?? "",
+                         actions: [.init(id: "ok", title: "OK", role: .cancel) { error = nil }],
+                         identifier: "session-close-error-dialog")
+            .phrenDialog(isPresented: $renameError.isPresent(), title: "Couldn't rename", message: renameError ?? "",
+                         actions: [.init(id: "ok", title: "OK", role: .cancel) { renameError = nil }],
+                         identifier: "session-rename-error-dialog")
+            .sheet(item: $assigning) { what in
+                NavigationStack {
+                    LiveProjectPicker(hostID: what.session.host.id, cwd: what.session.tab.cwd ?? "",
+                                      existing: livePreferences.preferences?.mapping(hostID: what.session.host.id,
+                                                                                     cwd: what.session.tab.cwd))
                 }
-            } message: { what in
-                Text(what.scope == .workspace
-                     ? "Every tab in \u{201C}\(what.session.workspaceName)\u{201D} on \(what.session.host.name) closes; running agents in them stop."
-                     : "\u{201C}\(what.session.tab.displayTitle)\u{201D} on \(what.session.host.name) closes; an agent running in it stops.")
             }
-            .alert("Couldn't close", isPresented: $error.isPresent()) { Button("OK") { error = nil } } message: { Text(error ?? "") }
+            .sheet(item: $renaming) { what in
+                SessionWorkspaceRenameEditor(session: what.session, prefix: what.prefix) { renameError = $0 }
+            }
+    }
+
+    private var menuActions: [PhrenActionSheet.Action] {
+        guard let what = menu else { return [] }
+        let session = what.session
+        var actions: [PhrenActionSheet.Action] = []
+        // The folder decides the name on the row. Linking overrides the
+        // automatic match (or fixes a wrong one); renaming changes Herdr's
+        // workspace label, which the row shows when there is no folder.
+        if session.tab.cwd != nil {
+            actions.append(.init(id: "link", title: what.project == nil ? "Link to project" : "Change project",
+                                 icon: "link") { assigning = what })
+        }
+        actions.append(.init(id: "rename", title: "Rename workspace", icon: "pencil") { renaming = what })
+        actions.append(.init(id: "close-tab", title: "Close tab", icon: "xmark", role: .destructive) {
+            request = .init(session: session, scope: .tab)
+        })
+        actions.append(.init(id: "close-workspace", title: "Close workspace \u{201C}\(session.workspaceName)\u{201D}",
+                             icon: "xmark.square", role: .destructive) {
+            request = .init(session: session, scope: .workspace)
+        })
+        return actions
+    }
+
+    private var closeMessage: String {
+        guard let what = request else { return "" }
+        return what.scope == .workspace
+            ? "Every tab in \u{201C}\(what.session.workspaceName)\u{201D} on \(what.session.host.name) closes; running agents in them stop."
+            : "\u{201C}\(what.session.tab.displayTitle)\u{201D} on \(what.session.host.name) closes; an agent running in it stops."
+    }
+
+    private var closeActions: [PhrenDialog.Action] {
+        guard let what = request else { return [.init(id: "keep", title: "Keep", role: .cancel) {}] }
+        return [
+            .init(id: "close", title: what.scope == .workspace ? "Close workspace" : "Close tab", role: .destructive) {
+                Self.perform(what, monitor: monitor(what.session)) { error = $0 }
+            },
+            .init(id: "keep", title: what.scope == .workspace ? "Keep workspace" : "Keep tab", role: .cancel) {},
+        ]
+    }
+}
+
+/// Renames a Herdr workspace: a labelled field with explicit Cancel and
+/// Rename, in place of a text-entry alert. It starts with the current name.
+private struct SessionWorkspaceRenameEditor: View {
+    let session: LiveAgentSession
+    let prefix: String
+    let failed: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var label: String
+
+    init(session: LiveAgentSession, prefix: String, failed: @escaping (String) -> Void) {
+        self.session = session
+        self.prefix = prefix
+        self.failed = failed
+        _label = State(initialValue: session.workspaceName)
+    }
+
+    private var trimmed: String { label.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    var body: some View {
+        NavigationStack {
+            PhrenScreen {
+                PhrenGroup("Workspace name", identifier: "\(prefix)-rename-caption") {
+                    PhrenTextField("Workspace name", text: $label, identifier: "\(prefix)-rename-field")
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .submitLabel(.done).onSubmit(rename)
+                    Text("Changes the workspace label in Herdr on \(session.host.name).")
+                        .font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
+                }
+            }
+            .navigationTitle("Rename workspace").navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }.phrenIdentifier("\(prefix)-rename-cancel")
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Rename", action: rename)
+                        .disabled(trimmed.isEmpty || trimmed == session.workspaceName)
+                        .phrenIdentifier("\(prefix)-rename-confirm")
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+
+    private func rename() {
+        let label = trimmed
+        guard !label.isEmpty, label != session.workspaceName else { return }
+        dismiss()
+        let session = session, failed = failed
+        Task {
+            do { try await PhrenConnection.herdrAction(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), operation: .rename, workspaceID: session.workspaceID, label: label) }
+            catch { failed(error.localizedDescription) }
+        }
     }
 }
 
 private struct LiveSessionCard: View, Equatable {
     @Environment(AppModel.self) private var model
-    @AppStorage("sessions.live.preferences.v1") private var data = Data()
+    @Environment(\.liveSessionPreferences) private var livePreferences
     let session: LiveAgentSession
     let fresh: Bool
     /// The computer answered before and its answer aged out, so the card says
@@ -924,17 +1064,14 @@ private struct LiveSessionCard: View, Equatable {
     var resolvedPin: Bool? = nil
     var onChat: (() -> Void)? = nil
     let onDetails: () -> Void
-    /// The swipe's red Close acts at once, the way Mail's does — the person
-    /// already swiped and hit a red button. Hold → Close tab / Close
-    /// workspace confirm first, through the one dialog the list owns: a dialog
+    /// The swipe's red Close acts at once, the way Mail's does: the person
+    /// already swiped and hit a red button. Hold, then Close tab or Close
+    /// workspace, confirms first, through the one dialog the list owns: a dialog
     /// per row inside a list that re-renders every second presented for the
     /// wrong row, and deleting a row after its swipe action ran under a dialog
     /// tripped UIKit's batch-update check.
     let onClose: (SessionCloseRequest, _ confirm: Bool) -> Void
-    @State private var assigningProject = false
-    @State private var renaming = false
-    @State private var newLabel = ""
-    @State private var renameError: String?
+    @Environment(\.sessionCardMenu) private var openSessionMenu
     @State private var childTarget: AgentChatTarget?
     @State private var childAgents: [AgentChild] = []
     @State private var showingChildAgents = false
@@ -945,8 +1082,13 @@ private struct LiveSessionCard: View, Equatable {
             && lhs.resolvedProject == rhs.resolvedProject && lhs.resolvedPin == rhs.resolvedPin
     }
 
+    private func openMenu(project: String?, prefix: String) {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        openSessionMenu?(SessionCardMenuRequest(session: session, project: project, prefix: prefix))
+    }
+
     var body: some View {
-        let preferences = try? LiveSessionPreferences.read(data)
+        let preferences = livePreferences.preferences
         let match = showHost ? nil : preferences?.projectMatch(hostID: session.host.id, cwd: session.tab.cwd,
                                                 projects: model.sessionProjects)
         let project = showHost ? resolvedProject : match?.project.name
@@ -961,6 +1103,7 @@ private struct LiveSessionCard: View, Equatable {
             .buttonStyle(.plain)
             .accessibilityIdentifier(showHost ? "overview-chat:\(session.accessibilityKey)"
                                      : "live-chat:\(session.workspaceID):\(session.tab.id)")
+            .accessibilityAction(named: "Session actions") { openMenu(project: project, prefix: prefix) }
             .disabled(!fresh)
             // Only agents still working earn a place on the card; finished
             // ones stay reachable from the chat's agent tree.
@@ -979,7 +1122,7 @@ private struct LiveSessionCard: View, Equatable {
                 .accessibilityIdentifier("\(prefix)-running-agents:\(session.accessibilityKey)")
             }
             SessionPinButton(session: session, pinned: resolvedPin ?? (preferences?.isPinned(session.id) == true),
-                             identifierPrefix: prefix, data: $data)
+                             identifierPrefix: prefix, data: livePreferences.binding)
             if showHost && showingCloseAction {
                 Button(role: .destructive) {
                     showingCloseAction = false
@@ -1003,36 +1146,9 @@ private struct LiveSessionCard: View, Equatable {
             Button("Close", systemImage: "xmark", role: .destructive) { onClose(.init(session: session, scope: .tab), false) }
                 .accessibilityIdentifier("\(prefix)-close:\(session.accessibilityKey)")
         }
-        .contextMenu {
-            // The folder decides the name on the row. Linking overrides the
-            // automatic match (or fixes a wrong one); renaming changes Herdr's
-            // workspace label, which the row shows when there is no folder.
-            if session.tab.cwd != nil {
-                Button(project == nil ? "Link to project" : "Change project", systemImage: "link") { assigningProject = true }
-            }
-            Button("Rename workspace", systemImage: "pencil") { newLabel = session.workspaceName; renameError = nil; renaming = true }
-            Button("Close tab", systemImage: "xmark", role: .destructive) { onClose(.init(session: session, scope: .tab), true) }
-            Button("Close workspace \u{201C}\(session.workspaceName)\u{201D}", systemImage: "xmark.square", role: .destructive) { onClose(.init(session: session, scope: .workspace), true) }
-        }
-        .sheet(isPresented: $assigningProject) {
-            NavigationStack { LiveProjectPicker(hostID: session.host.id, cwd: session.tab.cwd ?? "",
-                                                existing: preferences?.mapping(hostID: session.host.id, cwd: session.tab.cwd)) }
-        }
-        .alert("Rename workspace", isPresented: $renaming) {
-            TextField("Workspace name", text: $newLabel).accessibilityIdentifier("\(prefix)-rename-field")
-            Button("Cancel", role: .cancel) {}
-            Button("Rename") {
-                let label = newLabel.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !label.isEmpty, label != session.workspaceName else { return }
-                Task {
-                    do { try await PhrenConnection.herdrAction(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), operation: .rename, workspaceID: session.workspaceID, label: label) }
-                    catch { renameError = error.localizedDescription }
-                }
-            }.accessibilityIdentifier("\(prefix)-rename-confirm")
-        } message: { Text("Changes the workspace label in Herdr on \(session.host.name).") }
-        .alert("Couldn't rename", isPresented: Binding(get: { renameError != nil }, set: { if !$0 { renameError = nil } })) {
-            Button("OK", role: .cancel) {}
-        } message: { Text(renameError ?? "") }
+        // Hold opens the list's session actions sheet; VoiceOver reaches the
+        // same sheet through the chat button's named action.
+        .highPriorityGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in openMenu(project: project, prefix: prefix) })
         .sheet(isPresented: $showingChildAgents) {
             if let childTarget { ChatSubagentsView(session: session, target: childTarget, agents: childAgents) }
         }
@@ -1066,14 +1182,14 @@ private struct LiveSessionCard: View, Equatable {
 private struct LiveSessionDetailView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    @AppStorage("sessions.live.preferences.v1") private var data = Data()
+    @Environment(\.liveSessionPreferences) private var livePreferences
     @State private var assigning = false
     @State private var copiedFolder = false
     @State private var closingSession = false
     let sessionID: LiveAgentSession.ID
     let monitor: LiveHostMonitor
 
-    private var preferences: LiveSessionPreferences? { try? LiveSessionPreferences.read(data) }
+    private var preferences: LiveSessionPreferences? { livePreferences.preferences }
     private var host: LiveHost? { preferences?.hosts.first { $0.id == sessionID.hostID } }
     private var session: LiveAgentSession? {
         guard let host else { return nil }
@@ -1200,14 +1316,18 @@ private struct LiveSessionDetailView: View {
                         .padding(16)
                     }
                     .background(PhrenTheme.bg)
-                    .confirmationDialog("Close this session?", isPresented: $closingSession, titleVisibility: .visible) {
-                        Button("Close tab", role: .destructive) {
-                            Task {
-                                try? await PhrenConnection.herdrAction(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), operation: .close, workspaceID: session.workspaceID, tabID: session.tab.id)
-                                dismiss()
-                            }
-                        }
-                    } message: { Text("\u{201C}\(session.tab.displayTitle)\u{201D} on \(session.host.name) closes; an agent running in it stops.") }
+                    .phrenDialog(isPresented: $closingSession, title: "Close this session?",
+                                 message: "\u{201C}\(session.tab.displayTitle)\u{201D} on \(session.host.name) closes; an agent running in it stops.",
+                                 actions: [
+                                    .init(id: "close", title: "Close tab", role: .destructive) {
+                                        Task {
+                                            try? await PhrenConnection.herdrAction(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), operation: .close, workspaceID: session.workspaceID, tabID: session.tab.id)
+                                            dismiss()
+                                        }
+                                    },
+                                    .init(id: "keep", title: "Keep tab", role: .cancel) {},
+                                 ],
+                                 identifier: "session-detail-close-dialog")
                 } else {
                     PhrenEmptyState(title: "Session no longer available", message: "It was closed or its computer was removed. Return to the list for current sessions.")
                         .frame(maxWidth: .infinity, maxHeight: .infinity).background(PhrenTheme.bg)
@@ -1239,7 +1359,7 @@ private struct LiveSessionDetailView: View {
 struct LiveProjectPicker: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    @AppStorage("sessions.live.preferences.v1") private var data = Data()
+    @Environment(\.liveSessionPreferences) private var livePreferences
     @State private var error: String?
     let hostID: UUID
     let cwd: String
@@ -1272,8 +1392,10 @@ struct LiveProjectPicker: View {
     }
     private func assign(storeID: String?, project: String?, directory: String) {
         do {
-            data = try LiveSessionPreferences.assigning(hostID: hostID, directory: directory,
-                                                       storeID: storeID, project: project, in: data)
+            try livePreferences.update {
+                try LiveSessionPreferences.assigning(hostID: hostID, directory: directory,
+                                                     storeID: storeID, project: project, in: $0)
+            }
             dismiss()
         } catch { self.error = error.localizedDescription }
     }

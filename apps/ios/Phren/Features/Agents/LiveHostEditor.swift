@@ -57,22 +57,23 @@ struct LiveHostEditor: View {
                     Spacer(minLength: PhrenTheme.Space.small)
                     HStack(spacing: 1) {
                         Text("#").foregroundStyle(PhrenTheme.textDim)
-                        TextField("RRGGBB", text: $colorHex)
+                        PhrenTextField("RRGGBB", text: $colorHex, identifier: "host-color-hex",
+                                       monospaced: true, surface: .bare)
                             .textInputAutocapitalization(.characters).autocorrectionDisabled()
-                            .frame(width: 72)
-                            .accessibilityIdentifier("host-color-hex")
+                            .frame(width: 80)
                     }
                     .font(.system(.caption, design: .monospaced))
                 }
                 .padding(.vertical, 4)
             }
             Section("SSH computer") {
-                TextField("Name", text: $name).accessibilityIdentifier("live-host-name")
-                TextField("Tailscale hostname or IP", text: $address).accessibilityIdentifier("live-host-address")
+                PhrenTextField("Name", text: $name, identifier: "live-host-name", surface: .bare)
+                PhrenTextField("Tailscale hostname or IP", text: $address, identifier: "live-host-address", surface: .bare)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
                     .disabled(existing != nil)
-                TextField("SSH port", text: $port).keyboardType(.numberPad).disabled(existing != nil)
-                TextField("SSH username", text: $username).accessibilityIdentifier("live-host-username")
+                PhrenTextField("SSH port", text: $port, identifier: "live-host-port", surface: .bare)
+                    .keyboardType(.numberPad).disabled(existing != nil)
+                PhrenTextField("SSH username", text: $username, identifier: "live-host-username", surface: .bare)
                     .textInputAutocapitalization(.never).autocorrectionDisabled().disabled(existing != nil)
                 if existing != nil {
                     Text("To change the SSH destination or user, add another computer.").font(.caption).foregroundStyle(.secondary)
@@ -99,7 +100,8 @@ struct LiveHostEditor: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Herdr server") {
-                TextField("default", text: $herdrSession).textInputAutocapitalization(.never).autocorrectionDisabled()
+                PhrenTextField("default", text: $herdrSession, identifier: "live-host-herdr-server", surface: .bare)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
                 Text("Leave empty for the default server, or enter a named Herdr server on this computer.").font(.caption).foregroundStyle(.secondary)
             }
             if let error { Section { Text(error).foregroundStyle(.orange) } }

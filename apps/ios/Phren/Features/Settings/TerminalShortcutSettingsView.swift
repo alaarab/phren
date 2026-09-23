@@ -214,8 +214,8 @@ struct TerminalShortcutEditor: View {
             if shortcut.kind == .key || shortcut.kind == .text { modifiers }
             keyInput
             Section {
-                TextField("e.g. Submit", text: $shortcut.label).accessibilityIdentifier("shortcut-label")
-                TextField("Optional description", text: $shortcut.hint).accessibilityIdentifier("shortcut-hint")
+                PhrenTextField("e.g. Submit", text: $shortcut.label, identifier: "shortcut-label", surface: .bare)
+                PhrenTextField("Optional description", text: $shortcut.hint, identifier: "shortcut-hint", surface: .bare)
             } header: { Text("Button label & hint (optional)") }
             footer: { Text("The label replaces the full shortcut name on its button.") }
             Section("Icon (optional)") {
@@ -315,14 +315,14 @@ struct TerminalShortcutEditor: View {
             }
         case .text:
             Section {
-                TextField("Key or text", text: $shortcut.value).font(.system(.body, design: .monospaced))
-                    .accessibilityIdentifier("shortcut-text")
+                PhrenTextField("Key or text", text: $shortcut.value, identifier: "shortcut-text",
+                               monospaced: true, surface: .bare)
             } header: { Text("Custom Key / Text") }
             footer: { Text("Without modifiers, text is inserted exactly as written. With modifiers, b1 means a modified b followed by 1. Separate modified keys with a comma; use two commas for a literal comma.") }
         case .binding:
             Section {
-                TextField("e.g. Ctrl+b, Shift+t", text: $shortcut.value).font(.system(.body, design: .monospaced))
-                    .accessibilityIdentifier("shortcut-binding")
+                PhrenTextField("e.g. Ctrl+b, Shift+t", text: $shortcut.value, identifier: "shortcut-binding",
+                               monospaced: true, surface: .bare)
             } header: { Text("Advanced binding") }
             footer: { Text("Separate keystrokes with commas. Use Ctrl, Opt, Shift, or C-, M-, S-. Named keys include Esc, Tab, Enter, BSpace, arrows, Home, End, PageUp, PageDown and F1–F12. Use Space, Comma, Plus or Dash for punctuation.") }
         case .action:

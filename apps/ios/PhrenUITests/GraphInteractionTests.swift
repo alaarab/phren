@@ -232,9 +232,12 @@ final class GraphInteractionTests: XCTestCase {
         let search = app.buttons["Search graph"]
         XCTAssertTrue(search.waitForExistence(timeout: 10))
         search.tap()
-        let field = app.textFields["Search findings, tasks, projects"]
+        let field = app.textFields["graph-search"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5), "The graph search is the phren search field")
         field.tap()
         field.typeText("offline")
+        XCTAssertTrue(app.buttons["graph-search:clear"].exists, "The search field offers its own clear button")
+        capture(app, name: "Graph search field")
         app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Cache repeated requests")).firstMatch.tap()
         let focus = app.webViews.buttons["Focus"]
         XCTAssertTrue(focus.waitForExistence(timeout: 5))

@@ -175,8 +175,7 @@ struct SimulatorScreenView: View {
             NavigationStack {
                 PhrenScreen {
                     PhrenGroup("Text") {
-                        TextField("Text", text: $text)
-                            .accessibilityIdentifier("simulator-type-field")
+                        PhrenTextField("Text", text: $text, identifier: "simulator-type-field")
                     }
                 }
                 .navigationTitle("Type into the simulator")
@@ -194,10 +193,9 @@ struct SimulatorScreenView: View {
             NavigationStack {
                 PhrenScreen {
                     PhrenGroup("URL") {
-                        TextField("https://", text: $url)
+                        PhrenTextField("https://", text: $url, identifier: "simulator-url-field", monospaced: true)
                             .textInputAutocapitalization(.never).autocorrectionDisabled()
                             .keyboardType(.URL)
-                            .accessibilityIdentifier("simulator-url-field")
                     }
                 }
                 .navigationTitle("Open a URL in the simulator")

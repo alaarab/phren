@@ -681,14 +681,8 @@ public struct AgentChatTranscript: Equatable, Sendable {
         guard trimmed.contains("<task-notification>"), trimmed.contains("<tool-use-id>") else { return false }
         return trimmed.hasPrefix("<task-notification>") || trimmed.hasPrefix("<system-reminder>")
     }
-    private static let isoTimestamp: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter(); formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]; return formatter
-    }()
-    private static let isoTimestampPlain: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter(); formatter.formatOptions = [.withInternetDateTime]; return formatter
-    }()
     static func timestamp(_ raw: [String: Any]) -> Date? {
-        if let value = raw["timestamp"] as? String { return isoTimestamp.date(from: value) ?? isoTimestampPlain.date(from: value) }
+        if let value = raw["timestamp"] as? String { return ISO8601Dates.parse(value) }
         if let value = raw["timestamp"] as? Double { return Date(timeIntervalSince1970: value > 1e12 ? value / 1000 : value) }
         return nil
     }

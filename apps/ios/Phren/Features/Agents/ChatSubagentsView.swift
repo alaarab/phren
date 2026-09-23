@@ -803,11 +803,7 @@ private struct PhrenChildMessageField: View {
     @Binding var text: String
     let placeholder: String
     var body: some View {
-        TextField(placeholder, text: $text, axis: .vertical)
-            .textFieldStyle(.plain).font(PhrenTypography.body)
-            .foregroundStyle(PhrenTheme.text).tint(PhrenTheme.accent)
-            .lineLimit(1...6).padding(12).frame(minHeight: 44)
-            .background(PhrenTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium))
-            .accessibilityIdentifier("child-composer-field")
+        PhrenTextField(placeholder, text: $text, identifier: "child-composer-field", axis: .vertical)
+            .lineLimit(1...6)
     }
 }

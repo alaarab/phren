@@ -122,14 +122,12 @@ struct HerdrWorkspacesView: View {
             NavigationStack {
                 PhrenScreen {
                     PhrenGroup("Name") {
-                        TextField("Name", text: $name)
-                            .accessibilityIdentifier("herdr-name")
+                        PhrenTextField("Name", text: $name, identifier: "herdr-name")
                     }
                     if op.workspace == nil {
                         PhrenGroup("Folder") {
-                            TextField("Full folder path on computer", text: $cwd)
+                            PhrenTextField("Full folder path on computer", text: $cwd, identifier: "herdr-cwd", monospaced: true)
                                 .textInputAutocapitalization(.never).autocorrectionDisabled()
-                                .accessibilityIdentifier("herdr-cwd")
                         }
                     }
                 }

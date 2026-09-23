@@ -94,14 +94,8 @@ struct ChatModelPickerSheet: View {
 
     private var customField: some View {
         HStack(spacing: PhrenTheme.Space.small) {
-            TextField("model id", text: $custom)
+            PhrenTextField("model id", text: $custom, identifier: "chat-model-custom", monospaced: true)
                 .textInputAutocapitalization(.never).autocorrectionDisabled()
-                .font(.system(.body, design: .monospaced))
-                .padding(.horizontal, PhrenTheme.Space.medium)
-                .frame(minHeight: 44)
-                .background(PhrenTheme.surfaceRaised,
-                            in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.questionOption, style: .continuous))
-                .accessibilityIdentifier("chat-model-custom")
                 .onSubmit { if let token = customArgument { commit(token) } }
             Button("Use") { if let token = customArgument { commit(token) } }
                 .font(PhrenTypography.body.weight(.medium))

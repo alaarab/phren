@@ -25,6 +25,11 @@ final class MemoryConnectionTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Connect project memory"].waitForExistence(timeout: 5))
         app.buttons["Connect with a GitHub token"].tap()
         XCTAssertTrue(app.navigationBars["Token sign-in"].waitForExistence(timeout: 5))
+        let token = app.secureTextFields["onboarding-token"]
+        XCTAssertTrue(token.waitForExistence(timeout: 3), "The token is a phren secure field")
+        token.tap(); token.typeText("ghp_example")
+        XCTAssertNotEqual(token.value as? String, "ghp_example", "The token is not echoed")
+        attachUIScreenshot(app, "Token sign-in secure field")
         app.buttons["Cancel"].tap(); app.buttons["Done"].tap()
         app.tabBars.buttons["Agents"].tap()
         XCTAssertTrue(chat.waitForExistence(timeout: 5))

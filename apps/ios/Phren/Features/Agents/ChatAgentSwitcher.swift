@@ -14,11 +14,11 @@ struct ChatAgentSwitcher: View {
     let chooseSession: (LiveAgentSession) -> Void
     let close: () -> Void
     @Environment(\.scenePhase) private var scenePhase
-    @AppStorage("sessions.live.preferences.v1") private var data = Data()
+    @Environment(\.liveSessionPreferences) private var livePreferences
     private var overview: SessionOverviewMonitor { .shared }
     @State private var query = ""
     @AppStorage("agents.drawer.recent.v1") private var recent = false
-    private var preferences: LiveSessionPreferences? { try? LiveSessionPreferences.read(data) }
+    private var preferences: LiveSessionPreferences? { livePreferences.preferences }
     private var hosts: [LiveHost] { preferences?.hosts ?? [] }
     private struct PollID: Equatable { let hosts: [LiveHost]; let active: Bool }
 

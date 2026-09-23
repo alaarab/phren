@@ -15,12 +15,8 @@ struct ChatSecretSheet: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Typed into the agent's terminal and sent with Enter. It is not kept on this phone.")
                     .font(.caption).foregroundStyle(PhrenTheme.textMuted)
-                SecureField("Password", text: $secret)
+                PhrenSecureField("Password", text: $secret, identifier: "chat-secret-field", monospaced: true)
                     .textContentType(.password)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .font(.system(.body, design: .monospaced))
-                    .accessibilityIdentifier("chat-secret-field")
                 Spacer(minLength: 0)
             }
             .padding()

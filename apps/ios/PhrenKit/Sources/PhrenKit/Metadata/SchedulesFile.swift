@@ -296,9 +296,7 @@ public enum SchedulesFile {
 
     fileprivate static func timestampText(_ date: Date) -> String {
         // ISO8601FormatStyle can truncate a parsed .456 second to .455; this formatter rounds it.
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.string(from: date)
+        ISO8601Dates.string(from: date, fractionalSeconds: true)
     }
 
     fileprivate static func intervalText(_ minutes: Int) -> String {
@@ -317,13 +315,7 @@ public enum SchedulesFile {
     }
 
     private static func onceFormatter(_ format: String) -> DateFormatter {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.timeZone = .current
-        formatter.dateFormat = format
-        formatter.isLenient = false
-        return formatter
+        PhrenDateFormats.fixed(format)
     }
 
     private static func renderBlock(_ schedules: [Schedule]) -> [String] {

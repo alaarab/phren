@@ -217,7 +217,7 @@ enum HookHealthFixture {
 
     static var jsons: [String] {
         let now = Date()
-        let iso = { (seconds: TimeInterval) in ISO8601DateFormatter().string(from: now.addingTimeInterval(-seconds)) }
+        let iso = { (seconds: TimeInterval) in ISO8601Dates.string(from: now.addingTimeInterval(-seconds)) }
         let desk = """
         {"product":"phren-hook","computer":{"name":"Desk"},"checkedAt":"\(iso(0))",
          "versions":[{"tool":"hook","status":"ok","version":"0.2.14"},{"tool":"herdr","status":"ok","version":"0.9.0"},
