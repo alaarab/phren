@@ -15,8 +15,11 @@ struct ChatAgentSwitcher: View {
     let close: () -> Void
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.liveSessionPreferences) private var livePreferences
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var overview: SessionOverviewMonitor { .shared }
     @State private var query = ""
+    @State private var isSearching = false
+    @FocusState private var searchFocused: Bool
     @AppStorage("agents.drawer.recent.v1") private var recent = false
     private var preferences: LiveSessionPreferences? { livePreferences.preferences }
     private var hosts: [LiveHost] { preferences?.hosts ?? [] }
@@ -65,26 +68,72 @@ struct ChatAgentSwitcher: View {
             }
         }
         .safeAreaInset(edge: .top) {
-            VStack(spacing: 8) {
-                HStack {
+            HStack(spacing: PhrenTheme.Space.small) {
+                if isSearching {
                     PhrenSearchField(text: $query, placeholder: "Search workspaces, tabs…",
-                                     identifier: "agent-drawer-search")
-                    Button("Close", systemImage: "xmark") { close() }
-                        .labelStyle(.iconOnly).frame(width: 44, height: 44)
-                        .accessibilityIdentifier("agent-drawer-close")
+                                     identifier: "agent-drawer-search", focus: $searchFocused)
+                        .transition(.opacity)
+                        .onAppear { searchFocused = true }
+                    Button("Cancel") {
+                        query = ""
+                        searchFocused = false
+                        isSearching = false
+                    }
+                    .font(PhrenTypography.body)
+                    .foregroundStyle(PhrenTheme.accent)
+                    .frame(minHeight: 44).contentShape(Rectangle())
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("agent-drawer-search-cancel")
+                } else {
+                    iconGroup.transition(.opacity)
                 }
-                PhrenTextSegment(items: [
-                    .init(id: "recent", value: true, title: "Recent"),
-                    .init(id: "list", value: false, title: "List"),
-                ], selection: $recent, identifier: "agent-drawer-order")
-                .phrenContainerMarker("agent-drawer-order", label: "Workspace order",
-                                      value: recent ? "Recent" : "List")
-            }.padding(12).background(PhrenTheme.chatCanvas)
+                Spacer(minLength: 0)
+                Button("Close", systemImage: "xmark") { close() }
+                    .labelStyle(.iconOnly).frame(width: 44, height: 44)
+                    .foregroundStyle(PhrenTheme.textMuted)
+                    .accessibilityIdentifier("agent-drawer-close")
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 44)
+            .background(PhrenTheme.chatCanvas)
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: isSearching)
         }
         .task(id: PollID(hosts: hosts, active: scenePhase == .active)) {
             // The Agents list normally has this running already; if the chat
             // was reached without it (Spotlight, Siri), start it here.
             if scenePhase == .active { overview.ensureRunning(hosts: hosts) }
         }
+    }
+
+    private var iconGroup: some View {
+        HStack(spacing: PhrenTheme.Space.small) {
+            orderButton(icon: "magnifyingglass", label: "Search", identifier: "agent-drawer-search-toggle",
+                        selected: false) {
+                isSearching = true
+                searchFocused = true
+            }
+            orderButton(icon: "clock", label: "Recent order", identifier: "agent-drawer-order-recent",
+                        selected: recent) { recent = true }
+            orderButton(icon: "list.bullet", label: "List order", identifier: "agent-drawer-order-list",
+                        selected: !recent) { recent = false }
+        }
+        .phrenContainerMarker("agent-drawer-order", label: "Workspace order",
+                              value: recent ? "Recent" : "List")
+    }
+
+    private func orderButton(icon: String, label: String, identifier: String, selected: Bool,
+                             action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon).font(PhrenTypography.icon(18, weight: .semibold))
+                .foregroundStyle(selected ? PhrenTheme.accent : PhrenTheme.textMuted)
+                .frame(width: 44, height: 44)
+                .background(selected ? PhrenTheme.surfaceRaised : .clear,
+                            in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.small, style: .continuous))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityIdentifier(identifier)
     }
 }
