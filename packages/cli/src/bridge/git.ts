@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
-import { lstat, readFile, realpath, stat } from "node:fs/promises";
+import { lstat, readdir, readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { BridgeError, type Json } from "./protocol.js";
@@ -238,7 +238,7 @@ async function repositoryPath(root: string, raw: unknown, allowRoot = false): Pr
   return clean;
 }
 
-type TreeEntry = { name: string; path: string; kind: "dir" | "file"; status?: string; fileCount?: number };
+type TreeEntry = { name: string; path: string; kind: "dir" | "file"; status?: string; fileCount?: number; ignored?: true };
 type TreeSnapshot = { version: string; levels: Map<string, TreeEntry[]> };
 const treeCache = new Map<string, { head: string; expires: number; snapshot: Promise<TreeSnapshot> }>();
 const TREE_TTL_MS = 2_000;
@@ -290,11 +290,58 @@ async function treeSnapshot(root: string, head: string): Promise<TreeSnapshot> {
     [...entries.values()].sort((a, b) => a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === "dir" ? -1 : 1)])) };
 }
 
+const MAX_IGNORED_ENTRIES = 1_000;
+const ignoredCache = new Map<string, { expires: number; listing: Promise<string[]> }>();
+
+/** Git-ignored paths as `git ls-files --others --ignored --exclude-standard
+ * --directory` reports them: a wholly ignored folder once, with a trailing
+ * slash, instead of every file inside it. */
+async function ignoredListing(root: string): Promise<string[]> {
+  let cached = ignoredCache.get(root);
+  if (!cached || cached.expires <= Date.now()) {
+    if (ignoredCache.size >= 32) ignoredCache.delete(ignoredCache.keys().next().value!);
+    cached = { expires: Date.now() + TREE_TTL_MS,
+      listing: git(root, "ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z").then(out => out.split("\0").filter(Boolean)) };
+    ignoredCache.set(root, cached);
+  }
+  try { return await cached.listing; }
+  catch (error) { ignoredCache.delete(root); throw error; }
+}
+
+/** The ignored entries directly under `prefix`, marked `ignored`. Inside a
+ * wholly ignored folder Git lists nothing further, so that level is read from
+ * the disk itself (no `.git`, symlinks shown as files and never followed). */
+async function ignoredEntries(root: string, prefix: string, shown: TreeEntry[]): Promise<TreeEntry[]> {
+  const listing = await ignoredListing(root);
+  const taken = new Set(shown.map(entry => entry.name));
+  const entries = new Map<string, TreeEntry>();
+  const inside = prefix && listing.some(item => item.endsWith("/") && (prefix + "/").startsWith(item));
+  if (inside) {
+    const dirents = await readdir(path.join(root, prefix), { withFileTypes: true }).catch(() => []);
+    for (const dirent of dirents) {
+      if (dirent.name === ".git" || taken.has(dirent.name) || entries.size >= MAX_IGNORED_ENTRIES) continue;
+      entries.set(dirent.name, { name: dirent.name, path: `${prefix}/${dirent.name}`, kind: dirent.isDirectory() ? "dir" : "file", ignored: true });
+    }
+  } else {
+    const base = prefix ? prefix + "/" : "";
+    for (const item of listing) {
+      if (!item.startsWith(base) || item.length <= base.length) continue;
+      const rest = item.slice(base.length), slash = rest.indexOf("/");
+      const name = slash < 0 ? rest : rest.slice(0, slash);
+      if (!name || name === ".git" || taken.has(name) || entries.has(name)) continue;
+      if (entries.size >= MAX_IGNORED_ENTRIES) break;
+      entries.set(name, { name, path: base + name, kind: slash < 0 ? "file" : "dir", ignored: true });
+    }
+  }
+  return [...entries.values()];
+}
+
 /** One lazy directory response from a bounded repo/HEAD/status-hash snapshot.
  * Every request still validates the pane's repo and the requested path. A HEAD
  * move invalidates immediately; external working-tree edits age out after 2s.
- * Status refresh and phone mutations invalidate immediately as well. */
-export async function gitTree(cwd: string, relPath: unknown = ""): Promise<Json> {
+ * Status refresh and phone mutations invalidate immediately as well. With
+ * `ignored`, git-ignored folders and files at that level are added, marked. */
+export async function gitTree(cwd: string, relPath: unknown = "", ignored = false): Promise<Json> {
   const root = await repository(cwd);
   const prefix = await repositoryPath(root, relPath, true);
   const head = await git(root, "rev-parse", "HEAD").catch(() => "unborn");
@@ -306,7 +353,11 @@ export async function gitTree(cwd: string, relPath: unknown = ""): Promise<Json>
   }
   try {
     const snapshot = await cached.snapshot;
-    return { path: prefix, version: snapshot.version, entries: snapshot.levels.get(prefix) ?? [] };
+    const entries = snapshot.levels.get(prefix) ?? [];
+    if (!ignored) return { path: prefix, version: snapshot.version, entries };
+    const extra = await ignoredEntries(root, prefix, entries);
+    const all = [...entries, ...extra].sort((a, b) => a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === "dir" ? -1 : 1);
+    return { path: prefix, version: snapshot.version, entries: all };
   } catch (error) {
     if (treeCache.get(root) === cached) treeCache.delete(root);
     throw error;
