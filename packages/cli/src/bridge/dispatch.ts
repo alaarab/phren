@@ -8,7 +8,7 @@ import { computerName } from "./computers.js";
 import { dispatchParentSchema, validateDispatchParent } from "./dispatch-tree.js";
 import { grantLabel, listGrants, matchGrant } from "./grants.js";
 import { hookPeers, peerRequest, type HookPeer } from "./peers.js";
-import { atomic, BridgeError, bridgeRoot, PROTOCOL, startingTargetSchema, targetSchema, type Json, type Target } from "./protocol.js";
+import { atomic, BridgeError, bridgeRoot, id, PROTOCOL, provider, serverName, startingTargetSchema, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
 import { phrenStoreRoot } from "./transcripts.js";
 
 const text = (max: number) => z.string().min(1).max(max).refine(value => !!value.trim() && !/[\x00-\x1f\x7f]/.test(value));
@@ -25,6 +25,12 @@ export const dispatchSchema = z.object({
 }).strict();
 export type DispatchInput = z.infer<typeof dispatchSchema>;
 const remoteTarget = z.union([targetSchema, startingTargetSchema]);
+/** The local pane that asked for the dispatch, where return notices go. */
+export const originPaneSchema = z.object({ server: serverName, workspace: id, tab: id, pane: id }).strict();
+export type OriginPane = z.infer<typeof originPaneSchema>;
+export const workerStates = ["working", "done", "needs-you", "blocked", "gone"] as const;
+export type WorkerState = typeof workerStates[number];
+const timestamp = z.string().datetime();
 const receiptSchema = dispatchSchema.omit({ prompt: true }).extend({
   id: z.string().uuid(), createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
   computerId: z.string().uuid().optional(),
@@ -33,8 +39,17 @@ const receiptSchema = dispatchSchema.omit({ prompt: true }).extend({
   granted: z.string().max(200).optional().describe("Scope of the conductor grant that allowed this call."),
   skipped: z.array(z.object({ computer: computerName, reason: z.string().max(200) }).strict()).max(32).optional()
     .describe("Computers left out of anywhere placement, with the reason each could not report capacity."),
+  origin: originPaneSchema.extend({ agent: provider, terminal: z.string().min(1).max(200) }).strict().optional()
+    .describe("The local agent pane that placed this dispatch; return notices go there."),
+  worker: z.object({ state: z.enum(workerStates), since: timestamp, checkedAt: timestamp, sawWorking: z.boolean() }).strict().optional()
+    .describe("The worker pane's last observed state."),
+  returned: z.object({
+    state: z.enum(["done", "needs-you", "blocked", "gone"]), at: timestamp,
+    reply: z.string().max(4000).optional(), truncated: z.boolean().optional(), question: z.string().max(200).optional(),
+    turn: z.string().regex(/^[a-f0-9]{16}$/).optional(), read: z.boolean(), notifiedAt: timestamp.optional(),
+  }).strict().optional().describe("The latest return: the worker finished, needs the owner, is blocked or is gone."),
 });
-type Receipt = z.infer<typeof receiptSchema>;
+export type Receipt = z.infer<typeof receiptSchema>;
 type Skipped = { computer: string; reason: string };
 
 export async function dispatchProjectDirectory(project: unknown): Promise<string> {
@@ -50,6 +65,30 @@ async function save(receipt: Receipt): Promise<void> {
   const root = path.join(bridgeRoot(), "dispatches");
   await mkdir(root, { recursive: true, mode: 0o700 });
   await atomic(path.join(root, `${receipt.id}.json`), receipt);
+}
+
+const MAX_RECEIPT_BYTES = 65_536;
+let receiptUpdates: Promise<unknown> = Promise.resolve();
+
+/**
+ * Change one settled receipt: read it, let `change` edit it, and write it back
+ * when `change` returns true. Updates run one at a time in this process, and a
+ * receipt still being placed (launching or sending) is never touched.
+ */
+export function updateReceipt(receiptID: string, change: (receipt: Receipt) => boolean): Promise<Receipt | undefined> {
+  const run = receiptUpdates.then(async () => {
+    const file = path.join(bridgeRoot(), "dispatches", `${z.string().uuid().parse(receiptID)}.json`);
+    const info = await lstat(file).catch(() => undefined);
+    if (!info?.isFile() || info.isSymbolicLink() || info.size > MAX_RECEIPT_BYTES) return undefined;
+    const receipt = receiptSchema.parse(JSON.parse(await readFile(file, "utf8")));
+    if (["launching", "sending"].includes(receipt.state)) return undefined;
+    if (!change(receipt)) return receipt;
+    receipt.updatedAt = new Date().toISOString();
+    await atomic(file, receiptSchema.parse(receipt));
+    return receipt;
+  });
+  receiptUpdates = run.catch(() => undefined);
+  return run;
 }
 
 /** No ledger yet is normal; any other read failure is logged before it reads as empty. */
@@ -76,7 +115,7 @@ export async function dispatchStatus(): Promise<Receipt[]> {
     try {
       const file = path.join(root, name);
       const info = await lstat(file);
-      if (!info.isFile() || info.isSymbolicLink() || info.size > 16384) continue;
+      if (!info.isFile() || info.isSymbolicLink() || info.size > MAX_RECEIPT_BYTES) continue;
       const receipt = receiptSchema.parse(JSON.parse(await readFile(file, "utf8")));
       // A service restart cannot prove whether an in-flight mutation arrived.
       if (["launching", "sending"].includes(receipt.state)) receipt.state = "uncertain";
@@ -115,10 +154,19 @@ async function settledTarget(peer: HookPeer, launched: Json, harness: string): P
   return undefined;
 }
 
+export interface DispatchIdentity {
+  computerID: string;
+  validateParentTarget: (target: Target) => Promise<unknown>;
+  /** The agent and terminal running in a local pane, or undefined when the pane has no agent. */
+  originAgent?: (pane: OriginPane) => Promise<{ agent: Provider; terminal: string } | undefined>;
+}
+
 export class DispatchService {
   private active = false;
-  constructor(private readonly identity?: { computerID: string; validateParentTarget: (target: Target) => Promise<unknown> }) {}
-  async dispatch(input: unknown): Promise<Json> {
+  constructor(private readonly identity?: DispatchIdentity) {}
+  /** `originValue` is the local pane the request came from, as its agent's
+   * Herdr variables name it; a pane without a running agent is left out. */
+  async dispatch(input: unknown, originValue?: unknown): Promise<Json> {
     const data = dispatchSchema.parse(input);
     if (this.active) throw new BridgeError(429, "A dispatch is already being placed. Try again after its receipt arrives.");
     this.active = true;
@@ -152,11 +200,12 @@ export class DispatchService {
         remoteComputerID = (await capacity(peer)).computerId;
       }
       const grant = matchGrant(await listGrants(), { action: "dispatch", project: data.project, computer: peer.name });
+      const origin = await this.origin(originValue);
       // Prompts are sent over the pipe, never stored in the dispatch ledger.
       const { prompt, ...metadata } = data;
       const receipt: Receipt = { ...metadata, computer: peer.name, computerId: remoteComputerID!, id: randomUUID(),
         createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), state: "launching",
-        ...(grant ? { granted: grantLabel(grant) } : {}), ...(skipped.length ? { skipped } : {}) };
+        ...(grant ? { granted: grantLabel(grant) } : {}), ...(skipped.length ? { skipped } : {}), ...(origin ? { origin } : {}) };
       await save(receipt);
       try {
         const launched = await peerRequest(peer, `/v1/workspaces/launch?server=${encodeURIComponent(peer.server)}`,
@@ -174,5 +223,12 @@ export class DispatchService {
       receipt.updatedAt = new Date().toISOString(); await save(receipt);
       return { ok: receipt.state === "accepted", ...receipt };
     } finally { this.active = false; }
+  }
+
+  private async origin(value: unknown): Promise<Receipt["origin"]> {
+    const pane = originPaneSchema.safeParse(value);
+    if (!pane.success || !this.identity?.originAgent) return undefined;
+    const running = await this.identity.originAgent(pane.data).catch(() => undefined);
+    return running ? { ...pane.data, ...running } : undefined;
   }
 }

@@ -1,15 +1,16 @@
 # Conductor
 
 A conductor is an agent session that sends bounded work to other sessions.
-The optional `conductor` module supplies `dispatch`, `hand_off`, standing
-grants and the shipped conductor brief. It requires `memory` and `hook`.
+The optional `conductor` module supplies `dispatch`, `dispatch_returns`,
+`hand_off`, `live_sessions`, standing grants and the shipped conductor brief.
+It requires `memory` and `hook`.
 
 ```sh
 phren modules enable conductor
 phren bridge update
 ```
 
-Restart Hook and MCP after enabling the module. Full MCP exposes both tools;
+Restart Hook and MCP after enabling the module. Full MCP exposes these tools;
 core MCP reaches them through `phren_admin`.
 
 ## Enroll computers
@@ -95,7 +96,7 @@ currently requires Herdr.
 Each placement writes a private receipt in `<bridge>/dispatches/<id>.json`
 without retaining the prompt. States are `launching`, `sending`, `accepted`,
 `uncertain` and `failed`. `accepted` confirms first-prompt delivery, not worker
-completion. A lost acknowledgement leaves an uncertain receipt and is never
+completion; completion arrives as a return (see [Returns](#returns)). A lost acknowledgement leaves an uncertain receipt and is never
 automatically retried. Receipts survive restart; interrupted placement states
 are reported as uncertain. Only one placement runs at a time per service.
 
@@ -157,13 +158,57 @@ asking sentence and ordered radio options, with action arguments folded under
 Action details and terminal access in the header. Conductor grant choices use
 the same phren controls as other permissions.
 
-## Implemented adapters that are not wired into placement
+## Returns
 
-The repository includes tested headless receiver, report/outbox and question
-relay components. The running Hook does not currently connect these adapters
-to dispatch placement. There is no live headless fallback or automatic report
-return to the parent through those components. Remote ancestry and phone
-navigation are wired independently through receipts and `/v1/subagents`.
+```sh
+phren dispatch returns
+```
+
+After placement the dispatching Hook follows each worker and records what
+comes back. `dispatch_returns` (MCP) and `phren dispatch returns` list the
+unread returns, oldest first, and mark them read. A return is one of:
+
+- `done`: the worker finished its turn. `reply` is its final reply, read from
+  its transcript and capped at 4000 bytes (`truncated` when cut).
+- `needs-you`: the worker finished by asking the owner something. `question`
+  is the question line.
+- `blocked`: the worker waits on terminal input, such as a permission prompt.
+- `gone`: its pane closed or another conversation took the pane over.
+
+Each row names the dispatch ID, computer, project, label and the worker's
+`target`, so an answer or follow-up goes back with `hand_off`. A worker that
+takes more work and finishes again produces a new return. The receipt keeps
+the worker's last observed state in `worker` and the latest return in
+`returned`, so `phren dispatch status` shows them too, and a finished lead
+reads as completed in `/v1/subagents`.
+
+How it works: the receiving computer's Hook answers
+`POST /v1/dispatch/workers` from the Herdr snapshot it already shares with the
+phone and its activity tick, and reads a stopped worker's final reply through
+the transcript readers. It keeps no state about the dispatch. The dispatching
+Hook asks each enrolled computer about all of its open dispatches in one
+request, at most every 15 seconds, and follows a dispatch for 24 hours or
+until the worker is gone. A computer that does not answer records nothing;
+silence is never a transition. The receiving computer needs the conductor
+module, as it already does for placement.
+
+When `dispatch` is called by an agent running in a Herdr pane, the receipt
+keeps that pane as `origin`. While that agent is idle, the Hook types one line
+into it through the ordinary hand-off path, for example:
+
+```text
+Return: Linuxbox parser checks done, tests passed (dispatch <id>). Call dispatch_returns.
+```
+
+Several waiting returns share one line. The Hook never types into a working
+or blocked agent, nor into a pane now running another terminal, and sends at
+most one notice per pane every two minutes. A notice that was not delivered
+is tried again after that wait. Returns stay unread until `dispatch_returns`
+takes them, so a missed notice loses nothing.
+
+Remote ancestry and phone navigation are wired independently through receipts
+and `/v1/subagents`. There is no headless dispatch fallback: placement
+requires Herdr on the receiving computer.
 
 See [API reference](api-reference.md#cross-computer-dispatch) for fields and
 [Fan-out workers](fanout.md) for the separate local worker manifest protocol.
