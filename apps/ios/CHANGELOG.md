@@ -10,6 +10,7 @@ number counts up on its own.
 
 ### Changed
 
+- The live reply preview uses the chat's monospaced font, so a reply no longer changes typeface when the finished message replaces it.
 - Schedule history shows a run that finished by asking you something as "needs you" with the question, in the waiting color, instead of as a failure.
 - The agent tree folds finished workers into one "N finished" row you can open, and Clear finished archives that chat's finished workers on the computer right away instead of after a day.
 - Failures that used to pass silently now say why. An agent chat shows why approvals and status went quiet while it reconnects, why the sub-agent list could not refresh, and when sub-agents on other computers are missing because the computer's `hooks.yaml` is broken. A Memory search that fails shows its reason. Signing out or removing a store says when the copy on this phone could not be deleted, and local cache writes that fail during sync join the storage notice instead of vanishing.

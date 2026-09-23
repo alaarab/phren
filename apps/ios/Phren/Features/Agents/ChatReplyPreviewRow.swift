@@ -8,7 +8,9 @@ struct ChatReplyPreviewRow: View {
 
     var body: some View {
         Text(verbatim: preview.text)
-            .font(.system(size: textSize))
+            // The finished reply renders in the chat's monospaced face; the
+            // preview matches it so the text does not change font when it lands.
+            .font(.system(size: textSize, design: .monospaced))
             .foregroundStyle(PhrenTheme.chatText)
             .frame(maxWidth: .infinity, alignment: .leading)
             .allowsHitTesting(false)
