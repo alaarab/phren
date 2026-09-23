@@ -40,7 +40,7 @@ final class AgentChatImageTests: AgentChatUITestCase {
         viewer.doubleTap()
         let fitted = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Fit"), object: viewer)
         XCTAssertEqual(XCTWaiter.wait(for: [fitted], timeout: 5), .completed)
-        app.buttons["image-viewer-close"].tap()
+        app.buttons["file-viewer-close"].tap()
         XCTAssertTrue(viewer.waitForNonExistence(timeout: 5))
         XCTAssertTrue(picture.exists)
     }
@@ -135,7 +135,7 @@ final class AgentChatImageTests: AgentChatUITestCase {
         XCTAssertTrue(viewer.waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Conversation image.jpg"].exists)
         XCTAssertEqual(viewer.value as? String, "Fit")
-        app.buttons["image-viewer-close"].tap()
+        app.buttons["file-viewer-close"].tap()
         XCTAssertTrue(viewer.waitForNonExistence(timeout: 5))
         XCTAssertEqual(card.value as? String, "Collapsed")
         XCTAssertEqual(pictures.count, 4)

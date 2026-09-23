@@ -210,7 +210,7 @@ final class StoreTourTests: XCTestCase {
         pictures.firstMatch.tap()
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "image-viewer").firstMatch.waitForExistence(timeout: 5))
         settle(2.5)
-        app.buttons["image-viewer-close"].tap()
+        app.buttons["file-viewer-close"].tap()
         settle(1.5)
         let terminal = app.buttons["chat-composer-terminal"]
         expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: terminal)
