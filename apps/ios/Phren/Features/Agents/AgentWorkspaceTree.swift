@@ -197,7 +197,7 @@ private struct AgentWorkspaceSessionRow: View {
     let openSessionChild: (LiveAgentSession, AgentChatTarget, AgentChild) -> Void
     @State private var snapshotChildren: [AgentChild] = []
     @State private var snapshotTarget: AgentChatTarget?
-    @AppStorage("sessions.live.preferences.v1") private var hostData = Data()
+    @Environment(\.liveSessionPreferences) private var preferencesStore
 
     private var children: [AgentChild] { currentChildren ?? snapshotChildren }
 
@@ -241,14 +241,14 @@ private struct AgentWorkspaceSessionRow: View {
 
     private func unknown(_ agent: AgentChild) -> Bool {
         guard let computer = agent.computer else { return false }
-        return !((try? LiveSessionPreferences.read(hostData))?.hosts.contains {
+        return !(preferencesStore.preferences?.hosts.contains {
             $0.hookComputerID == computer.id && $0.fingerprint != nil
         } ?? false)
     }
 
     private func unavailable(_ agent: AgentChild) -> Bool {
         guard let computer = agent.computer,
-              let host = (try? LiveSessionPreferences.read(hostData))?.hosts.first(where: { $0.hookComputerID == computer.id }) else { return false }
+              let host = preferencesStore.preferences?.hosts.first(where: { $0.hookComputerID == computer.id }) else { return false }
         return SessionOverviewMonitor.shared.computers.first(where: { $0.host.id == host.id }).map {
             $0.monitor.message != nil || $0.monitor.isStale(at: .now)
         } ?? false

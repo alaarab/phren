@@ -7,13 +7,13 @@ import ImageIO
 /// Files or Photos, then copy the path to hand it to an agent.
 struct HostFilesView: View {
     var hostID: UUID? = nil
-    @AppStorage("sessions.live.preferences.v1") private var data = Data()
+    @Environment(\.liveSessionPreferences) private var preferencesStore
     @State private var refresh = UUID()
     /// Presented from the list, not a Section: a Section's own modifiers are
     /// not a view in the list, so its cover never appeared.
     @State private var preview: FileViewerItem?
     private var hosts: [LiveHost] {
-        ((try? LiveSessionPreferences.read(data))?.hosts ?? []).filter { hostID == nil || $0.id == hostID }
+        (preferencesStore.preferences?.hosts ?? []).filter { hostID == nil || $0.id == hostID }
     }
     var body: some View {
         PhrenList {

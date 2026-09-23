@@ -101,11 +101,11 @@ struct ProjectAgentDestination: Identifiable {
 private struct ProjectAgentSheet: ViewModifier {
     @Binding var choice: ProjectAgentChoice?
     @Environment(AppModel.self) private var model
-    @AppStorage("sessions.live.preferences.v1") private var data = Data()
+    @Environment(\.liveSessionPreferences) private var preferencesStore
     @AppStorage(ProjectAgentRecents.key) private var recentData = Data()
     @State private var launch: ProjectAgentDestination?
 
-    private var preferences: LiveSessionPreferences? { try? LiveSessionPreferences.read(data) }
+    private var preferences: LiveSessionPreferences? { preferencesStore.preferences }
     private var title: String {
         switch choice {
         case .project(let storeID, let project): "Open on computer · \(project) · \(model.storeName(for: storeID))"
@@ -219,11 +219,11 @@ struct ProjectComputerRows: View {
     var showsWorkspaces = false
     @Binding var choice: ProjectAgentChoice?
     @Environment(AppModel.self) private var model
-    @AppStorage("sessions.live.preferences.v1") private var data = Data()
+    @Environment(\.liveSessionPreferences) private var preferencesStore
 
     var body: some View {
         let hosts = ProjectAgentCheckouts.hosts(model: model, storeID: storeID, project: project,
-                                               preferences: try? LiveSessionPreferences.read(data))
+                                               preferences: preferencesStore.preferences)
         if !hosts.isEmpty {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {

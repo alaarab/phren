@@ -6,13 +6,13 @@ import WebKit
 
 struct WebPreviewView: View {
     let selection: WebServerSelection
-    @AppStorage("sessions.live.preferences.v1") private var data = Data()
+    @Environment(\.liveSessionPreferences) private var preferencesStore
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var phase
     @State private var browser = WebPreviewModel()
     @State private var retry = UUID()
     @State private var editing = false
-    private var host: LiveHost? { (try? LiveSessionPreferences.read(data))?.hosts.first { $0.id == selection.hostID } }
+    private var host: LiveHost? { preferencesStore.preferences?.hosts.first { $0.id == selection.hostID } }
     private struct ConnectionID: Equatable { let host: LiveHost?; let active: Bool; let retry: UUID }
 
     var body: some View {

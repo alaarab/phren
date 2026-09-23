@@ -6,13 +6,13 @@ import SwiftUI
 /// local ledgers are summed, and duplicate OpenRouter keys count once.
 struct AccountUsageView: View {
     var hostID: UUID? = nil
-    @AppStorage("sessions.live.preferences.v1") private var data = Data()
+    @Environment(\.liveSessionPreferences) private var preferencesStore
     @State private var refresh = 0
     @State private var errors: [UUID: String] = [:]
     @State private var loading: Set<UUID> = []
     private let cache = AccountUsageCache.shared
     private var hosts: [LiveHost] {
-        ((try? LiveSessionPreferences.read(data))?.hosts ?? []).filter { hostID == nil || $0.id == hostID }
+        (preferencesStore.preferences?.hosts ?? []).filter { hostID == nil || $0.id == hostID }
     }
 
     var body: some View {

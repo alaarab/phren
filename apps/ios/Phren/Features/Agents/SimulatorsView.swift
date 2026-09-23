@@ -6,10 +6,10 @@ import SwiftUI
 /// refreshed every few seconds in the list, faster once opened.
 struct SimulatorsView: View {
     var hostID: UUID? = nil
-    @AppStorage("sessions.live.preferences.v1") private var data = Data()
+    @Environment(\.liveSessionPreferences) private var preferencesStore
     @State private var refresh = UUID()
     private var hosts: [LiveHost] {
-        ((try? LiveSessionPreferences.read(data))?.hosts ?? []).filter { hostID == nil || $0.id == hostID }
+        (preferencesStore.preferences?.hosts ?? []).filter { hostID == nil || $0.id == hostID }
     }
     var body: some View {
         PhrenList {

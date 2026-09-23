@@ -9,12 +9,12 @@ struct ScheduleHistoryView: View {
 
     @Environment(\.openURL) private var openURL
     @Environment(AppModel.self) private var model
-    @AppStorage("sessions.live.preferences.v1") private var preferencesData = Data()
+    @Environment(\.liveSessionPreferences) private var preferencesStore
     @State private var runs: [ScheduleRun] = []
     @State private var loading = true
     @State private var error: String?
 
-    private var hosts: [LiveHost] { (try? LiveSessionPreferences.read(preferencesData))?.hosts ?? [] }
+    private var hosts: [LiveHost] { preferencesStore.preferences?.hosts ?? [] }
     private var host: LiveHost? {
         hosts.first { host in
             [host.name, host.address].contains { SchedulesView.canonicalHost($0) == SchedulesView.canonicalHost(schedule.computer) }

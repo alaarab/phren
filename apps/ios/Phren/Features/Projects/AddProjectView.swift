@@ -12,7 +12,7 @@ struct AddProjectView: View {
     var onAdded: (String) -> Void = { _ in }
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    @AppStorage("sessions.live.preferences.v1") private var data = Data()
+    @Environment(\.liveSessionPreferences) private var preferencesStore
     @State private var hostID: UUID?
     @State private var repos: [UUID: [PhrenConnection.RepoCandidate]] = [:]
     @State private var loading = false
@@ -29,7 +29,7 @@ struct AddProjectView: View {
         var id: String { rawValue }
         var title: String { self == .existing ? "On the computer" : "Clone from GitHub" }
     }
-    private var preferences: LiveSessionPreferences? { try? LiveSessionPreferences.read(data) }
+    private var preferences: LiveSessionPreferences? { preferencesStore.preferences }
     private var hosts: [LiveHost] { preferences?.hosts ?? [] }
     private var selectedHost: LiveHost? { hosts.first { $0.id == hostID } }
     private var available: [PhrenConnection.RepoCandidate] { (selectedHost.flatMap { repos[$0.id] } ?? []).filter { !$0.registered } }
@@ -223,7 +223,7 @@ struct AddProjectView: View {
                 return
             }
             // "Open on a computer" now knows the folder without asking.
-            data = (try? LiveSessionPreferences.assigning(hostID: host.id, directory: enrolled.directory, storeID: arrived.storeId, project: enrolled.project, in: data)) ?? data
+            try? preferencesStore.update { try LiveSessionPreferences.assigning(hostID: host.id, directory: enrolled.directory, storeID: arrived.storeId, project: enrolled.project, in: $0) }
             dismiss()
             onAdded(enrolled.project)
         } catch {

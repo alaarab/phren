@@ -15,7 +15,7 @@ struct AgentChangesView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.scenePhase) private var scenePhase
-    @AppStorage("sessions.live.preferences.v1") private var hostData = Data()
+    @Environment(\.liveSessionPreferences) private var preferencesStore
     @AppStorage("changes.wrap") private var wrapLines = true
     @AppStorage("changes.mode") private var mode = "list"
     @State private var model: ChangesModel
@@ -44,7 +44,7 @@ struct AgentChangesView: View {
 
     private var active: Bool {
         changesEnabled && visible && scenePhase == .active
-            && (try? LiveSessionPreferences.read(hostData))?.hosts
+            && preferencesStore.preferences?.hosts
                 .first(where: { $0.id == session.host.id })?.hasSameConnection(as: session.host) == true
     }
 

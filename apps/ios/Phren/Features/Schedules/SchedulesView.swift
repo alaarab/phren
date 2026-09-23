@@ -7,7 +7,7 @@ struct SchedulesView: View {
     let project: String?
 
     @Environment(AppModel.self) private var model
-    @AppStorage("sessions.live.preferences.v1") private var hostData = Data()
+    @Environment(\.liveSessionPreferences) private var preferencesStore
     @State private var reachableHosts: Set<UUID> = []
     @State private var liveState: [String: ScheduleRuntimeState] = [:]
     @State private var enabledOverrides: [String: Bool] = [:]
@@ -16,7 +16,7 @@ struct SchedulesView: View {
     @State private var editing: ScheduleEditorSelection?
 
     private var hosts: [LiveHost] {
-        ((try? LiveSessionPreferences.read(hostData))?.hosts ?? []).filter { SessionOverviewMonitor.shared.allows(.schedules, on: $0) }
+        (preferencesStore.preferences?.hosts ?? []).filter { SessionOverviewMonitor.shared.allows(.schedules, on: $0) }
     }
 
     private var snapshot: LocalStore.Snapshot { model.snapshot(for: storeId) }

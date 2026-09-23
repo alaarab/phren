@@ -25,7 +25,7 @@ struct CodeView: View {
         let end: Bool
         let revision: Int
     }
-    @AppStorage("sessions.live.preferences.v1") private var hostData = Data()
+    @Environment(\.liveSessionPreferences) private var preferencesStore
     @State private var mode = Mode.files
     @State private var query = ""
     @State private var directory = ""
@@ -63,7 +63,7 @@ struct CodeView: View {
     private var hosts: [LiveHost] {
         if let origin { return [origin.host] }
         if let host { return [host] }
-        return ((try? LiveSessionPreferences.read(hostData))?.hosts ?? []).filter { SessionOverviewMonitor.shared.allows(.code, on: $0) }
+        return (preferencesStore.preferences?.hosts ?? []).filter { SessionOverviewMonitor.shared.allows(.code, on: $0) }
     }
     /// Whether the computer serves the code index; without it the browser
     /// still lists and opens every file.

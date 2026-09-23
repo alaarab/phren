@@ -7,8 +7,8 @@ struct FilesView: View {
     @State private var storeId: String?
     @State private var query = ""
     @State private var target: FileTarget?
-    @AppStorage("sessions.live.preferences.v1") private var hostData = Data()
-    private var hosts: [LiveHost] { (try? LiveSessionPreferences.read(hostData))?.hosts ?? [] }
+    @Environment(\.liveSessionPreferences) private var preferencesStore
+    private var hosts: [LiveHost] { preferencesStore.preferences?.hosts ?? [] }
 
     struct FileTarget: Identifiable, Hashable {
         let storeId: String

@@ -346,7 +346,7 @@ struct HerdrTerminalView: View {
     var commandMenu = false
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dismiss) private var dismiss
-    @AppStorage("sessions.live.preferences.v1") private var hostData = Data()
+    @Environment(\.liveSessionPreferences) private var preferencesStore
     @State private var model = HerdrTerminalModel()
     @State private var visible = false
     @State private var shortcuts = false
@@ -361,7 +361,7 @@ struct HerdrTerminalView: View {
     @State private var stack = NavigationStackHandle()
     /// Settings → Keyboard: the toolbar steps aside for a physical keyboard.
     private var toolbarHidden: Bool { hardwareKeyboard && IntegrationSettings.enabled(IntegrationSettings.autoHideToolbarKey, default: false) }
-    private var currentHost: LiveHost? { (try? LiveSessionPreferences.read(hostData))?.hosts.first { $0.id == host.id } }
+    private var currentHost: LiveHost? { preferencesStore.preferences?.hosts.first { $0.id == host.id } }
     private var active: Bool { visible && scenePhase == .active && currentHost == host }
     /// A terminal opened for the computer as a whole shows whatever Herdr
     /// has in front; the sessions overview knows which tab that is.

@@ -24,7 +24,7 @@ struct AgentChatView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
-    @AppStorage("sessions.live.preferences.v1") private var hostData = Data()
+    @Environment(\.liveSessionPreferences) private var preferencesStore
     @State private var model = AgentChatModel()
     @State private var sendTask: Task<Void, Never>?
     @State private var visible = false
@@ -133,12 +133,12 @@ struct AgentChatView: View {
     }
 
     private var currentHost: LiveHost? {
-        (try? LiveSessionPreferences.read(hostData))?.hosts.first { $0.id == session.host.id }
+        preferencesStore.preferences?.hosts.first { $0.id == session.host.id }
     }
     private var project: SessionProject? {
         let pane = model.panes.first { $0.id == model.target?.paneID }
         let cwd = pane?.cwd ?? (model.panes.count == 1 ? session.tab.cwd : nil)
-        return (try? LiveSessionPreferences.read(hostData))?.projectMatch(hostID: session.host.id, cwd: cwd, projects: appModel.sessionProjects)?.project
+        return preferencesStore.preferences?.projectMatch(hostID: session.host.id, cwd: cwd, projects: appModel.sessionProjects)?.project
     }
     private var codeOrigin: SessionCodeContext? {
         guard let project, let target = model.target, !target.isStarting else { return nil }
@@ -607,7 +607,7 @@ struct AgentChatView: View {
         .sheet(isPresented: $assigningProject) {
             NavigationStack {
                 LiveProjectPicker(hostID: session.host.id, cwd: session.tab.cwd ?? "",
-                                  existing: (try? LiveSessionPreferences.read(hostData))?.mapping(hostID: session.host.id, cwd: session.tab.cwd))
+                                  existing: preferencesStore.preferences?.mapping(hostID: session.host.id, cwd: session.tab.cwd))
             }
         }
         .phrenDialog(isPresented: $attachmentError.isPresent(), title: "Could not add attachment",
@@ -671,7 +671,7 @@ struct AgentChatView: View {
 
     private func workNavigation(_ agent: AgentChild, session: LiveAgentSession,
                                 target: AgentChatTarget) -> AgentWorkNavigation? {
-        let hosts = (try? LiveSessionPreferences.read(hostData))?.hosts ?? []
+        let hosts = preferencesStore.preferences?.hosts ?? []
         let offline = Set(SessionOverviewMonitor.shared.computers.compactMap { computer in
             computer.monitor.message != nil || computer.monitor.isStale(at: .now)
                 ? computer.host.id : nil

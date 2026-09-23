@@ -18,13 +18,10 @@ import SwiftUI
 /// default is `shared`, so a view in a sheet or a separate root never finds it
 /// missing.
 ///
-/// Readers through this store: LiveSessionsView (overview, computer, card and
-/// session details), ProjectSessionsView, LaunchSessionView and
-/// ChatAgentSwitcher. Other screens still declare the key with `@AppStorage`
-/// and call `LiveSessionPreferences.read` themselves (the chat, terminal,
-/// files, web servers, simulators, schedules, projects, settings and intents
-/// screens, LiveHostEditor, the widget bridge and PhrenApp's notification
-/// registration); they move here as they are next edited.
+/// Every view reads and writes the key through this store, so a render never
+/// decodes it. Code that runs on an event rather than in `body` (intents, the
+/// widget bridge, notification and approval handlers, UI test fixtures and
+/// PhrenApp's push registration) still reads defaults directly when it runs.
 @Observable @MainActor
 final class LiveSessionPreferencesStore {
     static let key = "sessions.live.preferences.v1"

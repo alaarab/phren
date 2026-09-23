@@ -14,8 +14,8 @@ struct ProjectsView: View {
     @State private var showVoiceCapture = false
     @State private var showAddProject = false
     @State private var connectingComputer = false
-    @AppStorage("sessions.live.preferences.v1") private var livePreferences = Data()
-    private var hasComputer: Bool { !((try? LiveSessionPreferences.read(livePreferences))?.hosts.isEmpty ?? true) }
+    @Environment(\.liveSessionPreferences) private var preferencesStore
+    private var hasComputer: Bool { !(preferencesStore.preferences?.hosts.isEmpty ?? true) }
 
     /// The derived list's inputs, one value so the filter, a store revision
     /// or a permission change recomputes it once and nothing else does.
@@ -222,7 +222,7 @@ struct ProjectDetailView: View {
     let project: String
 
     @Environment(AppModel.self) private var model
-    @AppStorage("sessions.live.preferences.v1") private var hostData = Data()
+    @Environment(\.liveSessionPreferences) private var preferencesStore
     @State private var tab: Tab = .findings
     @State private var showingSkills = false
     @State private var skillsPresentationID = UUID()
@@ -396,7 +396,7 @@ struct ProjectDetailView: View {
         #if DEBUG && targetEnvironment(simulator)
         if CodeFixture.enabled { codeSymbols = CodeFixture.status.symbols; return }
         #endif
-        let hosts = ((try? LiveSessionPreferences.read(hostData))?.hosts ?? []).filter { SessionOverviewMonitor.shared.allows(.code, on: $0) }
+        let hosts = (preferencesStore.preferences?.hosts ?? []).filter { SessionOverviewMonitor.shared.allows(.code, on: $0) }
         guard let host = hosts.first else { return }
         codeSymbols = (try? await PhrenConnection.codeStatus(host: host, privateKey: DeviceSSHKey.load(host.id), project: project))?.symbols
     }

@@ -16,10 +16,10 @@ enum IntegrationSettings {
 
 /// Phren Hook: how to put it on a computer, and whether each saved computer has it.
 struct PhrenHookSettingsView: View {
-    @AppStorage("sessions.live.preferences.v1") private var data = Data()
+    @Environment(\.liveSessionPreferences) private var preferencesStore
     @State private var platform = "macOS"
     @State private var copied = false
-    private var hosts: [LiveHost] { (try? LiveSessionPreferences.read(data))?.hosts ?? [] }
+    private var hosts: [LiveHost] { preferencesStore.preferences?.hosts ?? [] }
     private var snippet: String {
         platform == "macOS"
             ? "npx --yes @phren/cli@\(Self.cliVersion) bridge install"
@@ -116,7 +116,7 @@ struct NotificationSettingsView: View {
     @AppStorage(LocalNotificationSettings.approvalsKey) private var approvals = true
     @AppStorage(LocalNotificationSettings.schedulesKey) private var schedules = true
     @State private var denied = false
-    @AppStorage("sessions.live.preferences.v1") private var hostsData = Data()
+    @Environment(\.liveSessionPreferences) private var preferencesStore
     /// Connected computers whose Hook reports push `configured: false`.
     @State private var pushMissing: [String] = []
 
@@ -160,7 +160,7 @@ struct NotificationSettingsView: View {
         .task {
             if approvals || schedules { denied = !(await LocalNotificationMonitor.shared.requestAuthorization()) }
         }
-        .task(id: hostsData) { pushMissing = await PushSetupCheck.unconfigured(hostsData) }
+        .task(id: preferencesStore.data) { pushMissing = await PushSetupCheck.unconfigured(preferencesStore.data) }
         .onChange(of: approvals) { _, value in changed(enabling: value) }
         .onChange(of: schedules) { _, value in changed(enabling: value) }
     }

@@ -11,7 +11,7 @@ struct ChatAgentCard: View, Equatable {
     @Environment(\.openToolOutput) private var openOutput
     @Environment(\.chatChildAgents) private var childAgents
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @AppStorage("sessions.live.preferences.v1") private var hostData = Data()
+    @Environment(\.liveSessionPreferences) private var preferencesStore
     @State private var showPrompt = false
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.agent == rhs.agent && lhs.entry == rhs.entry }
 
@@ -139,7 +139,7 @@ struct ChatAgentCard: View, Equatable {
 
     private func navigation(agent: AgentChild, session: LiveAgentSession,
                             target: AgentChatTarget) -> AgentWorkNavigation? {
-        let hosts = (try? LiveSessionPreferences.read(hostData))?.hosts ?? []
+        let hosts = preferencesStore.preferences?.hosts ?? []
         let offline = Set(SessionOverviewMonitor.shared.computers.compactMap { computer in
             computer.monitor.message != nil || computer.monitor.isStale(at: .now)
                 ? computer.host.id : nil

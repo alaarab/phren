@@ -7,7 +7,7 @@ struct PhrenToolCard: View, Equatable {
     var session: LiveAgentSession? = nil
     @Environment(AppModel.self) private var appModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @AppStorage("sessions.live.preferences.v1") private var hostData = Data()
+    @Environment(\.liveSessionPreferences) private var preferencesStore
     @State private var model = PhrenToolCardModel()
     @State private var opened: PhrenToolCardModel.Destination?
     static func == (lhs: Self, rhs: Self) -> Bool {
@@ -17,7 +17,7 @@ struct PhrenToolCard: View, Equatable {
     private var callID: String { messages.first?.toolCallID ?? messages.first?.id ?? "" }
     private var destination: PhrenToolCardModel.Destination? {
         let source = session.flatMap { session in
-            (try? LiveSessionPreferences.read(hostData))?.projectMatch(
+            preferencesStore.preferences?.projectMatch(
                 hostID: session.host.id, cwd: session.tab.cwd, projects: appModel.sessionProjects)?.project.storeID
         }
         let snapshots = Dictionary(uniqueKeysWithValues: appModel.storeDescriptors.map { ($0.id, appModel.snapshot(for: $0.id)) })

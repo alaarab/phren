@@ -4,7 +4,7 @@ import SwiftUI
 
 struct LiveHostEditor: View {
     @Environment(\.dismiss) private var dismiss
-    @AppStorage("sessions.live.preferences.v1") private var data = Data()
+    @Environment(\.liveSessionPreferences) private var preferencesStore
     var existing: LiveHost?
     @State private var id = UUID()
     @State private var name = ""
@@ -164,10 +164,10 @@ struct LiveHostEditor: View {
     private func forget() {
         Task { @MainActor in
             do {
-                let next = try LiveSessionPreferences.removing(id, from: data)
+                let next = try LiveSessionPreferences.removing(id, from: preferencesStore.data)
                 try await SessionOverviewDiskCache.shared.purge(forgetting: id)
                 try DeviceSSHKey.delete(id)
-                data = next
+                preferencesStore.write(next)
                 dismiss()
             } catch { self.error = error.localizedDescription }
         }
@@ -181,7 +181,7 @@ struct LiveHostEditor: View {
         colorHex = String(color.dropFirst())
         guard existing != nil else { selectedColor = color; return }
         do {
-            data = try LiveSessionPreferences.settingColor(hostID: id, color: color, in: data)
+            try preferencesStore.update { try LiveSessionPreferences.settingColor(hostID: id, color: color, in: $0) }
             selectedColor = color
         }
         catch { self.error = error.localizedDescription }
@@ -193,7 +193,7 @@ struct LiveHostEditor: View {
                                    fingerprint: existing?.fingerprint,
                                    herdrSession: herdrSession.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : herdrSession.trimmingCharacters(in: .whitespacesAndNewlines),
                                    color: selectedColor ?? existing?.color)
-            data = try LiveSessionPreferences.saving(host, in: data)
+            try preferencesStore.update { try LiveSessionPreferences.saving(host, in: $0) }
             saved = true
             dismiss()
         } catch { self.error = error.localizedDescription }

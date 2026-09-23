@@ -10,7 +10,7 @@ struct ScheduleEditorView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @AppStorage("sessions.live.preferences.v1") private var preferencesData = Data()
+    @Environment(\.liveSessionPreferences) private var preferencesStore
 
     @State private var name: String
     @State private var prompt: String
@@ -106,7 +106,7 @@ struct ScheduleEditorView: View {
 
     private var snapshot: LocalStore.Snapshot { model.snapshot(for: storeId) }
     private var projects: [String] { snapshot.projects.map(\.name).sorted() }
-    private var preferences: LiveSessionPreferences? { try? LiveSessionPreferences.read(preferencesData) }
+    private var preferences: LiveSessionPreferences? { preferencesStore.preferences }
     private var hosts: [LiveHost] { preferences?.hosts ?? [] }
     private var chosenHost: LiveHost? {
         hosts.first { host in

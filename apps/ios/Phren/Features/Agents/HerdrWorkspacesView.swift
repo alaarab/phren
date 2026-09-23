@@ -4,7 +4,7 @@ import SwiftUI
 
 struct HerdrWorkspacesView: View {
     let hostID: UUID
-    @AppStorage("sessions.live.preferences.v1") private var data = Data()
+    @Environment(\.liveSessionPreferences) private var preferencesStore
     @Environment(\.scenePhase) private var scenePhase
     @State private var snapshot: LiveWorkspaces?
     @State private var servers: [PhrenConnection.HerdrServer] = []
@@ -21,7 +21,7 @@ struct HerdrWorkspacesView: View {
     @State private var collapsed: Set<String> = []
     @State private var showingServers = false
     @State private var actionTarget: RowAction?
-    private var host: LiveHost? { (try? LiveSessionPreferences.read(data))?.hosts.first { $0.id == hostID } }
+    private var host: LiveHost? { preferencesStore.preferences?.hosts.first { $0.id == hostID } }
     private var active: Bool { visible && scenePhase == .active }
     private struct Edit: Identifiable {
         var id = UUID()
@@ -202,7 +202,7 @@ struct HerdrWorkspacesView: View {
             guard let host else { return }
             do {
                 var changed = host; changed.herdrSession = session == "default" ? nil : session
-                data = try LiveSessionPreferences.saving(changed, in: data)
+                try preferencesStore.update { try LiveSessionPreferences.saving(changed, in: $0) }
             } catch { self.error = error.localizedDescription }
         })
     }
@@ -258,13 +258,13 @@ struct HerdrWorkspacesView: View {
 private struct HerdrPanesView: View {
     let session: LiveAgentSession
     @Environment(\.scenePhase) private var scenePhase
-    @AppStorage("sessions.live.preferences.v1") private var hostData = Data()
+    @Environment(\.liveSessionPreferences) private var preferencesStore
     @State private var panes: [AgentChatPanes.Pane] = []
     @State private var error: String?
     @State private var visible = false
     @State private var creating = false
     @State private var createTask: Task<Void, Never>?
-    private var active: Bool { visible && scenePhase == .active && (try? LiveSessionPreferences.read(hostData))?.hosts.first(where: { $0.id == session.host.id }) == session.host }
+    private var active: Bool { visible && scenePhase == .active && preferencesStore.preferences?.hosts.first(where: { $0.id == session.host.id }) == session.host }
     var body: some View {
         PhrenList {
             Section {

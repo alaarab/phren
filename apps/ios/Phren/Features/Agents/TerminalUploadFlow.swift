@@ -13,7 +13,7 @@ struct TerminalUploadFlow: View {
     let attachments: [AgentAttachment]
     let onOpen: (LiveAgentSession, AgentChatPanes.Pane, [AgentAttachment]) -> Void
     @Environment(\.dismiss) private var dismiss
-    @AppStorage("sessions.live.preferences.v1") private var hostData = Data()
+    @Environment(\.liveSessionPreferences) private var preferencesStore
     @State private var snapshot: LiveWorkspaces?
     @State private var selectedSession: LiveAgentSession?
     @State private var panes: [AgentChatPanes.Pane] = []
@@ -21,7 +21,7 @@ struct TerminalUploadFlow: View {
     @State private var error: String?
     @State private var retry = UUID()
     private var hostMatches: Bool {
-        (try? LiveSessionPreferences.read(hostData))?.hosts.first { $0.id == host.id } == host
+        preferencesStore.preferences?.hosts.first { $0.id == host.id } == host
     }
 
     var body: some View {

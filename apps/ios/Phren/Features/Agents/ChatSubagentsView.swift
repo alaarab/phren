@@ -7,7 +7,7 @@ struct ChatSubagentsView: View {
     let target: AgentChatTarget
     let agents: [AgentChild]
     @Environment(\.dismiss) private var dismiss
-    @AppStorage("sessions.live.preferences.v1") private var hostData = Data()
+    @Environment(\.liveSessionPreferences) private var preferencesStore
     @State private var selected: AgentWorkNavigation?
     /// A worker whose own worktree the Hook knows, opened straight into Changes.
     @State private var changesChild: String?
@@ -19,8 +19,10 @@ struct ChatSubagentsView: View {
     @State private var clearing = false
     @State private var clearError: String?
     private var scope: String { target.id }
-    private var history: AgentWorkHistory {
-        (try? JSONDecoder().decode(AgentWorkHistory.self, from: historyData)) ?? AgentWorkHistory()
+    /// Decoded once per change of the stored bytes; rows read this, never the JSON.
+    @State private var history = AgentWorkHistory()
+    private static func decodeHistory(_ data: Data) -> AgentWorkHistory {
+        (try? JSONDecoder().decode(AgentWorkHistory.self, from: data)) ?? AgentWorkHistory()
     }
     private var overview: SessionOverviewMonitor { .shared }
 
@@ -84,8 +86,9 @@ struct ChatSubagentsView: View {
             .navigationDestination(item: $changesChild) { AgentChangesView(session: session, target: target, child: $0) }
             .toolbar(.hidden, for: .navigationBar)
         }
+        .onChange(of: historyData, initial: true) { _, data in history = Self.decodeHistory(data) }
         .onChange(of: agents, initial: true) { _, fresh in
-            var next = history
+            var next = Self.decodeHistory(historyData)
             next.observe(fresh, scope: scope, now: .now)
             historyData = (try? JSONEncoder().encode(next)) ?? historyData
         }
@@ -120,7 +123,7 @@ struct ChatSubagentsView: View {
             }
             if row.agent.displayState == .failed {
                 Button {
-                    var next = history
+                    var next = Self.decodeHistory(historyData)
                     next.dismissed.insert(scope + "/" + row.agent.navigationID)
                     historyData = (try? JSONEncoder().encode(next)) ?? historyData
                 } label: {
@@ -196,7 +199,7 @@ struct ChatSubagentsView: View {
     }
 
     private func navigation(for agent: AgentChild) -> AgentWorkNavigation? {
-        let hosts = (try? LiveSessionPreferences.read(hostData))?.hosts ?? []
+        let hosts = preferencesStore.preferences?.hosts ?? []
         let offline = Set(overview.computers.compactMap { computer in
             computer.monitor.message != nil || computer.monitor.isStale(at: .now)
                 ? computer.host.id : nil
