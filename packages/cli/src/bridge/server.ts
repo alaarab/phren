@@ -3,6 +3,7 @@ import { FanoutMessages } from "./fanout-messages.js";
 import { handOff } from "./hand-off.js";
 import { activateModules as moduleSnapshot, type ModuleSnapshot } from "../modules/runtime.js";
 import { BUILTIN_MODULES, disabledHint } from "../modules/registry.js";
+import { logger } from "../logger.js";
 import { randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
@@ -21,7 +22,7 @@ import { WorkspaceContextUsage } from "./context.js";
 import { DispatchService, dispatchProjectDirectory, dispatchStatus } from "./dispatch.js";
 import { remoteChildren } from "./dispatch-tree.js";
 import { addGrant, listGrants, removeGrant } from "./grants.js";
-import { hookPeers, peerRequest } from "./peers.js";
+import { optionalHookPeers, peerRequest } from "./peers.js";
 import { candidateRepos, enrollProject } from "./enroll.js";
 import { browseFiles } from "./files.js";
 import { MAX_FILE_RANGE, rangeInteger, readFileRange } from "./file-range.js";
@@ -362,8 +363,10 @@ export async function serve(version: string): Promise<void> {
             const target = targetFromURL(url); await validateTarget(target);
             const local = await childAgentTree(target.source, target.session, 0, new Set(), computerID);
             let remote: Awaited<ReturnType<typeof remoteChildren>> = [];
+            let peerError: string | undefined;
             if (url.searchParams.get("remote") !== "0") {
-              const peers = await hookPeers().catch(() => []);
+              const { peers, peerError: reason } = await optionalHookPeers();
+              peerError = reason;
               remote = await remoteChildren({ provider: target.source, session: target.session, computer: computerID },
                 await dispatchStatus(), async receipt => {
                   const peer = peers.find(candidate => candidate.name === receipt.computer);
@@ -376,7 +379,7 @@ export async function serve(version: string): Promise<void> {
                     agents: Array.isArray(snapshot.agents) ? snapshot.agents : [] };
                 });
             }
-            result = { computer: info.computer, agents: publicChildAgents([...local, ...remote]) }; break;
+            result = { computer: info.computer, agents: publicChildAgents([...local, ...remote]), ...(peerError ? { peerError } : {}) }; break;
           }
           case "/v1/subagents/messages": {
             result = await fanoutMessages.list(targetFromURL(url), url.searchParams.get("child")); break;
@@ -797,7 +800,11 @@ export async function serve(version: string): Promise<void> {
           const page = await reader.read(before, abort.signal);
           send(client, { ...page, type: "older", ...conversation });
         }
-      } catch { stop(); client.close(1011, "The conversation changed; refresh"); }
+      } catch (error) {
+        const reason = streamCloseReason(error);
+        if (!(error instanceof BridgeError && error.status === 409)) logger.warn("stream", `${url.pathname} closed: ${reason}`);
+        stop(); client.close(1011, reason);
+      }
       finally { busy = false; if (pending.length) void tick(); }
     };
     client.on("message", bytes => {
@@ -963,6 +970,23 @@ async function targetForPane(server: string, pane: Json): Promise<Json | undefin
  * by diffing snapshots; `agent.start` returns once Herdr has detected the
  * agent and it is ready for input, which can take most of `timeoutMs`.
  */
+/**
+ * Why a transcript or status stream closed. Only a real target change (the
+ * 409 validation) says the conversation changed; I/O, parse and git failures
+ * keep their own words, with absolute paths cut to their last component and
+ * the reason bounded to WebSocket's 123-byte close limit.
+ */
+export function streamCloseReason(error: unknown): string {
+  if (error instanceof BridgeError && error.status === 409) return "The conversation changed; refresh";
+  const code = (error as NodeJS.ErrnoException)?.code;
+  const first = (error instanceof Error ? error.message : String(error)).split("\n")[0]
+    .replace(/[\x00-\x1f\x7f]/g, " ").replace(/(?:~|\/)[^\s'",:]*\/([^\s'",:/]+)/g, "$1").trim();
+  let reason = error instanceof BridgeError ? first
+    : `Stream failed: ${typeof code === "string" && !first.startsWith(code) ? `${code} ` : ""}${first || "unknown error"}`;
+  while (Buffer.byteLength(reason) > 123) reason = reason.slice(0, -1);
+  return reason;
+}
+
 /** The Herdr agent-name slug for a human label: "Conductor smoke 4" becomes "conductor-smoke-4". */
 export function herdrAgentName(label: string): string {
   const slug = label.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^[^a-z]+/, "").replace(/-+$/, "").slice(0, 32).replace(/-+$/, "");

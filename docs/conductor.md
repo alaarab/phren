@@ -67,7 +67,9 @@ phren dispatch sessions
 `live_sessions` (MCP) and `phren dispatch sessions` list every live agent on
 this computer and on each computer in this Hook's `hooks.yaml`, with project,
 harness, status, role and the target `hand_off` takes. A peer that does not
-answer is listed under `unreachable`. Enrollment is one-way: a computer sees
+answer is listed under `unreachable`; a `hooks.yaml` that cannot be read or
+parsed leaves only this computer's agents and says why in `peerError`.
+Enrollment is one-way: a computer sees
 only the peers in its own `hooks.yaml`, so a conductor on each computer needs
 the others enrolled there too. A conductor starts in the phren store and has no
 project; its Herdr name is `conductor` (or `conductor-<label>`).
@@ -84,7 +86,9 @@ harness (`codex`, `claude`, `opencode`), optional model, label and prompt. The
 remote Hook resolves the project's checkout. Callers do not pass a checkout
 path. `anywhere` chooses the least busy responding peer, with names breaking
 ties. Capacity preflight requires a compatible Hook and the configured Herdr
-server. Placement currently requires Herdr.
+server. Peers that fail it sit out and are named with their reason in the
+receipt's `skipped` list (and in the error when none is left). Placement
+currently requires Herdr.
 
 Each placement writes a private receipt in `<bridge>/dispatches/<id>.json`
 without retaining the prompt. States are `launching`, `sending`, `accepted`,

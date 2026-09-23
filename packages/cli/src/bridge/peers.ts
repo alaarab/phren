@@ -4,6 +4,7 @@ import path from "node:path";
 import { Duplex } from "node:stream";
 import { load } from "js-yaml";
 import { z } from "zod";
+import { logger } from "../logger.js";
 import { hookRequest } from "./client.js";
 import { computerName, dispatchKeyPath, publicComputerKey } from "./computers.js";
 import { BridgeError, bridgeRoot, serverName, type Json } from "./protocol.js";
@@ -20,12 +21,42 @@ export type HookPeer = z.infer<typeof peerSchema>;
 
 export async function hookPeers(root = bridgeRoot()): Promise<HookPeer[]> {
   const file = path.join(root, "hooks.yaml");
-  const info = await lstat(file).catch(() => undefined);
-  if (!info) throw new BridgeError(409, "Configure peers and verified host keys in the Hook's hooks.yaml first.");
+  const info = await lstat(file).catch(error => {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw new BridgeError(409, `hooks.yaml could not be read (${(error as NodeJS.ErrnoException).code ?? "unknown error"}).`);
+  });
+  if (!info) throw new BridgeError(409, "Configure peers and verified host keys in the Hook's hooks.yaml first.", { hooksYaml: "missing" });
   if (!info.isFile() || info.isSymbolicLink() || info.size > 65_536 || (info.mode & 0o077)) throw new BridgeError(409, "hooks.yaml must be a private regular file (0600), at most 64 KiB.");
   const { computers } = z.object({ version: z.literal(1), computers: z.array(peerSchema).max(32) }).strict().parse(load(await readFile(file, "utf8")));
   if (new Set(computers.map(peer => peer.name)).size !== computers.length) throw new BridgeError(409, "hooks.yaml has duplicate computer names.");
   return computers;
+}
+
+/**
+ * Peers for reads that keep working without them. No hooks.yaml means no
+ * peers; a broken one is logged and returned as `peerError` so the response
+ * can say why remote agents are missing instead of hiding them.
+ */
+export async function optionalHookPeers(root = bridgeRoot()): Promise<{ peers: HookPeer[]; peerError?: string }> {
+  try { return { peers: await hookPeers(root) }; } catch (error) {
+    if (error instanceof BridgeError && error.details?.hooksYaml === "missing") return { peers: [] };
+    const peerError = hooksYamlError(error);
+    // Polled routes call this often; log each distinct problem once.
+    if (peerError !== lastPeerError) logger.warn("peers", peerError);
+    lastPeerError = peerError;
+    return { peers: [], peerError };
+  }
+}
+let lastPeerError: string | undefined;
+
+function hooksYamlError(error: unknown): string {
+  if (error instanceof BridgeError) return error.message;
+  if (error instanceof z.ZodError) {
+    const issue = error.issues[0];
+    return `hooks.yaml is invalid${issue?.path.length ? ` at ${issue.path.join(".")}` : ""}: ${issue?.message ?? "unexpected shape"}`.slice(0, 300);
+  }
+  const first = (error instanceof Error ? error.message : String(error)).split("\n")[0].replace(/[\x00-\x1f\x7f]/g, " ");
+  return `hooks.yaml could not be parsed: ${first}`.slice(0, 300);
 }
 
 export function peerSSHArgs(peer: HookPeer, knownHosts: string, key: string): string[] {
@@ -35,6 +66,13 @@ export function peerSSHArgs(peer: HookPeer, knownHosts: string, key: string): st
     "-o", "PasswordAuthentication=no", "-o", "KbdInteractiveAuthentication=no", "-o", "ForwardAgent=no",
     "-o", "ClearAllForwardings=yes", "-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", "ConnectTimeout=10",
     "-i", key, "-p", String(peer.port), "-l", peer.username, "--", peer.address, "phren-hook v1 pipe"];
+}
+
+/** Keeps ssh's own first stderr line (one line, bounded) and its exit code. */
+export function peerOfflineMessage(diagnostic: string, exitCode: number | null | undefined): string {
+  const line = diagnostic.split(/\r?\n/).map(text => text.replace(/[\x00-\x1f\x7f]/g, " ").trim().replace(/^ssh:\s*/, "")).find(Boolean)?.slice(0, 200);
+  const details = [line ? `ssh: ${line}` : "", typeof exitCode === "number" ? `exit ${exitCode}` : ""].filter(Boolean).join("; ");
+  return `The remote Hook is offline or SSH did not confirm the request${details ? ` (${details})` : ""}.`;
 }
 
 /** A pin is supplied out of band; dispatch never learns or replaces host keys. */
@@ -61,14 +99,20 @@ export async function peerRequest(peer: HookPeer, route: string, data?: Json): P
     ssh.stdin.on("error", error => stream?.destroy(error));
     let diagnostic = "";
     child.stderr!.on("data", bytes => { diagnostic = (diagnostic + bytes.toString()).slice(-4096); });
-    child.on("error", () => stream?.destroy(new BridgeError(503, "SSH is unavailable.")));
+    const exited = new Promise<number | null>(resolve => ssh.once("exit", code => resolve(code)));
+    child.on("error", error => stream?.destroy(new BridgeError(503, `SSH is unavailable (${(error as NodeJS.ErrnoException).code ?? "spawn failed"}).`)));
     try {
       return await hookRequest(route, data, { createConnection: () => stream! }, data === undefined ? 15_000 : 65_000);
     } catch (error) {
+      if (!(error instanceof BridgeError)) {
+        // ssh's stderr and exit status usually land just after the stream ends.
+        const exitCode = await Promise.race([exited, new Promise<undefined>(resolve => { setTimeout(() => resolve(undefined), 250).unref(); })]);
+        if (!/Permission denied|Host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED/i.test(diagnostic))
+          throw new BridgeError(503, peerOfflineMessage(diagnostic, exitCode));
+      }
       if (/Permission denied/i.test(diagnostic)) throw new BridgeError(403, "The remote computer has not enrolled this dispatch key.");
       if (/Host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED/i.test(diagnostic)) throw new BridgeError(403, "The remote SSH host key does not match its pin.");
-      if (error instanceof BridgeError) throw error;
-      throw new BridgeError(503, "The remote Hook is offline or SSH did not confirm the request.");
+      throw error;
     }
   } finally { stream?.destroy(); child?.kill(); await rm(temporary, { recursive: true, force: true }); }
 }

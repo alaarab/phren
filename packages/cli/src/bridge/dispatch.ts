@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { lstat, mkdir, readFile, readdir, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
+import { logger } from "../logger.js";
 import { readProjectConfig } from "../project-config.js";
 import { computerName } from "./computers.js";
 import { dispatchParentSchema, validateDispatchParent } from "./dispatch-tree.js";
@@ -30,8 +31,11 @@ const receiptSchema = dispatchSchema.omit({ prompt: true }).extend({
   state: z.enum(["launching", "sending", "accepted", "uncertain", "failed"]),
   target: remoteTarget.optional(), error: z.string().max(500).optional(),
   granted: z.string().max(200).optional().describe("Scope of the conductor grant that allowed this call."),
+  skipped: z.array(z.object({ computer: computerName, reason: z.string().max(200) }).strict()).max(32).optional()
+    .describe("Computers left out of anywhere placement, with the reason each could not report capacity."),
 });
 type Receipt = z.infer<typeof receiptSchema>;
+type Skipped = { computer: string; reason: string };
 
 export async function dispatchProjectDirectory(project: unknown): Promise<string> {
   const name = projectName.parse(project);
@@ -48,15 +52,31 @@ async function save(receipt: Receipt): Promise<void> {
   await atomic(path.join(root, `${receipt.id}.json`), receipt);
 }
 
+/** No ledger yet is normal; any other read failure is logged before it reads as empty. */
+async function receiptNames(root: string): Promise<string[]> {
+  try { return await readdir(root); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") logger.warn("dispatch", `Could not list dispatch receipts: ${failureReason(error)}`);
+    return [];
+  }
+}
+
+/** One bounded line for a log or a receipt: a Bridge message, an errno code, or the error's first line. */
+export function failureReason(error: unknown): string {
+  if (error instanceof z.ZodError) return "The remote Hook sent an unexpected reply (protocol mismatch).";
+  const code = (error as NodeJS.ErrnoException)?.code;
+  const message = error instanceof Error ? error.message.split("\n")[0] : String(error);
+  return `${typeof code === "string" && !(error instanceof BridgeError) ? `${code}: ` : ""}${message}`.replace(/[\x00-\x1f\x7f]/g, " ").slice(0, 200);
+}
+
 export async function dispatchStatus(): Promise<Receipt[]> {
   const root = path.join(bridgeRoot(), "dispatches");
-  const names = (await readdir(root).catch(() => [])).filter(name => /^[a-f0-9-]{36}\.json$/.test(name)).slice(0, 1024);
+  const names = (await receiptNames(root)).filter(name => /^[a-f0-9-]{36}\.json$/.test(name)).slice(0, 1024);
   const receipts: Receipt[] = [];
   for (const name of names) {
     try {
       const file = path.join(root, name);
       const info = await lstat(file);
-      if (!info.isFile() || info.isSymbolicLink() || info.size > 8192) continue;
+      if (!info.isFile() || info.isSymbolicLink() || info.size > 16384) continue;
       const receipt = receiptSchema.parse(JSON.parse(await readFile(file, "utf8")));
       // A service restart cannot prove whether an in-flight mutation arrived.
       if (["launching", "sending"].includes(receipt.state)) receipt.state = "uncertain";
@@ -107,19 +127,25 @@ export class DispatchService {
         if (!this.identity) throw new BridgeError(503, "This Hook cannot validate a dispatch parent.");
         await validateDispatchParent(data, this.identity.computerID, this.identity.validateParentTarget);
       }
-      if ((await readdir(path.join(bridgeRoot(), "dispatches")).catch(() => [])).length >= 1024) throw new BridgeError(429, "Dispatch history is full. Archive old receipts before dispatching again.");
+      if ((await receiptNames(path.join(bridgeRoot(), "dispatches"))).length >= 1024) throw new BridgeError(429, "Dispatch history is full. Archive old receipts before dispatching again.");
       const peers = await hookPeers();
       let peer: HookPeer | undefined;
       let remoteComputerID: string | undefined;
+      const skipped: Skipped[] = [];
       if (data.computer === "anywhere") {
         const available = await Promise.all(peers.map(async candidate => {
-          try { return { peer: candidate, ...await capacity(candidate) }; } catch { return undefined; }
+          try { return { peer: candidate, ...await capacity(candidate) }; } catch (error) {
+            // A peer that cannot report capacity sits out this placement, and the receipt says why.
+            skipped.push({ computer: candidate.name, reason: failureReason(error) });
+            return undefined;
+          }
         }));
+        skipped.sort((a, b) => a.computer.localeCompare(b.computer));
         const selected = available.filter((item): item is NonNullable<typeof item> => !!item)
           .sort((a, b) => a.working - b.working || a.peer.name.localeCompare(b.peer.name))[0];
         peer = selected?.peer;
         remoteComputerID = selected?.computerId;
-        if (!peer) throw new BridgeError(503, "No enrolled computer with a running Herdr is connected.");
+        if (!peer) throw new BridgeError(503, "No enrolled computer with a running Herdr is connected.", skipped.length ? { skipped } : undefined);
       } else {
         peer = peers.find(candidate => candidate.name === data.computer);
         if (!peer) throw new BridgeError(404, "Unknown computer. Add its verified connection to hooks.yaml.");
@@ -130,7 +156,7 @@ export class DispatchService {
       const { prompt, ...metadata } = data;
       const receipt: Receipt = { ...metadata, computer: peer.name, computerId: remoteComputerID!, id: randomUUID(),
         createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), state: "launching",
-        ...(grant ? { granted: grantLabel(grant) } : {}) };
+        ...(grant ? { granted: grantLabel(grant) } : {}), ...(skipped.length ? { skipped } : {}) };
       await save(receipt);
       try {
         const launched = await peerRequest(peer, `/v1/workspaces/launch?server=${encodeURIComponent(peer.server)}`,

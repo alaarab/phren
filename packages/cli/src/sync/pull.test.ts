@@ -8,7 +8,8 @@ import { getRuntimeHealth } from "../governance/policy.js";
 import { writeInstallPreferences } from "../init/preferences.js";
 import { runtimeFile } from "../phren-paths.js";
 import { initTestPhrenRoot, makeTempDir, writeFile } from "../test-helpers.js";
-import { parsePullInterval, periodicPullEnabled, pollStore, type RunGit, resolvePullInterval, runPollGit, startPullPolling } from "./pull.js";
+import { describeAutoSave } from "./outcome.js";
+import { parsePullInterval, periodicPullEnabled, pollStore, readPollState, type RunGit, resolvePullInterval, runPollGit, startPullPolling } from "./pull.js";
 
 const cleanups: (() => void)[] = [];
 afterEach(() => {
@@ -165,6 +166,46 @@ describe("store polling with real Git repositories", () => {
     expect(git(reader, "rev-parse", "HEAD")).toBe(localHead);
     expect(git(reader, "status", "--porcelain")).toBe("");
     expect(fs.existsSync(path.join(reader, ".git", "rebase-merge"))).toBe(false);
+    // The outcome is logged and kept with ahead/behind counts for doctor and status.
+    const sync = getRuntimeHealth(reader).lastSync;
+    expect(sync).toMatchObject({ lastPullStatus: "error", ahead: 1 });
+    expect(typeof sync?.behind).toBe("number");
+    const log = fs.readFileSync(runtimeFile(reader, "background-sync.log"), "utf8");
+    expect(log).toMatch(new RegExp(`periodic-pull: failed deferred: Periodic pull deferred: local and remote history diverged\\..* \\(ahead 1, behind ${sync?.behind}\\)\\n`));
+  });
+
+  it("logs a quiet unchanged poll only when it follows a different outcome", async () => {
+    const { reader } = fixture();
+    const log = () => fs.readFileSync(runtimeFile(reader, "background-sync.log"), "utf8").trim().split("\n");
+    expect((await pollStore(reader, 60, runPollGit, 100_000)).status).toBe("unchanged");
+    expect(log()).toEqual([expect.stringMatching(/periodic-pull: ok unchanged: Remote is unchanged\. \(ahead 0, behind 0\)$/)]);
+    expect((await pollStore(reader, 60, runPollGit, 200_000)).status).toBe("unchanged");
+    expect(log()).toHaveLength(1);
+    expect(getRuntimeHealth(reader).lastSync).toMatchObject({ ahead: 0, behind: 0 });
+  });
+
+  it("moves a corrupt poll state aside and logs it instead of silently resetting", async () => {
+    const { reader } = fixture();
+    const state = runtimeFile(reader, "pull-poll.json");
+    writeFile(state, "{ not json");
+    expect(readPollState(reader)).toEqual({});
+    expect(fs.existsSync(state)).toBe(false);
+    const aside = fs.readdirSync(path.dirname(state)).filter((name) => name.startsWith("pull-poll.json.corrupt-"));
+    expect(aside).toHaveLength(1);
+    expect(fs.readFileSync(path.join(path.dirname(state), aside[0]), "utf8")).toBe("{ not json");
+    expect(fs.readFileSync(runtimeFile(reader, "background-sync.log"), "utf8"))
+      .toContain(`periodic-pull: poll state was corrupt (`);
+    writeFile(state, "[1]");
+    expect(readPollState(reader)).toEqual({});
+    expect(fs.readFileSync(runtimeFile(reader, "background-sync.log"), "utf8")).toContain("(not a JSON object)");
+  });
+
+  it("describes a failed auto-save with its first error line and ahead/behind", () => {
+    expect(describeAutoSave({ status: "sync-failed", detail: "merge conflict in phren/tasks.md\nhint: fix it", at: "2026-09-22T10:00:00.000Z" }, { ahead: 23, behind: 140 }))
+      .toBe("sync failed: merge conflict in phren/tasks.md (ahead 23, behind 140) @ 2026-09-22T10:00:00.000Z");
+    expect(describeAutoSave({ status: "saved-pushed" }, { ahead: 0, behind: 0 })).toBe("last auto-save: saved-pushed");
+    expect(describeAutoSave({ status: "error", detail: "git add failed" }, undefined)).toBe("auto-save failed: git add failed");
+    expect(describeAutoSave(undefined, undefined)).toBe("no auto-save runtime record yet");
   });
 
   it("leaves in-progress Git operations and held Phren locks alone", async () => {
