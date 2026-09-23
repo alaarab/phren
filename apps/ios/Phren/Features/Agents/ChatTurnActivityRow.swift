@@ -37,10 +37,8 @@ struct ChatTurnActivityRow: View {
 
     var body: some View {
         if activity.isLive && scenePhase == .active {
-            TimelineView(.periodic(from: activity.startedAt, by: 1)) { tick in
-                let _ = PerformanceCounters.bump("tick.turn-activity")
-                live(at: tick.date)
-            }
+            // The shared clock ticks this leaf alone.
+            ClockText { now in live(at: now) }
         } else if activity.isLive {
             live(at: .now)
         } else {

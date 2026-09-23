@@ -70,14 +70,11 @@ struct VoiceCaptureView: View {
     @State private var permission: SpeechTranscriber.PermissionState = .notDetermined
     @State private var recognizerUnavailable = false
     @State private var recordingStartedAt: Date?
-    @State private var now = Date()
     @State private var pulse = false
     @State private var confirmDiscard = false
     @State private var saving = false
     @State private var kind: CaptureKind = .note
     @State private var showingTarget = false
-
-    private let ticker = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     init(targets: [VoiceCaptureTarget], preselected: VoiceCaptureTarget? = nil) {
         self.targets = targets
@@ -145,7 +142,6 @@ struct VoiceCaptureView: View {
             selectedTarget = preselected ?? Self.defaultTarget(in: targets)
             await preparePermissions()
         }
-        .onReceive(ticker) { now = $0 }
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .background, .inactive:
@@ -209,10 +205,13 @@ struct VoiceCaptureView: View {
             .onAppear { pulse = true }
 
             if transcriber.isRecording {
-                Text(elapsedText)
-                    .font(.title3.monospacedDigit())
-                    .foregroundStyle(PhrenTheme.textMuted)
-                    .accessibilityLabel("Recording, \(elapsedText) elapsed")
+                // The recording's duration is the only thing that ticks.
+                ClockText { now in
+                    Text(elapsedText(at: now))
+                        .font(PhrenTypography.title3.monospacedDigit())
+                        .foregroundStyle(PhrenTheme.textMuted)
+                        .accessibilityLabel("Recording, \(elapsedText(at: now)) elapsed")
+                }
             } else if let reason = transcriber.failureReason {
                 Text(reason)
                     .font(.footnote)
@@ -328,7 +327,6 @@ struct VoiceCaptureView: View {
             transcriber.onDraftChange = { draft.wrappedValue = $0 }
             transcriber.start(draft: text)
             recordingStartedAt = .now
-            now = .now
         }
     }
 
@@ -338,7 +336,7 @@ struct VoiceCaptureView: View {
         recognizerUnavailable = !transcriber.isRecognizerAvailable
     }
 
-    private var elapsedText: String {
+    private func elapsedText(at now: Date) -> String {
         guard let start = recordingStartedAt else { return "0:00" }
         let seconds = max(0, Int(now.timeIntervalSince(start)))
         return String(format: "%d:%02d", seconds / 60, seconds % 60)

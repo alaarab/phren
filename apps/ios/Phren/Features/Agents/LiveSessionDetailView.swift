@@ -23,10 +23,9 @@ struct LiveSessionDetailView: View {
     }
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-                let _ = PerformanceCounters.bump("tick.session-detail")
-                let fresh = monitor.isLive(at: context.date)
-                let stale = monitor.isStale(at: context.date)
+        Group {
+                let fresh = monitor.live
+                let stale = monitor.stale
                 if let session {
                     let project = match?.project
                     ScrollView {

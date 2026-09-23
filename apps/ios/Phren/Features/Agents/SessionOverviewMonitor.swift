@@ -151,18 +151,10 @@ final class SessionOverviewMonitor {
             do { try await Task.sleep(until: initialDeadline ?? .now, clock: .continuous) } catch { return }
             if generation == run { revealIfPossible(deadlineReached: true) }
         }
-        // Only a freshness transition publishes a new screen. The per-second
-        // relative clock below the cards never reads the list's inputs.
-        let freshness = Task {
-            while !Task.isCancelled {
-                do { try await Task.sleep(for: .seconds(1)) } catch { return }
-                PerformanceCounters.bump("tick.overview-freshness")
-                guard generation == run, ready else { continue }
-                let current = computers.map { $0.monitor.isFresh(at: .now) }
-                if current != screen.computers.map(\.fresh) { publish() }
-            }
-        }
-        defer { deadline.cancel(); freshness.cancel(); if generation == run { publication?.cancel() } }
+        // Only a freshness transition publishes a new screen: each monitor
+        // reports its answer aging out through onSnapshotChanged, from a
+        // one-shot timer, so no clock polls the computers every second.
+        defer { deadline.cancel(); if generation == run { publication?.cancel() } }
         await withTaskGroup(of: Void.self) { group in
             for computer in computers {
                 group.addTask {

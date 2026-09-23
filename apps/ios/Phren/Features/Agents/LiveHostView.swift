@@ -125,24 +125,21 @@ struct LiveHostView: View {
     private var connectionCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    let _ = PerformanceCounters.bump("tick.host-connection")
-                    let fresh = monitor.isFresh(at: context.date)
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 6) {
-                            Circle().fill(fresh ? PhrenTheme.cyan : PhrenTheme.textDim).frame(width: 5, height: 5)
-                            Text(fresh ? "Live" : monitor.isConnecting ? "Connecting…" : monitor.slowToAnswer ? "Slow to answer" : "Disconnected")
-                            if let date = monitor.lastUpdated {
-                                Text("· updated \(date, style: .relative) ago").lineLimit(1)
-                            }
+                let fresh = monitor.fresh
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Circle().fill(fresh ? PhrenTheme.cyan : PhrenTheme.textDim).frame(width: 5, height: 5)
+                        Text(fresh ? "Live" : monitor.isConnecting ? "Connecting…" : monitor.slowToAnswer ? "Slow to answer" : "Disconnected")
+                        if let date = monitor.lastUpdated {
+                            Text("· updated \(date, style: .relative) ago").lineLimit(1)
                         }
-                        if monitor.snapshot != nil {
-                            Text(fresh
-                                 ? "\(sessions.count) tabs · \(sessions.filter { $0.tab.activity == .working }.count) working · \(sessions.filter { $0.tab.activity == .waiting }.count) waiting"
-                                 : monitor.isConnecting ? "Refreshing…" : "Showing previous status")
-                        }
-                    }.font(.caption).foregroundStyle(PhrenTheme.textMuted)
-                }
+                    }
+                    if monitor.snapshot != nil {
+                        Text(fresh
+                             ? "\(sessions.count) tabs · \(sessions.filter { $0.tab.activity == .working }.count) working · \(sessions.filter { $0.tab.activity == .waiting }.count) waiting"
+                             : monitor.isConnecting ? "Refreshing…" : "Showing previous status")
+                    }
+                }.font(.caption).foregroundStyle(PhrenTheme.textMuted)
                 Spacer(minLength: 0)
                 Button { refreshID = UUID() } label: {
                     Image(systemName: "arrow.clockwise").frame(width: 44, height: 44)
@@ -187,13 +184,10 @@ struct LiveHostView: View {
 
     private func sessionCards(_ entries: [LiveAgentSession]) -> some View {
         ForEach(entries) { session in
-            TimelineView(.periodic(from: .now, by: 1)) { context in
-                let _ = PerformanceCounters.bump("tick.host-card")
-                LiveSessionCard(session: session, fresh: monitor.isLive(at: context.date), stale: monitor.isStale(at: context.date), onDetails: { selected = session }, onClose: { request, confirm in
-                    if confirm { closeRequest = request } else { SessionCloseDialogs.perform(request, monitor: monitor) { closeError = $0 } }
-                })
-                .equatable().separatedSessionRow()
-            }
+            LiveSessionCard(session: session, fresh: monitor.live, stale: monitor.stale, onDetails: { selected = session }, onClose: { request, confirm in
+                if confirm { closeRequest = request } else { SessionCloseDialogs.perform(request, monitor: monitor) { closeError = $0 } }
+            })
+            .equatable().separatedSessionRow()
         }
     }
 

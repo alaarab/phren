@@ -32,19 +32,19 @@ struct LiveStatusBar: View {
     /// full-width bar under the top bar.
     var compact = false
     @Environment(AppModel.self) private var model
-    @State private var now = Date()
-
-    private let ticker = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
         HStack(spacing: 6) {
             Circle()
                 .fill(indicatorColor)
                 .frame(width: 5, height: 5)
-            Text(statusText)
-                .font(compact ? .caption2 : .caption)
-                .foregroundStyle(PhrenTheme.textMuted)
-                .lineLimit(1)
+            // Only the "updated 3s ago" text reads the shared clock.
+            ClockText { now in
+                Text(statusText(at: now))
+                    .font(compact ? PhrenTypography.caption2 : PhrenTypography.caption)
+                    .foregroundStyle(PhrenTheme.textMuted)
+                    .lineLimit(1)
+            }
             if !compact {
                 Spacer()
                 if model.syncStatus.pendingCount > 0 {
@@ -57,7 +57,6 @@ struct LiveStatusBar: View {
         .padding(.horizontal, compact ? 0 : 24)
         .padding(.vertical, compact ? 0 : 8)
         .background(compact ? Color.clear : PhrenTheme.bg)
-        .onReceive(ticker) { now = $0; PerformanceCounters.bump("tick.sync-status") }
     }
 
     private var indicatorColor: Color {
@@ -65,7 +64,7 @@ struct LiveStatusBar: View {
         return model.syncStatus.isLive ? PhrenTheme.cyan : PhrenTheme.textDim
     }
 
-    private var statusText: String {
+    private func statusText(at now: Date) -> String {
         if let error = model.syncStatus.lastError {
             return "sync error — \(error)"
         }

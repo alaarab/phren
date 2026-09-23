@@ -5,7 +5,7 @@ import SwiftUI
 @Observable @MainActor
 final class LiveHostMonitor {
     var snapshot: LiveWorkspaces?
-    var lastUpdated: Date?
+    var lastUpdated: Date? { didSet { if lastUpdated != oldValue { updateFreshness() } } }
     var message: String?
     var fingerprint: String?
     var refreshing = false
@@ -16,7 +16,16 @@ final class LiveHostMonitor {
     /// phone is reaching a computer its cached rows stay in the live groups
     /// and are never labelled stale; only an answer that ages out, or an
     /// outright failure, makes it not live.
-    @ObservationIgnored private(set) var awaitingAnswer = true
+    private(set) var awaitingAnswer = true
+    /// The last answer is younger than `freshSeconds`. Set when an answer
+    /// lands and once more when it ages out, from a one-shot timer, so cards
+    /// and the overview observe freshness without a per-second clock.
+    private(set) var fresh = false
+    /// Fresh, or still making first contact since the app became active.
+    var live: Bool { fresh || (awaitingAnswer && message == nil) }
+    /// A computer that answered and whose answer has aged out.
+    var stale: Bool { !live && lastUpdated != nil }
+    @ObservationIgnored private var expiry: Task<Void, Never>?
     private var generation = UUID()
     @ObservationIgnored private var refreshRequested = false
     @ObservationIgnored private let fetchSnapshot: (LiveHost, Date?) async throws -> LiveWorkspaces
@@ -25,6 +34,21 @@ final class LiveHostMonitor {
     @ObservationIgnored private var publishing: Task<Void, Never>?
     @ObservationIgnored private let approvals = OverviewApprovalMonitor()
     @ObservationIgnored private var approvalRefresh: Task<Void, Never>?
+
+    private func updateFreshness() {
+        let now = Date.now
+        let current = isFresh(at: now)
+        if fresh != current { fresh = current }
+        expiry?.cancel(); expiry = nil
+        guard current, let lastUpdated else { return }
+        let remaining = lastUpdated.addingTimeInterval(Self.freshSeconds).timeIntervalSince(now)
+        expiry = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(max(0, remaining)) + .milliseconds(20)) } catch { return }
+            guard let self else { return }
+            self.updateFreshness()
+            self.onSnapshotChanged?()
+        }
+    }
 
     /// Fetch again now rather than at the end of the poll interval — after a
     /// close, a launch, anything the person just did to the computer.
@@ -280,5 +304,5 @@ extension LiveHostMonitor {
 
     /// The phone is reaching this computer, or has not heard from it yet.
     /// A fresh computer is live even while a poll is in flight.
-    var isConnecting: Bool { !isFresh(at: .now) && message == nil && (refreshing || awaitingAnswer) }
+    var isConnecting: Bool { !fresh && message == nil && (refreshing || awaitingAnswer) }
 }

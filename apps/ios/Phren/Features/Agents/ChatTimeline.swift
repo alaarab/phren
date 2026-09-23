@@ -4,11 +4,27 @@ import SwiftUI
 struct ChatBackgroundJobsView: View {
     let jobs: [ChatBackgroundJob]
     @State private var expanded: Set<String> = []
+    /// When finished jobs were last checked against their linger. Moved on by
+    /// a one-shot timer at the next job's expiry, not by a clock.
+    @State private var checkedAt = Date.now
+    private var shown: [ChatBackgroundJob] {
+        jobs.filter { $0.finishedAt.map { checkedAt.timeIntervalSince($0) <= ChatBackgroundJobs.finishedLinger } ?? true }
+    }
+    private var nextExpiry: Date? {
+        shown.compactMap { $0.finishedAt?.addingTimeInterval(ChatBackgroundJobs.finishedLinger) }.min()
+    }
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { tick in
-            let _ = PerformanceCounters.bump("tick.background-jobs")
-            let jobs = jobs.filter { $0.finishedAt.map { tick.date.timeIntervalSince($0) <= ChatBackgroundJobs.finishedLinger } ?? true }
-            if !jobs.isEmpty {
+        content
+            .onAppear { checkedAt = .now }
+            .task(id: nextExpiry) {
+                guard let nextExpiry else { return }
+                do { try await Task.sleep(for: .seconds(max(0, nextExpiry.timeIntervalSinceNow)) + .milliseconds(20)) } catch { return }
+                checkedAt = .now
+            }
+    }
+    @ViewBuilder private var content: some View {
+        let jobs = shown
+        if !jobs.isEmpty {
             VStack(alignment: .leading, spacing: 5) {
                 let running = jobs.filter { $0.state == .running }.count
                 HStack {
@@ -24,7 +40,12 @@ struct ChatBackgroundJobsView: View {
                                 Circle().fill(job.state == .running ? PhrenTheme.cyan : PhrenTheme.success).frame(width: 6, height: 6)
                                 if let worker = job.worker { AgentProviderGlyph(source: worker, size: 14) }
                                 Text(job.title).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
-                                Text(status(job, at: tick.date)).foregroundStyle(PhrenTheme.chatNeutralDim)
+                                if job.state == .running {
+                                    // Only a running job's duration ticks, from the shared clock.
+                                    ClockText { now in Text(status(job, at: now)).foregroundStyle(PhrenTheme.chatNeutralDim) }
+                                } else {
+                                    Text(status(job, at: job.finishedAt ?? job.startedAt)).foregroundStyle(PhrenTheme.chatNeutralDim)
+                                }
                                 Image(systemName: "chevron.down").rotationEffect(.degrees(expanded.contains(job.id) ? 180 : 0))
                             }
                             if expanded.contains(job.id) {
@@ -41,7 +62,6 @@ struct ChatBackgroundJobsView: View {
                 .overlay(alignment: .topLeading) {
                     Color.clear.frame(width: 1, height: 1).accessibilityElement().accessibilityIdentifier("chat-background-jobs")
                 }
-            }
         }
     }
     private func status(_ job: ChatBackgroundJob, at date: Date) -> String {

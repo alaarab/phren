@@ -12,52 +12,44 @@ extension AppModel {
     }
 }
 
-@Observable @MainActor
-private final class ProjectSessionDiscovery {
+/// The project's candidate sessions, read from the shared overview rather than
+/// fetched again: the overview already keeps every computer's snapshot live
+/// (over the Hook's overview stream, or its poll where a Hook predates it).
+@MainActor
+private struct ProjectSessionDiscovery {
     var sessions: [LiveAgentSession] = []
     var problems: [String] = []
     var refreshing = false
+    /// The newest answer from any of the computers.
     var updated: Date?
-    private var generation = UUID()
+    private var fresh: Set<UUID> = []
 
-    func refresh(hosts: [LiveHost]) async {
-        let run = UUID()
-        generation = run
-        refreshing = true
-        defer { if generation == run { refreshing = false } }
+    init(hosts: [LiveHost], overview: SessionOverviewMonitor) {
         var found: [LiveAgentSession] = []
         var failures: [String] = []
-        await withTaskGroup(of: HostResult.self) { group in
-            for host in hosts {
-                group.addTask {
-                    guard host.fingerprint != nil else {
-                        return HostResult(sessions: [], problem: "\(host.name): finish verifying the computer in Agents.")
-                    }
-                    do {
-                        let snapshot = try await LiveHostMonitor.fetch(host)
-                        return HostResult(sessions: snapshot.sessions(on: host), problem: nil)
-                    } catch {
-                        let message = (error as? LiveConnectionError)?.localizedDescription
-                            ?? (error as? PhrenKitError)?.localizedDescription ?? "Couldn't read sessions."
-                        return HostResult(sessions: [], problem: "\(host.name): \(message)")
-                    }
-                }
+        for host in hosts {
+            guard host.fingerprint != nil else {
+                failures.append("\(host.name): finish verifying the computer in Agents.")
+                continue
             }
-            for await result in group {
-                found += result.sessions
-                if let problem = result.problem { failures.append(problem) }
+            guard let monitor = overview.computers.first(where: { $0.host == host })?.monitor else {
+                refreshing = true
+                continue
             }
+            if let message = monitor.message {
+                failures.append("\(host.name): \(message)")
+            } else if let snapshot = monitor.snapshot {
+                found += snapshot.sessions(on: host)
+            }
+            if monitor.snapshot == nil && monitor.message == nil { refreshing = true }
+            if monitor.fresh { fresh.insert(host.id) }
+            if let date = monitor.lastUpdated, updated.map({ date > $0 }) ?? true { updated = date }
         }
-        guard !Task.isCancelled, generation == run else { return }
         sessions = found.sorted { ($0.host.name, $0.workspaceName, $0.tab.label, $0.tab.id) < ($1.host.name, $1.workspaceName, $1.tab.label, $1.tab.id) }
         problems = failures.sorted()
-        updated = .now
     }
 
-    private struct HostResult: Sendable {
-        let sessions: [LiveAgentSession]
-        let problem: String?
-    }
+    func isFresh(_ session: LiveAgentSession) -> Bool { fresh.contains(session.host.id) }
 }
 
 /// Opened by an explicit request to resume a project's session. Resolve once
@@ -69,7 +61,9 @@ struct ProjectSessionsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.liveSessionPreferences) private var livePreferences
-    @State private var discovery = ProjectSessionDiscovery()
+    private var discovery: ProjectSessionDiscovery {
+        ProjectSessionDiscovery(hosts: preferences?.hosts ?? [], overview: .shared)
+    }
     @State private var visible = false
     @State private var refreshID = UUID()
     @State private var error: String?
@@ -147,20 +141,15 @@ struct ProjectSessionsView: View {
             .onDisappear { visible = false }
             .task(id: DiscoveryIdentity(hosts: preferences?.hosts ?? [], active: visible && scenePhase == .active, refresh: refreshID)) {
                 guard visible, scenePhase == .active, let preferences, !preferences.hosts.isEmpty else { return }
-                while !Task.isCancelled {
-                    PerformanceCounters.bump("poll.project-discovery")
-                    await discovery.refresh(hosts: preferences.hosts)
-                    guard !Task.isCancelled else { return }
-                    do { try await Task.sleep(for: .seconds(10)) } catch { return }
-                }
+                let overview = SessionOverviewMonitor.shared
+                overview.ensureRunning(hosts: preferences.hosts)
+                for computer in overview.computers { computer.monitor.refreshNow() }
             }
     }
 
     private func sessionRow(_ session: LiveAgentSession, assign: Bool) -> some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-            let _ = PerformanceCounters.bump("tick.project-row")
-            let fresh = discovery.updated.map { context.date.timeIntervalSince($0) < 25 } == true
-            HStack(spacing: 0) {
+        let fresh = discovery.isFresh(session)
+        return HStack(spacing: 0) {
                 Button { open(session, assign: assign) } label: {
                     SessionCardContent(session: session, fresh: fresh, stale: !fresh, project: assign ? nil : project,
                                        projectStoreId: assign ? nil : storeID,
@@ -176,13 +165,14 @@ struct ProjectSessionsView: View {
                                  identifierPrefix: "discovered", data: livePreferences.binding)
             }
             .sessionCard()
-        }
     }
 
     private func open(_ session: LiveAgentSession, assign: Bool) {
         do {
+            let discovery = discovery
+            let answeredAt = SessionOverviewMonitor.shared.computers.first { $0.host == session.host }?.monitor.lastUpdated
             guard scenePhase == .active, visible,
-                  discovery.updated.map({ Date().timeIntervalSince($0) < 25 }) == true,
+                  answeredAt.map({ Date().timeIntervalSince($0) < 25 }) == true,
                   let current = discovery.sessions.first(where: { $0.id == session.id }),
                   current.host == session.host, current.tab.cwd == session.tab.cwd,
                   model.sessionProjects.contains(target) else {
