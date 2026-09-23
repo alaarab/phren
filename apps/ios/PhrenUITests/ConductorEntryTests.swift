@@ -87,6 +87,22 @@ final class ConductorEntryTests: XCTestCase {
         XCTAssertTrue(app.buttons["conductor-grant-add"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.buttons["conductor-grant-revoke:0"].exists)
         attachUIScreenshot(app, "Grants reached from the conductor's chat options")
+        // The editor's pickers open their cards (they raised a flag nothing presented).
+        app.buttons["conductor-grant-add"].tap()
+        let scope = app.buttons["conductor-grant-scope"]
+        XCTAssertTrue(scope.waitForExistence(timeout: 5))
+        scope.tap()
+        let everywhere = app.buttons["conductor-grant-scope-option:global"]
+        XCTAssertTrue(everywhere.waitForExistence(timeout: 5), "The Scope pill opens its choices")
+        everywhere.tap()
+        XCTAssertFalse(everywhere.waitForExistence(timeout: 1))
+        let computers = app.buttons["conductor-grant-computers"]
+        if computers.exists {
+            computers.tap()
+            XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "conductor-grant-computer-option:"))
+                .firstMatch.waitForExistence(timeout: 5), "The Computers pill opens its choices")
+        }
+        attachUIScreenshot(app, "Grant editor pickers")
     }
 
     @MainActor

@@ -140,10 +140,15 @@ struct CodeSymbolDossier: View {
     @ViewBuilder private var referencesSection: some View {
         if let references, !references.groups.isEmpty {
             PhrenSectionHeader(title: "References", count: references.total)
-            ForEach(references.groups) { group in
-                Text(group.file).plainListSectionLabel()
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                ForEach(Array(group.references.enumerated()), id: \.offset) { _, reference in
+            // One flat run of rows with unique ids: nested ForEach blocks of
+            // mixed rows inside a lazy stack misjudge heights on long lists
+            // and leave blank bands while scrolling.
+            ForEach(Self.referenceRows(references.groups)) { row in
+                switch row.content {
+                case .file(let file):
+                    Text(file).plainListSectionLabel()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                case .reference(let reference):
                     HStack(spacing: 10) {
                         Text("\(reference.line)")
                             .font(PhrenTheme.Font.monoCaption)
@@ -159,6 +164,21 @@ struct CodeSymbolDossier: View {
             }
         } else if references != nil {
             PhrenSectionHeader(title: "References", count: 0)
+        }
+    }
+
+    private struct ReferenceRow: Identifiable {
+        enum Content { case file(String), reference(CodeReference) }
+        let id: String
+        let content: Content
+    }
+
+    private static func referenceRows(_ groups: [CodeReferenceGroup]) -> [ReferenceRow] {
+        groups.flatMap { group in
+            [ReferenceRow(id: "file:\(group.file)", content: .file(group.file))]
+                + group.references.enumerated().map { index, reference in
+                    ReferenceRow(id: "ref:\(group.file):\(index)", content: .reference(reference))
+                }
         }
     }
 

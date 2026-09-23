@@ -47,7 +47,10 @@ final class ChangesTabTests: XCTestCase {
             .matching(NSPredicate(format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@", "changes-diff-header:", "Sources/App/Settings.swift")).firstMatch
         XCTAssertTrue(header.waitForExistence(timeout: 10))
         XCTAssertTrue(header.isHittable, "The tapped file's diff is on screen")
-        XCTAssertLessThan(header.frame.minY, app.frame.height / 2, "The tapped file's diff is brought to the top")
+        // The last file can only scroll as far as the end of the diff, so it
+        // is checked for being on screen rather than at the very top.
+        XCTAssertGreaterThanOrEqual(header.frame.minY, 0)
+        XCTAssertLessThan(header.frame.maxY, app.frame.height, "The tapped file's diff is on screen")
         attachUIScreenshot(app, "File opened from List")
     }
 

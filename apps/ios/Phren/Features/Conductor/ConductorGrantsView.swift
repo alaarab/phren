@@ -270,6 +270,12 @@ private struct ConductorGrantEditorView: View {
             .scrollDismissesKeyboard(.interactively)
         }
         .background(PhrenTheme.bg)
+        // The pills only raise these flags; the cards are presented here, at
+        // the editor's root, so their scrim covers the whole sheet.
+        .phrenSingleSelectSheet(isPresented: $showScope, title: "Scope", options: scopeOptions,
+                                selection: $scope, rowPrefix: "conductor-grant-scope-option")
+        .phrenMultiSelectSheet(isPresented: $showComputers, title: "Computers", options: computerOptions,
+                               selection: $computers, rowPrefix: "conductor-grant-computer-option")
         .phrenContainerMarker("conductor-grant-add-editor", label: "Add grant")
         .presentationDetents([.large])
         .interactiveDismissDisabled(saving)

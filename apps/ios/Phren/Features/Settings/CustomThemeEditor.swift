@@ -144,13 +144,15 @@ enum ThemeColorField: String, CaseIterable, Identifiable {
     func apply(_ color: UInt32, to p: inout PhrenPalette) {
         switch self {
         case .background:
+            // The background is only the page behind everything; cards and
+            // bars follow Panels, so a black page keeps visible panels.
             p.background = color; p.chatCanvas = color; p.sunken = Self.mix(color, 0, 0.2)
-            p.surface = Self.mix(color, 0xFFFFFF, 0.05); p.raised = Self.mix(color, 0xFFFFFF, 0.14)
+            Self.derivePanels(p.chatPanel, in: &p)
         case .text:
             p.text = color; p.navigation = color
             p.secondary = Self.mix(color, p.background, 0.1)
             p.muted = Self.mix(color, p.background, 0.32); p.dim = Self.mix(color, p.background, 0.38)
-        case .panels: p.chatPanel = color; p.toolPanel = color
+        case .panels: p.chatPanel = color; p.toolPanel = color; Self.derivePanels(color, in: &p)
         case .accent:
             p.action = color; p.accent = color
             p.hover = Self.mix(color, 0xFFFFFF, 0.25); p.solid = Self.mix(color, 0, 0.4)
@@ -167,6 +169,13 @@ enum ThemeColorField: String, CaseIterable, Identifiable {
         case .chatInlineCode: p.chatInlineCode = color
         }
     }
+    /// Cards sit a step above the page toward the Panels color; raised
+    /// bars and fields are the Panels color itself.
+    private static func derivePanels(_ panels: UInt32, in p: inout PhrenPalette) {
+        p.surface = mix(p.background, panels, 0.6)
+        p.raised = panels
+    }
+
     private static func mix(_ a: UInt32, _ b: UInt32, _ fraction: Double) -> UInt32 {
         [16, 8, 0].reduce(UInt32(0)) { result, shift in
             let channel = Double((a >> shift) & 255) * (1 - fraction) + Double((b >> shift) & 255) * fraction
