@@ -15,7 +15,7 @@ import { startChangeRetention } from "./changes.js";
 import { CodeReindexer, CodeRoutes } from "./code-routes.js";
 import { WorkspaceContextUsage } from "./context.js";
 import { DispatchService } from "./dispatch.js";
-import { servers, snapshot, validateTarget } from "./herdr.js";
+import { recentServers, sharedSnapshot, validateTarget } from "./herdr.js";
 import { LaunchLimiter } from "./limits.js";
 import { locateProject } from "./locate.js";
 import { BridgeError, bridgeRoot, objects, PROTOCOL, socketPath } from "./protocol.js";
@@ -140,11 +140,15 @@ export async function serve(version: string): Promise<void> {
     if (recording) return;
     recording = true;
     void (async () => {
-      const live = await servers();
+      // The server list is reused for SERVER_LIST_REUSE_MS instead of pinging
+      // every Herdr directory each tick, and a snapshot an open chat or the
+      // overview fetched in the last four seconds is reused; otherwise each
+      // tick still takes its own, so activity keeps its 5 s resolution.
+      const live = await recentServers();
       await tabActivity.pruneServers(live.map(server => String(server.session)));
       for (const server of live) {
         try {
-          const name = String(server.session), current = await snapshot(name);
+          const name = String(server.session), current = await sharedSnapshot(name, 4000);
           await tabActivity.observe(name, current);
           await journal.record(name, objects(current.panes));
         }

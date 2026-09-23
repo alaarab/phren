@@ -18,7 +18,7 @@ import { optionalHookPeers, peerRequest } from "./peers.js";
 import { candidateRepos, enrollProject } from "./enroll.js";
 import { browseFiles } from "./files.js";
 import { MAX_FILE_RANGE, rangeInteger, readFileRange } from "./file-range.js";
-import { paneChatState, panes, servers, snapshot, validateTarget, workspaceSnapshot } from "./herdr.js";
+import { paneChatState, panes, servers, sharedSnapshot, snapshot, validateTarget, workspaceSnapshot } from "./herdr.js";
 import type { LaunchLimiter } from "./limits.js";
 import { locateProject } from "./locate.js";
 import { gitRoot, launchDirectory, repositoryBranch, webServers } from "./projects.js";
@@ -240,13 +240,13 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           }
           case "/v1/projects/repos": result = { repos: await candidateRepos(await journal.recent()) }; break;
           case "/v1/workspaces": {
-            const server = selectedServer(url), s = await snapshot(server);
+            const server = selectedServer(url), s = await sharedSnapshot(server);
             const lastChanged = await tabActivity.observe(server, s);
             if (url.searchParams.get("watchApprovals") === "1") agentHooks.overview.renew(server);
             const context = await contextUsage.read(server, s);
             await journal.record(server, objects(s.panes));
             const chatStates = new Map(await Promise.all(objects(s.panes).filter(p => p.agent).map(async p =>
-              [p, await paneChatState(server, p).catch((): Json => ({}))] as const)));
+              [p, await paneChatState(server, p, { tokenWhenIdentified: false }).catch((): Json => ({}))] as const)));
             const workspaces = workspaceSnapshot(s, context, agentHooks.pendingPanes(server, s), lastChanged);
             // The branch each tab's agent is on, for the session cards.
             const agentsByTab = new Map<string, Json[]>();

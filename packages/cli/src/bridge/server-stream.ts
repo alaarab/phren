@@ -3,7 +3,7 @@ import { z } from "zod";
 import { logger } from "../logger.js";
 import type { AgentHooks } from "./agent-hooks.js";
 import { queuedQuestion, threadHealth } from "./codex-threads.js";
-import { trustedDirectory, validateTarget } from "./herdr.js";
+import { SNAPSHOT_SHARE_MS, trustedDirectory, validateTarget } from "./herdr.js";
 import { repositoryBranch } from "./projects.js";
 import { BridgeError, type Json, MAX_FRAME, object, type Provider, type Target, targetFromURL } from "./protocol.js";
 import type { CodexQuestions } from "./questions.js";
@@ -109,7 +109,7 @@ export function transcriptStreams(ctx: StreamContext) {
       if (busy || !ready || abort.signal.aborted) return; busy = true;
       try {
         if (first || pending.length === 0) {
-          const pane = first ? initialPane : await validateTarget(target);
+          const pane = first ? initialPane : await validateTarget(target, false, false, SNAPSHOT_SHARE_MS);
           if (awaitingTranscript) await findTranscript();
           if (awaitingTranscript) {
             if (first) send(client, { ...emptyPage, type: "backlog", ...conversation });
@@ -171,7 +171,7 @@ export function transcriptStreams(ctx: StreamContext) {
         }
         while (pending.length && reader && !abort.signal.aborted) {
           const before = pending.shift()!;
-          await validateTarget(target);
+          await validateTarget(target, false, false, SNAPSHOT_SHARE_MS);
           const page = await reader.read(before, abort.signal);
           send(client, { ...page, type: "older", ...conversation });
         }
