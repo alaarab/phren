@@ -38,6 +38,8 @@ struct WebServersView: View {
 struct WebServerSelection: Identifiable {
     let hostID: UUID
     let server: WebServer
+    /// The page a tapped link named ("/admin?tab=2"); nil opens the root.
+    var path: String? = nil
     var id: String { "\(hostID):\(server.id)" }
 }
 

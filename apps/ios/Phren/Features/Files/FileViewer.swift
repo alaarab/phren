@@ -113,6 +113,8 @@ struct FileViewer: View {
     @State private var sharing = false
     @State private var saving = false
     @State private var showingActions = false
+    /// An image fills the screen; its header floats over it and a tap hides it.
+    @State private var chromeHidden = false
 
     init(item: FileViewerItem, actions: [PhrenControlAction] = []) { self.item = item; self.actions = actions }
     init(attachment: AgentAttachment) {
@@ -123,12 +125,36 @@ struct FileViewer: View {
     static func kind(name: String, contentType: String?) -> FilePreviewKind {
         FilePreviewKind.detect(name: name, contentType: contentType)
     }
+    private var isImage: Bool {
+        download.url != nil && (item.previewKind ?? Self.kind(name: item.name, contentType: download.contentType)) == .image
+    }
+
     var body: some View {
-        VStack(spacing: 0) {
-            if !fullscreen { header }
-            if let url = download.url {
-                content(url: url)
-            } else { progress }
+        Group {
+            if isImage, let url = download.url {
+                // The picture gets the whole screen on black; the controls
+                // float over it instead of pushing it down.
+                ZStack(alignment: .top) {
+                    Color.black.ignoresSafeArea()
+                    content(url: url).ignoresSafeArea()
+                    if !chromeHidden {
+                        header
+                            .background(LinearGradient(colors: [.black.opacity(0.72), .black.opacity(0)], startPoint: .top, endPoint: .bottom)
+                                .ignoresSafeArea(edges: .top))
+                            .transition(.opacity)
+                    }
+                }
+                .contentShape(Rectangle())
+                .onTapGesture { withAnimation(.easeInOut(duration: 0.18)) { chromeHidden.toggle() } }
+                .accessibilityAction(named: chromeHidden ? "Show controls" : "Hide controls") { chromeHidden.toggle() }
+            } else {
+                VStack(spacing: 0) {
+                    if !fullscreen { header.background(PhrenTheme.surface) }
+                    if let url = download.url {
+                        content(url: url)
+                    } else { progress }
+                }
+            }
         }
         .background(PhrenTheme.bg.ignoresSafeArea())
         .foregroundStyle(PhrenTheme.text)
@@ -163,7 +189,7 @@ struct FileViewer: View {
             }
             PhrenIconButton(icon: "xmark", label: "Close file") { download.pause(); dismiss() }
                 .phrenIdentifier("file-viewer-close")
-        }.padding(.leading, 16).padding(.trailing, 6).frame(minHeight: 56).background(PhrenTheme.surface)
+        }.padding(.leading, 16).padding(.trailing, 6).frame(minHeight: 56)
     }
     private var progress: some View {
         VStack(spacing: 16) {

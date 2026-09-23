@@ -19,11 +19,25 @@ extension View {
     }
 }
 
+/// Opens a loopback link (http://localhost:5173) on the agent's own computer,
+/// in the web preview; returns false where no computer is known.
+struct OpenLocalWebServerKey: EnvironmentKey { static let defaultValue: ((URL) -> Bool)? = nil }
+extension EnvironmentValues {
+    var openLocalWebServer: ((URL) -> Bool)? {
+        get { self[OpenLocalWebServerKey.self] }
+        set { self[OpenLocalWebServerKey.self] = newValue }
+    }
+}
+
 private struct ChatWebLinks: ViewModifier {
     @State private var pending: URL?
     @Environment(\.openURL) private var testCapture
+    @Environment(\.openLocalWebServer) private var openLocal
     func body(content: Content) -> some View {
         content.environment(\.openURL, OpenURLAction { url in
+            // localhost means the agent's computer, not this phone: open it
+            // there through the preview, no website dialog needed.
+            if WebServer.loopback(url) != nil, openLocal?(url) == true { return .handled }
             if ExternalLinkPolicy.host(for: url) != nil { pending = url }
             return .discarded
         })

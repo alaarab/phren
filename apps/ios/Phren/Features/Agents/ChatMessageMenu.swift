@@ -90,63 +90,50 @@ struct ChatMessageMenuPresenter: ViewModifier {
     }
 }
 
+/// A pressed message's actions: the message stays exactly where it is,
+/// softly highlighted, and a compact card opens just above or below it.
+/// Nothing in the chat moves; a tap outside closes the card.
 private struct ChatMessageMenuOverlay: View {
     let menu: ChatMessageMenu
     let request: ChatMessageMenu.Request
-    @State private var menuHeight: CGFloat = 292
+    private let width: CGFloat = 240
 
     var body: some View {
         GeometryReader { geometry in
             let origin = geometry.frame(in: .global).origin
             let bounds = CGRect(origin: .zero, size: geometry.size).insetBy(dx: 8, dy: 8)
             let source = request.frame.offsetBy(dx: -origin.x, dy: -origin.y)
-            let width = min(320, bounds.width)
-            let layout = ChatMessageMenuLayout(bounds: bounds, source: source,
-                                               menuSize: CGSize(width: width, height: menuHeight))
+            let height = CGFloat(request.actions.count) * 44 + CGFloat(max(0, request.actions.count - 1)) * 0.5
+            let gap: CGFloat = 8
+            let below = bounds.maxY - source.maxY >= height + gap
+            let y = below ? source.maxY + gap : max(bounds.minY, source.minY - gap - height)
+            let x = min(max(source.minX, bounds.minX), bounds.maxX - width)
             ZStack(alignment: .topLeading) {
-                Color.black.opacity(0.5).ignoresSafeArea()
+                Color.black.opacity(0.18).ignoresSafeArea()
                     .contentShape(Rectangle()).onTapGesture { menu.dismiss() }
                     .accessibilityElement()
                     .accessibilityLabel("Dismiss message actions")
                     .accessibilityAddTraits(.isButton)
                     .accessibilityIdentifier("chat-message-menu-backdrop")
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        request.preview.frame(width: layout.preview.width).allowsHitTesting(false)
+                // The pressed message itself, marked in place (not a copy).
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(PhrenTheme.accent.opacity(0.10))
+                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(PhrenTheme.accent.opacity(0.35), lineWidth: 1))
+                    .frame(width: source.width + 8, height: min(source.height, bounds.height) + 8)
+                    .offset(x: source.minX - 4, y: max(bounds.minY, source.minY) - 4)
+                    .allowsHitTesting(false).accessibilityHidden(true)
+                PhrenMenuCard(items: request.actions.map { action in
+                    // Close first, then act: selection and copying take focus
+                    // only once the whole screen is back.
+                    PhrenMenuItem(id: action.id, title: action.title, systemImage: action.icon ?? "circle", isEnabled: action.isEnabled) {
+                        menu.dismiss(then: action.handler)
                     }
-                    .scrollBounceBehavior(.basedOnSize)
-                    .onAppear {
-                        if source.height > layout.preview.height, let paragraph = request.paragraph {
-                            proxy.scrollTo(paragraph, anchor: .center)
-                        }
-                    }
-                }
-                .frame(width: layout.preview.width, height: layout.preview.height)
-                .background(PhrenTheme.chatCanvas, in: RoundedRectangle(cornerRadius: 20))
-                .clipShape(RoundedRectangle(cornerRadius: 20))
-                .shadow(color: .black.opacity(0.25), radius: 12, y: 4)
-                .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("chat-message-menu-preview")
-                .offset(x: layout.preview.minX, y: layout.preview.minY)
-                .transition(menu.reduceMotion ? .opacity : .offset(y: source.minY - layout.preview.minY).combined(with: .opacity))
-
-                panel.frame(width: width).fixedSize(horizontal: false, vertical: true)
-                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { menuHeight = $0 }
-                    .hidden().accessibilityHidden(true).allowsHitTesting(false)
-                panel.frame(width: layout.menu.width, height: layout.menu.height)
-                    .offset(x: layout.menu.minX, y: layout.menu.minY)
+                }, identifier: "chat-message-menu", width: width, dismiss: {})
+                .offset(x: x, y: y)
+                .transition(.scale(scale: 0.96, anchor: below ? .top : .bottom).combined(with: .opacity))
             }
             .accessibilityElement(children: .contain).accessibilityAddTraits(.isModal)
             .accessibilityAction(.escape) { menu.dismiss() }
         }
-    }
-
-    private var panel: some View {
-        PhrenActionSheet(title: "Message", actions: request.actions.map { action in
-            // Restore the whole screen before selection or sharing takes focus.
-            PhrenControlAction(id: action.id, title: action.title, icon: action.icon, dismisses: false) {
-                menu.dismiss(then: action.handler)
-            }
-        }, identifier: "chat-message-menu", dismiss: { menu.dismiss() })
     }
 }

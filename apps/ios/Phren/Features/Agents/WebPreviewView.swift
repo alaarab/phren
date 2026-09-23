@@ -55,7 +55,7 @@ struct WebPreviewView: View {
         .task(id: ConnectionID(host: host, active: phase != .background, retry: retry)) {
             guard phase != .background else { browser.pause(); return }
             guard let host else { browser.message = "This computer was removed."; browser.stop(); return }
-            await browser.connect(host: host, server: selection.server)
+            await browser.connect(host: host, server: selection.server, path: selection.path)
         }
         .onDisappear { browser.stop() }
         .sheet(isPresented: $editing) {
@@ -75,7 +75,7 @@ private final class WebPreviewModel: NSObject, WKNavigationDelegate, WKUIDelegat
     private var generation = UUID()
     private var baseURL: URL?
 
-    func connect(host: LiveHost, server: WebServer) async {
+    func connect(host: LiveHost, server: WebServer, path: String? = nil) async {
         pause()
         let run = UUID(); generation = run
         message = nil; loading = true
@@ -113,7 +113,9 @@ private final class WebPreviewModel: NSObject, WKNavigationDelegate, WKUIDelegat
                 view.allowsBackForwardNavigationGestures = true
                 view.accessibilityIdentifier = "web-app-preview"
                 webView = view
-                view.load(URLRequest(url: url))
+                // A tapped link opens at its own page, on the tunnel's origin.
+                let first = path.flatMap { URL(string: $0, relativeTo: url)?.absoluteURL } ?? url
+                view.load(URLRequest(url: first))
             }
             if let tunnel {
                 await withTaskCancellationHandler { await tunnel.waitUntilClosed() } onCancel: { tunnel.close() }

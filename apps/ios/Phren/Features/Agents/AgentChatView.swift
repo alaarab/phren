@@ -53,6 +53,8 @@ struct AgentChatView: View {
     @State private var assigningProject = false
     @State private var showingChanges = false
     @State private var fullDiff: ChatFullDiff?
+    /// A localhost link the agent printed, open in the web preview on its computer.
+    @State private var localSite: WebServerSelection?
     @State private var turnChanges: ChatTurnChanges?
     @State private var fullToolOutput: FullToolOutput?
     @State private var historyTask: Task<Void, Never>?
@@ -211,6 +213,17 @@ struct AgentChatView: View {
         .environment(\.openChatDiff) { fullDiff = $0 }
         .environment(\.openTurnChanges) { turnChanges = $0 }
         .environment(\.resolvePendingEcho) { id, retry in model.resolvePendingEcho(id, retry: retry) }
+        .environment(\.openLocalWebServer) { url in
+            guard let server = WebServer.loopback(url) else { return false }
+            let path = URLComponents(url: url, resolvingAgainstBaseURL: false).map { parts in
+                parts.percentEncodedPath + (parts.percentEncodedQuery.map { "?" + $0 } ?? "")
+            }
+            localSite = WebServerSelection(hostID: session.host.id, server: server, path: path?.isEmpty == false ? path : nil)
+            return true
+        }
+        .fullScreenCover(item: $localSite) { selection in
+            NavigationStack { WebPreviewView(selection: selection) }
+        }
         .environment(\.openToolOutput) { fullToolOutput = $0 }
         .environment(model.turnControl)
         .environment(\.chatTurnStop, ChatTurnStop(enabled: turnStopEnabled) { sendTask = Task { await model.stop(session) } })

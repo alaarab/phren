@@ -18,6 +18,18 @@ public struct WebServer: Equatable, Sendable, Identifiable {
     public var displayName: String { name.isEmpty || name == "Error response" ? "Web server on port \(port)" : name }
     public var detail: String { [process, "Port \(port)"].compactMap { $0 }.joined(separator: " · ") }
 
+    /// A loopback link an agent printed (http://localhost:5173/admin), as the
+    /// server it names on that agent's computer; nil for any other URL.
+    public static func loopback(_ url: URL) -> Self? {
+        guard let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme),
+              let host = url.host?.lowercased(), ["localhost", "127.0.0.1", "0.0.0.0", "::1", "::"].contains(host),
+              url.user == nil, url.password == nil else { return nil }
+        let port = url.port ?? (scheme == "https" ? 443 : 80)
+        guard (1...65535).contains(port) else { return nil }
+        return Self(name: "", port: port, scheme: scheme, loopbackHost: host.contains(":") ? "::1" : "127.0.0.1",
+                    process: nil, pid: nil, directory: nil, source: nil)
+    }
+
     public static func readSnapshot(_ data: Data) throws -> [Self] {
         guard data.count <= 1_048_576 else { throw PhrenKitError.validation("The server list is too large.") }
         struct Snapshot: Decodable { var servers: [Entry] }

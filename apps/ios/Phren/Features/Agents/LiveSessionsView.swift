@@ -13,7 +13,6 @@ struct LiveSessionsView: View {
     @State private var scheduleOpen: ScheduleHistoryOpen?
     @State private var closeRequest: SessionCloseRequest?
     @State private var closeError: String?
-    @State private var showingMore = false
     @State private var schedulesStoreID: String?
     @State private var setupDestination: LiveSessionsModel.SetupAction?
     @State private var showingConductorLaunch = false
@@ -84,17 +83,31 @@ struct LiveSessionsView: View {
                     PhrenGroup("Computers", identifier: "sessions-computers") {
                         if screen.preferencesReadable {
                             ForEach(screen.computers) { computer in
-                                // Keep this row and its identity as the computer hold-action hook.
-                                NavigationLink { LiveHostView(hostID: computer.id) } label: {
-                                    PhrenMenuRow(title: computer.host.name,
-                                                 subtitle: computer.connecting ? "Connecting…" : computer.slow == true ? "Slow to answer" : computer.host.address,
-                                                 icon: "desktopcomputer",
-                                                 titleColor: PhrenTheme.hostColor(computer.host.color ?? LiveHost.defaultColor(for: computer.host.id)))
-                                        .padding(.horizontal, 12)
-                                        .background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.questionOption))
+                                HStack(spacing: 0) {
+                                    // Keep this row and its identity as the computer hold-action hook.
+                                    NavigationLink { LiveHostView(hostID: computer.id) } label: {
+                                        PhrenMenuRow(title: computer.host.name,
+                                                     subtitle: computer.connecting ? "Connecting…" : computer.host.address,
+                                                     icon: "desktopcomputer",
+                                                     titleColor: PhrenTheme.hostColor(computer.host.color ?? LiveHost.defaultColor(for: computer.host.id)))
+                                            .overlay(alignment: .trailing) { connectionStatus(computer).padding(.trailing, 4) }
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityIdentifier("live-host:\(computer.id)")
+                                    // The terminal needs only SSH, not the Hook: when the
+                                    // Hook is down this is still the way onto the machine.
+                                    if computer.message != nil, !computer.needsVerification {
+                                        NavigationLink { HerdrTerminalView(host: computer.host, route: .herdr(server: "default")) } label: {
+                                            Image(systemName: "terminal").font(.system(size: 15, weight: .semibold))
+                                                .frame(width: 44, height: 44).contentShape(Rectangle())
+                                        }
+                                        .buttonStyle(.plain).foregroundStyle(PhrenTheme.cyan)
+                                        .accessibilityLabel("Open \(computer.host.name)'s terminal")
+                                        .accessibilityIdentifier("overview-terminal:\(computer.id)")
+                                    }
                                 }
-                                .buttonStyle(.plain)
-                                .accessibilityIdentifier("live-host:\(computer.id)")
+                                .padding(.horizontal, 12)
+                                .background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.questionOption))
                             }
                             Button { sessions.adding = true } label: {
                                 PhrenMenuRow(title: "Add computer", icon: "plus")
@@ -127,8 +140,17 @@ struct LiveSessionsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .phrenScreen()
         .toolbar {
-            Button("More", systemImage: "ellipsis") { showingMore = true }
-                .accessibilityIdentifier("sessions-more")
+            if sessions.setupActions.contains(.connectMemory) {
+                Button("Connect memory", systemImage: "brain") { model.showingMemoryConnection = true }
+                    .accessibilityIdentifier("sessions-connect-memory")
+            }
+            // Schedules is the one thing up here worth a button; refresh is a
+            // pull, and computers, skills and instructions live in Settings.
+            if SessionOverviewMonitor.shared.allowsSchedules(),
+               let storeID = model.storeDescriptors.first(where: { model.storeFilter == nil || $0.id == model.storeFilter })?.id {
+                Button("Schedules", systemImage: "clock.badge.checkmark") { schedulesStoreID = storeID }
+                    .accessibilityIdentifier("sessions-schedules")
+            }
             AccountUsageRings(hosts: hosts)
             // Settings → Show on Agents chooses these.
             if IntegrationSettings.enabled(IntegrationSettings.showWebServersKey) {
@@ -153,8 +175,6 @@ struct LiveSessionsView: View {
             sessions.setFocusFilter(AgentFocusFilterStore.load())
         }
         .refreshable { sessions.refresh() }
-        .phrenActionSheet(isPresented: $showingMore, title: "Sessions", actions: moreActions,
-                          identifier: "sessions-more-sheet")
         .navigationDestination(item: $schedulesStoreID) { storeID in
             SchedulesView(storeId: storeID, project: nil)
         }
@@ -257,24 +277,6 @@ struct LiveSessionsView: View {
         .equatable()
     }
 
-    private var moreActions: [PhrenActionSheet.Action] {
-        var actions = sessions.setupActions.map { action in
-            PhrenActionSheet.Action(id: action.rawValue, title: action.title, icon: action.icon) {
-                if action == .connectMemory { model.showingMemoryConnection = true }
-                else { setupDestination = action }
-            }
-        }
-        if overview.screen.preferencesReadable {
-            actions.append(.init(id: "add-computer", title: "Add computer", icon: "plus") { sessions.adding = true })
-        }
-        actions.append(.init(id: "refresh", title: "Refresh all sessions", icon: "arrow.clockwise") { sessions.refresh() })
-        if SessionOverviewMonitor.shared.allowsSchedules(),
-           let storeID = model.storeDescriptors.first(where: { model.storeFilter == nil || $0.id == model.storeFilter })?.id {
-            actions.append(.init(id: "schedules", title: "Schedules", icon: "clock.badge.checkmark") { schedulesStoreID = storeID })
-        }
-        return actions
-    }
-
     /// A schedule notification lands here; the run's history opens once the
     /// store snapshot that holds the schedule is in.
     private struct ScheduleOpenRouting: ViewModifier {
@@ -347,38 +349,8 @@ struct LiveSessionsView: View {
                         sessionCard(session, screen: screen)
                     }
                     if group.id == "previous" {
-                        Text("phren can't reach these computers right now. Their terminal still opens from Connections below.")
+                        Text("phren can't reach these computers right now. Their terminal still opens from their row under Computers.")
                             .font(.caption).foregroundStyle(PhrenTheme.textMuted)
-                    }
-                }
-            }
-        }
-        let problems = screen.computers.filter { $0.message != nil }
-        if !problems.isEmpty {
-            PhrenGroup("Connections") {
-                ForEach(problems) { computer in
-                    HStack(spacing: 8) {
-                        NavigationLink { LiveHostView(hostID: computer.id) } label: {
-                            HStack {
-                                Text(computer.host.name).fontWeight(.medium)
-                                    .foregroundStyle(PhrenTheme.hostColor(computer.host.color ?? LiveHost.defaultColor(for: computer.host.id)))
-                                Spacer()
-                                Text(computer.needsVerification ? "Verify connection" : computer.slow == true ? "Slow to answer" : "Offline")
-                                    .font(.caption).foregroundStyle(PhrenTheme.warning)
-                            }
-                        }.accessibilityIdentifier("overview-reconnect:\(computer.id)")
-                        // The terminal needs only SSH, not the Hook: when the Hook
-                        // is down or overloaded this is still the way onto the
-                        // machine, instead of leaving phren for another app.
-                        if !computer.needsVerification {
-                            NavigationLink { HerdrTerminalView(host: computer.host, route: .herdr(server: "default")) } label: {
-                                Image(systemName: "terminal").font(.system(size: 15, weight: .semibold))
-                                    .frame(width: 44, height: 44).contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain).foregroundStyle(PhrenTheme.cyan)
-                            .accessibilityLabel("Open \(computer.host.name)'s terminal")
-                            .accessibilityIdentifier("overview-terminal:\(computer.id)")
-                        }
                     }
                 }
             }
@@ -386,3 +358,19 @@ struct LiveSessionsView: View {
     }
 }
 
+extension LiveSessionsView {
+    /// A computer's connection trouble, on its own row: a colored dot and a
+    /// word, only when something is wrong.
+    @ViewBuilder func connectionStatus(_ computer: SessionOverviewMonitor.ComputerRow) -> some View {
+        if computer.message != nil || computer.slow == true {
+            let label = computer.needsVerification ? "Verify" : computer.message != nil ? "Offline" : "Slow"
+            HStack(spacing: 5) {
+                Circle().fill(computer.message != nil ? PhrenTheme.warning : PhrenTheme.textMuted).frame(width: 7, height: 7)
+                Text(label).font(PhrenTypography.caption).foregroundStyle(PhrenTheme.warning)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(computer.host.name) \(label.lowercased())")
+            .accessibilityIdentifier("computer-status:\(computer.id)")
+        }
+    }
+}

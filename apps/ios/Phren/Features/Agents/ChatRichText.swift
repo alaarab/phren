@@ -60,13 +60,12 @@ struct ChatRichText: View, Equatable {
                     }
                     .padding(12).background(PhrenTheme.chatPanel, in: RoundedRectangle(cornerRadius: 14))
                     .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(PhrenTheme.border, lineWidth: 1))
-                    .onLongPressGesture(minimumDuration: 0.4) {
+                    .onLongPressGesture(minimumDuration: 0.5) {
                         menuSource?.open(block.id, [
                             PhrenControlAction(id: "copy-table", title: "Copy table", icon: "tablecells") {
                                 ChatClipboard.copy(block.rows.map { $0.joined(separator: " | ") }.joined(separator: "\n"))
                             },
-                            PhrenControlAction(id: "copy-message", title: "Copy message", icon: "doc.on.doc") { ChatClipboard.copy(reply) },
-                            PhrenControlAction(id: "share", title: "Share", icon: "square.and.arrow.up") { messageMenu?.sharedText = reply }
+                            PhrenControlAction(id: "copy-message", title: "Copy message", icon: "doc.on.doc") { ChatClipboard.copy(reply) }
                         ])
                     }
                     .id(block.id)
@@ -105,7 +104,7 @@ private struct ChatParagraph: View {
             .accessibilityHidden(selecting != nil)
             // A double-tap alone: single taps on links inside keep their speed.
             .onTapGesture(count: 2) { point in selection?.begin(owner: owner, block: block.id, at: point) }
-            .onLongPressGesture(minimumDuration: 0.4) { openMenu() }
+            .onLongPressGesture(minimumDuration: 0.5) { openMenu() }
             .accessibilityAction(named: "Message actions") { openMenu() }
             .id(block.id)
             .overlay {
@@ -148,8 +147,7 @@ private struct ChatParagraph: View {
             PhrenControlAction(id: "select-text", title: "Select text", icon: "character.cursor.ibeam") {
                 selection?.begin(owner: owner, block: block.id, at: nil)
             },
-            PhrenControlAction(id: "copy-message", title: "Copy message", icon: "doc.on.doc") { ChatClipboard.copy(reply) },
-            PhrenControlAction(id: "share", title: "Share", icon: "square.and.arrow.up") { messageMenu?.sharedText = reply }
+            PhrenControlAction(id: "copy-message", title: "Copy message", icon: "doc.on.doc") { ChatClipboard.copy(reply) }
         ])
     }
     // These transparent hit targets exist only for the paragraph interaction

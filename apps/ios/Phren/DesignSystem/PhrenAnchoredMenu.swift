@@ -75,25 +75,39 @@ private struct PhrenAnchoredMenuHost: ViewModifier {
     }
 
     private func card(_ request: PhrenAnchoredMenuRequest) -> some View {
+        PhrenMenuCard(items: request.items, identifier: request.identifier, width: Self.width, dismiss: request.dismiss)
+    }
+}
+
+/// The compact card every phren menu uses (the composer's +, a message's
+/// actions): 44-point rows of icon and title, hairlines between them, no
+/// title bar and no close button. A row closes the menu, then runs.
+struct PhrenMenuCard: View {
+    let items: [PhrenMenuItem]
+    let identifier: String
+    var width: CGFloat = 240
+    let dismiss: () -> Void
+
+    var body: some View {
         VStack(spacing: 0) {
-            ForEach(Array(request.items.enumerated()), id: \.element.id) { index, item in
+            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                 if index > 0 { Rectangle().fill(PhrenTheme.border).frame(height: 0.5) }
-                row(item, request: request)
+                row(item)
             }
         }
-        .frame(width: Self.width)
+        .frame(width: width)
         .background(PhrenTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
             .strokeBorder(PhrenTheme.border, lineWidth: 0.5))
         .shadow(color: .black.opacity(0.25), radius: 12, y: 4)
         // A marker, not an identifier on the card: a container identifier
         // would replace the rows' own.
-        .phrenContainerMarker(request.identifier, label: "Menu")
+        .phrenContainerMarker(identifier, label: "Menu")
     }
 
-    private func row(_ item: PhrenMenuItem, request: PhrenAnchoredMenuRequest) -> some View {
+    private func row(_ item: PhrenMenuItem) -> some View {
         Button {
-            request.dismiss()
+            dismiss()
             item.action()
         } label: {
             HStack(spacing: 12) {
@@ -113,7 +127,7 @@ private struct PhrenAnchoredMenuHost: ViewModifier {
         .buttonStyle(.plain)
         .disabled(!item.isEnabled)
         .opacity(item.isEnabled ? 1 : 0.4)
-        .accessibilityIdentifier("\(request.identifier):\(item.id)")
+        .accessibilityIdentifier("\(identifier):\(item.id)")
     }
 }
 

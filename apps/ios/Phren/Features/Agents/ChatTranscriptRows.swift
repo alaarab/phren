@@ -283,13 +283,11 @@ private struct ChatMessageRow<Historical: View>: View {
             .environment(\.chatMessageMenuSource, ChatMessageMenuSource { paragraph, actions in
                 openMenu(paragraph: paragraph, actions: actions)
             })
-            .opacity(messageMenu?.request?.owner == message.id ? 0 : 1)
-            .onLongPressGesture(minimumDuration: 0.4) { openMenu(paragraph: nil, actions: messageActions) }
+            .onLongPressGesture(minimumDuration: 0.5) { openMenu(paragraph: nil, actions: messageActions) }
             .accessibilityAction(named: "Message actions") { openMenu(paragraph: nil, actions: messageActions) }
     }
     private var messageActions: [PhrenControlAction] {
-        [PhrenControlAction(id: "copy-message", title: "Copy message", icon: "doc.on.doc") { ChatClipboard.copy(message.text) },
-         PhrenControlAction(id: "share", title: "Share", icon: "square.and.arrow.up") { messageMenu?.sharedText = message.text }]
+        [PhrenControlAction(id: "copy-message", title: "Copy message", icon: "doc.on.doc") { ChatClipboard.copy(message.text) }]
     }
     private func openMenu(paragraph: Int?, actions: [PhrenControlAction]) {
         guard menuAnchor.frame.width > 0 else { return }
@@ -383,9 +381,8 @@ private struct LocalCommandRow: View {
                     .phrenIdentifier("chat-command:\(id):actions")
             }
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { menuAnchor.frame = $0 }
-            .onLongPressGesture(minimumDuration: 0.4, perform: openActions)
+            .onLongPressGesture(minimumDuration: 0.5, perform: openActions)
             .accessibilityAction(named: "Command actions", openActions)
-            .opacity(messageMenu?.request?.owner == "command:\(id)" ? 0 : 1)
         }
     }
 

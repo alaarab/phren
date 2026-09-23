@@ -352,7 +352,7 @@ final class AgentChatComposerTests: AgentChatUITestCase {
         XCTAssertTrue(copyParagraph.waitForExistence(timeout: 5), "The paragraph's menu, above the bubble's")
         XCTAssertTrue(app.buttons["Select text"].exists)
         XCTAssertTrue(app.buttons["chat-message-menu:copy-message"].exists)
-        XCTAssertTrue(app.buttons["chat-message-menu:share"].exists)
+        XCTAssertFalse(app.buttons["chat-message-menu:share"].exists, "Share is not a message action")
         capture(app, "Paragraph menu")
         copyParagraph.tap()
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
@@ -409,21 +409,23 @@ final class AgentChatComposerTests: AgentChatUITestCase {
         XCTAssertTrue(paragraph.waitForExistence(timeout: 8))
         let composer = any.matching(identifier: "chat-composer").firstMatch
         let composerFrame = composer.frame
-        paragraph.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 5, dy: 5)).press(forDuration: 0.6)
+        let paragraphFrame = paragraph.frame
+        paragraph.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 5, dy: 5)).press(forDuration: 0.7)
         let backdrop = any["chat-message-menu-backdrop"]
-        let preview = any["chat-message-menu-preview"]
         XCTAssertTrue(backdrop.waitForExistence(timeout: 5))
-        XCTAssertTrue(preview.exists)
-        XCTAssertTrue(backdrop.frame.contains(composerFrame), "The dimmed backdrop covers the entire composer")
+        XCTAssertTrue(backdrop.frame.contains(composerFrame), "The backdrop covers the entire composer")
         XCTAssertFalse(composer.exists && composer.isHittable, "Input is blocked behind the menu")
-        XCTAssertTrue(preview.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Bravo paragraph")).firstMatch.exists)
-        for id in ["copy-paragraph", "select-text", "copy-message", "share"] {
+        // The pressed message stays exactly where it was; nothing is lifted or moved.
+        XCTAssertEqual(paragraph.frame.minY, paragraphFrame.minY, accuracy: 1)
+        XCTAssertEqual(composer.frame.minY, composerFrame.minY, accuracy: 1)
+        for id in ["copy-paragraph", "select-text", "copy-message"] {
             let action = app.buttons["chat-message-menu:" + id]
             XCTAssertTrue(action.isHittable)
-            XCTAssertFalse(action.frame.intersects(preview.frame), "Actions never cover the lifted message")
+            XCTAssertFalse(action.frame.intersects(paragraphFrame), "Actions never cover the pressed paragraph")
         }
-        capture(app, "Message lifted above composer backdrop")
-        app.buttons["chat-message-menu:close"].tap()
+        XCTAssertFalse(app.buttons["chat-message-menu:share"].exists)
+        capture(app, "Message menu beside the pressed paragraph")
+        backdrop.tap()
         XCTAssertTrue(backdrop.waitForNonExistence(timeout: 5))
         XCTAssertTrue(composer.isHittable)
         XCTAssertTrue(paragraph.exists)

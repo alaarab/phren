@@ -30,7 +30,9 @@ final class AutomaticSessionTests: XCTestCase {
     func testOfflineComputerDoesNotInventASession() {
         let app = launch(extra: ["--session-discovery-offline"])
         openProjectSessions(app)
-        app.buttons["overview-reconnect:A1000000-0000-0000-0000-000000000001"].tap()
+        // An offline computer says so on its own row under Computers.
+        XCTAssertTrue(app.descendants(matching: .any)["computer-status:A1000000-0000-0000-0000-000000000001"].waitForExistence(timeout: 15))
+        app.buttons["live-host:A1000000-0000-0000-0000-000000000001"].tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "connection", "closed")).firstMatch.waitForExistence(timeout: 15))
         XCTAssertFalse(app.staticTexts["Build phone app"].exists)
         XCTAssertFalse(app.buttons["chat-close"].exists)

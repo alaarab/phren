@@ -16,6 +16,7 @@ struct SettingsView: View {
     /// the picker has something to bind to.
     @State private var captureDefaultId: String?
     @State private var showingCaptureDefault = false
+    @State private var addingComputer = false
     @State private var captureLog: [CaptureLogEntry] = []
     @State private var captureQueue = CaptureQueueState()
     /// Drives the health cards' relative "synced Xm ago" text and staleness
@@ -118,6 +119,16 @@ struct SettingsView: View {
                 }
                 }
 
+                Section("Agents") {
+                    NavigationLink { LiveSessionsView() } label: { settingsRow("Computers", "desktopcomputer") }
+                    Button { addingComputer = true } label: { settingsRow("Add computer", "plus") }
+                        .accessibilityIdentifier("settings-add-computer")
+                    NavigationLink { SkillsView() } label: { settingsRow("Skills", "wand.and.stars") }
+                        .accessibilityIdentifier("settings-skills")
+                    NavigationLink { AgentsView() } label: { settingsRow("Agent instructions", "person.text.rectangle") }
+                        .accessibilityIdentifier("settings-agent-instructions")
+                }
+
                 Section("Integrations") {
                     NavigationLink { PhrenHookSettingsView() } label: { settingsRow("Phren Hook", "point.3.connected.trianglepath.dotted") }
                         .accessibilityIdentifier("settings-hook")
@@ -127,7 +138,6 @@ struct SettingsView: View {
                         .accessibilityIdentifier("settings-show-on-agents")
                     NavigationLink { ConductorSiriSettingsView() } label: { settingsRow("Siri and the Action button", "wand.and.rays") }
                         .accessibilityIdentifier("settings-conductor")
-                    NavigationLink { LiveSessionsView() } label: { settingsRow("Computers", "desktopcomputer") }
                     NavigationLink { HookHealthView() } label: { settingsRow("Health", "stethoscope") }
                         .accessibilityIdentifier("settings-health")
                     NavigationLink { AccountUsageView() } label: { settingsRow("Account usage", "chart.bar") }
@@ -321,6 +331,7 @@ struct SettingsView: View {
                 ],
                 identifier: "settings-sign-out-dialog"
             )
+            .sheet(isPresented: $addingComputer) { NavigationStack { LiveHostEditor() } }
             .phrenSingleSelectSheet(isPresented: $showingCaptureDefault, title: "Default project",
                                     options: captureDefaultOptions, selection: captureDefaultBinding,
                                     rowPrefix: "settings-capture-default")

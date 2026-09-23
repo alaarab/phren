@@ -35,14 +35,28 @@ extension XCTestCase {
         map.tap()
     }
 
+    /// The Sessions screen's former ••• items, where they live now: Schedules
+    /// and Connect memory in its top bar, refresh as a pull, and Skills,
+    /// Agent instructions and Add computer under Settings → Agents.
     @MainActor
     func openSessionsAction(_ action: String, in app: XCUIApplication) {
-        let more = app.buttons["sessions-more"]
-        XCTAssertTrue(more.waitForExistence(timeout: 5))
-        more.tap()
-        let item = app.buttons["sessions-more-sheet:\(action)"]
-        XCTAssertTrue(item.waitForExistence(timeout: 5))
-        item.tap()
+        switch action {
+        case "schedules", "connectMemory":
+            let button = app.buttons[action == "schedules" ? "sessions-schedules" : "sessions-connect-memory"]
+            XCTAssertTrue(button.waitForExistence(timeout: 5)); button.tap()
+        case "refresh":
+            let list = app.scrollViews.firstMatch.exists ? app.scrollViews.firstMatch : app.collectionViews.firstMatch
+            XCTAssertTrue(list.waitForExistence(timeout: 5))
+            list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25))
+                .press(forDuration: 0.05, thenDragTo: list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8)))
+        default:
+            app.tabBars.buttons["Settings"].tap()
+            let id = ["skills": "settings-skills", "instructions": "settings-agent-instructions", "add-computer": "settings-add-computer"][action] ?? action
+            let row = app.buttons[id]
+            for _ in 0..<8 where !(row.exists && row.isHittable) { app.swipeUp() }
+            XCTAssertTrue(row.waitForExistence(timeout: 5), "Settings → Agents offers \(action)")
+            row.tap()
+        }
     }
 
     /// Repository changes live in the chat's options sheet, not its header.
