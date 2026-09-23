@@ -2471,6 +2471,45 @@ schedules:
       }
     });
 
+    it("launches an agent in a new worktree on its own branch and names it in the worktree listing", async () => {
+      const git = (...args: string[]) => execFileAsync("git", ["-c", "user.name=t", "-c", "user.email=t@x", "-C", root, ...args]);
+      const launch = (branch: string) => api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "wt", kind: "claude", worktree: { branch } });
+      const creates = () => commands.filter(c => c.method === "workspace.create").length;
+      // Not a repository: refused before Herdr is asked for anything.
+      let before = creates();
+      const plain = await launch("phren/fix-login");
+      expect(plain.status).toBe(409);
+      expect(plain.data.error).toContain("not a Git repository");
+      expect(creates()).toBe(before);
+      await git("init", "-q", "-b", "main"); await writeFile(path.join(root, "base.txt"), "one\n");
+      await git("add", "base.txt"); await git("commit", "-qm", "start");
+      try {
+        const launched = await launch("phren/fix-login");
+        expect(launched.status, JSON.stringify(launched.data)).toBe(200);
+        const worktree = path.join(await realpathAsync(root), ".claude/worktrees/phren-fix-login");
+        expect(launched.data.worktree).toEqual({ path: worktree, branch: "phren/fix-login" });
+        expect(commands.filter(c => c.method === "workspace.create").at(-1)?.params).toMatchObject({ label: "wt", cwd: worktree });
+        expect(commands.filter(c => c.method === "agent.start").at(-1)?.params).toMatchObject({ name: "wt", kind: "claude" });
+        // The branch starts at the project's current HEAD.
+        expect((await git("rev-parse", "phren/fix-login")).stdout).toBe((await git("rev-parse", "HEAD")).stdout);
+        // Changes > Workers lists the worktree, named for the agent working there.
+        const listing = await api("/v1/git/worktrees", { target });
+        expect(listing.status, JSON.stringify(listing.data)).toBe(200);
+        expect(listing.data.worktrees.find((row: any) => row.path === ".claude/worktrees/phren-fix-login"))
+          .toMatchObject({ branch: "phren/fix-login", ahead: 0, worker: { label: "wt", provider: "claude" } });
+        // The branch exists now, and an existing branch is never reused.
+        before = creates();
+        const again = await launch("phren/fix-login");
+        expect(again.status).toBe(409);
+        expect(again.data.error).toContain('A branch named "phren/fix-login" already exists');
+        const existing = await launch("main");
+        expect(existing.status).toBe(409);
+        expect(existing.data.error).toContain('"main" already exists');
+        expect((await launch("bad..name")).status).toBe(400);
+        expect(creates()).toBe(before);
+      } finally { await rm(path.join(root, ".git"), { recursive: true, force: true }); await rm(path.join(root, ".claude"), { recursive: true, force: true }); }
+    });
+
     it("serves a requested history page without sending a recent backlog", async () => {
       await writeFile(record, Array.from({ length: 450 }, (_, i) => JSON.stringify(row(`Message ${i}`))).join("\n") + "\n");
       // Opening a conversation is a light page: 60 rows, the newest ones;

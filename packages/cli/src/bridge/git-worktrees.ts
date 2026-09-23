@@ -81,11 +81,15 @@ function uncommitted(status: string): number {
   return count;
 }
 
-async function workerFor(abs: string, workers: WorktreeWorker[]): Promise<WorktreeWorker | undefined> {
+async function workerFor(abs: string, workers: WorktreeWorker[], all: string[] = []): Promise<WorktreeWorker | undefined> {
+  // The primary checkout holds `.claude/worktrees/*`: a worker in one of those
+  // belongs to that worktree, not to the checkout around it.
+  const nested = all.filter(other => other.startsWith(abs + path.sep));
   let best: { worker: WorktreeWorker; score: number } | undefined;
   for (const worker of workers) {
     const cwd = await realpath(worker.cwd).catch(() => path.resolve(worker.cwd));
     if (cwd !== abs && !cwd.startsWith(abs + path.sep)) continue;
+    if (nested.some(inner => cwd === inner || cwd.startsWith(inner + path.sep))) continue;
     // An exact checkout beats a directory inside it; this conversation's own
     // agent beats a manifest that only names the checkout.
     const score = (cwd === abs ? 2 : 0) + (worker.child ? 1 : 0);
@@ -113,7 +117,7 @@ export async function gitWorktrees(cwd: string, workers: WorktreeWorker[] = []):
       } catch { ahead = 0; behind = 0; }
     }
     const changed = uncommitted(await git(worktree.abs, "status", "--porcelain=v1", "-z", "--untracked-files=normal").catch(() => ""));
-    const worker = await workerFor(worktree.abs, workers);
+    const worker = await workerFor(worktree.abs, workers, worktrees.map(item => item.abs));
     return {
       id: worktreeId(worktree.abs), path: displayPath(worktree.abs, roots), branch: worktree.branch,
       head: worktree.head, ahead, behind, changed,

@@ -5,10 +5,10 @@ import { gitBranches, gitDiscard, gitLog, gitPulls, gitStage, gitStatus, gitTree
 import { fanoutWorktrees } from "./fanouts.js";
 import { gitWorktrees, resolveWorktree, type WorktreeWorker } from "./git-worktrees.js";
 import { gitCommit, gitPullRequest, gitPush } from "./git-publish.js";
-import { findPane, paneChatState, paneIdentity, rpc, snapshot, startingPane, trustedDirectory, validateStartingTarget, validateTarget } from "./herdr.js";
+import { findPane, paneAgentName, paneChatState, paneIdentity, rpc, snapshot, startingPane, trustedDirectory, validateStartingTarget, validateTarget } from "./herdr.js";
 import { refuseWorkingSlash, type ModelSwitcher } from "./model-switch.js";
 import { repositoryDiff } from "./projects.js";
-import { BridgeError, type Json, MAX_FRAME, object, startingTargetSchema, type Target, targetSchema } from "./protocol.js";
+import { BridgeError, type Json, MAX_FRAME, object, objects, startingTargetSchema, type Target, targetSchema } from "./protocol.js";
 import type { CodexQuestions } from "./questions.js";
 import { childAgent, childAgentTree, conversationNamedPaths, transcriptPath, type ChildAgentRelation } from "./transcripts.js";
 import { sideQuestionText, type SideQuestions } from "./side-questions.js";
@@ -65,6 +65,22 @@ async function worktreeWorkers(target: Target): Promise<WorktreeWorker[]> {
   };
   visit(await childAgentTree(target.source, target.session).catch(() => []));
   for (const job of await fanoutWorktrees().catch(() => [])) workers.push({ cwd: job.worktree, label: job.label, provider: job.provider, state: job.state });
+  workers.push(...herdrWorktreeWorkers(await snapshot(target.server).catch((): Json => ({}))));
+  return workers;
+}
+
+/** Agents running in this Herdr server's panes, by the folder each works in:
+ * an agent launched into a new worktree from the phone is named here. Listed
+ * last, so a sub-agent or fan-out manifest for the same folder wins a tie. */
+export function herdrWorktreeWorkers(s: Json): WorktreeWorker[] {
+  const workers: WorktreeWorker[] = [];
+  for (const pane of objects(s.panes)) {
+    const cwd = pane.foreground_cwd || pane.cwd;
+    if (typeof pane.agent !== "string" || typeof cwd !== "string" || !cwd.startsWith("/")) continue;
+    const name = paneAgentName(s, pane);
+    workers.push({ cwd, label: name || pane.agent, provider: pane.agent,
+      ...(typeof pane.agent_status === "string" ? { state: pane.agent_status } : {}) });
+  }
   return workers;
 }
 

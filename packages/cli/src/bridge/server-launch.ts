@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { homeDir } from "../home-paths.js";
 import { agentNames, findPane, isConductorName, paneAgentName, paneChatState, paneIdentity, rpc, servers, snapshot } from "./herdr.js";
+import { createLaunchWorktree, launchWorktreeSchema, type LaunchWorktree } from "./launch-worktree.js";
 import { atomic, BridgeError, bridgeRoot, id, type Json, objects, provider } from "./protocol.js";
 
 /** Starting agents in Herdr from the phone: the launch route's harness
@@ -89,7 +90,9 @@ export function herdrAgentName(label: string): string {
  */
 export async function launchSession(server: string, data: Json, options: { canary?: boolean } = {}): Promise<Json> {
   const role = z.enum(["agent", "conductor"]).default("agent").parse(data.role);
-  const cwd = z.string().min(1).max(4096).refine(t => path.isAbsolute(t) && !/[\x00-\x1f\x7f]/.test(t)).parse(data.cwd);
+  const projectDirectory = z.string().min(1).max(4096).refine(t => path.isAbsolute(t) && !/[\x00-\x1f\x7f]/.test(t)).parse(data.cwd);
+  const worktreeRequest = data.worktree === undefined || data.worktree === null ? undefined : launchWorktreeSchema.parse(data.worktree);
+  if (worktreeRequest && role === "conductor") throw new BridgeError(400, "A conductor works across projects, so it cannot start in a worktree.");
   const label = plainText(200).parse(data.label);
   const kind = z.enum(launchKinds).parse(data.kind);
   const effort = z.enum(launchEfforts).default("medium").parse(data.effort);
@@ -126,7 +129,12 @@ export async function launchSession(server: string, data: Json, options: { canar
   if (workspace && !objects(before.workspaces).some(w => w.workspace_id === workspace)) throw new BridgeError(409, "The workspace changed.");
   const knownWorkspaces = new Set(objects(before.workspaces).map(w => w.workspace_id));
   const knownTabs = new Set(objects(before.tabs).map(t => t.tab_id));
-  await rpc(server, workspace ? "tab.create" : "workspace.create", { workspace_id: workspace, label, cwd, focus: false, env: {} });
+  // Created last, once nothing else can refuse the launch, so a refusal
+  // never leaves a worktree or branch behind.
+  const worktree: LaunchWorktree | undefined = worktreeRequest ? await createLaunchWorktree(projectDirectory, worktreeRequest) : undefined;
+  const cwd = worktree?.cwd ?? projectDirectory;
+  try { await rpc(server, workspace ? "tab.create" : "workspace.create", { workspace_id: workspace, label, cwd, focus: false, env: {} }); }
+  catch (error) { await worktree?.discard(); throw error; }
   let created: { workspaceId: string; tabId: string; paneId: string } | undefined;
   for (let attempt = 0; attempt < 25 && !created; attempt++) {
     const s = await snapshot(server);
@@ -162,7 +170,8 @@ export async function launchSession(server: string, data: Json, options: { canar
   const binding = { server, workspace: created.workspaceId, tab: created.tabId, pane: created.paneId, source: kind };
   const target = sessionId ? { ...binding, session: sessionId }
     : chat.starting === true ? { ...binding, starting: true, startingToken: chat.startingToken } : undefined;
-  return { ok: true, ...created, agent: kind, agentStatus, role, sessionId, target };
+  return { ok: true, ...created, agent: kind, agentStatus, role, sessionId, target,
+    ...(worktree ? { worktree: { path: worktree.path, branch: worktree.branch } } : {}) };
 }
 export async function workspaceAction(server: string, operation: string, data: Json): Promise<Json> {
   if (!["focus", "rename", "create", "close"].includes(operation)) throw new BridgeError(400, "Unsupported Herdr action.");

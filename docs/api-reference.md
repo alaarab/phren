@@ -136,6 +136,15 @@ conductor brief, prefixes the Herdr agent name with `conductor-`, and returns
 `role: "conductor"`. Workspace overview tabs report that role. A second running
 conductor for the store is rejected with status 409 and the existing target.
 
+An agent launch may add `worktree: { branch }`. The Hook runs `git worktree add
+-b <branch> <repo>/.claude/worktrees/<name> HEAD` from the project folder's
+repository, where `<name>` is the branch with `/` and `.` turned into `-`, and
+starts the agent in the same folder inside the new worktree. The reply adds
+`worktree: { path, branch }`. A folder outside Git, a repository with no
+commits, an existing branch or worktree folder answer 409, an invalid branch
+name 400, and a conductor with a worktree 400, all before Herdr is asked for
+anything. A failed Herdr create removes the new worktree and branch.
+
 ---
 
 ## Scheduled prompts
@@ -1107,7 +1116,8 @@ git-ignored folders and files are added, marked `ignored: true`.
 list --porcelain`): `{worktrees: [{id, path, branch, head, ahead, behind, changed,
 main?, locked?, worker?: {label, provider, child?, state?}}]}`. `ahead`/`behind`
 are against the pane's HEAD, `changed` counts uncommitted files, and `worker`
-names a fan-out job or this conversation's sub-agent editing there. Every other
+names a fan-out job, this conversation's sub-agent or a Herdr agent (by its
+agent name) editing there. Every other
 `/v1/git/*` route, `/v1/diff` and `/v1/files/range` accept `worktree=<id>`,
 resolved only against that listing. The bounded repository cache is keyed by HEAD and a file/status hash;
 it expires after two seconds and is invalidated by status refresh and mutations.
