@@ -121,10 +121,6 @@ const STARTUP_BLOCK_STATUSES = ["blocked", "waiting"];
 const STARTUP_PROMPT_MARKER = /[?❯]|\(y\/?n\)|^\s*\d+[.)]\s/m;
 const CLAUDE_SCHEDULE_SETTINGS = JSON.stringify({ enableAllProjectMcpServers: true });
 
-function record(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
-}
-
 function validateLocalTimestamp(value: string): string {
   localTimestamp.parse(value);
   const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})$/.exec(value)!;
@@ -146,7 +142,7 @@ export function intervalMilliseconds(value: string): number {
 }
 
 export function parseSchedule(value: unknown): Schedule {
-  const raw = record(value);
+  const raw = object(value);
   const every = z.enum(SCHEDULE_EVERY).parse(raw.every);
   const computer = singleLine(200).parse(raw.computer);
   if (canonicalComputer(computer) === "any") throw new Error('Schedule computer "any" is not supported.');
@@ -180,7 +176,7 @@ export async function readScheduleDocument(projectDir: string): Promise<Schedule
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return { document: { version: 1 }, schedules: [] };
     throw error;
   }
-  const document = record(yaml.load(text, { schema: yaml.CORE_SCHEMA }));
+  const document = object(yaml.load(text, { schema: yaml.CORE_SCHEMA }));
   if (document.version !== 1) throw new Error("schedules.yaml must have version: 1.");
   if (!Array.isArray(document.schedules)) throw new Error("schedules.yaml must contain a schedules list.");
   if (document.schedules.length > MAX_SCHEDULES) throw new Error(`A project can have at most ${MAX_SCHEDULES} schedules.`);
@@ -313,8 +309,8 @@ export async function readScheduleRuns(file: string): Promise<ScheduleRun[]> {
   for (const line of text.split("\n")) {
     if (!line.trim()) continue;
     try {
-      const raw = record(JSON.parse(line));
-      const launch = record(raw.launch);
+      const raw = object(JSON.parse(line));
+      const launch = object(raw.launch);
       if (typeof raw.id !== "string" || typeof raw.scheduleId !== "string" || typeof raw.project !== "string"
           || typeof raw.startedAt !== "string" || !["launched", "running", "blocked", "finished", "failed", "skipped"].includes(String(raw.status))
           || !["herdr", "headless"].includes(String(launch.mode))) continue;
