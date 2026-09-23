@@ -113,7 +113,8 @@ export async function servers(): Promise<Json[]> {
 }
 
 /** How old a shared `session.snapshot` may be for readers that poll: open
- * chat and status streams, the overview and the activity timer. */
+ * chat and status streams and the activity timer. The overview and every
+ * action take a fresh one, which the pollers then reuse. */
 export const SNAPSHOT_SHARE_MS = intervalFromEnv("PHREN_SNAPSHOT_SHARE_MS", 2_500, 0, 10_000);
 const sharedSnapshots = new Map<string, { at: number; value: Json }>();
 const inFlightSnapshots = new Map<string, Promise<Json>>();
@@ -134,8 +135,8 @@ export async function snapshot(server: string): Promise<Json> {
 /**
  * One `session.snapshot` per server shared by every poller: an answer less
  * than `maxAgeMs` old is reused and concurrent callers join the request in
- * flight, so N open chats and the overview cost one snapshot per window, not
- * one each. A pane that disappears or changes identity shows in the next
+ * flight, so N open chats cost one snapshot per window, not one each, and
+ * reuse the overview's when it is recent enough. A pane that disappears or changes identity shows in the next
  * snapshot, at most `maxAgeMs` after the change. Failures are never kept.
  * Anything about to act on a pane (a send, a key, a launch) calls `snapshot`.
  */
