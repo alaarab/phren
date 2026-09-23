@@ -56,8 +56,12 @@ final class AgentChatQueueTests: AgentChatUITestCase {
             app.buttons["chat-send"].tap()
         }
         // Finish the fixture's active turn once both messages are queued;
-        // its status snapshots deliberately keep saying working.
-        app.buttons["chat-stop"].tap()
+        // its status snapshots deliberately keep saying working. The draft
+        // leaves the box on send, so the stop shows at once; it enables once
+        // the send has finished.
+        let stop = app.buttons["chat-stop"]
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "isEnabled == true"), object: stop)], timeout: 5), .completed)
+        stop.tap()
         XCTAssertTrue(app.staticTexts["Received: First"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.staticTexts["Received: Second"].waitForExistence(timeout: 8))
         composer.tap(); composer.typeText("Third")
