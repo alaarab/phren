@@ -3,17 +3,32 @@ import XCTest
 /// "Open on a computer" from a session: a stalled thread offers a new one on
 /// the project's own computer, and the store already says where it lives.
 final class LaunchSessionTests: XCTestCase {
+    /// Launches the fixture, opens the stalled session and its New thread
+    /// sheet. The first launch on a freshly booted simulator can come up
+    /// before the fixture computer is installed (Agents shows only Add
+    /// computer); a relaunch always lands, as in LiveSessionsTests.
     @MainActor
-    func testOpensAProjectOnAKnownComputerAndLandsInChat() {
+    private func openNewThread(_ extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--session-details-fixture", "--native-chat-fixture", "--chat-history-stalled"]
-        app.launch()
-        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 8))
-        app.tabBars.buttons["Agents"].tap()
+        app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--session-details-fixture", "--native-chat-fixture"]
+            + extra + ["--chat-history-stalled"]
         let session = app.buttons["overview-chat:A1000000-0000-0000-0000-000000000001:herdr:default:w7:w7:t9"]
-        XCTAssertTrue(session.waitForExistence(timeout: 10)); session.tap()
+        for attempt in 0..<2 {
+            app.launch()
+            XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 8))
+            app.tabBars.buttons["Agents"].tap()
+            if session.waitForExistence(timeout: attempt == 0 ? 10 : 20) { break }
+            if attempt == 0 { app.terminate() }
+        }
+        XCTAssertTrue(session.exists); session.tap()
         let newThread = app.buttons["New thread"]
         XCTAssertTrue(newThread.waitForExistence(timeout: 8)); newThread.tap()
+        return app
+    }
+
+    @MainActor
+    func testOpensAProjectOnAKnownComputerAndLandsInChat() {
+        let app = openNewThread()
         let chooser = app.buttons["launch-computer"]
         XCTAssertTrue(chooser.waitForExistence(timeout: 5))
         chooser.tap()
@@ -46,15 +61,7 @@ final class LaunchSessionTests: XCTestCase {
 
     @MainActor
     func testWorktreeIsOptionalAndTakesAnEditableBranch() {
-        let app = XCUIApplication()
-        app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--session-details-fixture", "--native-chat-fixture", "--chat-history-stalled"]
-        app.launch()
-        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 8))
-        app.tabBars.buttons["Agents"].tap()
-        let session = app.buttons["overview-chat:A1000000-0000-0000-0000-000000000001:herdr:default:w7:w7:t9"]
-        XCTAssertTrue(session.waitForExistence(timeout: 10)); session.tap()
-        let newThread = app.buttons["New thread"]
-        XCTAssertTrue(newThread.waitForExistence(timeout: 8)); newThread.tap()
+        let app = openNewThread()
         XCTAssertTrue(app.buttons["launch-found:/work/phone"].waitForExistence(timeout: 5))
 
         let toggle = app.descendants(matching: .any)["launch-worktree"]
@@ -71,6 +78,8 @@ final class LaunchSessionTests: XCTestCase {
                         "Without a task the branch is phren/<short id>, got \(suggested)")
 
         func typeBranch(_ text: String) {
+            // Bring the field well above the keyboard before focusing it.
+            for _ in 0..<4 where !branch.isHittable || branch.frame.maxY > app.frame.height * 0.55 { app.swipeUp() }
             branch.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
             branch.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: (branch.value as? String ?? "").count + 2) + text)
         }
@@ -98,15 +107,7 @@ final class LaunchSessionTests: XCTestCase {
 
     @MainActor
     func testAFailedStartExplainsAndKeepsThePicker() {
-        let app = XCUIApplication()
-        app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--session-details-fixture", "--native-chat-fixture", "--launch-fails", "--chat-history-stalled"]
-        app.launch()
-        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 8))
-        app.tabBars.buttons["Agents"].tap()
-        let session = app.buttons["overview-chat:A1000000-0000-0000-0000-000000000001:herdr:default:w7:w7:t9"]
-        XCTAssertTrue(session.waitForExistence(timeout: 10)); session.tap()
-        let newThread = app.buttons["New thread"]
-        XCTAssertTrue(newThread.waitForExistence(timeout: 8)); newThread.tap()
+        let app = openNewThread(["--launch-fails"])
         for _ in 0..<8 where !app.buttons["launch-open"].isHittable { app.swipeUp() }
         XCTAssertTrue(app.buttons["launch-open"].waitForExistence(timeout: 5))
         app.buttons["launch-open"].tap()
