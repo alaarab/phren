@@ -111,10 +111,10 @@ export function markCorrelationsHelpful(
   }
 }
 
-/**
- * Tokenize a keyword string for overlap comparison.
- */
-function tokenize(text: string): Set<string> {
+/** Lowercased whitespace-separated keywords for overlap comparison. Unlike the
+ * search fallback it keeps punctuation and does not stem: correlation keys
+ * are stored keyword strings, compared as written. */
+function keywordSet(text: string): Set<string> {
   return new Set(
     text
       .toLowerCase()
@@ -146,7 +146,7 @@ export function getCorrelatedDocs(
     // Only look at last RECENT_WINDOW entries to keep it fast
     const recent = lines.slice(-RECENT_WINDOW);
 
-    const queryTokens = tokenize(keywords);
+    const queryTokens = keywordSet(keywords);
     if (queryTokens.size === 0) return [];
 
     const docScores = new Map<string, number>();
@@ -154,7 +154,7 @@ export function getCorrelatedDocs(
     for (const line of recent) {
       try {
         const entry: CorrelationEntry = JSON.parse(line);
-        const entryTokens = tokenize(entry.keywords);
+        const entryTokens = keywordSet(entry.keywords);
 
         // Calculate overlap between current query and past query
         let overlap = 0;

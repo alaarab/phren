@@ -46,7 +46,7 @@ import { removeSkillPath, setSkillEnabledAndSync } from "../skill/files.js";
 import {
   resultMsg,
   editDistance,
-  tokenize,
+  splitCommandLine,
   expandIds,
   normalizeSection,
   tasksByFilter,
@@ -123,7 +123,7 @@ function taskFileForProject(phrenPath: string, project: string): string {
 export async function executePalette(host: PaletteHost, input: string): Promise<void> {
   const trimmed = input.trim();
   if (!trimmed) return;
-  const parts = tokenize(trimmed);
+  const parts = splitCommandLine(trimmed);
   const command = (parts[0] || "").toLowerCase();
 
   if (command === "help") {
@@ -534,7 +534,7 @@ export function completeInput(line: string, phrenPath: string, profile: string, 
   const trimmed = line.trimStart();
   if (!trimmed.startsWith(":")) return [];
   const after = trimmed.slice(1);
-  const parts = tokenize(after);
+  const parts = splitCommandLine(after);
   const endsWithSpace = /\s$/.test(trimmed);
 
   if (parts.length === 0) return commands;
