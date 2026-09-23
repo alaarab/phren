@@ -254,7 +254,12 @@ final class AgentChatQueueTests: AgentChatUITestCase {
         let addContext = app.buttons["Add project context"]
         let projectMemory = app.buttons["Project memory"]
         XCTAssertTrue(projectMemory.waitForExistence(timeout: 5))
-        for _ in 0..<3 where !(addContext.exists && addContext.isHittable) { projectMemory.swipeUp() }
+        // The first swipe may grow the sheet to full height instead of
+        // scrolling it, so open it fully first, then scroll to the row.
+        let grabber = app.buttons["Sheet Grabber"]
+        if grabber.exists { grabber.swipeUp() }
+        for _ in 0..<6 where !(addContext.exists && addContext.isHittable) { projectMemory.swipeUp() }
+        XCTAssertTrue(addContext.isHittable, "Add project context is reachable in the options sheet")
         addContext.tap()
         XCTAssertTrue(app.navigationBars["Project context"].waitForExistence(timeout: 5))
         app.buttons["[decision] Keep phone sessions connected to project memory"].tap()
