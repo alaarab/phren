@@ -107,7 +107,7 @@ async function childActivity(source: Provider, session: string): Promise<ChildAc
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", shell: "ssh-pty", herdr: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, repositoryFiles: true, subagents: true, sideQuestions: true, dispatch: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true };
+  files: true, repositoryFiles: true, subagents: true, sideQuestions: true, dispatch: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, overviewStream: true };
 
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
@@ -140,16 +140,84 @@ async function body(request: IncomingMessage): Promise<Json> {
   return object(JSON.parse(Buffer.concat(chunks).toString() || "{}"));
 }
 
-function selectedServer(url: URL): string {
+export function selectedServer(url: URL): string {
   const mux = url.searchParams.get("mux");
   if (mux && !mux.startsWith("herdr:")) throw new BridgeError(400, "Select a Herdr server.");
   return serverName.parse(url.searchParams.get("server") || mux?.slice(6) || "default");
 }
 
+/**
+ * The overview a phone draws for one Herdr server: every tab with its agent,
+ * target, branch, model, running children and current step, from one
+ * `session.snapshot`. `GET /v1/workspaces` passes a fresh snapshot; the
+ * `/v1/overview` stream passes the shared one it already holds.
+ */
+export type WorkspacesReader = (server: string, s: Json, watchApprovals: boolean) => Promise<Json>;
+
+export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "agentHooks" | "journal" | "tabActivity" | "contextUsage">): WorkspacesReader {
+  const { modules, info, agentHooks, journal, tabActivity, contextUsage } = ctx;
+  return async (server, s, watchApprovals) => {
+    const lastChanged = await tabActivity.observe(server, s);
+    if (watchApprovals) agentHooks.overview.renew(server);
+    const context = await contextUsage.read(server, s);
+    await journal.record(server, objects(s.panes));
+    const chatStates = new Map(await Promise.all(objects(s.panes).filter(p => p.agent).map(async p =>
+      [p, await paneChatState(server, p, { tokenWhenIdentified: false }).catch((): Json => ({}))] as const)));
+    const workspaces = workspaceSnapshot(s, context, agentHooks.pendingPanes(server, s), lastChanged);
+    // The branch each tab's agent is on, for the session cards.
+    const agentsByTab = new Map<string, Json[]>();
+    for (const pane of objects(s.panes)) {
+      if (!pane.agent) continue;
+      const key = JSON.stringify([pane.workspace_id, pane.tab_id]);
+      const agents = agentsByTab.get(key) ?? [];
+      agents.push(pane); agentsByTab.set(key, agents);
+    }
+    const tabs = objects(workspaces.groups).flatMap(group => objects(group.children).map(tab => ({ group, tab })));
+    let nextTab = 0;
+    // Bound transcript and git work across tabs. Each worker owns one
+    // response row; snapshot order and target validation are unchanged.
+    await Promise.all(Array.from({ length: Math.min(4, tabs.length) }, async () => {
+      while (nextTab < tabs.length) {
+        const { group, tab } = tabs[nextTab++];
+        const agents = agentsByTab.get(JSON.stringify([group.id, tab.id])) ?? [];
+        if (agents.length === 1) {
+          const chat = chatStates.get(agents[0]);
+          if (chat?.starting === true) tab.starting = true;
+          if (typeof chat?.sessionId === "string" && provider.safeParse(agents[0].agent).success) {
+            tab.target = { server, workspace: group.id, tab: tab.id, pane: agents[0].pane_id,
+              source: agents[0].agent, session: chat.sessionId };
+          }
+        }
+        if (modules.has("git") && typeof tab.cwd === "string" && tab.agent) tab.branch = await repositoryBranch(tab.cwd);
+        // The model the pane's agent is running, and what it is doing
+        // right now, for cards and the lock screen.
+        if (agents.length === 1 && provider.safeParse(agents[0].agent).success) {
+          const session = chatStates.get(agents[0])?.sessionId;
+          tab.runningChildren = 0; tab.childProviders = [];
+          if (typeof session === "string") {
+            const source = agents[0].agent as Provider;
+            const [model, children] = await Promise.all([
+              currentModel(source, session).catch(() => undefined), childActivity(source, session),
+            ]);
+            if (model) tab.model = model;
+            tab.runningChildren = children.runningChildren; tab.childProviders = children.childProviders;
+            if (agents[0].agent_status === "working") {
+              const step = await currentStep(source, session).catch(() => undefined);
+              if (step) tab.currentStep = step;
+            }
+          }
+        }
+      }
+    }));
+    return { ...workspaces, phren: info };
+  };
+}
+
 export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage, response: ServerResponse) => Promise<void> {
-  const { version, modules, info, computerID, scheduleStore, scheduler, dispatches, agentHooks, journal, tabActivity, contextUsage,
+  const { version, modules, info, computerID, scheduleStore, scheduler, dispatches, agentHooks, journal,
     modelCatalog, accountUsage, launches, locatedDirectories, fanoutMessages, canary } = ctx;
   const { conversationReader, childConversationReader, emptyPage } = ctx.streams;
+  const readWorkspaces = workspacesReader(ctx);
   return async (request, response) => {
     response.setHeader("X-Phren-Protocol", String(PROTOCOL));
     response.setHeader("Cache-Control", "no-store");
@@ -244,60 +312,9 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           }
           case "/v1/projects/repos": result = { repos: await candidateRepos(await journal.recent()) }; break;
           case "/v1/workspaces": {
-            const server = selectedServer(url), s = await snapshot(server);
-            const lastChanged = await tabActivity.observe(server, s);
-            if (url.searchParams.get("watchApprovals") === "1") agentHooks.overview.renew(server);
-            const context = await contextUsage.read(server, s);
-            await journal.record(server, objects(s.panes));
-            const chatStates = new Map(await Promise.all(objects(s.panes).filter(p => p.agent).map(async p =>
-              [p, await paneChatState(server, p, { tokenWhenIdentified: false }).catch((): Json => ({}))] as const)));
-            const workspaces = workspaceSnapshot(s, context, agentHooks.pendingPanes(server, s), lastChanged);
-            // The branch each tab's agent is on, for the session cards.
-            const agentsByTab = new Map<string, Json[]>();
-            for (const pane of objects(s.panes)) {
-              if (!pane.agent) continue;
-              const key = JSON.stringify([pane.workspace_id, pane.tab_id]);
-              const agents = agentsByTab.get(key) ?? [];
-              agents.push(pane); agentsByTab.set(key, agents);
-            }
-            const tabs = objects(workspaces.groups).flatMap(group => objects(group.children).map(tab => ({ group, tab })));
-            let nextTab = 0;
-            // Bound transcript and git work across tabs. Each worker owns one
-            // response row; snapshot order and target validation are unchanged.
-            await Promise.all(Array.from({ length: Math.min(4, tabs.length) }, async () => {
-              while (nextTab < tabs.length) {
-                const { group, tab } = tabs[nextTab++];
-                const agents = agentsByTab.get(JSON.stringify([group.id, tab.id])) ?? [];
-                if (agents.length === 1) {
-                  const chat = chatStates.get(agents[0]);
-                  if (chat?.starting === true) tab.starting = true;
-                  if (typeof chat?.sessionId === "string" && provider.safeParse(agents[0].agent).success) {
-                    tab.target = { server, workspace: group.id, tab: tab.id, pane: agents[0].pane_id,
-                      source: agents[0].agent, session: chat.sessionId };
-                  }
-                }
-                if (modules.has("git") && typeof tab.cwd === "string" && tab.agent) tab.branch = await repositoryBranch(tab.cwd);
-                // The model the pane's agent is running, and what it is doing
-                // right now, for cards and the lock screen.
-                if (agents.length === 1 && provider.safeParse(agents[0].agent).success) {
-                  const session = chatStates.get(agents[0])?.sessionId;
-                  tab.runningChildren = 0; tab.childProviders = [];
-                  if (typeof session === "string") {
-                    const source = agents[0].agent as Provider;
-                    const [model, children] = await Promise.all([
-                      currentModel(source, session).catch(() => undefined), childActivity(source, session),
-                    ]);
-                    if (model) tab.model = model;
-                    tab.runningChildren = children.runningChildren; tab.childProviders = children.childProviders;
-                    if (agents[0].agent_status === "working") {
-                      const step = await currentStep(source, session).catch(() => undefined);
-                      if (step) tab.currentStep = step;
-                    }
-                  }
-                }
-              }
-            }));
-            result = { ...workspaces, phren: info }; break;
+            const server = selectedServer(url);
+            result = await readWorkspaces(server, await snapshot(server), url.searchParams.get("watchApprovals") === "1");
+            break;
           }
           case "/v1/workspaces/panes": result = await panes(selectedServer(url), url.searchParams.get("groupId") || "", url.searchParams.get("childId") || ""); break;
           case "/v1/transcripts/blob": {
