@@ -247,12 +247,15 @@ struct ChatComposerBar: View {
                     Text("Message \(model.target?.providerName ?? "agent")…")
                         .font(.system(size: composerTextSize, design: .monospaced))
                         .foregroundStyle(PhrenTheme.textMuted)
-                        .padding(.vertical, 8).padding(.horizontal, 12)
+                        .padding(.horizontal, 12)
                         .allowsHitTesting(false).accessibilityHidden(true)
                 }
             }
+            .padding(.vertical, 8)
             .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
             .contentShape(Rectangle())
+            // The padding around the editor still focuses it.
+            .simultaneousGesture(TapGesture().onEnded { if !composing { composing = true } })
             .dismissKeyboardOnDownwardDrag {
                 guard !textSelection.preventsKeyboardDismissal,
                       textSelection.composerView?.hasScrollableDraft != true else { return }

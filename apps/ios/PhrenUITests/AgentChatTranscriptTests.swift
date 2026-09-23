@@ -300,6 +300,35 @@ final class AgentChatTranscriptTests: AgentChatUITestCase {
         XCTAssertFalse(app.buttons["Latest messages"].waitForExistence(timeout: 2), "Returning to the bottom should re-engage follow")
     }
 
+    /// The person's message is in the transcript the moment the live line
+    /// is: a muted pending bubble above it, which the transcript row replaces.
+    @MainActor
+    func testSentMessageLandsBeforeTheLiveLine() {
+        let app = launch(extra: ["--chat-streaming", "--chat-activity-fixture", "--chat-clear-drafts", "--chat-slow-echo"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let transcript = app.scrollViews["chat-transcript"]
+        XCTAssertTrue(transcript.waitForExistence(timeout: 8))
+        let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
+        composer.tap(); composer.typeText("Order check message")
+        app.buttons["chat-send"].tap()
+        let pending = transcript.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-pending-message:")).firstMatch
+        let live = transcript.descendants(matching: .any).matching(identifier: "chat-activity").firstMatch
+        XCTAssertTrue(live.waitForExistence(timeout: 5))
+        XCTAssertTrue(pending.exists, "The sent message must be in the transcript by the time the live line is")
+        XCTAssertTrue(pending.label.contains("Order check message"), pending.label)
+        XCTAssertLessThanOrEqual(pending.frame.maxY, live.frame.minY + 1, "The message sits above the live line")
+        XCTAssertFalse((app.textViews["chat-composer"].value as? String ?? "").contains("Order check message"),
+                       "The bubble carries the message; the composer does not show it twice")
+        capture(app, "Sent message pending above the live line")
+        // The Hook's row replaces the pending bubble: one message, not two.
+        let echoed = transcript.descendants(matching: .any).matching(identifier: "chat-message:1:0").firstMatch
+        XCTAssertTrue(echoed.waitForExistence(timeout: 8))
+        XCTAssertTrue(pending.waitForNonExistence(timeout: 3))
+        XCTAssertLessThanOrEqual(echoed.frame.maxY, live.frame.minY + 1)
+        capture(app, "Sent message replaced by its transcript row")
+    }
+
     /// Sends a prompt into the spinner fixture and returns the live row.
     @MainActor private func startSpinnerTurn(_ app: XCUIApplication) -> XCUIElement {
         app.buttons["live-chat:w7:w7:t9"].tap()
@@ -324,8 +353,15 @@ final class AgentChatTranscriptTests: AgentChatUITestCase {
         XCTAssertLessThanOrEqual(abs(ring.frame.midY - live.frame.midY), 12, "The ring sits at the end of the activity line")
         XCTAssertGreaterThan(ring.frame.minX, live.frame.midX)
         XCTAssertTrue(app.buttons["chat-stop"].exists, "The composer keeps its own stop")
+        // A line of its own text height: the ring's target lies over the
+        // gaps around it instead of padding the row out to 44 points.
+        let sent = app.descendants(matching: .any).matching(identifier: "chat-message:1:0").firstMatch
+        XCTAssertTrue(sent.waitForExistence(timeout: 5))
+        XCTAssertLessThanOrEqual(live.frame.height, 30)
+        XCTAssertLessThanOrEqual(live.frame.minY - sent.frame.maxY, 10, "No empty band between the last row and the live line")
         capture(app, "Activity line live with the stop ring")
-        ring.tap()
+        // Tapped near its top edge, outside the line's own height.
+        ring.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15)).tap()
         let done = app.descendants(matching: .any).matching(identifier: "chat-activity-done").firstMatch
         XCTAssertTrue(done.waitForExistence(timeout: 8))
         XCTAssertTrue(done.label.hasPrefix("Stopped after "), done.label)

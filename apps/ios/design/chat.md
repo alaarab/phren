@@ -12,10 +12,11 @@ Running Shell. Once tool calls return, Working covers the gap before more text.
 Tool results, changes and background notifications do not start tool activity.
 Only the current turn's calls choose its verb.
 
-Use Phren's activity arc and muted caption color, with no card chrome. Reduce
-Motion leaves a static arc. The clock ticks at 1 Hz in the row alone. Pin the
-row to the transcript width and a 24-point caption-scaled height, and reserve a
-104-point caption-scaled timer slot with monospaced digits. Seconds becoming
+Use Phren's activity arc and muted color at footnote size (a tool pill's
+preview size), with no card chrome. Reduce Motion leaves a static arc. The
+clock ticks at 1 Hz in the row alone. Pin the row to the transcript width and
+a 24-point footnote-scaled height, and reserve a 112-point footnote-scaled
+timer slot with monospaced digits. The finished line stays caption size. Seconds becoming
 minutes must never change the row frame or move the transcript. Pause the clock
 and arc while the scene is inactive. The line is one accessibility element with
 children ignored and identifier chat-activity.
@@ -29,8 +30,9 @@ phone's own clock. Only the activity row observes these fields, so a token
 update redraws that row alone. Codex and other harnesses keep the line above.
 
 A live line ends in a stop ring, `chat-activity-stop`: a 22-point track with
-the running arc around a stop square, in a 44-point target, so the live row is
-44 points high at every tick. It sends the same stop as the composer's stop
+the running arc around a stop square, in a 44-point target that overlaps the
+gaps above and below the line. The row stays at its 24-point height at every
+tick; the target never pads it out. It sends the same stop as the composer's stop
 button and is enabled whenever that stop would be, with or without a draft.
 The composer keeps its own stop.
 
@@ -89,7 +91,10 @@ still lowers the keyboard. Composer and icon-row dismissal gestures must obey
 the same selection guard.
 
 The composer grows from one to four lines at the current text size, then
-scrolls internally. Keep UITextView scrolling enabled so dragging a handle
+scrolls internally. Its vertical padding sits outside the editor, so the
+scrolling viewport is whole lines and a long draft never shows a cut line
+against the box's edge; once the box has grown to hold the whole draft it
+shows it from the first line. Keep UITextView scrolling enabled so dragging a handle
 past the visible lines follows the selection through the entire draft. Do not
 scroll the whole selected range into view or hand that drag to the transcript.
 In a message's Select text mode, use the same selection and gesture guard;
@@ -122,9 +127,12 @@ A plain text question with no structured prompt still accepts the composer as
 its answer. Unknown terminal status counts as disconnected input readiness.
 
 Pending messages can be edited or removed and leave immediately when the
-blocker clears, even during a working turn. Submitted receipts remain internal
-until the transcript acknowledges them, and cannot be edited, removed or sent
-again. A confirmed rejection keeps the draft available for an explicit retry.
+blocker clears, even during a working turn. A submitted receipt shows at once
+at the end of the transcript as a muted, uncaptioned bubble
+(`chat-pending-message:<id>`), prepared with the live line and always above
+it, and the draft leaves the composer at the same moment. The transcript row
+that acknowledges it replaces it. Receipts cannot be edited, removed or sent
+again; a failed delivery puts the text back in the composer. A confirmed rejection keeps the draft available for an explicit retry.
 
 ## Sub-agent composers
 

@@ -13,6 +13,19 @@ struct ChatActivityContext: Equatable {
     var waiting = false
     /// The pane's folder, so a turn's diff names files inside it relatively.
     var workingDirectory: String?
+    /// Messages this phone sent that the transcript has not echoed yet.
+    var pendingEchoes: [ChatPendingEcho] = []
+}
+
+/// A sent message waiting for its transcript row: a muted bubble at the end
+/// of the conversation, never after the turn's live line.
+struct ChatPendingEcho: Equatable, Identifiable {
+    let id: UUID
+    let text: String
+    let images: [ChatAttachmentDraft]
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.id == rhs.id && lhs.text == rhs.text && lhs.images.map(\.id) == rhs.images.map(\.id)
+    }
 }
 
 struct ChatTurnActivity: Equatable {
@@ -94,6 +107,12 @@ extension ChatTranscriptPreparation {
         for index in 0...entries.count {
             result += insertions[index] ?? []
             if index < entries.count { result.append(entries[index]) }
+        }
+        // The person's own message lands with the live line, above it.
+        for echo in context.pendingEchoes {
+            var entry = ChatTimelineEntry(messages: [], pendingEcho: echo)
+            entry.placeholderLabel = "Your message: \(echo.text)"
+            result.append(entry)
         }
         if let live { result.append(activityEntry(live)) }
         return result

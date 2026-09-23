@@ -51,8 +51,10 @@ import UniformTypeIdentifiers
         var childDelivery = ""
         var selectionEndX = 0.0
         var selectionEndY = 0.0
+        /// The composer's scroll offset, text height and visible height.
+        var composer: [Double] = []
         var json: String {
-            let report: [String: Any] = ["copied": copied, "selected": selected,
+            let report: [String: Any] = ["copied": copied, "selected": selected, "composer": composer,
                                        "selectionEndX": selectionEndX, "selectionEndY": selectionEndY]
             return String(decoding: (try? JSONSerialization.data(withJSONObject: report, options: .sortedKeys)) ?? Data(), as: UTF8.self)
         }
@@ -931,7 +933,8 @@ import UniformTypeIdentifiers
         var activity: [String: Any]?
         if let start = streamStarts[target.id], let text = sent.last(where: { $0.0 == target.id })?.1 {
             let elapsed = Date.now.timeIntervalSince(start)
-            message(1, "user", text)
+            // A slow Hook: the person's row lands with the turn's start.
+            if !flag("--chat-slow-echo") || elapsed >= 2 { message(1, "user", text) }
             if elapsed >= 2 {
                 event(2, ["type": "task_started", "started_at": start.timeIntervalSince1970])
                 event(3, ["type": "token_count", "info": ["last_token_usage": ["input_tokens": 128, "output_tokens": 0]]])

@@ -21,7 +21,10 @@ struct ChatComposer: UIViewRepresentable {
     func makeUIView(context: Context) -> ChatSelectionTextView {
         let view = ChatSelectionTextView()
         view.backgroundColor = .clear
-        view.textContainerInset = UIEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
+        // No vertical inset inside the scroller: the box pads the editor
+        // instead, so a draft past four lines scrolls whole lines inside the
+        // padding and never runs into the box's rounded edge.
+        view.textContainerInset = UIEdgeInsets(top: 0, left: 12, bottom: 0, right: 12)
         view.textContainer.lineFragmentPadding = 0
         view.contentInsetAdjustmentBehavior = .never
         view.keyboardDismissMode = .none
@@ -149,6 +152,28 @@ class ChatSelectionTextView: UITextView {
     override func layoutSubviews() {
         super.layoutSubviews()
         observeSelectionGestures()
+        // A line typed while the box was shorter scrolls the caret into view;
+        // once the box has grown to hold the whole draft, show it from the top.
+        let maxOffset = max(0, contentSize.height - bounds.height)
+        if contentOffset.y > maxOffset + 0.5, !isDragging, !isDecelerating {
+            contentOffset.y = maxOffset
+        }
+        reportMetrics()
+    }
+
+    override var contentSize: CGSize { didSet { reportMetrics() } }
+    override var contentOffset: CGPoint { didSet { reportMetrics() } }
+
+    /// The editor's scroll offset, text height and visible height, for tests.
+    private func reportMetrics() {
+        #if DEBUG && targetEnvironment(simulator)
+        guard AgentChatFixture.enabled, pasteImages != nil else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let metrics = [contentOffset.y, contentSize.height, bounds.height].map { Double(($0 * 2).rounded() / 2) }
+            if AgentChatFixture.report.composer != metrics { AgentChatFixture.report.composer = metrics }
+        }
+        #endif
     }
 
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {

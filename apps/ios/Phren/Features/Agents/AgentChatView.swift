@@ -217,6 +217,13 @@ struct AgentChatView: View {
         }
         #if DEBUG && targetEnvironment(simulator)
         .overlay(alignment: .topLeading) { if AgentChatFixture.enabled { ChatFixtureReport() } }
+        .onChange(of: model.draft) { _, draft in
+            // Dictation's insert: typing the marker replaces the draft from
+            // outside the editor, as a dictated segment does.
+            guard AgentChatFixture.enabled, ProcessInfo.processInfo.arguments.contains("--chat-composer-inserts"),
+                  draft.hasSuffix("#dictate") else { return }
+            model.draft = DictationSession.join(String(draft.dropLast("#dictate".count)), "Dictated line one\nDictated line two")
+        }
         #endif
         .overlay {
             // The ZStack stays put so the backdrop and the panel can animate

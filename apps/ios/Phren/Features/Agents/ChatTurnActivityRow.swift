@@ -25,8 +25,8 @@ struct ChatTurnActivityRow: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.chatTurnStop) private var stop
     @Environment(ChatTurnControl.self) private var control: ChatTurnControl?
-    @ScaledMetric(relativeTo: .caption) private var timerWidth: CGFloat = 104
-    @ScaledMetric(relativeTo: .caption) private var rowHeight: CGFloat = 24
+    @ScaledMetric(relativeTo: .footnote) private var timerWidth: CGFloat = 112
+    @ScaledMetric(relativeTo: .footnote) private var rowHeight: CGFloat = 24
 
     /// Claude's own spinner line for this turn: its verb, with the fields
     /// the Hook read beside it.
@@ -51,12 +51,15 @@ struct ChatTurnActivityRow: View {
         HStack(spacing: PhrenTheme.Space.small) {
             line(at: now)
             if let stop {
+                // The ring keeps its 44-point target, laid over the gaps
+                // above and below the line rather than adding to them.
                 ChatStopRing(enabled: stop.enabled, action: stop.action)
+                    .frame(width: 44, height: rowHeight)
             }
         }
-        // The ring needs a 44-point target. The height is the same at every
-        // tick, so seconds becoming minutes never move the transcript.
-        .frame(height: max(rowHeight, stop == nil ? 0 : 44))
+        // The height is the same at every tick, so seconds becoming minutes
+        // never move the transcript.
+        .frame(height: rowHeight)
     }
 
     @ViewBuilder private func line(at now: Date) -> some View {
@@ -75,7 +78,8 @@ struct ChatTurnActivityRow: View {
             }
             Spacer(minLength: 0)
         }
-        .font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
+        // The size of a tool pill's preview, so the verb reads at a glance.
+        .font(PhrenTypography.footnote).foregroundStyle(PhrenTheme.textMuted)
         .frame(maxWidth: .infinity, alignment: .leading).frame(height: rowHeight)
         // Keep the accessibility region on the laid-out row. Without a
         // shape, its bounds follow the text and rotating arc, not the space

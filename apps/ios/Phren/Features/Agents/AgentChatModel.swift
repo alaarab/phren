@@ -73,7 +73,10 @@ final class AgentChatModel {
 
     init() {
         outbox.onChange = { [weak self] items in
-            guard let self, let target = self.target, !self.restoringDraft else { return }
+            guard let self else { return }
+            // A receipt shows as a muted bubble until its transcript row lands.
+            if Self.pendingEchoes(items) != preparedEchoes { prepareTranscript() }
+            guard let target = self.target, !self.restoringDraft else { return }
             AgentChatQueues.items[target.id] = items
         }
     }
@@ -132,7 +135,9 @@ final class AgentChatModel {
             submittedAfterLine: submittedAfterLine, busy: isBusy || preview != nil,
             waiting: needsAnswer || approval != nil || question != nil || terminalPrompt != nil || passwordPrompt
                 || ["waiting", "blocked"].contains(liveActivity ?? ""),
-            workingDirectory: panes.first { $0.id == target?.paneID }?.cwd)
+            workingDirectory: panes.first { $0.id == target?.paneID }?.cwd,
+            pendingEchoes: Self.pendingEchoes(queue))
+        preparedEchoes = activity.pendingEchoes
         let previous = preparation
         preparationTask = Task {
             let value = await Task.detached(priority: .userInitiated) {
@@ -146,6 +151,11 @@ final class AgentChatModel {
             currentToolName = value.currentToolName; currentToolDetail = value.currentToolDetail; timelineRevision += 1
             matchSentImages()
         }
+    }
+    @ObservationIgnored private var preparedEchoes: [ChatPendingEcho] = []
+    private static func pendingEchoes(_ items: [QueuedMessage]) -> [ChatPendingEcho] {
+        items.filter { $0.submittedAfterLine != nil }
+            .map { ChatPendingEcho(id: $0.id, text: $0.text, images: $0.attachments.filter(\.attachment.isImage)) }
     }
     private func matchSentImages() {
         var matches: [String: [ChatAttachmentDraft]] = [:]
@@ -654,22 +664,33 @@ final class AgentChatModel {
         }
         let optimistic = QueuedMessage(text: submitted, attachments: items)
         let sendingTarget = target
+        var handedToBubble = false
         let result = await deliver(submitted, attachments: items, session: session, consumeDraft: consumeDraft) { text in
             guard self.target == sendingTarget, !AgentSlashCommand.isCommand(submitted) else { return }
             var pending = optimistic
             pending.submittedAfterLine = self.history.totalLines - 1
             pending.submittedText = text
             self.queue.append(pending)
+            // The muted bubble now carries the message; the composer does
+            // not show it twice. A failed delivery puts it back.
+            if consumeDraft == nil, self.draft == submitted {
+                handedToBubble = true
+                self.draft = ""
+                self.attachments.removeAll { item in items.contains { $0.id == item.id } }
+            }
         }
         guard target == sendingTarget else { return }
         if result.rejected { queue.removeAll { $0.id == optimistic.id } }
         else if let index = queue.firstIndex(where: { $0.id == optimistic.id }) { queue[index].attachments = result.attachments }
         reconcileHandedOffQueue()
+        if handedToBubble, !result.delivered {
+            attachments = result.attachments.filter { sent in !attachments.contains { $0.id == sent.id } } + attachments
+        }
         for uploaded in result.attachments {
             if let index = attachments.firstIndex(where: { $0.id == uploaded.id }) { attachments[index].path = uploaded.path }
         }
         guard result.delivered else {
-            if consumeDraft != nil { draft = DictationSession.join(submitted, draft) }
+            if consumeDraft != nil || handedToBubble { draft = DictationSession.join(submitted, draft) }
             return
         }
         // A dictation send already cleared its draft before delivery. Even
@@ -719,8 +740,9 @@ final class AgentChatModel {
         let text = paths.isEmpty ? submitted : submitted + "\n\nAttached files on this computer:\n" + paths
         deliveryStatus = "Sending…"
         submittedAfterLine = max(0, history.totalLines) - 1
-        sentAt = .now; awaitingReply = true
+        // The receipt first, so the person's bubble is never behind the live line.
         submittedToAgent(text)
+        sentAt = .now; awaitingReply = true
         do {
             #if DEBUG && targetEnvironment(simulator)
             if AgentChatFixture.enabled { try await AgentChatFixture.send(target, text: text) }

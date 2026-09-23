@@ -26,8 +26,11 @@ struct ChatTimelineEntry: Identifiable, Equatable {
     var turnActivity: ChatTurnActivity? = nil
     /// The files a finished turn changed, drawn as one row at its end.
     var turnChanges: ChatTurnChanges? = nil
+    /// A sent message the transcript has not echoed yet.
+    var pendingEcho: ChatPendingEcho? = nil
     var id: String {
-        turnActivity.map { "activity:\($0.ownerID)" } ?? turnChanges.map { "changes:\($0.ownerID)" } ?? messages[0].id
+        turnActivity.map { "activity:\($0.ownerID)" } ?? turnChanges.map { "changes:\($0.ownerID)" }
+            ?? pendingEcho.map { "pending:\($0.id)" } ?? messages[0].id
     }
     var isActivity: Bool { kind != .message }
     var isReadRun: Bool { kind == .readRun }

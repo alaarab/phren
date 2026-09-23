@@ -38,6 +38,20 @@ final class ChatTurnActivityTests: XCTestCase {
         XCTAssertEqual(reopened.entries, prepared.entries)
     }
 
+    /// A sent message the transcript has not echoed is prepared together
+    /// with the submit's live line, and above it.
+    func testPendingEchoLandsWithTheLiveLineAndAboveIt() throws {
+        let frame = try transcript([message("assistant", "Ready")])
+        let echo = ChatPendingEcho(id: UUID(), text: "Fix the header", images: [])
+        var prepared = ChatTranscriptPreparation()
+        prepared.update(frame.messages, activity: .init(submittedAt: .now, submittedAfterLine: 0, busy: true, pendingEchoes: [echo]))
+        let ids = prepared.entries.map(\.id)
+        XCTAssertEqual(prepared.entries.last?.turnActivity?.isLive, true)
+        XCTAssertEqual(ids.suffix(2).first, "pending:\(echo.id)")
+        prepared.update(frame.messages, activity: .init(submittedAt: .now, submittedAfterLine: 0, busy: true))
+        XCTAssertFalse(prepared.entries.contains { $0.pendingEcho != nil }, "An acknowledged receipt leaves no bubble")
+    }
+
     func testProgressOnlyCompletionInvalidatesPreparationAndWaitingHidesLiveRow() throws {
         let frame = try transcript([event("task_started", at: 1000), message("user", "Hello")])
         var progress = AgentChatProgress(); progress.receive(frame)

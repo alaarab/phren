@@ -21,7 +21,7 @@ final class AgentChatComposerTests: AgentChatUITestCase {
             let start = composer.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.2))
             start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: cappedHeight - 20)))
         }
-        composer.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 30, dy: 16)).doubleTap()
+        composer.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 30, dy: 8)).doubleTap()
         let report = app.staticTexts["chat-fixture-copied"]
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             self.selectionReport(app)["selected"] as? String == "Alpha"
@@ -82,6 +82,94 @@ final class AgentChatComposerTests: AgentChatUITestCase {
         XCTAssertEqual(app.keyboards.firstMatch.exists, keyboardWasVisible)
         XCTAssertGreaterThan((selectionReport(app)["selected"] as? String ?? "").count, "Bravo".count)
         XCTAssertTrue(app.buttons["chat-selectable-done"].exists)
+    }
+
+    /// The box follows the draft on every change: typing, the first wrap, a
+    /// paste, dictation's insert and deleting back down. One to four lines
+    /// grow it; past four it keeps its height and scrolls inside.
+    @MainActor
+    func testComposerHeightFollowsTheDraftToFourLinesThenScrolls() {
+        let app = launch(extra: ["--chat-composer-inserts", "--chat-clear-drafts"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let composer = app.textViews["chat-composer"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 8))
+        let empty = settledHeight(composer)
+        composer.tap()
+        composer.typeText("One")
+        let one = keepsUp(app, composer, "one line")
+        XCTAssertEqual(one, empty, accuracy: 1)
+        composer.typeText("\nTwo")
+        let two = keepsUp(app, composer, "two lines")
+        let line = two - one
+        XCTAssertGreaterThan(line, 14, "A second line grows the box by a line")
+        composer.typeText("\nThree")
+        XCTAssertEqual(keepsUp(app, composer, "three lines"), one + 2 * line, accuracy: 1.5)
+        composer.typeText("\nFour")
+        let four = keepsUp(app, composer, "four lines")
+        XCTAssertEqual(four, one + 3 * line, accuracy: 1.5)
+        capture(app, "Composer with a four-line draft")
+        composer.typeText("\nFive\nSix")
+        XCTAssertEqual(keepsUp(app, composer, "six lines", cap: four), four, accuracy: 1, "Past four lines the box scrolls")
+        capture(app, "Composer with a six-line draft")
+        // Deleting back down shrinks it with the text.
+        composer.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: "\nFive\nSix".count))
+        XCTAssertEqual(keepsUp(app, composer, "back to four", cap: four), four, accuracy: 1)
+        composer.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: "\nThree\nFour".count))
+        XCTAssertEqual(keepsUp(app, composer, "back to two", cap: four), two, accuracy: 1)
+        composer.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: "\nTwo".count))
+        XCTAssertEqual(keepsUp(app, composer, "back to one", cap: four), one, accuracy: 1)
+        // The first wrap: one line typed past the width of the box.
+        composer.typeText(" and then a single sentence that keeps going past the edge")
+        XCTAssertGreaterThanOrEqual(keepsUp(app, composer, "first wrap", cap: four), two - 1)
+        composer.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 80))
+        XCTAssertEqual(keepsUp(app, composer, "cleared", cap: four), one, accuracy: 1)
+        // A paste of several lines at once.
+        UIPasteboard.general.string = "Pasted one\nPasted two\nPasted three"
+        composer.press(forDuration: 1.1)
+        let paste = app.menuItems["Paste"]
+        if paste.waitForExistence(timeout: 3) {
+            paste.tap()
+            XCTAssertEqual(keepsUp(app, composer, "paste", cap: four), one + 2 * line, accuracy: 1.5)
+            composer.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 40))
+            XCTAssertEqual(keepsUp(app, composer, "paste cleared", cap: four), one, accuracy: 1)
+        }
+        // Dictation changes the draft from outside the editor.
+        composer.typeText("#dictate")
+        XCTAssertEqual(keepsUp(app, composer, "dictation", cap: four), two, accuracy: 1.5)
+        capture(app, "Composer after a dictated insert")
+        composer.typeText("#dictate")
+        XCTAssertEqual(keepsUp(app, composer, "dictation twice", cap: four), one + 2 * line, accuracy: 1.5)
+    }
+
+    /// The composer's settled height, after checking that the box holds its
+    /// text: as tall as the text up to the cap, and never scrolled while the
+    /// whole draft fits.
+    @MainActor @discardableResult
+    private func keepsUp(_ app: XCUIApplication, _ composer: XCUIElement, _ step: String, cap: CGFloat = .greatestFiniteMagnitude) -> CGFloat {
+        let height = settledHeight(composer)
+        var metrics: [Double] = []
+        let fits = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            metrics = self.selectionReport(app)["composer"] as? [Double] ?? []
+            guard metrics.count == 3 else { return false }
+            let (offset, content, visible) = (metrics[0], metrics[1], metrics[2])
+            let whole = content <= visible + 1
+            return abs(visible - composer.frame.height) <= 1
+                && (whole ? offset <= 0.5 : visible >= min(Double(cap), content) - 1)
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [fits], timeout: 3), .completed,
+                       "\(step): the box must hold its text (offset, text, visible) = \(metrics), frame \(composer.frame.height)")
+        return height
+    }
+
+    @MainActor private func settledHeight(_ element: XCUIElement) -> CGFloat {
+        var last = element.frame.height
+        for _ in 0..<10 {
+            usleep(250_000)
+            let now = element.frame.height
+            if abs(now - last) < 0.5 { return now }
+            last = now
+        }
+        return last
     }
 
     @MainActor private func selectionReport(_ app: XCUIApplication) -> [String: Any] {

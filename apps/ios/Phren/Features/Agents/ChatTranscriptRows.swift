@@ -120,6 +120,8 @@ private struct ChatTranscriptRow: View, Equatable {
         #endif
         if let activity = entry.turnActivity {
             ChatTurnActivityRow(activity: activity)
+        } else if let echo = entry.pendingEcho {
+            ChatPendingEchoRow(echo: echo, preview: preview)
         } else if let changes = entry.turnChanges {
             ChatTurnChangesRow(changes: changes).equatable()
         } else if let note = entry.messages.first, note.isNarration {
@@ -160,6 +162,35 @@ private struct ChatTranscriptRow: View, Equatable {
                 }
             }
         })
+    }
+}
+
+/// A message sent from this phone, before its transcript row lands: the
+/// same bubble, muted and uncaptioned. The real row replaces it.
+private struct ChatPendingEchoRow: View {
+    let echo: ChatPendingEcho
+    let preview: (ChatAttachmentDraft) -> Void
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            Spacer(minLength: 30)
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(echo.images) { item in
+                    Button { preview(item) } label: {
+                        ChatAttachmentImage(attachment: item.attachment).frame(maxHeight: 220).clipShape(RoundedRectangle(cornerRadius: 12))
+                    }.accessibilityLabel("View attached \(item.attachment.name)")
+                }
+                if !echo.text.isEmpty {
+                    ChatRichText(text: echo.text, messageID: nil, replyLabel: "Copy message", cacheKey: "pending:\(echo.id)").equatable()
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(PhrenTheme.chatUserBubble, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        }
+        .opacity(0.5)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Your message, sending: \(echo.text)")
+        .accessibilityIdentifier("chat-pending-message:\(echo.id)")
     }
 }
 
