@@ -9,14 +9,18 @@ struct HostFilesView: View {
     var hostID: UUID? = nil
     @AppStorage("sessions.live.preferences.v1") private var data = Data()
     @State private var refresh = UUID()
+    /// Presented from the list, not a Section: a Section's own modifiers are
+    /// not a view in the list, so its cover never appeared.
+    @State private var preview: FileViewerItem?
     private var hosts: [LiveHost] {
         ((try? LiveSessionPreferences.read(data))?.hosts ?? []).filter { hostID == nil || $0.id == hostID }
     }
     var body: some View {
         PhrenList {
             if hosts.isEmpty { Text("Add a computer in Agents to put files on it.").foregroundStyle(PhrenTheme.textMuted) }
-            ForEach(hosts) { host in HostFilesSection(host: host, refresh: refresh) }
+            ForEach(hosts) { host in HostFilesSection(host: host, refresh: refresh, preview: $preview) }
         }
+        .fullScreenCover(item: $preview) { FileViewer(item: $0) }
         .navigationTitle("Files").navigationBarTitleDisplayMode(.inline)
         .phrenScreen()
         .refreshable { refresh = UUID() }
@@ -31,7 +35,7 @@ private struct HostFilesSection: View {
     @State private var importing = false
     @State private var busy = false
     @State private var copied: String?
-    @State private var preview: FileViewerItem?
+    @Binding var preview: FileViewerItem?
     var body: some View {
         Section {
             NavigationLink { RepositoryProjectsView(host: host) } label: {
@@ -66,7 +70,6 @@ private struct HostFilesSection: View {
             else { ProgressView("Asking \(host.name)…") }
         } header: { Text(host.name) } footer: { Text("Tap a file to open it. Use Copy to hand its path to an agent. Uploads are cleared after two weeks.") }
         .task(id: refresh) { await load() }
-        .fullScreenCover(item: $preview) { FileViewer(item: $0) }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             guard case .success(let urls) = result else { return }
             busy = true
