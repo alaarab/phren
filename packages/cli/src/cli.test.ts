@@ -1569,10 +1569,21 @@ describe("CLI integration: help and health", () => {
   // dispatcher's short-circuit was bypassed for namespace commands.
   describe("namespace --help shows subcommand list", () => {
     const namespaces = REGISTRY.filter((c) => c.subcommands?.length && !c.hidden);
+    // Module-gated namespaces (bridge, dispatch, schedule, code...) answer
+    // --help only from a store that enables them; give the CLI its own such
+    // store rather than whatever store the machine running the tests has.
+    let store: IsolatedCliEnv;
+    beforeAll(() => {
+      store = setupIsolatedCliEnv("phren-help-");
+      grantAdmin(store.phrenDir);
+      fs.writeFileSync(path.join(store.phrenDir, ".config", "modules.yaml"), "version: 1\nenabled:\n"
+        + ["memory", "tasks", "hook", "git", "schedules", "conductor", "fanout", "code"].map(name => `  ${name}: true\n`).join(""));
+    });
+    afterAll(() => store.cleanup());
     for (const cmd of namespaces) {
       const firstSub = cmd.subcommands![0];
       it(`${cmd.name} --help renders ${cmd.subcommands!.length} subcommand line(s)`, () => {
-        const { stdout, exitCode } = runCli([cmd.name, "--help"]);
+        const { stdout, exitCode } = runCli([cmd.name, "--help"], store.env());
         expect(exitCode).toBe(0);
         expect(stdout).toContain(`phren ${cmd.name}`);
         expect(stdout).toContain(firstSub.usage);

@@ -773,20 +773,28 @@ It uses isolated synthetic stores and tokenless clients; the fixture entry point
 is compiled only in Debug simulator builds. Saved test views use a separate
 UserDefaults suite.
 
-Both test targets are parallelizable in the Phren scheme. Run the suite on two
-simulator clones to cut wall time roughly in half:
+Run the UI suite serially, on one simulator. `PhrenUITests` is not
+parallelizable in the Phren scheme, and the command says so explicitly:
+parallel simulator clones overload the Mac, which other builds and workers
+usually share, and the slower clone then times out on fixture delays and
+relaunches.
 
 ```bash
 xcodebuild test -project Phren.xcodeproj -scheme Phren \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  -parallel-testing-enabled YES -parallel-testing-worker-count 2 \
-  -retry-tests-on-failure -test-iterations 2
+  -parallel-testing-enabled NO
 ```
 
-Measured on September 21: 47 UI tests took 597 s on two clones against about
-1400 s serial. A test that waits on a long fixture delay or relaunches the app
-can time out on the slower clone, so the retry flag reruns a failure once
-before reporting it.
+The App Store tour (`StoreTourTests`) and the product video takes
+(`TrailerTour`) only produce screenshots and recordings, so an ordinary run
+skips them. Pass `PHREN_RUN_TOURS=1` to the test runner to run them, which
+xcodebuild does for variables prefixed with `TEST_RUNNER_`:
+
+```bash
+TEST_RUNNER_PHREN_RUN_TOURS=1 xcodebuild test -project Phren.xcodeproj -scheme Phren \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -parallel-testing-enabled NO -only-testing:PhrenUITests/StoreTourTests
+```
 
 Screenshot attachments are normally skipped so the run does not pay for them.
 Set `PHREN_UI_SHOTS=1` in the test runner's environment to capture the design

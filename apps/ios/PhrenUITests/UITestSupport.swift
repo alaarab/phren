@@ -1,6 +1,14 @@
 import XCTest
 
 extension XCTestCase {
+    /// The App Store and trailer tours only produce screenshots and takes, so
+    /// they run only when asked (`PHREN_RUN_TOURS=1`, passed to xcodebuild as
+    /// `TEST_RUNNER_PHREN_RUN_TOURS=1`) and are skipped in an ordinary run.
+    func skipUnlessToursRequested() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["PHREN_RUN_TOURS"] == "1",
+                          "Set PHREN_RUN_TOURS=1 to run the store and trailer tours.")
+    }
+
     /// Attach a screenshot only when a design run asked for shots
     /// (`PHREN_UI_SHOTS=1`) or once this test has already failed, so an
     /// ordinary suite run does not pay for a capture at every step. Each test

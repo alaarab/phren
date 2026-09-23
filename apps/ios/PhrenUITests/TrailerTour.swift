@@ -9,7 +9,10 @@ final class TrailerTour: XCTestCase {
     private let studio = "A1000000-0000-0000-0000-000000000001"
     private let laptop = "A1000000-0000-0000-0000-000000000002"
 
-    override func setUp() { continueAfterFailure = true }
+    override func setUpWithError() throws {
+        try skipUnlessToursRequested()
+        continueAfterFailure = true
+    }
 
     // MARK: Beats 4 and 5: Agents tab, then read the chat and send what's next
 

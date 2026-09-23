@@ -143,7 +143,11 @@ and `PHREN_HERDR_HOME` to override `~/.config/herdr`. Normal phone installations
 use the defaults. Transcript and callback settings respect `CODEX_HOME`,
 `CLAUDE_CONFIG_DIR`, and `COPILOT_HOME`. `PHREN_APPROVAL_HOLD_MS` overrides how
 long the Hook holds a permission ask for the phone (default `55000`, the whole
-Claude window is 60000); tests shorten it. The installed service uses its own user
+Claude window is 60000); tests shorten it. Tests also shorten
+`PHREN_IDENTITY_CACHE_MS` (how long a pane's process-based conversation probe
+is reused, default `2000`) and `PHREN_DIALOG_THROTTLE_MS` (how often a waiting
+pane's terminal dialog is read, default `3000`); the Hook reads all three once
+at startup. The installed service uses its own user
 session environment; keep these paths consistent with the coding agents.
 See [Phren Hook setup](phren-hook.md) and [written files](footprint.md).
 

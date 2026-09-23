@@ -31,8 +31,9 @@ schemes:
       targets:
         - name: PhrenTests
           parallelizable: true
+        # Serial: parallel simulator clones overload the Mac the suite shares.
         - name: PhrenUITests
-          parallelizable: true
+          parallelizable: false
 
 targets:
   PhrenTests:

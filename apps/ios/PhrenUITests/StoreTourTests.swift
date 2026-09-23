@@ -9,6 +9,8 @@ final class StoreTourTests: XCTestCase {
     private let mac = "A1000000-0000-0000-0000-000000000001"
     private let linux = "A1000000-0000-0000-0000-000000000002"
 
+    override func setUpWithError() throws { try skipUnlessToursRequested() }
+
     // MARK: Screens
 
     @MainActor
