@@ -24,6 +24,7 @@ import { TabActivityStore } from "./tab-activity.js";
 import { childAgentTree } from "./transcripts.js";
 import { ModelCatalog } from "./models.js";
 import { ModelSwitcher } from "./model-switch.js";
+import { SideQuestions } from "./side-questions.js";
 import { AccountUsageReader } from "./usage.js";
 import { createScheduleLauncher, Scheduler, scheduleRunsFile } from "./schedules.js";
 import { dailyCanaryDue, runCanary } from "./canary.js";
@@ -57,6 +58,7 @@ export async function serve(version: string): Promise<void> {
   const agentHooks = new AgentHooks(undefined, modules);
   const modelCatalog = new ModelCatalog();
   const modelSwitcher = new ModelSwitcher(agentHooks, modelCatalog);
+  const sideQuestions = new SideQuestions();
   const contextUsage = new WorkspaceContextUsage();
   const accountUsage = new AccountUsageReader();
   const tabActivity = new TabActivityStore();
@@ -105,10 +107,10 @@ export async function serve(version: string): Promise<void> {
 
   const stopRetention = modules.has("git") ? await startChangeRetention() : () => {};
   if (modules.has("git")) await rm(path.join(root, "changes-scratch"), { recursive: true, force: true });
-  const streams = transcriptStreams({ modules, agentHooks, codexQuestions, info, activeCapabilities });
+  const streams = transcriptStreams({ modules, agentHooks, codexQuestions, sideQuestions, info, activeCapabilities });
   const { stream } = streams;
   const http = createServer(createRouteHandler({ version, modules, info, computerID, scheduleStore, scheduler, dispatches, agentHooks,
-    journal, tabActivity, contextUsage, modelCatalog, modelSwitcher, accountUsage, codexQuestions, launches, locatedDirectories,
+    journal, tabActivity, contextUsage, modelCatalog, modelSwitcher, sideQuestions, accountUsage, codexQuestions, launches, locatedDirectories,
     fanoutMessages, canary, streams }));
   http.requestTimeout = 20_000; http.headersTimeout = 10_000; http.maxHeadersCount = 32;
   const ws = new WebSocketServer({ noServer: true, maxPayload: 65_536, perMessageDeflate: false });

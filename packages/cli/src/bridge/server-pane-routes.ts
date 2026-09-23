@@ -8,6 +8,7 @@ import { repositoryDiff } from "./projects.js";
 import { BridgeError, type Json, MAX_FRAME, object, startingTargetSchema, type Target, targetSchema } from "./protocol.js";
 import type { CodexQuestions } from "./questions.js";
 import { childAgent, childAgentTree, conversationNamedPaths, transcriptPath } from "./transcripts.js";
+import { sideQuestionText, type SideQuestions } from "./side-questions.js";
 import { saveUpload } from "./uploads.js";
 
 /** Routes that act on one pane's conversation: prompts, answer keys, typed
@@ -18,6 +19,7 @@ export interface PaneRouteContext {
   agentHooks: AgentHooks;
   modelSwitcher: ModelSwitcher;
   codexQuestions: CodexQuestions;
+  sideQuestions: SideQuestions;
 }
 
 export /** A file from the phone: a plain name and base64 bytes, bounded. */
@@ -79,7 +81,7 @@ async function typeSecret(server: string, pane: string, text: string): Promise<v
 }
 
 export async function paneRoute(ctx: PaneRouteContext, url: URL, data: Json, response: ServerResponse): Promise<unknown> {
-  const { agentHooks, modelSwitcher, codexQuestions } = ctx;
+  const { agentHooks, modelSwitcher, codexQuestions, sideQuestions } = ctx;
   let result: unknown;
   if (url.pathname === "/v1/keys" && object(data.target).starting === true) {
     // A folder-trust or login prompt comes before the agent has a
@@ -118,12 +120,12 @@ export async function paneRoute(ctx: PaneRouteContext, url: URL, data: Json, res
   // Uploads store bytes without answering or interrupting the agent.
   // They still require fresh identity, just like prompt mutations.
   const sendsInput = ["/v1/prompt", "/v1/keys", "/v1/secret", "/v1/model"].includes(url.pathname);
-  if (sendsInput) modelSwitcher.assertAvailable(target);
+  if (sendsInput) { modelSwitcher.assertAvailable(target); sideQuestions.assertAvailable(target); }
   // A key press is how a prompt the agent draws in its terminal gets
   // answered, so keys are the one input allowed while the agent is
   // blocked or waiting; the status check below is theirs alone.
   const pane = await validateTarget(target, false, sendsInput || url.pathname === "/v1/upload");
-  if (sendsInput) modelSwitcher.assertAvailable(target);
+  if (sendsInput) { modelSwitcher.assertAvailable(target); sideQuestions.assertAvailable(target); }
   if (url.pathname === "/v1/prompt") {
     // A waiting agent takes typed text only when nothing structured
     // is pending there: an approval the Hook holds or saw, or a
@@ -141,7 +143,12 @@ export async function paneRoute(ctx: PaneRouteContext, url: URL, data: Json, res
     // A working agent queues typed text and submits it when its turn
     // ends, which can be minutes away; waiting for that only delays
     // the phone. The record still guards the paste for ten minutes.
-    refuseWorkingSlash(pane, text);
+    refuseWorkingSlash(pane, text, target.source);
+    if (sideQuestionText(target.source, text) !== undefined) {
+      // Claude's `/btw` runs beside the turn and never reaches the transcript:
+      // the Hook reads its panel and the answer arrives as a side-answer frame.
+      return { ok: true, delivered: true, sideQuestion: await sideQuestions.ask(target, pane, text) };
+    }
     if (target.source === "codex" && /^\s*\/model\s+\S/i.test(text)) throw new BridgeError(422, "Use the model picker to switch Codex models.");
     const expected = agentHooks.expectDelivery(target, text, String(pane.agent_status) === "working" ? 300 : 1_500);
     await rpc(target.server, "agent.prompt", { target: target.pane, text });
@@ -163,6 +170,8 @@ export async function paneRoute(ctx: PaneRouteContext, url: URL, data: Json, res
       } catch { /* No reliable post-delivery identity. */ }
       result = { ok: true, ...(!confirmed ? { deliveryUncertain: true } : {}) };
     }
+  } else if (url.pathname === "/v1/side-question/dismiss") {
+    result = sideQuestions.dismiss(target, z.string().uuid().parse(data.id));
   } else if (url.pathname === "/v1/model") {
     result = await modelSwitcher.switch(target, data);
   } else if (url.pathname === "/v1/keys") {

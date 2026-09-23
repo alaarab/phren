@@ -8,6 +8,7 @@ import { repositoryBranch } from "./projects.js";
 import { BridgeError, type Json, MAX_FRAME, object, type Provider, type Target, targetFromURL } from "./protocol.js";
 import type { CodexQuestions } from "./questions.js";
 import type { HookInfo } from "./server-routes.js";
+import type { SideQuestions } from "./side-questions.js";
 import { TranscriptPreviewStream } from "./transcript-preview.js";
 import { childAgent, childAgentTree, refreshTranscript, TranscriptReader, transcriptPath } from "./transcripts.js";
 import type { ModuleSnapshot } from "../modules/runtime.js";
@@ -20,6 +21,7 @@ export interface StreamContext {
   modules: ModuleSnapshot;
   agentHooks: AgentHooks;
   codexQuestions: CodexQuestions;
+  sideQuestions?: SideQuestions;
   info: HookInfo;
   activeCapabilities: Record<string, unknown>;
 }
@@ -51,7 +53,7 @@ export function streamCloseReason(error: unknown): string {
 }
 
 export function transcriptStreams(ctx: StreamContext) {
-  const { modules, agentHooks, codexQuestions, info, activeCapabilities } = ctx;
+  const { modules, agentHooks, codexQuestions, sideQuestions, info, activeCapabilities } = ctx;
   /** A conversation the agent has identified but not written yet (Claude
    * Code creates its file on the first turn) is an empty transcript, not a
    * missing one: `reader` stays undefined until the file appears. */
@@ -93,6 +95,10 @@ export function transcriptStreams(ctx: StreamContext) {
     // each tick, and the frames name the child by its parent-scoped id.
     const child = url.pathname === "/v1/transcripts" ? url.searchParams.get("child") : null;
     const cursor = url.pathname === "/v1/transcripts" ? url.searchParams.get("afterLine") : null;
+    // Side answers (Claude's `/btw`) ride the parent conversation's stream
+    // for a phone that asked for them; an older phone rejects unknown frames.
+    const sideAnswers = url.pathname === "/v1/transcripts" && child === null && url.searchParams.get("sideAnswers") === "1";
+    const sentSide = new Map<string, number>();
     // The first frame stays a backlog for protocol compatibility, but a
     // reconnect only reads rows beyond the phone's retained raw-line cursor.
     let resumeAfterLine = cursor === null ? undefined : z.coerce.number().int().nonnegative().max(4_294_967_295).parse(cursor);
@@ -166,6 +172,13 @@ export function transcriptStreams(ctx: StreamContext) {
               ...(historyHealth.stalled ? { historyStalled: true, historyStalledSince: historyHealth.since } : {}),
               modules: info.modules, store: info.store, profile: info.profile, generation: info.generation,
               capabilities: { ...activeCapabilities, asyncQuestions: target.source === "codex" && codexQuestions.available }, branch } });
+          }
+          if (sideAnswers && sideQuestions) {
+            for (const { revision, ...side } of sideQuestions.list(target)) {
+              if (sentSide.get(side.id) === revision) continue;
+              sentSide.set(side.id, revision);
+              send(client, { type: "side-answer", ...conversation, ...side });
+            }
           }
           first = false;
         }

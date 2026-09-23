@@ -3,12 +3,15 @@ import { AgentHooks, visibleTerminalChoice } from "./agent-hooks.js";
 import { rpc, validateTarget } from "./herdr.js";
 import { ModelCatalog, type AgentModel } from "./models.js";
 import { BridgeError, type Json, type Target } from "./protocol.js";
+import { sideQuestionText } from "./side-questions.js";
 import { stripTerminal } from "../terminal-text.js";
 
 export const MODEL_BUSY = "This agent is working. The model switch can happen when the turn ends. Choose Switch after this turn.";
 
-/** Busy slash commands must never enter the harness's text queue. */
-export function refuseWorkingSlash(pane: Json, text: string): void {
+/** Busy slash commands must never enter the harness's text queue. Claude's
+ * `/btw` side question is the one made to run beside a working turn. */
+export function refuseWorkingSlash(pane: Json, text: string, source?: string): void {
+  if (source && sideQuestionText(source, text) !== undefined) return;
   if (pane.agent_status === "working" && /^\s*\//.test(text)) throw new BridgeError(409, MODEL_BUSY);
 }
 
