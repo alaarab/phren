@@ -26,8 +26,11 @@ struct CodeDiffView: View, Equatable {
         lhs.patch == rhs.patch && lhs.previewLineLimit == rhs.previewLineLimit
             && lhs.collapsible == rhs.collapsible && lhs.cacheKey == rhs.cacheKey
     }
-    init(patch: String, cacheKey: String? = nil, previewLineLimit: Int = 36, collapsible: Bool = false) {
+    /// `initiallyOpen` starts a collapsible card unfolded, as a turn's
+    /// combined diff does for its first few files.
+    init(patch: String, cacheKey: String? = nil, previewLineLimit: Int = 36, collapsible: Bool = false, initiallyOpen: Bool = false) {
         self.patch = patch
+        _open = State(initialValue: initiallyOpen)
         self.previewLineLimit = previewLineLimit
         self.collapsible = collapsible
         self.cacheKey = cacheKey

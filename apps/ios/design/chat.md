@@ -179,6 +179,28 @@ Colors carry meaning in the transcript: `chatPath` for file paths and links,
 call state, `chatNote` for narration and the finished line. Each has a light
 value for light custom themes. Phren purple stays on buttons and phren cards.
 
+## Turn diff
+
+A finished turn (completed or stopped) that changed files ends with one quiet
+44-point row styled like a tool pill: a plus-minus icon, `N files changed`
+and the `+A −B` counts, then a chevron. It sits after the turn's last row and
+before the person's next message; a working turn and a turn that changed
+nothing have none. Identifier `chat-turn-changes:<owner-message-id>`, one
+accessibility element read as `3 files changed, 6 added, 3 removed`.
+
+The change set comes from the transcript alone, never from git, since another
+agent may be editing the same checkout: each call's `Changes` rows (the Hook's
+`phren_changes`), or, for a call without them, the patch its input carries
+(Edit, MultiEdit, Write, apply_patch). A call whose result failed adds
+nothing. Pieces for the same file join in order; an absolute path inside the
+pane's folder, or one ending in a repository path the turn already names, is
+shown relative. Preparation computes it off-main, cached by the turn's owner
+and its tool rows.
+
+The row pushes Turn changes: the total, then one `CodeDiffView` per file
+(open when there are six files or fewer), each title bar folding it and its
+open button (`chat-patch-open`) pushing that file's `FileDiffView`.
+
 ## Header and keyboard
 
 The header's capsule sits on a solid band of the chat canvas from the top of

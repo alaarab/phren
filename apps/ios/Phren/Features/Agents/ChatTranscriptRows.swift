@@ -120,6 +120,8 @@ private struct ChatTranscriptRow: View, Equatable {
         #endif
         if let activity = entry.turnActivity {
             ChatTurnActivityRow(activity: activity)
+        } else if let changes = entry.turnChanges {
+            ChatTurnChangesRow(changes: changes).equatable()
         } else if let note = entry.messages.first, note.isNarration {
             ChatNarrationRow(message: note).equatable()
         } else if let compaction = entry.messages.first, compaction.isCompaction {

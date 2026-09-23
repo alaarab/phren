@@ -24,7 +24,11 @@ struct ChatTimelineEntry: Identifiable, Equatable {
     var placeholderIdentifier = ""
     var placeholderLabel = ""
     var turnActivity: ChatTurnActivity? = nil
-    var id: String { turnActivity.map { "activity:\($0.ownerID)" } ?? messages[0].id }
+    /// The files a finished turn changed, drawn as one row at its end.
+    var turnChanges: ChatTurnChanges? = nil
+    var id: String {
+        turnActivity.map { "activity:\($0.ownerID)" } ?? turnChanges.map { "changes:\($0.ownerID)" } ?? messages[0].id
+    }
     var isActivity: Bool { kind != .message }
     var isReadRun: Bool { kind == .readRun }
 

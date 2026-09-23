@@ -66,6 +66,7 @@ number counts up on its own.
 - Agent work puts running jobs first, shows failures for one hour with their age, and remembers dismissed failures. Header counts match the visible rows.
 
 - The working tree keeps expanded folders and loaded children during refreshes and tab switches. Directory rows show file totals; indexed projects also show symbol totals and kinds, with file symbol chips opening the dossier.
+- A finished agent turn that changed files ends with one quiet row, "3 files changed +6 −3". Tapping it opens everything that turn changed, file by file, and each file opens its own full diff. The list comes from the conversation itself (the edits the agent made and the changes Phren Hook measured under its commands), so another agent working in the same folder never shows up in it. Works for Claude and Codex.
 
 - Internal: the largest chat, sessions and tasks source files are split along their seams (composer, options, dictation, scroll follow, pending queue; one file per sessions type; the task sheets), and the chat model keeps its connection and outgoing queue in their own objects. The chat UI tests are split by feature. Nothing looks or behaves differently.
 

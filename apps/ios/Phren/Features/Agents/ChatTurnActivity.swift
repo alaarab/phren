@@ -11,6 +11,8 @@ struct ChatActivityContext: Equatable {
     var submittedAfterLine = -1
     var busy = false
     var waiting = false
+    /// The pane's folder, so a turn's diff names files inside it relatively.
+    var workingDirectory: String?
 }
 
 struct ChatTurnActivity: Equatable {
@@ -67,6 +69,15 @@ extension ChatTranscriptPreparation {
                 let anchor = reply ?? users.first { $0.line > owner.line }
                 let position = anchor.flatMap { anchor in entries.firstIndex { $0.messages.contains { $0.id == anchor.id } } } ?? entries.count
                 insertions[position, default: []].append(activityEntry(activity))
+                // What the turn changed closes it: after its last row, before
+                // the next message from the person.
+                if let changes = ChatTurnChanges.collect(ownerID: owner.id, rows: rows, root: context.workingDirectory), let last = rows.last {
+                    let end = entries.lastIndex { $0.messages.contains { $0.id == last.id } }.map { $0 + 1 } ?? entries.count
+                    var entry = ChatTimelineEntry(messages: [], turnChanges: changes)
+                    entry.placeholderIdentifier = changes.identifier
+                    entry.placeholderLabel = changes.spokenLabel
+                    insertions[end, default: []].append(entry)
+                }
             }
         }
         // Cover submit-to-acknowledgement latency without inventing a persisted start.

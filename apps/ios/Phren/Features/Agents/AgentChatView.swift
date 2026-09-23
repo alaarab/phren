@@ -50,6 +50,7 @@ struct AgentChatView: View {
     @State private var assigningProject = false
     @State private var showingChanges = false
     @State private var fullDiff: ChatFullDiff?
+    @State private var turnChanges: ChatTurnChanges?
     @State private var fullToolOutput: FullToolOutput?
     @State private var historyTask: Task<Void, Never>?
     @State private var atBottom = true
@@ -205,6 +206,7 @@ struct AgentChatView: View {
         .background(PhrenTheme.chatCanvas)
         .confirmsWebLinks()
         .environment(\.openChatDiff) { fullDiff = $0 }
+        .environment(\.openTurnChanges) { turnChanges = $0 }
         .environment(\.openToolOutput) { fullToolOutput = $0 }
         .environment(model.turnControl)
         .environment(\.chatTurnStop, ChatTurnStop(enabled: turnStopEnabled) { sendTask = Task { await model.stop(session) } })
@@ -241,6 +243,7 @@ struct AgentChatView: View {
         .keepsInteractivePop(hidesNavigationBar: true, screenTag: Self.screenTag)
         .navigationDestination(item: $openedChild) { AgentWorkDestinationView(navigation: $0) }
         .navigationDestination(item: $fullDiff) { FileDiffView(file: $0.file, section: $0.section) }
+        .navigationDestination(item: $turnChanges) { ChatTurnDiffView(changes: $0) }
         .environment(\.fileLinkContext, model.target.map { FileLinkContext(host: session.host, target: $0) })
         .navigationDestination(item: $fullToolOutput) { FullToolOutputView(output: $0) }
         .navigationDestination(isPresented: $showingChanges) {

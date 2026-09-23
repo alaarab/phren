@@ -26,7 +26,9 @@ struct ChatChildAgents: Equatable {
 private struct OpenChatDiffKey: EnvironmentKey { static let defaultValue: (ChatFullDiff) -> Void = { _ in } }
 private struct OpenToolOutputKey: EnvironmentKey { static let defaultValue: (FullToolOutput) -> Void = { _ in } }
 private struct ChatChildAgentsKey: EnvironmentKey { static let defaultValue: ChatChildAgents? = nil }
+private struct OpenTurnChangesKey: EnvironmentKey { static let defaultValue: (ChatTurnChanges) -> Void = { _ in } }
 extension EnvironmentValues {
+    var openTurnChanges: (ChatTurnChanges) -> Void { get { self[OpenTurnChangesKey.self] } set { self[OpenTurnChangesKey.self] = newValue } }
     var openChatDiff: (ChatFullDiff) -> Void { get { self[OpenChatDiffKey.self] } set { self[OpenChatDiffKey.self] = newValue } }
     var openToolOutput: (FullToolOutput) -> Void { get { self[OpenToolOutputKey.self] } set { self[OpenToolOutputKey.self] = newValue } }
     var chatChildAgents: ChatChildAgents? { get { self[ChatChildAgentsKey.self] } set { self[ChatChildAgentsKey.self] = newValue } }

@@ -131,7 +131,8 @@ final class AgentChatModel {
             submittedAt: sentAt ?? preview?.turnStartedAt,
             submittedAfterLine: submittedAfterLine, busy: isBusy || preview != nil,
             waiting: needsAnswer || approval != nil || question != nil || terminalPrompt != nil || passwordPrompt
-                || ["waiting", "blocked"].contains(liveActivity ?? ""))
+                || ["waiting", "blocked"].contains(liveActivity ?? ""),
+            workingDirectory: panes.first { $0.id == target?.paneID }?.cwd)
         let previous = preparation
         preparationTask = Task {
             let value = await Task.detached(priority: .userInitiated) {
