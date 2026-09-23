@@ -45,6 +45,8 @@ number counts up on its own.
 
 - The working tree keeps expanded folders and loaded children during refreshes and tab switches. Directory rows show file totals; indexed projects also show symbol totals and kinds, with file symbol chips opening the dossier.
 
+- Internal: the largest chat, sessions and tasks source files are split along their seams (composer, options, dictation, scroll follow, pending queue; one file per sessions type; the task sheets), and the chat model keeps its connection and outgoing queue in their own objects. The chat UI tests are split by feature. Nothing looks or behaves differently.
+
 ### Added
 
 - One file viewer opens computer files, working-tree contents and verified paths in chat. Downloads show progress and resume from the cache after cancellation or backgrounding. Video and audio use phren playback controls; PDFs have page controls, JSON folds, CSV scrolls as a table, Markdown renders, code highlights and images zoom. Save to Files and Share work for every downloaded type.
