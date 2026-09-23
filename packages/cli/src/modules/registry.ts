@@ -145,7 +145,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
     tools: full(["code_search", "code_definition", "code_references", "code_outline", "code_usage"]),
     cliCommands: ["code index", "code status", "code search", "code outline", "code refs", "code def", "code usage"],
     agentHooks: [],
-    hookRoutes: [...routes("GET", ["/v1/code/tree", "/v1/code/usage-page", "/v1/code/recent", "/v1/code/status", "/v1/code/search", "/v1/code/outline", "/v1/code/outline-summary", "/v1/code/definition", "/v1/code/references", "/v1/code/usage"]), ...routes("POST", ["/v1/code/note", "/v1/code/reindex"])],
+    hookRoutes: [...routes("GET", ["/v1/code/tree", "/v1/code/usage-page", "/v1/code/recent", "/v1/code/status", "/v1/code/search", "/v1/code/outline", "/v1/code/outline-summary", "/v1/code/file-references", "/v1/code/definition", "/v1/code/references", "/v1/code/usage"]), ...routes("POST", ["/v1/code/note", "/v1/code/reindex"])],
     capabilities: ["code"],
     storeFiles: [], localFiles: ["<store>/.runtime/code/*.sqlite"],
     phoneScreens: [{ screen: "CodeView", capability: "code" }], skills: ["code"],
