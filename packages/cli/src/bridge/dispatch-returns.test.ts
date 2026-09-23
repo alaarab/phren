@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DispatchService, dispatchStatus, updateReceipt, type Receipt } from "./dispatch.js";
 import { DispatchReturns, NOTICE_MS, noticeLine, observe, POLL_MS, REPLY_LIMIT, workerStates, type WorkerReaders } from "./dispatch-returns.js";
 import { findPane } from "./herdr.js";
+import { localHost } from "./dispatch-hosts.js";
 import { hookPeers, peerRequest } from "./peers.js";
 import { object, objects, provider, type Json } from "./protocol.js";
 
@@ -226,6 +227,24 @@ describe("the dispatching Hook's returns loop", () => {
     clock += POLL_MS;
     await returns.tick();
     expect(vi.mocked(peerRequest)).not.toHaveBeenCalled();
+  });
+
+  it("follows a dispatch placed on this computer through its own Hook, never over SSH", async () => {
+    // This computer's Hook answers placement; its worker states come from
+    // the same code, called in-process by the returns loop.
+    const localHook = vi.fn(async (route: string) => route === "/v1/dispatch/capacity"
+      ? { product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working: 0 }
+      : route.startsWith("/v1/workspaces/launch") ? { ok: true, target: workerTarget } : { ok: true });
+    const here = new DispatchService(undefined, () => localHost("default", ["Laptop"], localHook as never));
+    const placed = await here.dispatch({ ...brief, computer: "Laptop" });
+    expect(placed).toMatchObject({ ok: true, computer: "Laptop" });
+    const localWorkers = vi.fn(async (input: Json) => ({ ...await workerStates(input, readers(() => remote, finalTurn)) }));
+    const watching = new DispatchReturns({ snapshot: async () => local, identity: recordedIdentity, deliver, now: () => clock,
+      isLocal: computer => computer === "Laptop", localWorkers });
+    await watching.tick();
+    expect(localWorkers).toHaveBeenCalledWith({ targets: [expect.objectContaining({ pane: workerTarget.pane })] });
+    expect(vi.mocked(peerRequest)).not.toHaveBeenCalled();
+    expect((await dispatchStatus())[0].worker).toBeDefined();
   });
 
   it("records nothing while a peer is unreachable and leaves placing receipts alone", async () => {

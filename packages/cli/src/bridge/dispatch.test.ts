@@ -6,11 +6,17 @@ import { DispatchService, dispatchStatus } from "./dispatch.js";
 import { addGrant } from "./grants.js";
 import { BridgeError } from "./protocol.js";
 import { hookPeers, peerRequest } from "./peers.js";
+import { hookRequest } from "./client.js";
+import { isLocalComputer } from "./dispatch-hosts.js";
 
 vi.mock("./peers.js", () => ({ hookPeers: vi.fn(), peerRequest: vi.fn() }));
+// This computer is "Laptop" and its own Hook is faked: tests never reach a real Hook.
+vi.mock("./computer-names.js", () => ({ localNames: () => ["Laptop.example.net", "Laptop"] }));
+vi.mock("./client.js", () => ({ hookRequest: vi.fn() }));
 const target = { server: "default", workspace: "w1", tab: "t1", pane: "p1", source: "codex", starting: true, startingToken: "a".repeat(64) };
 const brief = { computer: "anywhere", project: "phren", harness: "codex", prompt: "A private worker brief", label: "Tests" };
 const remoteID = "30000000-0000-4000-8000-000000000001";
+const localID = "30000000-0000-4000-8000-000000000009";
 
 describe("dispatch receipts and selection", () => {
   let root: string;
@@ -19,6 +25,10 @@ describe("dispatch receipts and selection", () => {
     vi.mocked(hookPeers).mockResolvedValue(["Desk", "Linuxbox"].map(name => ({ name, address: "desk.example", username: "sam", port: 22, hostKey: "unused", server: "default" })));
     vi.mocked(peerRequest).mockImplementation(async (peer, route) => route === "/v1/dispatch/capacity"
       ? { product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working: peer.name === "Desk" ? 3 : 1 }
+      : route.startsWith("/v1/workspaces/launch") ? { ok: true, target } : { ok: true });
+    // Busier than any peer unless a test says otherwise.
+    vi.mocked(hookRequest).mockImplementation(async route => route === "/v1/dispatch/capacity"
+      ? { product: "phren-hook", protocol: 1, computer: { id: localID }, servers: ["default"], working: 9 }
       : route.startsWith("/v1/workspaces/launch") ? { ok: true, target } : { ok: true });
   });
   afterEach(async () => { vi.unstubAllEnvs(); vi.resetAllMocks(); await rm(root, { recursive: true, force: true }); });
@@ -48,12 +58,14 @@ describe("dispatch receipts and selection", () => {
 
   it("breaks ties by name and propagates explicit enrollment failures", async () => {
     vi.mocked(peerRequest).mockRejectedValue(new BridgeError(403, "Key not enrolled"));
+    vi.mocked(hookRequest).mockRejectedValue(new BridgeError(503, "Local Hook not running"));
     await expect(new DispatchService().dispatch({ ...brief, computer: "Desk" })).rejects.toThrow("Key not enrolled");
     const none = await new DispatchService().dispatch(brief).catch(error => error);
     expect(none).toBeInstanceOf(BridgeError);
     expect(none.message).toContain("No enrolled computer");
     // Every peer that sat out placement is named with its reason.
-    expect(none.details).toEqual({ skipped: [{ computer: "Desk", reason: "Key not enrolled" }, { computer: "Linuxbox", reason: "Key not enrolled" }] });
+    expect(none.details).toEqual({ skipped: [{ computer: "Desk", reason: "Key not enrolled" }, { computer: "Laptop", reason: "Local Hook not running" },
+      { computer: "Linuxbox", reason: "Key not enrolled" }] });
     vi.mocked(peerRequest).mockImplementation(async (_peer, route) => route === "/v1/dispatch/capacity"
       ? { product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working: 0 }
       : route.startsWith("/v1/workspaces/launch") ? { target } : { ok: true, deliveryUncertain: true });
@@ -133,3 +145,46 @@ describe("dispatch receipts and selection", () => {
     expect(other.granted).toBeUndefined();
   });
 });
+
+describe("dispatch to this computer", () => {
+  let root: string;
+  beforeEach(async () => {
+    root = await mkdtemp(path.join(tmpdir(), "phren-dispatch-local-")); vi.stubEnv("PHREN_BRIDGE_HOME", root);
+    vi.mocked(hookRequest).mockImplementation(async route => route === "/v1/dispatch/capacity"
+      ? { product: "phren-hook", protocol: 1, computer: { id: localID }, servers: ["default"], working: 0 }
+      : route.startsWith("/v1/workspaces/launch") ? { ok: true, target } : { ok: true });
+  });
+  afterEach(async () => { vi.unstubAllEnvs(); vi.resetAllMocks(); await rm(root, { recursive: true, force: true }); });
+
+  it("places on this computer through its own Hook with no hooks.yaml and no SSH", async () => {
+    vi.mocked(hookPeers).mockRejectedValue(new BridgeError(409, "Configure peers and verified host keys in the Hook's hooks.yaml first."));
+    for (const name of ["Laptop", "laptop.example.net", "local"]) {
+      const result = await new DispatchService().dispatch({ ...brief, computer: name });
+      expect(result).toMatchObject({ ok: true, state: "accepted", computer: "Laptop", computerId: localID, target });
+    }
+    expect(vi.mocked(peerRequest)).not.toHaveBeenCalled();
+    const routes = vi.mocked(hookRequest).mock.calls.map(call => call[0]);
+    expect(routes.filter(route => route.startsWith("/v1/workspaces/launch"))).toHaveLength(3);
+    expect(vi.mocked(hookRequest).mock.calls.find(call => call[0] === "/v1/prompt")?.[1]).toEqual({ target, text: brief.prompt });
+  });
+
+  it("still refuses an unknown computer when hooks.yaml is missing", async () => {
+    vi.mocked(hookPeers).mockRejectedValue(new BridgeError(409, "Configure peers and verified host keys in the Hook's hooks.yaml first."));
+    await expect(new DispatchService().dispatch({ ...brief, computer: "Desk" })).rejects.toThrow("hooks.yaml");
+    expect(vi.mocked(hookRequest)).not.toHaveBeenCalled();
+  });
+
+  it("lets anywhere choose this computer when it is the least busy", async () => {
+    vi.mocked(hookPeers).mockResolvedValue([{ name: "Linuxbox", address: "linuxbox.example", username: "sam", port: 22, hostKey: "unused", server: "default" }]);
+    vi.mocked(peerRequest).mockImplementation(async (_peer, route) => route === "/v1/dispatch/capacity"
+      ? { product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working: 4 } : { ok: true });
+    expect(await new DispatchService().dispatch(brief)).toMatchObject({ ok: true, computer: "Laptop" });
+  });
+
+  it("matches this computer by any of its names, never another's", () => {
+    const names = ["Mac.example.net", "Mac", "Sams-Mac"];
+    for (const name of ["Mac", "mac.example.net", "MAC.attlocal.net", "Sams-Mac.local", "local"]) expect(isLocalComputer(name, names)).toBe(true);
+    for (const name of ["Linuxbox", "Desk", "MacBookPro", ""]) expect(isLocalComputer(name, names)).toBe(false);
+  });
+});
+
