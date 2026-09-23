@@ -4,6 +4,7 @@ import { noteOptionalReadFailure, rpc } from "./herdr.js";
 import { object, objects, type Json, type Target } from "./protocol.js";
 import { withTranscriptIndex } from "./transcript-index.js";
 import type { Entry } from "./transcripts.js";
+import { stripTerminal } from "../terminal-text.js";
 
 export interface TranscriptPreview { turnStartedAt: string; text: string }
 export const PREVIEW_INTERVAL_MS = 500;
@@ -12,7 +13,7 @@ const MAX_TEXT = 32_768;
 /** Only the last Claude reply after the current prompt is eligible. A missing
  * prompt anchor is deliberately silent: scrollback could belong to an old turn. */
 export function claudePanePreview(rendered: string, prompt: string, previous = ""): string {
-  const raw = rendered.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "").split(/\r?\n/);
+  const raw = stripTerminal(rendered).split("\n");
   // The rule above the input box can carry the session title
   // ("───── Claude sesh ─"); it ends the reply, it is never part of it.
   const lines = raw.map(line => /[─━═]{3,}/.test(line) && !/^\s*[│┃║]/.test(line) ? "❯" : line.replace(/[\u2500-\u257f]/g, "").trimEnd());
@@ -65,7 +66,7 @@ export function claudePanePreview(rendered: string, prompt: string, previous = "
 
 /** The word Claude's own spinner shows ("✻ Pondering… (12s · esc to interrupt)"). */
 export function claudeSpinnerVerb(rendered: string): string | undefined {
-  const lines = rendered.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").split(/\r?\n/);
+  const lines = stripTerminal(rendered).split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {
     const match = /^\s*[✻✽✶✢✳✦·*⠁-⣿]\s+([A-Z][\p{L}'-]{1,30})(?:…|\.\.\.)\s*\((?:\d|.*esc to interrupt)/u.exec(lines[i]);
     if (match) return match[1];
