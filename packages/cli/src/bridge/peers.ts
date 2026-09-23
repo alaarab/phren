@@ -76,7 +76,7 @@ export function peerOfflineMessage(diagnostic: string, exitCode: number | null |
 }
 
 /** A pin is supplied out of band; dispatch never learns or replaces host keys. */
-export async function peerRequest(peer: HookPeer, route: string, data?: Json): Promise<Json> {
+export async function peerRequest(peer: HookPeer, route: string, data?: Json, timeout?: number): Promise<Json> {
   const root = bridgeRoot(), key = dispatchKeyPath(root);
   const info = await lstat(key).catch(() => undefined);
   if (!info?.isFile() || info.isSymbolicLink() || (info.mode & 0o077)) throw new BridgeError(409, "Run phren bridge enroll-computer on this computer first (private key mode 0600).");
@@ -102,7 +102,7 @@ export async function peerRequest(peer: HookPeer, route: string, data?: Json): P
     const exited = new Promise<number | null>(resolve => ssh.once("exit", code => resolve(code)));
     child.on("error", error => stream?.destroy(new BridgeError(503, `SSH is unavailable (${(error as NodeJS.ErrnoException).code ?? "spawn failed"}).`)));
     try {
-      return await hookRequest(route, data, { createConnection: () => stream! }, data === undefined ? 15_000 : 65_000);
+      return await hookRequest(route, data, { createConnection: () => stream! }, timeout ?? (data === undefined ? 15_000 : 65_000));
     } catch (error) {
       if (!(error instanceof BridgeError)) {
         // ssh's stderr and exit status usually land just after the stream ends.

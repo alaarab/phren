@@ -404,6 +404,20 @@ export async function runStatus() {
     console.log(`\n  ${DIM}${gitTarget} is not a git repo${RESET}`);
   }
 
+  // Health: the same data Phren Hook serves at /v1/health/details.
+  if (moduleEnabled(phrenPath, "hook", profile)) {
+    try {
+      const { hookRequest } = await import("./bridge/client.js");
+      const { healthDetails, formatHealth } = await import("./bridge/health.js");
+      const hook = await hookRequest("/v1/health", undefined, undefined, 2_000).catch(() => undefined);
+      const health = await healthDetails({ store: phrenPath, hookVersion: typeof hook?.version === "string" ? hook.version : undefined });
+      console.log(`\n  ${BOLD}Health${RESET} ${DIM}(${health.computer.name})${RESET}`);
+      for (const line of formatHealth(health, { dim: DIM, reset: RESET, red: RED, yellow: YELLOW, green: GREEN })) console.log(line);
+    } catch (err: unknown) {
+      logger.debug("status", `health: ${errorMessage(err)}`);
+    }
+  }
+
   // Telemetry
   const telemetry = getTelemetrySummary(phrenPath);
   const firstLine = telemetry.split("\n")[0];

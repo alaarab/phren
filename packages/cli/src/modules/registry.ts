@@ -71,7 +71,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
     cliCommands: [
       "bridge", "bridge install", "bridge update", "bridge uninstall", "bridge rollback", "bridge status",
       "bridge doctor", "bridge usage", "bridge usage-statusline", "bridge hook", "bridge serve", "bridge ssh",
-      "bridge fanouts archive",
+      "bridge fanouts archive", "canary",
     ],
     agentHooks: [
       { agents: ["codex", "claude"], events: ["SessionStart", "UserPromptSubmit", "Stop", "PermissionRequest"], handler: "bridge-hook.mjs hook <agent>" },
@@ -80,7 +80,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
     ],
     hookRoutes: [
       ...routes("GET", [
-        "/v1/health", "/v1/muxes", "/v1/activity", "/v1/web-servers", "/v1/simulators",
+        "/v1/health", "/v1/health/details", "/v1/health/peers", "/v1/muxes", "/v1/activity", "/v1/web-servers", "/v1/simulators",
         "/v1/simulators/screenshot", "/v1/simulators/apps", "/v1/files", "/v1/models", "/v1/projects/files",
         "/v1/uploads/image", "/v1/files/range", "/v1/usage", "/v1/push/status", "/v1/projects/locate", "/v1/projects/repos",
         "/v1/workspaces", "/v1/workspaces/panes", "/v1/transcripts/blob", "/v1/transcripts/history",
@@ -90,7 +90,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
         "/v1/push/register", "/v1/push/answer", "/v1/files", "/v1/projects/add", "/v1/simulators/action",
         "/v1/workspaces/launch", "/v1/workspaces/create", "/v1/workspaces/focus", "/v1/workspaces/rename",
         "/v1/workspaces/close", "/v1/prompt", "/v1/model", "/v1/keys", "/v1/secret", "/v1/upload",
-        "/v1/approvals/answer", "/v1/questions/answer", "/v1/subagents/resume",
+        "/v1/approvals/answer", "/v1/questions/answer", "/v1/subagents/resume", "/v1/canary",
       ]),
       ...routes("WS", ["/v1/transcripts", "/v1/status"]),
     ],
@@ -100,7 +100,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
       "files", "repositoryFiles", "subagents", "approvalPush", "simulators",
     ],
     storeFiles: [".runtime/sessions/opencode-*.events.jsonl", ".runtime/approvals/opencode-*.json"],
-    localFiles: ["<bridge>/installed.json", "<bridge>/versions/**", "<bridge>/current", "<bridge>/dispatch", "<bridge>/computer-id"],
+    localFiles: ["<bridge>/installed.json", "<bridge>/versions/**", "<bridge>/current", "<bridge>/dispatch", "<bridge>/computer-id", "<bridge>/canary.json", "<bridge>/canary-daily"],
     phoneScreens: [{ screen: "LiveSessionsView", capability: "hook" }, { screen: "AgentChatView", capability: "transcript" }],
     skills: [],
   },

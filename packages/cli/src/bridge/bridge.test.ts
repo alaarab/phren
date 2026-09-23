@@ -5,7 +5,7 @@ import { readFileSync, realpathSync } from "node:fs";
 import { appendFile, chmod, mkdir, mkdtemp, open, readFile, realpath as realpathAsync, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { request } from "node:http";
 import { createConnection, createServer as createNetServer, type Server, type Socket } from "node:net";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -2202,6 +2202,53 @@ schedules:
       const connections = (await readFile(path.join(root, "ssh-calls.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
       expect(connections).toHaveLength(3);
       expect(connections.every(args => args.includes("IdentityAgent=none"))).toBe(true);
+    });
+
+    it("reports health details, with a peer that does not list this computer back as one-way", async () => {
+      await dispatchFixture();
+      const details = await api("/v1/health/details");
+      expect(details.status, JSON.stringify(details.data)).toBe(200);
+      expect(details.data).toMatchObject({ product: "phren-hook", computer: { name: hostname() },
+        push: { configured: false }, schedules: { lastRun: null }, canary: null });
+      expect(details.data.versions.map((item: { tool: string }) => item.tool)).toEqual(["hook", "herdr", "claude", "codex", "copilot", "opencode"]);
+      expect(details.data.versions[0]).toMatchObject({ tool: "hook", status: "ok" });
+      expect(Array.isArray(details.data.stores)).toBe(true);
+      expect(details.data.peers).toMatchObject({ configured: true, computers: [{ name: "Linuxbox", reachable: true, listsBack: false }] });
+      // Once the peer's hooks.yaml names this computer, the link is two-way.
+      const line = await enrollComputer("Back", path.join(root, "remote"));
+      const hostKey = publicComputerKey(line.slice(line.indexOf("ssh-ed25519")));
+      await writeFile(path.join(root, "remote/hooks.yaml"), JSON.stringify({ version: 1, computers: [
+        { name: hostname().split(".")[0].replace(/[^A-Za-z0-9_.-]/g, "-"), address: "back.example", username: "sam", hostKey },
+      ] }), { mode: 0o600 });
+      expect((await api("/v1/health/details")).data.peers.computers[0]).toMatchObject({ name: "Linuxbox", reachable: true, listsBack: true });
+    });
+
+    it("runs the canary: launches and closes its own conductor, reads an idle transcript, never types into a pane", async () => {
+      agentStatus = "idle";
+      const run = await api("/v1/canary", {});
+      expect(run.status, JSON.stringify(run.data)).toBe(200);
+      expect(run.data).toMatchObject({ version: 1, trigger: "manual", ok: true });
+      const steps = Object.fromEntries(run.data.steps.map((item: { name: string; status: string }) => [item.name, item.status]));
+      expect(steps).toMatchObject({ conductor: "ok", transcript: "ok", sessions: "ok" });
+      const created = commands.find(c => c.method === "workspace.create");
+      expect(created?.params.label).toBe("phren canary");
+      expect(commands.find(c => c.method === "agent.start")?.params).toMatchObject({ name: "phren-canary", kind: "claude" });
+      expect(commands.filter(c => c.method === "workspace.close").map(c => c.params.workspace_id)).toEqual(["w9"]);
+      expect(commands.some(c => ["agent.prompt", "agent.send_keys"].includes(c.method))).toBe(false);
+      const saved = JSON.parse(await readFile(path.join(root, "bridge/canary.json"), "utf8"));
+      expect(saved.startedAt).toBe(run.data.startedAt);
+      expect((await api("/v1/health/details")).data.canary).toMatchObject({ ok: true, startedAt: run.data.startedAt });
+    });
+
+    it("closes the canary's workspace and reports Herdr's reason when the conductor cannot start", async () => {
+      failAgentStart = true;
+      const run = await api("/v1/canary", {});
+      expect(run.status).toBe(200);
+      expect(run.data.ok).toBe(false);
+      const conductor = run.data.steps.find((item: { name: string }) => item.name === "conductor");
+      expect(conductor).toMatchObject({ status: "failed" });
+      expect(conductor.reason).toContain("agent not detected");
+      expect(commands.filter(c => c.method === "workspace.close").map(c => c.params.workspace_id)).toEqual(["w9"]);
     });
 
     it("does not launch when the remote project is absent or the request is invalid", async () => {
