@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+// Cited in docs/whitepaper.tex; keep this path stable.
 
 import { Database } from "bun:sqlite";
 import * as fs from "fs";

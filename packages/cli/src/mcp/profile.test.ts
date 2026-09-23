@@ -185,6 +185,38 @@ describe("dispatch", () => {
     expect(calls).toEqual(["update_task", "update_task", "update_task"]);
   });
 
+  it("passes arrays and objects through, and decodes their JSON-string forms", async () => {
+    const catalog: Catalog = new Map();
+    const seen: Record<string, unknown>[] = [];
+    catalog.set("complete_many", {
+      name: "complete_many",
+      // complete_task's shape: a single string is wrapped, an array is kept.
+      config: { inputSchema: { item: z.preprocess((v) => (typeof v === "string" ? [v] : v), z.array(z.string()).min(1)) } },
+      handler: (args) => { seen.push(args); return ok(args); },
+    });
+    await dispatch(catalog, "complete_many", { item: ["bid:a", "bid:b"] });
+    await dispatch(catalog, "complete_many", { item: '["bid:a", "bid:b"]' });
+    await dispatch(catalog, "complete_many", { item: "bid:a" });
+    expect(seen.map((a) => a.item)).toEqual([["bid:a", "bid:b"], ["bid:a", "bid:b"], ["bid:a"]]);
+    const { registered } = gateWith("core");
+    const updates = parse(await registered.get("manage_task")!.handler({ action: "update", project: "p", task: "t", updates: { section: "Queue" } }));
+    expect(updates.data.args.updates).toEqual({ section: "Queue" });
+  });
+
+  it("decodes a stringified number or boolean only where the field needs one", async () => {
+    const catalog: Catalog = new Map();
+    const seen: Record<string, unknown>[] = [];
+    catalog.set("probe", {
+      name: "probe",
+      config: { inputSchema: { limit: z.number().optional(), flag: z.boolean().optional(), label: z.string().optional() } },
+      handler: (args) => { seen.push(args); return ok(args); },
+    });
+    await dispatch(catalog, "probe", { limit: "5", flag: "true", label: "42" });
+    expect(seen[0]).toEqual({ limit: 5, flag: true, label: "42" });
+    const bad = parse(await dispatch(catalog, "probe", { limit: "007x" }));
+    expect(bad.ok).toBe(false);
+  });
+
   it("reports a JSON-string updates miss at its real inner path, not as a type error", async () => {
     const { registered, calls } = gateWith("core");
     const res = parse(await registered.get("manage_task")!.handler({ action: "update", project: "p", task: "t", updates: '{"priority":"urgent"}' }));

@@ -139,11 +139,6 @@ export async function containedFanoutRoot(env: NodeJS.ProcessEnv): Promise<strin
   } catch { return undefined; }
 }
 
-/** Where the archive sweep moves finished job folders, same id, one directory over. */
-export function fanoutArchiveRoot(env: NodeJS.ProcessEnv = process.env): string {
-  return path.join(storeRoot(env), ".runtime", "agent-fanouts-archive");
-}
-
 async function regularContainedFile(root: string, candidate: string, maxBytes: number): Promise<string | undefined> {
   try {
     const link = await lstat(candidate);
@@ -189,7 +184,7 @@ async function readRefusedFromStderr(jobRoot: string): Promise<Blocked | undefin
   } catch { return undefined; }
 }
 
-export function blockedReason(value: Blocked): string {
+function blockedReason(value: Blocked): string {
   const pattern = typeof value.pattern === "string" ? value.pattern.trim() : "";
   return (pattern ? `blocked: ${value.type} ${pattern}` : `blocked: ${value.type}`).slice(0, 500);
 }

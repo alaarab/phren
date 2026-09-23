@@ -13,7 +13,7 @@ const STALLED_AFTER_MS = 10 * 60 * 1_000;
 
 interface Emitted { lastOrdinal: number; maxUpdated: number; count: number; turnSignature?: string; done: Record<string, "call" | "queued" | "done"> }
 
-export function codexHome(): string { return process.env.CODEX_HOME || path.join(homedir(), ".codex"); }
+function codexHome(): string { return process.env.CODEX_HOME || path.join(homedir(), ".codex"); }
 export function materializedRoot(): string { return path.join(bridgeRoot(), "codex-threads"); }
 export function materializedPath(session: string): string { return path.join(materializedRoot(), `${session}.jsonl`); }
 
@@ -24,17 +24,6 @@ async function openReadOnly(file: string): Promise<Db | undefined> {
     const sqlite = await import("node:sqlite");
     return new sqlite.DatabaseSync(file, { readOnly: true }) as unknown as Db;
   } catch { return undefined; }
-}
-
-/** Whether the thread store knows this session; cheap enough for a lookup. */
-export async function codexThreadExists(session: string): Promise<boolean> {
-  if (!sessionId.safeParse(session).success) return false;
-  const db = await openReadOnly(path.join(codexHome(), "thread_history_1.sqlite"));
-  if (!db) return false;
-  try {
-    const row = object(db.prepare("select count(*) as n from thread_items where thread_id = ?").get(session));
-    return Number(row.n) > 0;
-  } catch { return false; } finally { db.close(); }
 }
 
 /** A working pane whose projection cursor stopped at an unfinished turn can
