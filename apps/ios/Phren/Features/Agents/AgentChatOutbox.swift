@@ -22,6 +22,12 @@ final class AgentChatOutbox {
         items.removeAll { $0.id == item.id && $0.submittedAfterLine == nil }
     }
 
+    /// Retires a receipt the transcript never showed, for Dismiss or Retry.
+    func retire(_ id: UUID) -> QueuedMessage? {
+        guard let index = items.firstIndex(where: { $0.id == id && $0.submittedAfterLine != nil }) else { return nil }
+        return items.remove(at: index)
+    }
+
     /// Takes a held message out of the list, if it has not been handed off.
     func take(_ item: QueuedMessage) -> QueuedMessage? {
         guard let index = items.firstIndex(where: { $0.id == item.id }), items[index].submittedAfterLine == nil else { return nil }
@@ -41,7 +47,9 @@ final class AgentChatOutbox {
                 guard row.line > after else { return false }
                 if row.text == text { return true }
                 let have = AgentQueuedMessages.normalizedText(row.text)
-                if !wanted.isEmpty { return have == wanted }
+                // Claude can join queued sends into one turn, so a message
+                // long enough not to match by chance may land inside another.
+                if !wanted.isEmpty { return have == wanted || (wanted.count >= 12 && have.contains(wanted)) }
                 // Pictures with no words of their own: the landed turn is the
                 // image blocks (or the placeholder the parser gives them).
                 return !item.attachments.isEmpty && have.isEmpty && (!row.imageBlocks.isEmpty || !row.uploadImages.isEmpty || row.text == "[Image attachment]")
@@ -69,17 +77,26 @@ extension AgentChatModel {
             if self.target == sendingTarget, let index = self.queue.firstIndex(where: { $0.id == item.id }) {
                 self.queue[index].submittedAfterLine = self.history.totalLines - 1
                 self.queue[index].submittedText = text
+                self.queue[index].submittedAt = .now
             }
         }
         guard target == sendingTarget else { return false }
         outbox.failedItem = result.delivered ? nil : item.id
         if let index = queue.firstIndex(where: { $0.id == item.id }) {
             queue[index].attachments = result.attachments
-            if result.rejected { queue[index].submittedAfterLine = nil; queue[index].submittedText = nil }
+            if result.rejected { queue[index].submittedAfterLine = nil; queue[index].submittedText = nil; queue[index].submittedAt = nil }
         }
         reconcileHandedOffQueue()
         if result.delivered { scheduleDrain() }
         return result.delivered
+    }
+
+    /// A receipt the transcript never showed: Dismiss drops it; Retry puts
+    /// its text and attachments back in the composer, since the message may
+    /// have arrived after all and a blind resend could duplicate it.
+    func resolvePendingEcho(_ id: UUID, retry: Bool) {
+        guard let item = outbox.retire(id) else { return }
+        if retry { draft = item.text; attachments = item.attachments }
     }
 
     func remove(_ item: QueuedMessage) {

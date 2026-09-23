@@ -23,8 +23,12 @@ struct ChatPendingEcho: Equatable, Identifiable {
     let id: UUID
     let text: String
     let images: [ChatAttachmentDraft]
+    var submittedAt: Date? = nil
+    /// How long a receipt may wait for its transcript row before it offers
+    /// Dismiss and Retry instead of sitting grey.
+    static let staleAfter: TimeInterval = 180
     static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.id == rhs.id && lhs.text == rhs.text && lhs.images.map(\.id) == rhs.images.map(\.id)
+        lhs.id == rhs.id && lhs.text == rhs.text && lhs.images.map(\.id) == rhs.images.map(\.id) && lhs.submittedAt == rhs.submittedAt
     }
 }
 

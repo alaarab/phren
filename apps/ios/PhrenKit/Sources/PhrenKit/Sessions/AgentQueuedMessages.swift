@@ -8,9 +8,16 @@ public enum AgentQueuedMessages {
     /// never to deduplicate two ordinary user turns.
     public static func normalizedText(_ text: String) -> String {
         var value = imageMarker.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text), withTemplate: "")
-        if let footer = value.range(of: "Attached files on this computer:", options: .backwards),
-           footer.lowerBound == value.startIndex || value[value.index(before: footer.lowerBound)].isNewline {
-            value = String(value[..<footer.lowerBound])
+        // Drop each footer and the file paths under it, but keep any text
+        // after them: Claude joins queued messages into one turn, so a later
+        // message can follow a footer directly ("…computer:Next message").
+        while let footer = value.range(of: "Attached files on this computer:") {
+            var rest = value[footer.upperBound...]
+            while let line = rest.firstIndex(where: { !$0.isNewline }).map({ rest[$0...] }),
+                  line.hasPrefix("/") || line.hasPrefix("~/") {
+                rest = line.firstIndex(where: \.isNewline).map { line[$0...] } ?? ""
+            }
+            value = String(value[..<footer.lowerBound]) + "\n" + rest
         }
         return value.split(whereSeparator: \.isWhitespace).joined(separator: " ")
     }

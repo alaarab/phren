@@ -167,10 +167,49 @@ private struct ChatTranscriptRow: View, Equatable {
 
 /// A message sent from this phone, before its transcript row lands: the
 /// same bubble, muted and uncaptioned. The real row replaces it.
+struct PendingEchoActionKey: EnvironmentKey { static let defaultValue: ((UUID, Bool) -> Void)? = nil }
+extension EnvironmentValues {
+    /// Dismiss (false) or retry (true) a receipt the transcript never showed.
+    var resolvePendingEcho: ((UUID, Bool) -> Void)? {
+        get { self[PendingEchoActionKey.self] }
+        set { self[PendingEchoActionKey.self] = newValue }
+    }
+}
+
 private struct ChatPendingEchoRow: View {
     let echo: ChatPendingEcho
     let preview: (ChatAttachmentDraft) -> Void
+    @Environment(\.resolvePendingEcho) private var resolve
     var body: some View {
+        VStack(alignment: .trailing, spacing: 6) {
+            bubble
+            if let submittedAt = echo.submittedAt, resolve != nil {
+                // Only this row ticks, and only while it waits.
+                TimelineView(.periodic(from: submittedAt.addingTimeInterval(ChatPendingEcho.staleAfter), by: 30)) { context in
+                    if context.date.timeIntervalSince(submittedAt) >= ChatPendingEcho.staleAfter { staleActions }
+                }
+            }
+        }
+    }
+
+    /// The message never showed up in the conversation: say so and offer a
+    /// way out instead of leaving a grey bubble behind for good.
+    private var staleActions: some View {
+        HStack(spacing: PhrenTheme.Space.small) {
+            Text("Not seen in the chat yet").font(PhrenTheme.Font.caption).foregroundStyle(PhrenTheme.warning)
+            Button("Dismiss") { resolve?(echo.id, false) }
+                .font(PhrenTheme.Font.caption.weight(.semibold)).foregroundStyle(PhrenTheme.textMuted)
+                .frame(minHeight: 44).contentShape(Rectangle()).buttonStyle(.plain)
+                .accessibilityIdentifier("chat-pending-dismiss:\(echo.id)")
+            Button("Retry") { resolve?(echo.id, true) }
+                .font(PhrenTheme.Font.caption.weight(.semibold)).foregroundStyle(PhrenTheme.accent)
+                .frame(minHeight: 44).contentShape(Rectangle()).buttonStyle(.plain)
+                .accessibilityIdentifier("chat-pending-retry:\(echo.id)")
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private var bubble: some View {
         HStack(alignment: .top, spacing: 0) {
             Spacer(minLength: 30)
             VStack(alignment: .leading, spacing: 8) {

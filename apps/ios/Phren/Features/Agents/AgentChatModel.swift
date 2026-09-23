@@ -16,6 +16,8 @@ struct QueuedMessage: Identifiable, Equatable {
     var attachments: [ChatAttachmentDraft]
     var submittedAfterLine: Int? = nil
     var submittedText: String? = nil
+    /// When the Hook took it; a receipt the transcript never shows goes stale.
+    var submittedAt: Date? = nil
 }
 
 /// Queues survive switching agents within a chat, like drafts do.
@@ -155,7 +157,7 @@ final class AgentChatModel {
     @ObservationIgnored private var preparedEchoes: [ChatPendingEcho] = []
     private static func pendingEchoes(_ items: [QueuedMessage]) -> [ChatPendingEcho] {
         items.filter { $0.submittedAfterLine != nil }
-            .map { ChatPendingEcho(id: $0.id, text: $0.text, images: $0.attachments.filter(\.attachment.isImage)) }
+            .map { ChatPendingEcho(id: $0.id, text: $0.text, images: $0.attachments.filter(\.attachment.isImage), submittedAt: $0.submittedAt) }
     }
     private func matchSentImages() {
         var matches: [String: [ChatAttachmentDraft]] = [:]
@@ -670,6 +672,7 @@ final class AgentChatModel {
             var pending = optimistic
             pending.submittedAfterLine = self.history.totalLines - 1
             pending.submittedText = text
+            pending.submittedAt = .now
             self.queue.append(pending)
             // The muted bubble now carries the message; the composer does
             // not show it twice. A failed delivery puts it back.
@@ -737,7 +740,10 @@ final class AgentChatModel {
             return (false, sent, true)
         }
         let paths = sent.compactMap { $0.path }.joined(separator: "\n")
-        let text = paths.isEmpty ? submitted : submitted + "\n\nAttached files on this computer:\n" + paths
+        // The footer ends in a newline: Claude turns the paths into image
+        // references and joins queued sends, and without it the next message
+        // would run straight on from "computer:".
+        let text = paths.isEmpty ? submitted : submitted + "\n\nAttached files on this computer:\n" + paths + "\n"
         deliveryStatus = "Sending…"
         submittedAfterLine = max(0, history.totalLines) - 1
         // The receipt first, so the person's bubble is never behind the live line.

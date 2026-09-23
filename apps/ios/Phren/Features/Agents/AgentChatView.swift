@@ -210,6 +210,7 @@ struct AgentChatView: View {
         .confirmsWebLinks()
         .environment(\.openChatDiff) { fullDiff = $0 }
         .environment(\.openTurnChanges) { turnChanges = $0 }
+        .environment(\.resolvePendingEcho) { id, retry in model.resolvePendingEcho(id, retry: retry) }
         .environment(\.openToolOutput) { fullToolOutput = $0 }
         .environment(model.turnControl)
         .environment(\.chatTurnStop, ChatTurnStop(enabled: turnStopEnabled) { sendTask = Task { await model.stop(session) } })
