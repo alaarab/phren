@@ -128,6 +128,8 @@ struct SettingsView: View {
                     NavigationLink { ConductorSiriSettingsView() } label: { settingsRow("Siri and the Action button", "wand.and.rays") }
                         .accessibilityIdentifier("settings-conductor")
                     NavigationLink { LiveSessionsView() } label: { settingsRow("Computers", "desktopcomputer") }
+                    NavigationLink { HookHealthView() } label: { settingsRow("Health", "stethoscope") }
+                        .accessibilityIdentifier("settings-health")
                     NavigationLink { AccountUsageView() } label: { settingsRow("Account usage", "chart.bar") }
                         .accessibilityIdentifier("settings-account-usage")
                     Text("Chat, terminals, and project memory stay together in Phren. Connect the agents already running on your computers.")

@@ -704,6 +704,8 @@ private struct LiveHostView: View {
                         .accessibilityIdentifier("host-simulators")
                     NavigationLink { HostFilesView(hostID: host.id) } label: { Label("Files", systemImage: "folder") }
                         .accessibilityIdentifier("host-files")
+                    NavigationLink { HookHealthView(hostID: host.id) } label: { Label("Health", systemImage: "stethoscope") }
+                        .accessibilityIdentifier("host-health")
                     NavigationLink { HerdrWorkspacesView(hostID: host.id) } label: {
                         Label("Herdr workspaces & terminal", systemImage: "terminal")
                     }

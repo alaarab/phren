@@ -225,6 +225,11 @@ export const REGISTRY: Command[] = [
     run: async args => (await import("./bridge/dispatch-command.js")).runHandOff(args),
   },
   {
+    name: "canary", topic: "core", usage: "phren canary [--daily on|off]",
+    summary: "Exercise launch, schedules, transcripts and peers through Phren Hook; saves canary.json",
+    run: async args => (await import("./bridge/canary.js")).runCanaryCommand(args),
+  },
+  {
     name: "conductor", topic: "core", usage: "phren conductor <subcommand>",
     summary: "Manage conductor standing grants",
     subcommands: [

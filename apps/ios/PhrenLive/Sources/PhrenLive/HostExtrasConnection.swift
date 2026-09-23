@@ -63,6 +63,26 @@ extension PhrenConnection {
         return version
     }
 
+    /// The computer's health: versions, store sync, last scheduled run, peers,
+    /// approval push and the last canary. Peer probes stop at 5 seconds each.
+    public static func hookHealth(host: LiveHost, privateKey: Data) async throws -> HookHealth {
+        try host.validate()
+        let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey),
+                                       request: GatewayRequest(path: "/v1/health/details", timeoutSeconds: 30))
+        try Task.checkCancellation()
+        return try HookHealth.decode(data)
+    }
+
+    /// Runs the canary on the computer now; it launches and closes its own
+    /// conductor and never types into an existing session.
+    public static func runCanary(host: LiveHost, privateKey: Data) async throws -> HookHealth.Canary {
+        try host.validate()
+        let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey),
+                                       request: GatewayRequest(path: "/v1/canary", body: Data("{}".utf8), timeoutSeconds: 240))
+        try Task.checkCancellation()
+        return try JSONDecoder().decode(HookHealth.Canary.self, from: data)
+    }
+
     public static func simulators(host: LiveHost, privateKey: Data) async throws -> [HostSimulator] {
         try host.validate()
         let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: GatewayRequest(path: "/v1/simulators"))

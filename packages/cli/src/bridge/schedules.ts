@@ -340,6 +340,8 @@ export class Scheduler {
   private readonly log: (message: string) => void;
   private serial: Promise<void> = Promise.resolve();
   private ticking = false;
+  /** When the scheduler last looked for due work; a health read shows it. */
+  lastTickAt?: Date;
 
   constructor(options: { now: () => Date; store: string; launch: ScheduleLauncher; runsFile: string; computer?: string | (() => string);
     locateProject?: (project: string) => Promise<string | undefined>; push?: SchedulePushSender; log?: (message: string) => void }) {
@@ -488,6 +490,7 @@ export class Scheduler {
   async tick(): Promise<void> {
     if (this.ticking) return;
     this.ticking = true;
+    this.lastTickAt = this.now();
     try {
       const status = await this.statuses(), now = this.now();
       for (const schedule of status.schedules) {
