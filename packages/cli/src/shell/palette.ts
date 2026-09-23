@@ -33,7 +33,8 @@ export function editDistance(a: string, b: string): number {
   return dp[m][n];
 }
 
-export function tokenize(input: string): string[] {
+/** Splits a typed palette command into words on whitespace, honoring single and double quotes. */
+export function splitCommandLine(input: string): string[] {
   const out: string[] = [];
   let current = "";
   let quote: '"' | "'" | null = null;
