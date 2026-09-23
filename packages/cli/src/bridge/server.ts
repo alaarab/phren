@@ -28,7 +28,7 @@ import { candidateRepos, enrollProject } from "./enroll.js";
 import { browseFiles } from "./files.js";
 import { MAX_FILE_RANGE, rangeInteger, readFileRange } from "./file-range.js";
 import { gitBranches, gitDiscard, gitLog, gitPulls, gitStage, gitStatus, gitTree, gitUnstage } from "./git.js";
-import { paneChatState, paneIdentity, panes, rpc, servers, snapshot, trustedDirectory, validateStartingTarget, validateTarget, workspaceSnapshot, startingPane, paneAgentName, isConductorName } from "./herdr.js";
+import { paneChatState, paneIdentity, panes, rpc, servers, snapshot, trustedDirectory, validateStartingTarget, validateTarget, workspaceSnapshot, startingPane, paneAgentName, isConductorName, findPane, agentNames } from "./herdr.js";
 import { LaunchLimiter } from "./limits.js";
 import { locateProject } from "./locate.js";
 import { gitRoot, launchDirectory, repositoryBranch, repositoryDiff, webServers } from "./projects.js";
@@ -508,7 +508,7 @@ export async function serve(version: string): Promise<void> {
             // terminal/process binding, not the absence of a session. Never retry.
             let confirmed = false;
             try {
-              const current = objects((await snapshot(target.server)).panes).find(p => p.pane_id === target.pane && p.tab_id === target.tab && p.workspace_id === target.workspace && p.agent === target.source);
+              const current = findPane(await snapshot(target.server), target);
               confirmed = !!current && current.terminal_id === pane.terminal_id && (await paneChatState(target.server, current)).startingToken === target.startingToken;
             } catch { /* Already delivered; an uncertain reply must not resend. */ }
             result = { ok: true, ...(!confirmed ? { deliveryUncertain: true } : {}) };
@@ -557,7 +557,7 @@ export async function serve(version: string): Promise<void> {
               // submission to another conversation is still refused above.
               let confirmed = false;
               try {
-                const current = objects((await snapshot(target.server)).panes).find(p => p.pane_id === target.pane && p.tab_id === target.tab && p.workspace_id === target.workspace && p.agent === target.source);
+                const current = findPane(await snapshot(target.server), target);
                 confirmed = !!current && current.terminal_id === pane.terminal_id && await paneIdentity(target.server, current, true) === target.session;
               } catch { /* No reliable post-delivery identity. */ }
               result = { ok: true, ...(!confirmed ? { deliveryUncertain: true } : {}) };
@@ -1033,7 +1033,7 @@ export async function launchSession(server: string, data: Json, options: { canar
   const before = await snapshot(server);
   // Herdr agent names are unique per server; a scheduled run or a second
   // launch with the same label would otherwise collide with the first.
-  const taken = new Set([...objects(before.panes), ...objects(before.agents)].map(item => String(item.agent_name ?? item.name ?? "")));
+  const taken = agentNames(before);
   let name = wanted;
   for (let n = 2; taken.has(name) && n < 100; n++) name = `${wanted.slice(0, 32 - String(n).length - 1)}-${n}`;
   if (role === "conductor" && !options.canary) {
@@ -1079,7 +1079,7 @@ export async function launchSession(server: string, data: Json, options: { canar
     }
   }
   const after = await snapshot(server);
-  const pane = objects(after.panes).find(p => p.pane_id === created!.paneId && p.tab_id === created!.tabId && p.workspace_id === created!.workspaceId);
+  const pane = findPane(after, { workspace: created.workspaceId, tab: created.tabId, pane: created.paneId });
   const agentStatus = typeof pane?.agent_status === "string" ? pane.agent_status : undefined;
   const sessionId = pane && pane.agent === kind ? await paneIdentity(server, pane) : undefined;
   const chat = !sessionId && pane && pane.agent === kind ? await paneChatState(server, pane).catch((): Json => ({})) : {};
