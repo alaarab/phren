@@ -115,18 +115,22 @@ extension PhrenConnection {
     /// `paths` are files a command named; the computer adds their repositories
     /// (and a commit a hook already made) to the pane's own working tree.
     /// A child diff is scoped by its public id and never includes parent paths.
-    public static func repositoryDiff(host: LiveHost, privateKey: Data, target: AgentChatTarget, paths: [String] = [], child: String? = nil) async throws -> AgentRepositoryDiff {
+    public static func repositoryDiff(host: LiveHost, privateKey: Data, target: AgentChatTarget, paths: [String] = [], child: String? = nil,
+                                      worktree: String? = nil) async throws -> AgentRepositoryDiff {
         try checkHost(host, target)
-        let request = try repositoryDiffRequest(target: target, paths: paths, child: child)
+        let request = try repositoryDiffRequest(target: target, paths: paths, child: child, worktree: worktree)
         let pane = try await chatPanes(host: host, privateKey: privateKey, workspaceID: target.workspaceID, tabID: target.tabID).validate(target)
         guard let cwd = pane.cwd, cwd.hasPrefix("/"), cwd.utf8.count <= 4_096 else { throw PhrenKitError.validation("This pane has no repository folder.") }
         let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: request)
         return try AgentRepositoryDiff.read(data)
     }
 
-    static func repositoryDiffRequest(target: AgentChatTarget, paths: [String], child: String?) throws -> GatewayRequest {
+    static func repositoryDiffRequest(target: AgentChatTarget, paths: [String], child: String?, worktree: String? = nil) throws -> GatewayRequest {
         let fields: [String: Any]
-        if let child {
+        if let worktree {
+            // Another worktree of the pane's repository: the whole checkout.
+            fields = ["worktree": try GatewayRequest.worktreeField(worktree)]
+        } else if let child {
             guard child.range(of: #"^[a-f0-9]{32}$"#, options: .regularExpression) != nil else {
                 throw PhrenKitError.validation("This child agent is invalid.")
             }

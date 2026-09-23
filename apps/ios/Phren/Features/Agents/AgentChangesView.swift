@@ -6,6 +6,10 @@ struct AgentChangesView: View {
     let session: LiveAgentSession
     let target: AgentChatTarget
     var child: String? = nil
+    /// One of the repository's other worktrees (a worker's checkout), by the
+    /// id `/v1/git/worktrees` listed, and what the Workers row called it.
+    var worktree: String? = nil
+    var worktreeTitle: String? = nil
     var codeOrigin: SessionCodeContext? = nil
 
     @Environment(\.dismiss) private var dismiss
@@ -20,13 +24,19 @@ struct AgentChangesView: View {
     @State private var visible = false
     @State private var indexedCode: SessionCodeContext?
 
-    init(session: LiveAgentSession, target: AgentChatTarget, child: String? = nil, codeOrigin: SessionCodeContext? = nil) {
+    init(session: LiveAgentSession, target: AgentChatTarget, child: String? = nil, worktree: String? = nil,
+         worktreeTitle: String? = nil, codeOrigin: SessionCodeContext? = nil) {
         self.session = session
         self.target = target
         self.child = child
+        self.worktree = worktree
+        self.worktreeTitle = worktreeTitle
         self.codeOrigin = codeOrigin
-        _model = State(initialValue: ChangesModel(session: session, target: target, child: child))
+        _model = State(initialValue: ChangesModel(session: session, target: target, child: child, worktree: worktree))
     }
+
+    /// Workers only list from the pane's own tree; a worker's view is already one.
+    private var showsWorkers: Bool { child == nil && worktree == nil }
 
     private var changesEnabled: Bool {
         SessionOverviewMonitor.shared.allows(.changes, on: session.host, fallback: session.capabilities)
@@ -77,7 +87,7 @@ struct AgentChangesView: View {
         .toolbar(.hidden, for: .tabBar)
         .task(id: codeOrigin?.id) {
             indexedCode = nil
-            guard child == nil, let origin = codeOrigin, await origin.hasIndex(), !Task.isCancelled else { return }
+            guard child == nil, worktree == nil, let origin = codeOrigin, await origin.hasIndex(), !Task.isCancelled else { return }
             indexedCode = origin
         }
         .onAppear { visible = true; if !changesEnabled { dismiss() }; scheduleLoad() }
@@ -108,7 +118,8 @@ struct AgentChangesView: View {
     }
 
     private var title: String {
-        if child != nil, let branch = model.status?.branch, !branch.isEmpty { return branch }
+        if worktree != nil, let worktreeTitle, !worktreeTitle.isEmpty { return worktreeTitle }
+        if child != nil || worktree != nil, let branch = model.status?.branch, !branch.isEmpty { return branch }
         return "Uncommitted changes"
     }
 
@@ -170,7 +181,7 @@ struct AgentChangesView: View {
     private var tabBar: some View {
         HStack(spacing: 8) {
             HStack(spacing: 4) {
-                ForEach(ChangesSection.allCases.filter { $0 != .code || indexedCode != nil }) { section in
+                ForEach(ChangesSection.allCases.filter { ($0 != .code || indexedCode != nil) && ($0 != .workers || showsWorkers) }) { section in
                     Button { selection = section } label: {
                         Image(systemName: section.symbol)
                             .font(.system(size: 15, weight: .medium))
@@ -234,11 +245,12 @@ struct AgentChangesView: View {
 
     @ViewBuilder private var selectedSection: some View {
         switch selection {
-        case .changes: ChangesTab(session: session, target: target, child: child)
-        case .history: ChangesHistoryTab(session: session, target: target, child: child)
-        case .branches: ChangesBranchesTab(session: session, target: target, child: child)
-        case .pulls: ChangesPullRequestsTab(session: session, target: target, child: child)
-        case .tree: ChangesWorkingTreeTab(session: session, target: target, child: child, codeOrigin: indexedCode)
+        case .changes: ChangesTab(session: session, target: target, child: child, worktree: worktree)
+        case .history: ChangesHistoryTab(session: session, target: target, child: child, worktree: worktree)
+        case .branches: ChangesBranchesTab(session: session, target: target, child: child, worktree: worktree)
+        case .pulls: ChangesPullRequestsTab(session: session, target: target, child: child, worktree: worktree)
+        case .tree: ChangesWorkingTreeTab(session: session, target: target, child: child, worktree: worktree, codeOrigin: indexedCode)
+        case .workers: ChangesWorkersTab(session: session, target: target)
         case .code:
             if let origin = indexedCode { CodeView(storeId: origin.storeID, project: origin.project, origin: origin) }
         }
@@ -246,7 +258,7 @@ struct AgentChangesView: View {
 }
 
 enum ChangesSection: String, CaseIterable, Identifiable {
-    case changes, history, branches, pulls, tree, code
+    case changes, history, branches, pulls, tree, workers, code
 
     var id: String { rawValue }
     var title: String {
@@ -256,6 +268,7 @@ enum ChangesSection: String, CaseIterable, Identifiable {
         case .branches: "Branches"
         case .pulls: "PRs"
         case .tree: "Working tree"
+        case .workers: "Workers"
         case .code: "Code"
         }
     }
@@ -266,6 +279,7 @@ enum ChangesSection: String, CaseIterable, Identifiable {
         case .branches: "arrow.triangle.branch"
         case .pulls: "arrow.triangle.pull"
         case .tree: "list.bullet.indent"
+        case .workers: "person.2"
         case .code: "curlybraces"
         }
     }
@@ -284,11 +298,34 @@ final class ChangesModel {
     let session: LiveAgentSession
     let target: AgentChatTarget
     let child: String?
+    let worktree: String?
+    /// The repository's other worktrees, for the Workers section.
+    private(set) var worktrees: GitWorktrees?
+    private(set) var worktreesError: String?
 
-    init(session: LiveAgentSession, target: AgentChatTarget, child: String?) {
+    init(session: LiveAgentSession, target: AgentChatTarget, child: String?, worktree: String? = nil) {
         self.session = session
         self.target = target
         self.child = child
+        self.worktree = worktree
+    }
+
+    func loadWorktrees() async {
+        #if DEBUG && targetEnvironment(simulator)
+        if AgentChatFixture.enabled {
+            do { worktrees = try AgentChatFixture.gitWorktrees(); worktreesError = nil }
+            catch { worktreesError = error.localizedDescription }
+            return
+        }
+        #endif
+        do {
+            let value = try await PhrenConnection.gitWorktrees(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target)
+            guard !Task.isCancelled else { return }
+            worktrees = value; worktreesError = nil
+        } catch {
+            guard !Task.isCancelled else { return }
+            worktreesError = error.localizedDescription
+        }
     }
 
     func reload() { revision &+= 1 }
@@ -296,14 +333,14 @@ final class ChangesModel {
     func load() async {
         #if DEBUG && targetEnvironment(simulator)
         if AgentChatFixture.enabled {
-            do { status = try AgentChatFixture.gitStatus(target, child: child); error = nil }
+            do { status = try AgentChatFixture.gitStatus(target, child: child, worktree: worktree); error = nil }
             catch { self.error = error.localizedDescription }
             return
         }
         #endif
         do {
             let key = try DeviceSSHKey.load(session.host.id)
-            let value = try await PhrenConnection.gitStatus(host: session.host, privateKey: key, target: target, child: child)
+            let value = try await PhrenConnection.gitStatus(host: session.host, privateKey: key, target: target, child: child, worktree: worktree)
             guard !Task.isCancelled else { return }
             status = value
             error = nil

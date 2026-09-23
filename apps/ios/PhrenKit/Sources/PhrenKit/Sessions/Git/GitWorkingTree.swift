@@ -1,7 +1,7 @@
 import Foundation
 
 /// `/v1/git/tree` on the computer: one level of the pane's repository, from
-/// `git ls-files` plus untracked files. A directory carries `changed` when any
+/// `git ls-files` plus untracked files, and ignored entries when asked. A directory carries `changed` when any
 /// changed file lives under it; a file carries its own status letter.
 public struct GitWorkingTree: Decodable, Equatable, Sendable {
     public enum Kind: String, Decodable, Sendable {
@@ -37,8 +37,12 @@ public struct GitWorkingTree: Decodable, Equatable, Sendable {
         public let kind: Kind
         public let status: Status?
         public let fileCount: Int?
+        /// Set when "Show ignored" asked for git-ignored entries: this folder
+        /// or file is ignored by the repository's rules.
+        public let ignored: Bool?
         public var id: String { path }
         public var isDirectory: Bool { kind == .dir }
+        public var isIgnored: Bool { ignored == true }
     }
 
     /// The path this level was requested for; "" is the repository root.

@@ -21,8 +21,30 @@ extension AgentChatFixture {
         .init(path: "Notes.md", status: "?", staged: false, additions: 6, deletions: 0),
     ]
 
-    static func gitStatus(_ target: AgentChatTarget, child: String? = nil) throws -> GitStatus {
-        GitStatus(branch: child == nil ? "main" : "deepseek/compact-phone", upstream: "origin/main", ahead: 1, behind: 0,
+    /// Two workers' worktrees and one nobody claims, as `/v1/git/worktrees` lists them.
+    static let parserWorktree = "0123456789abcdef0123456789abcdef"
+    static func gitWorktrees() throws -> GitWorktrees {
+        GitWorktrees(worktrees: [
+            .init(id: parserWorktree, path: ".claude/worktrees/agent-parser", branch: "worktree-agent-parser",
+                  ahead: 2, changed: 3, worker: .init(label: "Fix the parser", provider: "claude",
+                                                      child: String(repeating: "c", count: 32), state: "running")),
+            .init(id: "fedcba9876543210fedcba9876543210", path: "~/work/phren-review", branch: "fanout/review",
+                  ahead: 1, changed: 0, worker: .init(label: "Review bridge routes", provider: "codex", state: "completed")),
+            .init(id: "00112233445566778899aabbccddeeff", path: ".claude/worktrees/agent-old", branch: "worktree-agent-old"),
+        ])
+    }
+
+    static func gitStatus(_ target: AgentChatTarget, child: String? = nil, worktree: String? = nil) throws -> GitStatus {
+        if worktree != nil {
+            // A worker's checkout: its own branch and edits, none of the pane's.
+            return GitStatus(branch: "worktree-agent-parser", upstream: nil, ahead: 2, behind: 0, staged: 0, unstaged: 2, untracked: 1,
+                             additions: 18, deletions: 4, files: [
+                                .init(path: "Sources/Parser.swift", status: "M", staged: false, additions: 12, deletions: 4),
+                                .init(path: "Sources/Lexer.swift", status: "M", staged: false, additions: 2, deletions: 0),
+                                .init(path: "Tests/ParserTests.swift", status: "?", staged: false, additions: 4, deletions: 0),
+                             ])
+        }
+        return GitStatus(branch: child == nil ? "main" : "deepseek/compact-phone", upstream: "origin/main", ahead: 1, behind: 0,
                   staged: gitFiles.filter(\.staged).count,
                   unstaged: gitFiles.filter { !$0.staged && $0.status != "?" }.count,
                   untracked: gitFiles.filter { $0.status == "?" }.count,
@@ -63,8 +85,12 @@ extension AgentChatFixture {
         ]))
     }
 
-    static func tree(path: String) throws -> GitWorkingTree {
-        let paths = Set(gitFiles.map(\.path)).union(["README.md"])
+    /// Ignored entries the working tree hides until Show ignored is on: a
+    /// media folder (the owner's `video/`), build output and one file.
+    private static let ignoredPaths = ["video/intro.mp4", "video/clips/demo.mov", "build/app.o", "debug.log"]
+
+    static func tree(path: String, ignored: Bool = false) throws -> GitWorkingTree {
+        let paths = Set(gitFiles.map(\.path)).union(["README.md"]).union(ignored ? Set(ignoredPaths) : [])
         let prefix = path.isEmpty ? "" : path + "/"
         var entries: [String: [String: Any]] = [:]
         for file in paths where file.hasPrefix(prefix) {
@@ -72,7 +98,11 @@ extension AgentChatFixture {
             guard let first = parts.first else { continue }
             let name = String(first), directory = parts.count > 1
             var entry: [String: Any] = ["name": name, "path": prefix + name, "kind": directory ? "dir" : "file"]
-            if directory { entry["status"] = "changed" }
+            if ignoredPaths.contains(file) {
+                // A folder that also holds tracked files is not ignored itself.
+                if let existing = entries[name], existing["ignored"] == nil { continue }
+                entry["ignored"] = true
+            } else if directory { entry["status"] = "changed" }
             else if let change = gitFiles.first(where: { $0.path == file }) { entry["status"] = change.status }
             entries[name] = entry
         }

@@ -46,6 +46,35 @@ async function claudeChildModel(file: string): Promise<string | undefined> {
   return model;
 }
 
+/** The checkout a Claude sub-agent edits in. Claude Code writes the isolated
+ * worktree into the child's `.meta.json`; an older child falls back to the
+ * `cwd` its own first rows record when that folder is a linked worktree (its
+ * `.git` is a file). A child working in the parent's checkout gets nothing,
+ * and a worktree already removed is not offered. */
+export async function claudeChildCheckout(file: string): Promise<Pick<ChildAgentRelation, "cwd" | "worktreeName" | "branch">> {
+  const meta = await readFile(file.slice(0, -".jsonl".length) + ".meta.json", "utf8").then(v => object(JSON.parse(v))).catch(() => ({} as Json));
+  let cwd = typeof meta.worktreePath === "string" && path.isAbsolute(meta.worktreePath) ? meta.worktreePath : undefined;
+  let branch = typeof meta.worktreeBranch === "string" && meta.worktreeBranch ? meta.worktreeBranch.slice(0, 200) : undefined;
+  if (!cwd) {
+    const input = createInterface({ input: createReadStream(file, { start: 0, end: 65_535 }), crlfDelay: Infinity });
+    let lines = 0;
+    for await (const line of input) {
+      try {
+        const value = object(JSON.parse(line)).cwd;
+        if (typeof value === "string" && path.isAbsolute(value)) {
+          if ((await stat(path.join(value, ".git")).catch(() => undefined))?.isFile()) cwd = value;
+          break;
+        }
+      } catch { /* Keep looking past a malformed row. */ }
+      if (++lines >= 40) break;
+    }
+    input.close();
+    branch = undefined;
+  }
+  if (!cwd || !(await stat(cwd).catch(() => undefined))?.isDirectory()) return {};
+  return { cwd, worktreeName: path.basename(cwd).slice(0, 200), ...(branch ? { branch } : {}) };
+}
+
 async function withClaudeChildModels(relations: ChildAgentRelation[]): Promise<ChildAgentRelation[]> {
   return Promise.all(relations.map(async relation => {
     if (relation.model !== undefined || relation.transcript === undefined) return relation;
@@ -111,9 +140,10 @@ export async function claudeChildAgents(file: string, session: string): Promise<
       continue;
     }
     const model = await claudeChildModel(childFile).catch(() => undefined);
+    const checkout = await claudeChildCheckout(childFile).catch(() => ({}));
     relations.push({ id: createHash("sha256").update(`claude\0${session}\0${agentId}`).digest("hex").slice(0, 32),
       session: agentId, transcript: childFile, provider: "claude", ...launch,
-      ...(model !== undefined ? { model } : {}), children: [] });
+      ...(model !== undefined ? { model } : {}), ...checkout, children: [] });
   }
   if (teammates.size && root) {
     const names = (await readdir(root).catch(() => [] as string[])).filter(n => /^agent-a[A-Za-z0-9][A-Za-z0-9_-]{0,63}-[0-9a-f]{8,32}\.jsonl$/.test(n));
@@ -129,9 +159,10 @@ export async function claudeChildAgents(file: string, session: string): Promise<
       // the transcript's first assistant turn carries the full id and wins.
       const meta = await readFile(childFile.slice(0, -".jsonl".length) + ".meta.json", "utf8").then(v => object(JSON.parse(v))).catch(() => ({} as Json));
       const model = await claudeChildModel(childFile).catch(() => undefined) ?? (typeof meta.model === "string" && meta.model ? meta.model.slice(0, 200) : undefined);
+      const checkout = await claudeChildCheckout(childFile).catch(() => ({}));
       relations.push({ id: createHash("sha256").update(`claude\0${session}\0${agentId}`).digest("hex").slice(0, 32),
         session: agentId, transcript: childFile, provider: "claude", ...launch,
-        ...(model !== undefined ? { model } : {}), children: [] });
+        ...(model !== undefined ? { model } : {}), ...checkout, children: [] });
     }
   }
   claudeRelationCache.set(file, { signature, relations, ...(awaiting ? { recheckAt: Date.now() + 2_000 } : {}) });

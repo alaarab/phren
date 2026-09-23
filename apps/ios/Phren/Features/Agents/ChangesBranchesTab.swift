@@ -6,6 +6,7 @@ struct ChangesBranchesTab: View {
     let session: LiveAgentSession
     let target: AgentChatTarget
     var child: String? = nil
+    var worktree: String? = nil
 
     @Environment(\.scenePhase) private var scenePhase
     @State private var branches: GitBranches?
@@ -22,7 +23,7 @@ struct ChangesBranchesTab: View {
                         PhrenSectionHeader(title: "Local", count: branches.local.count)
                         ForEach(branches.local) { branch in
                             NavigationLink {
-                                ChangesHistoryTab(session: session, target: target, child: child, ref: branch.name)
+                                ChangesHistoryTab(session: session, target: target, child: child, worktree: worktree, ref: branch.name)
                             } label: {
                                 BranchRow(name: branch.name, upstream: branch.upstream, tracking: branch.tracking,
                                           current: branch.name == branches.current, remote: false)
@@ -104,7 +105,7 @@ struct ChangesBranchesTab: View {
 
     private func fetch() async throws -> GitBranches {
         try await PhrenConnection.gitBranches(host: session.host, privateKey: DeviceSSHKey.load(session.host.id),
-                                              target: target, child: child)
+                                              target: target, child: child, worktree: worktree)
     }
 }
 

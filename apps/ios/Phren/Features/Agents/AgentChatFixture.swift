@@ -249,7 +249,8 @@ import UniformTypeIdentifiers
     static func childAgents(_ target: AgentChatTarget) throws -> AgentChildTree {
         var agents: [[String: Any]] = flag("--chat-agent-card") ? [
             ["id": auditChild, "provider": "claude", "model": "gpt-5-codex", "path": "Audit the chat timeline", "callId": "agent-audit", "state": "completed", "worktreeName": "phren-color-ui", "branch": "codex/device-color", "children": [] as [Any]],
-            ["id": testsChild, "provider": "claude", "path": "Run the full test suite", "callId": "agent-tests", "state": "running", "children": [] as [Any]],
+            ["id": testsChild, "provider": "claude", "path": "Run the full test suite", "callId": "agent-tests", "state": "running", "children": [] as [Any]]
+                .merging(flag("--chat-worker-worktree") ? ["worktreeName": "agent-tests", "branch": "worktree-agent-tests"] : [:]) { $1 },
         ] : []
         if flag("--chat-child-workers") && clearedFinishedWorkers {
             agents = [

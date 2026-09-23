@@ -111,6 +111,11 @@ Unbound or conflicting identities remain unavailable for chat and attachments.
 - `POST /v1/git/tree`: one directory with descendant file counts and a snapshot
   version. The bounded cache expires after two seconds; status refresh and
   mutations invalidate it. The phone retains expanded paths and loaded children.
+  `ignored: true` (the Show ignored switch) adds git-ignored entries, marked.
+- `POST /v1/git/worktrees`: the repository's other worktrees with branch, commits
+  ahead, uncommitted files and the worker editing there when known. The phone
+  sends a row's `id` back as `worktree` on the git routes, `/v1/diff` and
+  `/v1/files/range`; the computer resolves it only against its own listing.
 - `WS /v1/transcripts`: backlog, append, and older frames with provider JSON rows
   and stable line numbers. History requests include `beforeLine`. Live preview
   frames carry `{preview: {turnStartedAt, text}}` or `{preview: null}` without

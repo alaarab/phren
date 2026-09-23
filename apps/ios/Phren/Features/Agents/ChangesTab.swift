@@ -6,6 +6,7 @@ struct ChangesTab: View {
     let session: LiveAgentSession
     let target: AgentChatTarget
     let child: String?
+    var worktree: String? = nil
 
     @Environment(ChangesModel.self) private var changes
     @AppStorage("changes.mode") private var mode = "list"
@@ -18,10 +19,11 @@ struct ChangesTab: View {
     @State private var discardTarget: GitStatus.File?
     @State private var loadTask: Task<Void, Never>?
 
-    init(session: LiveAgentSession, target: AgentChatTarget, child: String?) {
+    init(session: LiveAgentSession, target: AgentChatTarget, child: String?, worktree: String? = nil) {
         self.session = session
         self.target = target
         self.child = child
+        self.worktree = worktree
     }
 
     var body: some View {
@@ -160,9 +162,9 @@ struct ChangesTab: View {
                 }
                 #endif
                 if staged {
-                    try await PhrenConnection.gitUnstage(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, child: child, paths: [path])
+                    try await PhrenConnection.gitUnstage(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, child: child, worktree: worktree, paths: [path])
                 } else {
-                    try await PhrenConnection.gitStage(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, child: child, paths: [path])
+                    try await PhrenConnection.gitStage(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, child: child, worktree: worktree, paths: [path])
                 }
                 changes.reload()
                 reload()
@@ -184,7 +186,7 @@ struct ChangesTab: View {
                     return
                 }
                 #endif
-                try await PhrenConnection.gitDiscard(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, child: child, paths: [file.path])
+                try await PhrenConnection.gitDiscard(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, child: child, worktree: worktree, paths: [file.path])
                 changes.reload()
                 reload()
             } catch { actionError = error.localizedDescription }
@@ -205,10 +207,10 @@ struct ChangesTab: View {
             if AgentChatFixture.enabled {
                 result = try AgentChatFixture.gitDiff()
             } else {
-                result = try await PhrenConnection.repositoryDiff(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, paths: [], child: child)
+                result = try await PhrenConnection.repositoryDiff(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, paths: [], child: child, worktree: worktree)
             }
             #else
-            result = try await PhrenConnection.repositoryDiff(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, paths: [], child: child)
+            result = try await PhrenConnection.repositoryDiff(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, paths: [], child: child, worktree: worktree)
             #endif
             try Task.checkCancellation()
             diff = result

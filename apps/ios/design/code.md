@@ -139,3 +139,30 @@ session remains the note recipient. IDs are `changes-tab-code`,
 
 UI coverage in ChangesTabTests captures the session Code tab, enriched tree and
 direct note delivery. AgentChatNavigationTests captures the chat options entry.
+
+Show ignored is a PhrenSwitch in the working tree's header, off by default and
+remembered (`changes.tree.showIgnored`). On, each level adds the git-ignored
+folders and files Git reports there, drawn at half opacity with the spoken value
+"Ignored". An ignored folder expands from the disk; an ignored file opens in the
+file viewer, never as a diff. IDs: `changes-tree-switch:ignored`, and the
+existing `changes-tree-entry:<path>` rows.
+
+## Workers
+
+phren is organized around live sessions and the agent tree; a worktree is a
+detail of the worker that owns it. Workers (sub-agents, fan-out jobs) edit in
+their own worktree, so the pane's diff never shows their work. The pane's own
+Changes screen has a Workers section listing the repository's other worktrees:
+the worker's task when the Hook can name it (fan-out manifest, or a Claude
+sub-agent whose checkout it is), otherwise the branch, then branch and path,
+with uncommitted files and commits ahead trailing. Named workers come first,
+under Workers; the rest under Other worktrees. A row opens the same Changes
+screen bound to that worktree (list, diff, history, branches, PRs, working tree
+and files), titled with the worker's task and without a Workers section of its
+own. In the agent tree, a local worker whose worktree is known has a Changes
+button on its row that opens its changes directly.
+
+IDs: `changes-tab-workers`, `changes-workers-section:workers`,
+`changes-workers-section:other`, `changes-worktree:<id>`, `changes-workers-empty`,
+`child-agent-changes:<child id>`. ChangesWorkersTests covers the section, a
+worker's bound view, the agent-tree entry and Show ignored with screenshots.

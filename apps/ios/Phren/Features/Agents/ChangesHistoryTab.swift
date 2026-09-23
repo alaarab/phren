@@ -7,6 +7,8 @@ struct ChangesHistoryTab: View {
     let session: LiveAgentSession
     let target: AgentChatTarget
     var child: String? = nil
+    /// One of the repository's other worktrees, from the Workers section.
+    var worktree: String? = nil
     /// When pushed from Branches, the ref whose log to show.
     var ref: String? = nil
 
@@ -200,7 +202,7 @@ struct ChangesHistoryTab: View {
 
     private func fetch() async throws -> GitLog {
         try await PhrenConnection.gitLog(host: session.host, privateKey: DeviceSSHKey.load(session.host.id),
-                                         target: target, child: child, limit: 60, ref: ref)
+                                         target: target, child: child, worktree: worktree, limit: 60, ref: ref)
     }
 }
 

@@ -53,4 +53,33 @@ final class GitRoutesTests: XCTestCase {
         }
         XCTAssertThrowsError(try PhrenConnection.gitLogRequest(target: target, child: nil, limit: 60, ref: "--all"))
     }
+
+    func testWorktreeScopesEveryRouteAndIsCheckedForShape() throws {
+        let target = try target(), worktree = String(repeating: "c", count: 32)
+        func body(_ request: GatewayRequest) throws -> [String: Any] {
+            try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(request.body)) as? [String: Any])
+        }
+        XCTAssertEqual(try PhrenConnection.gitWorktreesRequest(target: target).path, "/v1/git/worktrees")
+        let requests = [
+            try PhrenConnection.gitStatusRequest(target: target, child: nil, worktree: worktree),
+            try PhrenConnection.gitLogRequest(target: target, child: nil, limit: 60, ref: nil, worktree: worktree),
+            try PhrenConnection.gitBranchesRequest(target: target, child: nil, worktree: worktree),
+            try PhrenConnection.gitTreeRequest(target: target, path: "", child: nil, worktree: worktree),
+            try PhrenConnection.gitWriteRequest(target: target, route: "stage", child: nil, paths: ["a.swift"], worktree: worktree),
+            try PhrenConnection.repositoryDiffRequest(target: target, paths: ["ignored.swift"], child: nil, worktree: worktree),
+        ]
+        for request in requests { XCTAssertEqual(try body(request)["worktree"] as? String, worktree, request.path) }
+        XCTAssertNil(try body(requests[5])["paths"], "A worktree diff is the whole checkout")
+        XCTAssertThrowsError(try PhrenConnection.gitStatusRequest(target: target, child: nil, worktree: "../repo")) { error in
+            XCTAssertEqual(error as? PhrenKitError, .validation("This worktree is invalid."))
+        }
+    }
+
+    func testTreeRequestAsksForIgnoredOnlyWhenShown() throws {
+        let target = try target()
+        let hidden = try PhrenConnection.gitTreeRequest(target: target, path: "video", child: nil)
+        XCTAssertNil((try JSONSerialization.jsonObject(with: XCTUnwrap(hidden.body)) as? [String: Any])?["ignored"])
+        let shown = try PhrenConnection.gitTreeRequest(target: target, path: "video", child: nil, ignored: true)
+        XCTAssertEqual((try JSONSerialization.jsonObject(with: XCTUnwrap(shown.body)) as? [String: Any])?["ignored"] as? Bool, true)
+    }
 }

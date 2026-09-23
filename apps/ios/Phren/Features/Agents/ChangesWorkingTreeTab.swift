@@ -6,8 +6,12 @@ struct ChangesWorkingTreeTab: View {
     let session: LiveAgentSession
     let target: AgentChatTarget
     let child: String?
+    var worktree: String? = nil
     var codeOrigin: SessionCodeContext? = nil
     @Environment(ChangesModel.self) private var model
+    /// Git-ignored folders and files, dimmed, for the build output or media
+    /// folder a search of the working tree would otherwise never find.
+    @AppStorage("changes.tree.showIgnored") private var showIgnored = false
     @State private var dossier: CodeDossierTarget?
     private var tree: GitWorkingTree? {
         get { model.workingTree.tree }
@@ -29,10 +33,11 @@ struct ChangesWorkingTreeTab: View {
     @State private var loadTask: Task<Void, Never>?
     @State private var childTasks: [String: Task<Void, Never>] = [:]
 
-    init(session: LiveAgentSession, target: AgentChatTarget, child: String?, codeOrigin: SessionCodeContext? = nil) {
+    init(session: LiveAgentSession, target: AgentChatTarget, child: String?, worktree: String? = nil, codeOrigin: SessionCodeContext? = nil) {
         self.session = session
         self.target = target
         self.child = child
+        self.worktree = worktree
         self.codeOrigin = codeOrigin
     }
 
@@ -75,7 +80,12 @@ struct ChangesWorkingTreeTab: View {
             }
             .refreshable { await model.load(); await loadRoot() }
         }
-        .accessibilityIdentifier("changes-tree")
+        // A marker, not the container's identifier, which would replace the
+        // Show ignored switch's own.
+        .overlay(alignment: .topLeading) {
+            Color.clear.frame(width: 1, height: 1).accessibilityElement().accessibilityIdentifier("changes-tree")
+                .allowsHitTesting(false)
+        }
         .fullScreenCover(item: $opened) { FileViewer(item: $0) }
         .navigationDestination(item: $openedDiff) { FileDiffView(file: $0.file, section: $0.section) }
         .sheet(item: $dossier) { symbol in
@@ -89,6 +99,9 @@ struct ChangesWorkingTreeTab: View {
             for level in children.values { await enrich(level) }
         }
         .onChange(of: model.revision) { _, _ in reload() }
+        // A new listing either way: drop loaded levels so expanded folders
+        // reload with (or without) their ignored entries.
+        .onChange(of: showIgnored) { _, _ in tree = nil; children = [:]; reload() }
         .onAppear { if tree == nil { reload() } }
         .onDisappear {
             loadTask?.cancel(); openTask?.cancel()
@@ -101,12 +114,20 @@ struct ChangesWorkingTreeTab: View {
         HStack(spacing: 6) {
             Image(systemName: "arrow.triangle.branch").font(PhrenTheme.Font.caption).foregroundStyle(PhrenTheme.chatNeutral)
             Text("Working tree").font(PhrenTheme.Font.monoSubheadline.weight(.semibold)).foregroundStyle(PhrenTheme.text)
-            Spacer(minLength: 0)
+            Spacer(minLength: 8)
+            PhrenSwitch(isOn: $showIgnored) {
+                Text("Show ignored").font(PhrenTheme.Font.caption).foregroundStyle(PhrenTheme.textMuted)
+            }
+            .fixedSize()
+            .accessibilityIdentifier("changes-tree-switch:ignored")
         }
-        .padding(.horizontal, 16).padding(.vertical, 8)
+        .padding(.leading, 16).padding(.trailing, 8)
         .background(PhrenTheme.surface)
         .overlay(alignment: .bottom) { Rectangle().fill(PhrenTheme.border).frame(height: 1) }
-        .accessibilityIdentifier("changes-tree-header")
+        .overlay(alignment: .topLeading) {
+            Color.clear.frame(width: 1, height: 1).accessibilityElement().accessibilityIdentifier("changes-tree-header")
+                .allowsHitTesting(false)
+        }
     }
 
     @MainActor
@@ -123,12 +144,12 @@ struct ChangesWorkingTreeTab: View {
             let result: GitWorkingTree
             #if DEBUG && targetEnvironment(simulator)
             if AgentChatFixture.enabled {
-                result = try AgentChatFixture.tree(path: "")
+                result = try AgentChatFixture.tree(path: "", ignored: showIgnored)
             } else {
-                result = try await PhrenConnection.gitTree(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, child: child, path: "")
+                result = try await PhrenConnection.gitTree(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, child: child, worktree: worktree, path: "", ignored: showIgnored)
             }
             #else
-            result = try await PhrenConnection.gitTree(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, child: child, path: "")
+            result = try await PhrenConnection.gitTree(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, child: child, worktree: worktree, path: "", ignored: showIgnored)
             #endif
             try Task.checkCancellation()
             let changed = tree?.version == nil || tree?.version != result.version
@@ -179,12 +200,12 @@ struct ChangesWorkingTreeTab: View {
             let result: GitWorkingTree
             #if DEBUG && targetEnvironment(simulator)
             if AgentChatFixture.enabled {
-                result = try AgentChatFixture.tree(path: path)
+                result = try AgentChatFixture.tree(path: path, ignored: showIgnored)
             } else {
-                result = try await PhrenConnection.gitTree(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, child: child, path: path)
+                result = try await PhrenConnection.gitTree(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, child: child, worktree: worktree, path: path, ignored: showIgnored)
             }
             #else
-            result = try await PhrenConnection.gitTree(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, child: child, path: path)
+            result = try await PhrenConnection.gitTree(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, child: child, worktree: worktree, path: path, ignored: showIgnored)
             #endif
             try Task.checkCancellation()
             let priorVersion = children[path]?.version
@@ -241,11 +262,11 @@ struct ChangesWorkingTreeTab: View {
     /// other file, unchanged or ignored, opens its contents.
     private func openEntry(_ entry: GitWorkingTree.Entry) {
         guard !entry.isDirectory else { return }
-        if let status = entry.status, status != .unknown, status != .changed {
+        if !entry.isIgnored, let status = entry.status, status != .unknown, status != .changed {
             openTask?.cancel()
             openTask = Task { await openDiff(entry) }
         } else {
-            opened = FileViewerItem(host: session.host, file: RemoteFile(path: entry.path, target: target, child: child))
+            opened = FileViewerItem(host: session.host, file: RemoteFile(path: entry.path, target: target, child: child, worktree: worktree))
         }
     }
 
@@ -256,10 +277,10 @@ struct ChangesWorkingTreeTab: View {
             if AgentChatFixture.enabled {
                 result = try AgentChatFixture.gitDiff()
             } else {
-                result = try await PhrenConnection.repositoryDiff(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, paths: [entry.path], child: child)
+                result = try await PhrenConnection.repositoryDiff(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, paths: [entry.path], child: child, worktree: worktree)
             }
             #else
-            result = try await PhrenConnection.repositoryDiff(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, paths: [entry.path], child: child)
+            result = try await PhrenConnection.repositoryDiff(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, paths: [entry.path], child: child, worktree: worktree)
             #endif
             try Task.checkCancellation()
             let files = result.files + (result.related?.flatMap(\.files) ?? [])
@@ -301,8 +322,9 @@ private struct WorkingTreeRow: View {
         HStack(spacing: 4) {
             Button {
                 if entry.isDirectory { onToggle(entry) } else { onOpen(entry) }
-            } label: { row }
+            } label: { row.opacity(entry.isIgnored ? 0.5 : 1) }
                 .buttonStyle(.plain)
+                .accessibilityValue(entry.isIgnored ? "Ignored" : "")
                 .accessibilityIdentifier("changes-tree-entry:\(entry.path)")
             if let summary = summaries[entry.path], summary.symbols > 0 {
                 if let symbol = summary.symbol, !entry.isDirectory {

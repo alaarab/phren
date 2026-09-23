@@ -233,6 +233,27 @@ export async function fanoutChildren(parentProvider: Provider, parentSession: st
   return children.sort((a, b) => a.path.localeCompare(b.path) || a.id.localeCompare(b.id));
 }
 
+/** Every fan-out job's worktree with its task label and harness, whatever
+ * conversation launched it, so the Changes screen can name the worker editing
+ * a checkout. Newest first, bounded like the child listing. */
+export async function fanoutWorktrees(env: NodeJS.ProcessEnv = process.env): Promise<Array<{ worktree: string; label: string; provider: FanoutManifest["provider"]; state: string }>> {
+  const root = await containedFanoutRoot(env);
+  if (!root) return [];
+  const entries = (await readdir(root).catch(() => [])).filter(name => jobID.safeParse(name).success);
+  const stamped = await Promise.all(entries.map(async name => ({ name, at: (await stat(path.join(root, name)).catch(() => undefined))?.mtimeMs ?? 0 })));
+  const jobs: Array<{ worktree: string; label: string; provider: FanoutManifest["provider"]; state: string }> = [];
+  for (const { name } of stamped.sort((a, b) => b.at - a.at).slice(0, MAX_JOBS)) {
+    const manifestFile = await regularContainedFile(root, path.join(root, name, "manifest.json"), MAX_MANIFEST_BYTES);
+    if (!manifestFile) continue;
+    try {
+      const manifest = manifestSchema.parse(JSON.parse(await readFile(manifestFile, "utf8")));
+      if (manifest.id !== name) continue;
+      jobs.push({ worktree: manifest.worktree, label: manifest.taskLabel, provider: manifest.provider, state: manifest.status });
+    } catch { /* Torn or untrusted manifests name no worker. */ }
+  }
+  return jobs;
+}
+
 /** A blocked fan-out job, with the parent it belongs to, for a push. */
 export interface BlockedFanout {
   id: string;

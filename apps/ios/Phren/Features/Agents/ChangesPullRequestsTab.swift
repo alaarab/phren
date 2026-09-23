@@ -6,15 +6,17 @@ struct ChangesPullRequestsTab: View {
     let session: LiveAgentSession
     let target: AgentChatTarget
     let child: String?
+    var worktree: String? = nil
     @Environment(\.openURL) private var openURL
     @State private var model: GitPulls?
     @State private var error: String?
     @State private var loadTask: Task<Void, Never>?
 
-    init(session: LiveAgentSession, target: AgentChatTarget, child: String?) {
+    init(session: LiveAgentSession, target: AgentChatTarget, child: String?, worktree: String? = nil) {
         self.session = session
         self.target = target
         self.child = child
+        self.worktree = worktree
     }
 
     var body: some View {
@@ -66,10 +68,10 @@ struct ChangesPullRequestsTab: View {
             if AgentChatFixture.enabled {
                 result = try AgentChatFixture.pulls()
             } else {
-                result = try await PhrenConnection.gitPulls(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, child: child)
+                result = try await PhrenConnection.gitPulls(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, child: child, worktree: worktree)
             }
             #else
-            result = try await PhrenConnection.gitPulls(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, child: child)
+            result = try await PhrenConnection.gitPulls(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, child: child, worktree: worktree)
             #endif
             try Task.checkCancellation()
             model = result; error = nil

@@ -2412,6 +2412,31 @@ schedules:
       expect((await api("/v1/git/stage", { target, paths: ["/etc/passwd"] })).status).toBe(400);
     });
 
+    it("lists the repository's other worktrees and scopes git routes, the diff and files to a listed one", async () => {
+      const git = (...args: string[]) => execFileAsync("git", ["-c", "user.name=t", "-c", "user.email=t@x", "-C", root, ...args]);
+      await git("init", "-q"); await writeFile(path.join(root, "base.txt"), "one\n");
+      await git("add", "base.txt"); await git("commit", "-qm", "start");
+      const worker = path.join(root, ".claude/worktrees/agent-x");
+      await git("worktree", "add", "-q", "-b", "worktree-agent-x", worker);
+      await writeFile(path.join(worker, "base.txt"), "one\ntwo\n");
+      try {
+        const listing = await api("/v1/git/worktrees", { target });
+        expect(listing.status, JSON.stringify(listing.data)).toBe(200);
+        const row = listing.data.worktrees.find((item: any) => item.path === ".claude/worktrees/agent-x");
+        expect(row).toMatchObject({ branch: "worktree-agent-x", ahead: 0, changed: 1 });
+        const status = await api("/v1/git/status", { target, worktree: row.id });
+        expect(status.data).toMatchObject({ branch: "worktree-agent-x", files: [{ path: "base.txt", status: "M" }] });
+        const diff = await api("/v1/diff", { target, worktree: row.id });
+        expect(diff.status, JSON.stringify(diff.data)).toBe(200);
+        expect(diff.data.files.map((file: any) => file.path)).toEqual(["base.txt"]);
+        const file = await api("/v1/files/range?" + new URLSearchParams({ ...target, worktree: row.id, path: "base.txt", offset: "0", length: "64" }));
+        expect(Buffer.from(file.data.data, "base64").toString()).toBe("one\ntwo\n");
+        expect((await api("/v1/git/status", { target, worktree: "f".repeat(32) })).status).toBe(404);
+        expect((await api("/v1/git/status", { target, worktree: worker })).status).toBe(400);
+        expect((await api("/v1/git/status", { target, worktree: row.id, child: "a".repeat(32) })).status).toBe(400);
+      } finally { await rm(path.join(root, ".git"), { recursive: true, force: true }); await rm(path.join(root, ".claude"), { recursive: true, force: true }); }
+    });
+
     it("serves a requested history page without sending a recent backlog", async () => {
       await writeFile(record, Array.from({ length: 450 }, (_, i) => JSON.stringify(row(`Message ${i}`))).join("\n") + "\n");
       // Opening a conversation is a light page: 60 rows, the newest ones;

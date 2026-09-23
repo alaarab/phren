@@ -12,7 +12,7 @@ extension PhrenConnection {
         var query = file.target.map(GatewayRequest.targetQuery) ?? [:]
         query["path"] = file.path; query["offset"] = String(offset); query["length"] = String(length)
         query["project"] = file.project; query["directory"] = file.directory
-        query["child"] = file.child; query["version"] = version
+        query["child"] = file.child; query["worktree"] = file.worktree; query["version"] = version
         if file.uploads { query["scope"] = "uploads" }
         let bytes = try await fetchData(host: host, key: .init(rawRepresentation: privateKey),
             request: GatewayRequest(path: GatewayRequest.path("/v1/files/range", query), maximumResponseBytes: length == 0 ? 32_768 : 6_000_000))

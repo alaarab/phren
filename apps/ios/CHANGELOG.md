@@ -12,6 +12,8 @@ number counts up on its own.
 
 - GitHub Copilot chats end their turns again with Copilot 1.0.87, which no longer writes an idle event: a turn starts with your prompt and finishes at Copilot's final answer, so the chat stops showing the agent as working forever. A failed Copilot tool run is marked as failed.
 - Settings → Notifications says "Instant approval alerts need an APNs key on the computer" and names each connected computer whose Hook reports push as not configured, instead of implying that registering this phone was enough.
+- Changes has a Workers section: the repository's other worktrees, where sub-agents and fan-out workers keep their edits, each named by the worker's task (or its branch) with uncommitted files and commits ahead. A row opens the same list, diff, history and working tree bound to that worker's checkout. In the agent tree, a worker with its own worktree has a Changes button that opens it directly.
+- The working tree has a Show ignored switch, off by default and remembered, that lists git-ignored folders and files dimmed, so a build or media folder can be found and its files opened.
 - Claude chats suggest `/btw` for a quick side question. It sends even while Claude is working, and the answer shows on a card above the message box, marked as not part of the conversation, with Copy and Dismiss. Dismissing a question that is still being answered cancels it on the computer.
 - The live reply preview uses the chat's monospaced font, so a reply no longer changes typeface when the finished message replaces it.
 - Schedule history shows a run that finished by asking you something as "needs you" with the question, in the waiting color, instead of as a failure.

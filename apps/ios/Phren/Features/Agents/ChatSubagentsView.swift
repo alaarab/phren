@@ -9,6 +9,8 @@ struct ChatSubagentsView: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage("sessions.live.preferences.v1") private var hostData = Data()
     @State private var selected: AgentWorkNavigation?
+    /// A worker whose own worktree the Hook knows, opened straight into Changes.
+    @State private var changesChild: String?
     @AppStorage("agent-work.history.v1") private var historyData = Data()
     @State private var now = Date.now
     @State private var finishedExpanded = false
@@ -78,6 +80,7 @@ struct ChatSubagentsView: View {
             }
             .background(PhrenTheme.chatCanvas)
             .navigationDestination(item: $selected) { AgentWorkDestinationView(navigation: $0) }
+            .navigationDestination(item: $changesChild) { AgentChangesView(session: session, target: target, child: $0) }
             .toolbar(.hidden, for: .navigationBar)
         }
         .onChange(of: agents, initial: true) { _, fresh in
@@ -102,6 +105,17 @@ struct ChatSubagentsView: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("child-agent:\(row.agent.computer == nil ? row.agent.id : row.agent.navigationID)")
+            if row.agent.computer == nil, row.agent.worktreeName != nil {
+                // Its edits live in its own worktree, which the pane's diff never shows.
+                Button { changesChild = row.agent.id } label: {
+                    Image(systemName: "plus.forwardslash.minus").font(.system(size: 16))
+                        .foregroundStyle(PhrenTheme.textMuted).frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Changes")
+                .accessibilityIdentifier("child-agent-changes:\(row.agent.id)")
+            }
             if row.agent.displayState == .failed {
                 Button {
                     var next = history

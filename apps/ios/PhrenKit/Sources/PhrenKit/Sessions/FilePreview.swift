@@ -63,14 +63,19 @@ public struct RemoteFile: Hashable, Sendable {
     public var directory: String?
     public var target: AgentChatTarget?
     public var child: String?
+    /// One of the pane repository's other worktrees, by its listed id.
+    public var worktree: String?
     public var uploads: Bool
     public init(path: String, project: String? = nil, directory: String? = nil,
-                target: AgentChatTarget? = nil, child: String? = nil, uploads: Bool = false) {
+                target: AgentChatTarget? = nil, child: String? = nil, worktree: String? = nil, uploads: Bool = false) {
         self.path = path; self.project = project; self.directory = directory
-        self.target = target; self.child = child; self.uploads = uploads
+        self.target = target; self.child = child; self.worktree = worktree; self.uploads = uploads
     }
     public var cacheIdentity: String {
-        [project ?? "", directory ?? "", target?.id ?? "", child ?? "", uploads ? "uploads" : "project", path].joined(separator: "\n")
+        // A worktree joins the identity only when set, so existing cached
+        // files keep their keys.
+        ([project ?? "", directory ?? "", target?.id ?? "", child ?? ""] + (worktree.map { ["worktree:" + $0] } ?? [])
+            + [uploads ? "uploads" : "project", path]).joined(separator: "\n")
     }
 }
 
