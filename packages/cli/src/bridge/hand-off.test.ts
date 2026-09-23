@@ -6,6 +6,8 @@ import { hookRequest } from "./client.js";
 import { handOff, listLiveSessions, notLinkedComputers } from "./hand-off.js";
 
 vi.mock("./client.js", () => ({ hookRequest: vi.fn() }));
+// This computer's names are synthetic so the real hostname never matters.
+vi.mock("./computer-names.js", () => ({ localNames: () => ["Desk.example.net", "Desk"] }));
 vi.mock("./grants.js", () => ({ listGrants: vi.fn(async () => []), matchGrant: vi.fn(), grantLabel: vi.fn() }));
 afterEach(() => vi.resetAllMocks());
 
@@ -54,5 +56,33 @@ it("counts a computer linked under any of its names: hostname label, Bonjour nam
   try {
     await writeFile(path.join(store, "machines.yaml"), "Desk.example.net: home\nDesk: home\nlinuxbox-host: home\nWork-Laptop: work\n");
     expect(notLinkedComputers(store, "Desk.example.net", ["Linuxbox", "linuxbox-host"])).toEqual([{ name: "Work-Laptop" }]);
+  } finally { await rm(store, { recursive: true, force: true }); }
+});
+
+it("matches registered names by first label, whatever domain DHCP or Bonjour added", async () => {
+  const store = await mkdtemp(path.join(tmpdir(), "phren-names-"));
+  try {
+    await writeFile(path.join(store, "machines.yaml"), "Desk: home\nDesk.local: home\ndesk.lan: home\nLinuxbox.example.net: home\nLAPTOP.local: work\n");
+    // Desk is this computer (its local names) under three names; Linuxbox is a peer known by its bare name.
+    expect(notLinkedComputers(store, "Desk-Mini", ["linuxbox"])).toEqual([{ name: "LAPTOP.local" }]);
+  } finally { await rm(store, { recursive: true, force: true }); }
+});
+
+it("collapses one unlinked computer registered under several names into one entry with its aliases", async () => {
+  const store = await mkdtemp(path.join(tmpdir(), "phren-names-"));
+  try {
+    await writeFile(path.join(store, "machines.yaml"), "Linuxbox.example.net: home\nLinuxbox: home\nlinuxbox.local: home\nWork-Laptop: work\n");
+    expect(notLinkedComputers(store, "Desk", [])).toEqual([
+      { name: "Linuxbox", aliases: ["linuxbox.local", "Linuxbox.example.net"] },
+      { name: "Work-Laptop" },
+    ]);
+  } finally { await rm(store, { recursive: true, force: true }); }
+});
+
+it("counts a peer as linked through any name or alias its Hook reports", async () => {
+  const store = await mkdtemp(path.join(tmpdir(), "phren-names-"));
+  try {
+    await writeFile(path.join(store, "machines.yaml"), "Linuxbox.local: home\nlinuxbox-host.example.net: home\n");
+    expect(notLinkedComputers(store, "Desk", ["Build", "10.0.0.8", "Linuxbox", "LINUXBOX-HOST"])).toEqual([]);
   } finally { await rm(store, { recursive: true, force: true }); }
 });

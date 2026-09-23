@@ -70,6 +70,11 @@ this computer and on each computer in this Hook's `hooks.yaml`, with project,
 harness, status, role and the target `hand_off` takes. A peer that does not
 answer is listed under `unreachable`; a `hooks.yaml` that cannot be read or
 parsed leaves only this computer's agents and says why in `peerError`.
+Computers in the store's `machines.yaml` with no link come back in `notLinked`.
+A registered name is compared by its first DNS label, ignoring case, so
+`Desk.local` and `Desk.example.net` are this computer when it is Desk, and a
+peer matches through its name, address or the aliases its Hook reports. Names
+sharing a first label are one entry with `aliases`.
 Enrollment is one-way: a computer sees
 only the peers in its own `hooks.yaml`, so a conductor on each computer needs
 the others enrolled there too; Settings → Health on the phone and `phren status`

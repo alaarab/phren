@@ -92,8 +92,10 @@ since the tab last changed, when the Hook has seen it change), role, branch,
 model and the `target` that `hand_off` takes. Computers that could not be
 reached come back in `unreachable`. Computers registered in the store's
 `machines.yaml` but not linked in `hooks.yaml` come back in
-`notLinked: [{ name }]`: their sessions were not checked, which is not the same
-as nothing running there. `enrolled` counts this Hook's peers, and `peerError`
+`notLinked: [{ name, aliases? }]`: their sessions were not checked, which is not
+the same as nothing running there. Names are compared by their first DNS label,
+ignoring case, against this computer's names and each peer's name, address and
+aliases; registered names sharing a first label are one entry. `enrolled` counts this Hook's peers, and `peerError`
 says why none were read when `hooks.yaml` is broken. No parameters. In the
 core profile use `phren_admin(action: "live_sessions")`.
 

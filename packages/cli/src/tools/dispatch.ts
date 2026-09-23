@@ -43,7 +43,7 @@ export function register(server: McpServer): void {
       const note = result.peerError ? ` Enrolled computers were skipped: ${result.peerError}`
         : result.enrolled === 0 && !result.notLinked.length ? " No other computers are enrolled here; run `phren bridge enroll-computer` to add them." : "";
       const unlinked = result.notLinked.length
-        ? ` Not linked, so not checked (this does not mean nothing is running there): ${result.notLinked.map(item => item.name).join(", ")}. Link one with \`phren bridge enroll-computer\`.` : "";
+        ? ` Not linked, so not checked (this does not mean nothing is running there): ${result.notLinked.map(item => item.aliases?.length ? `${item.name} (also ${item.aliases.join(", ")})` : item.name).join("; ")}. Link one with \`phren bridge enroll-computer\`.` : "";
       return mcpResponse({ ok: true, data: result, message: `${result.sessions.length} live sessions across ${result.enrolled + 1} computers.${note}${unlinked}` });
     } catch (error) {
       return mcpResponse({ ok: false, error: error instanceof Error ? error.message : "Could not list live sessions." });

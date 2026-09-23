@@ -5,7 +5,6 @@ import { projectName } from "./dispatch.js";
 import { grantLabel, listGrants, matchGrant } from "./grants.js";
 import { hookPeers, optionalHookPeers, peerRequest, type HookPeer } from "./peers.js";
 import { BridgeError, object, objects, sessionId, targetSchema, type Json, type Target } from "./protocol.js";
-import { canonicalComputer } from "./schedules.js";
 import { findPhrenPath } from "../phren-paths.js";
 import { listMachines } from "../profile-store.js";
 import { localNames } from "./computer-names.js";
@@ -78,28 +77,54 @@ function sessionsFrom(overview: Json, computer: string, local: boolean, now = Da
   return sessions;
 }
 
-/** Every live agent the conductor could hand work to: this computer's Herdr
- * overview plus each enrolled computer's, read through its verified Hook.
- * An unreachable computer is reported, never silently dropped. */
+/** A computer name's first DNS label, lowercased: `Desk`, `desk.local` and
+ * `Desk.example.net` are one computer. DHCP and Bonjour add domains to the
+ * same machine's name, so full names do not identify a computer. */
+export function computerLabel(name: string): string {
+  const value = name.trim().toLowerCase();
+  // An IPv4 address is one name, not a label and a domain.
+  return /^\d+(\.\d+){3}$/.test(value) ? value : value.split(".")[0] ?? "";
+}
+
+/** A registered computer this Hook cannot see, with the other names the store
+ * registers it under. */
+export interface NotLinkedComputer { name: string; aliases?: string[] }
+
 /** Computers the store registers (machines.yaml) that this Hook has no
- * verified connection to, so their sessions cannot be listed from here. */
-export function notLinkedComputers(store: string | null, here: string, linked: readonly string[]): { name: string }[] {
+ * verified connection to, so their sessions cannot be listed from here.
+ * Names are compared by first label against this computer's names and each
+ * peer's name, address and aliases; names sharing a label collapse into one
+ * entry. */
+export function notLinkedComputers(store: string | null, here: string, linked: readonly string[]): NotLinkedComputer[] {
   if (!store) return [];
   const machines = listMachines(store);
   if (!machines.ok) return [];
-  const known = new Set([here, here.split(".")[0], ...localNames(), ...linked].map(canonicalComputer));
-  return Object.keys(machines.data).filter(name => !known.has(canonicalComputer(name))).sort().map(name => ({ name }));
+  const known = new Set([here, ...localNames(), ...linked].map(computerLabel).filter(Boolean));
+  const groups = new Map<string, string[]>();
+  for (const name of Object.keys(machines.data)) {
+    const label = computerLabel(name);
+    if (!label || known.has(label)) continue;
+    groups.set(label, [...(groups.get(label) ?? []), name]);
+  }
+  return [...groups.values()].map(names => {
+    // The shortest name leads (usually the bare label); the rest are aliases.
+    const [name, ...aliases] = [...names].sort((a, b) => a.length - b.length || a.localeCompare(b));
+    return aliases.length ? { name, aliases } : { name };
+  }).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export interface LiveSessions {
   sessions: LiveSession[];
   unreachable: { computer: string; error: string }[];
   /** Registered in the store but not linked in hooks.yaml: unknown, not idle. */
-  notLinked: { name: string }[];
+  notLinked: NotLinkedComputer[];
   enrolled: number;
   peerError?: string;
 }
 
+/** Every live agent the conductor could hand work to: this computer's Herdr
+ * overview plus each enrolled computer's, read through its verified Hook.
+ * An unreachable computer is reported, never silently dropped. */
 export async function listLiveSessions(options: { store?: string | null } = {}): Promise<LiveSessions> {
   const health = await hookRequest("/v1/health");
   const here = typeof object(health.computer).name === "string" ? String(object(health.computer).name) : "this computer";
