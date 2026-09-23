@@ -39,6 +39,7 @@ import { loadCodePackage, loadedFrom } from "../modules/code-package.js";
 import { gitRepository, paneRoute, uploadBody } from "./server-pane-routes.js";
 import { launchSession, workspaceAction } from "./server-launch.js";
 import type { TranscriptStreams } from "./server-stream.js";
+import { hookMetrics } from "./metrics.js";
 
 /** The Hook's HTTP API over its Unix socket: module gating, the GET routes,
  * the POST routes that are not bound to one pane, and grant deletion. */
@@ -156,6 +157,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
       if (request.method === "GET") {
         switch (url.pathname) {
           case "/v1/health": result = { ...info, codePackage: await codePackageStatus(scheduleStore, modules.has("code")) }; break;
+          case "/v1/metrics": result = hookMetrics.snapshot(); break;
           case "/v1/health/details": result = await healthDetails({ hookVersion: version, computerId: computerID, store: scheduleStore,
             scheduler: scheduler ? { running: true, lastTickAt: scheduler.lastTickAt } : undefined, push: agentHooks.push.status }); break;
           case "/v1/health/peers": {

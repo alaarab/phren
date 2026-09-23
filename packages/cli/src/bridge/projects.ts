@@ -9,9 +9,11 @@ import path from "node:path";
 import { phrenStoreRoot } from "./transcripts.js";
 import { locateProject } from "./locate.js";
 import { BridgeError, type Json } from "./protocol.js";
+import { countGit } from "./metrics.js";
 
 const exec = promisify(execFile);
 export async function git(cwd: string, ...args: string[]): Promise<string> {
+  countGit("projects");
   return (await exec("git", ["-C", cwd, "--no-pager", ...args], {
     timeout: 10_000, maxBuffer: 4_194_304, env: nonInteractiveGitEnv({ ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_CONFIG_NOSYSTEM: "1" }),
   })).stdout;
@@ -116,6 +118,7 @@ export async function repositoryBranch(cwd: string): Promise<string | undefined>
   if (cached && Date.now() - cached.at < 10_000) return cached.value;
   let value: string | undefined;
   try {
+    countGit("branch");
     const { stdout } = await exec("git", ["-C", cwd, "--no-pager", "branch", "--show-current"], {
       timeout: 5_000, maxBuffer: 65_536, env: nonInteractiveGitEnv({ ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_CONFIG_NOSYSTEM: "1" }),
     });

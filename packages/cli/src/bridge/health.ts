@@ -10,6 +10,7 @@ import { publicComputerKey } from "./computers.js";
 import { hookPeers, peerRequest, type HookPeer } from "./peers.js";
 import { BridgeError, bridgeRoot } from "./protocol.js";
 import { canonicalComputer, readScheduleDocument, readScheduleRuns, scheduleRunsFile } from "./schedules.js";
+import { countGit } from "./metrics.js";
 
 const exec = promisify(execFile);
 
@@ -101,6 +102,7 @@ function plainError(value: string | undefined): string | undefined {
 
 async function git(cwd: string, args: string[]): Promise<string | undefined> {
   try {
+    countGit("health");
     const { stdout } = await exec("git", args, { cwd, timeout: 5_000, maxBuffer: 65_536, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
     return stdout.trim();
   } catch { return undefined; }

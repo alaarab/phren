@@ -781,6 +781,16 @@ socket.on('close', () => process.exit(0));
       expect(workspaces.data.phren.gatewayMs).toBe(4200);
       expect((await api("/v1/workspaces/panes?groupId=w1&childId=w1:t1")).data.panes[0].sessionId).toBe(session);
       expect((await api("/v1/activity")).data.events[0].directory).toBe(root);
+      // The counters saw the Herdr calls, identity probe and timers behind the reads above.
+      const metrics = await api("/v1/metrics");
+      expect(metrics.status).toBe(200);
+      expect(Object.keys(metrics.data).sort()).toEqual(["git", "herdr", "identity", "pid", "startedAt", "timers", "uptimeSeconds"]);
+      expect(metrics.data.herdr["session.snapshot"].total).toBeGreaterThan(0);
+      expect(metrics.data.herdr["pane.process_info"].total).toBeGreaterThan(0);
+      expect(Object.keys(metrics.data.identity).length).toBeGreaterThan(0);
+      expect(metrics.data.herdr["session.snapshot"]).toEqual({ total: expect.any(Number), lastMinute: expect.any(Number),
+        currentMinute: expect.any(Number), perMinute: expect.any(Number) });
+      expect(JSON.stringify(metrics.data)).not.toContain(root);
       const permissions = await import("node:fs/promises").then(fs => fs.stat(path.join(root, "bridge/hook.sock")));
       expect(permissions.mode & 0o777).toBe(0o600);
       expect(await stat(path.join(root, "bridge/changes/expired.jsonl")).catch(() => undefined)).toBeUndefined();

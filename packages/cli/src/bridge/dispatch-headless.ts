@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import { z } from "zod";
 import { visibleCodexExecEvent, visibleOpenCodeRunEvent } from "./fanouts.js";
 import { atomicInPrivateDir, BridgeError, bridgeRoot, provider, startingTargetSchema, targetSchema, type Json } from "./protocol.js";
+import { countGit } from "./metrics.js";
 
 const exec = promisify(execFile);
 const timestamp = z.string().datetime({ offset: true });
@@ -109,6 +110,7 @@ async function verifiedWrapper(file: string): Promise<string> {
 async function isolatedWorktree(source: string, destination: string): Promise<string> {
   await mkdir(path.dirname(destination), { recursive: true, mode: 0o700 });
   try {
+    countGit("dispatch");
     await exec("git", ["-C", source, "worktree", "add", "--detach", destination, "HEAD"], { env: nonInteractiveGitEnv(), timeout: 20_000, maxBuffer: 65_536 });
     return await realpath(destination);
   } catch {
