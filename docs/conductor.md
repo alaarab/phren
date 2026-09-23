@@ -71,7 +71,9 @@ answer is listed under `unreachable`; a `hooks.yaml` that cannot be read or
 parsed leaves only this computer's agents and says why in `peerError`.
 Enrollment is one-way: a computer sees
 only the peers in its own `hooks.yaml`, so a conductor on each computer needs
-the others enrolled there too. A conductor starts in the phren store and has no
+the others enrolled there too; Settings → Health on the phone and `phren status`
+flag a link that runs only one way (see [Phren Hook](phren-hook.md#health-and-the-canary)).
+A conductor starts in the phren store and has no
 project; its Herdr name is `conductor` (or `conductor-<label>`).
 
 ## Dispatch new work

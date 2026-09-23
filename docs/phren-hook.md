@@ -206,6 +206,41 @@ start to the first response byte (`gatewayMs`). The iPhone shows a computer as
 gateway took over 1.5 seconds, keeping the last snapshot visible instead of
 calling it unreachable.
 
+### Health and the canary
+
+`GET /v1/health/details` answers whether phren is healthy on this computer, and
+the phone's Settings → Health (or Health on a computer's page in Agents) shows one
+section per computer from it. `phren status` prints the same data under Health.
+It reports:
+
+- `versions`: Phren Hook, Herdr, Claude Code, Codex, Copilot and OpenCode, each
+  from `--version` (3 second limit, cached 5 minutes), or `missing` when absent.
+- `stores`: each registered store's branch and ahead/behind against its upstream
+  as last fetched (nothing is fetched), the last push outcome background sync
+  recorded, and the failure while it is failing.
+- `schedules`: whether the scheduler is ticking and the newest run in
+  `schedule-runs.jsonl` (schedule name, project, status, reason, time).
+- `peers`: every computer in `hooks.yaml`, probed through its verified Hook with a
+  5 second limit. `listsBack` is false when that computer's own `hooks.yaml` does
+  not list this one (matched by pinned host key or name), so a one-way link
+  shows; it is null for a Hook too old to say.
+- `push`: whether direct APNs is configured (`apns.json`).
+- `canary`: the last `canary.json`.
+
+Nothing in it is a secret, a file's contents or a store path.
+
+`phren canary` (or `POST /v1/canary`) exercises the real paths once: it launches
+a Claude conductor named `phren-canary` in a temporary folder through the same
+launch path the phone uses, then closes that workspace and deletes the folder,
+even on failure; checks that every `schedules.yaml` parses and the scheduler
+ticked in the last two minutes (no schedule runs); reads one idle session's
+transcript, read only; and lists live sessions everywhere, failing on an
+unreachable computer. Each step records `ok`, `failed` or `skipped` with the
+reason and duration in `canary.json` in the bridge directory. It never types into
+an existing pane and never touches schedules or tasks. The Hook runs it once a
+day when `PHREN_CANARY_DAILY=1` is in its environment or after
+`phren canary --daily on` (`--daily off` stops it).
+
 The helper exposes a private Unix socket, not a public HTTP port. SSH keys stay
 in the iPhone Keychain. Images and activity remain local to the computer; see the
 [protocol and storage limits](../apps/ios/AGENT_CONNECTIONS.md).

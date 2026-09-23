@@ -43,6 +43,8 @@ import { currentModel, currentStep } from "./steps.js";
 import { TranscriptPreviewStream } from "./transcript-preview.js";
 import { AccountUsageReader } from "./usage.js";
 import { createScheduleLauncher, Scheduler, scheduleRunsFile } from "./schedules.js";
+import { healthDetails, listsCaller } from "./health.js";
+import { dailyCanaryDue, runCanary } from "./canary.js";
 import { defaultPhrenPath } from "../shared.js";
 import { loadCodePackage, loadedFrom } from "../modules/code-package.js";
 
@@ -188,6 +190,9 @@ export async function serve(version: string): Promise<void> {
     store: modules.store, profile: modules.profile, generation: modules.generation,
     get load() { return { average: Number(loadavg()[0].toFixed(2)), cpus: cpus().length }; },
     get gatewayMs() { return gatewayTiming(); } };
+  // The canary launches through the same serialized launch path as the phone.
+  const canary = (trigger: "manual" | "daily") => runCanary({ trigger, store: scheduleStore,
+    launch: (server, data) => launches.run(() => launchSession(server, data, { canary: true })), scheduler });
   const old = await lstat(socketPath()).catch(() => null);
   if (old) {
     if (!old.isSocket() || (process.getuid && old.uid !== process.getuid())) throw new Error("Refusing to replace an unexpected hook socket.");
@@ -211,6 +216,14 @@ export async function serve(version: string): Promise<void> {
       if (request.method === "GET") {
         switch (url.pathname) {
           case "/v1/health": result = { ...info, codePackage: await codePackageStatus(scheduleStore, modules.has("code")) }; break;
+          case "/v1/health/details": result = await healthDetails({ hookVersion: version, computerId: computerID, store: scheduleStore,
+            scheduler: scheduler ? { running: true, lastTickAt: scheduler.lastTickAt } : undefined, push: agentHooks.push.status }); break;
+          case "/v1/health/peers": {
+            // A peer's health probe asks whether this computer lists it back.
+            const caller = z.object({ name: z.string().max(253).optional(), hostKey: z.string().max(512).optional() })
+              .parse({ name: url.searchParams.get("name") ?? undefined, hostKey: url.searchParams.get("hostKey") ?? undefined });
+            result = { computer: info.computer, version, ...await listsCaller(caller) }; break;
+          }
           case "/v1/dispatch": result = { dispatches: await dispatchStatus() }; break;
           case "/v1/conductor/grants": result = { grants: await listGrants() }; break;
           case "/v1/dispatch/capacity": {
@@ -427,6 +440,8 @@ export async function serve(version: string): Promise<void> {
           const input = z.object({ project: z.string().min(1).max(200).optional(), id: z.string().regex(/^[a-f0-9]{8}$/).optional(),
             limit: z.number().int().min(1).max(500).optional() }).parse(data);
           result = { runs: await scheduler!.history(input) };
+        } else if (url.pathname === "/v1/canary") {
+          result = await canary("manual");
         } else if (url.pathname === "/v1/dispatch") {
           result = await dispatches!.dispatch(data);
         } else if (url.pathname === "/v1/conductor/grants") {
@@ -837,6 +852,8 @@ export async function serve(version: string): Promise<void> {
   await agentHooks.start();
   void scheduler?.tick().catch(() => {});
   const scheduleTimer = scheduler ? setInterval(() => { void scheduler.tick().catch(() => {}); }, 30_000) : undefined;
+  // Off unless PHREN_CANARY_DAILY=1 or `phren canary --daily on`.
+  const canaryTimer = setInterval(() => { void dailyCanaryDue().then(due => due ? canary("daily") : undefined).catch(() => {}); }, 10 * 60_000);
   let recording = false;
   const activityTimer = setInterval(() => {
     if (recording) return;
@@ -855,7 +872,7 @@ export async function serve(version: string): Promise<void> {
     })().finally(() => { recording = false; }).catch(() => {});
   }, 5000);
   await new Promise<void>(resolve => {
-    const stop = () => { fanoutMessages.close(); stopRetention(); clearInterval(scheduleTimer); clearInterval(activityTimer); scheduler?.close(); codeReindexer?.close(); agentHooks.close(); ws.clients.forEach(c => c.terminate()); ws.close(); http.close(() => resolve()); http.closeAllConnections(); };
+    const stop = () => { fanoutMessages.close(); stopRetention(); clearInterval(scheduleTimer); clearInterval(canaryTimer); clearInterval(activityTimer); scheduler?.close(); codeReindexer?.close(); agentHooks.close(); ws.clients.forEach(c => c.terminate()); ws.close(); http.close(() => resolve()); http.closeAllConnections(); };
     process.once("SIGTERM", stop); process.once("SIGINT", stop);
   });
   await unlink(socketPath()).catch(() => {});
@@ -993,7 +1010,7 @@ export function herdrAgentName(label: string): string {
   return slug || "agent";
 }
 
-export async function launchSession(server: string, data: Json): Promise<Json> {
+export async function launchSession(server: string, data: Json, options: { canary?: boolean } = {}): Promise<Json> {
   const role = z.enum(["agent", "conductor"]).default("agent").parse(data.role);
   const cwd = z.string().min(1).max(4096).refine(t => path.isAbsolute(t) && !/[\x00-\x1f\x7f]/.test(t)).parse(data.cwd);
   const label = plainText(200).parse(data.label);
@@ -1004,7 +1021,9 @@ export async function launchSession(server: string, data: Json): Promise<Json> {
   // the label a person typed is not, so derive one from it.
   const baseName = herdrAgentName(data.name === undefined ? label : plainText(200).parse(data.name));
   // "Conductor" stays "conductor", never "conductor-conductor".
-  const wanted = role === "conductor" ? (baseName === "conductor" || baseName.startsWith("conductor-") ? baseName : herdrAgentName(`conductor-${baseName}`)) : baseName;
+  // The canary's conductor is not the store's conductor: it keeps its own
+  // name, so the phone never pins it and a real conductor is never refused.
+  const wanted = options.canary ? "phren-canary" : role === "conductor" ? (baseName === "conductor" || baseName.startsWith("conductor-") ? baseName : herdrAgentName(`conductor-${baseName}`)) : baseName;
   const model = typeof data.model === "string" && data.model.trim() ? plainText(200).parse(data.model.trim()) : undefined;
   const modelFlag: Partial<Record<(typeof launchKinds)[number], string>> = { codex: "--model", claude: "--model", opencode: "--model" };
   const workspace = data.workspaceId === undefined ? undefined : id.parse(data.workspaceId);
@@ -1016,7 +1035,7 @@ export async function launchSession(server: string, data: Json): Promise<Json> {
   const taken = new Set([...objects(before.panes), ...objects(before.agents)].map(item => String(item.agent_name ?? item.name ?? "")));
   let name = wanted;
   for (let n = 2; taken.has(name) && n < 100; n++) name = `${wanted.slice(0, 32 - String(n).length - 1)}-${n}`;
-  if (role === "conductor") {
+  if (role === "conductor" && !options.canary) {
     const otherServers = (await servers()).map(item => String(item.session)).filter(name => name !== server);
     const overviews = [{ name: server, value: before }, ...await Promise.all(otherServers.map(async name => ({ name, value: await snapshot(name) })))];
     for (const overview of overviews) {
