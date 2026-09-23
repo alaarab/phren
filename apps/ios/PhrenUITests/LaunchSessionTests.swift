@@ -45,6 +45,58 @@ final class LaunchSessionTests: XCTestCase {
     }
 
     @MainActor
+    func testWorktreeIsOptionalAndTakesAnEditableBranch() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--session-details-fixture", "--native-chat-fixture", "--chat-history-stalled"]
+        app.launch()
+        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 8))
+        app.tabBars.buttons["Agents"].tap()
+        let session = app.buttons["overview-chat:A1000000-0000-0000-0000-000000000001:herdr:default:w7:w7:t9"]
+        XCTAssertTrue(session.waitForExistence(timeout: 10)); session.tap()
+        let newThread = app.buttons["New thread"]
+        XCTAssertTrue(newThread.waitForExistence(timeout: 8)); newThread.tap()
+        XCTAssertTrue(app.buttons["launch-found:/work/phone"].waitForExistence(timeout: 5))
+
+        let toggle = app.descendants(matching: .any)["launch-worktree"]
+        for _ in 0..<8 where !(toggle.exists && toggle.isHittable) { app.swipeUp() }
+        XCTAssertTrue(toggle.waitForExistence(timeout: 3))
+        XCTAssertEqual(toggle.value as? String, "Off", "A worktree is optional and off by default")
+        XCTAssertFalse(app.textFields["launch-worktree-branch"].exists)
+        toggle.tap()
+        XCTAssertEqual(toggle.value as? String, "On")
+        let branch = app.textFields["launch-worktree-branch"]
+        XCTAssertTrue(branch.waitForExistence(timeout: 3))
+        let suggested = branch.value as? String ?? ""
+        XCTAssertNotNil(suggested.range(of: #"^phren/[0-9a-f]{6}$"#, options: .regularExpression),
+                        "Without a task the branch is phren/<short id>, got \(suggested)")
+
+        func typeBranch(_ text: String) {
+            branch.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+            branch.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: (branch.value as? String ?? "").count + 2) + text)
+        }
+        let open = app.buttons["launch-open"]
+        typeBranch("-bad")
+        XCTAssertTrue(app.staticTexts["launch-worktree-note"].label.contains("starts with a letter or digit"))
+        XCTAssertFalse(open.isEnabled, "An invalid branch name keeps Open disabled")
+
+        // The computer refuses a branch that already exists, and the sheet stays.
+        typeBranch("main")
+        for _ in 0..<6 where !open.isHittable { app.swipeUp() }
+        XCTAssertTrue(open.isEnabled)
+        open.tap()
+        XCTAssertTrue(app.staticTexts["Couldn't open session"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "already exists")).firstMatch.exists)
+        app.buttons["OK"].tap()
+
+        for _ in 0..<6 where !branch.isHittable { app.swipeDown() }
+        typeBranch("phren/fix-login")
+        XCTAssertEqual(branch.value as? String, "phren/fix-login")
+        for _ in 0..<6 where !open.isHittable { app.swipeUp() }
+        open.tap()
+        XCTAssertTrue(app.buttons["chat-close"].waitForExistence(timeout: 10), "The worktree session opens into chat")
+    }
+
+    @MainActor
     func testAFailedStartExplainsAndKeepsThePicker() {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--session-details-fixture", "--native-chat-fixture", "--launch-fails", "--chat-history-stalled"]

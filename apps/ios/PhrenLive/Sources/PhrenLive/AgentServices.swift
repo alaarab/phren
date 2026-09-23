@@ -332,13 +332,16 @@ extension PhrenConnection {
         public let model: String?
         public let role: LaunchRole
         public let effort: LaunchEffort?
+        /// A new branch to start the agent on, in a new worktree of the project's repository.
+        public let worktreeBranch: String?
 
         public init(cwd: String, label: String, kind: LaunchKind, workspaceID: String? = nil,
                     timeoutMs: Int = 45_000, model: String? = nil, role: LaunchRole = .agent,
-                    effort: LaunchEffort? = nil) {
+                    effort: LaunchEffort? = nil, worktreeBranch: String? = nil) {
             self.cwd = cwd; self.label = label; self.kind = kind
             self.workspaceID = workspaceID; self.timeoutMs = timeoutMs
             self.model = model; self.role = role; self.effort = effort
+            self.worktreeBranch = worktreeBranch
         }
     }
 
@@ -360,9 +363,11 @@ extension PhrenConnection {
     /// Herdr reports the agent ready — up to `timeoutMs` plus a margin.
     public static func launchSession(host: LiveHost, privateKey: Data, cwd: String, label: String, kind: LaunchKind,
                                      workspaceID: String? = nil, timeoutMs: Int = 45_000, model: String? = nil,
-                                     role: LaunchRole = .agent, effort: LaunchEffort? = nil) async throws -> LaunchedSession {
+                                     role: LaunchRole = .agent, effort: LaunchEffort? = nil,
+                                     worktreeBranch: String? = nil) async throws -> LaunchedSession {
         let launch = LaunchRequest(cwd: cwd, label: label, kind: kind, workspaceID: workspaceID,
-                                   timeoutMs: timeoutMs, model: model, role: role, effort: effort)
+                                   timeoutMs: timeoutMs, model: model, role: role, effort: effort,
+                                   worktreeBranch: worktreeBranch)
         var request = GatewayRequest(path: "/v1/workspaces/launch", body: try launchRequestBody(launch))
         request.timeoutSeconds = min(120_000, max(3_000, timeoutMs)) / 1_000 + 20
         let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: request)
@@ -397,6 +402,12 @@ extension PhrenConnection {
             body["model"] = trimmed
         }
         if let effort = launch.effort { body["effort"] = effort.rawValue }
+        if let branch = launch.worktreeBranch {
+            let trimmed = branch.trimmingCharacters(in: .whitespaces)
+            guard launch.role == .agent else { throw PhrenKitError.validation("A conductor works across projects, so it cannot start in a worktree.") }
+            if let problem = WorktreeBranch.problem(trimmed) { throw PhrenKitError.validation(problem) }
+            body["worktree"] = ["branch": trimmed]
+        }
         return try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
     }
 

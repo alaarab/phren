@@ -20,6 +20,13 @@ Conductor as the other choice. Computer, harness and model remain explicit.
 Conductor effort is low, medium or high, defaulting to medium. The phone
 remembers its conductor harness, model and effort per store.
 
+For an agent, a Worktree group follows Effort: a Work in a new worktree
+`PhrenSwitch` (`launch-worktree`, off by default) that reveals the branch field
+(`launch-worktree-branch`), suggested as `phren/<slug of the task's first line>`
+or `phren/<short id>`, and a note (`launch-worktree-note`) that turns to the
+danger color with the reason a name would be refused. Open stays disabled
+while the name is invalid. A conductor has no worktree choice.
+
 `POST /v1/workspaces/launch` accepts `role: "conductor"` and `effort`, attaches
 the shipped conductor brief, and records the role in Herdr's
 `conductor-<label>` agent name. The overview reports that role to the phone.

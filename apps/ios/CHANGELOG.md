@@ -75,6 +75,7 @@ number counts up on its own.
 
 ### Added
 
+- Opening a project on a computer can start the agent in a new worktree. Turn on Work in a new worktree below Effort and edit the branch, suggested from the task's first line or `phren/` and a short id. The computer adds the worktree under `.claude/worktrees` from the project's current HEAD and starts the agent there; it says so when the folder is not a Git repository or the branch already exists. The worktree then shows in Changes > Workers, named for the agent working in it.
 - One file viewer opens computer files, working-tree contents and verified paths in chat. Downloads show progress and resume from the cache after cancellation or backgrounding. Video and audio use phren playback controls; PDFs have page controls, JSON folds, CSV scrolls as a table, Markdown renders, code highlights and images zoom. Save to Files and Share work for every downloaded type.
 
 - Replies appear as they are written below the activity row. Live previews become the finished reply without duplicate text or restarting the reveal animation.

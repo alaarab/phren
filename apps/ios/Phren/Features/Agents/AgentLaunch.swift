@@ -89,17 +89,18 @@ enum AgentLaunch {
     /// for Herdr to list the new tab with its agent so the chat can target it.
     static func launch(host: LiveHost, cwd: String, label: String, kind: Harness, model: String? = nil,
                        role: PhrenConnection.LaunchRole = .agent,
-                       effort: PhrenConnection.LaunchEffort? = nil,
+                       effort: PhrenConnection.LaunchEffort? = nil, worktreeBranch: String? = nil,
                        progress: @MainActor (String) -> Void = { _ in }) async throws -> LiveAgentSession {
         #if DEBUG && targetEnvironment(simulator)
         if AgentChatFixture.enabled {
             return try await AgentChatFixture.launch(host: host, cwd: cwd, label: label, kind: kind.rawValue,
-                                                     role: role.rawValue, effort: effort?.rawValue)
+                                                     role: role.rawValue, effort: effort?.rawValue, worktreeBranch: worktreeBranch)
         }
         #endif
         let key = try DeviceSSHKey.load(host.id)
         let launched = try await PhrenConnection.launchSession(host: host, privateKey: key, cwd: cwd, label: label,
-                                                               kind: kind, model: model, role: role, effort: effort)
+                                                               kind: kind, model: model, role: role, effort: effort,
+                                                               worktreeBranch: worktreeBranch)
         await progress("Waiting for \(kind.title) to be ready…")
         for _ in 0..<20 {
             if let session = try await PhrenConnection.fetch(host: host, privateKey: key).sessions(on: host)

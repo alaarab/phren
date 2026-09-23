@@ -34,6 +34,20 @@ final class LaunchSessionTests: XCTestCase {
         XCTAssertEqual(body["model"] as? String, "opus")
     }
 
+    func testWorktreeLaunchBodyCarriesTheBranchOnlyWhenAsked() throws {
+        let plain = try JSONSerialization.jsonObject(with: PhrenConnection.launchRequestBody(
+            .init(cwd: "/home/sam/phren", label: "phren", kind: .codex))) as? [String: Any]
+        XCTAssertNil(plain?["worktree"])
+        let data = try PhrenConnection.launchRequestBody(.init(cwd: "/home/sam/phren", label: "phren", kind: .claude,
+                                                               worktreeBranch: " phren/fix-login "))
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(body["worktree"] as? [String: String], ["branch": "phren/fix-login"])
+        XCTAssertThrowsError(try PhrenConnection.launchRequestBody(.init(cwd: "/home/sam/phren", label: "phren", kind: .claude,
+                                                                         worktreeBranch: "-bad")))
+        XCTAssertThrowsError(try PhrenConnection.launchRequestBody(.init(cwd: "/home/sam/phren", label: "phren", kind: .claude,
+                                                                         role: .conductor, worktreeBranch: "phren/c")))
+    }
+
     func testLaunchValidatesInputBeforeConnecting() async throws {
         let host = try LiveHost(name: "Fixture", address: "fixture.invalid", username: "fixture")
         do { _ = try await PhrenConnection.launchSession(host: host, privateKey: Data(), cwd: "relative", label: "phren", kind: .codex); XCTFail("relative cwd") }

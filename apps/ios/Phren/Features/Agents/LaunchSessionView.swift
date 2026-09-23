@@ -44,6 +44,9 @@ struct LaunchSessionView: View {
     /// Each computer's own model list per harness, keyed "host|harness".
     @State private var catalogs: [String: [AgentModelChoice]] = [:]
     @State private var catalogFailed: Set<String> = []
+    /// Optional: start the agent on a new branch in a worktree of its own.
+    @State private var inWorktree = false
+    @State private var worktreeBranch: String
 
     init(storeID: String, project: String, taskRequest: TaskAgentRequest? = nil,
          preferredHostID: UUID? = nil, initialRole: PhrenConnection.LaunchRole = .agent,
@@ -52,6 +55,7 @@ struct LaunchSessionView: View {
         _storeID = State(initialValue: storeID)
         _project = State(initialValue: project)
         _role = State(initialValue: initialRole)
+        _worktreeBranch = State(initialValue: WorktreeBranch.suggested(firstLine: taskRequest?.title))
         self.taskRequest = taskRequest
         self.preferredHostID = preferredHostID
         self.allowsStoreSelection = allowsStoreSelection
@@ -154,8 +158,13 @@ struct LaunchSessionView: View {
         if hostID == host.id, !folderEdited { folder = suggestedFolder(host); folderEdited = false }
     }
 
+    /// Only an agent starts in a worktree; a conductor works across projects.
+    private var usesWorktree: Bool { inWorktree && role != .conductor }
+    private var worktreeProblem: String? { usesWorktree ? WorktreeBranch.problem(worktreeBranch) : nil }
+
     private var canOpen: Bool {
         !launching && selectedHost?.fingerprint != nil && (role == .conductor || folder.hasPrefix("/")) && harness != nil
+            && worktreeProblem == nil
     }
 
     var body: some View {
@@ -269,6 +278,22 @@ struct LaunchSessionView: View {
                         ForEach(efforts) { level in
                             PhrenOptionRow(title: level.title, selected: effort == level) { effort = level }
                                 .accessibilityIdentifier("launch-effort:\(level.rawValue)")
+                        }
+                    }
+                }
+
+                if role != .conductor {
+                    PhrenGroup("Worktree") {
+                        PhrenSwitch("Work in a new worktree", isOn: $inWorktree)
+                            .accessibilityIdentifier("launch-worktree")
+                        if inWorktree {
+                            PhrenTextField("phren/branch-name", text: $worktreeBranch,
+                                           identifier: "launch-worktree-branch", monospaced: true)
+                                .autocorrectionDisabled().textInputAutocapitalization(.never)
+                            Text(worktreeProblem ?? "A new branch from the project's current HEAD, checked out under .claude/worktrees on the computer. The agent works there, and its changes show in Changes > Workers.")
+                                .font(PhrenTypography.caption)
+                                .foregroundStyle(worktreeProblem == nil ? PhrenTheme.textMuted : PhrenTheme.danger)
+                                .accessibilityIdentifier("launch-worktree-note")
                         }
                     }
                 }
@@ -519,9 +544,12 @@ struct LaunchSessionView: View {
             status = role == .conductor ? "Starting the conductor with \(harness.title)…" : "Starting \(harness.title) in \(project)…"
             let chosen = supportsModel ? modelName.trimmingCharacters(in: .whitespacesAndNewlines) : ""
             rememberConductorChoice()
+            let branch = usesWorktree ? worktreeBranch.trimmingCharacters(in: .whitespaces) : nil
+            if let branch { status = "Creating \(branch) and starting \(harness.title)…" }
             let session = try await AgentLaunch.launch(host: host, cwd: cwd, label: label, kind: harness,
                                                        model: chosen.isEmpty ? nil : chosen, role: role,
-                                                       effort: supportsEffort ? effort : nil) { status = $0 }
+                                                       effort: supportsEffort ? effort : nil,
+                                                       worktreeBranch: branch) { status = $0 }
             if role == .conductor {
                 ConductorLaunchSettings.save(storeID: storeID, harness: harness, model: chosen,
                                              effort: effort, hostID: host.id, project: project)

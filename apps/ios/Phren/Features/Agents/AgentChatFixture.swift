@@ -1083,7 +1083,7 @@ import UniformTypeIdentifiers
     /// "Open on a computer": what the Hook would return after creating a
     /// workspace and starting the agent, plus the snapshot the session comes
     /// from. Recorded so a UI test can check what was asked for.
-    static var launches: [(cwd: String, label: String, kind: String, role: String, effort: String?)] = []
+    static var launches: [(cwd: String, label: String, kind: String, role: String, effort: String?, worktree: String?)] = []
     static func locate(project: String) async throws -> [PhrenConnection.LocatedFolder] {
         try await Task.sleep(for: .milliseconds(150))
         return [.init(directory: "/work/\(project)", source: "activity", lastSeen: "2026-09-12T01:00:00Z"),
@@ -1164,10 +1164,12 @@ import UniformTypeIdentifiers
     /// Simulator actions the fixture screen sent, for tests.
     nonisolated(unsafe) static var simulatorActions: [String] = []
     static func launch(host: LiveHost, cwd: String, label: String, kind: String,
-                       role: String = "agent", effort: String? = nil) async throws -> LiveAgentSession {
+                       role: String = "agent", effort: String? = nil, worktreeBranch: String? = nil) async throws -> LiveAgentSession {
         try await Task.sleep(for: .milliseconds(400))
-        launches.append((cwd, label, kind, role, effort))
+        launches.append((cwd, label, kind, role, effort, worktreeBranch))
         if flag("--launch-fails") { throw PhrenKitError.validation("Herdr couldn't start \(kind) in the new pane: the fixture said no.") }
+        // The Hook's own refusal for a branch that already exists.
+        if worktreeBranch == "main" { throw PhrenKitError.validation(#"A branch named "main" already exists in this repository. Choose another branch name."#) }
         let json = #"{"kind":"herdr","groups":[{"id":"w9","label":"\#(label)","children":[{"id":"w9:t1","label":"1","title":"\#(label)","agent":"\#(kind)","agentStatus":"working","cwd":"\#(cwd)","sessionId":"fixture-\#(kind)-session","agentPaneCount":1,"paneCount":1,"role":"\#(role)"}]}]}"#
         guard let session = try LiveWorkspaces.read(Data(json.utf8)).sessions(on: host).first else { throw PhrenKitError.validation("Fixture produced no session.") }
         return session
