@@ -344,7 +344,7 @@ function canonical(value: unknown): string {
   if (value !== null && typeof value === "object") return "{" + Object.keys(value as Json).sort().map(k => JSON.stringify(k) + ":" + canonical((value as Json)[k])).join(",") + "}";
   return JSON.stringify(value) ?? "null";
 }
-export function answeredQuestionInput(tool: string, input: unknown, updatedInput: unknown): Json {
+function answeredQuestionInput(tool: string, input: unknown, updatedInput: unknown): Json {
   if (tool !== "AskUserQuestion") throw new BridgeError(400, "Only a question can be answered with input.");
   if (updatedInput === null || typeof updatedInput !== "object" || Array.isArray(updatedInput)) throw new BridgeError(400, "The answer is not an object.");
   const raw = JSON.stringify(updatedInput);

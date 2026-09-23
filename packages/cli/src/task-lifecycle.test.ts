@@ -247,7 +247,7 @@ describe("task lifecycle", () => {
     expect(blocked).toBeDefined();
   });
 
-  it("auto mode completes the tracked task after a successful stop", () => {
+  it("auto mode never completes the tracked task after a successful stop", () => {
     writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({
       schemaVersion: 1,
 
@@ -258,7 +258,7 @@ describe("task lifecycle", () => {
 
     handleTaskPromptLifecycle({
       phrenPath: tmp.path,
-      prompt: "Fix narrow terminal task rendering",
+      prompt: "Add this to the task list: fix narrow terminal task rendering",
       project,
       sessionId: "session-complete",
       intent: "debug",
@@ -271,11 +271,80 @@ describe("task lifecycle", () => {
       detail: "commit saved; background sync scheduled",
     });
 
+    // The next turn's prompt arrives; the earlier task must still be open.
+    handleTaskPromptLifecycle({
+      phrenPath: tmp.path,
+      prompt: "Now update the release notes for the sync worker",
+      project,
+      sessionId: "session-complete",
+      intent: "build",
+    });
+    finalizeTaskSession({
+      phrenPath: tmp.path,
+      sessionId: "session-complete",
+      status: "saved-pushed",
+      detail: "pushed",
+    });
+
     const task = readTasks(tmp.path, project);
     expect(task.ok).toBe(true);
     if (!task.ok) return;
-    expect(task.data.items.Active).toHaveLength(0);
-    expect(task.data.items.Done[0].line).toContain("Fix narrow terminal task rendering");
+    expect(task.data.items.Done).toHaveLength(0);
+    const active = task.data.items.Active.find((i) => i.line.includes("narrow terminal task rendering"));
+    expect(active).toBeDefined();
+    // Detached at the turn boundary: the unrelated next prompt did not rewrite it.
+    expect(active?.context ?? "").not.toMatch(/release notes/i);
+  });
+
+  describe("machine-originated prompts", () => {
+    const framed: Array<[string, string]> = [
+      ["a sub-agent hand-back", '<agent-message from="worker-1">\nImplemented the fix for the sync worker retry and updated the tests in packages/cli/src/sync.ts\n</agent-message>'],
+      ["a system notification", "[SYSTEM NOTIFICATION] Background command finished: fix the build pipeline and deploy the release"],
+      ["a task notification", "<task-notification>\n<task-id>abc123</task-id>\n<status>completed</status>\n<summary>Implement the retry queue for sync</summary>\n</task-notification>"],
+      ["a system reminder", "<system-reminder>\nFix the failing tests in packages/cli before continuing\n</system-reminder>"],
+      ["a hand-back with leading whitespace", "  \n<agent-message>Update the docs and fix the lint errors in src/index.ts</agent-message>"],
+      ["a notification inside pasted content", '<pasted_content id="1">\n[SYSTEM NOTIFICATION] Implement the retry queue for sync\n</pasted_content id="1">'],
+    ];
+
+    function autoPolicy(): void {
+      writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({
+        schemaVersion: 1,
+        lowConfidenceThreshold: 0.7,
+        riskySections: ["Stale", "Conflicts"],
+        taskMode: "auto",
+      }, null, 2) + "\n");
+    }
+
+    for (const [label, prompt] of framed) {
+      it(`never creates a task from ${label}`, () => {
+        autoPolicy();
+        const before = fs.readFileSync(path.join(tmp.path, project, "tasks.md"), "utf8");
+        const result = handleTaskPromptLifecycle({ phrenPath: tmp.path, prompt, project, sessionId: "session-frame", intent: "build" });
+        expect(result.noticeLines).toEqual([]);
+        expect(fs.readFileSync(path.join(tmp.path, project, "tasks.md"), "utf8")).toBe(before);
+      });
+    }
+
+    it("never completes or moves a tracked task when hand-backs arrive", () => {
+      autoPolicy();
+      handleTaskPromptLifecycle({
+        phrenPath: tmp.path,
+        prompt: "Add this to the task list: fix narrow terminal task rendering",
+        project,
+        sessionId: "session-handback",
+        intent: "build",
+      });
+      const before = fs.readFileSync(path.join(tmp.path, project, "tasks.md"), "utf8");
+      for (const [, prompt] of framed) {
+        handleTaskPromptLifecycle({ phrenPath: tmp.path, prompt, project, sessionId: "session-handback", intent: "build" });
+      }
+      expect(fs.readFileSync(path.join(tmp.path, project, "tasks.md"), "utf8")).toBe(before);
+      const task = readTasks(tmp.path, project);
+      expect(task.ok).toBe(true);
+      if (!task.ok) return;
+      expect(task.data.items.Done).toHaveLength(0);
+      expect(task.data.items.Active.some((i) => i.line.includes("narrow terminal task rendering"))).toBe(true);
+    });
   });
 });
 

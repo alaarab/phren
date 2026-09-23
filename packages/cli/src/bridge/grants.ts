@@ -17,7 +17,7 @@ export const grantSchema = z.object({
   until: z.string().datetime({ offset: true }).optional().describe("Expiry timestamp; omitted means until revoked."),
 }).strict();
 export type Grant = z.infer<typeof grantSchema>;
-export const grantFile = (root = bridgeRoot()) => path.join(root, "conductor.yaml");
+const grantFile = (root = bridgeRoot()) => path.join(root, "conductor.yaml");
 
 const fileSchema = z.object({ grants: z.array(grantSchema).max(64) }).strict();
 

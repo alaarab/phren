@@ -1,4 +1,5 @@
 #!/usr/bin/env tsx
+// Cited in docs/whitepaper.tex; keep this path stable.
 
 import * as fs from "fs";
 import * as os from "os";

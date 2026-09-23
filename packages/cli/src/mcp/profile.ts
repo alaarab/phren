@@ -243,14 +243,23 @@ function errorResponse(error: string, extra: Record<string, unknown> = {}) {
  * validate when the raw string never would, so the miss reports its real inner
  * path instead of "expected object, received string". A string the field
  * accepts as-is (JSON that is genuinely text) and a string that is not JSON
- * are left to the schema's own error.
+ * are left to the schema's own error. The same untyped schema turns a number
+ * or a boolean into its text ("5", "true"); that text is decoded only when the
+ * field rejects it and accepts the decoded value.
  */
 function decodeJsonArguments(schema: z.ZodObject<z.ZodRawShape>, args: Record<string, unknown>): Record<string, unknown> {
   const out = { ...args };
   for (const [key, value] of Object.entries(args)) {
     if (typeof value !== "string") continue;
     const field = schema.shape[key] as z.ZodTypeAny | undefined;
-    if (!field || !/^\s*[[{"]/.test(value)) continue;
+    if (!field) continue;
+    const text = value.trim();
+    if (/^(?:true|false|-?\d+(?:\.\d+)?)$/.test(text)) {
+      const primitive: unknown = text === "true" ? true : text === "false" ? false : Number(text);
+      if (!field.safeParse(value).success && field.safeParse(primitive).success) out[key] = primitive;
+      continue;
+    }
+    if (!/^\s*[[{"]/.test(value)) continue;
     let decoded: unknown = value;
     for (let hop = 0; hop < 3; hop++) {
       if (typeof decoded !== "string" || !/^\s*[[{"]/.test(decoded)) break;
