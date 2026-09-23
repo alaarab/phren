@@ -10,6 +10,7 @@ import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import { withFileLock } from "../governance/locks.js";
 import { runtimeFile } from "../phren-paths.js";
 import { mergeStoreUpstream, type RunStoreGit } from "../sync/store-merge.js";
+import { aheadBehind, logSyncOutcome, type AheadBehind } from "../sync/outcome.js";
 import { activeStoreAuthFailure, authBackoffActive, isGitAuthFailure, storeAuthDetail, withStoreAuthBackoff } from "../sync/auth.js";
 
 // ── Git context ─────────────────────────────────────────────────────────────
@@ -150,7 +151,14 @@ const runSessionStoreGit: RunStoreGit = async (cwd, args) => {
 };
 
 /** Startup pulls share the store's Git lock and never rewrite local commits. */
-export async function pullAtSessionStart(cwd: string, git: RunStoreGit = runSessionStoreGit, now = Date.now()): Promise<{ ok: boolean; output?: string; error?: string }> {
+export async function pullAtSessionStart(cwd: string, git: RunStoreGit = runSessionStoreGit, now = Date.now()): Promise<{ ok: boolean; output?: string; error?: string; counts?: AheadBehind }> {
+  const result = await pullAtSessionStartUnlogged(cwd, git, now);
+  const counts = await aheadBehind(cwd, git);
+  logSyncOutcome(cwd, "session-start-pull", { ok: result.ok, detail: result.ok ? result.output : result.error, counts });
+  return counts ? { ...result, counts } : result;
+}
+
+async function pullAtSessionStartUnlogged(cwd: string, git: RunStoreGit, now: number): Promise<{ ok: boolean; output?: string; error?: string }> {
   try {
     return await withFileLock(runtimeFile(cwd, "git-op"), async () => {
       const auth = activeStoreAuthFailure(cwd);

@@ -50,6 +50,7 @@ import {
 } from "./session-background.js";
 import { spawnDetachedChild } from "../shared/process.js";
 import { resolveManagementCapabilities } from "../init/management-preset.js";
+import { aheadBehind, logSyncOutcome } from "../sync/outcome.js";
 
 // ── Utility ─────────────────────────────────────────────────────────────────
 
@@ -560,36 +561,41 @@ export async function handleBackgroundSync() {
   try {
     await withFileLock(runtimeFile(phrenPathLocal, "git-op"), async () => {
       const previousSync = getRuntimeHealth(phrenPathLocal).lastSync;
-      const record = (
+      const record = async (
         autoSaveStatus: AutoSaveStatus,
         patch: Omit<SyncStatus, "consecutiveFailures" | "lastSuccessfulPushAt"> & { lastPushStatus: PushStatus },
         detail: string,
       ) => {
+        // Ahead/behind make a failure actionable: "behind 140" is a different fix from "ahead 23".
+        const counts = await aheadBehind(phrenPathLocal, (cwd, args) => runBestEffortGit(args, cwd));
         updateRuntimeHealth(phrenPathLocal, {
           lastAutoSave: { at: now, status: autoSaveStatus, detail },
-          lastSync: nextSyncStatus(previousSync, patch, now),
+          lastSync: { ...nextSyncStatus(previousSync, patch, now), ...(counts ?? {}) },
         });
         appendAuditLog(phrenPathLocal, "background_sync", `status=${patch.lastPushStatus} detail=${JSON.stringify(detail)}`);
+        logSyncOutcome(phrenPathLocal, "background-sync", {
+          ok: autoSaveStatus !== "sync-failed", detail: `${patch.lastPushStatus}: ${detail}`, counts,
+        });
       };
 
       const remotes = await runBestEffortGit(["remote"], phrenPathLocal);
       if (!remotes.ok || !remotes.output) {
         const unsyncedCommits = await countUnsyncedCommits(phrenPathLocal);
         const detail = "background sync skipped; no remote configured";
-        record("saved-local", { lastPushAt: now, lastPushStatus: "saved-local", lastPushDetail: detail, unsyncedCommits }, detail);
+        await record("saved-local", { lastPushAt: now, lastPushStatus: "saved-local", lastPushDetail: detail, unsyncedCommits }, detail);
         return;
       }
 
       const push = await runBestEffortGit(["push"], phrenPathLocal);
       if (push.ok) {
         const detail = "commit pushed by background sync";
-        record("saved-pushed", { lastPushAt: now, lastPushStatus: "saved-pushed", lastPushDetail: detail, unsyncedCommits: 0 }, detail);
+        await record("saved-pushed", { lastPushAt: now, lastPushStatus: "saved-pushed", lastPushDetail: detail, unsyncedCommits: 0 }, detail);
         return;
       }
 
       const recovered = await recoverPushConflict(phrenPathLocal);
       if (recovered.ok) {
-        record("saved-pushed", {
+        await record("saved-pushed", {
           lastPushAt: now,
           lastPushStatus: "saved-pushed",
           lastPushDetail: recovered.detail,
@@ -615,7 +621,7 @@ export async function handleBackgroundSync() {
         ? `local and remote histories are unrelated (no merge base) — the remote was most likely re-initialized. ` +
           `Reconcile manually: cd ${phrenPathLocal} && git fetch && git log --oneline origin/HEAD`
         : (recovered.detail || push.error || "background sync push failed");
-      record("sync-failed", {
+      await record("sync-failed", {
         lastPushAt: now,
         lastPushStatus: pushStatus,
         lastPushDetail: failDetail,
@@ -625,6 +631,9 @@ export async function handleBackgroundSync() {
         unsyncedCommits,
       }, failDetail);
     });
+  } catch (err: unknown) {
+    logSyncOutcome(phrenPathLocal, "background-sync", { ok: false, detail: errorMessage(err) });
+    throw err;
   } finally {
     try { fs.unlinkSync(lockPath); } catch {}
   }

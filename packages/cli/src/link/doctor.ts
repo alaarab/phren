@@ -46,6 +46,7 @@ import { CONTEXT_COST_LIMITS, medianHookInjectionTokens, storeWeight } from "../
 import { resolveMcpProfile } from "../mcp/profile.js";
 import { activeStoreAuthFailure, isGitAuthFailure, recordStoreAuthFailure, storeAuthDetail, storeSyncRemote } from "../sync/auth.js";
 import { storeCredentialCheck, type ConfirmStoreRemoval } from "../sync/auth-doctor.js";
+import { describeAutoSave } from "../sync/outcome.js";
 
 // ── Doctor ──────────────────────────────────────────────────────────────────
 
@@ -641,9 +642,10 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
   checks.push({
     name: "runtime-auto-save",
     ok: autoSaveStatus === "saved-pushed" || autoSaveStatus === "saved-local" || autoSaveStatus === "clean",
-    detail: autoSaveStatus
-      ? `last auto-save: ${autoSaveStatus}${autoSaveAt ? ` @ ${autoSaveAt}` : ""}`
-      : "no auto-save runtime record yet",
+    detail: describeAutoSave(
+      { status: autoSaveStatus, at: autoSaveAt, detail: typeof autoSaveObj?.["detail"] === "string" ? autoSaveObj["detail"] : undefined },
+      isRecord(runtime?.["lastSync"]) ? runtime["lastSync"] as { ahead?: number; behind?: number } : undefined,
+    ),
   });
   checks.push({
     name: "runtime-prompt",

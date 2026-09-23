@@ -129,6 +129,9 @@ export interface RuntimeHealth {
     consecutiveFailures?: number;
     /** Last time a push actually reached the remote. */
     lastSuccessfulPushAt?: string;
+    /** Commits ahead of and behind the upstream tracking ref at the last sync outcome. */
+    ahead?: number;
+    behind?: number;
   };
 }
 
@@ -399,6 +402,8 @@ function normalizeRuntimeHealth(data: Record<string, unknown>): RuntimeHealth {
     if (isFiniteNumber(data.lastSync.unsyncedCommits)) normalized.lastSync.unsyncedCommits = data.lastSync.unsyncedCommits;
     if (isFiniteNumber(data.lastSync.consecutiveFailures)) normalized.lastSync.consecutiveFailures = data.lastSync.consecutiveFailures;
     if (typeof data.lastSync.lastSuccessfulPushAt === "string") normalized.lastSync.lastSuccessfulPushAt = data.lastSync.lastSuccessfulPushAt;
+    if (isFiniteNumber(data.lastSync.ahead)) normalized.lastSync.ahead = data.lastSync.ahead;
+    if (isFiniteNumber(data.lastSync.behind)) normalized.lastSync.behind = data.lastSync.behind;
   }
   return normalized;
 }

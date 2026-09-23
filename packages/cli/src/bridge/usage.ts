@@ -85,9 +85,22 @@ export async function readOpenCodeUsage(executable = "opencode", now = new Date(
   try {
     const { stdout } = await exec(executable, ["stats", "--days", "7", "--pure"], { timeout: 12_000, maxBuffer: 1_048_576 });
     return openCodeUsage(stdout, now);
-  } catch {
-    return { source: "opencode", windows: [], message: "Could not read OpenCode's seven-day cost. Run opencode stats --days 7 on this computer." };
+  } catch (error) {
+    return { source: "opencode", windows: [], message: openCodeFailure(error) };
   }
+}
+
+/** Not installed, not signed in and a failing command each say so, with the command's own first line. */
+export function openCodeFailure(error: unknown): string {
+  const failure = error as { code?: string | number; stderr?: string; killed?: boolean; signal?: string } | undefined;
+  if (failure?.code === "ENOENT") return "OpenCode is not installed on this computer (opencode was not found on PATH).";
+  const said = String(failure?.stderr ?? "").replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").split(/\r?\n/)
+    .map(line => line.replace(/[\x00-\x1f\x7f]/g, " ").trim()).find(Boolean)?.slice(0, 200);
+  if (/not (logged|signed) in|no (credentials|providers?)|unauthori[sz]ed|opencode auth login/i.test(said ?? ""))
+    return `OpenCode is not signed in on this computer. Run opencode auth login. (${said})`;
+  if (failure?.killed || failure?.signal) return "opencode stats --days 7 timed out on this computer.";
+  const exit = typeof failure?.code === "number" ? ` (exit ${failure.code})` : "";
+  return `opencode stats --days 7 failed${exit}${said ? `: ${said}` : ""}. Run it on this computer to see why.`;
 }
 
 const openCodeAuthFile = () => path.join(

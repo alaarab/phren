@@ -204,6 +204,27 @@ describe("scheduled startup prompts", () => {
     }
   });
 
+  it("refuses to touch an unreadable Codex config and says why", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "phren-codex-")); temporary.push(home);
+    await mkdir(path.join(home, "config.toml"));
+    const previous = process.env.CODEX_HOME;
+    process.env.CODEX_HOME = home;
+    try {
+      await expect(ensureCodexDirTrusted(path.join(home, "repo"))).rejects.toMatchObject({ code: "EISDIR" });
+    } finally {
+      if (previous === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = previous;
+    }
+  });
+
+  it("reports the watch loop's real error instead of assuming Herdr disconnected", async () => {
+    const target = { workspaceId: "w1", tabId: "w1:t1", paneId: "w1:p1" };
+    const result = await watchHerdrRun("default", target, new AbortController().signal, { source: "claude", startedAt: 0 }, {
+      pause: async () => {},
+      panes: async () => { throw new Error("Herdr: unknown method pane.list\nstack"); },
+    });
+    expect(result).toEqual({ status: "failed", reason: "Watching the scheduled prompt failed: Herdr: unknown method pane.list" });
+  });
+
   it("classifies a fake pane that spent its first 90 seconds waiting at a startup prompt", () => {
     const prompt = classifyStartupBlock({ elapsedMs: STARTUP_BLOCK_WINDOW_MS, transcriptActive: false, status: "blocked", lines: promptLines });
     expect(prompt).toContain("Allow external CLAUDE.md file imports?");

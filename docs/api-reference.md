@@ -61,7 +61,8 @@ CLI equivalent:
 List every live agent session on this computer and each enrolled computer:
 computer, project (none for a conductor), harness, status, role, branch, model
 and the `target` that `hand_off` takes. Computers that could not be reached come
-back in `unreachable`; `enrolled` counts this Hook's peers. No parameters. In the
+back in `unreachable`; `enrolled` counts this Hook's peers, and `peerError`
+says why none were read when `hooks.yaml` is broken. No parameters. In the
 core profile use `phren_admin(action: "live_sessions")`.
 
 CLI equivalent: `phren dispatch sessions`.

@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { claudePanePreview, CodexRolloutPreview, TranscriptPreviewStream } from "./transcript-preview.js";
+import { logger } from "../logger.js";
+import { claudePanePreview, CodexRolloutPreview, readPreviewPane, TranscriptPreviewStream } from "./transcript-preview.js";
 import { TranscriptReader } from "./transcripts.js";
 import type { Target } from "./protocol.js";
 
@@ -16,6 +17,18 @@ async function scratch() {
 afterEach(async () => { vi.useRealTimers(); vi.unstubAllEnvs(); await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 
 describe("live reply previews", () => {
+  it("returns no pane text when Herdr fails, logging the reason once per pane", async () => {
+    vi.stubEnv("PHREN_HERDR_HOME", await scratch());
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const failing = { ...target, pane: "w1:p-missing" };
+      expect(await readPreviewPane(failing)).toBe("");
+      expect(await readPreviewPane(failing)).toBe("");
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0][1]).toBe("Preview pane read for default/w1:p-missing failed: Herdr is not reachable on this computer (ENOENT: Herdr is not running).");
+    } finally { warn.mockRestore(); }
+  });
+
   it("streams growing Claude pane text at most twice a second, and stops at the real entry", async () => {
     let words = "The first";
     const pane = vi.fn(async () => `╭────╮\n❯ Explain this\n⏺ ${words}\n✻ Working… (esc to interrupt)\n❯ composer\n╰────╯`);

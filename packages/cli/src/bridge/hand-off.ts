@@ -3,7 +3,7 @@ import { computerName } from "./computers.js";
 import { hookRequest } from "./client.js";
 import { projectName } from "./dispatch.js";
 import { grantLabel, listGrants, matchGrant } from "./grants.js";
-import { hookPeers, peerRequest, type HookPeer } from "./peers.js";
+import { hookPeers, optionalHookPeers, peerRequest, type HookPeer } from "./peers.js";
 import { BridgeError, object, objects, sessionId, targetSchema, type Json, type Target } from "./protocol.js";
 
 const promptText = z.string().min(1).max(32768).refine(value => !/[\x00-\x08\x0b-\x1f\x7f]/.test(value));
@@ -73,11 +73,11 @@ function sessionsFrom(overview: Json, computer: string, local: boolean): LiveSes
 /** Every live agent the conductor could hand work to: this computer's Herdr
  * overview plus each enrolled computer's, read through its verified Hook.
  * An unreachable computer is reported, never silently dropped. */
-export async function listLiveSessions(): Promise<{ sessions: LiveSession[]; unreachable: { computer: string; error: string }[]; enrolled: number }> {
+export async function listLiveSessions(): Promise<{ sessions: LiveSession[]; unreachable: { computer: string; error: string }[]; enrolled: number; peerError?: string }> {
   const health = await hookRequest("/v1/health");
   const here = typeof object(health.computer).name === "string" ? String(object(health.computer).name) : "this computer";
   const sessions = sessionsFrom(await hookRequest("/v1/workspaces"), here, true);
-  const peers = await hookPeers().catch(() => [] as HookPeer[]);
+  const { peers, peerError } = await optionalHookPeers();
   const unreachable: { computer: string; error: string }[] = [];
   await Promise.all(peers.map(async peer => {
     try {
@@ -87,5 +87,5 @@ export async function listLiveSessions(): Promise<{ sessions: LiveSession[]; unr
       unreachable.push({ computer: peer.name, error: error instanceof Error ? error.message : "Unreachable." });
     }
   }));
-  return { sessions, unreachable, enrolled: peers.length };
+  return { sessions, unreachable, enrolled: peers.length, ...(peerError ? { peerError } : {}) };
 }

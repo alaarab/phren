@@ -24,7 +24,8 @@ export function register(server: McpServer): void {
   }, async () => {
     try {
       const result = await listLiveSessions();
-      const note = result.enrolled === 0 ? " No other computers are enrolled here; run `phren bridge enroll-computer` to add them." : "";
+      const note = result.peerError ? ` Enrolled computers were skipped: ${result.peerError}`
+        : result.enrolled === 0 ? " No other computers are enrolled here; run `phren bridge enroll-computer` to add them." : "";
       return mcpResponse({ ok: true, data: result, message: `${result.sessions.length} live sessions across ${result.enrolled + 1} computers.${note}` });
     } catch (error) {
       return mcpResponse({ ok: false, error: error instanceof Error ? error.message : "Could not list live sessions." });

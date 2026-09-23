@@ -49,7 +49,11 @@ describe("dispatch receipts and selection", () => {
   it("breaks ties by name and propagates explicit enrollment failures", async () => {
     vi.mocked(peerRequest).mockRejectedValue(new BridgeError(403, "Key not enrolled"));
     await expect(new DispatchService().dispatch({ ...brief, computer: "Desk" })).rejects.toThrow("Key not enrolled");
-    await expect(new DispatchService().dispatch(brief)).rejects.toThrow("No enrolled computer");
+    const none = await new DispatchService().dispatch(brief).catch(error => error);
+    expect(none).toBeInstanceOf(BridgeError);
+    expect(none.message).toContain("No enrolled computer");
+    // Every peer that sat out placement is named with its reason.
+    expect(none.details).toEqual({ skipped: [{ computer: "Desk", reason: "Key not enrolled" }, { computer: "Linuxbox", reason: "Key not enrolled" }] });
     vi.mocked(peerRequest).mockImplementation(async (_peer, route) => route === "/v1/dispatch/capacity"
       ? { product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working: 0 }
       : route.startsWith("/v1/workspaces/launch") ? { target } : { ok: true, deliveryUncertain: true });
@@ -62,7 +66,9 @@ describe("dispatch receipts and selection", () => {
       return route === "/v1/dispatch/capacity" ? { product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working: 2 }
         : route.startsWith("/v1/workspaces/launch") ? { target } : { ok: true };
     });
-    expect(await new DispatchService().dispatch(brief)).toMatchObject({ computer: "Linuxbox", state: "accepted" });
+    const placed = await new DispatchService().dispatch(brief);
+    expect(placed).toMatchObject({ computer: "Linuxbox", state: "accepted", skipped: [{ computer: "Desk", reason: "Offline" }] });
+    expect((await dispatchStatus())[0].skipped).toEqual([{ computer: "Desk", reason: "Offline" }]);
     vi.mocked(peerRequest).mockResolvedValue({ product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: [], working: 0 });
     await expect(new DispatchService().dispatch({ ...brief, computer: "Desk" })).rejects.toThrow("Herdr is not running");
   });

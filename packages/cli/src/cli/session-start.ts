@@ -206,6 +206,7 @@ export async function handleHookSessionStart() {
       lastPullDetail: pull.ok ? (pull.output || "pull ok") : (pull.error || "pull failed"),
       lastSuccessfulPullAt: pull.ok && hasRemote ? startedAt : undefined,
       unsyncedCommits,
+      ...("counts" in pull && pull.counts ? pull.counts : {}),
     },
   });
   appendAuditLog(

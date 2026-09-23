@@ -26,6 +26,7 @@ import { renderPhrenArt } from "./phren-art.js";
 import { RESET, BOLD, DIM, GREEN, YELLOW, RED, CYAN } from "./shell/render.js";
 import { storeWeight } from "./store-weight.js";
 import { activeStoreAuthFailure, storeAuthDetail } from "./sync/auth.js";
+import { describeAutoSave } from "./sync/outcome.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -367,6 +368,9 @@ export async function runStatus() {
     console.log(`           local commits ${runtime.lastSync?.unsyncedCommits ?? 0}`);
   } else {
     console.log(`\n  ${DIM}sync${RESET}     auto-save ${runtime.lastAutoSave?.status || "n/a"}`);
+    if (runtime.lastAutoSave?.status === "sync-failed" || runtime.lastAutoSave?.status === "error") {
+      console.log(`           ${RED}${describeAutoSave(runtime.lastAutoSave, runtime.lastSync)}${RESET}`);
+    }
     console.log(`           last pull ${runtime.lastSync?.lastPullStatus || "n/a"}${runtime.lastSync?.lastPullAt ? ` @ ${runtime.lastSync.lastPullAt}` : ""}`);
     console.log(`           last push ${runtime.lastSync?.lastPushStatus || "n/a"}${runtime.lastSync?.lastPushAt ? ` @ ${runtime.lastSync.lastPushAt}` : ""}`);
     console.log(`           unsynced commits ${runtime.lastSync?.unsyncedCommits ?? 0}`);

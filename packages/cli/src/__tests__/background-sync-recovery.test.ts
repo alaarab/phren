@@ -111,6 +111,9 @@ describe("handleBackgroundSync recovery", () => {
     const runtime = JSON.parse(fs.readFileSync(path.join(repoB, ".runtime", "runtime-health.json"), "utf8"));
     expect(runtime.lastSync.lastPushStatus).toBe("saved-pushed");
     expect(runtime.lastSync.lastPullStatus).toBe("ok");
+    expect(runtime.lastSync).toMatchObject({ ahead: 0, behind: 0 });
+    expect(fs.readFileSync(path.join(repoB, ".runtime", "background-sync.log"), "utf8"))
+      .toMatch(/background-sync: ok saved-pushed: commit pushed after merging remote changes \(ahead 0, behind 0\)\n/);
   }, RECOVERY_TEST_TIMEOUT_MS);
 
   it("keeps commits local when the remote becomes unavailable", async () => {
@@ -183,6 +186,15 @@ describe("handleBackgroundSync recovery", () => {
     expect(fs.existsSync(path.join(repoB, ".runtime", "background-sync.lock"))).toBe(false);
     expect(fs.readFileSync(path.join(repoB, "demo", "summary.md"), "utf8")).toContain("local conflicting change");
     expect(fs.readFileSync(path.join(repoB, "demo", "summary.md"), "utf8")).not.toContain("<<<<<<<");
+
+    // The failure keeps its reason and counts, in the log and where doctor reads them.
+    const runtime = JSON.parse(fs.readFileSync(path.join(repoB, ".runtime", "runtime-health.json"), "utf8"));
+    expect(runtime.lastAutoSave.status).toBe("sync-failed");
+    expect(runtime.lastSync).toMatchObject({ ahead: 1, behind: 1 });
+    const log = fs.readFileSync(path.join(repoB, ".runtime", "background-sync.log"), "utf8");
+    expect(log).toMatch(/background-sync: failed pull-failed: .+ \(ahead 1, behind 1\)\n/);
+    const { describeAutoSave } = await import("../sync/outcome.js");
+    expect(describeAutoSave(runtime.lastAutoSave, runtime.lastSync)).toMatch(/^sync failed: .+ \(ahead 1, behind 1\) @ /);
   }, RECOVERY_TEST_TIMEOUT_MS);
 
   it("auto-merges task conflicts without leaving merge markers behind", async () => {

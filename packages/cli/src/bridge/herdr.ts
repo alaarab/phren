@@ -6,6 +6,7 @@ import { readdir, readlink, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { BridgeError, id, object, objects, requestID, serverName, provider, sessionId, type Json, type Target, type StartingTarget } from "./protocol.js";
+import { logger } from "../logger.js";
 import { recordedSession } from "./agent-hooks.js";
 import { tabActivityKey } from "./tab-activity.js";
 
@@ -16,10 +17,34 @@ function herdrSocket(server: string): string {
   return path.join(herdrRoot(), ...(server === "default" ? [] : ["sessions", server]), "herdr.sock");
 }
 
+/** A socket failure keeps its errno so "not running", "stale socket" and "permissions" stay distinct. */
+export function herdrSocketError(error: Error): BridgeError {
+  const code = (error as NodeJS.ErrnoException).code;
+  const reason = code === "ENOENT" ? "Herdr is not running"
+    : code === "ECONNREFUSED" ? "stale socket, Herdr is not listening"
+    : code === "EACCES" || code === "EPERM" ? "this user may not open Herdr's socket"
+    : undefined;
+  const tag = code && /^[A-Z0-9_]{1,32}$/.test(code) ? code : "unknown error";
+  return new BridgeError(503, `Herdr is not reachable on this computer (${tag}${reason ? `: ${reason}` : ""}).`);
+}
+
+const optionalReadFailures = new Map<string, string>();
+/**
+ * For pane reads whose callers treat text as optional: the caller still gets
+ * nothing, but the reason is logged once per target (again only if it changes).
+ */
+export function noteOptionalReadFailure(what: string, key: string, error: unknown): void {
+  const reason = (error instanceof Error ? error.message : String(error)).split("\n")[0].slice(0, 200);
+  if (optionalReadFailures.get(key) === reason) return;
+  if (optionalReadFailures.size >= 256) optionalReadFailures.clear();
+  optionalReadFailures.set(key, reason);
+  logger.warn("herdr", `${what} for ${key} failed: ${reason}`);
+}
+
 /** Herdr's documented newline JSON socket API. No shell, UI focus, or inherited caller context. */
 export async function rpc(server: string, method: string, params: Json = {}, signal?: AbortSignal, timeoutMs = 10_000): Promise<Json> {
   const socket = herdrSocket(server);
-  const metadata = await stat(socket);
+  const metadata = await stat(socket).catch(error => { throw herdrSocketError(error); });
   if (!metadata.isSocket() || (process.getuid && metadata.uid !== process.getuid())) throw new BridgeError(503, "The Herdr socket is unavailable.");
   return new Promise((resolve, reject) => {
     const client = connect(socket);
@@ -34,7 +59,7 @@ export async function rpc(server: string, method: string, params: Json = {}, sig
     if (signal?.aborted) { abort(); return; }
     signal?.addEventListener("abort", abort, { once: true });
     client.setTimeout(timeoutMs, () => finish(new BridgeError(504, "Herdr did not answer. Refresh before trying again.")));
-    client.on("error", () => finish(new BridgeError(503, "Herdr is not reachable on this computer.")));
+    client.on("error", error => finish(herdrSocketError(error)));
     client.on("end", () => finish(new BridgeError(503, "Herdr closed the request before confirming it.")));
     client.on("connect", () => client.write(JSON.stringify({ id: key, method, params }) + "\n"));
     client.on("data", bytes => {
