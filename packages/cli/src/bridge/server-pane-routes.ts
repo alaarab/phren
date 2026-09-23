@@ -7,6 +7,7 @@ import { gitWorktrees, resolveWorktree, type WorktreeWorker } from "./git-worktr
 import { gitCommit, gitPullRequest, gitPush } from "./git-publish.js";
 import { findPane, paneAgentName, paneChatState, paneIdentity, rpc, snapshot, startingPane, trustedDirectory, validateStartingTarget, validateTarget } from "./herdr.js";
 import { refuseWorkingSlash, type ModelSwitcher } from "./model-switch.js";
+import { sessionWebServers } from "./session-servers.js";
 import { repositoryDiff } from "./projects.js";
 import { BridgeError, type Json, MAX_FRAME, object, objects, startingTargetSchema, type Target, targetSchema } from "./protocol.js";
 import type { CodexQuestions } from "./questions.js";
@@ -266,6 +267,9 @@ export async function paneRoute(ctx: PaneRouteContext, url: URL, data: Json, res
   } else if (url.pathname === "/v1/upload") {
     const { name, bytes } = uploadBody(data);
     result = { ok: true, path: await saveUpload(target.session, name, bytes) };
+  } else if (url.pathname === "/v1/web-servers/session") {
+    // This session's own servers only; the machine-wide list is /v1/web-servers.
+    result = await sessionWebServers(target, pane);
   } else if (url.pathname === "/v1/diff") {
     const child = z.string().regex(/^[a-f0-9]{32}$/).optional().parse(data.child);
     if (data.worktree !== undefined) {
