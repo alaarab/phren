@@ -7,15 +7,18 @@ struct ChatReplyPreviewRow: View {
     @ScaledMetric(relativeTo: .body) private var textSize = 14.5
 
     var body: some View {
-        Text(verbatim: preview.text)
+        // A live partial, not the reply: it can stop mid-word, so it reads
+        // a step quieter and ends in a caret until the transcript's text
+        // replaces it.
+        (Text(verbatim: preview.text).foregroundColor(PhrenTheme.chatText.opacity(0.78))
+            + Text(verbatim: " ▍").foregroundColor(PhrenTheme.accent))
             // The finished reply renders in the chat's monospaced face; the
             // preview matches it so the text does not change font when it lands.
             .font(.system(size: textSize, design: .monospaced))
-            .foregroundStyle(PhrenTheme.chatText)
             .frame(maxWidth: .infinity, alignment: .leading)
             .allowsHitTesting(false)
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(preview.text)
+            .accessibilityLabel("Reply in progress: \(preview.text)")
             .accessibilityIdentifier("chat-reply-preview")
     }
 }

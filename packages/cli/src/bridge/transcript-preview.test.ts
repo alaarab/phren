@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { logger } from "../logger.js";
-import { claudePanePreview, CodexRolloutPreview, readPreviewPane, TranscriptPreviewStream, unwrapTerminalLines } from "./transcript-preview.js";
+import { claudeChrome, claudePanePreview, CodexRolloutPreview, readPreviewPane, TranscriptPreviewStream, unwrapTerminalLines } from "./transcript-preview.js";
 import { TranscriptReader } from "./transcripts.js";
 import type { Target } from "./protocol.js";
 
@@ -271,5 +271,32 @@ describe("unwrapTerminalLines", () => {
     const pane = "❯ Explain this\n⏺ The preview comes from the terminal, where every line\n  is wrapped to the pane, so it needs joining.\n✻ Pondering… (3s)\n❯";
     expect(claudePanePreview(pane, "Explain this"))
       .toBe("The preview comes from the terminal, where every line is wrapped to the pane, so it needs joining.");
+  });
+});
+
+describe("Claude Code screen text", () => {
+  it("keeps the update notice out of a streaming reply", () => {
+    const pane = [
+      "❯ Why is it stuck",
+      "⏺ That message did reach me. The phone is still showing its own copy because",
+      "  it only clears that copy when the transcript has the same text, so the copy",
+      "  never",
+      "",
+      "                                                    ✔ Update installed · Restart to update",
+      "✻ Spelunking… (6s · thought for 2s)",
+      "❯",
+    ].join("\n");
+    const text = claudePanePreview(pane, "Why is it stuck");
+    expect(text).not.toMatch(/Update installed|Restart to update/);
+    expect(text.endsWith("so the copy never")).toBe(true);
+  });
+
+  it("recognizes status, tip and hint lines but not reply text that mentions them", () => {
+    for (const line of ["✔ Update installed · Restart to update", "✗ Auto-update failed", "Tip: Use /memory to edit", "⏵⏵ auto-accept edits on (shift+tab to cycle)", "※ Run /doctor for details"]) {
+      expect(claudeChrome(line)).toBe(true);
+    }
+    for (const line of ["The update check passed.", "I will restart the server next.", "Tips are in the README."]) {
+      expect(claudeChrome(line)).toBe(false);
+    }
   });
 });
