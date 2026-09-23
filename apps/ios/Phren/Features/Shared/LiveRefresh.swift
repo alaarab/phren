@@ -68,10 +68,12 @@ final class LiveRefresh {
                 Task { [weak self] in
                     await job.work()
                     job.running = false
-                    _ = self
+                    // A job that ran past its next due time is picked up now.
+                    self?.wake()
                 }
             }
-            let next = jobs.values.map(\.due).min() ?? now.advanced(by: .seconds(60))
+            // A running job is not due until it finishes (and wakes the loop).
+            let next = jobs.values.filter { !$0.running }.map(\.due).min() ?? now.advanced(by: .seconds(3_600))
             let sleeper = Task { _ = try? await Task.sleep(until: max(next, ContinuousClock.now.advanced(by: .milliseconds(50))), clock: .continuous) }
             self.sleeper = sleeper
             await sleeper.value

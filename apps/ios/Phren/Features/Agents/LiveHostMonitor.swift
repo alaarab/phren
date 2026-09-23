@@ -83,7 +83,7 @@ final class LiveHostMonitor {
     /// lands or the request fails outright.
     func reconnecting() {
         awaitingAnswer = true
-        refreshRequested = true
+        refreshNow()
         onSnapshotChanged?()
     }
 
@@ -144,6 +144,7 @@ final class LiveHostMonitor {
             }
         }
         lastUpdated = Date()
+        if awaitingAnswer { awaitingAnswer = false }
         if message != nil { message = nil }
         if fingerprint != nil { fingerprint = nil }
     }
@@ -173,6 +174,7 @@ final class LiveHostMonitor {
                     accept(value, host: host)
                 case .heartbeat(let info):
                     lastUpdated = Date()
+                    if awaitingAnswer { awaitingAnswer = false }
                     if message != nil { message = nil }
                     if let info, let current = snapshot, current.phren != info { snapshot = current.updating(info: info) }
                     if let current = snapshot { refreshApprovals(current, host: host, changed: false) }
