@@ -250,6 +250,8 @@ public extension AgentChild {
 
 public struct AgentChildTree: Codable, Equatable, Sendable {
     public let agents: [AgentChild]
+    /// Why the Hook could not read its enrolled computers (a broken hooks.yaml), so remote children are missing.
+    public let peerError: String?
     public var agentCount: Int { agents.reduce(0) { $0 + $1.agentCount } }
     public var runningCount: Int { agents.reduce(0) { $0 + $1.runningCount } }
     public static func read(_ data: Data) throws -> Self { try JSONDecoder().decode(Self.self, from: data) }

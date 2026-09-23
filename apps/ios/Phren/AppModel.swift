@@ -1,3 +1,4 @@
+import OSLog
 import SwiftUI
 import PhrenKit
 
@@ -239,6 +240,7 @@ final class AppModel {
 
     let client: GitHubClient
 
+    private static let authLog = Logger(subsystem: "com.phren.ios", category: "Auth")
     private static let storesDefaultsKey = "phren.stores"
     private static let legacyRepoDefaultsKey = "phren.selected-repo"
     /// The registry's on-disk shape. Version 1 is a bare `[StoreDescriptor]`
@@ -665,8 +667,12 @@ final class AppModel {
             let verified = try await client.currentUser()
             guard generation == authenticationGeneration else { return false }
             user = verified
-            // Metadata caching is best effort. A failed save retains the old token.
-            try? credentials.save(.init(token: stored.token, kind: stored.kind, user: verified))
+            // Metadata caching is best effort. A failed save retains the old token, and the log says why.
+            do {
+                try credentials.save(.init(token: stored.token, kind: stored.kind, user: verified))
+            } catch {
+                Self.authLog.error("Refreshed account details were not saved: \(error.localizedDescription, privacy: .public)")
+            }
             appliedJournalRouting.removeAll()
             await applyWriteContexts()
         } catch GitHubError.http(status: 401, message: _, method: _, path: _) {
@@ -705,9 +711,10 @@ final class AppModel {
         authenticationGeneration = UUID()
         liveGeneration = UUID()
         await ApprovalActivityController.shared.clear()
+        var wipeFailures: [String] = []
         for context in storeContexts {
             await context.engine.stopLive()
-            try? await context.store.wipe()
+            do { try await context.store.wipe() } catch { wipeFailures.append("\(context.descriptor.displayName): \(error.localizedDescription)") }
         }
         credentials.delete()
         storageDefaults.removeObject(forKey: Self.storesDefaultsKey)
@@ -730,6 +737,10 @@ final class AppModel {
         StorageIssueLog.shared.removeAll()
         storageIssues = []
         lastSurfacedIssueId = nil
+        if !wipeFailures.isEmpty {
+            // The sign-in screen is what shows next; say the copies are still here.
+            authenticationMessage = "Signed out, but this device's copy couldn't be deleted (\(wipeFailures.joined(separator: "; "))). Its files are still in the app's data folder."
+        }
         SpotlightIndex.shared.refreshProjects(from: self)
         phase = .signedOut
     }
@@ -769,7 +780,11 @@ final class AppModel {
         guard let index = storeContexts.firstIndex(where: { $0.id == id }) else { return }
         let context = storeContexts[index]
         await context.engine.stopLive()
-        try? await context.store.wipe()
+        do {
+            try await context.store.wipe()
+        } catch {
+            lastActionError = "Removed \(context.descriptor.displayName), but its copy on this device couldn't be deleted: \(error.localizedDescription)"
+        }
         storeContexts.remove(at: index)
         if storeFilter == id { storeFilter = nil }
         storeRoles.removeValue(forKey: id)

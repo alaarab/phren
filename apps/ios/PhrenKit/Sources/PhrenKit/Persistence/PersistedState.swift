@@ -258,7 +258,7 @@ public enum PersistedState {
             return LoadResult(value: nil, issue: nil)
         }
         return decode(type, data: data, document: document, location: Self.location(of: key), decoder: decoder) {
-            quarantineDefaults(data: data, in: defaults, key: key)
+            Quarantine(path: quarantineDefaults(data: data, in: defaults, key: key))
         }
     }
 
@@ -291,7 +291,7 @@ public enum PersistedState {
         document: String,
         location: String,
         decoder: JSONDecoder,
-        quarantine: () -> String?
+        quarantine: () -> Quarantine
     ) -> LoadResult<Value> {
         // Version first, so a document from a newer build is recognized as
         // such rather than reported as corrupt when its new required field
@@ -301,8 +301,8 @@ public enum PersistedState {
             let moved = quarantine()
             return LoadResult(value: nil, issue: report(
                 kind: .futureSchema, document: document, location: location,
-                quarantineLocation: moved, foundSchemaVersion: found,
-                expected: Value.currentSchemaVersion, detail: nil
+                quarantineLocation: moved.path, foundSchemaVersion: found,
+                expected: Value.currentSchemaVersion, detail: moved.failure
             ))
         }
 
@@ -312,8 +312,9 @@ public enum PersistedState {
             let moved = quarantine()
             return LoadResult(value: nil, issue: report(
                 kind: .unreadable, document: document, location: location,
-                quarantineLocation: moved, foundSchemaVersion: found,
-                expected: Value.currentSchemaVersion, detail: "\(error)"
+                quarantineLocation: moved.path, foundSchemaVersion: found,
+                expected: Value.currentSchemaVersion,
+                detail: ["\(error)", moved.failure].compactMap { $0 }.joined(separator: "; ")
             ))
         }
     }
@@ -323,19 +324,34 @@ public enum PersistedState {
     /// Moves an unreadable file aside as `<name>.corrupt-<ISO8601>.<ext>`.
     /// Never deletes and never overwrites: the bytes have to outlive this
     /// launch for a later build to migrate them.
-    static func quarantineFile(at url: URL, data: Data) -> String? {
+    static func quarantineFile(at url: URL, data: Data) -> Quarantine {
         let destination = quarantineURL(for: url)
         do {
             try FileManager.default.moveItem(at: url, to: destination)
-            return destination.path
-        } catch {
+            return Quarantine(path: destination.path)
+        } catch let moveError {
             // A move can fail (an open handle, an odd filesystem). We already
             // hold the bytes, so write the copy ourselves rather than lose
-            // them, and only then take the original out of the way.
-            guard (try? data.write(to: destination, options: .atomic)) != nil else { return nil }
-            try? FileManager.default.removeItem(at: url)
-            return destination.path
+            // them, and only then take the original out of the way. Each
+            // failure rides along in the issue's detail instead of vanishing.
+            do {
+                try data.write(to: destination, options: .atomic)
+            } catch {
+                return Quarantine(path: nil, failure: "move failed: \(moveError); copy failed: \(error)")
+            }
+            do {
+                try FileManager.default.removeItem(at: url)
+            } catch {
+                return Quarantine(path: destination.path, failure: "copied aside, but the original stayed: \(error)")
+            }
+            return Quarantine(path: destination.path)
         }
+    }
+
+    /// Where a quarantine put the bytes, and why any step of it failed.
+    struct Quarantine {
+        var path: String?
+        var failure: String?
     }
 
     /// The preferences twin: copy the raw bytes to a sibling key *before*
@@ -393,6 +409,15 @@ public enum PersistedState {
     }
 
     // MARK: - Reporting
+
+    /// A failed on-device write outside a ``VersionedDocument`` (the file
+    /// cache, the keychain, a wipe), recorded through the same log and shown
+    /// through the same banner as a failed document save.
+    @discardableResult
+    public static func reportUnwritable(document: String, location: String, error: Error) -> StorageIssue {
+        report(kind: .unwritable, document: document, location: location, quarantineLocation: nil,
+               foundSchemaVersion: nil, expected: 0, detail: "\(error)")
+    }
 
     private static func report(
         kind: StorageIssue.Kind,

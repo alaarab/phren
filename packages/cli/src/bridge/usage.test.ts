@@ -11,10 +11,12 @@ import {
   codexUsage,
   fetchClaudeUsage,
   fetchOpenRouterUsage,
+  openCodeFailure,
   openCodeUsage,
   readClaudeToken,
   readCodexLimits,
   readOpenCodeGoUsage,
+  readOpenCodeUsage,
   usageStatusLine,
 } from "./usage.js";
 
@@ -133,6 +135,22 @@ describe("account usage", () => {
     expect(value).toEqual({ source: "opencode", windows: [], spend: { amountUSD: 4.39, period: "rolling_7_days" }, updatedAt: now.toISOString() });
     expect(JSON.stringify(value)).not.toContain("private session title");
     expect(openCodeUsage("no cost here").message).toContain("opencode stats");
+  });
+  it("says whether OpenCode is missing, signed out or failing", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "phren-opencode-"));
+    try {
+      expect((await readOpenCodeUsage(path.join(root, "missing-opencode"), now)).message).toMatch(/not installed/);
+      const script = async (name: string, body: string) => {
+        const file = path.join(root, name);
+        await writeFile(file, `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+        return file;
+      };
+      const signedOut = await readOpenCodeUsage(await script("signed-out", "echo 'Error: not logged in to any provider' >&2; exit 1"), now);
+      expect(signedOut.message).toBe("OpenCode is not signed in on this computer. Run opencode auth login. (Error: not logged in to any provider)");
+      const broken = await readOpenCodeUsage(await script("broken", "echo '' >&2; echo 'database is locked' >&2; exit 3"), now);
+      expect(broken.message).toBe("opencode stats --days 7 failed (exit 3): database is locked. Run it on this computer to see why.");
+    } finally { await rm(root, { recursive: true, force: true }); }
+    expect(openCodeFailure({ killed: true, signal: "SIGTERM" })).toContain("timed out");
   });
   it("accounts for OpenCode Go fan-outs by model and rolling window", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "phren-go-usage-"));

@@ -147,6 +147,8 @@ struct AgentChatView: View {
     @State private var menuCommand: ChatMenuCommand?
     @State private var showingChildAgents = false
     @State private var childAgents: [AgentChild] = []
+    /// Why the sub-agent tree could not be read, or why remote children are missing from it.
+    @State private var childAgentsError: String?
     @State private var openedChild: AgentWorkNavigation?
     @State private var previewImage: ChatAttachmentDraft?
     @State private var assigningProject = false
@@ -790,10 +792,15 @@ struct AgentChatView: View {
             let key = try DeviceSSHKey.load(session.host.id)
             let tree = try await PhrenConnection.childAgents(host: session.host, privateKey: key, target: target)
             childAgents = tree.agents
+            childAgentsError = tree.peerError.map { "Sub-agents on other computers are missing: \($0)" }
             let computers = AgentChild.runningRows(childAgents).compactMap { $0.agent.computer?.name }
             await SessionWorkingActivityController.shared.observeSubagents(
                 session: session, count: runningChildAgentCount, computers: computers)
-        } catch {}
+        } catch is CancellationError {
+        } catch {
+            // Keep the last tree; say why it may be stale.
+            childAgentsError = "Couldn't refresh sub-agents: \(error.localizedDescription)"
+        }
     }
 
     private func openChildFromDrawer(_ child: AgentChild) {
@@ -1328,6 +1335,8 @@ struct AgentChatView: View {
             }
             if let error = model.deliveryError { Text(error).font(.caption).foregroundStyle(PhrenTheme.warning).accessibilityIdentifier("chat-delivery-error") }
             if let error = model.draftStorageError { Text(error).font(.caption).foregroundStyle(PhrenTheme.warning).accessibilityIdentifier("chat-draft-storage-error") }
+            if let error = model.statusError { Text(error).font(.caption).foregroundStyle(PhrenTheme.warning).accessibilityIdentifier("chat-status-error") }
+            if let error = childAgentsError { Text(error).font(.caption).foregroundStyle(PhrenTheme.warning).accessibilityIdentifier("chat-subagents-error") }
             VStack(spacing: 0) {
                 ChatComposer(text: $model.draft, focused: Binding(get: { composing }, set: { composing = $0 }),
                              placeholder: "Message \(model.target?.providerName ?? "agent")…",

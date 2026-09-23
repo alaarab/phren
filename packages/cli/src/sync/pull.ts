@@ -14,6 +14,7 @@ import { errorMessage } from "../utils.js";
 import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import { activeStoreAuthFailure, authBackoffActive, storeAuthDetail, withStoreAuthBackoff } from "./auth.js";
 import { inProgressGitOperation } from "./git-state.js";
+import { aheadBehind, appendSyncLog, logSyncOutcome } from "./outcome.js";
 import { mergeStoreUpstream, type GitResult, type RunStoreGit } from "./store-merge.js";
 
 export const DEFAULT_PULL_INTERVAL_SECONDS = 0;
@@ -61,12 +62,28 @@ export const runPollGit: RunGit = async (cwd, args) => {
 interface PollState { checkedAt?: number; failures?: number; status?: string; detail?: string }
 export interface PullResult { status: "unchanged" | "updated" | "deferred" | "error" | "not-due"; detail: string }
 
-function readPollState(phrenPath: string): PollState {
-  try {
-    const value = JSON.parse(fs.readFileSync(runtimeFile(phrenPath, "pull-poll.json"), "utf8"));
-    return value && typeof value === "object" && !Array.isArray(value) ? value as PollState : {};
+/**
+ * A missing state file is a first check. A corrupt one is logged and moved
+ * aside (kept for inspection) so the next check starts clean instead of
+ * silently resetting the backoff on every poll.
+ */
+export function readPollState(phrenPath: string): PollState {
+  const file = runtimeFile(phrenPath, "pull-poll.json");
+  let text: string;
+  try { text = fs.readFileSync(file, "utf8"); } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") logPeriodicSync(phrenPath, `poll state unreadable: ${errorMessage(err).split("\n")[0]}`);
+    return {};
   }
-  catch { return {}; }
+  let reason: string;
+  try {
+    const value = JSON.parse(text);
+    if (value && typeof value === "object" && !Array.isArray(value)) return value as PollState;
+    reason = "not a JSON object";
+  } catch (err: unknown) { reason = errorMessage(err).split("\n")[0]; }
+  const aside = `${file}.corrupt-${Date.now()}`;
+  try { fs.renameSync(file, aside); } catch (err: unknown) { debugLog(`poll state rename: ${errorMessage(err)}`); }
+  logPeriodicSync(phrenPath, `poll state was corrupt (${reason}); moved it to ${path.basename(aside)} and started fresh`);
+  return {};
 }
 
 /** Includes user-owned operations: polling never continues or aborts these. */
@@ -78,11 +95,7 @@ async function worktreeBusy(cwd: string, git: RunGit): Promise<boolean> {
 
 /** The periodic pull writes its decisions to the same log a background sync uses. */
 function logPeriodicSync(phrenPath: string, detail: string): void {
-  try {
-    const logPath = runtimeFile(phrenPath, "background-sync.log");
-    fs.mkdirSync(path.dirname(logPath), { recursive: true });
-    fs.appendFileSync(logPath, `[${new Date().toISOString()}] periodic-pull: ${detail}\n`);
-  } catch (err: unknown) { debugLog(`periodic pull log: ${errorMessage(err)}`); }
+  appendSyncLog(phrenPath, "periodic-pull", detail);
 }
 
 
@@ -101,18 +114,24 @@ export async function pollStore(phrenPath: string, seconds: number, git: RunGit 
     const delay = Math.min(seconds * 2 ** failures, Math.max(seconds, 1800)) * 1000;
     if (typeof previous.checkedAt === "number" && now >= previous.checkedAt && now - previous.checkedAt < delay) return skipped;
 
-    const finish = (result: PullResult, verifiedRemote = false): PullResult => {
+    const finish = async (result: PullResult, verifiedRemote = false): Promise<PullResult> => {
       atomicWriteText(runtimeFile(phrenPath, "pull-poll.json"), JSON.stringify({
         checkedAt: now, failures: result.status === "error" ? failures + 1 : 0, ...result,
       }) + "\n");
       if (verifiedRemote || result.status === "updated" || result.status === "error" || result.status === "deferred") {
         const at = new Date(now).toISOString();
         const ok = result.status === "updated" || result.status === "unchanged";
+        const counts = await aheadBehind(phrenPath, git);
         updateRuntimeHealth(phrenPath, { lastSync: {
           lastPullAt: at, lastPullStatus: ok ? "ok" : "error",
           lastPullDetail: result.detail,
           ...(ok ? { lastSuccessfulPullAt: at } : {}),
+          ...(counts ?? {}),
         } });
+        // A quiet "unchanged" poll is logged only when it follows a different outcome.
+        if (result.status !== "unchanged" || previous.status !== "unchanged") {
+          logSyncOutcome(phrenPath, "periodic-pull", { ok, detail: `${result.status}: ${result.detail}`, counts });
+        }
       }
       return result;
     };
@@ -154,12 +173,10 @@ export async function pollStore(phrenPath: string, seconds: number, git: RunGit 
       });
       if (merged.committedLocalWrites) logPeriodicSync(phrenPath, "committed uncommitted store writes before pull");
       if (merged.status === "busy" || merged.status === "conflict") {
-        logPeriodicSync(phrenPath, merged.detail);
         const reason = merged.status === "conflict" ? `local and remote history diverged. ${merged.detail}` : merged.detail;
         return deferred(`Periodic pull deferred: ${reason}`);
       }
       if (merged.status === "error") return failed(`Periodic pull failed: ${merged.detail}`);
-      if (merged.status === "updated") logPeriodicSync(phrenPath, merged.detail);
       return finish({ status: merged.status, detail: merged.detail }, true);
     } finally { releaseGit(); }
   } finally { releasePoll(); }

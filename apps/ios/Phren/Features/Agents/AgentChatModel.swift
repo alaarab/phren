@@ -239,6 +239,8 @@ final class AgentChatModel {
     var hasMore: Bool { history.hasMore }
     var error: String?
     var deliveryError: String?
+    /// Why the approval and status channel dropped, until it reconnects.
+    var statusError: String?
     var loading = true
     var connected = false
     /// Counts reconnect backlogs; the view pins to the end on each when following.
@@ -623,7 +625,7 @@ final class AgentChatModel {
 
     private func beginStatus(_ session: LiveAgentSession, target: AgentChatTarget, run: UUID) {
         statusTask?.cancel(); interactionConnected = false; approval = nil; isCompacting = false
-        historyStalled = false; historyStalledSince = nil
+        historyStalled = false; historyStalledSince = nil; statusError = nil
         let statusRun = UUID(); statusGeneration = statusRun
         statusTask = Task {
             while !Task.isCancelled {
@@ -663,9 +665,16 @@ final class AgentChatModel {
                         acceptReportedModel(status.modelName)
                         if statusBranch != status.branch { statusBranch = status.branch }
                         if approval != nil || ["waiting", "blocked"].contains(status.activity ?? "") { awaitingReply = false }
+                        statusError = nil
                         await ApprovalActivityController.shared.sync(approval, session: session, target: target)
                     }
-                } catch {}
+                } catch is CancellationError {
+                } catch {
+                    // The loop retries on its own; say why approvals and status went quiet meanwhile.
+                    if self.target == target, generation == run, statusGeneration == statusRun {
+                        statusError = "Status updates paused: \(error.localizedDescription) Retrying."
+                    }
+                }
                 guard !Task.isCancelled, self.target == target, generation == run, statusGeneration == statusRun else { return }
                 approval = nil; terminalPrompt = nil; interactionConnected = false; isCompacting = false
                 passwordPrompt = false

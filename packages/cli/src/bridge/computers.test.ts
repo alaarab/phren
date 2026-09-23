@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { acceptComputer, computerKeyLine, dispatchKeyPath, enrollComputer, publicComputerKey } from "./computers.js";
-import { hookPeers, peerSSHArgs } from "./peers.js";
+import { hookPeers, optionalHookPeers, peerOfflineMessage, peerSSHArgs } from "./peers.js";
 
 describe("computer enrollment", () => {
   let root: string;
@@ -61,5 +61,25 @@ describe("computer enrollment", () => {
     await expect(hookPeers(root)).rejects.toThrow("duplicate");
     await chmod(file, 0o644);
     await expect(hookPeers(root)).rejects.toThrow("0600");
+  });
+
+  it("reads optional peers: no file is no peers, a broken file names its problem", async () => {
+    expect(await optionalHookPeers(root)).toEqual({ peers: [] });
+    const file = path.join(root, "hooks.yaml");
+    await writeFile(file, "version: 1\ncomputers: [{ name: Desk }]\n", { mode: 0o600 });
+    const invalid = await optionalHookPeers(root);
+    expect(invalid.peers).toEqual([]);
+    expect(invalid.peerError).toMatch(/^hooks\.yaml is invalid at computers\.0\.address: /);
+    await writeFile(file, "version: 1\ncomputers: [\n", { mode: 0o600 });
+    expect((await optionalHookPeers(root)).peerError).toMatch(/^hooks\.yaml could not be parsed: /);
+    await chmod(file, 0o644);
+    expect((await optionalHookPeers(root)).peerError).toContain("0600");
+  });
+
+  it("keeps ssh's own first diagnostic line and exit code when a peer is offline", () => {
+    expect(peerOfflineMessage("\nssh: connect to host desk.example port 22: Connection refused\r\nmore\n", 255))
+      .toBe("The remote Hook is offline or SSH did not confirm the request (ssh: connect to host desk.example port 22: Connection refused; exit 255).");
+    expect(peerOfflineMessage("", null)).toBe("The remote Hook is offline or SSH did not confirm the request.");
+    expect(peerOfflineMessage("x".repeat(500), 1)).toHaveLength("The remote Hook is offline or SSH did not confirm the request (ssh: ; exit 1).".length + 200);
   });
 });

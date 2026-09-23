@@ -16,6 +16,12 @@ final class AgentChildRemoteTests: XCTestCase {
         XCTAssertEqual(nested.remote?.child, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
         XCTAssertNotEqual(lead.navigationID, nested.navigationID)
         XCTAssertNil(tree.agents.last?.computer, "Older local rows keep decoding without descriptors")
+        XCTAssertNil(tree.peerError, "A Hook that read its peers sends no peerError")
+    }
+
+    func testTreeCarriesTheHooksYamlProblemThatHidRemoteChildren() throws {
+        let tree = try AgentChildTree.read(Data(#"{"agents":[],"peerError":"hooks.yaml is invalid at version: Invalid literal value, expected 1"}"#.utf8))
+        XCTAssertEqual(tree.peerError, "hooks.yaml is invalid at version: Invalid literal value, expected 1")
     }
 
     func testRemoteTargetRequiresComputerAndValidTarget() throws {

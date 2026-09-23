@@ -12,12 +12,12 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { WebSocket } from "ws";
 import { ApprovalWatchLeases, permissionPrompt, terminalChoice, visibleTerminalChoice } from "./agent-hooks.js";
 import { capturesChanges, namedPaths, outputCallIds, ToolChanges } from "./changes.js";
-import { workspaceSnapshot } from "./herdr.js";
+import { herdrSocketError, rpc, workspaceSnapshot } from "./herdr.js";
 import { planAgentHooks, upgradeKeys } from "./install.js";
 import { locateProject } from "./locate.js";
 import { repositoryBranch, repositoryDiff } from "./projects.js";
-import { object } from "./protocol.js";
-import { herdrAgentName } from "./server.js";
+import { BridgeError, object } from "./protocol.js";
+import { herdrAgentName, streamCloseReason } from "./server.js";
 import { historicalImage, phrenStoreRoot, TranscriptReader, transcriptPath, visibleEvent } from "./transcripts.js";
 import { dispatch } from "./transport.js";
 import { enrollComputer, publicComputerKey } from "./computers.js";
@@ -2228,5 +2228,32 @@ describe("Hook module capabilities", () => {
     } finally {
       await rm(store, { recursive: true, force: true });
     }
+  });
+});
+
+describe("failures keep their cause", () => {
+  it("names the socket errno when Herdr cannot be reached", async () => {
+    const errno = (code: string) => Object.assign(new Error(code), { code });
+    expect(herdrSocketError(errno("ENOENT")).message).toBe("Herdr is not reachable on this computer (ENOENT: Herdr is not running).");
+    expect(herdrSocketError(errno("ECONNREFUSED")).message).toContain("ECONNREFUSED: stale socket");
+    expect(herdrSocketError(errno("EACCES")).message).toContain("EACCES: this user may not open");
+    expect(herdrSocketError(new Error("odd")).message).toBe("Herdr is not reachable on this computer (unknown error).");
+    const home = await mkdtemp(path.join(tmpdir(), "phren-herdr-missing-"));
+    vi.stubEnv("PHREN_HERDR_HOME", home);
+    try {
+      const error = await rpc("default", "server.info").catch(caught => caught);
+      expect(error.message).toContain("(ENOENT: Herdr is not running)");
+      expect(error.message).not.toContain(home);
+    } finally { vi.unstubAllEnvs(); await rm(home, { recursive: true, force: true }); }
+  });
+
+  it("closes a stream with its own reason unless the conversation really changed", () => {
+    const changed = new BridgeError(409, "This pane's conversation changed. Reopen the chat.");
+    expect(streamCloseReason(changed)).toBe("The conversation changed; refresh");
+    const io = Object.assign(new Error("EACCES: permission denied, open '/home/sam/.claude/projects/app/session.jsonl'"), { code: "EACCES" });
+    expect(streamCloseReason(io)).toBe("Stream failed: EACCES: permission denied, open 'session.jsonl'");
+    expect(streamCloseReason(new SyntaxError("Unexpected token } in JSON\n    at parse"))).toBe("Stream failed: Unexpected token } in JSON");
+    expect(streamCloseReason(new BridgeError(503, "Herdr is not reachable on this computer (ECONNREFUSED: stale socket, Herdr is not listening)."))).toContain("ECONNREFUSED");
+    expect(Buffer.byteLength(streamCloseReason(new Error("é".repeat(400))))).toBeLessThanOrEqual(123);
   });
 });

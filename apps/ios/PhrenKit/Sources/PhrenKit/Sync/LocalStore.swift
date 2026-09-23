@@ -365,12 +365,23 @@ public actor LocalStore {
         return (files.map(\.path), complete ? files : nil)
     }
 
+    /// Deletes the local copy. A copy that could not be deleted is still
+    /// reset in memory, and the failure is thrown so the caller can say the
+    /// files remain on the device.
     public func wipe() throws {
         cachedSnapshot = nil
-        try? FileManager.default.removeItem(at: root)
+        var removal: Error?
+        do {
+            try FileManager.default.removeItem(at: root)
+        } catch CocoaError.fileNoSuchFile {
+            // Nothing was cached yet.
+        } catch {
+            removal = error
+        }
         try FileManager.default.createDirectory(at: root.appendingPathComponent("files"),
                                                 withIntermediateDirectories: true)
         manifest = Manifest(owner: manifest.owner, repo: manifest.repo, branch: manifest.branch)
+        if let removal { throw removal }
         // The quarantined copies went with the directory, so stop telling the
         // user they're still recoverable in the app's data folder.
         storageIssues = []

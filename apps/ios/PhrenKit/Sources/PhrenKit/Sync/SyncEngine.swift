@@ -310,6 +310,15 @@ public actor SyncEngine {
         storageIssues.append(issue)
     }
 
+    /// A local cache write that failed. The cache heals on the next pull, but
+    /// until then the phone shows stale files, so it is reported like a failed
+    /// queue save rather than dropped.
+    private func recordCacheFailure(_ document: String, location: String, error: Error) {
+        let issue = PersistedState.reportUnwritable(document: document, location: location, error: error)
+        storageIssues.removeAll { $0.kind == .unwritable && $0.document == document }
+        storageIssues.append(issue)
+    }
+
     /// Applies the op locally (instant UI), persists it, and schedules a flush.
     public func enqueue(_ op: PendingOp) async throws {
         // Writability first. `write` checks the same predicate at flush time,
@@ -562,8 +571,12 @@ public actor SyncEngine {
     /// and the pull's sha comparison alone would skip them — the re-apply
     /// would then replay ops onto content that already has them.
     private func forgetCachedShas(_ paths: [String]) async {
-        try? await store.updateManifest { manifest in
-            for path in paths { manifest.blobShas.removeValue(forKey: path) }
+        do {
+            try await store.updateManifest { manifest in
+                for path in paths { manifest.blobShas.removeValue(forKey: path) }
+            }
+        } catch {
+            recordCacheFailure("cached file versions", location: "manifest", error: error)
         }
     }
 
@@ -733,11 +746,15 @@ public actor SyncEngine {
         var deleted: [String: String] = [:]
         for path in order {
             guard let content = overlay[path] else { continue }
-            if let content {
-                try? await store.write(path, content: content, blobSha: nil)
-            } else {
-                if let sha = await store.blobSha(for: path) { deleted[path] = sha }
-                try? await store.delete(path)
+            do {
+                if let content {
+                    try await store.write(path, content: content, blobSha: nil)
+                } else {
+                    if let sha = await store.blobSha(for: path) { deleted[path] = sha }
+                    try await store.delete(path)
+                }
+            } catch {
+                recordCacheFailure("local edits", location: path, error: error)
             }
         }
         notify(.content)

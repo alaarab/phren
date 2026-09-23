@@ -275,6 +275,49 @@ final class PersistedStateTests: XCTestCase {
         XCTAssertEqual(StorageIssueLog.shared.issues.map(\.id), [issue.id])
     }
 
+    func testAFailedQuarantineKeepsItsReasonInTheIssue() throws {
+        // A read-only folder refuses both the move and the fallback copy.
+        let locked = directory.appendingPathComponent("locked")
+        try FileManager.default.createDirectory(at: locked, withIntermediateDirectories: true)
+        try Data(#"{"pending": ["#.utf8).write(to: locked.appendingPathComponent("pending-ops.json"))
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: locked.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked.path) }
+
+        let issue = try XCTUnwrap(PendingOpsQueue.load(from: locked.appendingPathComponent("pending-ops.json")).issue)
+        XCTAssertEqual(issue.kind, .unreadable)
+        XCTAssertNil(issue.quarantineLocation)
+        XCTAssertTrue(issue.detail?.contains("move failed:") == true, issue.detail ?? "no detail")
+        XCTAssertTrue(issue.detail?.contains("copy failed:") == true, issue.detail ?? "no detail")
+        XCTAssertTrue(issue.userMessage.contains("couldn't set them aside"))
+    }
+
+    func testCacheWriteFailuresReachTheIssueLog() {
+        let issue = PersistedState.reportUnwritable(document: "local edits", location: "demo/tasks.md",
+                                                     error: CocoaError(.fileWriteNoPermission))
+        XCTAssertEqual(issue.kind, .unwritable)
+        XCTAssertNotNil(issue.detail)
+        XCTAssertEqual(StorageIssueLog.shared.issues.map(\.id), [issue.id])
+        XCTAssertEqual(issue.userMessage, "Phren couldn't save your local edits on this device, so they may not survive closing the app.")
+    }
+
+    func testAWipeThatCannotDeleteTheCopySaysSo() async throws {
+        let parent = directory.appendingPathComponent("parent")
+        let store = try LocalStore(rootDirectory: parent.appendingPathComponent("store"), owner: "octo", repo: "brain", branch: "main")
+        try await store.write("demo/tasks.md", content: "# tasks\n", blobSha: nil)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: parent.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: parent.path) }
+
+        do {
+            try await store.wipe()
+            XCTFail("a wipe that left the folder behind must throw")
+        } catch {
+            XCTAssertFalse(error is CancellationError)
+        }
+        // The in-memory state is reset either way.
+        let manifest = await store.currentManifest
+        XCTAssertTrue(manifest.blobShas.isEmpty)
+    }
+
     // MARK: - SyncEngine plumbing
 
     func testSyncEngineStartsEmptyAndReportsAQuarantinedQueue() async throws {

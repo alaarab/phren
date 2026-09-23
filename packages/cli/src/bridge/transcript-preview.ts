@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { codexThreadPreview } from "./codex-threads.js";
-import { rpc } from "./herdr.js";
+import { noteOptionalReadFailure, rpc } from "./herdr.js";
 import { object, objects, type Json, type Target } from "./protocol.js";
 import { withTranscriptIndex } from "./transcript-index.js";
 import type { Entry } from "./transcripts.js";
@@ -79,7 +79,10 @@ export async function readPreviewPane(target: Target): Promise<string> {
       { target: target.pane, source: "visible", lines: 80, strip_ansi: true }, undefined, 2_000));
     const read = object(result.read ?? result);
     return typeof read.text === "string" ? read.text : "";
-  } catch { return ""; }
+  } catch (error) {
+    noteOptionalReadFailure("Preview pane read", `${target.server}/${target.pane}`, error);
+    return "";
+  }
 }
 
 /** Older Codex rollouts may carry public text deltas between response items.

@@ -674,7 +674,12 @@ struct MemoryView: View {
             results = MemoryBrowsing.results(hits: hits, graphMatches: graphMatches, contents: contents, storeId: request.store)
             searching = false
             updateList()
-        } catch {}
+        } catch is CancellationError {
+            // A newer query replaced this one; it owns `searching` now.
+        } catch {
+            searching = false
+            self.error = error.localizedDescription
+        }
     }
 
     private struct RefreshKey: Equatable {

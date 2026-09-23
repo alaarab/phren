@@ -8,10 +8,11 @@ import { finished as streamFinished } from "node:stream/promises";
 import * as yaml from "js-yaml";
 import { z } from "zod";
 import { fanoutRoot } from "./fanouts.js";
-import { paneIdentity, rpc, servers, snapshot } from "./herdr.js";
+import { noteOptionalReadFailure, paneIdentity, rpc, servers, snapshot } from "./herdr.js";
 import type { SchedulePush, SchedulePushKind, SchedulePushResult } from "./push.js";
 import { atomic, BridgeError, bridgeRoot, object, objects, type Json } from "./protocol.js";
 import { transcriptPath } from "./transcripts.js";
+import { logger } from "../logger.js";
 import { getProjectSourcePath } from "../project-config.js";
 import { defaultPhrenPath, getProjectDirs } from "../shared.js";
 
@@ -564,7 +565,16 @@ async function paneRecentLines(server: string, paneId: string): Promise<string[]
     const value = await rpc(server, "pane.read", { pane_id: paneId, source: "recent", lines: 40 });
     const text = String(object(object(value).read).text ?? "");
     return text.split(/\r?\n/);
-  } catch { return []; }
+  } catch (error) {
+    noteOptionalReadFailure("Scheduled run pane read", `${server}/${paneId}`, error);
+    return [];
+  }
+}
+
+/** The watch loop's own words for a failure, instead of assuming Herdr went away. */
+export function watchFailureReason(error: unknown): string {
+  const first = (error instanceof Error ? error.message : String(error)).split("\n")[0].replace(/[\x00-\x1f\x7f]/g, " ").trim().slice(0, 200);
+  return `Watching the scheduled prompt failed: ${first || "unknown error"}`;
 }
 
 interface StartupWatch {
@@ -641,7 +651,7 @@ export async function watchHerdrRun(server: string, target: { workspaceId: strin
           await Promise.resolve(startup.onBlocked(prompt)).catch(() => undefined);
         }
       }
-    } catch { return { status: "failed", reason: "Herdr disconnected while the scheduled prompt was running." }; }
+    } catch (error) { return { status: "failed", reason: watchFailureReason(error) }; }
   }
   return { status: "failed", reason: "Phren Hook stopped while the scheduled prompt was running." };
 }
@@ -655,7 +665,9 @@ async function launchHeadless(context: ScheduleLaunchContext, store: string, sta
     eventLog, createdAt: now, startedAt: now, updatedAt: now, status: "queued", schedule: { id: context.schedule.id, project: context.project } };
   await writeManifest(jobDir, manifest);
   const command = headlessCommand(context.schedule, context.cwd);
-  if (context.schedule.harness === "codex") await ensureCodexDirTrusted(context.cwd).catch(() => {});
+  // An untrusted directory only costs Codex a prompt; the run still starts, and the log says why.
+  if (context.schedule.harness === "codex") await ensureCodexDirTrusted(context.cwd).catch(error =>
+    logger.warn("schedule", `Could not mark ${path.basename(context.cwd)} trusted for Codex (run ${context.runId}): ${error instanceof Error ? error.message.split("\n")[0] : String(error)}`));
   let child: ChildProcess;
   try { child = spawn(command.file, command.args, { cwd: command.cwd, env: process.env, stdio: ["pipe", "pipe", "pipe"] }); }
   catch (error) { await writeManifest(jobDir, { ...manifest, status: "failed", updatedAt: new Date().toISOString(), finishedAt: new Date().toISOString() }); throw error; }
@@ -704,7 +716,8 @@ export async function ensureCodexDirTrusted(cwd: string): Promise<void> {
   const file = path.join(directory, "config.toml");
   let text = "";
   try { text = await readFile(file, "utf8"); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") return; }
+  // An unreadable config is left untouched; the caller logs why.
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
   const header = `[projects.${tomlQuote(cwd)}]`;
   const trustLine = 'trust_level = "trusted"';
   let next: string;
