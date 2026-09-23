@@ -3,6 +3,7 @@ import { rename, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { z } from "zod";
+import { isRecord } from "../phren-core.js";
 
 export const PROTOCOL = 1;
 export const MAX_FRAME = 8 * 1024 * 1024;
@@ -31,9 +32,8 @@ export const startingTargetSchema = targetSchema.omit({ session: true }).extend(
 });
 export type StartingTarget = z.infer<typeof startingTargetSchema>;
 export type Json = Record<string, unknown>;
-export function object(value: unknown): Json {
-  return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Json : {};
-}
+/** `value` when it is a plain object, else an empty one. */
+export function object(value: unknown): Json { return isRecord(value) ? value : {}; }
 export function objects(value: unknown): Json[] { return Array.isArray(value) ? value.map(object) : []; }
 export function bridgeRoot(): string { return process.env.PHREN_BRIDGE_HOME || path.join(homedir(), ".local/share/phren/bridge"); }
 export function socketPath(): string { return path.join(bridgeRoot(), "hook.sock"); }
