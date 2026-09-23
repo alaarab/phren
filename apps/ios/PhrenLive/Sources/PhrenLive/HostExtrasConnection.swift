@@ -73,6 +73,15 @@ extension PhrenConnection {
         return try HookHealth.decode(data)
     }
 
+    /// Whether the computer's Hook can push approvals: `configured` is false
+    /// until it has loaded an APNs key, even with this phone registered.
+    public static func pushStatus(host: LiveHost, privateKey: Data) async throws -> HookHealth.Push {
+        try host.validate()
+        let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey),
+                                       request: GatewayRequest(path: "/v1/push/status", maximumResponseBytes: 4_096))
+        return try JSONDecoder().decode(HookHealth.Push.self, from: data)
+    }
+
     /// Runs the canary on the computer now; it launches and closes its own
     /// conductor and never types into an existing session.
     public static func runCanary(host: LiveHost, privateKey: Data) async throws -> HookHealth.Canary {

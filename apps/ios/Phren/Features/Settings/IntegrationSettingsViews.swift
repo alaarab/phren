@@ -84,6 +84,31 @@ private struct HookStatusRow: View {
     }
 }
 
+/// Which saved computers answer that their Hook has no APNs key. A computer
+/// that cannot be reached is left out: this names only a known missing key.
+enum PushSetupCheck {
+    static func unconfigured(_ hostsData: Data) async -> [String] {
+        #if DEBUG && targetEnvironment(simulator)
+        if await HookHealthFixture.enabled {
+            return await HookHealthFixture.computers.filter { !$0.push.configured }.map(\.computer.name)
+        }
+        #endif
+        let hosts = (try? LiveSessionPreferences.read(hostsData))?.hosts ?? []
+        return await withTaskGroup(of: (Int, String?).self) { group in
+            for (index, host) in hosts.enumerated() {
+                group.addTask {
+                    guard let key = try? DeviceSSHKey.load(host.id),
+                          let status = try? await PhrenConnection.pushStatus(host: host, privateKey: key) else { return (index, nil) }
+                    return (index, status.configured ? nil : host.name)
+                }
+            }
+            var missing: [(Int, String)] = []
+            for await case let (index, name?) in group { missing.append((index, name)) }
+            return missing.sorted { $0.0 < $1.0 }.map(\.1)
+        }
+    }
+}
+
 /// What the phone does with an agent's permission requests and the Agents screen.
 struct NotificationSettingsView: View {
     @AppStorage(IntegrationSettings.liveActivityKey) private var liveActivity = true
@@ -91,6 +116,9 @@ struct NotificationSettingsView: View {
     @AppStorage(LocalNotificationSettings.approvalsKey) private var approvals = true
     @AppStorage(LocalNotificationSettings.schedulesKey) private var schedules = true
     @State private var denied = false
+    @AppStorage("sessions.live.preferences.v1") private var hostsData = Data()
+    /// Connected computers whose Hook reports push `configured: false`.
+    @State private var pushMissing: [String] = []
 
     var body: some View {
         PhrenScreen {
@@ -105,6 +133,11 @@ struct NotificationSettingsView: View {
                     .font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
                 Text("Immediate remote approval alerts and schedule results while Phren is suspended need an APNs key on your Hook. Local notifications need no key and no relay server.")
                     .font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
+                if !pushMissing.isEmpty {
+                    Text("Instant approval alerts need an APNs key on the computer. Not set up on \(ListFormatter.localizedString(byJoining: pushMissing)).")
+                        .font(PhrenTypography.caption).foregroundStyle(PhrenTheme.warning)
+                        .phrenIdentifier("notifications-push-unconfigured")
+                }
                 if denied {
                     Text("Notifications are off in iOS. Allow them in Settings to receive these alerts.")
                         .font(PhrenTypography.caption).foregroundStyle(PhrenTheme.warning)
@@ -127,6 +160,7 @@ struct NotificationSettingsView: View {
         .task {
             if approvals || schedules { denied = !(await LocalNotificationMonitor.shared.requestAuthorization()) }
         }
+        .task(id: hostsData) { pushMissing = await PushSetupCheck.unconfigured(hostsData) }
         .onChange(of: approvals) { _, value in changed(enabling: value) }
         .onChange(of: schedules) { _, value in changed(enabling: value) }
     }

@@ -29,4 +29,25 @@ final class LocalNotificationSettingsTests: XCTestCase {
             XCTAssertEqual(control.value as? String, before)
         }
     }
+
+    /// `--hook-health-fixture`: Desk has an APNs key, Linuxbox does not.
+    @MainActor
+    func testNamesTheComputerWithoutAnAPNsKey() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--hook-health-fixture"]
+        app.launch()
+        XCTAssertTrue(app.tabBars.buttons["Settings"].waitForExistence(timeout: 8))
+        app.tabBars.buttons["Settings"].tap()
+        let row = app.buttons["settings-notifications"]
+        for _ in 0..<12 {
+            if row.exists && !row.frame.isEmpty && row.isHittable { break }
+            app.swipeUp()
+        }
+        row.tap()
+        let notice = app.descendants(matching: .any)["notifications-push-unconfigured"].firstMatch
+        XCTAssertTrue(notice.waitForExistence(timeout: 10))
+        XCTAssertTrue(notice.label.contains("Instant approval alerts need an APNs key on the computer"), notice.label)
+        XCTAssertTrue(notice.label.contains("Linuxbox"), notice.label)
+        XCTAssertFalse(notice.label.contains("Desk"), notice.label)
+    }
 }

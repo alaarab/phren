@@ -393,7 +393,8 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         } else if (url.pathname === "/v1/conductor/grants") {
           result = { ok: true, grant: await addGrant(data) };
         } else if (url.pathname === "/v1/push/register") {
-          await agentHooks.push.register(data); result = { ok: true };
+          // Registration is kept for when a key is added; the reply says whether push works now.
+          await agentHooks.push.register(data); result = { ok: true, configured: agentHooks.push.status.configured };
         } else if (url.pathname === "/v1/push/answer") {
           await agentHooks.answerPush(z.string().uuid().parse(data.binding), data.decision); result = { ok: true };
         } else if (url.pathname === "/v1/files") {

@@ -10,6 +10,7 @@ number counts up on its own.
 
 ### Changed
 
+- Settings → Notifications says "Instant approval alerts need an APNs key on the computer" and names each connected computer whose Hook reports push as not configured, instead of implying that registering this phone was enough.
 - Claude chats suggest `/btw` for a quick side question. It sends even while Claude is working, and the answer shows on a card above the message box, marked as not part of the conversation, with Copy and Dismiss. Dismissing a question that is still being answered cancels it on the computer.
 - The live reply preview uses the chat's monospaced font, so a reply no longer changes typeface when the finished message replaces it.
 - Schedule history shows a run that finished by asking you something as "needs you" with the question, in the waiting color, instead of as a failure.
