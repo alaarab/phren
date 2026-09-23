@@ -235,10 +235,15 @@ final class ChatTimelineTests: XCTestCase {
         ])
         let groups = ChatTimelineEntry.group(messages)
         XCTAssertEqual(groups.flatMap(\.messages), messages)
-        XCTAssertEqual(groups.map { $0.messages.count }, [1, 1, 2, 1, 1, 1])
-        XCTAssertEqual(groups.map(\.isActivity), [true, false, true, true, false, true])
-        XCTAssertEqual(ChatToolSummary(groups[2].messages).count, 1)
-        XCTAssertEqual(ChatToolSummary(groups[3].messages).preview, "swift test")
+        // The two adjacent Shell calls fold into one pill ("Shell ×2"); the
+        // user's reply still ends it, and the late output stays after it.
+        XCTAssertEqual(groups.map { $0.messages.count }, [1, 1, 3, 1, 1])
+        XCTAssertEqual(groups.map(\.isActivity), [true, false, true, false, true])
+        XCTAssertTrue(groups[2].isReadRun)
+        let calls = ChatReadRunPresentation(groups[2].messages).groups
+        XCTAssertEqual(calls.map { $0.messages.count }, [2, 1])
+        XCTAssertEqual(ChatToolSummary(calls[0].messages).count, 1)
+        XCTAssertEqual(ChatToolSummary(calls[1].messages).preview, "swift test")
         XCTAssertTrue(ChatTimelineEntry.group([]).isEmpty)
     }
 
@@ -319,10 +324,15 @@ final class ChatTimelineTests: XCTestCase {
             ["type": "message", "role": "assistant", "content": "Done"],
             ["type": "function_call_output", "call_id": "a", "output": "Later output"]
         ])
+        // Both Shell calls fold into one pill; inside it each output still
+        // follows its own call id.
         let groups = ChatTimelineEntry.group(messages)
-        XCTAssertEqual(groups.map { $0.messages.map(\.text) }, [["first", "first result"], ["second", "second result"], ["Done"], ["Later output"]])
+        XCTAssertEqual(groups.map { $0.messages.map(\.text) }, [["first", "first result", "second", "second result"], ["Done"], ["Later output"]])
+        let calls = ChatReadRunPresentation(groups[0].messages).groups
+        XCTAssertEqual(calls.map { $0.messages.map(\.text) }, [["first", "first result"], ["second", "second result"]])
         XCTAssertEqual(Set(groups.flatMap(\.messages).map(\.id)), Set(messages.map(\.id)))
-        XCTAssertEqual(groups[1].id, ChatTimelineEntry.group(Array(messages.prefix(2)))[1].id)
+        let unfolded = ChatTimelineEntry.group(messages, foldingReads: false)
+        XCTAssertEqual(unfolded[1].id, ChatTimelineEntry.group(Array(messages.prefix(2)), foldingReads: false)[1].id)
     }
 
     func testUnknownOrAmbiguousResultIDsNeverAttachToAnotherCall() throws {
@@ -333,7 +343,12 @@ final class ChatTimelineTests: XCTestCase {
             ["type": "function_call_output", "call_id": "absent", "output": "unmatched"],
             ["type": "function_call_output", "output": "unidentified"]
         ])
-        XCTAssertEqual(ChatTimelineEntry.group(messages).map { $0.messages.count }, [1, 1, 1, 1, 1])
+        let groups = ChatTimelineEntry.group(messages)
+        // The two calls fold into one pill, but inside it neither claims the
+        // ambiguous result, and the unmatched outputs stay on their own.
+        XCTAssertEqual(groups.map { $0.messages.count }, [2, 1, 1, 1])
+        XCTAssertEqual(ChatReadRunPresentation(groups[0].messages).groups.map { $0.messages.count }, [1, 1])
+        XCTAssertEqual(ChatTimelineEntry.group(messages, foldingReads: false).map { $0.messages.count }, [1, 1, 1, 1, 1])
     }
 
     func testToolPreviewBoundsManyLinesAndLongUnicodeWithoutLosingSource() throws {
@@ -415,7 +430,12 @@ final class ChatTimelineTests: XCTestCase {
         payloads.append(try call("plan", "ExitPlanMode", ["plan": "# Plan\n1. Do it"]))
         payloads.append(result("plan", "User has approved your plan."))
         let entries = ChatTimelineEntry.group(try read(payloads))
-        XCTAssertFalse(entries.contains(where: \.isReadRun), "Cards break a would-be run")
+        // The first two reads fold ("Read ×2"), but the list's card ends the
+        // run: the third read stays on its own.
+        let runs = entries.filter(\.isReadRun)
+        XCTAssertEqual(runs.count, 1, "Cards break a would-be run")
+        XCTAssertEqual(runs.first?.messages.filter { !$0.isToolResult }.map(\.text).count, 2)
+        XCTAssertNotNil(entries.first(where: { $0.callID == "r2" }), "The read after the card keeps its own row")
         let cards = entries.compactMap(\.card)
         guard cards.count == 5 else { return XCTFail("Expected five cards, got \(cards)") }
         guard case .todos(let first) = cards[0], case .agent(let agent) = cards[1], case .todos(let second) = cards[2],
