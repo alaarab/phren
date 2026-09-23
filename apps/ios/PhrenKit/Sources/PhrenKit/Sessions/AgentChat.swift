@@ -800,7 +800,8 @@ public struct AgentChatTranscript: Equatable, Sendable {
         case "tool.execution_start": return [Part(role: .tool, title: data["toolName"] as? String ?? "Tool", text: readable(data["arguments"]), toolCallID: data["toolCallId"] as? String)]
         case "tool.execution_complete":
             let result = data["result"] as? [String: Any], error = data["error"] as? [String: Any]
-            return [Part(role: .tool, title: "Tool result", text: text(result?["content"]) + text(error?["message"]), toolCallID: data["toolCallId"] as? String)]
+            return [Part(role: .tool, title: "Tool result", text: text(result?["content"]) + text(error?["message"]), toolCallID: data["toolCallId"] as? String,
+                         isToolError: data["success"] as? Bool == false || error != nil)]
         default: return []
         }
     }

@@ -66,7 +66,14 @@ public struct AgentChatProgressEvent: Equatable, Sendable {
         }
         if source == "copilot", raw["agentId"] == nil, let data = raw["data"] as? [String: Any] {
             switch raw["type"] as? String {
-            case "assistant.turn_start": return .init(line: line, value: .started(date(nil, fallback: raw["timestamp"])))
+            // The person's prompt starts the turn. `assistant.turn_start` opens
+            // each model call inside it, so it is not a turn of its own.
+            case "user.message":
+                guard data["source"] == nil || data["source"] as? String == "user" else { return nil }
+                return .init(line: line, value: .started(date(nil, fallback: raw["timestamp"])))
+            // Copilot 1.0.87 writes no session.idle: its final answer ends the turn.
+            case "assistant.message":
+                return data["phase"] as? String == "final_answer" ? .init(line: line, value: .finished(date(nil, fallback: raw["timestamp"]))) : nil
             case "session.idle": return .init(line: line, value: data["aborted"] as? Bool == true ? .stopped : .finished(date(nil, fallback: raw["timestamp"])))
             case "abort": return .init(line: line, value: .stopped)
             case "assistant.usage":

@@ -127,7 +127,9 @@ fs.writeFileSync(path.join(store, "phren.root.yaml"), "installMode: shared\nsync
 // regenerated only by `PHREN_REGENERATE_SWIFT_FIXTURES=1 swift test`, never
 // by this script, so it must survive the wipe untouched. The hand-authored
 // Hook protocol corpus is shared by Swift and TypeScript and must survive too.
-const PRESERVE_ON_WIPE = new Set(["swift-writes", "hook-events.json"]);
+// The Copilot backlog frame is written by the Hook's transcript-copilot.test.ts
+// (PHREN_UPDATE_FIXTURES=1) from its sanitized real session.
+const PRESERVE_ON_WIPE = new Set(["swift-writes", "hook-events.json", "copilot-1.0.87-backlog.json"]);
 fs.mkdirSync(fixturesDir, { recursive: true });
 for (const entry of fs.readdirSync(fixturesDir)) {
   if (PRESERVE_ON_WIPE.has(entry)) continue;
