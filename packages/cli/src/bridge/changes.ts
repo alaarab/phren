@@ -116,7 +116,27 @@ async function treeDiff(root: string, before: string, after: string, env: NodeJS
   return files;
 }
 
-interface Snapshot { at: number; trees: Map<string, Tree>; result?: Promise<ChangedFile[]>; expiry?: NodeJS.Timeout }
+interface Snapshot { at: number; conversation: string; own: Set<string>; trees: Map<string, Tree>; result?: Promise<ChangedFile[]>; expiry?: NodeJS.Timeout }
+/** Files one tool call named in its own input (an Edit's file_path, a patch's
+ * headers), from its start to its end. Another conversation's claim over a
+ * file keeps that file out of a shell call's diff taken over the same time. */
+interface Claim { conversation: string; toolUseId: string; paths: Set<string>; start: number; end?: number }
+const CLAIM_RETENTION = 10 * 60_000;
+
+/** The files a call names in its structured input, never the words of a command line. */
+export function claimedPaths(input: Json, cwd: string, home = homeDir()): string[] {
+  const found = new Set<string>();
+  for (const value of [input.file_path, input.path, input.notebook_path,
+    ...((Array.isArray(input.replacements) ? input.replacements : []).map(v => object(v).filePath))]) {
+    if (typeof value === "string" && value.length > 0 && value.length <= 4096 && !value.includes("\0")) found.add(value);
+  }
+  const patch = [input.patch, input.input].filter((v): v is string => typeof v === "string").join("\n").slice(0, 262144);
+  for (const match of patch.matchAll(/^\*\*\* (?:Update|Add|Delete) File: (.+)$|^\*\*\* Move to: (.+)$/gm)) {
+    const value = (match[1] ?? match[2]).trim(); if (value && value.length <= 4096 && !value.includes("\0")) found.add(value);
+    if (found.size >= 48) break;
+  }
+  return [...found].map(value => value === "~" || value.startsWith("~/") ? path.join(home, value.slice(1)) : path.resolve(cwd, value));
+}
 const PENDING_FOR = 6_000;
 const BUDGET = 2_500;
 const DAY = 86_400_000;
@@ -157,6 +177,7 @@ export class ToolChanges {
   private snapshots = new Map<string, Snapshot>();
   private results = new Map<string, CachedChanges>();
   private controllers = new Set<AbortController>();
+  private claims: Claim[] = [];
 
   private file(conversation: string) { return path.join(bridgeRoot(), "changes", conversation.replace(/[^A-Za-z0-9._-]/g, "_") + ".jsonl"); }
   private async budget<T>(work: (signal: AbortSignal) => Promise<T>): Promise<T> {
@@ -177,8 +198,11 @@ export class ToolChanges {
 
   async before(conversation: string, toolUseId: string, cwd: string, command: string, input: Json = {}): Promise<void> {
     const key = `${conversation}\0${toolUseId}`;
-    if (!toolUseId || this.snapshots.size >= 64 || this.snapshots.has(key)) return;
-    const snapshot: Snapshot = { at: Date.now(), trees: new Map() };
+    if (!toolUseId) return;
+    const claimed = claimedPaths(input, cwd);
+    this.claim(conversation, toolUseId, claimed);
+    if (this.snapshots.size >= 64 || this.snapshots.has(key)) return;
+    const snapshot: Snapshot = { at: Date.now(), conversation, own: new Set(claimed), trees: new Map() };
     this.snapshots.set(key, snapshot);
     try {
       await this.budget(async signal => {
@@ -203,8 +227,20 @@ export class ToolChanges {
     } catch { this.snapshots.delete(key); await this.discard(snapshot); }
   }
 
+  private claim(conversation: string, toolUseId: string, paths: string[]) {
+    const now = Date.now();
+    this.claims = this.claims.filter(claim => claim.end === undefined ? now - claim.start < 30 * 60_000 : now - claim.end < CLAIM_RETENTION);
+    if (paths.length && this.claims.length < 512) this.claims.push({ conversation, toolUseId, paths: new Set(paths), start: now });
+  }
+  /** Whether another conversation's call named this file while `snapshot` ran. */
+  private claimedElsewhere(snapshot: Snapshot, file: string, until: number): boolean {
+    return this.claims.some(claim => claim.conversation !== snapshot.conversation && claim.paths.has(file)
+      && claim.start <= until && (claim.end ?? until) >= snapshot.at);
+  }
+
   async after(conversation: string, toolUseId: string): Promise<void> {
     const key = `${conversation}\0${toolUseId}`, snapshot = this.snapshots.get(key);
+    for (const claim of this.claims) if (claim.conversation === conversation && claim.toolUseId === toolUseId) claim.end ??= Date.now();
     if (!snapshot) return;
     snapshot.result ??= this.compute(snapshot);
     const files = await snapshot.result;
@@ -220,7 +256,15 @@ export class ToolChanges {
           try { files.push(...await treeDiff(root, before.hash, await treeHash(root, before.env, signal), before.env, signal)); }
           catch { signal.throwIfAborted(); }
         }
-        return files;
+        // A file another agent's edit named during this call is its change,
+        // not this call's, even though it landed inside the same window.
+        // A call that names its files (an Edit, a Write, a patch) changed
+        // only those, whatever else moved in the repository meanwhile.
+        const until = Date.now();
+        return files.filter(file => {
+          const absolute = path.resolve(file.root, file.path);
+          return snapshot.own.size ? snapshot.own.has(absolute) : !this.claimedElsewhere(snapshot, absolute, until);
+        });
       });
     } catch { return []; }
     finally { await this.discard(snapshot); }
