@@ -6,6 +6,7 @@ struct ChatBackgroundJobsView: View {
     @State private var expanded: Set<String> = []
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { tick in
+            let _ = PerformanceCounters.bump("tick.background-jobs")
             let jobs = jobs.filter { $0.finishedAt.map { tick.date.timeIntervalSince($0) <= ChatBackgroundJobs.finishedLinger } ?? true }
             if !jobs.isEmpty {
             VStack(alignment: .leading, spacing: 5) {

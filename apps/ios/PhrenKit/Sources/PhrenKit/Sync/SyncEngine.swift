@@ -285,6 +285,7 @@ public actor SyncEngine {
         setStatus { $0.isLive = true }
         liveTask = Task { [weak self] in
             while let self, !Task.isCancelled {
+                PerformanceCounters.bump("poll.github")
                 await self.pull()
                 try? await Task.sleep(nanoseconds: UInt64(Self.livePollInterval * 1_000_000_000))
             }

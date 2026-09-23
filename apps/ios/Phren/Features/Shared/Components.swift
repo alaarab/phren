@@ -57,7 +57,7 @@ struct LiveStatusBar: View {
         .padding(.horizontal, compact ? 0 : 24)
         .padding(.vertical, compact ? 0 : 8)
         .background(compact ? Color.clear : PhrenTheme.bg)
-        .onReceive(ticker) { now = $0 }
+        .onReceive(ticker) { now = $0; PerformanceCounters.bump("tick.sync-status") }
     }
 
     private var indicatorColor: Color {

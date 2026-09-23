@@ -423,10 +423,12 @@ public struct LiveSessionPreferences: Codable, Equatable, Sendable {
     private static let memo = DecodeMemo<Self>()
 
     public static func read(_ data: Data) throws -> Self {
-        try memo.value(for: data, decode: decode)
+        PerformanceCounters.bump("prefs.read")
+        return try memo.value(for: data, decode: decode)
     }
 
     private static func decode(_ data: Data) throws -> Self {
+        PerformanceCounters.bump("prefs.decode")
         if data.isEmpty { return Self() }
         let value = try JSONDecoder().decode(Self.self, from: data)
         guard value.schemaVersion == 1 else { throw PhrenKitError.validation("Update phren to read these live connections.") }

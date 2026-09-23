@@ -126,6 +126,7 @@ struct LiveHostView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
+                    let _ = PerformanceCounters.bump("tick.host-connection")
                     let fresh = monitor.isFresh(at: context.date)
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 6) {
@@ -187,6 +188,7 @@ struct LiveHostView: View {
     private func sessionCards(_ entries: [LiveAgentSession]) -> some View {
         ForEach(entries) { session in
             TimelineView(.periodic(from: .now, by: 1)) { context in
+                let _ = PerformanceCounters.bump("tick.host-card")
                 LiveSessionCard(session: session, fresh: monitor.isLive(at: context.date), stale: monitor.isStale(at: context.date), onDetails: { selected = session }, onClose: { request, confirm in
                     if confirm { closeRequest = request } else { SessionCloseDialogs.perform(request, monitor: monitor) { closeError = $0 } }
                 })

@@ -21,6 +21,7 @@ enum CodeHighlighting {
 
     /// One line, tinted by token; plain text keeps the caller's foreground.
     static func highlighted(_ line: String, language: SyntaxTokenizer.Language) -> AttributedString {
+        PerformanceCounters.bump("highlight.lines")
         var text = AttributedString(line)
         guard language != .plain else { return text }
         for token in SyntaxTokenizer.tokenize(line, language: language) {

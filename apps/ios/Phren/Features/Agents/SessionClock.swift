@@ -19,6 +19,7 @@ final class SessionClock {
                 while !Task.isCancelled {
                     do { try await Task.sleep(for: .seconds(1)) } catch { return }
                     now = .now
+                    PerformanceCounters.bump("tick.session-clock")
                 }
             }
         }

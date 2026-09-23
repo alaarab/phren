@@ -170,6 +170,7 @@ struct HerdrWorkspacesView: View {
                 servers = try await PhrenConnection.herdrServers(host: host, privateKey: DeviceSSHKey.load(host.id))
                 #endif
                 while !Task.isCancelled {
+                    PerformanceCounters.bump("poll.herdr-workspaces")
                     let value = try await LiveHostMonitor.fetch(host)
                     try Task.checkCancellation(); snapshot = value; error = nil
                     try await Task.sleep(for: .seconds(3))
@@ -308,6 +309,7 @@ private struct HerdrPanesView: View {
             guard active else { return }
             do {
                 while !Task.isCancelled {
+                    PerformanceCounters.bump("poll.herdr-panes")
                     let result = try await AgentChatModel.fetchPanes(session)
                     try Task.checkCancellation(); panes = result.panes; error = nil
                     try await Task.sleep(for: .seconds(3))

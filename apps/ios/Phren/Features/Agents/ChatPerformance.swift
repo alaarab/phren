@@ -1,4 +1,5 @@
 import Foundation
+import PhrenKit
 
 enum ChatPerformance {
     static let enabled = ProcessInfo.processInfo.environment["PHREN_PERFORMANCE_LOG"] == "1"
@@ -8,6 +9,7 @@ enum ChatPerformance {
     static func end(_ name: String, _ start: CFAbsoluteTime) {
         #if DEBUG
         guard enabled else { return }
+        PerformanceCounters.bump("body." + name.replacingOccurrences(of: " ", with: "-"))
         let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1_000
         lock.lock()
         let old = totals[name] ?? (0, 0, 0)

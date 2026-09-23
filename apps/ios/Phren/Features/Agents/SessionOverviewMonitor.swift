@@ -156,6 +156,7 @@ final class SessionOverviewMonitor {
         let freshness = Task {
             while !Task.isCancelled {
                 do { try await Task.sleep(for: .seconds(1)) } catch { return }
+                PerformanceCounters.bump("tick.overview-freshness")
                 guard generation == run, ready else { continue }
                 let current = computers.map { $0.monitor.isFresh(at: .now) }
                 if current != screen.computers.map(\.fresh) { publish() }

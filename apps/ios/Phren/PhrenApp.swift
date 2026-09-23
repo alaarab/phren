@@ -36,6 +36,7 @@ struct PhrenApp: App {
                 }
                 .onChange(of: appearance.palette) { _, _ in Self.applyPhrenChrome() }
                 .modifier(ExternalURLTestCapture())
+                .performanceCountersProbe()
                 .task {
                     guard !AppRuntime.isControlsFixture else { return }
                     // ActivityKit reconciliation can wait until SwiftUI has

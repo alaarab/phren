@@ -228,6 +228,7 @@ private struct AgentWorkspaceSessionRow: View {
         .task(id: RefreshID(session: item.id, isCurrent: currentChildren != nil)) {
             guard currentChildren == nil else { return }
             while !Task.isCancelled {
+                PerformanceCounters.bump("poll.drawer-subagents")
                 if let snapshot = try? await SessionSubagentSnapshot.load(item), !Task.isCancelled {
                     snapshotTarget = snapshot.target
                     snapshotChildren = snapshot.agents

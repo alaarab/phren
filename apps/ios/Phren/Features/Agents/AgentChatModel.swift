@@ -451,6 +451,7 @@ final class AgentChatModel {
             }
         }
         while !Task.isCancelled {
+            PerformanceCounters.bump("poll.chat-panes")
             do {
                 let list = try await Self.fetchPanes(session)
                 try Task.checkCancellation()

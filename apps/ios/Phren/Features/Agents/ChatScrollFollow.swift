@@ -116,6 +116,7 @@ private struct ModernChatFollowScroll<Content: View>: View {
             .onScrollPhaseChange { _, phase in
                 let driving = phase == .tracking || phase == .interacting || phase == .decelerating
                 if driving != userDriven { userDriven = driving }
+                ScrollHitchProbe.shared.moving(phase != .idle, name: "chat")
             }
             .onScrollGeometryChange(for: ChatScrollMetrics.self) { ChatScrollMetrics($0) } action: { old, new in
                 metrics = new

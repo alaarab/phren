@@ -383,6 +383,7 @@ private struct AccountUsagePoller: View {
                 }
                 #endif
                 repeat {
+                    PerformanceCounters.bump("poll.usage-screen")
                     loading = cache.snapshot(for: host) == nil
                     do {
                         _ = try await cache.refresh(host, force: refresh != lastRefresh)

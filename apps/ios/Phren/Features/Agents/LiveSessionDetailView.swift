@@ -24,6 +24,7 @@ struct LiveSessionDetailView: View {
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
+                let _ = PerformanceCounters.bump("tick.session-detail")
                 let fresh = monitor.isLive(at: context.date)
                 let stale = monitor.isStale(at: context.date)
                 if let session {

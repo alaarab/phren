@@ -148,6 +148,7 @@ struct ProjectSessionsView: View {
             .task(id: DiscoveryIdentity(hosts: preferences?.hosts ?? [], active: visible && scenePhase == .active, refresh: refreshID)) {
                 guard visible, scenePhase == .active, let preferences, !preferences.hosts.isEmpty else { return }
                 while !Task.isCancelled {
+                    PerformanceCounters.bump("poll.project-discovery")
                     await discovery.refresh(hosts: preferences.hosts)
                     guard !Task.isCancelled else { return }
                     do { try await Task.sleep(for: .seconds(10)) } catch { return }
@@ -157,6 +158,7 @@ struct ProjectSessionsView: View {
 
     private func sessionRow(_ session: LiveAgentSession, assign: Bool) -> some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
+            let _ = PerformanceCounters.bump("tick.project-row")
             let fresh = discovery.updated.map { context.date.timeIntervalSince($0) < 25 } == true
             HStack(spacing: 0) {
                 Button { open(session, assign: assign) } label: {

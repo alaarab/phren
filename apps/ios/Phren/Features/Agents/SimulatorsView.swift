@@ -82,6 +82,7 @@ struct SimulatorScreen: View {
         .task(id: phase) {
             guard phase == .active else { return }
             while !Task.isCancelled {
+                PerformanceCounters.bump("poll.simulator")
                 do {
                     #if DEBUG && targetEnvironment(simulator)
                     if AgentChatFixture.enabled { image = Self.fixtureImage; try await Task.sleep(for: .seconds(interval)); continue }

@@ -93,6 +93,7 @@ private struct WebServerSection: View {
         .task(id: PollID(host: host, refresh: refresh, active: phase == .active && !editing)) {
             guard phase == .active, !editing else { return }
             repeat {
+                PerformanceCounters.bump("poll.web-servers")
                 loading = true
                 do {
                     let result = try await fetch()

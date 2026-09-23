@@ -30,6 +30,7 @@ struct AccountUsageRings: View {
         .task(id: RefreshID(hosts: hosts, active: phase == .active)) {
             guard phase == .active else { return }
             repeat {
+                PerformanceCounters.bump("poll.usage-rings")
                 for host in hosts { _ = try? await cache.refresh(host) }
                 do { try await Task.sleep(for: .seconds(60)) } catch { return }
             } while !Task.isCancelled

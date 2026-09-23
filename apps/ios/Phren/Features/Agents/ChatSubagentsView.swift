@@ -91,6 +91,7 @@ struct ChatSubagentsView: View {
         }
         .task {
             while !Task.isCancelled {
+                PerformanceCounters.bump("tick.subagents-now")
                 now = .now
                 try? await Task.sleep(for: .seconds(30))
             }
@@ -485,6 +486,7 @@ struct SessionSubagentsCard: View {
         }
         .task(id: session.id) {
             while !Task.isCancelled {
+                PerformanceCounters.bump("poll.session-subagents")
                 if let snapshot = try? await SessionSubagentSnapshot.load(session) {
                     target = snapshot.target; agents = snapshot.agents
                 }
@@ -683,6 +685,7 @@ struct ChildAgentTranscriptView: View {
         if AgentChatFixture.enabled { return }
         #endif
         while !Task.isCancelled {
+            PerformanceCounters.bump("poll.worker-messages")
             do {
                 messages = try await PhrenConnection.childAgentMessages(host: session.host,
                     privateKey: DeviceSSHKey.load(session.host.id), target: target, child: child)

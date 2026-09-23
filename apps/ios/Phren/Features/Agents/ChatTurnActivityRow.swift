@@ -38,6 +38,7 @@ struct ChatTurnActivityRow: View {
     var body: some View {
         if activity.isLive && scenePhase == .active {
             TimelineView(.periodic(from: activity.startedAt, by: 1)) { tick in
+                let _ = PerformanceCounters.bump("tick.turn-activity")
                 live(at: tick.date)
             }
         } else if activity.isLive {

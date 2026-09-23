@@ -105,6 +105,7 @@ struct LiveSessionCard: View, Equatable {
         }
         .task(id: session.id) {
             while !Task.isCancelled {
+                PerformanceCounters.bump("poll.card-subagents")
                 do {
                     if let snapshot = try await SessionSubagentSnapshot.load(session) {
                         childTarget = snapshot.target; childAgents = snapshot.agents

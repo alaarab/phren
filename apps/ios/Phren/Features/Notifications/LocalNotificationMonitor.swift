@@ -54,6 +54,7 @@ final class LocalNotificationMonitor {
             approvals.retireExpired()
             await hostsChanged()
             while !Task.isCancelled {
+                PerformanceCounters.bump("poll.notifications")
                 await poll(includeApprovals: false)
                 do { try await Task.sleep(for: .seconds(30)) } catch { return }
             }

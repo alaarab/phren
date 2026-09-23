@@ -72,6 +72,7 @@ final class LiveHostMonitor {
         var first = true
         defer { if generation == run { polling = false; refreshing = false; approvalRefresh?.cancel() } }
         while !Task.isCancelled {
+            PerformanceCounters.bump("poll.overview")
             refreshing = true
             let fetchStarted = CFAbsoluteTimeGetCurrent()
             do {
