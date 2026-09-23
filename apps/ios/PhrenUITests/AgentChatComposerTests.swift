@@ -96,10 +96,15 @@ final class AgentChatComposerTests: AgentChatUITestCase {
             dy: report["selectionEndY"] as? Double ?? 0))
     }
 
+    /// Interactive dismissal follows the finger into the keyboard, as in
+    /// Messages: the drag runs from the transcript down past the keyboard's
+    /// top edge. A short drag that stays above it only scrolls.
     @MainActor private func dragTranscriptDown(_ app: XCUIApplication) {
         let transcript = app.scrollViews["chat-transcript"]
         let start = transcript.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.3))
-        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 150)))
+        let keyboard = app.keyboards.firstMatch
+        let distance = keyboard.exists ? keyboard.frame.minY + 80 - start.screenPoint.y : 150
+        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: distance)))
     }
 
     @MainActor
