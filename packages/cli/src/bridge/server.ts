@@ -15,7 +15,8 @@ import { WebSocket, WebSocketServer } from "ws";
 import { z } from "zod";
 import { ActivityJournal } from "./activity.js";
 import { AgentHooks } from "./agent-hooks.js";
-import { homeDirectory, startChangeRetention } from "./changes.js";
+import { startChangeRetention } from "./changes.js";
+import { homeDir } from "../home-paths.js";
 import { resolveCodeStore, CodeReindexer, CodeRoutes } from "./code-routes.js";
 import { queuedQuestion, threadHealth } from "./codex-threads.js";
 import { WorkspaceContextUsage } from "./context.js";
@@ -476,7 +477,7 @@ export async function serve(version: string): Promise<void> {
         } else if (url.pathname.startsWith("/v1/workspaces/")) {
           const operation = url.pathname.split("/").at(-1)!;
           result = operation === "create" ? await launches.run(async () => workspaceAction(selectedServer(url), operation,
-            { ...data, cwd: await launchDirectory(data.cwd ?? homeDirectory(), await journal.recent(), locatedDirectories) }))
+            { ...data, cwd: await launchDirectory(data.cwd ?? homeDir(), await journal.recent(), locatedDirectories) }))
             : await workspaceAction(selectedServer(url), operation, data);
         } else {
           if (url.pathname === "/v1/keys" && object(data.target).starting === true) {
@@ -961,7 +962,7 @@ async function prepareConductor(kind: (typeof launchKinds)[number], effort: Laun
   if (kind === "claude") return [...(model ? ["--model", model] : []), "--append-system-prompt-file", briefFile, "--effort", effort];
   if (kind === "codex") return [...(model ? ["--model", model] : []), "-c", `model_reasoning_effort=${effort}`, "-c", `developer_instructions=${JSON.stringify(brief)}`];
   if (kind === "opencode") {
-    const directory = path.join(process.env.XDG_CONFIG_HOME || path.join(homeDirectory(), ".config"), "opencode", "agents");
+    const directory = path.join(process.env.XDG_CONFIG_HOME || path.join(homeDir(), ".config"), "opencode", "agents");
     const file = path.join(directory, "conductor.md");
     const definition = `---\ndescription: Coordinate the owner's work across agent sessions.\nmode: primary\n---\n\n${brief}\n`;
     await mkdir(directory, { recursive: true, mode: 0o700 });

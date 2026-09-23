@@ -1,7 +1,7 @@
 import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import { execFile } from "node:child_process";
 import { appendFile, copyFile, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, unlink, utimes } from "node:fs/promises";
-import { homedir } from "node:os";
+import { homeDir } from "../home-paths.js";
 import path from "node:path";
 import { promisify } from "node:util";
 import { bridgeRoot, object, type Json } from "./protocol.js";
@@ -23,12 +23,6 @@ const gitPool = new ProcessPool(2);
 
 /** Tools whose filesystem changes are captured around the lifecycle callback. */
 export const SHELL_TOOLS = new Set(["Bash", "bash", "shell", "Shell", "exec_command", "shell_command", "local_shell", "write_stdin"]);
-
-/** The user's home: `HOME` when set (tests and POSIX), else the OS's answer —
- * `os.homedir()` ignores `HOME` on Windows. */
-export function homeDirectory(env: NodeJS.ProcessEnv = process.env): string {
-  return env.HOME && path.isAbsolute(env.HOME) ? env.HOME : homedir();
-}
 
 const NAMED = /(?<![\w@:/])(?:~\/|\.\/|\/)[\w.@+~-]+(?:\/[\w.@+~-]+)*/g;
 /** The places a command names — the same rule the phone applies. */
@@ -61,7 +55,7 @@ async function git(cwd: string, args: string[], extra: NodeJS.ProcessEnv = {}, s
 
 /** The repository holding `target` (a file, a folder, or something not yet
  * created), confined to the user's home; undefined otherwise. */
-async function repositoryOf(target: string, cwd: string, home = homeDirectory(), signal?: AbortSignal): Promise<string | undefined> {
+async function repositoryOf(target: string, cwd: string, home = homeDir(), signal?: AbortSignal): Promise<string | undefined> {
   const absolute = target === "~" || target.startsWith("~/") ? path.join(home, target.slice(1)) : path.resolve(cwd, target);
   let existing = absolute;
   while (!(await stat(existing).catch(() => undefined))) {
@@ -191,7 +185,7 @@ export class ToolChanges {
         for (const target of [cwd, phrenStoreRoot(), ...namedPaths(command, input)]) {
           signal.throwIfAborted();
           if (roots.size >= 6) break;
-          const root = await repositoryOf(target, cwd, homeDirectory(), signal); if (root) roots.add(root);
+          const root = await repositoryOf(target, cwd, homeDir(), signal); if (root) roots.add(root);
         }
         for (const root of roots) {
           try { snapshot.trees.set(root, await scratchTree(root, signal)); }

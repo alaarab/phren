@@ -4,6 +4,7 @@ import * as path from "path";
 import * as crypto from "crypto";
 import * as yaml from "js-yaml";
 import { bootstrapPhrenDotEnv } from "./phren-dotenv.js";
+import { homeDir } from "./home-paths.js";
 import { PhrenError, isRecord, loadYamlDocument, RESERVED_PROJECT_DIR_NAMES } from "./phren-core.js";
 import { errorMessage, isValidProjectName, safeProjectPath } from "./utils.js";
 import { FINDINGS_FILENAME } from "./filenames.js";
@@ -29,9 +30,7 @@ export interface InstallContext extends PhrenRootManifest {
 
 export const ROOT_MANIFEST_FILENAME = "phren.root.yaml";
 
-export function homeDir(env: NodeJS.ProcessEnv = process.env): string {
-  return env.HOME || env.USERPROFILE || os.homedir();
-}
+export { homeDir };
 
 export function homePath(...parts: string[]): string {
   return path.join(homeDir(), ...parts);

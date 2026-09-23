@@ -3,7 +3,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { request } from "node:http";
 import { userInfo } from "node:os";
-import { homeDirectory } from "./changes.js";
+import { homeDir } from "../home-paths.js";
 import { realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { phrenStoreRoot } from "./transcripts.js";
@@ -58,7 +58,7 @@ async function committed(root: string, pathspec: string): Promise<Json | undefin
  * a deleted file still finds its repository. */
 async function resolveTouched(raw: string, cwd: string): Promise<string | undefined> {
   if (typeof raw !== "string" || !raw || raw.length > 4096 || raw.includes("\0")) return undefined;
-  const home = homeDirectory();
+  const home = homeDir();
   const absolute = raw === "~" || raw.startsWith("~/") ? path.join(home, raw.slice(1)) : path.resolve(cwd, raw);
   let existing = absolute, rest: string[] = [];
   while (!(await stat(existing).catch(() => undefined))) {
@@ -224,7 +224,7 @@ export async function launchDirectory(raw: unknown, activity: Json[] = [], locat
   let dir: string;
   try { dir = await realpath(raw); if (!(await stat(dir)).isDirectory()) throw new Error(); }
   catch { throw new BridgeError(400, "Workspace directory does not exist."); }
-  const home = await realpath(homeDirectory());
+  const home = await realpath(homeDir());
   if (dir === home || dir.startsWith(home + path.sep)) return dir;
   for (const candidate of located) {
     const real = await realpath(candidate).catch(() => undefined);
