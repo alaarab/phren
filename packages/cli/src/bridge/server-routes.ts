@@ -192,7 +192,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
               root = path.join(bridgeRoot(), "uploads");
             } else if (url.searchParams.has("session")) {
               const target = targetFromURL(url), pane = await validateTarget(target);
-              const cwd = await gitRepository(pane, target, url.searchParams.get("child") ?? undefined);
+              const cwd = await gitRepository(pane, target, url.searchParams.get("child") ?? undefined, url.searchParams.get("worktree") ?? undefined);
               const repository = await gitRoot(cwd);
               if (!repository) throw new BridgeError(409, "This pane is not in a project repository.");
               root = repository;

@@ -1064,9 +1064,18 @@ Directories return `{path, kind: "directory", truncated, entries}` with at most
 with up to 2 MiB of file content encoded as base64. Symlinks, `.git`, traversal and paths
 outside the selected checkout are refused. This route is read-only.
 
-`POST /v1/git/tree` takes the session's full target, optional `child` and relative
-`path`. It returns one directory with descendant file counts and a snapshot
-version. The bounded repository cache is keyed by HEAD and a file/status hash;
+`POST /v1/git/tree` takes the session's full target, optional `child` or
+`worktree`, relative `path` and optional `ignored: true`. It returns one directory
+with descendant file counts and a snapshot version; with `ignored`, the level's
+git-ignored folders and files are added, marked `ignored: true`.
+
+`POST /v1/git/worktrees` lists the pane repository's other worktrees (`git worktree
+list --porcelain`): `{worktrees: [{id, path, branch, head, ahead, behind, changed,
+main?, locked?, worker?: {label, provider, child?, state?}}]}`. `ahead`/`behind`
+are against the pane's HEAD, `changed` counts uncommitted files, and `worker`
+names a fan-out job or this conversation's sub-agent editing there. Every other
+`/v1/git/*` route, `/v1/diff` and `/v1/files/range` accept `worktree=<id>`,
+resolved only against that listing. The bounded repository cache is keyed by HEAD and a file/status hash;
 it expires after two seconds and is invalidated by status refresh and mutations.
 Opening a directory does not collect diff statistics or upstream history.
 

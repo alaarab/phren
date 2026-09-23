@@ -2,12 +2,14 @@ import type { ServerResponse } from "node:http";
 import { z } from "zod";
 import type { AgentHooks } from "./agent-hooks.js";
 import { gitBranches, gitDiscard, gitLog, gitPulls, gitStage, gitStatus, gitTree, gitUnstage } from "./git.js";
+import { fanoutWorktrees } from "./fanouts.js";
+import { gitWorktrees, resolveWorktree, type WorktreeWorker } from "./git-worktrees.js";
 import { findPane, paneChatState, paneIdentity, rpc, snapshot, startingPane, trustedDirectory, validateStartingTarget, validateTarget } from "./herdr.js";
 import { refuseWorkingSlash, type ModelSwitcher } from "./model-switch.js";
 import { repositoryDiff } from "./projects.js";
 import { BridgeError, type Json, MAX_FRAME, object, startingTargetSchema, type Target, targetSchema } from "./protocol.js";
 import type { CodexQuestions } from "./questions.js";
-import { childAgent, childAgentTree, conversationNamedPaths, transcriptPath } from "./transcripts.js";
+import { childAgent, childAgentTree, conversationNamedPaths, transcriptPath, type ChildAgentRelation } from "./transcripts.js";
 import { sideQuestionText, type SideQuestions } from "./side-questions.js";
 import { saveUpload } from "./uploads.js";
 
@@ -31,16 +33,38 @@ function uploadBody(data: Json): { name: string; bytes: Buffer } {
   return { name, bytes };
 }
 
-/** The repository a git route acts on: the pane's trusted directory, or a
- * spawned child's own worktree exactly as /v1/diff resolves it. */
-export async function gitRepository(pane: Json, target: Target, child: unknown): Promise<string> {
+/** The repository a git route acts on: the pane's trusted directory, a
+ * spawned child's own worktree exactly as /v1/diff resolves it, or one of the
+ * pane repository's other worktrees as `/v1/git/worktrees` lists it. */
+export async function gitRepository(pane: Json, target: Target, child: unknown, worktree?: unknown): Promise<string> {
   const id = z.string().regex(/^[a-f0-9]{32}$/).optional().parse(child);
+  if (worktree !== undefined && worktree !== null) {
+    if (id !== undefined) throw new BridgeError(400, "Choose a child agent or a worktree, not both.");
+    return resolveWorktree(await trustedDirectory(pane), worktree);
+  }
   if (id !== undefined) {
     const relation = childAgent(await childAgentTree(target.source, target.session), id);
     if (!relation) throw new BridgeError(404, "That agent is not part of this conversation.");
     return relation.cwd ?? await trustedDirectory(pane);
   }
   return trustedDirectory(pane);
+}
+
+/** Who might be editing each worktree: this conversation's agents with a
+ * checkout of their own (so the phone can open that agent), then every
+ * fan-out manifest by its recorded worktree. Best effort; a missing
+ * transcript or manifest only leaves a worktree unlabelled. */
+async function worktreeWorkers(target: Target): Promise<WorktreeWorker[]> {
+  const workers: WorktreeWorker[] = [];
+  const visit = (nodes: ChildAgentRelation[]) => {
+    for (const node of nodes) {
+      if (node.remote === undefined && node.cwd) workers.push({ cwd: node.cwd, label: node.path, provider: node.provider, child: node.id, state: node.state });
+      visit(node.children);
+    }
+  };
+  visit(await childAgentTree(target.source, target.session).catch(() => []));
+  for (const job of await fanoutWorktrees().catch(() => [])) workers.push({ cwd: job.worktree, label: job.label, provider: job.provider, state: job.state });
+  return workers;
 }
 
 /** The phone can press these and nothing else; never a typed string.
@@ -227,7 +251,10 @@ export async function paneRoute(ctx: PaneRouteContext, url: URL, data: Json, res
     result = { ok: true, path: await saveUpload(target.session, name, bytes) };
   } else if (url.pathname === "/v1/diff") {
     const child = z.string().regex(/^[a-f0-9]{32}$/).optional().parse(data.child);
-    if (child !== undefined) {
+    if (data.worktree !== undefined) {
+      // Another worktree of the pane's repository: the whole checkout.
+      result = await repositoryDiff(await gitRepository(pane, target, data.child, data.worktree), [], []);
+    } else if (child !== undefined) {
       // A spawned agent: its own worktree for a fan-out, otherwise the
       // parent's checkout. The whole repository, no phone-named paths.
       const relation = childAgent(await childAgentTree(target.source, target.session), child);
@@ -248,12 +275,13 @@ export async function paneRoute(ctx: PaneRouteContext, url: URL, data: Json, res
   else if (url.pathname.startsWith("/v1/git/")) {
     // Git routes read the pane's repository, or a spawned child's own
     // worktree, exactly as /v1/diff resolves it.
-    const cwd = await gitRepository(pane, target, data.child);
+    const cwd = await gitRepository(pane, target, data.child, data.worktree);
     if (url.pathname === "/v1/git/status") result = await gitStatus(cwd);
+    else if (url.pathname === "/v1/git/worktrees") result = await gitWorktrees(cwd, await worktreeWorkers(target));
     else if (url.pathname === "/v1/git/log") result = await gitLog(cwd, z.coerce.number().int().min(1).max(200).optional().parse(data.limit) ?? 60, z.string().min(1).max(512).optional().parse(data.ref));
     else if (url.pathname === "/v1/git/branches") result = await gitBranches(cwd);
     else if (url.pathname === "/v1/git/pulls") result = await gitPulls(cwd);
-    else if (url.pathname === "/v1/git/tree") result = await gitTree(cwd, z.string().max(4096).optional().parse(data.path) ?? "");
+    else if (url.pathname === "/v1/git/tree") result = await gitTree(cwd, z.string().max(4096).optional().parse(data.path) ?? "", z.boolean().optional().parse(data.ignored) ?? false);
     else if (url.pathname === "/v1/git/stage") result = await gitStage(cwd, data.paths);
     else if (url.pathname === "/v1/git/unstage") result = await gitUnstage(cwd, data.paths);
     else if (url.pathname === "/v1/git/discard") result = await gitDiscard(cwd, data.paths);
