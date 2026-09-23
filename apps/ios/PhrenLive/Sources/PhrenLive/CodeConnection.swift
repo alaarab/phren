@@ -34,6 +34,12 @@ extension PhrenConnection {
         return try CodeOutlineSummaryResults.read(data)
     }
 
+    /// Resolved uses made from one file, for tappable identifiers in the code viewer.
+    public static func codeFileReferences(host: LiveHost, privateKey: Data, project: String, path: String, storeID: String? = nil) async throws -> [CodeFileReference] {
+        let data = try await codeGet(host: host, privateKey: privateKey, path: "/v1/code/file-references", project: project, storeID: storeID, fields: ["path": try codePath(path)])
+        return try CodeFileReferenceResults.read(data)
+    }
+
     public static func codeDefinition(host: LiveHost, privateKey: Data, project: String, symbol: String, storeID: String? = nil) async throws -> CodeDefinition {
         let data = try await codeGet(host: host, privateKey: privateKey, path: "/v1/code/definition", project: project, storeID: storeID, fields: ["symbol": try codeSymbol(symbol)])
         return try CodeDefinitionResults.read(data)

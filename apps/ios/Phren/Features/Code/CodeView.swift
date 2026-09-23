@@ -2,18 +2,23 @@ import PhrenKit
 import PhrenLive
 import SwiftUI
 
-/// A project's indexed files, symbol search, complete usage ranking and recent index observations.
+/// A project's code browser: every file in the checkout, opened in the code
+/// viewer, with symbol search, the complete usage ranking and recent index
+/// observations when the computer has a code index.
 struct CodeView: View {
     let storeId: String
     let project: String
     var origin: SessionCodeContext? = nil
+    /// A computer chosen from its own page; the project page lets the index pick.
+    var host: LiveHost? = nil
+    /// The checkout folder that computer located for the project.
+    var checkout: String? = nil
 
     private enum Mode: String, CaseIterable { case files = "Files", usage = "Usage", recent = "Recent" }
     private struct Request: Hashable {
         let mode: Mode
         let query: String
         let directory: String
-        let file: String
         let kind: String
         let usageFile: String
         let offset: Int
@@ -24,16 +29,16 @@ struct CodeView: View {
     @State private var mode = Mode.files
     @State private var query = ""
     @State private var directory = ""
-    @State private var file = ""
     @State private var kind = ""
     @State private var usageFile = ""
     @State private var offset = 0
     @State private var end = false
     @State private var revision = 0
     @State private var status: CodeStatus?
-    @State private var tree: [CodeTreeEntry] = []
+    @State private var statusError: String?
+    @State private var entries: [CodeBrowserEntry] = []
+    @State private var truncated = false
     @State private var symbols: [CodeSymbol] = []
-    @State private var outline: [CodeOutlineEntry] = []
     @State private var usage: CodeUsagePage?
     @State private var recent: [CodeRecentSymbol] = []
     @State private var selected: CodeDossierTarget?
@@ -47,15 +52,31 @@ struct CodeView: View {
     @State private var pickerLoading = false
     @State private var pickerError: String?
     @State private var scrollTarget: Int?
+    @State private var openedFile: CodeFileLocation?
+    @State private var viewer: FileViewerItem?
     @FocusState private var searchFocused: Bool
 
     private var hosts: [LiveHost] {
         if let origin { return [origin.host] }
+        if let host { return [host] }
         return ((try? LiveSessionPreferences.read(hostData))?.hosts ?? []).filter { SessionOverviewMonitor.shared.allows(.code, on: $0) }
     }
+    /// Whether the computer serves the code index; without it the browser
+    /// still lists and opens every file.
+    private var indexed: Bool {
+        #if DEBUG && targetEnvironment(simulator)
+        if CodeFixture.enabled { return true }
+        #endif
+        if origin != nil { return true }
+        if let host { return SessionOverviewMonitor.shared.allows(.code, on: host) }
+        return !hosts.isEmpty
+    }
+    private var context: CodeBrowserContext {
+        CodeBrowserContext(storeId: storeId, project: project, host: hosts.first, checkout: checkout, origin: origin, indexed: indexed)
+    }
     private var request: Request {
-        Request(mode: mode, query: query.trimmingCharacters(in: .whitespacesAndNewlines), directory: directory,
-                file: file, kind: kind, usageFile: usageFile, offset: offset, end: end, revision: revision)
+        Request(mode: indexed ? mode : .files, query: indexed ? query.trimmingCharacters(in: .whitespacesAndNewlines) : "", directory: directory,
+                kind: kind, usageFile: usageFile, offset: offset, end: end, revision: revision)
     }
     private var kinds: [PhrenOption<String>] {
         [("", "All kinds"), ("function", "Function"), ("method", "Method"), ("types", "Type"), ("variable", "Variable")]
@@ -66,11 +87,13 @@ struct CodeView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
-                    indexHeader
-                    PhrenSearchField(text: $query, placeholder: directory.isEmpty ? "Search symbols" : "Search in \(directory)",
-                                     identifier: "code-search", focus: $searchFocused)
-                    PhrenTextSegment(items: Mode.allCases.map { PhrenOption(id: $0.rawValue.lowercased(), value: $0, title: $0.rawValue) },
-                                     selection: $mode, identifier: "code-mode")
+                    if indexed {
+                        indexHeader
+                        PhrenSearchField(text: $query, placeholder: directory.isEmpty ? "Search symbols" : "Search in \(directory)",
+                                         identifier: "code-search", focus: $searchFocused)
+                        PhrenTextSegment(items: Mode.allCases.map { PhrenOption(id: $0.rawValue.lowercased(), value: $0, title: $0.rawValue) },
+                                         selection: $mode, identifier: "code-mode")
+                    }
                     scope
                     if !request.query.isEmpty || mode == .usage { filters }
                     if let errorText {
@@ -86,7 +109,7 @@ struct CodeView: View {
                         if symbols.isEmpty { empty("No symbols match “\(request.query)”") }
                         ForEach(symbols) { symbolRow($0) }
                     } else {
-                        switch mode {
+                        switch request.mode {
                         case .files: filesContent
                         case .usage: usageContent
                         case .recent: recentContent
@@ -100,7 +123,7 @@ struct CodeView: View {
             }
         }
         .background(PhrenTheme.bg)
-        .navigationTitle("Code")
+        .navigationTitle(indexed ? "Code" : project)
         .navigationBarTitleDisplayMode(.inline)
         .overlay(alignment: .topLeading) {
             Color.clear.frame(width: 1, height: 1).accessibilityElement().accessibilityIdentifier("code-screen")
@@ -109,10 +132,15 @@ struct CodeView: View {
         .phrenActionSheet(isPresented: $showFiles, title: pickerDirectory.isEmpty ? "Usage by file" : pickerDirectory,
                           actions: fileActions, identifier: "code-file-picker")
         .sheet(item: $selected) { target in
-            CodeSymbolDossier(storeId: storeId, project: project, symbol: target.name, hosts: hosts, origin: origin)
-                .presentationDetents([.large])
+            CodeSymbolDossier(storeId: storeId, project: project, symbol: target.name, hosts: hosts, origin: origin) { file, line in
+                selected = nil
+                openedFile = CodeFileLocation(path: file, line: line)
+            }
+            .presentationDetents([.large])
         }
-        .task { await loadStatus() }
+        .navigationDestination(item: $openedFile) { CodeFileView(context: context, path: $0.path, line: $0.line) }
+        .fullScreenCover(item: $viewer) { FileViewer(item: $0) }
+        .task { if indexed { await loadStatus() } }
         .task(id: request) { await load(request) }
         .task(id: "\(showFiles):\(pickerDirectory)") { if showFiles { await loadPicker() } }
         .onChange(of: kind) { _, _ in resetUsage() }
@@ -124,7 +152,9 @@ struct CodeView: View {
         HStack(alignment: .top, spacing: PhrenTheme.Space.small) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(project).font(PhrenTheme.Font.body.weight(.semibold)).foregroundStyle(PhrenTheme.text)
-                if let status {
+                if let statusError {
+                    Text(statusError).foregroundStyle(PhrenTheme.warning).accessibilityIdentifier("code-status-error")
+                } else if let status {
                     Text("\(status.files) files · \(status.symbols) symbols").accessibilityIdentifier("code-index-counts")
                     Text(status.languages.map { "\($0.language) (\($0.files))" }.joined(separator: " · "))
                         .accessibilityIdentifier("code-languages")
@@ -146,12 +176,9 @@ struct CodeView: View {
                 .font(PhrenTheme.Font.monoCaption).foregroundStyle(PhrenTheme.textSecondary)
                 .accessibilityIdentifier("code-directory")
             Spacer(minLength: 0)
-            if !directory.isEmpty || !file.isEmpty {
-                action("Up", id: "code-up") {
-                    if !file.isEmpty { file = "" }
-                    else { directory = parent(directory); usageFile = ""; resetUsage() }
-                }
-                action("Root", id: "code-root") { directory = ""; file = ""; usageFile = ""; resetUsage() }
+            if !directory.isEmpty {
+                action("Up", id: "code-up") { directory = parent(directory); usageFile = ""; resetUsage() }
+                action("Root", id: "code-root") { directory = ""; usageFile = ""; resetUsage() }
             }
         }
     }
@@ -169,45 +196,35 @@ struct CodeView: View {
     }
 
     @ViewBuilder private var filesContent: some View {
-        if file.isEmpty {
-            PhrenSectionHeader(title: "Indexed files", count: tree.count)
-            if tree.isEmpty { empty("No indexed files in this directory.") }
-            ForEach(tree) { entry in
-                Button {
-                    if entry.directory { directory = entry.path; usageFile = ""; resetUsage() }
-                    else { file = entry.path }
-                } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: entry.directory ? "folder" : "doc.text").foregroundStyle(PhrenTheme.accent).accessibilityHidden(true)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(entry.name).font(PhrenTheme.Font.body.weight(.medium)).foregroundStyle(PhrenTheme.text)
-                            Text(entry.languages.joined(separator: " · ")).font(PhrenTheme.Font.caption).foregroundStyle(PhrenTheme.textMuted)
-                        }
-                        Spacer(minLength: 0)
-                        VStack(alignment: .trailing, spacing: 4) {
-                            Text("\(entry.symbols) symbols")
-                            if entry.directory { Text("\(entry.files) files") }
-                        }.font(PhrenTheme.Font.caption).foregroundStyle(PhrenTheme.textSecondary)
-                    }.padding(12).frame(minHeight: 44).contentShape(Rectangle()).sessionCard()
-                }.buttonStyle(.plain).accessibilityIdentifier("code-tree:\(entry.path)")
-            }
-        } else {
-            Text(file).font(PhrenTheme.Font.monoCaption).foregroundStyle(PhrenTheme.textSecondary)
-            action("Usage in this file", id: "code-file-usage") { usageFile = file; mode = .usage; resetUsage() }
-            if outline.isEmpty { empty("No symbols indexed in this file.") }
-            ForEach(flatten(outline)) { row in
-                Button { selected = CodeDossierTarget(name: "\(file)::\(row.name)") } label: {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(row.name).font(PhrenTheme.Font.body.weight(.medium)).foregroundStyle(PhrenTheme.text)
-                            Text("\(row.entry.kind) · line \(row.entry.line)").font(PhrenTheme.Font.caption).foregroundStyle(PhrenTheme.textMuted)
-                        }
-                        Spacer(minLength: 0)
-                        CodeUsageIndicator(uses: row.entry.uses)
-                    }.padding(12).frame(minHeight: 44).contentShape(Rectangle()).sessionCard()
-                }.buttonStyle(.plain).accessibilityIdentifier("code-file-symbol:\(row.entry.line):\(row.entry.name)")
-            }
+        if entries.isEmpty { empty("This folder is empty.") }
+        ForEach(entries) { entry in
+            Button { open(entry) } label: {
+                HStack(spacing: 10) {
+                    if entry.directory {
+                        Image(systemName: "folder").foregroundStyle(PhrenTheme.accent).frame(width: 22).accessibilityHidden(true)
+                    } else {
+                        PhrenFileTypeIcon(path: entry.path).frame(width: 22).accessibilityHidden(true)
+                    }
+                    Text(entry.name).font(PhrenTheme.Font.body.weight(.medium)).foregroundStyle(PhrenTheme.text)
+                        .lineLimit(1).truncationMode(.middle)
+                    Spacer(minLength: 0)
+                    if let symbols = entry.symbols, symbols > 0 {
+                        Text("\(symbols)").font(PhrenTheme.Font.caption.monospacedDigit()).foregroundStyle(PhrenTheme.textSecondary)
+                            .accessibilityLabel("\(symbols) symbols")
+                    }
+                    if entry.directory {
+                        Image(systemName: "chevron.right").font(PhrenTheme.Font.caption).foregroundStyle(PhrenTheme.textDim).accessibilityHidden(true)
+                    }
+                }.padding(.horizontal, 12).frame(minHeight: 44).contentShape(Rectangle()).sessionCard()
+            }.buttonStyle(.plain).accessibilityIdentifier("code-tree:\(entry.path)")
         }
+        if truncated { empty("Showing the first 500 entries.") }
+    }
+
+    private func open(_ entry: CodeBrowserEntry) {
+        if entry.directory { directory = entry.path; usageFile = ""; resetUsage(); return }
+        if CodeBrowserContext.opensAsSource(entry.path) { openedFile = CodeFileLocation(path: entry.path) }
+        else { viewer = context.viewerItem(entry.path) }
     }
 
     @ViewBuilder private var usageContent: some View {
@@ -241,13 +258,18 @@ struct CodeView: View {
                 .font(PhrenTheme.Font.caption).foregroundStyle(PhrenTheme.textMuted)
             if recent.isEmpty { empty("No recently indexed symbols.") }
             ForEach(recent) { entry in
-                symbolRow(entry.symbol, detail: "Change indexed \(Date(timeIntervalSince1970: entry.indexedAt / 1000).formatted(date: .abbreviated, time: .shortened))")
+                symbolRow(entry.symbol, detail: "Change indexed \(Date(timeIntervalSince1970: entry.indexedAt / 1000).formatted(date: .abbreviated, time: .shortened))",
+                          opensFile: true)
             }
         }
     }
 
-    private func symbolRow(_ symbol: CodeSymbol, rank: Int? = nil, maximum: Int? = nil, detail: String? = nil) -> some View {
-        Button { searchFocused = false; selected = CodeDossierTarget(name: symbol.qualifiedName) } label: {
+    private func symbolRow(_ symbol: CodeSymbol, rank: Int? = nil, maximum: Int? = nil, detail: String? = nil, opensFile: Bool = false) -> some View {
+        Button {
+            searchFocused = false
+            if opensFile { openedFile = CodeFileLocation(path: symbol.file, line: symbol.line) }
+            else { selected = CodeDossierTarget(name: symbol.qualifiedName) }
+        } label: {
             HStack(spacing: 10) {
                 if let rank { Text("\(rank)").font(PhrenTheme.Font.monoCaption).foregroundStyle(PhrenTheme.textMuted) }
                 VStack(alignment: .leading, spacing: 4) {
@@ -277,18 +299,6 @@ struct CodeView: View {
     private func resetUsage() { offset = 0; end = false; scrollTarget = nil }
     private func jump(toEnd: Bool) { scrollTarget = nil; end = toEnd; offset = 0; revision += 1 }
 
-    private struct OutlineRow: Identifiable {
-        let entry: CodeOutlineEntry
-        let name: String
-        var id: String { "\(entry.line):\(name)" }
-    }
-    private func flatten(_ entries: [CodeOutlineEntry], container: String = "") -> [OutlineRow] {
-        entries.flatMap { entry in
-            let name = container.isEmpty ? entry.name : "\(container).\(entry.name)"
-            return [OutlineRow(entry: entry, name: name)] + flatten(entry.children, container: entry.name)
-        }
-    }
-
     private var fileActions: [PhrenActionSheet.Action] {
         var actions: [PhrenActionSheet.Action] = [
             .init(id: "all", title: "All files", handler: { usageFile = "" })
@@ -304,7 +314,7 @@ struct CodeView: View {
                 .init(id: entry.path, title: entry.name, icon: entry.directory ? "folder" : "doc.text",
                       caption: "\(entry.symbols) symbols", dismisses: !entry.directory, handler: {
                     if entry.directory { pickerDirectory = entry.path }
-                    else { usageFile = entry.path; directory = parent(entry.path); file = "" }
+                    else { usageFile = entry.path; directory = parent(entry.path) }
                 })
             }
         }
@@ -315,22 +325,21 @@ struct CodeView: View {
         #if DEBUG && targetEnvironment(simulator)
         if CodeFixture.enabled { status = CodeFixture.status; return }
         #endif
-        guard let host = hosts.first else { errorText = "Connect a computer with the code index enabled."; return }
-        do { status = try await PhrenConnection.codeStatus(host: host, privateKey: DeviceSSHKey.load(host.id), project: project, storeID: storeId) }
-        catch { errorText = error.localizedDescription }
+        guard let host = hosts.first else { statusError = "Connect a computer with the code index enabled."; return }
+        do { status = try await PhrenConnection.codeStatus(host: host, privateKey: DeviceSSHKey.load(host.id), project: project, storeID: storeId); statusError = nil }
+        catch { statusError = error.localizedDescription }
     }
 
     @MainActor private func load(_ requested: Request) async {
         loading = true; errorText = nil; scrollTarget = nil
-        tree = []; outline = []; symbols = []; usage = nil; recent = []
+        entries = []; truncated = false; symbols = []; usage = nil; recent = []
         defer { if requested == request { loading = false } }
         do {
             if !requested.query.isEmpty { try await Task.sleep(for: .milliseconds(250)) }
             try Task.checkCancellation()
             #if DEBUG && targetEnvironment(simulator)
             if CodeFixture.enabled {
-                tree = CodeFixture.tree(requested.directory)
-                outline = CodeFixture.outline(requested.file)
+                entries = CodeBrowserEntry.merge(CodeFixture.listing(requested.directory), counts: CodeFixture.tree(requested.directory))
                 symbols = CodeFixture.search(requested.query).filter { matches($0, requested) }
                 usage = CodeFixture.page(kind: requested.kind, file: requested.usageFile, directory: requested.directory, offset: requested.offset, end: requested.end)
                 recent = CodeFixture.symbols.filter { requested.directory.isEmpty || $0.file.hasPrefix(requested.directory + "/") }
@@ -339,7 +348,7 @@ struct CodeView: View {
                 return
             }
             #endif
-            guard let host = hosts.first else { throw PhrenKitError.validation("Connect a computer with the code index enabled.") }
+            guard let host = hosts.first else { throw PhrenKitError.validation("Connect a computer to browse this project.") }
             let key = try DeviceSSHKey.load(host.id)
             if !requested.query.isEmpty {
                 let result = try await PhrenConnection.codeSearch(host: host, privateKey: key, project: project, query: requested.query,
@@ -348,12 +357,19 @@ struct CodeView: View {
             } else {
                 switch requested.mode {
                 case .files:
-                    if requested.file.isEmpty {
-                        let result = try await PhrenConnection.codeTree(host: host, privateKey: key, project: project, directory: requested.directory, storeID: storeId)
-                        try Task.checkCancellation(); tree = result
-                    } else {
-                        let result = try await PhrenConnection.codeOutline(host: host, privateKey: key, project: project, path: requested.file, storeID: storeId)
-                        try Task.checkCancellation(); outline = result
+                    // Every file from the checkout; the index adds symbol counts
+                    // and still lists its own files if the checkout is not found.
+                    let indexed = indexed
+                    async let counts: [CodeTreeEntry]? = indexed ? (try? await PhrenConnection.codeTree(host: host, privateKey: key, project: project, directory: requested.directory, storeID: storeId)) : nil
+                    do {
+                        let listing = try await PhrenConnection.repositoryFiles(host: host, privateKey: key, project: project, directory: checkout ?? "", path: requested.directory)
+                        let tree = await counts
+                        try Task.checkCancellation()
+                        entries = CodeBrowserEntry.merge((listing.entries ?? []).map { CodeBrowserEntry(path: $0.path, directory: $0.kind == "directory") }, counts: tree ?? [])
+                        truncated = listing.truncated == true
+                    } catch {
+                        guard let tree = await counts, !Task.isCancelled else { throw error }
+                        entries = CodeBrowserEntry.merge(tree.map { CodeBrowserEntry(path: $0.path, directory: $0.directory) }, counts: tree)
                     }
                 case .usage:
                     let result = try await PhrenConnection.codeUsagePage(host: host, privateKey: key, project: project, kind: requested.kind,
@@ -399,6 +415,24 @@ struct CodeView: View {
             status = try await PhrenConnection.codeReindex(host: host, privateKey: DeviceSSHKey.load(host.id), project: project, storeID: storeId)
             revision += 1
         } catch { errorText = error.localizedDescription }
+    }
+}
+
+/// One row of the browser: a checkout entry, with the index's counts when it has them.
+struct CodeBrowserEntry: Identifiable, Equatable {
+    let path: String
+    let directory: Bool
+    var symbols: Int? = nil
+    var name: String { (path as NSString).lastPathComponent }
+    var id: String { path }
+
+    static func merge(_ entries: [CodeBrowserEntry], counts: [CodeTreeEntry]) -> [CodeBrowserEntry] {
+        let symbols = Dictionary(counts.map { ($0.path, $0.symbols) }, uniquingKeysWith: { first, _ in first })
+        return entries.map { entry in
+            var entry = entry
+            entry.symbols = symbols[entry.path]
+            return entry
+        }
     }
 }
 

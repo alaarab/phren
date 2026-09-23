@@ -28,6 +28,7 @@ struct ChangesWorkingTreeTab: View {
     @State private var loading: Set<String> = []
     @State private var error: String?
     @State private var opened: FileViewerItem?
+    @State private var openedSource: CodeFileLocation?
     @State private var openedDiff: DiffTarget?
     @State private var openTask: Task<Void, Never>?
     @State private var loadTask: Task<Void, Never>?
@@ -88,10 +89,14 @@ struct ChangesWorkingTreeTab: View {
         }
         .fullScreenCover(item: $opened) { FileViewer(item: $0) }
         .navigationDestination(item: $openedDiff) { FileDiffView(file: $0.file, section: $0.section) }
+        .navigationDestination(item: $openedSource) { CodeFileView(context: codeContext, path: $0.path, line: $0.line) }
         .sheet(item: $dossier) { symbol in
             if let origin = codeOrigin {
                 CodeSymbolDossier(storeId: origin.storeID, project: origin.project, symbol: symbol.name,
-                                  hosts: [origin.host], origin: origin)
+                                  hosts: [origin.host], origin: origin) { file, line in
+                    dossier = nil
+                    openedSource = CodeFileLocation(path: file, line: line)
+                }
             }
         }
         .task(id: codeOrigin?.id) {
@@ -265,9 +270,18 @@ struct ChangesWorkingTreeTab: View {
         if !entry.isIgnored, let status = entry.status, status != .unknown, status != .changed {
             openTask?.cancel()
             openTask = Task { await openDiff(entry) }
+        } else if CodeBrowserContext.opensAsSource(entry.path) {
+            openedSource = CodeFileLocation(path: entry.path)
         } else {
             opened = FileViewerItem(host: session.host, file: RemoteFile(path: entry.path, target: target, child: child, worktree: worktree))
         }
+    }
+
+    /// The code viewer reads this pane's repository; the index resolves names
+    /// when the session's computer has one.
+    private var codeContext: CodeBrowserContext {
+        CodeBrowserContext(storeId: codeOrigin?.storeID ?? "", project: codeOrigin?.project ?? "", host: session.host,
+                           origin: codeOrigin, session: (target, child, worktree), indexed: codeOrigin != nil)
     }
 
     private func openDiff(_ entry: GitWorkingTree.Entry) async {

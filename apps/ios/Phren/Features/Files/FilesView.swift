@@ -176,85 +176,54 @@ struct DocumentContentView: View {
     }
 }
 
+/// A computer's projects, each opening the project code browser on the
+/// checkout that computer located.
 struct RepositoryProjectsView: View {
     let host: LiveHost
     @Environment(AppModel.self) private var model
     var body: some View {
         PhrenList {
             ForEach(model.mergedProjects.filter { $0.project.name != "global" }) { item in
-                NavigationLink { RepositoryLocationsView(host: host, project: item.project.name) } label: {
+                NavigationLink { RepositoryLocationsView(host: host, storeId: item.storeId, project: item.project.name) } label: {
                     Label(item.project.name, systemImage: "folder")
-                }
+                }.phrenIdentifier("repository-project:\(item.project.name)")
             }
         }.navigationTitle(host.name).phrenScreen()
     }
 }
 
+/// One located checkout opens straight into the browser; several are listed.
 private struct RepositoryLocationsView: View {
     let host: LiveHost
+    let storeId: String
     let project: String
     @State private var folders: [PhrenConnection.LocatedFolder]?
     @State private var error: String?
     var body: some View {
-        PhrenList {
-            if let folders {
-                if folders.isEmpty { Text("No checkout found on this computer.") }
-                ForEach(folders) { folder in
-                    NavigationLink { RepositoryBrowserView(host: host, project: project, directory: folder.directory) } label: {
-                        Label(folder.directory, systemImage: "folder").lineLimit(2)
-                    }
-                }
-            } else if let error { Text(error).foregroundStyle(PhrenTheme.warning) }
-            else { ProgressView("Finding project…") }
-        }.navigationTitle(project).phrenScreen()
-            .task {
-                do { folders = try await PhrenConnection.locateProject(host: host, privateKey: DeviceSSHKey.load(host.id), project: project) }
-                catch { if !Task.isCancelled { self.error = error.localizedDescription } }
-            }
-    }
-}
-
-private struct RepositoryBrowserView: View {
-    let host: LiveHost
-    let project: String
-    let directory: String
-    var path = ""
-    @State private var response: PhrenConnection.RepositoryFileResponse?
-    @State private var error: String?
-    @State private var refresh = UUID()
-    @State private var opened: FileViewerItem?
-    var body: some View {
         Group {
-            if let response {
+            if let folders, folders.count == 1 {
+                CodeView(storeId: storeId, project: project, host: host, checkout: folders[0].directory)
+            } else {
                 PhrenList {
-                    ForEach(response.entries ?? []) { entry in
-                        if entry.kind == "directory" {
-                            NavigationLink { RepositoryBrowserView(host: host, project: project, directory: directory, path: entry.path) } label: {
-                                Label(entry.name, systemImage: "folder")
+                    if let folders {
+                        if folders.isEmpty { Text("No checkout found on this computer.") }
+                        ForEach(folders) { folder in
+                            NavigationLink { CodeView(storeId: storeId, project: project, host: host, checkout: folder.directory) } label: {
+                                Label(folder.directory, systemImage: "folder").lineLimit(2)
                             }
-                        } else {
-                            Button { opened = FileViewerItem(host: host, file: RemoteFile(path: entry.path, project: project, directory: directory)) } label: {
-                                HStack { PhrenFileTypeIcon(path: entry.path); Text(entry.name) }.frame(minHeight: 44)
-                            }.buttonStyle(.plain).phrenIdentifier("repository-file:\(entry.path)")
                         }
-                    }
-                    if response.entries?.isEmpty == true { Text("Empty folder").foregroundStyle(PhrenTheme.textMuted) }
-                    if response.truncated == true { Text("Showing the first 500 entries.").foregroundStyle(PhrenTheme.textMuted) }
-                }
-            } else if let error { Text(error).foregroundStyle(PhrenTheme.warning).padding() }
-            else { Text("Loading files…").foregroundStyle(PhrenTheme.textMuted) }
-        }.navigationTitle(path.isEmpty ? project : (path as NSString).lastPathComponent)
-            .navigationBarTitleDisplayMode(.inline).phrenScreen()
-            .toolbar {
-                PhrenIconButton(icon: "arrow.clockwise", label: "Refresh files") { refresh = UUID() }
+                    } else if let error { Text(error).foregroundStyle(PhrenTheme.warning) }
+                    else { Text("Finding project…").foregroundStyle(PhrenTheme.textMuted) }
+                }.navigationTitle(project).phrenScreen()
             }
-            .fullScreenCover(item: $opened) { FileViewer(item: $0) }
-            .task(id: refresh) {
-                response = nil; error = nil
-                do {
-                    response = try await PhrenConnection.repositoryFiles(host: host, privateKey: DeviceSSHKey.load(host.id), project: project, directory: directory, path: path)
-                } catch { if !Task.isCancelled { self.error = error.localizedDescription } }
-            }
+        }
+        .task {
+            #if DEBUG && targetEnvironment(simulator)
+            if CodeFixture.enabled { folders = [.init(directory: "/home/sam/Projects/\(project)", source: "phren", lastSeen: nil)]; return }
+            #endif
+            do { folders = try await PhrenConnection.locateProject(host: host, privateKey: DeviceSSHKey.load(host.id), project: project) }
+            catch { if !Task.isCancelled { self.error = error.localizedDescription } }
+        }
     }
 }
 

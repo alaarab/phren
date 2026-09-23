@@ -167,4 +167,31 @@ extension CodeIndexTests {
         let member = try JSONDecoder().decode(CodeSymbol.self, from: Data(symbol.replacingOccurrences(of: "null", with: "\"Helpers\"").utf8))
         XCTAssertEqual(member.qualifiedName, "python/helpers.py::Helpers.greet")
     }
+
+    func testFileReferencesMarkWholeIdentifiersWithTheirDeclarations() throws {
+        let json = #"{"project":"demo","path":"src/util.ts","references":[{"line":5,"kind":"call","name":"add","symbol":"src/app.ts::add","file":"src/app.ts","targetLine":2,"targetKind":"function"}]}"#
+        let references = try CodeFileReferenceResults.read(Data(json.utf8))
+        XCTAssertThrowsError(try CodeFileReferenceResults.read(Data(json.replacingOccurrences(of: "src/app.ts::add", with: "other.ts::add").utf8)))
+        XCTAssertThrowsError(try CodeFileReferenceResults.read(Data(json.replacingOccurrences(of: "\"line\":5", with: "\"line\":0").utf8)))
+        let outline = [CodeOutlineEntry(name: "double", kind: "function", line: 4, endLine: 6, signature: "", doc: "", exported: true, uses: 1, children: [])]
+        let symbols = CodeFileSymbols(path: "src/util.ts", outline: outline, references: references)
+        let uses = symbols.occurrences(in: "  return add(value, addend) + add(1, 2);", line: 5)
+        XCTAssertEqual(uses.map(\.range.location), [9, 30])
+        XCTAssertEqual(uses.first?.target.symbol, "src/app.ts::add")
+        XCTAssertEqual(uses.first?.target.line, 2)
+        XCTAssertEqual(symbols.occurrences(in: "export function double(value: number) {", line: 4).first?.target.symbol, "src/util.ts::double")
+        XCTAssertTrue(symbols.occurrences(in: "add", line: 9).isEmpty)
+    }
+
+    func testSourceTextDecodesUTF8SplitsLinesAndRejectsBinary() {
+        XCTAssertEqual(CodeSourceText.lines("a\r\nb\n"), ["a", "b"])
+        XCTAssertEqual(CodeSourceText.lines(""), [""])
+        XCTAssertNil(CodeSourceText.decode(Data([0x61, 0x00, 0x62])))
+        XCTAssertNil(CodeSourceText.decode(Data([0xFF, 0xFE, 0xFD])))
+        XCTAssertEqual(CodeSourceText.decode(Data("é".utf8)), "é")
+        XCTAssertTrue(CodeSourceText.opensAsSource(.code))
+        XCTAssertTrue(CodeSourceText.opensAsSource(.file))
+        XCTAssertFalse(CodeSourceText.opensAsSource(.image))
+        XCTAssertFalse(CodeSourceText.opensAsSource(.pdf))
+    }
 }

@@ -3,14 +3,16 @@ import PhrenLive
 import SwiftUI
 
 /// One symbol's dossier: its definition snippet in the Changes screen's
-/// monospace, the last change, every resolved reference grouped by file, and a
-/// Findings section reserved for stage 4. Opened from a Code row.
+/// monospace, the last change, every resolved reference grouped by file, and
+/// the findings cited on it. Opened from a Code row or a name in the code
+/// viewer; with `onOpen`, the definition and each reference open in the viewer.
 struct CodeSymbolDossier: View {
     let storeId: String
     let project: String
     let symbol: String
     let hosts: [LiveHost]
     var origin: SessionCodeContext? = nil
+    var onOpen: ((_ file: String, _ line: Int) -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
     @State private var definition: CodeDefinition?
@@ -88,6 +90,14 @@ struct CodeSymbolDossier: View {
                 }
             }
             Spacer(minLength: 0)
+            if let definition {
+                CodeUsageIndicator(uses: references?.total ?? definition.symbol.uses)
+                if let onOpen {
+                    PhrenIconButton(icon: "arrow.turn.down.right", label: "Go to definition") {
+                        onOpen(definition.symbol.file, definition.symbol.line)
+                    }.phrenIdentifier("code-dossier-definition")
+                }
+            }
             PhrenIconButton(icon: "xmark", label: "Close symbol") { dismiss() }
         }
         .padding(.horizontal, 14)
@@ -148,18 +158,27 @@ struct CodeSymbolDossier: View {
                 case .file(let file):
                     Text(file).plainListSectionLabel()
                         .frame(maxWidth: .infinity, alignment: .leading)
-                case .reference(let reference):
-                    HStack(spacing: 10) {
-                        Text("\(reference.line)")
-                            .font(PhrenTheme.Font.monoCaption)
-                            .foregroundStyle(PhrenTheme.textSecondary)
-                            .frame(minWidth: 34, alignment: .trailing)
-                        PhrenChip(text: reference.kind)
-                        Spacer(minLength: 0)
+                case .reference(let file, let reference):
+                    Button { onOpen?(file, reference.line) } label: {
+                        HStack(spacing: 10) {
+                            Text("\(reference.line)")
+                                .font(PhrenTheme.Font.monoCaption)
+                                .foregroundStyle(PhrenTheme.textSecondary)
+                                .frame(minWidth: 34, alignment: .trailing)
+                            PhrenChip(text: reference.kind)
+                            Spacer(minLength: 0)
+                            if onOpen != nil {
+                                Image(systemName: "chevron.right").font(PhrenTheme.Font.caption).foregroundStyle(PhrenTheme.textDim)
+                                    .accessibilityHidden(true)
+                            }
+                        }
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
+                        .sessionCard()
                     }
-                    .padding(.horizontal, 12).padding(.vertical, 6)
-                    .frame(minHeight: 44)
-                    .sessionCard()
+                    .buttonStyle(.plain).disabled(onOpen == nil)
+                    .accessibilityIdentifier("code-reference:\(file):\(reference.line)")
                 }
             }
         } else if references != nil {
@@ -168,7 +187,7 @@ struct CodeSymbolDossier: View {
     }
 
     private struct ReferenceRow: Identifiable {
-        enum Content { case file(String), reference(CodeReference) }
+        enum Content { case file(String), reference(String, CodeReference) }
         let id: String
         let content: Content
     }
@@ -177,7 +196,7 @@ struct CodeSymbolDossier: View {
         groups.flatMap { group in
             [ReferenceRow(id: "file:\(group.file)", content: .file(group.file))]
                 + group.references.enumerated().map { index, reference in
-                    ReferenceRow(id: "ref:\(group.file):\(index)", content: .reference(reference))
+                    ReferenceRow(id: "ref:\(group.file):\(index)", content: .reference(group.file, reference))
                 }
         }
     }

@@ -127,12 +127,106 @@ enum CodeFixture {
     }
 
     private static func snippet(_ symbol: CodeSymbol) -> String {
-        switch symbol.name {
-        case "add": return "export function add(a: number, b: number): number {\n  return a + b;\n}"
-        case "Point": return "export class Point {\n  constructor(public x: number, public y: number) {}\n\n  length(): number {\n    return Math.hypot(this.x, this.y);\n  }\n}"
-        case "greet": return "export function greet(name: string): string {\n  return `Hello, ${name}`;\n}"
-        case "Service": return "final class Service {\n  func run() async throws {\n    try await work()\n  }\n}"
-        default: return symbol.signature
+        guard let text = sources[symbol.file] else { return symbol.signature }
+        let lines = text.components(separatedBy: "\n")
+        return lines[(symbol.line - 1)..<min(lines.count, symbol.endLine)].joined(separator: "\n")
+    }
+
+    /// The fixture checkout: the three indexed files, whose declarations sit
+    /// on the lines `symbols` names, plus files the index never reads.
+    static let sources: [String: String] = [
+        "typescript/app.ts": """
+        export function add(a: number, b: number): number {
+          return a + b;
+        }
+
+        export class Point {
+          constructor(public x: number, public y: number) {}
+
+          length(): number {
+            return Math.hypot(this.x, this.y);
+          }
+
+          shifted(by: number): Point { return new Point(add(this.x, by), this.y); }
+          // Coordinates stay immutable.
+        }
+
+        interface Coordinate {
+          x: number;
+          y: number;
+        }
+
+        type Axis = "x" | "y";
+        """,
+        "typescript/util.ts": """
+        export function greet(name: string): string {
+          const count = add(name.length, 1);
+          return `Hello, ${formatName(name, String(count))}`;
+        }
+
+        export function formatName(first: string, last: string): string {
+          const parts = [first, last].map((part) => part.trim());
+          return parts.join(" ");
+        }
+
+        function helper(): void {
+          console.log(new Point(1, 2).length()); }
+        """,
+        "swift/Service.swift": """
+        final class Service {
+          private let queue = [Request]()
+          func run() async throws {
+            for request in queue { _ = parse(request.body) }
+            try await Task.sleep(for: .zero)
+          }
+
+          init() {}
+          // Runs work.
+        }
+
+        struct Request {
+          let body: Data
+          var path = "/"
+        }
+
+        func parse(_ data: Data) -> Request? {
+          Request(body: data)
+        }
+        """,
+        "README.md": "# demo\n\nA fixture project for the code browser.\n",
+        "docs/guide/setup.txt": "Install the tools.\nRun the checks.\nOpen the project.\n",
+        "assets/logo.png": "",
+    ]
+
+    static func source(_ path: String) -> Data? {
+        if path == "assets/logo.png" { return Data([0x89, 0x50, 0x4E, 0x47, 0x00, 0x00]) }
+        return sources[path].map { Data($0.utf8) }
+    }
+
+    /// The checkout's immediate children, folders first, as the files route lists them.
+    static func listing(_ directory: String) -> [CodeBrowserEntry] {
+        let prefix = directory.isEmpty ? "" : directory + "/"
+        var entries: [String: Bool] = [:]
+        for path in sources.keys where path.hasPrefix(prefix) {
+            let rest = path.dropFirst(prefix.count)
+            if let slash = rest.firstIndex(of: "/") { entries[prefix + rest[..<slash]] = true }
+            else { entries[path] = false }
+        }
+        return entries.map { CodeBrowserEntry(path: $0.key, directory: $0.value) }
+            .sorted { $0.directory != $1.directory ? $0.directory : $0.name < $1.name }
+    }
+
+    /// Resolved uses by file, pointing at the declarations in `symbols`.
+    static func fileReferences(_ path: String) -> [CodeFileReference] {
+        let uses: [String: [(Int, String)]] = [
+            "typescript/app.ts": [(12, "Point"), (12, "add")],
+            "typescript/util.ts": [(2, "add"), (3, "formatName"), (12, "Point"), (12, "length")],
+            "swift/Service.swift": [(2, "Request"), (4, "parse"), (17, "Request"), (18, "Request")],
+        ]
+        return (uses[path] ?? []).compactMap { line, name in
+            guard let symbol = symbols.first(where: { $0.name == name }) else { return nil }
+            return CodeFileReference(line: line, kind: "call", name: name, symbol: symbol.qualifiedName,
+                                     file: symbol.file, targetLine: symbol.line, targetKind: symbol.kind)
         }
     }
 }

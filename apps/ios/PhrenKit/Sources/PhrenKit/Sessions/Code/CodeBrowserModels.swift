@@ -80,3 +80,96 @@ public struct CodeRecentResults: Decodable, Sendable {
 extension CodeSymbol {
     public var qualifiedName: String { "\(file)::\(parent.map { $0 + "." } ?? "")\(name)" }
 }
+
+/// A resolved use in one file and the declaration it names, as a
+/// file-qualified symbol query (`file::Container.name`).
+public struct CodeFileReference: Decodable, Equatable, Sendable {
+    public let line: Int
+    public let kind: String
+    public let name: String
+    public let symbol: String
+    public let file: String
+    public let targetLine: Int
+    public let targetKind: String
+
+    public init(line: Int, kind: String, name: String, symbol: String, file: String, targetLine: Int, targetKind: String) {
+        self.line = line; self.kind = kind; self.name = name; self.symbol = symbol
+        self.file = file; self.targetLine = targetLine; self.targetKind = targetKind
+    }
+}
+
+public struct CodeFileReferenceResults: Decodable, Sendable {
+    public let references: [CodeFileReference]
+    public static func read(_ data: Data) throws -> [CodeFileReference] {
+        guard data.count <= 4_194_304 else { throw PhrenKitError.validation("The file's references are too large.") }
+        let value = try JSONDecoder().decode(Self.self, from: data)
+        guard value.references.count <= 5_000, value.references.allSatisfy({
+            $0.line > 0 && $0.targetLine > 0 && !$0.name.isEmpty && !$0.file.isEmpty && $0.symbol.hasPrefix($0.file + "::")
+        }) else { throw PhrenKitError.validation("The file's references are invalid.") }
+        return value.references
+    }
+}
+
+/// Which identifiers in a file the index can resolve, and to what: every
+/// declaration in the file's outline and every resolved use, keyed by line.
+public struct CodeFileSymbols: Equatable, Sendable {
+    public struct Target: Equatable, Sendable {
+        public let name: String
+        /// File-qualified symbol query for the definition and dossier routes.
+        public let symbol: String
+        public let file: String
+        public let line: Int
+    }
+    public private(set) var byLine: [Int: [Target]] = [:]
+    public init() {}
+
+    public init(path: String, outline: [CodeOutlineEntry], references: [CodeFileReference]) {
+        func visit(_ entries: [CodeOutlineEntry], container: String?) {
+            for entry in entries {
+                let symbol = "\(path)::\(container.map { $0 + "." } ?? "")\(entry.name)"
+                add(Target(name: entry.name, symbol: symbol, file: path, line: entry.line), at: entry.line)
+                visit(entry.children, container: entry.name)
+            }
+        }
+        visit(outline, container: nil)
+        for reference in references {
+            add(Target(name: reference.name, symbol: reference.symbol, file: reference.file, line: reference.targetLine), at: reference.line)
+        }
+    }
+
+    private mutating func add(_ target: Target, at line: Int) {
+        guard line > 0, !(byLine[line] ?? []).contains(where: { $0.name == target.name }) else { return }
+        byLine[line, default: []].append(target)
+    }
+
+    public var isEmpty: Bool { byLine.isEmpty }
+
+    /// Whole-word occurrences of the line's known names, as UTF-16 ranges,
+    /// each with its target. A name inside a longer identifier is skipped.
+    public func occurrences(in text: String, line: Int) -> [(range: NSRange, target: Target)] {
+        guard let targets = byLine[line], !targets.isEmpty else { return [] }
+        let source = text as NSString
+        var found: [(range: NSRange, target: Target)] = []
+        for target in targets {
+            var search = NSRange(location: 0, length: source.length)
+            while search.length > 0 {
+                let range = source.range(of: target.name, options: .literal, range: search)
+                guard range.location != NSNotFound else { break }
+                if Self.boundary(source, before: range.location), Self.boundary(source, after: NSMaxRange(range)),
+                   !found.contains(where: { NSIntersectionRange($0.range, range).length > 0 }) {
+                    found.append((range, target))
+                }
+                let next = NSMaxRange(range)
+                search = NSRange(location: next, length: source.length - next)
+            }
+        }
+        return found.sorted { $0.range.location < $1.range.location }
+    }
+
+    private static func identifier(_ unit: unichar) -> Bool {
+        guard let scalar = Unicode.Scalar(unit) else { return true }
+        return scalar == "_" || scalar == "$" || CharacterSet.alphanumerics.contains(scalar)
+    }
+    private static func boundary(_ source: NSString, before index: Int) -> Bool { index == 0 || !identifier(source.character(at: index - 1)) }
+    private static func boundary(_ source: NSString, after index: Int) -> Bool { index >= source.length || !identifier(source.character(at: index)) }
+}

@@ -1,6 +1,7 @@
 # Code screen
 
-The Code destination opens on the project's indexed codebase. The project band,
+The Code destination is the project's one code browser: every file in the
+checkout, opened in a code viewer that knows the index's symbols. The project band,
 session Changes tab and chat action use `curlybraces`. A local SF Symbol rendering
 at 15pt and 17pt showed its two clean strokes remain legible; the slashed chevrons
 look like a generic coding action and the stacked squares lose interior detail.
@@ -13,11 +14,13 @@ Phone screenshots are checked by the simulator runner.
 - Files is the initial `PhrenTextSegment` selection. Usage and Recent are its
   other destinations (`code-mode:files|usage|recent`). A `PhrenSearchField`
   (`code-search`) searches symbols from any destination.
-- Files shows one indexed directory at a time. Folders aggregate descendant
-  file and symbol counts; files show their symbol counts, including zero.
-  `code-tree:<path>` opens a folder or a source-ordered file outline. Root and
-  Up actions retain an explicit, visible directory scope. File declarations
-  (`code-file-symbol:<line>:<name>`) open the exact file-qualified dossier.
+- Files shows one checkout directory at a time from `/v1/projects/files`,
+  folders first, including files the index never reads. A single 44-point row
+  per entry: folder or file-type icon, name, and the index's symbol count when
+  it has one. `code-tree:<path>` opens a folder, or a file in the code viewer.
+  Pictures, video, audio, PDF and CSV open in the file viewer instead. Root and
+  Up actions retain an explicit, visible directory scope. When the checkout
+  cannot be listed, the indexed tree still is.
 - Selecting a directory scopes search and Recent to its descendants, using a
   literal path prefix. Kind filtering uses a phren single-select card:
   All kinds, Function, Method, Type, Variable. Type includes classes, structs,
@@ -30,19 +33,61 @@ Phone screenshots are checked by the simulator runner.
   and scrolls to its first row; Cold jumps directly to the final page and its
   last row. These are positions in the same list, with the same filters.
 - Usage's file filter is a phren action sheet that browses indexed folders.
-  File outlines also offer Usage in this file. Clear file filter restores the
+  Clear file filter restores the
   directory distribution; Root clears the directory scope.
 - Recent shows the 30 symbols the index most recently saw change. A persisted
   fingerprint covers declaration metadata and body text; unchanged full scans
   preserve observation time. Old indexes fall back to file parse time until
   the next scan records fingerprints. This is index observation time, not Git
-  author time. Each row opens the same dossier.
+  author time. Each row opens its file in the code viewer at the symbol.
+- Without the code module on that computer (a computer page entry), the browser
+  shows the project name as its title and Files only: no header, search or modes.
+
+## Code viewer
+
+`CodeFileView` shows one file: its folder path in one muted mono line, then
+numbered source in `PhrenTypography.monoFootnote` with `CodeHighlighting`
+colors. Rows are lazy, so a render colors only the lines on screen; a
+zero-height copy of the longest line holds the horizontal width steady.
+Everything else is the file's own content, with no captions.
+
+- Reading: `/v1/files/range`, the first 256 KiB and then the rest in one more
+  read. Over the files route's 2 MiB the viewer says "<size> is over the 2 MB
+  the code viewer reads." with Open in file viewer (paged text). Content with a
+  NUL byte or invalid UTF-8 says "Not a text file." with the same action.
+- Outline: a `PhrenIconButton` (`code-file-outline`) in the navigation bar,
+  only for indexed files with declarations. It opens a phren action sheet of
+  the flattened outline (`code-outline:<line>:<name>`, kind and line as the
+  caption, a filter field past eight rows). Choosing one scrolls the line to
+  the upper fifth and tints it with the accent.
+- Tappable names: the outline's declarations and every resolved use from
+  `/v1/code/file-references`, matched as whole identifiers on their own line,
+  are links in the accent tint with a dotted underline. A link opens the
+  symbol's dossier as a medium sheet: header with name, kind, location, usage
+  bar and Go to definition (`code-dossier-definition`), then snippet,
+  references and findings. Go to definition and every reference row
+  (`code-reference:<file>:<line>`) open that line, in place for this file or by
+  pushing the other file's viewer. An older Hook without the route still gets
+  tappable declarations from the outline.
+- Unindexed and non-index sources (the working tree without an index) open
+  read-only with colors and no links.
+
+Entry points into the browser: the project page's Code cell, the session's
+Changes Code tab and chat options Code (all `CodeView`), a computer's Files
+page Project files and the Memory tab's Files Computers rows (a project, then
+its located checkout; one checkout opens directly), and the Changes working
+tree, whose unchanged or ignored text files open in `CodeFileView` from the
+pane's repository.
 
 ## Routes and wire data
 
 `GET /v1/code/tree?project=&directory=` returns immediate indexed children with
-`path`, `directory`, `files`, `symbols`, and `languages`. It reads the index, so
-unindexed files never appear as empty source files.
+`path`, `directory`, `files`, `symbols`, and `languages`. The browser merges its
+symbol counts into the checkout listing from `/v1/projects/files`.
+
+`GET /v1/code/file-references?project=&path=` returns one file's resolved uses in
+line order, each with the declaration as a file-qualified `symbol`, its `file`
+and `targetLine` (at most 5000).
 
 `GET /v1/code/usage-page?project=&kind=&file=&directory=&offset=&limit=&end=`
 returns full symbol rows in `entries`, plus `total`, `offset`, `limit`, and
@@ -76,10 +121,15 @@ A large sheet with a header (name, kind chip, `file:line`, close), then:
 ## UI tests
 
 `PhrenUITests/CodeTests.swift` runs against `--code-fixture`, a fixed index of a
-dozen symbols across three files, so no Hook is needed. Five-row fixture usage
-pages exercise middle ranks and both jumps. Tests cover the initial tree, file
-outline to dossier, search to dossier, and kind filtering. Screenshots include
-`Code home tree`, `Code tree dossier`, `Code middle usage`, `Code search`, and
+dozen symbols across three files plus a README, a nested unindexed text file
+and a picture, so no Hook is needed. Five-row fixture usage pages exercise
+middle ranks and both jumps. Tests cover the checkout tree, a nested unindexed
+file, an outline jump, a tapped name to its dossier and Go to definition in
+another file, Recent opening the file at the symbol, a picture keeping the file
+viewer, a computer's Files page opening the browser, search to dossier, and
+kind filtering. Screenshots include `Code home tree`, `Code file`,
+`Code outline`, `Code symbol panel`, `Code definition in another file`,
+`Computer project browser`, `Code middle usage`, `Code search`, and
 `Code dossier`. Route tests cover complete pagination, path boundaries, tree
 counts, empty files and recency; PhrenKit validates the new envelopes.
 
@@ -144,7 +194,7 @@ Show ignored is a PhrenSwitch in the working tree's header, off by default and
 remembered (`changes.tree.showIgnored`). On, each level adds the git-ignored
 folders and files Git reports there, drawn at half opacity with the spoken value
 "Ignored". An ignored folder expands from the disk; an ignored file opens in the
-file viewer, never as a diff. IDs: `changes-tree-switch:ignored`, and the
+code viewer when it is text and in the file viewer otherwise, never as a diff. IDs: `changes-tree-switch:ignored`, and the
 existing `changes-tree-entry:<path>` rows.
 
 ## Workers

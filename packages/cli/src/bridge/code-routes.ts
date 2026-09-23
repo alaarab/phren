@@ -130,6 +130,18 @@ export class CodeRoutes {
     return { project, path: file, entries: result.value };
   }
 
+  /** Resolved uses made from one file, with the declaration each names, so the
+   * phone's code viewer can make those identifiers tappable. */
+  async fileReferences(projectValue: string | null, pathValue: string | null): Promise<{ project: string; path: string; references: import("@phren/code").FileReference[] }> {
+    const project = projectSchema.parse(projectValue ?? "");
+    const file = relativePathSchema.parse(pathValue ?? "");
+    const code = await requireCodePackage(this.store);
+    if (typeof code.fileReferences !== "function") throw new BridgeError(503, "Update @phren/code to make identifiers tappable.");
+    const result = await code.fileReferences(this.store, project, file);
+    if (!result.available) throw noIndex(project);
+    return { project, path: file, references: result.value };
+  }
+
   async outlineSummary(projectValue: string | null, pathsValue: string | null) {
     const project = projectSchema.parse(projectValue ?? "");
     let raw: unknown;
