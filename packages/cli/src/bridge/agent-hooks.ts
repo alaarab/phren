@@ -8,7 +8,7 @@ import { watch, type FSWatcher } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { atomicInPrivateDir, BridgeError, bridgeRoot, object, objects, provider, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
-import { findPane, herdrRoot, rpc, servers, snapshot, trustedDirectory, validateTarget } from "./herdr.js";
+import { findPane, herdrRoot, knownPanes, rpc, servers, snapshot, trustedDirectory, validateTarget } from "./herdr.js";
 import { readPaneText } from "./pane-text.js";
 import { capturesChanges, ToolChanges } from "./changes.js";
 import { phrenStoreRoot, unwrapPastedContent } from "./transcripts.js";
@@ -18,7 +18,7 @@ import { ApprovalPushService } from "./push.js";
 import { intervalFromEnv } from "./limits.js";
 import { answeredQuestionInput, numberedDialog, passwordLine, permissionPrompt, questionChoice, terminalChoice, terminalQuestions, visibleTerminalChoice,
   type TerminalChoice, type TerminalQuestion } from "./terminal-choice.js";
-import { directoryNames, opencodeApprovalFile, opencodeRequest } from "./opencode-approvals.js";
+import { directoryNames, opencodeApprovalFile, opencodeRequest, readOpencodeRequest } from "./opencode-approvals.js";
 import { ApprovalWatchLeases, bindingPath, localSocket, PushBindingStore } from "./agent-hook-stores.js";
 import { countTick } from "./metrics.js";
 
@@ -26,6 +26,8 @@ export { permissionPrompt, terminalChoice, visibleTerminalChoice, type TerminalC
 export { ApprovalWatchLeases, PushBindingStore, recordedSession } from "./agent-hook-stores.js";
 
 const APPROVAL_SWEEP_MS = 2_000;
+/** How recent the Herdr snapshots must be for the poll to trust "no opencode pane". */
+const OPENCODE_PANES_FRESH_MS = 15_000;
 const APPROVAL_DEBOUNCE_MS = 100;
 /** How long a permission ask is held for the phone before it falls back to
  * the terminal. Claude's own hook window is 60 s; a test shortens it. */
@@ -134,6 +136,7 @@ export class AgentHooks {
   async sweepOpencodeApprovals(): Promise<void> {
     if (this.closed) return;
     if (this.opencodeSweep) return this.opencodeSweep;
+    countTick("opencode-sweep");
     const sweep = this.readOpencodeApprovals();
     this.opencodeSweep = sweep;
     try { await sweep; } finally { this.opencodeSweep = undefined; }
@@ -146,7 +149,7 @@ export class AgentHooks {
       if (this.closed) return;
       const match = /^opencode-(ses_[0-9A-Za-z]{1,64})\.request\.json$/.exec(name);
       if (!match) continue;
-      const request = opencodeRequest(match[1]);
+      const request = await readOpencodeRequest(match[1]);
       if (!request) continue;
       const id = String(request.id);
       live.add(id);
@@ -653,7 +656,15 @@ export class AgentHooks {
       this.opencodeWatcher = watch(this.approvalsDirectory(), { persistent: false }, () => this.scheduleOpencodeSweep());
       this.opencodeWatcher.on("error", () => { this.opencodeWatcher?.close(); this.opencodeWatcher = undefined; });
     } catch { this.opencodeWatcher = undefined; }
-    this.opencodePoll = setInterval(() => { countTick("opencode-approvals"); this.scheduleOpencodeSweep(); }, APPROVAL_SWEEP_MS);
+    // The poll backs up the watcher. It skips while nothing is held and every
+    // running Herdr server's recent snapshot shows no opencode pane; a new
+    // request file still reaches the sweep through the watcher.
+    this.opencodePoll = setInterval(() => {
+      countTick("opencode-approvals");
+      const panes = this.opencodeWatcher && !this.opencode.size ? knownPanes(OPENCODE_PANES_FRESH_MS) : undefined;
+      if (panes && !panes.some(pane => pane.agent === "opencode")) return;
+      this.scheduleOpencodeSweep();
+    }, APPROVAL_SWEEP_MS);
     this.opencodePoll.unref?.();
     this.fanoutTimer = setInterval(() => { countTick("fanout-blocked"); void this.sweepBlockedFanouts(); }, FANOUT_SWEEP_MS);
     this.fanoutTimer.unref?.();
