@@ -1111,6 +1111,24 @@ resolved only against that listing. The bounded repository cache is keyed by HEA
 it expires after two seconds and is invalidated by status refresh and mutations.
 Opening a directory does not collect diff statistics or upstream history.
 
+### Commit, push and pull request
+
+Each takes the session's full target and optional `child` or `worktree`, like
+the other `/v1/git/*` routes, and answers `{ok: true, ...}` or, when Git or gh
+refused, `{ok: false, output}` with the output exactly as printed (stdout and
+stderr interleaved, at most 64 KiB). Input errors are ordinary 400/409 errors.
+
+| Route | Body | Answer |
+| --- | --- | --- |
+| `POST /v1/git/commit` | `message` (required, at most 20,000 characters) | `{ok, sha, short, subject, branch, output?}`. Commits the index only; 409 when nothing is staged. Hooks always run (never `--no-verify`), and a hook's refusal is `{ok: false, output}`. |
+| `POST /v1/git/push` | `confirmDefault?: true` | `{ok, branch, remote, upstream, setUpstream, output}`. Pushes the current branch to its upstream, or to `origin` with the upstream set. Never forced. The default branch (the remote's `HEAD`, else `main`/`master`) is 409 without `confirmDefault`; a detached HEAD or missing remote is 409. |
+| `POST /v1/git/pr` | `draft?: true` | `{ok, url, branch, draft?, existing?}` through `gh pr create --fill`. `{ok: false, reason: "missing" \| "auth", message}` when gh is not installed or not signed in; `reason: "failed"` with gh's `output` otherwise. |
+
+`POST /v1/git/pulls` also returns `branch` and `current`: the checked-out
+branch's pull request in any state, `{number, title, url, head, base, draft,
+state, checks}`, where `checks` is `passing`, `failing`, `pending` or null.
+`POST /v1/git/status` returns `defaultBranch`, the branch a push asks to confirm.
+
 ### Live transcript previews
 
 The transcript WebSocket includes `preview: {turnStartedAt, text}` or

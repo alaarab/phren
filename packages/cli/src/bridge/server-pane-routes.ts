@@ -4,6 +4,7 @@ import type { AgentHooks } from "./agent-hooks.js";
 import { gitBranches, gitDiscard, gitLog, gitPulls, gitStage, gitStatus, gitTree, gitUnstage } from "./git.js";
 import { fanoutWorktrees } from "./fanouts.js";
 import { gitWorktrees, resolveWorktree, type WorktreeWorker } from "./git-worktrees.js";
+import { gitCommit, gitPullRequest, gitPush } from "./git-publish.js";
 import { findPane, paneChatState, paneIdentity, rpc, snapshot, startingPane, trustedDirectory, validateStartingTarget, validateTarget } from "./herdr.js";
 import { refuseWorkingSlash, type ModelSwitcher } from "./model-switch.js";
 import { repositoryDiff } from "./projects.js";
@@ -285,6 +286,9 @@ export async function paneRoute(ctx: PaneRouteContext, url: URL, data: Json, res
     else if (url.pathname === "/v1/git/stage") result = await gitStage(cwd, data.paths);
     else if (url.pathname === "/v1/git/unstage") result = await gitUnstage(cwd, data.paths);
     else if (url.pathname === "/v1/git/discard") result = await gitDiscard(cwd, data.paths);
+    else if (url.pathname === "/v1/git/commit") result = await gitCommit(cwd, data.message);
+    else if (url.pathname === "/v1/git/push") result = await gitPush(cwd, data.confirmDefault);
+    else if (url.pathname === "/v1/git/pr") result = await gitPullRequest(cwd, data.draft);
     else throw new BridgeError(404, "Unknown Phren Hook route.");
   }
   else if (url.pathname === "/v1/approvals/answer") {
