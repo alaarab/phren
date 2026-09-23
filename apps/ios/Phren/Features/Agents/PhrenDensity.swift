@@ -12,10 +12,13 @@ enum PhrenDensity {
     /// The gap between two transcript entries.
     static let transcriptRowSpacing: CGFloat = 6
     /// An expanded tool card: its internal padding and the gap between rows.
-    static let toolCardPadding: CGFloat = 8
-    static let toolCardRowSpacing: CGFloat = 4
-    /// The collapsed tool pill. It does not shrink; the cards around it do.
-    static let collapsedToolRowHeight: CGFloat = 44
+    static let toolCardPadding: CGFloat = 6
+    static let toolCardRowSpacing: CGFloat = 2
+    /// The collapsed tool pill (owner, September 23: less padding, more on
+    /// screen). Its touch target still reaches 44 points through
+    /// `toolRowTouchOutset` above and below the drawn pill.
+    static let collapsedToolRowHeight: CGFloat = 36
+    static var toolRowTouchOutset: CGFloat { (44 - collapsedToolRowHeight) / 2 }
     /// The Changes list row.
     static let changesRowHeight: CGFloat = 44
     /// The Changes section band and the icon tabs inside it.

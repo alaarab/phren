@@ -87,7 +87,8 @@ struct ChatReadRun: View, Equatable {
                     ToolStatusMark(status: presentation.status)
                     Image(systemName: "chevron.down").font(.system(size: 12, weight: .semibold))
                         .rotationEffect(.degrees(expanded ? 180 : 0)).foregroundStyle(PhrenTheme.chatNeutralDim)
-                }.font(PhrenTypography.footnote).padding(.horizontal, 12).frame(height: 44)
+                }.font(PhrenTypography.footnote).padding(.horizontal, 12).frame(height: PhrenDensity.collapsedToolRowHeight)
+                    .contentShape(Rectangle().inset(by: -PhrenDensity.toolRowTouchOutset))
             }.buttonStyle(.plain)
                 .accessibilityLabel(presentation.spokenLabel)
                 .accessibilityValue(expanded ? "Expanded" : "Collapsed")
@@ -158,7 +159,8 @@ struct ChatToolActivity: View, Equatable {
                         .rotationEffect(.degrees(expanded ? 180 : 0)).foregroundStyle(PhrenTheme.chatNeutralDim)
                 }
                 .font(PhrenTypography.footnote)
-                .padding(.horizontal, 12).frame(height: 44)
+                .padding(.horizontal, 12).frame(height: PhrenDensity.collapsedToolRowHeight)
+                    .contentShape(Rectangle().inset(by: -PhrenDensity.toolRowTouchOutset))
                 .contentShape(Rectangle())
             }.buttonStyle(.plain)
                 .accessibilityLabel("\(summary.title), \(summary.count) \(summary.count == 1 ? "operation" : "operations")"

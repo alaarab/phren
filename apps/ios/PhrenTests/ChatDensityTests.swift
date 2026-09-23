@@ -12,9 +12,11 @@ final class ChatDensityTests: XCTestCase {
     }
 
     func testToolCardsStayCompact() {
-        XCTAssertEqual(PhrenDensity.collapsedToolRowHeight, 44)
-        XCTAssertEqual(PhrenDensity.toolCardPadding, 8)
-        XCTAssertEqual(PhrenDensity.toolCardRowSpacing, PhrenTheme.Space.xs)
+        XCTAssertEqual(PhrenDensity.collapsedToolRowHeight, 36)
+        // The drawn pill is 36 points; its touch target still reaches 44.
+        XCTAssertEqual(PhrenDensity.collapsedToolRowHeight + 2 * PhrenDensity.toolRowTouchOutset, 44)
+        XCTAssertEqual(PhrenDensity.toolCardPadding, 6)
+        XCTAssertEqual(PhrenDensity.toolCardRowSpacing, 2)
     }
 
     func testChangesScreenMeasurements() {
@@ -25,11 +27,11 @@ final class ChatDensityTests: XCTestCase {
         XCTAssertEqual(PhrenDensity.treeIndent, 12)
     }
 
-    /// A collapsed tool pill (44) plus the 6pt gap after it is a 50pt pitch,
-    /// so an 800pt transcript fits 16 of them.
+    /// A collapsed tool pill (36) plus the 6pt gap after it is a 42pt pitch,
+    /// so an 800pt transcript fits 19 of them (16 at the old 44pt pill).
     func testCollapsedToolRowsThatFitInEightHundredPoints() {
-        XCTAssertEqual(PhrenDensity.collapsedToolRowPitch, 50)
-        XCTAssertEqual(PhrenDensity.collapsedToolRows(inHeight: 800), 16)
+        XCTAssertEqual(PhrenDensity.collapsedToolRowPitch, 42)
+        XCTAssertEqual(PhrenDensity.collapsedToolRows(inHeight: 800), 19)
         XCTAssertEqual(PhrenDensity.collapsedToolRows(inHeight: 0), 0)
     }
 }

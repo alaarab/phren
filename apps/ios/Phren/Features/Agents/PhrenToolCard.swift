@@ -136,23 +136,21 @@ struct PhrenToolCard: View, Equatable {
             HStack(spacing: PhrenTheme.Space.small) {
                 Image("PhrenMark").resizable().scaledToFit().frame(width: 14, height: 14).accessibilityHidden(true)
                 Text(presentation.verb).font(PhrenTypography.footnote.weight(.semibold))
-                    .foregroundStyle(PhrenTheme.text).lineLimit(2)
+                    .foregroundStyle(PhrenTheme.text).lineLimit(1).layoutPriority(1)
+                // The project and tag ride on the title line (owner,
+                // September 23): one line for what was done and where.
+                if let project = presentation.project {
+                    Text(project).font(.caption.weight(.medium)).lineLimit(1)
+                        .foregroundStyle(PhrenTheme.sessionProject)
+                        .padding(.horizontal, 7).padding(.vertical, 3)
+                        .background(PhrenTheme.sessionProject.opacity(0.1), in: Capsule())
+                }
+                if let tag = presentation.tag {
+                    Text(tag).font(.caption2).foregroundStyle(PhrenTheme.textMuted).lineLimit(1)
+                }
                 Spacer(minLength: 0)
                 status
                 if hasDestination { Color.clear.frame(width: 16, height: 14).accessibilityHidden(true) }
-            }
-            if presentation.project != nil || presentation.tag != nil {
-                HStack(spacing: 6) {
-                    if let project = presentation.project {
-                        Text(project).font(.caption.weight(.medium)).lineLimit(1)
-                            .foregroundStyle(PhrenTheme.sessionProject)
-                            .padding(.horizontal, 7).padding(.vertical, 3)
-                            .background(PhrenTheme.sessionProject.opacity(0.1), in: Capsule())
-                    }
-                    if let tag = presentation.tag {
-                        Text(tag).font(.caption2).foregroundStyle(PhrenTheme.textMuted).lineLimit(1)
-                    }
-                }
             }
             if !presentation.body.isEmpty {
                 Text(presentation.body).font(.subheadline).foregroundStyle(PhrenTheme.textSecondary)
