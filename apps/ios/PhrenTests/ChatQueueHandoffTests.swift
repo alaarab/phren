@@ -86,7 +86,13 @@ final class ChatQueueHandoffTests: XCTestCase {
         XCTAssertTrue(model.localPendingMessages.isEmpty)
         model.attachStartingTarget(try AgentChatTarget(hostID: host, workspaceID: "w", tabID: "w:t", paneID: "w:p",
             source: "codex", sessionID: "first-session"))
-        XCTAssertNil(model.pendingReason)
+        // Attaching releases the "Starting" hold, but the new binding has no
+        // transcript stream yet, so follow-ups wait for it rather than being
+        // sent against a conversation the phone cannot reconcile.
+        XCTAssertEqual(model.pendingReason, "Disconnected")
+        let firstTurn = try AgentChatTranscript.read(Data(#"{"type":"backlog","source":"codex","totalLines":1,"entries":[]}"#.utf8), source: "codex")
+        model.accept(firstTurn)
+        XCTAssertNil(model.pendingReason, "The attached transcript's stream releases the follow-up")
     }
 
     private func frame(line: Int) throws -> AgentChatTranscript {
