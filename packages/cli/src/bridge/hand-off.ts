@@ -8,6 +8,8 @@ import { BridgeError, object, objects, sessionId, targetSchema, type Json, type 
 import { canonicalComputer } from "./schedules.js";
 import { findPhrenPath } from "../phren-paths.js";
 import { listMachines } from "../profile-store.js";
+import { execFileSync } from "node:child_process";
+import { hostname } from "node:os";
 
 const promptText = z.string().min(1).max(32768).refine(value => !/[\x00-\x08\x0b-\x1f\x7f]/.test(value));
 
@@ -82,11 +84,23 @@ function sessionsFrom(overview: Json, computer: string, local: boolean, now = Da
  * An unreachable computer is reported, never silently dropped. */
 /** Computers the store registers (machines.yaml) that this Hook has no
  * verified connection to, so their sessions cannot be listed from here. */
+/** Every name this computer answers to: machines.yaml often registers the
+ * same Mac as its hostname, the hostname's first label and its Bonjour name. */
+function localNames(): string[] {
+  const host = hostname();
+  const names = [host, host.split(".")[0]];
+  if (process.platform === "darwin") {
+    try { names.push(execFileSync("scutil", ["--get", "LocalHostName"], { encoding: "utf8", timeout: 1_000 }).trim()); }
+    catch { /* No Bonjour name set: the hostname forms above still match. */ }
+  }
+  return names.filter(Boolean);
+}
+
 export function notLinkedComputers(store: string | null, here: string, linked: readonly string[]): { name: string }[] {
   if (!store) return [];
   const machines = listMachines(store);
   if (!machines.ok) return [];
-  const known = new Set([here, ...linked].map(canonicalComputer));
+  const known = new Set([here, here.split(".")[0], ...localNames(), ...linked].map(canonicalComputer));
   return Object.keys(machines.data).filter(name => !known.has(canonicalComputer(name))).sort().map(name => ({ name }));
 }
 
@@ -114,6 +128,6 @@ export async function listLiveSessions(options: { store?: string | null } = {}):
     }
   }));
   const store = options.store !== undefined ? options.store : findPhrenPath();
-  const notLinked = notLinkedComputers(store, here, peers.map(peer => peer.name));
+  const notLinked = notLinkedComputers(store, here, peers.flatMap(peer => [peer.name, peer.address]));
   return { sessions, unreachable, notLinked, enrolled: peers.length, ...(peerError ? { peerError } : {}) };
 }
