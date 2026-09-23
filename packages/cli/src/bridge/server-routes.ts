@@ -389,6 +389,9 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           result = await fanoutMessages.send(data);
         } else if (url.pathname === "/v1/subagents/archive-finished") {
           result = await fanoutMessages.archiveFinished(data);
+        } else if (url.pathname === "/v1/code/disable") {
+          result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, typeof data.store === "string" ? data.store : undefined, true)))
+            .disable(z.string().parse(data.project));
         } else if (url.pathname === "/v1/code/reindex") {
           result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, typeof data.store === "string" ? data.store : undefined, true)))
             .reindex(z.string().parse(data.project));

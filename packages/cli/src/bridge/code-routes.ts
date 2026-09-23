@@ -1,3 +1,4 @@
+import { rm } from "node:fs/promises";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { resolveAllStores } from "../store-registry.js";
@@ -114,6 +115,17 @@ export class CodeRoutes {
     const result = await (await requireCodePackage(this.store)).recentSymbols(this.store, project, optionalPath(directoryValue));
     if (!result.available) throw noIndex(project);
     return { project, entries: result.value };
+  }
+
+  /** Turns code intelligence off for a project: its index is deleted, and
+   * the reindexer follows only projects that have one, so nothing rebuilds it
+   * until the phone turns it on again. */
+  async disable(projectValue: string | null): Promise<{ project: string; disabled: true }> {
+    const project = projectSchema.parse(projectValue ?? "");
+    const { codeDatabasePath } = await requireCodePackage(this.store);
+    const file = codeDatabasePath(this.store, project);
+    await Promise.all([file, `${file}-journal`, `${file}-wal`, `${file}-shm`].map(path => rm(path, { force: true })));
+    return { project, disabled: true };
   }
 
   async reindex(projectValue: string | null) {
