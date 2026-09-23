@@ -20,6 +20,35 @@ const request = z.object({ model: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._\[\]
 const cleanLabel = (label: string) => label.replace(/\s*\((?:current|default|recommended)\)/gi, "").trim().toLowerCase();
 const effortLabel = (label: string) => cleanLabel(label).replace(/^extra\s+high$/, "xhigh");
 
+/** The levels Claude Code's `/effort` takes (2.1.280) when the catalogue
+ * lists none for a model; Claude still refuses one the model lacks. */
+export const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+
+type EffortReply = { effort: string } | { error: string };
+
+/** Claude Code's first reply to `/effort <level>` below its latest "Set model
+ * to" line, the switch this transaction just verified, so an older reply in
+ * the scrollback never confirms. A cap reports the level actually set; an
+ * override or refusal is an error. */
+export function claudeEffortReply(text: string): EffortReply | undefined {
+  const lines = text.split(/\r?\n/).map(line => stripTerminal(line).trim().replace(/^[⏺●⎿]\s*/, ""));
+  let start = -1;
+  lines.forEach((line, index) => { if (line.startsWith("Set model to ")) start = index; });
+  if (start < 0) return undefined;
+  const replies: EffortReply[] = [];
+  for (const output of lines.slice(start + 1)) {
+    let match: RegExpMatchArray | null;
+    if ((match = output.match(/^Set effort level to ([a-z]+)\b/))) replies.push({ effort: match[1] });
+    else if ((match = output.match(/^Effort '[^']*' exceeds the cap\b.*; set to '([a-z]+)' instead/))) replies.push({ effort: match[1] });
+    else if (/^(?:Not applied: )?CLAUDE_CODE_EFFORT_LEVEL=\S* overrides/.test(output)) {
+      replies.push({ error: "CLAUDE_CODE_EFFORT_LEVEL on the computer overrides Claude's effort in this session." });
+    } else if ((match = output.match(/^(?:Failed to set effort level: |Invalid argument: )(.*)/))) {
+      replies.push({ error: `Claude did not set the effort: ${match[1].slice(0, 200)}` });
+    }
+  }
+  return replies[0];
+}
+
 /** Empty prompts can draw a dim placeholder. Only ANSI evidence that every
  * character after the prompt is dim distinguishes that from a person's draft. */
 function emptyComposer(line: string): boolean {
@@ -106,7 +135,11 @@ export class ModelSwitcher {
       if (target.source === "codex" && (!effort || !model.supportedReasoningEfforts?.includes(effort))) {
         throw new BridgeError(422, "The catalogue does not confirm that reasoning effort. Refresh the model list.");
       }
-      if (target.source === "claude" && chosenEffort) throw new BridgeError(422, "Choose Claude's reasoning effort in its terminal.");
+      if (target.source === "claude" && chosenEffort
+        && !(model.supportedReasoningEfforts?.length ? model.supportedReasoningEfforts : CLAUDE_EFFORTS).includes(chosenEffort)) {
+        throw new BridgeError(422, "Claude does not list that effort for this model. Refresh the model list.");
+      }
+      let claudeEffort: string | undefined;
       const before = await this.hooks.paneLines(target, false);
       // Preserve a person's draft and any pre-existing menu. Never clear it.
       const composer = before.split(/\r?\n/).reverse().find(line => /^\s*[›❯>]/.test(stripTerminal(line)));
@@ -149,14 +182,24 @@ export class ModelSwitcher {
         await waitFor(text => codexModelStatus(text, model) ? true : undefined, "the new model in Codex's status line", true);
       } else {
         await waitFor(text => text !== stripTerminal(before) && text.split(/\r?\n/).some(line => {
-          const output = line.trim().replace(/^[⏺●]\s*/, "");
+          const output = line.trim().replace(/^[⏺●⎿]\s*/, "");
           return output.toLowerCase().startsWith("set model to ") && [model.name, model.id, id].some(name => {
             const result = output.slice("Set model to ".length).toLowerCase();
             return result === name.toLowerCase() || result.startsWith(name.toLowerCase() + " ") || result.startsWith(name.toLowerCase() + " (");
           });
         }) ? true : undefined, "Claude's model confirmation");
+        if (chosenEffort) {
+          // `/effort` after the model, so the new model's own default never
+          // replaces the chosen level.
+          await validate(true);
+          await rpc(target.server, "agent.prompt", { target: target.pane, text: `/effort ${chosenEffort}` });
+          const reply = await waitFor(text => claudeEffortReply(text), "Claude's effort confirmation");
+          if ("error" in reply) throw new BridgeError(409, reply.error);
+          claudeEffort = reply.effort;
+        }
       }
-      return { ok: true, model: model.id, name: model.name, ...(target.source === "codex" ? { effort } : {}) };
+      return { ok: true, model: model.id, name: model.name,
+        ...(target.source === "codex" ? { effort } : claudeEffort ? { effort: claudeEffort } : {}) };
     } catch (error) {
       if (opened) {
         // Escape only the same, non-working pane. Never interrupt a new turn
