@@ -133,7 +133,7 @@ async function history(args: string[]): Promise<void> {
   const result = await hookPost("/v1/schedules/history", { ...(project ? { project } : {}), ...(option(args, "--id") ? { id: option(args, "--id") } : {}), ...(limit ? { limit } : {}) });
   const runs = Array.isArray(result.runs) ? result.runs.map(object) : [];
   if (!runs.length) { console.log("No schedule runs."); return; }
-  for (const run of runs) console.log(`${String(run.startedAt)}  ${String(run.status).padEnd(8)}  ${String(run.project)}/${String(run.scheduleId)}${run.reason ? `  ${String(run.reason)}` : ""}`);
+  for (const run of runs) console.log(`${String(run.startedAt)}  ${String(run.status).padEnd(9)}  ${String(run.project)}/${String(run.scheduleId)}${run.reason ? `  ${String(run.reason)}` : ""}`);
 }
 
 export async function handleScheduleCommand(args: string[], store: string): Promise<number> {

@@ -309,10 +309,13 @@ async function archivedFinishedAt(directory: string): Promise<number> {
  * that old, gaining a synthesized {status: failed, reason: "no manifest"}
  * manifest in the archive. The archive keeps ARCHIVE_MAX_FOLDERS folders,
  * deleting the oldest beyond that. `dryRun` reports the same work without
- * touching anything. */
+ * touching anything. `olderThanMs` replaces the 24 hour age (0 archives every
+ * finished job), and `parent` limits the sweep to one parent session's jobs;
+ * a folder without a manifest has no parent and is left alone then. */
 export async function archiveFinishedFanouts(env: NodeJS.ProcessEnv = process.env,
-  options: { dryRun?: boolean; now?: number } = {}): Promise<FanoutArchiveResult> {
+  options: { dryRun?: boolean; now?: number; olderThanMs?: number; parent?: { session: string; provider?: Provider } } = {}): Promise<FanoutArchiveResult> {
   const now = options.now ?? Date.now(), dryRun = options.dryRun ?? false;
+  const age = options.olderThanMs ?? ARCHIVE_AGE_MS, parent = options.parent;
   const moves: Array<{ name: string; basis: number }> = [];
   const configured = fanoutRoot(env);
   const root = await realpath(configured).catch(() => undefined);
@@ -329,6 +332,8 @@ export async function archiveFinishedFanouts(env: NodeJS.ProcessEnv = process.en
       const exit = await exitStamp(directory);
       if (exit === undefined) continue;
       const manifest = await jobManifest(root, directory);
+      if (parent && (manifest?.parent?.session !== parent.session
+        || (parent.provider !== undefined && manifest.parent.provider !== parent.provider))) continue;
       let basis: number;
       if (manifest && ARCHIVED_STATUSES.has(manifest.status)) {
         const finished = manifest.finishedAt ? Date.parse(manifest.finishedAt) : NaN;
@@ -336,7 +341,7 @@ export async function archiveFinishedFanouts(env: NodeJS.ProcessEnv = process.en
       } else if (!manifest) {
         basis = exit;
       } else continue;
-      if (now - basis <= ARCHIVE_AGE_MS) continue;
+      if (age > 0 ? now - basis <= age : now < basis) continue;
       moves.push({ name, basis });
       if (dryRun) continue;
       await mkdir(archive, { recursive: true, mode: 0o700 });
@@ -360,6 +365,23 @@ export async function archiveFinishedFanouts(env: NodeJS.ProcessEnv = process.en
     deleted = excess.length;
   }
   return { moved: moves.map(move => move.name), deleted };
+}
+
+export const FANOUTS_ARCHIVE_USAGE = "Usage: phren bridge fanouts archive [--dry-run] [--parent <session-id>] [--older-than <minutes>]";
+
+/** `--parent` limits the sweep to one parent chat's workers; `--older-than`
+ * replaces the 24 hour age, and 0 archives every finished one. */
+export function parseFanoutArchiveFlags(flags: string[]): { dryRun?: boolean; parent?: { session: string }; olderThanMs?: number } {
+  const options: { dryRun?: boolean; parent?: { session: string }; olderThanMs?: number } = {};
+  for (let index = 0; index < flags.length; index++) {
+    const flag = flags[index];
+    if (flag === "--dry-run") { options.dryRun = true; continue; }
+    const value = flags[index + 1];
+    if (flag === "--parent" && value !== undefined && sessionId.safeParse(value).success) { options.parent = { session: value }; index++; continue; }
+    if (flag === "--older-than" && value !== undefined && /^\d{1,7}$/.test(value)) { options.olderThanMs = Number(value) * 60_000; index++; continue; }
+    throw new Error(FANOUTS_ARCHIVE_USAGE);
+  }
+  return options;
 }
 
 /** Project raw `opencode run --format json` rows into the small public chat

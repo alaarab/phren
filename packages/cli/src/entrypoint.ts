@@ -58,7 +58,8 @@ export function resolveTopLevelInvocation(argv: string[]): TopLevelInvocation {
   }
 
   if (argvCommand === "--help" || argvCommand === "-h") {
-    return { kind: "help" };
+    // `phren --help all` reads like `phren help all`, so it does the same.
+    return argv.length > 1 ? { kind: "manage", argv } : { kind: "help" };
   }
 
   if (argvCommand === "--version" || argvCommand === "-v" || argvCommand === "version") {

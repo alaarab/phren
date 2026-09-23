@@ -135,3 +135,21 @@ describe("POST /v1/subagents/resume", () => {
     expect(opencode.argv({ ...options, resume: "ses_worker42" })).not.toContain("--model");
   });
 });
+
+describe("POST /v1/subagents/archive-finished", () => {
+  it("validates the parent and archives its finished workers now", async () => {
+    const f = await fixture("completed");
+    await writeFile(path.join(f.directory, "exit.txt"), "0\n");
+    expect(await f.service.archiveFinished({ target })).toEqual({ ok: true, archived: 1 });
+    expect(f.validate).toHaveBeenCalledWith(target);
+    await expect(readFile(path.join(f.directory, "manifest.json"))).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await fanoutChildren("codex", parent, f.env)).toEqual([]);
+  });
+
+  it("leaves a running worker and refuses a malformed body", async () => {
+    const f = await fixture("running");
+    expect(await f.service.archiveFinished({ target })).toEqual({ ok: true, archived: 0 });
+    await expect(f.service.archiveFinished({ target, child: f.child })).rejects.toThrow();
+    expect(await fanoutChildren("codex", parent, f.env)).toHaveLength(1);
+  });
+});

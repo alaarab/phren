@@ -1,13 +1,14 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
-import { mkdir, readFile, stat } from "node:fs/promises";
+import { mkdir, open, readFile, stat } from "node:fs/promises";
 import { hostname } from "node:os";
 import { codexHome } from "../home-paths.js";
 import path from "node:path";
 import { finished as streamFinished } from "node:stream/promises";
 import * as yaml from "js-yaml";
 import { z } from "zod";
+import { publicAssistant } from "./dispatch-reports.js";
 import { fanoutRoot } from "./fanouts.js";
 import { findPane, paneIdentity, rpc, servers, snapshot } from "./herdr.js";
 import { readPaneText } from "./pane-text.js";
@@ -28,7 +29,10 @@ export type ScheduleEvery = typeof SCHEDULE_EVERY[number];
 export type ScheduleHarness = typeof SCHEDULE_HARNESSES[number];
 export type ScheduleNotify = typeof SCHEDULE_NOTIFY[number];
 export type Weekday = typeof WEEKDAYS[number];
-export type ScheduleRunStatus = "launched" | "running" | "blocked" | "finished" | "failed" | "skipped";
+export const SCHEDULE_RUN_STATUSES = ["launched", "running", "blocked", "finished", "needs-you", "failed", "skipped"] as const;
+export type ScheduleRunStatus = typeof SCHEDULE_RUN_STATUSES[number];
+/** How a run ended: done, done but waiting on the owner's answer, or not done. */
+export interface ScheduleRunOutcome { status: "finished" | "needs-you" | "failed"; reason?: string }
 
 export interface Schedule {
   id: string;
@@ -77,7 +81,7 @@ export interface ScheduleRun {
 
 export interface ScheduleLaunchResult {
   launch: ScheduleLaunchRecord;
-  completion?: Promise<{ status: "finished" | "failed"; reason?: string }>;
+  completion?: Promise<ScheduleRunOutcome>;
 }
 
 export interface ScheduleLaunchContext {
@@ -310,7 +314,7 @@ export async function readScheduleRuns(file: string): Promise<ScheduleRun[]> {
       const raw = object(JSON.parse(line));
       const launch = object(raw.launch);
       if (typeof raw.id !== "string" || typeof raw.scheduleId !== "string" || typeof raw.project !== "string"
-          || typeof raw.startedAt !== "string" || !["launched", "running", "blocked", "finished", "failed", "skipped"].includes(String(raw.status))
+          || typeof raw.startedAt !== "string" || !(SCHEDULE_RUN_STATUSES as readonly string[]).includes(String(raw.status))
           || !["herdr", "headless"].includes(String(launch.mode))) continue;
       runs.push(raw as unknown as ScheduleRun);
     } catch { /* A torn final line does not hide older history. */ }
@@ -441,12 +445,12 @@ export class Scheduler {
     });
   }
 
-  private async finishRun(id: string, schedule: Schedule, status: "finished" | "failed", reason?: string,
+  private async finishRun(id: string, schedule: Schedule, status: ScheduleRunOutcome["status"], reason?: string,
     previousNotification?: Promise<unknown>): Promise<void> {
     const run = await this.updateRun(id, { status, finishedAt: this.now().toISOString(), ...(reason ? { reason } : {}) });
     await previousNotification;
     if (run.blockedStartupPrompt && run.blockNotified) return;
-    await this.notifyRun(run, schedule, status === "finished" ? "scheduleFinished" : "scheduleFailed");
+    await this.notifyRun(run, schedule, status === "failed" ? "scheduleFailed" : "scheduleFinished");
   }
 
   private async recordBlockedStartup(id: string, schedule: Schedule, promptText: string): Promise<void> {
@@ -467,7 +471,8 @@ export class Scheduler {
     const text = reason ?? run.reason;
     const value: SchedulePush = { kind, scheduleId: schedule.id, project: run.project, name: schedule.name,
       computer: schedule.computer, runId: run.id,
-      status: kind === "scheduleStarted" ? "running" : kind === "scheduleFinished" ? "finished" : kind === "scheduleBlocked" ? "blocked" : "failed",
+      status: kind === "scheduleStarted" ? "running" : kind === "scheduleFinished" ? (run.status === "needs-you" ? "needs-you" : "finished")
+        : kind === "scheduleBlocked" ? "blocked" : "failed",
       ...(text ? { reason: text } : {}), ...(route ? { route } : {}) };
     let result: SchedulePushResult;
     try { result = this.push ? await this.push.notify(value) : { notified: false, reason: "no push config" }; }
@@ -576,6 +581,84 @@ export interface StartupWatchEnv {
   resolveSession?: (server: string, pane: Json) => Promise<string | undefined>;
   transcriptStamp?: (source: ScheduleHarness, sessionId: string | undefined) => Promise<{ size: number; mtimeMs: number } | undefined>;
   panes?: (server: string) => Promise<Json[]>;
+  finalTurn?: (source: ScheduleHarness, sessionId: string | undefined) => Promise<FinalTurn | undefined>;
+}
+
+export interface FinalTurn { completed: boolean; lastAssistant?: string }
+
+const FINAL_TURN_TAIL_BYTES = 512 * 1024;
+
+/** A turn's end as the harness writes it: Claude's end_turn reply or its
+ * turn_duration record, Codex's task_complete, opencode's end_turn step. */
+function turnEnded(raw: Json, source: ScheduleHarness): boolean {
+  const payload = object(raw.payload), message = object(raw.message), data = object(raw.data);
+  if (source === "claude") return (raw.type === "assistant" && message.stop_reason === "end_turn")
+    || (raw.type === "system" && raw.subtype === "turn_duration");
+  if (source === "codex") return raw.type === "event_msg" && ["task_complete", "task_completed"].includes(String(payload.type));
+  return data.stop_reason === "end_turn";
+}
+
+/** The last assistant reply in a transcript and whether its turn finished.
+ * A person's message after the reply opens a new turn, so it clears both. */
+export function finalTurnFromLines(lines: readonly string[], source: ScheduleHarness): FinalTurn {
+  let completed = false, lastAssistant: string | undefined;
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    let raw: Json;
+    try { raw = object(JSON.parse(line)); } catch { continue; }
+    const payload = object(raw.payload);
+    const userTurn = source === "claude" ? raw.type === "user" && !raw.isMeta && typeof object(raw.message).content === "string"
+      : source === "codex" ? raw.type === "response_item" && payload.type === "message" && payload.role === "user"
+      : raw.type === "user/message";
+    if (userTurn) { completed = false; lastAssistant = undefined; continue; }
+    const text = publicAssistant(raw, source);
+    if (text) { lastAssistant = text; completed = false; }
+    if (turnEnded(raw, source)) completed = true;
+  }
+  return { completed, ...(lastAssistant ? { lastAssistant } : {}) };
+}
+
+async function realFinalTurn(source: ScheduleHarness, sessionId: string | undefined): Promise<FinalTurn | undefined> {
+  if (!sessionId) return undefined;
+  const file = await transcriptPath(source, sessionId).catch(() => undefined);
+  if (!file) return undefined;
+  const handle = await open(file, "r").catch(() => undefined);
+  if (!handle) return undefined;
+  try {
+    const { size } = await handle.stat();
+    const start = Math.max(0, size - FINAL_TURN_TAIL_BYTES), buffer = Buffer.alloc(size - start);
+    await handle.read(buffer, 0, buffer.length, start);
+    const lines = buffer.toString("utf8").split("\n");
+    return finalTurnFromLines(start > 0 ? lines.slice(1) : lines, source);
+  } catch { return undefined; } finally { await handle.close().catch(() => undefined); }
+}
+
+const OPTION_LINE = /^\s*(?:[-*]\s+)?\(?\d{1,2}[.)]\s+\S/;
+const CHOICE_WORDS = /\b(?:choose|pick|which|options?|prefer|want|should I|shall I|let me know|decide|approve|confirm|go ahead)\b/i;
+
+function plainLine(line: string): string {
+  return line.replace(/[*_`#>]+/g, "").replace(/\s+/g, " ").trim().slice(0, 200);
+}
+
+/** When a finished reply ends by asking the owner something (a question, or
+ * numbered options introduced as a choice), the question's first line. */
+export function ownerQuestion(text: string): string | undefined {
+  const lines = text.replace(/\r/g, "").split("\n").map(line => line.trimEnd());
+  while (lines.length && !lines.at(-1)!.trim()) lines.pop();
+  if (!lines.length) return undefined;
+  let end = lines.length;
+  while (end > 0 && OPTION_LINE.test(lines[end - 1])) end--;
+  if (lines.length - end >= 2) {
+    let intro = end - 1;
+    while (intro >= 0 && !lines[intro].trim()) intro--;
+    const line = intro >= 0 ? plainLine(lines[intro]) : "";
+    return line && (line.endsWith("?") || (line.endsWith(":") && CHOICE_WORDS.test(line))) ? line : undefined;
+  }
+  const last = plainLine(lines.at(-1)!);
+  if (!/\?\)?$/.test(last)) return undefined;
+  let first = lines.length - 1;
+  while (first > 0 && lines[first - 1].trim() && !OPTION_LINE.test(lines[first - 1])) first--;
+  return plainLine(lines[first]) || last;
 }
 
 async function realTranscriptStamp(source: ScheduleHarness, sessionId: string | undefined): Promise<{ size: number; mtimeMs: number } | undefined> {
@@ -586,13 +669,14 @@ async function realTranscriptStamp(source: ScheduleHarness, sessionId: string | 
 }
 
 export async function watchHerdrRun(server: string, target: { workspaceId: string; tabId: string; paneId: string }, signal: AbortSignal,
-  startup: StartupWatch, env: StartupWatchEnv = {}): Promise<{ status: "finished" | "failed"; reason?: string }> {
+  startup: StartupWatch, env: StartupWatchEnv = {}): Promise<ScheduleRunOutcome> {
   const now = env.now ?? Date.now;
   const pause = env.pause ?? ((ms: number) => new Promise<void>(resolve => { const timer = setTimeout(resolve, ms); timer.unref(); }));
   const readPane = env.readPane ?? paneRecentLines;
   const resolveSession = env.resolveSession ?? ((name: string, pane: Json) => paneIdentity(name, pane).catch(() => undefined));
   const transcriptStamp = env.transcriptStamp ?? realTranscriptStamp;
   const listPanes = env.panes ?? (async (name: string) => objects((await snapshot(name)).panes));
+  const finalTurn = env.finalTurn ?? realFinalTurn;
   let sessionId = startup.sessionId;
   let transcriptActive = false;
   let stamp: { size: number; mtimeMs: number } | undefined;
@@ -605,7 +689,14 @@ export async function watchHerdrRun(server: string, target: { workspaceId: strin
       const pane = findPane({ panes: await listPanes(server) }, { workspace: target.workspaceId, tab: target.tabId, pane: target.paneId });
       if (!pane) return { status: "failed", reason: "The Herdr pane closed before the scheduled prompt finished." };
       const status = String(pane.agent_status);
-      if (status === "idle") return { status: "finished" };
+      // Herdr reports a finished turn as idle, or as done until someone looks
+      // at the pane. Either one is the agent stopping on its own.
+      if (status === "idle" || status === "done") {
+        if (!sessionId) sessionId = await resolveSession(server, pane);
+        const turn = await finalTurn(startup.source, sessionId).catch(() => undefined);
+        const question = turn?.completed && turn.lastAssistant ? ownerQuestion(turn.lastAssistant) : undefined;
+        return question ? { status: "needs-you", reason: question } : { status: "finished" };
+      }
       if (!["working", "starting", "blocked", "waiting", "unknown"].includes(status)) {
         return { status: "failed", reason: "The scheduled agent stopped before the prompt finished." };
       }
@@ -673,7 +764,7 @@ async function launchHeadless(context: ScheduleLaunchContext, store: string, sta
     throw error;
   });
   await writeManifest(jobDir, { ...manifest, status: "running", updatedAt: new Date().toISOString() });
-  const completion = closed.then(async ({ code, signal }): Promise<{ status: "finished" | "failed"; reason?: string }> => {
+  const completion = closed.then(async ({ code, signal }): Promise<ScheduleRunOutcome> => {
     await streamsFinished;
     const finishedAt = new Date().toISOString(), ok = code === 0;
     await writeManifest(jobDir, { ...manifest, status: ok ? "completed" : "failed", updatedAt: finishedAt, finishedAt,

@@ -19,14 +19,16 @@ export function register(server: McpServer): void {
   });
   server.registerTool("live_sessions", {
     title: "◆ phren · live sessions",
-    description: "List the live agent sessions on this computer and every enrolled computer: computer, project, harness, status, role and the target hand_off takes. Computers that could not be reached are listed separately.",
+    description: "List the live agent sessions on this computer and every enrolled computer: computer, project, harness, status, idleFor (seconds since the tab last changed), role and the target hand_off takes. Computers that could not be reached are listed separately, and computers registered in the store but not linked in hooks.yaml come back in notLinked: their sessions are unknown, not absent.",
     inputSchema: {},
   }, async () => {
     try {
       const result = await listLiveSessions();
       const note = result.peerError ? ` Enrolled computers were skipped: ${result.peerError}`
-        : result.enrolled === 0 ? " No other computers are enrolled here; run `phren bridge enroll-computer` to add them." : "";
-      return mcpResponse({ ok: true, data: result, message: `${result.sessions.length} live sessions across ${result.enrolled + 1} computers.${note}` });
+        : result.enrolled === 0 && !result.notLinked.length ? " No other computers are enrolled here; run `phren bridge enroll-computer` to add them." : "";
+      const unlinked = result.notLinked.length
+        ? ` Not linked, so not checked (this does not mean nothing is running there): ${result.notLinked.map(item => item.name).join(", ")}. Link one with \`phren bridge enroll-computer\`.` : "";
+      return mcpResponse({ ok: true, data: result, message: `${result.sessions.length} live sessions across ${result.enrolled + 1} computers.${note}${unlinked}` });
     } catch (error) {
       return mcpResponse({ ok: false, error: error instanceof Error ? error.message : "Could not list live sessions." });
     }

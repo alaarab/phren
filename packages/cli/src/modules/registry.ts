@@ -90,7 +90,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
         "/v1/push/register", "/v1/push/answer", "/v1/files", "/v1/projects/add", "/v1/simulators/action",
         "/v1/workspaces/launch", "/v1/workspaces/create", "/v1/workspaces/focus", "/v1/workspaces/rename",
         "/v1/workspaces/close", "/v1/prompt", "/v1/model", "/v1/keys", "/v1/secret", "/v1/upload",
-        "/v1/approvals/answer", "/v1/questions/answer", "/v1/subagents/resume", "/v1/canary",
+        "/v1/approvals/answer", "/v1/questions/answer", "/v1/subagents/resume", "/v1/subagents/archive-finished", "/v1/canary",
       ]),
       ...routes("WS", ["/v1/transcripts", "/v1/status"]),
     ],

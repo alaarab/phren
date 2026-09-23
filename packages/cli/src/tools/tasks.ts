@@ -424,10 +424,16 @@ export function register(server: McpServer, ctx: McpContext): void {
           promote: z.boolean().optional().describe("If true, clear the speculative flag on this task (confirm the user wants it)."),
           move_to_active: z.boolean().optional().describe("Used with promote: also move the task to the Active section."),
           work_next: z.boolean().optional().describe("If true, pick the highest-priority Queue item and move it to Active. Ignores item param."),
+          item: z.unknown().optional().describe("Not read here: item is a top-level parameter beside updates."),
         }).describe("Fields to update. All are optional."),
       }),
     },
-    async ({ project: projectInput, item, updates }) => {
+    async ({ project: projectInput, item, updates: given }) => {
+      // A caller that nests item inside updates would otherwise hear only that item is missing.
+      const { item: misplacedItem, ...updates } = given;
+      if (misplacedItem !== undefined) {
+        return mcpResponse({ ok: false, error: "item is a top-level parameter, not a field of updates. Pass it beside updates: { project, item, updates }." });
+      }
       const resolved = resolveStoreForProject(ctx, projectInput);
       const project = resolved.project;
       const targetPath = resolved.phrenPath;

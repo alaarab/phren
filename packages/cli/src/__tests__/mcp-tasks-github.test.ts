@@ -127,6 +127,17 @@ describe("mcp-tasks GitHub issue tools", () => {
     expect(task.data.items.Queue[0].githubUrl).toBe("https://github.com/alaarab/phren/issues/14");
   });
 
+  it("says item is a top-level parameter when it is nested inside updates", async () => {
+    const res = parseResult(await server.call("update_task", {
+      project,
+      updates: { item: "bid:deadbeef", section: "Active" },
+    }));
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/item is a top-level parameter/);
+    const task = readTasks(tmp.path, project);
+    expect(task.ok && task.data.items.Queue).toHaveLength(1);
+  });
+
   it("creates and links a GitHub issue via update_task", async () => {
     const res = parseResult(await server.call("update_task", {
       project,
