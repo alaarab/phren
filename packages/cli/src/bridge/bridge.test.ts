@@ -2247,7 +2247,7 @@ schedules:
       expect(run.data.ok).toBe(false);
       const conductor = run.data.steps.find((item: { name: string }) => item.name === "conductor");
       expect(conductor).toMatchObject({ status: "failed" });
-      expect(conductor.reason).toContain("agent not detected");
+      expect(conductor.reason).toContain("is not an available shell");
       expect(commands.filter(c => c.method === "workspace.close").map(c => c.params.workspace_id)).toEqual(["w9"]);
     });
 
