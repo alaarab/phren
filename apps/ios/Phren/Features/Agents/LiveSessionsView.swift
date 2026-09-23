@@ -688,6 +688,16 @@ private struct LiveHostView: View {
                             }
                         }
                     }
+                    // Health lives in the page, not the toolbar: a fifth
+                    // toolbar item pushes the terminal into the overflow menu.
+                    if let host {
+                        NavigationLink { HookHealthView(hostID: host.id) } label: {
+                            PhrenRow(icon: "stethoscope", title: "Health")
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("host-health")
+                        .padding(.top, 8)
+                    }
                 }
 
             }
@@ -706,8 +716,6 @@ private struct LiveHostView: View {
                         .accessibilityIdentifier("host-simulators")
                     NavigationLink { HostFilesView(hostID: host.id) } label: { Label("Files", systemImage: "folder") }
                         .accessibilityIdentifier("host-files")
-                    NavigationLink { HookHealthView(hostID: host.id) } label: { Label("Health", systemImage: "stethoscope") }
-                        .accessibilityIdentifier("host-health")
                     NavigationLink { HerdrWorkspacesView(hostID: host.id) } label: {
                         Label("Herdr workspaces & terminal", systemImage: "terminal")
                     }
