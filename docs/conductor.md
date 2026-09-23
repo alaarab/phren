@@ -33,6 +33,15 @@ effort. `POST /v1/workspaces/launch` accepts `role: "conductor"` with Claude,
 Codex or OpenCode, loads the shipped brief and gives Herdr an agent name
 starting with `conductor-`. Effort is `low`, `medium` or `high`.
 
+An agent (not a conductor) can start in a new worktree. The sheet's Work in a
+new worktree switch is off by default; turned on, it takes a branch name,
+suggested from the task's first line or `phren/<short-id>`. The Hook sends
+`worktree: { branch }` to `git worktree add`, from the project's current HEAD
+into `<repo>/.claude/worktrees/<name>`, and starts the agent there. It refuses
+a folder that is not a Git repository and a branch that already exists, with a
+message the phone shows. The worktree then appears in the session's Changes >
+Workers tab, named for the agent working in it.
+
 The Hook checks its Herdr servers for an existing conductor before launching
 another and returns 409 with the existing target when one is found. This is a
 check on that computer's Hook; it is not a distributed lock across computers.

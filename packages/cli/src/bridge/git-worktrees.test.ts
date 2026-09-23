@@ -9,6 +9,7 @@ import { gitStatus, gitTree } from "./git.js";
 import { gitWorktrees, resolveWorktree, worktreeId } from "./git-worktrees.js";
 import { claudeChildCheckout } from "./transcript-claude.js";
 import { BridgeError } from "./protocol.js";
+import { herdrWorktreeWorkers } from "./server-pane-routes.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -66,6 +67,22 @@ describe("worker worktrees", () => {
     ]) as { worktrees: Worktree[] };
     expect(worktrees[0].worker).toEqual({ label: "Fix the parser", provider: "claude", child: "a".repeat(32), state: "running" });
     expect(worktrees[1].worker).toEqual({ label: "Review bridge", provider: "opencode", state: "running" });
+  });
+
+  it("names a Herdr agent's worktree, and never the primary checkout around a nested worktree", async () => {
+    const { root, inside } = await repository();
+    const workers = herdrWorktreeWorkers({
+      panes: [
+        { pane_id: "w1:p1", agent: "claude", agent_status: "working", cwd: inside, foreground_cwd: inside },
+        { pane_id: "w1:p2", cwd: root },
+      ],
+      agents: [{ pane_id: "w1:p1", name: "phone-2" }],
+    });
+    expect(workers).toEqual([{ cwd: inside, label: "phone-2", provider: "claude", state: "working" }]);
+    const fromInside = (await gitWorktrees(path.join(root, ".claude/worktrees/agent-one"), workers) as { worktrees: Worktree[] }).worktrees;
+    expect(fromInside.find(worktree => worktree.main)?.worker).toBeUndefined();
+    const fromRoot = (await gitWorktrees(root, workers) as { worktrees: Worktree[] }).worktrees;
+    expect(fromRoot.find(worktree => worktree.path === ".claude/worktrees/agent-one")?.worker).toEqual({ label: "phone-2", provider: "claude", state: "working" });
   });
 
   it("resolves only listed worktree ids, and git routes read that checkout like the main tree", async () => {
