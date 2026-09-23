@@ -92,7 +92,7 @@ describe("phren store sync with real Git repositories", () => {
     expect(git(local, "status", "--porcelain")).toBe("");
     expect(fs.existsSync(path.join(local, ".git", "MERGE_HEAD"))).toBe(false);
     expect(fs.existsSync(path.join(local, ".git", "rebase-merge"))).toBe(false);
-    expect(output).toContain("union-merged store markdown");
+    expect(output).toContain("resolved conflicts in project/FINDINGS.md");
   });
 
   it("aborts a conflict outside the union set and reports its exact path", async () => {
