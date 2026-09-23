@@ -59,7 +59,7 @@ import {
   extractConflictVersions,
 } from "./shared/content.js";
 import { isValidProjectName } from "./utils.js";
-import { grantAdmin, initTestPhrenRoot, makeTempDir, suppressOutput } from "./test-helpers.js";
+import { grantAdmin, initTestPhrenRoot, makeTempDir, resetTestPhrenPath, suppressOutput } from "./test-helpers.js";
 import * as path from "path";
 import * as fs from "fs";
 import * as yaml from "js-yaml";
@@ -90,11 +90,11 @@ function readVersionedEntries<T>(filePath: string): Record<string, T> {
 }
 
 beforeEach(() => {
-  delete process.env.PHREN_PATH;
+  resetTestPhrenPath();
 });
 
 afterEach(() => {
-  delete process.env.PHREN_PATH;
+  resetTestPhrenPath();
   delete process.env.PHREN_ACTOR;
   if (tmpCleanup) {
     tmpCleanup();
@@ -155,6 +155,8 @@ describe("findPhrenPath", () => {
     const tmp = makeTempDir("fakehome-");
     const origHome = process.env.HOME;
     const origCwd = process.cwd();
+    // Resolved without PHREN_PATH, from a temp cwd.
+    delete process.env.PHREN_PATH;
     process.env.HOME = tmp.path;
     process.chdir(tmp.path);
     try {
@@ -173,6 +175,8 @@ describe("findPhrenPath", () => {
     initTestPhrenRoot(dotPhren);
     const origHome = process.env.HOME;
     const origCwd = process.cwd();
+    // Resolved without PHREN_PATH, from a temp cwd.
+    delete process.env.PHREN_PATH;
     process.env.HOME = tmp.path;
     process.chdir(tmp.path);
     try {
@@ -195,6 +199,8 @@ describe("findPhrenPath", () => {
 
     const origCwd = process.cwd();
     const origHome = process.env.HOME;
+    // Resolved without PHREN_PATH, from a temp cwd.
+    delete process.env.PHREN_PATH;
     process.env.HOME = path.join(tmp.path, "home");
     fs.mkdirSync(process.env.HOME, { recursive: true });
     process.chdir(nestedDir);
@@ -213,6 +219,8 @@ describe("ensurePhrenPath", () => {
     const tmp = makeTempDir("fakehome-");
     const origHome = process.env.HOME;
     const origCwd = process.cwd();
+    // Resolved without PHREN_PATH, from a temp cwd.
+    delete process.env.PHREN_PATH;
     process.env.HOME = tmp.path;
     process.chdir(tmp.path);
     try {
@@ -1965,6 +1973,8 @@ describe("findPhrenPathWithArg", () => {
     const tmp = makeTempDir("fakehome-no-phren-");
     const origHome = process.env.HOME;
     const origCwd = process.cwd();
+    // Resolved without PHREN_PATH, from a temp cwd.
+    delete process.env.PHREN_PATH;
     process.env.HOME = tmp.path;
     process.chdir(tmp.path);
     try {

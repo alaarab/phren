@@ -1008,7 +1008,8 @@ export async function launchSession(server: string, data: Json): Promise<Json> {
   const model = typeof data.model === "string" && data.model.trim() ? plainText(200).parse(data.model.trim()) : undefined;
   const modelFlag: Partial<Record<(typeof launchKinds)[number], string>> = { codex: "--model", claude: "--model", opencode: "--model" };
   const workspace = data.workspaceId === undefined ? undefined : id.parse(data.workspaceId);
-  const timeout = Math.min(120_000, Math.max(3_000, data.timeoutMs === undefined ? 45_000 : z.number().int().parse(data.timeoutMs)));
+  // Herdr 0.9.1 refuses a start timeout of 3000 ms or less (invalid_agent_timeout).
+  const timeout = Math.min(120_000, Math.max(3_001, data.timeoutMs === undefined ? 45_000 : z.number().int().parse(data.timeoutMs)));
   const before = await snapshot(server);
   // Herdr agent names are unique per server; a scheduled run or a second
   // launch with the same label would otherwise collide with the first.

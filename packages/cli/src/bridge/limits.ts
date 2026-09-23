@@ -33,3 +33,12 @@ export class LaunchLimiter {
     try { return await work(); } finally { this.active = false; }
   }
 }
+
+/** A millisecond interval read once at startup from the environment variable
+ * `name`, when it is a number within `[min, max]`; otherwise `fallback`.
+ * Tests shorten these. */
+export function intervalFromEnv(name: string, fallback: number, min = 0, max = 60_000): number {
+  const raw = process.env[name];
+  const value = Number(raw);
+  return raw && Number.isFinite(value) && value >= min && value <= max ? Math.floor(value) : fallback;
+}

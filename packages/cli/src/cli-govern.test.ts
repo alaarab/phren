@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
-import { makeTempDir, writeFile, grantAdmin, suppressOutput } from "./test-helpers.js";
+import { makeTempDir, writeFile, grantAdmin, suppressOutput, resetTestPhrenPath } from "./test-helpers.js";
 
 let tmpDir: string;
 let tmpCleanup: (() => void) | undefined;
@@ -28,13 +28,13 @@ async function importGovern(phrenDir: string) {
 }
 
 beforeEach(() => {
-  delete process.env.PHREN_PATH;
+  resetTestPhrenPath();
   delete process.env.PHREN_PROFILE;
   delete process.env.PHREN_MEMORY_TTL_DAYS;
 });
 
 afterEach(() => {
-  delete process.env.PHREN_PATH;
+  resetTestPhrenPath();
   delete process.env.PHREN_PROFILE;
   delete process.env.PHREN_MEMORY_TTL_DAYS;
   delete process.env.PHREN_ACTOR;
