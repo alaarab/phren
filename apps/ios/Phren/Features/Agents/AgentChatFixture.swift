@@ -314,14 +314,31 @@ import UniformTypeIdentifiers
                ("assistant", "Remote parser fixture marker: the nested route stayed on Linuxbox.")]
             : [("user", "Run swift test in PhrenKit and the simulator suite; report failures only."),
                ("assistant", "Child tests marker: PhrenKit suite is running.")]
-        let entries: [[String: Any]] = turns.enumerated().map { index, turn in
+        // `--child-history`: the audit child's first page starts at line 20,
+        // under a screenful of rows, so its earlier page loads on scrolling up.
+        let paged = child == auditChild && flag("--child-history")
+        let start = paged ? 20 : 0
+        let filler = paged ? (0..<30).map { ("assistant", "Child later step \($0): checked another fold rule in the timeline models and compared it with the grouped rows the phone draws.") } : []
+        let entries = childEntries(child: child, turns: turns + filler, from: start)
+        let frame: [String: Any] = ["type": "backlog", "source": "claude", "session": child, "entries": entries,
+                                    "startLine": start, "totalLines": start + entries.count, "hasMore": paged]
+        return try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: frame), source: "claude", sidechain: true, session: child)
+    }
+    /// The page before `before` of the `--child-history` audit child.
+    static func childHistory(child: String, before: Int) -> AgentChatTranscript? {
+        guard child == auditChild, flag("--child-history"), before == 20 else { return nil }
+        let turns = [("assistant", "Child earlier marker: the first fold rule it read.")]
+            + (1..<20).map { ("assistant", "Child earlier step \($0).") }
+        let frame: [String: Any] = ["type": "older", "source": "claude", "session": child, "entries": childEntries(child: child, turns: turns, from: 0),
+                                    "startLine": 0, "totalLines": 20 + 33, "hasMore": false]
+        return try? AgentChatTranscript.read(JSONSerialization.data(withJSONObject: frame), source: "claude", sidechain: true, session: child)
+    }
+    private static func childEntries(child: String, turns: [(String, String)], from start: Int) -> [[String: Any]] {
+        turns.enumerated().map { index, turn in
             let message: [String: Any] = ["role": turn.0, "content": [["type": "text", "text": turn.1]]]
             let raw: [String: Any] = ["type": turn.0, "isSidechain": true, "agentId": child, "message": message]
-            return ["line": index, "raw": raw]
+            return ["line": start + index, "raw": raw]
         }
-        let frame: [String: Any] = ["type": "backlog", "source": "claude", "session": child,
-                                    "entries": entries, "startLine": 0, "totalLines": entries.count, "hasMore": false]
-        return try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: frame), source: "claude", sidechain: true, session: child)
     }
     static var clearedFinishedWorkers = false
     /// Clear finished: the fixture Hook archives the finished worker and

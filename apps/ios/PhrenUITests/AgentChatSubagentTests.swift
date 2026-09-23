@@ -42,6 +42,22 @@ final class AgentChatSubagentTests: AgentChatUITestCase {
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Read ChatTimelineModels.swift")).firstMatch.waitForExistence(timeout: 3))
     }
 
+    /// A long child transcript loads its earlier page on scrolling up, with no button to tap.
+    @MainActor
+    func testChildTranscriptLoadsEarlierActivityOnScrollingUp() {
+        let app = launch(extra: ["--chat-agent-card", "--child-history"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let open = app.buttons["chat-agent-transcript:agent-audit"]
+        XCTAssertTrue(open.waitForExistence(timeout: 8)); open.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Child later step 29")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["child-agent-older"].exists, "No Show earlier activity button")
+        let earlier = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Child earlier marker")).firstMatch
+        XCTAssertFalse(earlier.exists, "The earlier page waits until the reader scrolls up")
+        for _ in 0..<10 where !(earlier.exists && earlier.isHittable) { app.swipeDown(velocity: .fast) }
+        XCTAssertTrue(earlier.waitForExistence(timeout: 5))
+        capture(app, "Child transcript after scrolling up")
+    }
+
     @MainActor
     func testSubagentCardOpensItsOwnTranscriptAndTheComposerBadgeCountsRunningAgents() {
         let app = launch(extra: ["--chat-agent-card"])

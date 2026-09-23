@@ -35,9 +35,9 @@ final class AccountUsageCacheTests: XCTestCase {
         let quotas = AccountUsageRingSelection.primaryWindows(in: accounts)
 
         XCTAssertEqual(quotas.map(\.source), ["claude"])
-        XCTAssertEqual(quotas.first?.window.id, "five_hour")
-        XCTAssertEqual(quotas.first?.window.usedPercent, 40)
-        XCTAssertEqual(AccountUsageRingSelection.accessibilityValue(quotas), "Claude 40%")
+        XCTAssertEqual(quotas.first?.window.id, "seven_day")
+        XCTAssertEqual(quotas.first?.window.usedPercent, 16)
+        XCTAssertEqual(AccountUsageRingSelection.accessibilityValue(quotas), "Claude 16%")
     }
 
     func testHeaderRingsIgnoreOpenCodeGoWithoutAReportedLimit() throws {

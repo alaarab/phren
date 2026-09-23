@@ -38,11 +38,15 @@ public struct MergedAccountUsage: Identifiable, Equatable, Sendable {
         return windows.sorted { rank($0) != rank($1) ? rank($0) < rank($1) : $0.id < $1.id }
     }
 
-    /// The window the header ring draws: the first window the page shows
-    /// with a percentage (Claude's 5-hour window), never a different or
-    /// higher window such as the per-model weekly allowance.
+    /// The window the header ring draws. For Claude it is the 7-day
+    /// all-models window, never the 5-hour window or a per-model weekly
+    /// allowance; elsewhere it is the first window the page shows with a
+    /// percentage.
     public var primaryWindow: AccountUsageSnapshot.Window? {
-        displayWindows.first { $0.usedPercent != nil }
+        if source == "claude", let week = displayWindows.first(where: { $0.id == "seven_day" && $0.usedPercent != nil }) {
+            return week
+        }
+        return displayWindows.first { $0.usedPercent != nil }
     }
 
     public static func merge(_ reports: [(computer: String, snapshot: AccountUsageSnapshot?)], at now: Date) -> [MergedAccountUsage] {

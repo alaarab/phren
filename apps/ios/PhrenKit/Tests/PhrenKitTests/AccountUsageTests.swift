@@ -24,8 +24,7 @@ final class AccountUsageTests: XCTestCase {
         XCTAssertEqual(claude.windows.map(\.id), ["five_hour", "seven_day", "seven_day_fable"])
         XCTAssertEqual(claude.windows.map(\.usedPercent), [40, 16, 18], "The newest whole report wins, not the maximum for each window")
         XCTAssertEqual(claude.windows.map(\.name), ["5-hour limit", "7-day, all models", "7-day, Fable"])
-        XCTAssertEqual(claude.primaryWindow?.id, "five_hour")
-        XCTAssertEqual(claude.primaryWindow?.usedPercent, 40)
+        XCTAssertEqual(claude.primaryWindow?.id, "seven_day")
         XCTAssertEqual(claude.origin, "status-line")
         XCTAssertEqual(claude.updatedAt, ISO8601Dates.parse("2026-09-15T20:29:30Z"))
         XCTAssertFalse(claude.stale)
@@ -36,10 +35,9 @@ final class AccountUsageTests: XCTestCase {
         XCTAssertTrue(value.accounts[0].windows.isEmpty)
         XCTAssertNil(value.accounts[0].updatedDate)
     }
-    /// The header ring draws primaryWindow, which must be the first window
-    /// the Account usage page shows (Claude's 5-hour window), even when the
-    /// per-model weekly allowance or the all-models window is higher.
-    func testRingBindsToTheFiveHourWindowThePageShowsFirst() throws {
+    /// The header ring draws primaryWindow: Claude's 7-day all-models window
+    /// (never the 5-hour or per-model weekly one), and Codex's first window.
+    func testRingBindsToClaudesSevenDayAllModelsWindow() throws {
         let now = try XCTUnwrap(ISO8601Dates.parse("2026-09-15T20:30:00Z"))
         let claudeReport = try AccountUsageSnapshot.read(Data(#"{"accounts":[{"source":"claude","origin":"status-line","updatedAt":"2026-09-15T20:29:30Z","windows":[{"id":"seven_day_fable","name":"7-day, Fable","usedPercent":90},{"id":"seven_day","name":"7-day, all models","usedPercent":70},{"id":"five_hour","name":"5-hour limit","usedPercent":5}]}]}"#.utf8))
         let codexReport = try AccountUsageSnapshot.read(Data(#"{"accounts":[{"source":"codex","updatedAt":"2026-09-15T20:29:30Z","windows":[{"id":"codex:primary","name":"5-hour limit","usedPercent":23.5},{"id":"codex:secondary","name":"7-day limit","usedPercent":41.2}]}]}"#.utf8))
@@ -47,8 +45,8 @@ final class AccountUsageTests: XCTestCase {
 
         let claude = try XCTUnwrap(merged.first { $0.source == "claude" })
         XCTAssertEqual(claude.displayWindows.map(\.id), ["five_hour", "seven_day_fable", "seven_day"])
-        XCTAssertEqual(claude.primaryWindow?.id, "five_hour", "The ring never jumps to a higher window")
-        XCTAssertEqual(claude.primaryWindow?.usedPercent, 5)
+        XCTAssertEqual(claude.primaryWindow?.id, "seven_day", "Not the 5-hour or the Fable-only window")
+        XCTAssertEqual(claude.primaryWindow?.usedPercent, 70)
 
         let codex = try XCTUnwrap(merged.first { $0.source == "codex" })
         XCTAssertEqual(codex.displayWindows.map(\.id), ["codex:primary", "codex:secondary"])

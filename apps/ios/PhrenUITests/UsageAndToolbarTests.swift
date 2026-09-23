@@ -54,7 +54,7 @@ final class UsageAndToolbarTests: XCTestCase {
         expectation(for: reported, evaluatedWith: rings)
         waitForExpectations(timeout: 8)
         let headerPrimary = rings.value as? String
-        XCTAssertEqual(headerPrimary, "Claude 40%")
+        XCTAssertEqual(headerPrimary, "Claude 16%")
         capture(app, "Sessions tab with usage rings")
         rings.tap()
         XCTAssertTrue(app.navigationBars["Account usage"].waitForExistence(timeout: 5))

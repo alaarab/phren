@@ -538,6 +538,8 @@ struct ChildAgentTranscriptView: View {
     @State private var loaded = false
     @State private var live = false
     @State private var loadingOlder = false
+    @State private var nearTop = false
+    @State private var pagingReady = false
     @State private var error: String?
     @State private var fullToolOutput: FullToolOutput?
     @State private var textSelection = ChatTextSelection()
@@ -566,6 +568,7 @@ struct ChildAgentTranscriptView: View {
     var body: some View {
         VStack(spacing: 0) {
             transcriptHeader
+            ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
                     if let error {
@@ -580,15 +583,10 @@ struct ChildAgentTranscriptView: View {
                         }.frame(maxWidth: .infinity).padding(.vertical, 40)
                     } else if loaded {
                         if history.hasMore {
-                            Button {
-                                Task { await loadOlder() }
-                            } label: {
-                                Label(loadingOlder ? "Loading earlier activity…" : "Show earlier activity", systemImage: "clock.arrow.circlepath")
-                                    .font(.caption).foregroundStyle(PhrenTheme.accent)
-                                    .padding(12).frame(maxWidth: .infinity, alignment: .leading).phrenPanel(tool: true)
-                            }
-                            .buttonStyle(.plain).disabled(loadingOlder)
-                            .accessibilityIdentifier("child-agent-older")
+                            // Scrolling to the top loads the earlier page, as in chat;
+                            // the first row stays where it was.
+                            ProgressView().frame(maxWidth: .infinity, minHeight: 32)
+                                .accessibilityLabel("Loading earlier activity")
                         }
                         if history.messages.isEmpty {
                             Text(agent.permissionRefused ? "The worker was refused before it ran." : agent.state == .running ? "Nothing recorded yet." : "This agent recorded no conversation.")
@@ -602,6 +600,21 @@ struct ChildAgentTranscriptView: View {
                         ProgressView("Loading agent transcript…").frame(maxWidth: .infinity).padding(.vertical, 48)
                     }
                 }.padding(.horizontal, 16).padding(.vertical, 12)
+            }
+            .defaultScrollAnchor(.bottom)
+            .modifier(ChatHistoryScrollObserver { near in
+                nearTop = near
+                if near { Task { await loadOlder(proxy) } }
+            })
+            .task(id: loaded) {
+                // Let the first page settle at the bottom before deciding
+                // whether the reader is at the top.
+                pagingReady = false
+                guard loaded else { return }
+                do { try await Task.sleep(for: .milliseconds(350)) } catch { return }
+                pagingReady = true
+                if nearTop { await loadOlder(proxy) }
+            }
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) { childComposer }
@@ -832,14 +845,32 @@ struct ChildAgentTranscriptView: View {
         }
     }
 
-    @MainActor private func loadOlder() async {
-        guard let before = history.startLine, before > 0, !loadingOlder else { return }
+    @MainActor private func loadOlder(_ proxy: ScrollViewProxy) async {
+        guard pagingReady, history.hasMore, let before = history.startLine, before > 0, !loadingOlder else { return }
         loadingOlder = true; defer { loadingOlder = false }
+        let anchor = entries.first?.id
         do {
+            #if DEBUG && targetEnvironment(simulator)
+            if AgentChatFixture.enabled {
+                guard let page = AgentChatFixture.childHistory(child: child, before: before) else { return }
+                history.receive(page)
+                keep(anchor, proxy)
+                return
+            }
+            #endif
             let page = try await PhrenConnection.childAgentHistory(host: session.host, privateKey: DeviceSSHKey.load(session.host.id),
                 target: target, child: child, provider: agent.provider, beforeLine: before)
             history.receive(page)
-        } catch { /* The earlier rows stay one tap away; the live tail keeps flowing. */ }
+            keep(anchor, proxy)
+        } catch { /* Scrolling back to the top tries again; the live tail keeps flowing. */ }
+    }
+
+    /// Holds the row that was first before the older page arrived at the top.
+    @MainActor private func keep(_ anchor: String?, _ proxy: ScrollViewProxy) {
+        guard let anchor else { return }
+        let row = entries.first { $0.id == anchor || $0.messages.contains { $0.id == anchor } }?.id ?? anchor
+        var transaction = Transaction(); transaction.disablesAnimations = true
+        withTransaction(transaction) { proxy.scrollTo(row, anchor: .top) }
     }
 }
 
