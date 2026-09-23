@@ -6,6 +6,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { fanoutRoot } from "./fanouts.js";
 import { bridgeRoot, type Json, object } from "./protocol.js";
+import { stripTerminal } from "../terminal-text.js";
 
 const exec = promisify(execFile);
 
@@ -71,7 +72,7 @@ export function codexUsage(value: unknown, now = new Date()): AccountUsage {
 
 /** Parse OpenCode's own cost ledger. `stats --days 7` is a rolling local view. */
 export function openCodeUsage(output: string, now = new Date()): AccountUsage {
-  const plain = output.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+  const plain = stripTerminal(output);
   const match = /Total Cost\s+\$([0-9][0-9,]*(?:\.[0-9]+)?)/i.exec(plain);
   const amountUSD = match ? Number(match[1].replace(/,/g, "")) : Number.NaN;
   if (!Number.isFinite(amountUSD) || amountUSD < 0 || amountUSD > 1_000_000_000) {
@@ -94,7 +95,7 @@ export async function readOpenCodeUsage(executable = "opencode", now = new Date(
 export function openCodeFailure(error: unknown): string {
   const failure = error as { code?: string | number; stderr?: string; killed?: boolean; signal?: string } | undefined;
   if (failure?.code === "ENOENT") return "OpenCode is not installed on this computer (opencode was not found on PATH).";
-  const said = String(failure?.stderr ?? "").replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").split(/\r?\n/)
+  const said = stripTerminal(String(failure?.stderr ?? "")).split(/\r?\n/)
     .map(line => line.replace(/[\x00-\x1f\x7f]/g, " ").trim()).find(Boolean)?.slice(0, 200);
   if (/not (logged|signed) in|no (credentials|providers?)|unauthori[sz]ed|opencode auth login/i.test(said ?? ""))
     return `OpenCode is not signed in on this computer. Run opencode auth login. (${said})`;
