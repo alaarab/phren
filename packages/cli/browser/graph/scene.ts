@@ -29,8 +29,9 @@ import {
   fitCameraToGraph,
   notifyClear,
   notifySelection,
+  followLayoutChange,
   onHover,
-  onNodeClick,
+  onCanvasClick,
   onNodeRightClick,
   runIntro,
   selectNode,
@@ -158,6 +159,7 @@ export function pushGraphData(): void {
   // node is pinned via fx/fy/fz so the force sim leaves the positions alone.
   const cageSpecs = computeHierarchicalLayout(nodes);
   state.fg.graphData({ nodes, links });
+  followLayoutChange();
   if (state.fg.scene) {
     cageScene = state.fg.scene();
     buildCages(cageScene!, cageSpecs, containerSize());
@@ -238,16 +240,14 @@ export function setupForceGraph(): void {
     .cooldownTicks(0)
     .d3AlphaDecay(1)
     .onNodeHover((node: FGNode | null) => onHover(node))
-    .onNodeClick((node: FGNode) => onNodeClick(node))
+    .onNodeClick((node: FGNode, event: MouseEvent) => onCanvasClick(event, node))
     .onNodeRightClick((node: FGNode, event: MouseEvent) => onNodeRightClick(node, event))
     .onNodeDragEnd((node: FGNode) => {
       node.fx = node.x;
       node.fy = node.y;
       node.fz = node.z;
     })
-    .onBackgroundClick(() => {
-      if (state.selectedNodeId || state.focusedProjectId) clearSelection();
-    });
+    .onBackgroundClick((event: MouseEvent) => onCanvasClick(event, null));
 
   state.fg = fg;
 

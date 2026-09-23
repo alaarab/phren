@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { state } from "../../browser/graph/state.js";
 import {
-  beginCameraInteraction, disposeSelectionCamera, endCameraInteraction,
+  anchorCamera, beginCameraInteraction, disposeSelectionCamera, endCameraInteraction, followLayout,
   frameSelection, recenterSelection, restoreSelectionCamera, setSelectionViewport, zoomCamera,
 } from "../../browser/graph/selection-camera.js";
 
@@ -144,6 +144,27 @@ describe("dossier camera", () => {
     restoreSelectionCamera();
     expect(camera.position.distanceTo(position)).toBeLessThan(0.000001);
     expect(frames.size).toBe(0);
+  });
+
+  it("follows the selected node when a new node set lays it out elsewhere", () => {
+    frameSelection("node");
+    settle();
+    // A Focus neighbourhood or a refresh recomputes the layout and moves it.
+    state.fgNodeById.set("node", { id: "node", x: -220, y: 140, z: -60, raw: {} as never });
+    expect(followLayout()).toBeNull();
+    settle();
+    expect(project().x).toBeCloseTo(196.5);
+    expect(project().y).toBeCloseTo(198);
+  });
+
+  it("hands a revealed node back to the host to fly to, until the user takes the camera", () => {
+    anchorCamera("next");
+    expect(followLayout()).toBe("next");
+    beginCameraInteraction();
+    endCameraInteraction();
+    expect(followLayout()).toBeNull();
+    anchorCamera("gone");
+    expect(followLayout()).toBeNull();
   });
 
   it("cancels an in-flight recenter and never pulls back during or after a drag", () => {

@@ -114,6 +114,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Memory viewer: the camera stays on the node it was sent to when the graph is laid out again. The layout depends on which nodes are shown, so a Focus neighbourhood, a refresh, a filter or a delete moved every node while the camera kept its old pose: after Focus the focused node was left off screen. A selected node is recentred in the free space above the dossier and a revealed node is flown to again, until the user pans, orbits or pinches.
+- Memory viewer: a tap selects the node under the finger. force-graph resolved a click to the object it last hovered, which it updates on a throttled render tick and which a touch never moves before it lands, so a tap selected the node under the previous tap, or nothing. The viewer now picks at the tap's own position, and of overlapping dots it takes the one whose centre is closest.
 - Project counts mean the same thing on every surface: everything a project
   holds (live findings, team journal findings and the whole archive) and every
   open task, from one shared count (`projectMemoryCounts`). The web UI graph,
