@@ -826,7 +826,7 @@ struct AgentChatView: View {
             }, at: 1)
         }
         if project != nil {
-            items.append(PhrenMenuItem(id: "context", title: "Project memory", systemImage: "brain", isEnabled: canAdd) {
+            items.append(PhrenMenuItem(id: "context", title: "Project memory", systemImage: "brain") {
                 // Let the menu dismiss before the context sheet slides up.
                 Task { try? await Task.sleep(for: .milliseconds(350)); showingContext = true }
             })

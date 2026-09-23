@@ -30,7 +30,8 @@ private struct PhrenAnchoredMenuModifier: ViewModifier {
     let identifier: String
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var cardHeight: CGFloat { CGFloat(items.count) * 44 }
+    /// Rows plus the hairlines between them, so the card sits exactly `gap` off the anchor.
+    private var cardHeight: CGFloat { CGFloat(items.count) * 44 + CGFloat(max(0, items.count - 1)) * 0.5 }
 
     func body(content: Content) -> some View {
         content
@@ -72,8 +73,9 @@ private struct PhrenAnchoredMenuModifier: ViewModifier {
         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
             .strokeBorder(PhrenTheme.border, lineWidth: 0.5))
         .shadow(color: .black.opacity(0.25), radius: 12, y: 4)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier(identifier)
+        // A marker, not an identifier on the card: a container identifier
+        // would replace the rows' own.
+        .phrenContainerMarker(identifier, label: "Menu")
     }
 
     private func row(_ item: PhrenMenuItem) -> some View {
