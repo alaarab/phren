@@ -20,6 +20,7 @@ import { answeredQuestionInput, numberedDialog, passwordLine, permissionPrompt, 
   type TerminalChoice, type TerminalQuestion } from "./terminal-choice.js";
 import { directoryNames, opencodeApprovalFile, opencodeRequest } from "./opencode-approvals.js";
 import { ApprovalWatchLeases, bindingPath, localSocket, PushBindingStore } from "./agent-hook-stores.js";
+import { countTick } from "./metrics.js";
 
 export { permissionPrompt, terminalChoice, visibleTerminalChoice, type TerminalChoice, type TerminalQuestion } from "./terminal-choice.js";
 export { ApprovalWatchLeases, PushBindingStore, recordedSession } from "./agent-hook-stores.js";
@@ -652,14 +653,14 @@ export class AgentHooks {
       this.opencodeWatcher = watch(this.approvalsDirectory(), { persistent: false }, () => this.scheduleOpencodeSweep());
       this.opencodeWatcher.on("error", () => { this.opencodeWatcher?.close(); this.opencodeWatcher = undefined; });
     } catch { this.opencodeWatcher = undefined; }
-    this.opencodePoll = setInterval(() => this.scheduleOpencodeSweep(), APPROVAL_SWEEP_MS);
+    this.opencodePoll = setInterval(() => { countTick("opencode-approvals"); this.scheduleOpencodeSweep(); }, APPROVAL_SWEEP_MS);
     this.opencodePoll.unref?.();
-    this.fanoutTimer = setInterval(() => { void this.sweepBlockedFanouts(); }, FANOUT_SWEEP_MS);
+    this.fanoutTimer = setInterval(() => { countTick("fanout-blocked"); void this.sweepBlockedFanouts(); }, FANOUT_SWEEP_MS);
     this.fanoutTimer.unref?.();
     // The archive sweep runs once at start so a long-dormant store clears
     // immediately, then hourly.
     void this.sweepFanoutArchive();
-    this.fanoutArchiveTimer = setInterval(() => { void this.sweepFanoutArchive(); }, FANOUT_ARCHIVE_MS);
+    this.fanoutArchiveTimer = setInterval(() => { countTick("fanout-archive"); void this.sweepFanoutArchive(); }, FANOUT_ARCHIVE_MS);
     this.fanoutArchiveTimer.unref?.();
     this.scheduleOpencodeSweep();
     void this.sweepBlockedFanouts();

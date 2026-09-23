@@ -13,6 +13,7 @@ import { getProjectOwnershipDefault, readProjectConfig } from "../project-config
 import { projectSlugFromPath } from "../phren-paths.js";
 import { runBestEffortGit } from "../cli/session-git.js";
 import { mergeStoreUpstream, type RunStoreGit } from "../sync/store-merge.js";
+import { countGit } from "./metrics.js";
 
 /**
  * "Add project" from the phone: the repositories on this computer that phren
@@ -84,7 +85,7 @@ export async function candidateRepos(activity: Json[], env: NodeJS.ProcessEnv = 
       const parent = path.dirname(existing); if (parent === existing) return undefined;
       existing = parent;
     }
-    try { return (await exec("git", ["-C", existing, "rev-parse", "--show-toplevel"], { env: nonInteractiveGitEnv(), timeout: 5_000 })).stdout.trim() || undefined; } catch { return undefined; }
+    try { countGit("enroll"); return (await exec("git", ["-C", existing, "rev-parse", "--show-toplevel"], { env: nonInteractiveGitEnv(), timeout: 5_000 })).stdout.trim() || undefined; } catch { return undefined; }
   };
   for (const event of [...activity].reverse()) {
     const directory = typeof event.directory === "string" ? event.directory : undefined;
@@ -158,6 +159,7 @@ export async function enrollProject(input: EnrollInput, env: NodeJS.ProcessEnv =
     try { await stat(directory); throw new BridgeError(409, `${directory} already exists on this computer. Add that folder instead.`); }
     catch (error) { if (error instanceof BridgeError) throw error; }
     try {
+      countGit("enroll");
       await exec("git", ["clone", "--", url, directory], { timeout: 180_000, maxBuffer: 4_194_304, env: nonInteractiveGitEnv(env) });
     } catch (error) {
       const detail = error instanceof Error && "stderr" in error ? String((error as { stderr?: string }).stderr ?? "").trim().split("\n").pop() : undefined;

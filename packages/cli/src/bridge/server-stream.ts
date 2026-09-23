@@ -11,6 +11,7 @@ import type { HookInfo } from "./server-routes.js";
 import { TranscriptPreviewStream } from "./transcript-preview.js";
 import { childAgent, childAgentTree, refreshTranscript, TranscriptReader, transcriptPath } from "./transcripts.js";
 import type { ModuleSnapshot } from "../modules/runtime.js";
+import { countTick } from "./metrics.js";
 
 /** The WebSocket transcript and status streams: the backlog, appended rows and
  * previews on a tick loop, older pages on request, and the pane's status. */
@@ -202,7 +203,7 @@ export function transcriptStreams(ctx: StreamContext) {
       }
       if (abort.signal.aborted) { stop(); return; }
       ready = true;
-      timer = setInterval(() => { void tick(); }, reader || awaitingTranscript ? 500 : 1500);
+      timer = setInterval(() => { countTick(url.pathname === "/v1/transcripts" ? "stream-transcripts" : "stream-status"); void tick(); }, reader || awaitingTranscript ? 500 : 1500);
       await tick();
     } catch (error) { stop(); throw error; }
   }
