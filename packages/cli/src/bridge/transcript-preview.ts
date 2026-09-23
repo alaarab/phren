@@ -156,6 +156,15 @@ export class TranscriptPreviewStream {
     for (const { raw, line } of entries) {
       if (line <= this.observedLine) continue;
       this.observedLine = line;
+      if (this.target.source === "codex") {
+        // Codex brackets a turn with task_started and task_complete; its
+        // delta source is only read between them.
+        const payload = object(raw.payload);
+        if (raw.type === "event_msg" && payload.type === "task_started") this.ended = false;
+        else if (raw.type === "response_item" && payload.type === "message" && payload.role === "user") this.ended = false;
+        else if (raw.type === "event_msg" && ["task_complete", "task_completed", "turn_aborted", "task_aborted"].includes(String(payload.type))) this.ended = true;
+        continue;
+      }
       if (this.target.source !== "claude") continue;
       const message = object(raw.message), blocks = objects(message.content);
       if (raw.type === "user" && !raw.phrenQueued && !raw.isMeta && !blocks.some(b => b.type === "tool_result")) {
@@ -163,6 +172,11 @@ export class TranscriptPreviewStream {
         if (prompt.trim() && typeof raw.timestamp === "string" && Number.isFinite(Date.parse(raw.timestamp))) {
           this.startedAt = raw.timestamp; this.prompt = prompt; this.landed = false; this.ended = false; this.wasWorking = false; this.verb = undefined;
         }
+      } else if (this.startedAt && ((raw.type === "assistant" && message.stop_reason === "end_turn")
+        || (raw.type === "system" && raw.subtype === "turn_duration"))) {
+        // The transcript says the turn is over before the shared snapshot
+        // (up to 2.5 s old) stops saying "working": stop reading the pane now.
+        this.landed = true; this.ended = true; this.verb = undefined;
       } else if (this.startedAt && (raw.type === "assistant" || blocks.some(b => b.type === "tool_result"))) this.landed = true;
     }
   }
@@ -175,7 +189,7 @@ export class TranscriptPreviewStream {
       if (this.target.source === "codex" || this.target.source === "opencode") {
         // These harnesses own a delta source. Never scrape their pane, even
         // when the source is temporarily empty or unavailable.
-        next = await this.delta(file);
+        if (!this.ended) next = await this.delta(file);
       } else if (this.target.source === "claude" && this.startedAt && !this.ended) {
         if (readAt - this.lastRead < PREVIEW_INTERVAL_MS) return undefined;
         this.lastRead = readAt;

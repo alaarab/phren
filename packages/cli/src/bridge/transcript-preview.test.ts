@@ -41,12 +41,49 @@ describe("live reply previews", () => {
     expect(pane).toHaveBeenCalledTimes(1);
     expect(await stream.update("working", undefined, 500)).toEqual({ preview: { turnStartedAt: start, text: words } });
     expect(await stream.update("working", undefined, 1000)).toBeUndefined();
-    stream.observe([{ line: 1, raw: { type: "assistant", timestamp: "2026-09-22T10:00:01Z", message: { content: words, stop_reason: "end_turn" } } }]);
+    stream.observe([{ line: 1, raw: { type: "assistant", timestamp: "2026-09-22T10:00:01Z", message: { content: words, stop_reason: "tool_use" } } }]);
     // The text stops at the real entry; Claude's spinner verb carries on.
     expect(await stream.update("working", undefined, 1600)).toEqual({ preview: null });
     expect(stream.verb).toBe("Working");
     await stream.update("idle", undefined, 2600);
     expect(stream.verb).toBeUndefined();
+  });
+
+  it("stops reading the pane when the transcript ends the turn, though the snapshot still says working", async () => {
+    const pane = vi.fn(async () => "❯ Explain this\n⏺ Partial reply\n✻ Working… (esc to interrupt)\n❯");
+    for (const end of [
+      { type: "assistant", timestamp: "2026-09-22T10:00:02Z", message: { content: [{ type: "text", text: "Done." }], stop_reason: "end_turn" } },
+      { type: "system", subtype: "turn_duration", durationMs: 2000, timestamp: "2026-09-22T10:00:02Z" },
+    ]) {
+      pane.mockClear();
+      const stream = new TranscriptPreviewStream(target, pane);
+      stream.observe([user]);
+      expect(await stream.update("working", undefined, 0)).toEqual({ preview: { turnStartedAt: start, text: "Partial reply" } });
+      stream.observe([{ line: 1, raw: end }]);
+      expect(stream.verb).toBeUndefined();
+      // A stale shared snapshot keeps reporting "working" for up to 2.5 s.
+      expect(await stream.update("working", undefined, 600)).toEqual({ preview: null });
+      for (const at of [1200, 1800, 2400]) expect(await stream.update("working", undefined, at)).toBeUndefined();
+      expect(pane).toHaveBeenCalledTimes(1);
+      // The next prompt resumes reads.
+      stream.observe([{ line: 2, raw: { ...user.raw, timestamp: "2026-09-22T10:01:00Z" } }]);
+      expect((await stream.update("working", undefined, 3000))?.preview?.turnStartedAt).toBe("2026-09-22T10:01:00Z");
+      expect(pane).toHaveBeenCalledTimes(2);
+    }
+  });
+
+  it("stops reading a Codex delta source after task_complete until the next turn starts", async () => {
+    const codex: Target = { ...target, source: "codex" };
+    const delta = vi.fn(async () => ({ turnStartedAt: start, text: "Streaming" }));
+    const stream = new TranscriptPreviewStream(codex, async () => "", delta);
+    stream.observe([{ line: 0, raw: { type: "event_msg", timestamp: start, payload: { type: "task_started" } } }]);
+    expect(await stream.update("working", undefined, 0)).toEqual({ preview: { turnStartedAt: start, text: "Streaming" } });
+    stream.observe([{ line: 1, raw: { type: "event_msg", timestamp: start, payload: { type: "task_complete" } } }]);
+    expect(await stream.update("working", undefined, 600)).toEqual({ preview: null });
+    expect(delta).toHaveBeenCalledTimes(1);
+    stream.observe([{ line: 2, raw: { type: "event_msg", timestamp: start, payload: { type: "task_started" } } }]);
+    await stream.update("working", undefined, 1200);
+    expect(delta).toHaveBeenCalledTimes(2);
   });
 
   it("clears at stop and does not resurrect a preview from unchanged terminal content", async () => {
