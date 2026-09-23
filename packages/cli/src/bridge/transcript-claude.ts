@@ -230,6 +230,27 @@ export function isNarration(block: Record<string, unknown>): boolean {
   return bytes.subarray(0, 96).includes(Buffer.from([0x42, 0x09, ...Buffer.from("narration")]));
 }
 
+/** The largest injection the phone is sent; the hook's own budget keeps real ones far smaller. */
+const HOOK_CONTEXT_LIMIT = 16_384;
+
+/** A phren UserPromptSubmit injection, as `{ type: "phren_hook_context",
+ * parentUuid, content }`, or undefined for any other row. */
+export function phrenHookContext(raw: Json, includeSidechain = false): Json | undefined {
+  if (raw.type !== "attachment" || (raw.isSidechain && !includeSidechain)) return undefined;
+  const attachment = object(raw.attachment);
+  // Input Claude takes mid-turn arrives as a queued_command row right before
+  // its hook output. Only whether it was a background notification crosses,
+  // so the phone can leave a notification's injection out.
+  if (attachment.type === "queued_command") {
+    return { type: "phren_turn_input", timestamp: raw.timestamp, notification: attachment.commandMode === "task-notification" };
+  }
+  if (attachment.type !== "hook_success" || attachment.hookEvent !== "UserPromptSubmit") return undefined;
+  const content = typeof attachment.content === "string" ? attachment.content : "";
+  if (!/^\s*◆ phren\b/.test(content) && !content.includes("<phren-context>")) return undefined;
+  return { type: "phren_hook_context", timestamp: raw.timestamp, uuid: raw.uuid, parentUuid: raw.parentUuid,
+    content: content.length > HOOK_CONTEXT_LIMIT ? content.slice(0, HOOK_CONTEXT_LIMIT) + "\n…" : content };
+}
+
 /** Claude Code rows the phone may see: user, assistant and system turns with
  * private reasoning redacted, queued phone messages, background task
  * notifications and compaction markers. */
@@ -279,6 +300,11 @@ export function visibleClaudeEvent(raw: Json, includeSidechain = false): Json | 
     return { type: "user", isCompactSummary: true, timestamp: raw.timestamp,
       message: { role: "user", content: (typeof content === "string" ? content : "").slice(0, 4_000) } };
   }
+  // What phren's prompt hook injected into a user turn: Claude Code records
+  // the hook's output as an attachment row pointing at that turn. Only
+  // phren's own output crosses; other hooks' output stays private.
+  const hookContext = phrenHookContext(raw, includeSidechain);
+  if (hookContext) return hookContext;
   if (raw.isMeta || (raw.isSidechain && !includeSidechain) || !["user", "assistant", "system"].includes(String(raw.type))) return undefined;
   raw = Object.fromEntries(Object.entries(raw).filter(([key]) => CLAUDE_KEYS.has(key)));
   const message = unwrapUserText(object(raw.message));

@@ -82,7 +82,7 @@ extension ChatTranscriptPreparation {
                 let activity = ChatTurnActivity(ownerID: owner.id, startedAt: start, finishedAt: turn.finishedAt, phase: turn.phase,
                                                 verb: verb, fromHarness: said != nil)
                 // The final assistant text is the reply; earlier text can be tool commentary.
-                let reply = rows.last { $0.role == .assistant && $0.localCommand == nil && !$0.isNarration }
+                let reply = rows.last { $0.role == .assistant && $0.localCommand == nil && !$0.isNarration && !$0.isHookContext }
                 let anchor = reply ?? users.first { $0.line > owner.line }
                 let position = anchor.flatMap { anchor in entries.firstIndex { $0.messages.contains { $0.id == anchor.id } } } ?? entries.count
                 insertions[position, default: []].append(activityEntry(activity))

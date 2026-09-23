@@ -573,7 +573,8 @@ final class AgentChatModel {
         // question lifecycle; a reconnect delta is partial and leaves it alone.
         if frame.kind != .older { questionState.receive(frame.questionEvents, reset: frame.replacesConversation) }
         reveal.receive(frame, previous: messages, animated: animateReplies && hasTranscript && !hadPreview)
-        if frame.messages.contains(where: { $0.line > submittedAfterLine && $0.role != .user }) { awaitingReply = false }
+        // phren's own hook output lands with the person's turn, not as the reply.
+        if frame.messages.contains(where: { $0.line > submittedAfterLine && $0.role != .user && !$0.isHookContext }) { awaitingReply = false }
         if !connection.progressConnected, !frame.progressEvents.isEmpty || frame.replacesConversation { acceptProgress(frame) }
         acceptContext(frame)
         // A backlog after the transcript was already showing is a reconnect

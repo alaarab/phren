@@ -355,6 +355,9 @@ public struct AgentChatMessage: Equatable, Sendable, Identifiable {
     /// Claude's narration between tool calls ("Checking the tests next"):
     /// progress notes for the person watching, not the reply.
     public var isNarration = false
+    /// What phren's prompt hook injected into the person's turn (its results
+    /// and trace), shown folded under that turn; never the agent's reply.
+    public var isHookContext = false
     init(id: String, line: Int, role: Role, title: String?, text: String,
          imageBlocks: [Int] = [], resultImages: [ImageRef] = [], uploadImages: [String] = [], toolCallID: String? = nil) {
         self.id = id; self.line = line; self.role = role; self.title = title; self.text = text
@@ -505,8 +508,23 @@ public struct AgentChatTranscript: Equatable, Sendable {
         var queueEvents: [AgentQueueConsumption] = []
         var context = AgentSessionContext()
         var seen: Set<String> = []
+        // A background notification's hook output is not something the person typed.
+        var inputWasNotification = false
         for entry in entries {
             guard let line = entry["line"] as? Int, line >= 0, var raw = entry["raw"] as? [String: Any] else { continue }
+            if source == "claude", raw["type"] as? String == "phren_turn_input" {
+                inputWasNotification = raw["notification"] as? Bool == true; continue
+            }
+            if source == "claude", raw["type"] as? String == "phren_hook_context" {
+                defer { inputWasNotification = false }
+                guard !inputWasNotification, let content = raw["content"] as? String, !content.isEmpty,
+                      seen.insert("\(line):hook").inserted else { continue }
+                var message = AgentChatMessage(id: "\(line):hook", line: line, role: .assistant, title: "phren context",
+                                               text: boundedMessageText(content))
+                message.timestamp = Self.timestamp(raw)
+                message.isHookContext = true
+                messages.append(message); continue
+            }
             if sidechain, raw["isSidechain"] as? Bool == true { raw.removeValue(forKey: "isSidechain") }
             if ["claude", "codex"].contains(source), raw["type"] as? String == "phren_queue_consumed",
                let key = raw["key"] as? String, Self.validQueueKey(key) {

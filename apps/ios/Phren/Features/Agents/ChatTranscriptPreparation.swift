@@ -114,6 +114,7 @@ struct ChatTranscriptPreparation {
         if let message = entry.messages.first {
             if message.localCommand != nil { return "chat-command:\(message.id)" }
             if message.isNarration { return "chat-narration:\(message.id)" }
+            if message.isHookContext { return "chat-hook-context:\(message.id)" }
             return "chat-message:\(message.id)"
         }
         return ""
@@ -141,6 +142,7 @@ struct ChatTranscriptPreparation {
                 return command.kind == .output ? "Command output: \(command.text)" : "Command: \(command.text)"
             }
             if message.isNarration { return "Thinking: \(ToolOutputPreview(message.text, lines: 4, characters: 400).text)" }
+            if message.isHookContext { return "phren context: \(ToolOutputPreview(message.text, lines: 2, characters: 200).text)" }
             let role = message.role == .user ? "Your message" : "Agent reply"
             let body = ToolOutputPreview(message.text, lines: 40, characters: 6_000).text
             return body.isEmpty ? role : "\(role): \(body)"

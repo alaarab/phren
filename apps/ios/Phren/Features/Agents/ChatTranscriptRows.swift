@@ -124,6 +124,8 @@ private struct ChatTranscriptRow: View, Equatable {
             ChatPendingEchoRow(echo: echo, preview: preview)
         } else if let changes = entry.turnChanges {
             ChatTurnChangesRow(changes: changes).equatable()
+        } else if let context = entry.messages.first, context.isHookContext {
+            ChatHookContextRow(message: context).equatable()
         } else if let note = entry.messages.first, note.isNarration {
             ChatNarrationRow(message: note).equatable()
         } else if let compaction = entry.messages.first, compaction.isCompaction {
@@ -475,6 +477,52 @@ private struct ChatCompactionRow: View, Equatable {
 /// Claude's narration between tool calls ("Checking the tests next"): a
 /// dim italic note, not the reply. One line with an ellipsis; a tap opens
 /// the whole note in place and another folds it.
+/// What phren's prompt hook injected into the person's turn: one quiet line
+/// ("phren · 3 results") that opens to the injected results and the trace.
+private struct ChatHookContextRow: View, Equatable {
+    let message: AgentChatMessage
+    @State private var expanded = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.message == rhs.message }
+    /// The hook's own first line, without its diamond: "phren · phren · 3 results".
+    private var summary: String {
+        let first = message.text.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? ""
+        return first.replacingOccurrences(of: "◆", with: "").trimmingCharacters(in: .whitespaces)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { expanded.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image("PhrenMark").resizable().scaledToFit().frame(width: 12, height: 12).accessibilityHidden(true)
+                    Text(summary.isEmpty ? "phren context" : summary).lineLimit(1).truncationMode(.tail)
+                    Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
+                        .rotationEffect(.degrees(expanded ? 180 : 0)).accessibilityHidden(true)
+                    Spacer(minLength: 0)
+                }
+                .font(PhrenTypography.caption).foregroundStyle(PhrenTheme.chatNote)
+                .frame(minHeight: 28).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("phren context: \(summary)")
+            .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+            .accessibilityHint(expanded ? "Fold what phren added" : "Show what phren added to this message")
+            .accessibilityIdentifier("chat-hook-context:\(message.id)")
+            if expanded {
+                Text(verbatim: message.text)
+                    .font(PhrenTheme.Font.monoCaption).foregroundStyle(PhrenTheme.textSecondary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                    .background(PhrenTheme.chatPanel, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.small, style: .continuous))
+                    .accessibilityIdentifier("chat-hook-context-body:\(message.id)")
+            }
+        }
+    }
+}
+
 private struct ChatNarrationRow: View, Equatable {
     let message: AgentChatMessage
     @State private var expanded = false
