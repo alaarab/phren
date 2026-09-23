@@ -31,6 +31,7 @@ import { defaultPhrenPath } from "../shared.js";
 import { capabilitiesForModules, createRouteHandler, type HookInfo, requireRoute } from "./server-routes.js";
 import { transcriptStreams } from "./server-stream.js";
 import { launchSession } from "./server-launch.js";
+import { localNames } from "./computer-names.js";
 
 export { capabilities, capabilitiesForModules, requireRoute } from "./server-routes.js";
 export { streamCloseReason } from "./server-stream.js";
@@ -84,7 +85,7 @@ export async function serve(version: string): Promise<void> {
     } catch { /* the node gateway has not answered yet */ }
     return undefined;
   }
-  const info: HookInfo = { product: "phren-hook", protocol: PROTOCOL, version, computer: { id: computerID, name: hostname() }, capabilities: activeCapabilities,
+  const info: HookInfo = { product: "phren-hook", protocol: PROTOCOL, version, computer: { id: computerID, name: hostname(), aliases: localNames() }, capabilities: activeCapabilities,
     modules: Object.fromEntries(modules.modules.map(module => [module.name, module.version])),
     store: modules.store, profile: modules.profile, generation: modules.generation,
     get load() { return { average: Number(loadavg()[0].toFixed(2)), cpus: cpus().length }; },
