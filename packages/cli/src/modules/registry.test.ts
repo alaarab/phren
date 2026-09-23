@@ -141,11 +141,12 @@ describe("built-in registration declarations", () => {
     const declared = BUILTIN_MODULES.flatMap(module => module.hookRoutes);
     const identities = declared.map(route => `${route.method} ${route.path}`);
     expect(new Set(identities).size).toBe(identities.length);
-    const server = source("bridge/server.ts");
+    const server = source("bridge/server-routes.ts");
     const getBlock = server.slice(server.indexOf('if (request.method === "GET")'), server.indexOf('} else if (request.method === "POST")'));
     const currentGets = [...getBlock.matchAll(/case "(\/v1\/[^\"]+)"/g)].map(match => match[1]);
     expect(declared.filter(route => route.method === "GET").map(route => route.path).sort()).toEqual(currentGets.sort());
-    const postBlock = server.slice(server.indexOf('} else if (request.method === "POST")'), server.indexOf('} else throw new BridgeError(405'));
+    const postBlock = server.slice(server.indexOf('} else if (request.method === "POST")'), server.indexOf('} else throw new BridgeError(405'))
+      + source("bridge/server-pane-routes.ts");
     const currentPosts = new Set([...postBlock.matchAll(/url.pathname === "(\/v1\/[^\"]+)"/g)].map(match => match[1]));
     for (const operation of ["create", "focus", "rename", "close"]) currentPosts.add(`/v1/workspaces/${operation}`);
     expect(declared.filter(route => route.method === "POST").map(route => route.path).sort()).toEqual([...currentPosts].sort());
