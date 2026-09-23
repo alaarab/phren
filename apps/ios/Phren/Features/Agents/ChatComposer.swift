@@ -230,7 +230,11 @@ class ChatSelectionTextView: UITextView {
 
     func selectionDidChange() {
         #if DEBUG && targetEnvironment(simulator)
-        if AgentChatFixture.enabled, let range = Range(selectedRange, in: text), let selectedTextRange {
+        // The composer and a selectable paragraph share one report. Only the
+        // view holding a selection writes it: the idle composer's refresh
+        // after every chat update would otherwise erase a message selection.
+        if AgentChatFixture.enabled, isFirstResponder || selectedRange.length > 0,
+           let range = Range(selectedRange, in: text), let selectedTextRange {
             AgentChatFixture.report.selected = String(text[range])
             let end = caretRect(for: selectedTextRange.end)
             AgentChatFixture.report.selectionEndX = end.midX - bounds.minX
