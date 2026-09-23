@@ -10,6 +10,10 @@ public struct WebServer: Equatable, Sendable, Identifiable {
     public let process: String?
     public let pid: Int?
     public let directory: String?
+    /// For one session's list: "started" (its own process tree) or
+    /// "mentioned" (a live port its transcript names); nil machine-wide.
+    public let source: String?
+    public var mentionedHere: Bool { source == "mentioned" }
     public var id: String { "\(scheme):\(loopbackHost):\(port)" }
     public var displayName: String { name.isEmpty || name == "Error response" ? "Web server on port \(port)" : name }
     public var detail: String { [process, "Port \(port)"].compactMap { $0 }.joined(separator: " · ") }
@@ -24,6 +28,7 @@ public struct WebServer: Equatable, Sendable, Identifiable {
             var process: String?
             var pid: Int?
             var cwd: String?
+            var source: String?
         }
         let snapshot = try JSONDecoder().decode(Snapshot.self, from: data)
         var seen = Set<String>()
@@ -36,7 +41,8 @@ public struct WebServer: Equatable, Sendable, Identifiable {
                   (url.port ?? (scheme == "https" ? 443 : 80)) == entry.port else { return nil }
             let server = Self(name: String((entry.name ?? "").prefix(300)), port: entry.port, scheme: scheme,
                               loopbackHost: host.contains(":") ? "::1" : "127.0.0.1",
-                              process: entry.process.map { String($0.prefix(100)) }, pid: entry.pid, directory: entry.cwd)
+                              process: entry.process.map { String($0.prefix(100)) }, pid: entry.pid, directory: entry.cwd,
+                              source: entry.source.flatMap { ["started", "mentioned"].contains($0) ? $0 : nil })
             return seen.insert(server.id).inserted ? server : nil
         }.sorted { $0.port < $1.port }
     }

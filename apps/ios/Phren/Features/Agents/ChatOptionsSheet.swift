@@ -48,6 +48,14 @@ struct ChatOptionsSheet: View {
                         }
                         .accessibilityIdentifier("chat-diff")
                     }
+                    if let target = model.target {
+                        // This session's own servers only; the computer's
+                        // whole list stays on the computer's page.
+                        NavigationLink { SessionWebServersView(session: session, target: target) } label: {
+                            Label("Web servers", systemImage: "globe")
+                        }
+                        .accessibilityIdentifier("chat-options-web-servers")
+                    }
                     if !session.tab.isConductor, project == nil, session.tab.cwd != nil {
                         Button { afterOptions(.linkProject) } label: { Label("Link to project", systemImage: "link") }
                             .accessibilityIdentifier("chat-link-project")
