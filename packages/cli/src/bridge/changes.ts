@@ -123,6 +123,11 @@ interface Snapshot { at: number; conversation: string; own: Set<string>; trees: 
 interface Claim { conversation: string; toolUseId: string; paths: Set<string>; start: number; end?: number }
 const CLAIM_RETENTION = 10 * 60_000;
 
+/** The real path of a file that may not exist yet: its folder's real path plus its name. */
+async function realPathOf(file: string): Promise<string> {
+  return realpath(file).catch(async () => path.join(await realpath(path.dirname(file)).catch(() => path.dirname(file)), path.basename(file)));
+}
+
 /** The files a call names in its structured input, never the words of a command line. */
 export function claimedPaths(input: Json, cwd: string, home = homeDir()): string[] {
   const found = new Set<string>();
@@ -199,7 +204,8 @@ export class ToolChanges {
   async before(conversation: string, toolUseId: string, cwd: string, command: string, input: Json = {}): Promise<void> {
     const key = `${conversation}\0${toolUseId}`;
     if (!toolUseId) return;
-    const claimed = claimedPaths(input, cwd);
+    // Real paths, like the repository roots the diff reports (/var → /private/var).
+    const claimed = await Promise.all(claimedPaths(input, cwd).map(realPathOf));
     this.claim(conversation, toolUseId, claimed);
     if (this.snapshots.size >= 64 || this.snapshots.has(key)) return;
     const snapshot: Snapshot = { at: Date.now(), conversation, own: new Set(claimed), trees: new Map() };
@@ -261,10 +267,14 @@ export class ToolChanges {
         // A call that names its files (an Edit, a Write, a patch) changed
         // only those, whatever else moved in the repository meanwhile.
         const until = Date.now();
-        return files.filter(file => {
-          const absolute = path.resolve(file.root, file.path);
-          return snapshot.own.size ? snapshot.own.has(absolute) : !this.claimedElsewhere(snapshot, absolute, until);
-        });
+        const kept: ChangedFile[] = [];
+        for (const file of files) {
+          // Both sides as real paths: a root reported through a symlinked
+          // folder (/var on macOS) still matches the call's own claim.
+          const absolute = await realPathOf(path.resolve(file.root, file.path));
+          if (snapshot.own.size ? snapshot.own.has(absolute) : !this.claimedElsewhere(snapshot, absolute, until)) kept.push(file);
+        }
+        return kept;
       });
     } catch { return []; }
     finally { await this.discard(snapshot); }
