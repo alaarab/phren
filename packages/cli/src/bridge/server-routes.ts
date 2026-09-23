@@ -49,7 +49,7 @@ export interface HookInfo {
   product: string;
   protocol: number;
   version: string;
-  computer: { id: string; name: string };
+  computer: { id: string; name: string; aliases?: string[] };
   capabilities: Record<string, unknown>;
   modules: Record<string, string>;
   store: string;

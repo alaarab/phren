@@ -8,8 +8,7 @@ import { BridgeError, object, objects, sessionId, targetSchema, type Json, type 
 import { canonicalComputer } from "./schedules.js";
 import { findPhrenPath } from "../phren-paths.js";
 import { listMachines } from "../profile-store.js";
-import { execFileSync } from "node:child_process";
-import { hostname } from "node:os";
+import { localNames } from "./computer-names.js";
 
 const promptText = z.string().min(1).max(32768).refine(value => !/[\x00-\x08\x0b-\x1f\x7f]/.test(value));
 
@@ -84,18 +83,6 @@ function sessionsFrom(overview: Json, computer: string, local: boolean, now = Da
  * An unreachable computer is reported, never silently dropped. */
 /** Computers the store registers (machines.yaml) that this Hook has no
  * verified connection to, so their sessions cannot be listed from here. */
-/** Every name this computer answers to: machines.yaml often registers the
- * same Mac as its hostname, the hostname's first label and its Bonjour name. */
-function localNames(): string[] {
-  const host = hostname();
-  const names = [host, host.split(".")[0]];
-  if (process.platform === "darwin") {
-    try { names.push(execFileSync("scutil", ["--get", "LocalHostName"], { encoding: "utf8", timeout: 1_000 }).trim()); }
-    catch { /* No Bonjour name set: the hostname forms above still match. */ }
-  }
-  return names.filter(Boolean);
-}
-
 export function notLinkedComputers(store: string | null, here: string, linked: readonly string[]): { name: string }[] {
   if (!store) return [];
   const machines = listMachines(store);
@@ -119,15 +106,21 @@ export async function listLiveSessions(options: { store?: string | null } = {}):
   const sessions = sessionsFrom(await hookRequest("/v1/workspaces"), here, true);
   const { peers, peerError } = await optionalHookPeers();
   const unreachable: { computer: string; error: string }[] = [];
+  // Names each peer answers to (its hostname, Bonjour name), so a computer
+  // registered under another of its names is not reported as unlinked.
+  const peerNames: string[] = [];
   await Promise.all(peers.map(async peer => {
     try {
       const route = peer.server && peer.server !== "default" ? `/v1/workspaces?server=${encodeURIComponent(peer.server)}` : "/v1/workspaces";
-      sessions.push(...sessionsFrom(await peerRequest(peer, route), peer.name, false));
+      const [overview, health] = await Promise.all([peerRequest(peer, route), peerRequest(peer, "/v1/health").catch(() => ({}))]);
+      sessions.push(...sessionsFrom(overview, peer.name, false));
+      const computer = object(object(health).computer);
+      for (const name of [computer.name, ...(Array.isArray(computer.aliases) ? computer.aliases : [])]) if (typeof name === "string") peerNames.push(name);
     } catch (error) {
       unreachable.push({ computer: peer.name, error: error instanceof Error ? error.message : "Unreachable." });
     }
   }));
   const store = options.store !== undefined ? options.store : findPhrenPath();
-  const notLinked = notLinkedComputers(store, here, peers.flatMap(peer => [peer.name, peer.address]));
+  const notLinked = notLinkedComputers(store, here, [...peers.flatMap(peer => [peer.name, peer.address]), ...peerNames]);
   return { sessions, unreachable, notLinked, enrolled: peers.length, ...(peerError ? { peerError } : {}) };
 }
