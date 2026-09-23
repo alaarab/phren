@@ -138,4 +138,4 @@ session remains the note recipient. IDs are `changes-tab-code`,
 `chat-options-code`, and `changes-tree-symbols:<path>`.
 
 UI coverage in ChangesTabTests captures the session Code tab, enriched tree and
-direct note delivery. AgentChatTests captures the header action entry.
+direct note delivery. AgentChatNavigationTests captures the chat options entry.
