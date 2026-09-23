@@ -41,6 +41,50 @@ final class GraphInteractionTests: XCTestCase {
         capture(app, name: "Selected node above dossier")
     }
 
+    /// Focus narrows the map to the node's neighbourhood, which lays the graph
+    /// out again. The camera must end on the focused node, so a tap at the
+    /// middle of the canvas selects that node and not a neighbour or nothing.
+    @MainActor
+    func testFocusLandsOnTheFocusedNode() {
+        let app = XCUIApplication()
+        // Three projects, so the one-project neighbourhood lays out elsewhere.
+        app.launchArguments = ["--ui-testing", "--memory-fixture"]
+        app.launch()
+        openMemoryGraph(from: app)
+        let canvas = app.webViews.firstMatch
+        XCTAssertTrue(canvas.staticTexts["LEDGER"].firstMatch.waitForExistence(timeout: 20))
+        app.buttons["memory-search-toggle"].tap()
+        let field = app.textFields["memory-search"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        field.typeText("Webhook signatures\n")
+        let dossier = nodeDetails(in: app)
+        XCTAssertTrue(dossier.waitForExistence(timeout: 5))
+        let focus = app.webViews.buttons["Focus"]
+        XCTAssertTrue(focus.waitForExistence(timeout: 5))
+        focus.tap()
+        XCTAssertTrue(dossier.waitForNonExistence(timeout: 5), "Focus closes the dossier")
+        // Let the reveal flight and the neighbourhood's relayout finish.
+        Thread.sleep(forTimeInterval: 2)
+        capture(app, name: "Focused node")
+
+        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        let projectedNode = app.webViews.images.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "Selected finding: ")
+        ).firstMatch
+        XCTAssertTrue(dossier.waitForExistence(timeout: 5), "tapping the middle of the map selects the focused node")
+        XCTAssertTrue(projectedNode.waitForExistence(timeout: 5))
+        XCTAssertTrue(projectedNode.label.contains("Webhook signatures"), "selected \(projectedNode.label)")
+        let centered = NSPredicate { _, _ in
+            guard projectedNode.exists, dossier.exists else { return false }
+            let freeCenter = (canvas.frame.minY + dossier.frame.minY - 24) / 2
+            return abs(projectedNode.frame.midY - freeCenter) < 6 && abs(projectedNode.frame.midX - canvas.frame.midX) < 6
+        }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: centered, object: nil)], timeout: 5), .completed,
+                       "the reselected node centers in the free space above the dossier")
+        capture(app, name: "Focused node selected")
+    }
+
     @MainActor
     func testNodeDossierKeepsGraphVisibleAndCloses() {
         let app = XCUIApplication()

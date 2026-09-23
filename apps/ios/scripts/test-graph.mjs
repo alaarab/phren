@@ -132,6 +132,111 @@ test("phone graph renders, selects nodes, and accepts camera commands", { timeou
   await page.close();
 });
 
+async function openPhonePage() {
+  const page = await browser.newPage({ viewport: { width: 393, height: 620 }, isMobile: true, hasTouch: true });
+  const errors = [];
+  page.on("pageerror", error => errors.push(error.message));
+  await page.addInitScript(() => {
+    window.messages = [];
+    window.webkit = { messageHandlers: Object.fromEntries(["graphReady", "graphSelect", "graphAction", "graphError"].map(
+      name => [name, { postMessage: body => window.messages.push({ name, body }) }]
+    )) };
+  });
+  await page.goto(baseURL);
+  await page.waitForFunction(() => window.messages.some(message => message.name === "graphReady"));
+  return { page, errors };
+}
+
+/** What MemoryView presents after Focus: the node and its one-step neighbours. */
+function neighbourhood(graph, id) {
+  const keep = new Set([id]);
+  for (const link of graph.links) {
+    if (link.source === id) keep.add(link.target);
+    if (link.target === id) keep.add(link.source);
+  }
+  const nodes = graph.nodes.filter(node => keep.has(node.id));
+  const links = graph.links.filter(link => keep.has(link.source) && keep.has(link.target));
+  return { nodes, links, topics: [], total: nodes.length };
+}
+
+async function waitForScreenPosition(page, id, expected, label) {
+  try {
+    await page.waitForFunction(({ id, expected }) => {
+      const at = window.phrenGraph.screenPosFor(id);
+      return at && Math.abs(at.x - expected.x) < 4 && Math.abs(at.y - expected.y) < 4;
+    }, { id, expected }, { timeout: 4000 });
+  } catch {
+    const at = await page.evaluate(id => window.phrenGraph.screenPosFor(id), id);
+    assert.fail(`${label}: ${id} is at ${JSON.stringify(at)}, expected ${JSON.stringify(expected)}`);
+  }
+}
+
+test("Focus lands on the focused node after its neighbourhood reflows the layout", { timeout: 60000 }, async () => {
+  const { page, errors } = await openPhonePage();
+  const graph = payload();
+  await page.evaluate(graph => window.phrenHost.render(graph), graph);
+  await page.waitForFunction(() => window.phrenGraph?.getData().nodes.length === 39);
+  await page.waitForTimeout(3000);
+  const center = { x: 393 / 2, y: 620 / 2 };
+
+  // MemoryView sends reveal as soon as Focus is tapped, then the smaller
+  // neighbourhood payload once it is built; that payload lays out afresh.
+  await page.evaluate(() => window.phrenHost.focusNode("api:3"));
+  await page.waitForFunction(() => window.messages.some(message => message.name === "graphSelect" && message.body?.id === "api:3"));
+  await page.evaluate(() => window.phrenHost.revealNode("api:3"));
+  await page.waitForTimeout(100);
+  await page.evaluate(graph => window.phrenHost.render(graph), neighbourhood(graph, "api:3"));
+  await page.waitForFunction(() => window.phrenGraph.getData().nodes.length === 2);
+  await waitForScreenPosition(page, "api:3", center, "revealed node after the neighbourhood reflow");
+
+  // A later refresh that moves the selected node keeps it in the free space.
+  await page.evaluate(graph => window.phrenHost.render(graph), graph);
+  await page.evaluate(() => window.phrenHost.focusNode("mobile:4"));
+  await page.waitForFunction(() => window.messages.some(message => message.name === "graphSelect" && message.body?.id === "mobile:4"));
+  const free = await page.evaluate(() => {
+    const canvas = document.getElementById("graph-canvas").getBoundingClientRect();
+    const dossier = document.getElementById("graph-dossier").getBoundingClientRect();
+    return { x: canvas.width / 2, y: (dossier.top - canvas.top - 24) / 2 };
+  });
+  await waitForScreenPosition(page, "mobile:4", free, "selected node before the refresh");
+  const smaller = { ...graph, nodes: graph.nodes.filter(node => node.project !== "design") };
+  smaller.links = graph.links.filter(link => smaller.nodes.some(n => n.id === link.source) && smaller.nodes.some(n => n.id === link.target));
+  await page.evaluate(graph => window.phrenHost.render(graph), smaller);
+  await page.waitForFunction(() => window.phrenGraph.getData().nodes.length === 26);
+  await waitForScreenPosition(page, "mobile:4", free, "selected node after a refresh reflows the layout");
+  if (process.env.PHREN_GRAPH_FOCUS_SCREENSHOT) await page.screenshot({ path: process.env.PHREN_GRAPH_FOCUS_SCREENSHOT });
+  assert.deepEqual(errors, []);
+  await page.close();
+});
+
+test("tapping a node selects that node, not a neighbour", { timeout: 60000 }, async () => {
+  const { page, errors } = await openPhonePage();
+  await page.evaluate(graph => window.phrenHost.render(graph), payload());
+  await page.waitForFunction(() => window.phrenGraph?.getData().nodes.length === 39);
+  await page.waitForTimeout(3000);
+  await page.evaluate(() => window.phrenGraph.peekNode("mobile"));
+  await page.waitForTimeout(1500);
+  const wrong = [];
+  for (let n = 0; n < 12; n++) {
+    const id = `mobile:${n}`;
+    const at = await page.evaluate(id => window.phrenGraph.screenPosFor(id), id);
+    if (!at || at.x < 0 || at.y < 0 || at.x > 393 || at.y > 620) continue;
+    const picked = await page.evaluate(({ x, y }) => window.phrenGraph.getNodeAt(x, y)?.id ?? null, at);
+    if (picked !== id) wrong.push(`${id} picked ${picked}`);
+    await page.evaluate(() => { window.messages = []; });
+    await page.touchscreen.tap(at.x, at.y);
+    await page.waitForTimeout(400);
+    const tapped = await page.evaluate(() => window.messages.filter(m => m.name === "graphSelect" && m.body).map(m => m.body.id).pop() ?? null);
+    if (tapped !== id) wrong.push(`${id} tapped ${tapped}`);
+    await page.evaluate(() => window.phrenHost.clear());
+    // Closing the dossier eases the camera back; tap the next node once it rests.
+    await page.waitForTimeout(800);
+  }
+  assert.deepEqual(wrong, []);
+  assert.deepEqual(errors, []);
+  await page.close();
+});
+
 test("no visible finding label overlaps a project label at default zoom", { timeout: 60000 }, async () => {
   const page = await browser.newPage({ viewport: { width: 393, height: 620 }, isMobile: true, hasTouch: true });
   page.on("pageerror", error => assert.fail(`page error: ${error.message}`));
