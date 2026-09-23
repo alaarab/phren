@@ -428,3 +428,40 @@ pane at most twice a second while Herdr reports the agent working, and never
 on a status-only stream, but that status now comes from a snapshot up to
 2.5 s old, so a turn's reads can run up to 2.5 s past its end. The 85.6 to 99
 difference is that tail plus tick timing, not a new reader.
+
+## Preview stops at the transcript's turn end, 2026-09-22
+
+**Change.** The live preview stops reading the pane as soon as the
+transcript says the turn is over (a Claude assistant entry with
+`stop_reason: "end_turn"` or a `turn_duration` system record; a Codex
+`task_complete`, which stops its delta reads), even while the shared
+snapshot still says working, and resumes on the next user prompt (Codex:
+the next `task_started`).
+
+**Method.** Two Hooks side by side, neither the owner's installed one: the
+build before this change and this build, each with its own temporary
+`PHREN_BRIDGE_HOME` and an empty temporary `PHREN_PATH` (modules memory,
+tasks, hook, git), the real `PHREN_HERDR_HOME` and home. Both streamed the
+same live Claude conversation read-only for five minutes at the same time:
+
+```bash
+node scripts/bench-hook.mjs --socket <bridge-home>/hook.sock --minutes 5 \
+  --scenarios chat --target default,<workspace>,<tab>,<pane>,claude,<session>
+```
+
+The conversation was an orchestrating session whose turns end often while
+Herdr keeps reporting it working. `--target` now also takes commas, since
+Herdr tab and pane ids contain a colon. Load average 11.8 to 6.1 (first run)
+and 4.9 to 15.4 (second).
+
+| Per minute, chat stream | before | after |
+|---|---:|---:|
+| `agent.read`, first run | 100.6 | 14 |
+| `agent.read`, second run | 99.2 | 37 |
+| `session.snapshot` | 20.4 / 20.8 | 20.2 / 20.8 |
+| Frames received in 5 min | 23 / 19 | 22 / 21 |
+
+The remaining reads are the turns still running. How much this saves
+depends on how long a pane keeps reporting working after its transcript
+ended the turn; on a session that works without pause it saves only the
+tail of each turn.

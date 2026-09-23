@@ -17,7 +17,7 @@
  *
  *   node scripts/bench-hook.mjs [--socket <hook.sock>] [--minutes 2]
  *     [--scenarios idle,chat,overview] [--sample 5] [--settle 15]
- *     [--server default] [--target server:workspace:tab:pane:source:session] [--json]
+ *     [--server default] [--target server,workspace,tab,pane,source,session] [--json]
  *
  * --socket defaults to $PHREN_BRIDGE_HOME/hook.sock, else the installed Hook's.
  * Without --target the chat scenario picks the first pane whose conversation
@@ -79,8 +79,10 @@ async function processSample(pid) {
 async function chatTarget() {
   const given = option("target");
   if (given) {
-    const [srv, workspace, tab, pane, source, session] = given.split(":").length === 6 ? given.split(":") : [];
-    if (!session) throw new Error("--target is server:workspace:tab:pane:source:session");
+    // Herdr tab and pane ids carry a colon ("w13:t2"), so commas separate them too.
+    const parts = given.includes(",") ? given.split(",") : given.split(":");
+    const [srv, workspace, tab, pane, source, session] = parts.length === 6 ? parts : [];
+    if (!session) throw new Error("--target is server,workspace,tab,pane,source,session (or colons when no id has one)");
     return { server: srv, workspace, tab, pane, source, session };
   }
   const overview = await get(`/v1/workspaces?mux=herdr:${encodeURIComponent(server)}`);
