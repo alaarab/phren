@@ -268,3 +268,103 @@ failures require socket permission; the shell-change timing fixture passed
 in isolation, while an untouched secret-redaction fixture still failed.
 PhrenKit and PhrenLive results and the blocked iOS build are detailed in the
 phone report. This round does not claim a clean full-platform gate.
+
+## Baseline 2026-09-22
+
+The numbers the Phase 2 optimization work is judged against. Nothing was
+optimized in this round; it added the counters and the harnesses.
+
+### Hook
+
+**Method.** `GET /v1/metrics` counts Herdr RPCs by method (every `rpc()`
+call, failed ones included), identity work (`lsof`/`proc` are process scans,
+`probe` a cache miss, `cached` a hit inside `PHREN_IDENTITY_CACHE_MS`,
+`reported` a pane whose agent reported its own session id so nothing was
+scanned), git child processes by caller and timer ticks by name.
+`scripts/bench-hook.mjs` reads it before and after each five-minute scenario
+and samples the Hook's cumulative CPU time and RSS with `ps` every 5 s. CPU %
+is CPU time over wall time (100 = one core).
+
+The owner's installed Hook was not touched. A second Hook ran from this
+round's build with its own `PHREN_BRIDGE_HOME` and an empty temporary
+`PHREN_PATH` (modules memory, tasks, hook, git), the real
+`PHREN_HERDR_HOME` and the real home, so it read the same live Herdr panes
+and transcripts while its schedules, fan-outs, approvals and sockets stayed
+separate. Nobody else connected to it, so "idle" is the Hook's own timers.
+The chat scenario streamed one live Claude conversation read-only; the
+overview scenario polled `GET /v1/workspaces?watchApprovals=1` every 3 s as
+the phone does. At the time the default Herdr server had three agent panes,
+all reporting their session ids; `ping` goes to each Herdr server directory
+found (five). Apple M4, 10 cores.
+
+| Per minute | idle | chat stream | overview every 3 s |
+|---|---:|---:|---:|
+| Herdr calls, all | 72 | 275.8 | 151.8 |
+| `ping` | 60 | 60 | 60 |
+| `session.snapshot` | 12 | 131.6 | 31.8 |
+| `agent.read` | 0 | 84.2 | 0 |
+| `pane.process_info` | 0 | 0 | 60 |
+| Identity scans (`lsof`/`proc`) | 0 | 0 | 0 |
+| Identity `reported` | 0 | 119.6 | 60 |
+| Git spawns (`branch`) | 0 | 0 | 15 |
+| Timer `activity` | 12 | 12 | 12 |
+| Timer `fanout-messages` | 60 | 59.8 | 60 |
+| Timer `opencode-approvals` | 30 | 30 | 29.8 |
+| Timer `fanout-blocked` | 12 | 12 | 12 |
+| Timer `stream-transcripts` | 0 | 119.6 | 0 |
+| CPU % of one core | 0.2 | 0.5 | 0.7 |
+| RSS MiB, mean / max | 85.6 / 86.5 | 86.8 / 115.8 | 95.5 / 140.3 |
+| Load average, start / end | 3.86 / 4.59 | 4.38 / 9.87 | 13.46 / 3.13 |
+
+Idle and overview are the second run (19:35 to 19:46 local); chat is the
+first run (19:24 to 19:30). The first run's overview window overlapped other
+workers' builds (load 14 to 21) and gave the same counts with 1.0 % CPU and
+a 185.8 MiB RSS peak; the first run's idle window (load 4.0 to 3.5) gave the
+same counts, 0.2 % CPU and 103.7 / 134.7 MiB RSS, still holding memory
+from a short smoke run's chat stream just before it. The chat stream received 6 frames (92 KB) in five minutes;
+overview polls took 174 ms on average.
+
+What the counts say, for the work that follows:
+
+- A chat stream ticks every 500 ms, and every tick takes a full
+  `session.snapshot` to revalidate the target, about two a second per open
+  chat, plus `agent.read` for the live preview.
+- An overview poll costs one snapshot, one `pane.process_info` per agent pane
+  (even when the agent reported its session id) and a `git branch` per agent
+  cwd whenever the 10 s branch cache has expired.
+- Idle, the activity timer pings every Herdr server directory every 5 s.
+
+**Caveats.** The bench Hook ran at normal priority (the installed service runs
+at Nice -5) and had no phone or agent lifecycle traffic, so these are
+lower bounds for a Hook with clients. Counts are deterministic; CPU and RSS
+move with host load. Git spawns count only the Hook's own call sites in
+`packages/cli/src/bridge`. Reproduce with a Hook built from this tree:
+
+```bash
+node scripts/bench-hook.mjs --socket <bridge-home>/hook.sock --minutes 5
+```
+
+### Phone
+
+**Method.** `PhrenUITests/PerformanceBaselineTests`, opt-in with
+`TEST_RUNNER_PHREN_RUN_PERF=1`, on the iPhone 17 Pro simulator with a debug
+build, run serially under the shared iOS build lock. Each test prints
+`PHREN_PERF` wall-clock lines and wraps the measured step in `measure` with
+`XCTClockMetric` and `XCTCPUMetric(application:)`, five recorded iterations
+after a warm-up. Load average 3.65 at the start and 5.99 at the end
+(the build before the tests ran raised the 5-minute average to 9.97).
+
+| Measurement | Clock, s (mean, RSD) | App CPU time, s | App CPU cycles, kC | Instructions, kI |
+|---|---:|---:|---:|---:|
+| Open heavy chat (`--chat-heavy`), tap row to last message shown | 1.579 (0.5 %) | 0.607 | 2,124,483 | 6,244,667 |
+| Heavy chat, 3 swipes down into history then 3 back up | 16.364 (0.7 %) | 4.739 | 13,871,375 | 28,477,638 |
+| Open Agents with `--all-sessions-fixture`, tap tab to first card | 1.449 (0.8 %) | 0.222 | 732,039 | 1,778,576 |
+
+The first, cold opens took 1.640 s (chat) and 1.707 s (Agents). The
+wall-clock split of the swipes was 8.3 s down and 8.3 s up.
+
+**Caveats.** Clock time includes XCUITest's event synthesis and its wait for
+the app to go idle after every tap and swipe, so it is a UI test time, not a
+frame time; compare runs with each other, not with a device. App CPU time,
+cycles and instructions are the app process alone and are the better signal
+for rendering work: the six swipes keep the app busy for 4.7 s of CPU.

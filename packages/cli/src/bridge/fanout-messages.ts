@@ -5,6 +5,7 @@ import { z } from "zod";
 import { archiveFinishedFanouts, containedFanoutRoot, fanoutChildID, manifestSchema, storeRoot, type FanoutManifest } from "./fanouts.js";
 import { atomic, BridgeError, targetSchema, type Target } from "./protocol.js";
 import { childAgent, type ChildAgentRelation } from "./transcripts.js";
+import { countTick } from "./metrics.js";
 
 export const fanoutMessageSchema = z.object({
   target: targetSchema,
@@ -31,7 +32,7 @@ export class FanoutMessages {
   constructor(private readonly env: NodeJS.ProcessEnv, private readonly deps: Dependencies) {}
 
   start(): void {
-    this.timer = setInterval(() => { void this.tick().catch(() => {}); }, 1000);
+    this.timer = setInterval(() => { countTick("fanout-messages"); void this.tick().catch(() => {}); }, 1000);
     this.timer.unref();
     void this.tick().catch(() => {});
   }

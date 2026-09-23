@@ -8,6 +8,7 @@ import { bridgeRoot, object, type Json } from "./protocol.js";
 import { z } from "zod";
 import { ProcessPool } from "./limits.js";
 import { phrenStoreRoot } from "./transcripts.js";
+import { countGit, countTick } from "./metrics.js";
 
 const exec = promisify(execFile);
 
@@ -48,7 +49,7 @@ export function namedPaths(command: string, input: Json = {}): string[] {
 }
 
 async function git(cwd: string, args: string[], extra: NodeJS.ProcessEnv = {}, signal?: AbortSignal): Promise<string> {
-  return gitPool.run(signal, async () => (await exec("git", ["-C", cwd, "--no-pager", ...args], {
+  return gitPool.run(signal, async () => (countGit("changes"), await exec("git", ["-C", cwd, "--no-pager", ...args], {
     signal, timeout: 10_000, maxBuffer: 8_388_608, env: nonInteractiveGitEnv({ ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_CONFIG_NOSYSTEM: "1", ...extra }),
   })).stdout);
 }
@@ -140,7 +141,7 @@ export async function pruneChanges(now = Date.now()): Promise<void> {
 
 export async function startChangeRetention(): Promise<() => void> {
   await pruneChanges();
-  const timer = setInterval(async () => { await pruneChanges().catch(() => {}); }, DAY);
+  const timer = setInterval(async () => { countTick("change-retention"); await pruneChanges().catch(() => {}); }, DAY);
   timer.unref();
   return () => clearInterval(timer);
 }

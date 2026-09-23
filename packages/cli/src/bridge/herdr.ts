@@ -10,6 +10,7 @@ import { logger } from "../logger.js";
 import { recordedSession } from "./agent-hook-stores.js";
 import { tabActivityKey } from "./tab-activity.js";
 import { intervalFromEnv } from "./limits.js";
+import { countHerdr, countIdentity } from "./metrics.js";
 
 const exec = promisify(execFile);
 export function herdrRoot(): string { return process.env.PHREN_HERDR_HOME || path.join(homedir(), ".config/herdr"); }
@@ -45,6 +46,7 @@ export function noteOptionalReadFailure(what: string, key: string, error: unknow
 /** Herdr's documented newline JSON socket API. No shell, UI focus, or inherited caller context. */
 export async function rpc(server: string, method: string, params: Json = {}, signal?: AbortSignal, timeoutMs = 10_000): Promise<Json> {
   const socket = herdrSocket(server);
+  countHerdr(method);
   const metadata = await stat(socket).catch(error => { throw herdrSocketError(error); });
   if (!metadata.isSocket() || (process.getuid && metadata.uid !== process.getuid())) throw new BridgeError(503, "The Herdr socket is unavailable.");
   return new Promise((resolve, reject) => {
@@ -159,9 +161,11 @@ async function foregroundPids(server: string, pane: Json): Promise<number[]> {
 async function processLogs(pids: number[]): Promise<string[]> {
   const paths = await Promise.all(pids.map(async pid => {
     if (process.platform === "linux") {
+      countIdentity("proc");
       const base = `/proc/${pid}/fd`;
       return Promise.all((await readdir(base).catch(() => [])).slice(0, 4096).map(fd => readlink(path.join(base, fd)).catch(() => "")));
     }
+    countIdentity("lsof");
     const result = await exec("/usr/sbin/lsof", ["-a", "-p", String(pid), "-Fn"], { timeout: 3000, maxBuffer: 1_048_576 }).catch(() => ({ stdout: "" }));
     return result.stdout.split("\n").filter(n => n.startsWith("n/")).map(n => n.slice(1));
   }));
@@ -175,11 +179,12 @@ const identities = new Map<string, { at: number; result: Promise<PaneIdentity> }
 const identityKey = (server: string, pane: Json, pids: number[]) => JSON.stringify([server, pane.pane_id, pane.terminal_id, pids, pane.agent]);
 export async function paneIdentity(server: string, pane: Json, fresh = false): Promise<string | undefined> {
   const reported = object(pane.agent_session);
-  if (reported.kind === "id" && reported.agent === pane.agent && typeof reported.value === "string" && sessionId.safeParse(reported.value).success) return reported.value;
+  if (reported.kind === "id" && reported.agent === pane.agent && typeof reported.value === "string" && sessionId.safeParse(reported.value).success) { countIdentity("reported"); return reported.value; }
   const pids = await foregroundPids(server, pane);
   const key = identityKey(server, pane, pids);
   const cached = identities.get(key);
-  if (!fresh && cached && Date.now() - cached.at < IDENTITY_CACHE_MS) return (await cached.result).sessionId;
+  if (!fresh && cached && Date.now() - cached.at < IDENTITY_CACHE_MS) { countIdentity("cached"); return (await cached.result).sessionId; }
+  countIdentity(fresh ? "probe-fresh" : "probe");
   const result = identityFromProcesses(server, pane, pids);
   if (identities.size >= 128) identities.delete(identities.keys().next().value!);
   identities.set(key, { at: Date.now(), result });

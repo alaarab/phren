@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import { z } from "zod";
 import type { ChangedFile } from "./changes.js";
 import { type Json, object, type Provider, sessionId } from "./protocol.js";
+import { countGit } from "./metrics.js";
 
 const MAX_MANIFEST_BYTES = 64 * 1024;
 const MAX_EVENT_LOG_BYTES = 64 * 1024 * 1024;
@@ -105,6 +106,7 @@ async function worktreeDetails(worktree: string): Promise<WorktreeDetails> {
     const worktreeName = path.basename(worktree).slice(0, 200);
     details = worktreeName ? { worktreeName } : {};
     try {
+      countGit("fanouts");
       const { stdout } = await exec("git", ["-C", worktree, "rev-parse", "--abbrev-ref", "HEAD"],
         { timeout: 2_000, maxBuffer: 4_096 });
       const branch = stdout.trim();

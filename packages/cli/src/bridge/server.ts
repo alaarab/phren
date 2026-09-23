@@ -9,6 +9,7 @@ import { cpus, hostname, loadavg } from "node:os";
 import path from "node:path";
 import { WebSocketServer } from "ws";
 import { ActivityJournal } from "./activity.js";
+import { countTick } from "./metrics.js";
 import { AgentHooks } from "./agent-hooks.js";
 import { startChangeRetention } from "./changes.js";
 import { CodeReindexer, CodeRoutes } from "./code-routes.js";
@@ -129,11 +130,12 @@ export async function serve(version: string): Promise<void> {
   await chmod(socketPath(), 0o600);
   await agentHooks.start();
   void scheduler?.tick().catch(() => {});
-  const scheduleTimer = scheduler ? setInterval(() => { void scheduler.tick().catch(() => {}); }, 30_000) : undefined;
+  const scheduleTimer = scheduler ? setInterval(() => { countTick("schedules"); void scheduler.tick().catch(() => {}); }, 30_000) : undefined;
   // Off unless PHREN_CANARY_DAILY=1 or `phren canary --daily on`.
-  const canaryTimer = setInterval(() => { void dailyCanaryDue().then(due => due ? canary("daily") : undefined).catch(() => {}); }, 10 * 60_000);
+  const canaryTimer = setInterval(() => { countTick("canary"); void dailyCanaryDue().then(due => due ? canary("daily") : undefined).catch(() => {}); }, 10 * 60_000);
   let recording = false;
   const activityTimer = setInterval(() => {
+    countTick("activity");
     if (recording) return;
     recording = true;
     void (async () => {
