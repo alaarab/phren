@@ -7,6 +7,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { execFileSync } from "child_process";
 import { getPhrenPath } from "../shared.js";
+import { atomicWriteText } from "../phren-paths.js";
 import { FINDINGS_FILENAME } from "../data/access.js";
 import { TASKS_FILENAME } from "../data/tasks.js";
 import { isValidProjectName, getOptionValue, getPositionalArgs } from "../utils.js";
@@ -22,14 +23,6 @@ import {
 } from "../store-registry.js";
 
 const EXEC_TIMEOUT_MS = 30_000;
-
-function atomicWriteText(filePath: string, content: string): void {
-  const dir = path.dirname(filePath);
-  fs.mkdirSync(dir, { recursive: true });
-  const tmp = filePath + ".tmp." + process.pid;
-  fs.writeFileSync(tmp, content);
-  fs.renameSync(tmp, filePath);
-}
 
 // ── phren team init <name> [--remote <url>] [--description <desc>] ──────────
 

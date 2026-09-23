@@ -1,13 +1,13 @@
 import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import { execFile, spawn as spawnProcess, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { lstat, mkdir, open, readFile, readdir, realpath, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, readdir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
 import { visibleCodexExecEvent, visibleOpenCodeRunEvent } from "./fanouts.js";
-import { BridgeError, bridgeRoot, provider, startingTargetSchema, targetSchema, type Json } from "./protocol.js";
+import { atomicInPrivateDir, BridgeError, bridgeRoot, provider, startingTargetSchema, targetSchema, type Json } from "./protocol.js";
 
 const exec = promisify(execFile);
 const timestamp = z.string().datetime({ offset: true });
@@ -86,11 +86,8 @@ function headlessRoot(root: string): string { return path.join(root, "headless-d
 function worktreeRoot(root: string): string { return path.join(root, "headless-worktrees"); }
 function manifestPath(root: string, jobId: string): string { return path.join(headlessRoot(root), jobID.parse(jobId), "manifest.json"); }
 
-async function atomicWrite(file: string, value: unknown): Promise<void> {
-  await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
-  const temporary = `${file}.${randomUUID()}.tmp`;
-  await writeFile(temporary, JSON.stringify(value, null, 2) + "\n", { mode: 0o600, flag: "wx" });
-  try { await rename(temporary, file); } finally { await unlink(temporary).catch(() => {}); }
+function writeJson(file: string, value: unknown): Promise<void> {
+  return atomicInPrivateDir(file, JSON.stringify(value, null, 2) + "\n");
 }
 
 async function regularManifest(file: string): Promise<HeadlessManifest | undefined> {
@@ -204,15 +201,15 @@ export class DispatchHeadless {
         label: input.label, cwd: source, worktree: destination, eventLog: "events.jsonl", stderrLog: "stderr.log",
         createdAt: now, updatedAt: now, status: "preparing",
       };
-      await atomicWrite(manifestPath(this.root, jobId), manifest);
+      await writeJson(manifestPath(this.root, jobId), manifest);
       try {
         const worktree = await this.createWorktree(source, destination);
         if (!worktree.startsWith(root + path.sep) || worktree === source) throw new BridgeError(503, "The fanout wrapper did not receive an isolated worktree.");
         manifest = { ...manifest, worktree, status: "spawning", updatedAt: new Date().toISOString() };
-        await atomicWrite(manifestPath(this.root, jobId), manifest);
+        await writeJson(manifestPath(this.root, jobId), manifest);
       } catch (error) {
         manifest = { ...manifest, status: "failed", updatedAt: new Date().toISOString(), finishedAt: new Date().toISOString(), error: asBridgeError(error, "Could not create the isolated worktree.").message.slice(0, 500) };
-        await atomicWrite(manifestPath(this.root, jobId), manifest);
+        await writeJson(manifestPath(this.root, jobId), manifest);
         throw asBridgeError(error, "Could not create the isolated worktree.");
       }
 
@@ -239,7 +236,7 @@ export class DispatchHeadless {
       } catch (error) {
         await events.close(); await errors.close();
         manifest = { ...manifest, status: "failed", updatedAt: new Date().toISOString(), finishedAt: new Date().toISOString(), error: "The fanout wrapper could not start." };
-        await atomicWrite(manifestPath(this.root, jobId), manifest);
+        await writeJson(manifestPath(this.root, jobId), manifest);
         throw asBridgeError(error, "The fanout wrapper could not start.");
       }
       await events.close(); await errors.close();
@@ -249,12 +246,12 @@ export class DispatchHeadless {
         child.unref();
         await this.afterSpawn?.(child);
         manifest = { ...manifest, status: "running", updatedAt: new Date().toISOString() };
-        await atomicWrite(manifestPath(this.root, jobId), manifest);
+        await writeJson(manifestPath(this.root, jobId), manifest);
         receiptSaved = true;
       } catch (error) {
         if (!spawned) {
           manifest = { ...manifest, status: "failed", updatedAt: new Date().toISOString(), finishedAt: new Date().toISOString(), error: "The fanout wrapper could not start." };
-          await atomicWrite(manifestPath(this.root, jobId), manifest);
+          await writeJson(manifestPath(this.root, jobId), manifest);
           throw asBridgeError(error, "The fanout wrapper could not start.");
         }
         // The spawn happened. Leaving this receipt at spawning is the durable no-restart boundary.
@@ -273,7 +270,7 @@ export class DispatchHeadless {
     if (!current || !["running", "spawning"].includes(current.status)) return;
     const at = new Date().toISOString();
     const ok = code === 0;
-    await atomicWrite(file, { ...current, status: ok ? "completed" : "failed", updatedAt: at, finishedAt: at,
+    await writeJson(file, { ...current, status: ok ? "completed" : "failed", updatedAt: at, finishedAt: at,
       ...(typeof code === "number" ? { exitCode: code } : {}), ...(ok ? {} : { error: signal ? `The headless wrapper exited after ${signal}.` : `The headless wrapper exited with code ${code ?? "unknown"}.` }) }).catch(() => {});
   }
 
