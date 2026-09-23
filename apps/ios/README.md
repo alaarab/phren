@@ -259,6 +259,12 @@ Agents, Projects, Tasks and Memory prepare rows and counts when inputs change.
 Heavy chats keep distant rows at their measured height with only an identifier
 and label, and folded tool bodies are not built. Image previews share a decoded
 cache; the graph prepares payloads off the main actor and retains its web view.
+Each computer's session list arrives over Phren Hook's overview stream where
+the Hook offers it (polled every 10 seconds otherwise), and every screen that
+shows sessions reads that one list; other periodic reads share one timer. Only
+elapsed-time labels tick, from one clock for the app, and a chat field redraws
+only the view that shows it. Measurements are in
+[docs/performance.md](../../docs/performance.md).
 
 Live session lists use compact, separated cards. Tap the pin beside a session
 to keep it in **Pinned** in the agent overview, and tap it again to unpin.

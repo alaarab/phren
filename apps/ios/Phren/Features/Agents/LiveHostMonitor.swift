@@ -263,7 +263,7 @@ final class LiveHostMonitor {
     static let fixtureStream = AppModel.isUITesting && ProcessInfo.processInfo.arguments.contains("--overview-stream-fixture")
 
     /// What a Hook's stream does, over the fixtures: read the overview every
-    /// two and a half seconds, send it when it changed, heartbeat otherwise.
+    /// five seconds, send it when it changed, heartbeat otherwise.
     private static func fixtureOverviewStream(_ host: LiveHost) -> AsyncThrowingStream<LiveOverviewFrame, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
@@ -274,7 +274,7 @@ final class LiveHostMonitor {
                         previous = .now
                         if value != last { continuation.yield(.overview(value)); last = value; sentAt = .now }
                         else if Date().timeIntervalSince(sentAt) >= 20 { continuation.yield(.heartbeat(nil)); sentAt = .now }
-                        try await Task.sleep(for: .milliseconds(2_500))
+                        try await Task.sleep(for: .seconds(5))
                     }
                     continuation.finish()
                 } catch { continuation.finish(throwing: error) }
