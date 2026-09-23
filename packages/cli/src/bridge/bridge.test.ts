@@ -641,7 +641,7 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     hook = spawn(process.execPath, [hookBundle, "serve"], { env: { ...process.env,
       PATH: `${path.join(root, "bin")}:${process.env.PATH}`, PHREN_PATH: path.join(root, ".phren"),
       HOME: root, PHREN_BRIDGE_HOME: path.join(root, "bridge"), PHREN_HERDR_HOME: path.join(root, "herdr"), CODEX_HOME: path.join(root, "codex"),
-      PHREN_APPROVAL_HOLD_MS: "2500", PHREN_IDENTITY_CACHE_MS: String(IDENTITY_CACHE_MS), PHREN_DIALOG_THROTTLE_MS: String(DIALOG_THROTTLE_MS) },
+      PHREN_APPROVAL_HOLD_MS: "2500", PHREN_IDENTITY_CACHE_MS: String(IDENTITY_CACHE_MS), PHREN_DIALOG_THROTTLE_MS: String(DIALOG_THROTTLE_MS), PHREN_SNAPSHOT_SHARE_MS: String(IDENTITY_CACHE_MS) },
       stdio: ["ignore", "ignore", "pipe"] });
     hook.stderr!.on("data", bytes => log += bytes);
     let ready = false;
