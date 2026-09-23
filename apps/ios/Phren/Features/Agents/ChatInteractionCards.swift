@@ -139,6 +139,9 @@ struct ChatQuestionOptionRow: View {
     var trailingCaption: String? = nil
     var badge: String? = nil
     var muted = false
+    /// A question's option: bordered, supporting text in the secondary color.
+    var outlined = false
+    var identifier: String? = nil
     let action: () -> Void
 
     var body: some View {
@@ -147,9 +150,10 @@ struct ChatQuestionOptionRow: View {
                        glyph: glyph,
                        trailing: trailing,
                        detail: preview.map { value in AnyView(previewContent(value)) },
-                       radius: radius, minimumHeight: minimumHeight ?? 44, muted: muted, action: action)
-            // The preview sits in a scroller, which drops it from the button's label.
-            .accessibilityValue(preview ?? "")
+                       radius: radius, minimumHeight: minimumHeight ?? 44, muted: muted,
+                       outlined: outlined, captionColor: outlined ? PhrenTheme.textSecondary : PhrenTheme.textMuted,
+                       // The preview sits in its own scroller, outside the button's label.
+                       value: preview, identifier: identifier, action: action)
     }
 
     private var glyph: AnyView? {
@@ -166,16 +170,19 @@ struct ChatQuestionOptionRow: View {
         return nil
     }
 
+    /// A wide diagram scrolls sideways inside its own box; the card keeps its width.
     private func previewContent(_ value: String) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        ScrollView(.horizontal, showsIndicators: true) {
             Text(value).font(PhrenTheme.Font.monoCaption2).foregroundStyle(PhrenTheme.text)
                 .lineLimit(inline ? 6 : nil).fixedSize(horizontal: true, vertical: true)
                 .padding(8)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(PhrenTheme.bgSunken, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.small, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: PhrenTheme.Radius.small, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: PhrenTheme.Radius.small, style: .continuous)
             .stroke(PhrenTheme.border, lineWidth: 1))
-        .padding(.top, 2)
+        .accessibilityIdentifier(identifier.map { "\($0):preview" } ?? "chat-question-preview")
     }
 }
 
@@ -225,27 +232,30 @@ struct ChatQuestionCard: View {
             if keepsOptionsVisible {
                 questionList(inline: true)
             } else {
-                let questions = questionList(inline: true).background(GeometryReader { geometry in
-                    Color.clear.preference(key: ChatQuestionsHeight.self, value: geometry.size.height)
-                })
+                // Measured at full height: a squeezed measurement would never overflow.
+                let questions = questionList(inline: true).fixedSize(horizontal: false, vertical: true)
+                    .background(GeometryReader { geometry in
+                        Color.clear.preference(key: ChatQuestionsHeight.self, value: geometry.size.height)
+                    })
                 Group {
                     if overflows {
-                        ScrollView(showsIndicators: true) { questions }.frame(height: Self.scrollCap)
-                            .mask(
-                                // Fade the last rows out so the cut reads as "more below", not as the end.
-                                VStack(spacing: 0) {
-                                    Color.black
-                                    LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: 36)
-                                })
-                            .overlay(alignment: .bottom) {
-                                Button { expanded = true } label: {
-                                    Label("Show all", systemImage: "chevron.down").font(.caption.weight(.semibold))
-                                        .padding(.horizontal, 10).padding(.vertical, 5)
-                                        .background(PhrenTheme.surfaceRaised, in: Capsule())
-                                        .overlay(Capsule().stroke(PhrenTheme.border, lineWidth: 1))
-                                }.buttonStyle(.plain).foregroundStyle(PhrenTheme.text).padding(.bottom, 4)
-                                    .accessibilityIdentifier("chat-question-show-all")
-                            }
+                        VStack(spacing: 0) {
+                            ScrollView(showsIndicators: true) { questions }.frame(height: Self.scrollCap)
+                                .accessibilityIdentifier("chat-question-scroll")
+                                .mask(
+                                    // Fade the last rows out so the cut reads as "more below", not as the end.
+                                    VStack(spacing: 0) {
+                                        Color.black
+                                        LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: 36)
+                                    })
+                            // Its own row below the cut, never drawn over an option.
+                            Button { expanded = true } label: {
+                                Label("Show all", systemImage: "chevron.down").font(PhrenTheme.Font.caption.weight(.semibold))
+                                    .frame(maxWidth: .infinity, minHeight: 44)
+                                    .contentShape(Rectangle())
+                            }.buttonStyle(.plain).foregroundStyle(PhrenTheme.text)
+                                .accessibilityIdentifier("chat-question-show-all")
+                        }
                     } else { questions }
                 }.onPreferenceChange(ChatQuestionsHeight.self) { questionsHeight = $0 }
             }
@@ -299,31 +309,23 @@ struct ChatQuestionCard: View {
     }
 
     private func questionList(inline: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        // Each question is one plain line, "Header: question", then its
+        // options as compact bordered rows sized to their text.
+        VStack(alignment: .leading, spacing: PhrenTheme.Space.large) {
             ForEach(prompt.questions.indices, id: \.self) { index in
                 let question = prompt.questions[index]
-                if index > 0 { Divider().overlay(PhrenTheme.border).padding(.vertical, 2) }
-                HStack(spacing: 8) {
-                    if let header = question.header, !header.isEmpty {
-                        Text(header).font(.caption.weight(.medium)).lineLimit(1).foregroundStyle(PhrenTheme.sessionProject)
-                            .padding(.horizontal, 7).padding(.vertical, 3)
-                            .background(PhrenTheme.sessionProject.opacity(0.1), in: Capsule())
+                VStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
+                    if keepsOptionsVisible {
+                        ChatQuestionText(header: question.header, text: question.question, inline: inline) { expanded = true }
+                    } else {
+                        ChatQuestionLine(header: question.header, text: question.question)
                     }
-                    if prompt.questions.count > 1 {
-                        Text("Question \(index + 1)").font(.caption2).foregroundStyle(PhrenTheme.textMuted)
+                    if question.isFreeText {
+                        typedRow(index, question: question, placeholder: question.kind == "number" ? "Enter a number" : "Type your answer")
+                    } else {
+                        ForEach(question.options.indices, id: \.self) { option in optionRow(index, question: question, option: option, inline: inline) }
+                        if allowsTyping { typedRow(index, question: question, placeholder: "Other…") }
                     }
-                }
-                if keepsOptionsVisible {
-                    ChatQuestionText(text: question.question, inline: inline) { expanded = true }
-                } else {
-                    Text(question.question).font(.headline).foregroundStyle(PhrenTheme.text).textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                if question.isFreeText {
-                    typedRow(index, question: question, placeholder: question.kind == "number" ? "Enter a number" : "Type your answer")
-                } else {
-                    ForEach(question.options.indices, id: \.self) { option in optionRow(index, question: question, option: option, inline: inline) }
-                    if allowsTyping { typedRow(index, question: question, placeholder: "Other…") }
                 }
             }
         }
@@ -333,7 +335,9 @@ struct ChatQuestionCard: View {
         let selected = answers[index, default: .init()].selections.contains(option)
         let choice = question.options[option]
         return ChatQuestionOptionRow(label: choice.label, detail: choice.description, preview: choice.preview,
-                                     selected: selected, multi: multi, inline: inline, busy: busy) {
+                                     selected: selected, multi: multi, inline: inline, busy: busy,
+                                     radius: PhrenTheme.Radius.questionOption, outlined: true,
+                                     identifier: "chat-question-\(inline ? "" : "sheet-")option:\(index):\(option)") {
             var answer = answers[index, default: .init()]
             if multi {
                 if selected { answer.selections.removeAll { $0 == option } } else { answer.selections.append(option) }
@@ -361,13 +365,40 @@ struct ChatQuestionCard: View {
                 .foregroundStyle(PhrenTheme.text).focused($typing, equals: index)
                 .keyboardType(question.kind == "number" ? .numbersAndPunctuation : .default)
                 .accessibilityIdentifier("chat-question-typed-\(index)")
-        }.padding(12).background(active ? PhrenTheme.cyan.opacity(0.1) : PhrenTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.small, style: .continuous))
+        }.padding(.horizontal, PhrenTheme.Space.medium).padding(.vertical, PhrenTheme.Space.small)
+            .frame(minHeight: 44)
+            .background(active ? PhrenTheme.cyan.opacity(0.1) : PhrenTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.questionOption, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: PhrenTheme.Radius.questionOption, style: .continuous)
+                .stroke(active ? PhrenTheme.cyan.opacity(0.5) : PhrenTheme.borderStrong, lineWidth: 1))
             .disabled(busy)
+    }
+}
+
+/// "Header: question" as one wrapping line; the header in the project color.
+struct ChatQuestionLine: View {
+    let header: String?
+    let text: String
+
+    static func content(header: String?, text: String) -> AttributedString {
+        var line = AttributedString(text)
+        if let header, !header.isEmpty {
+            var prefix = AttributedString(header + ": ")
+            prefix.foregroundColor = PhrenTheme.sessionProject
+            line = prefix + line
+        }
+        return line
+    }
+
+    var body: some View {
+        Text(Self.content(header: header, text: text))
+            .font(PhrenTheme.Font.body.weight(.semibold)).foregroundStyle(PhrenTheme.text)
+            .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
     }
 }
 
 /// The fade and expansion belong to the asking text, never to the answers.
 private struct ChatQuestionText: View {
+    var header: String? = nil
     let text: String
     let inline: Bool
     let expand: () -> Void
@@ -377,8 +408,7 @@ private struct ChatQuestionText: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(text).font(.headline).foregroundStyle(PhrenTheme.text).textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
+            ChatQuestionLine(header: header, text: text)
                 .background(GeometryReader { geometry in
                     Color.clear.preference(key: ChatQuestionsHeight.self, value: geometry.size.height)
                 })

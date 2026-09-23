@@ -279,6 +279,21 @@ struct AgentChatView: View {
         }
     }
 
+    /// Pasted images join the draft as attachments, the same as the + picker's.
+    private func pasteImages(_ providers: [NSItemProvider]) {
+        guard let openingTarget = model.target else { return }
+        Task { @MainActor in
+            for provider in providers {
+                guard model.target == openingTarget else { return }
+                do {
+                    let attachment = try await ChatAttachmentPreparation.pasted(provider)
+                    guard model.target == openingTarget else { return }
+                    model.add(attachment)
+                } catch { model.deliveryError = error.localizedDescription }
+            }
+        }
+    }
+
     private var currentHost: LiveHost? {
         (try? LiveSessionPreferences.read(hostData))?.hosts.first { $0.id == session.host.id }
     }
@@ -1340,7 +1355,8 @@ struct AgentChatView: View {
             VStack(spacing: 0) {
                 ChatComposer(text: $model.draft, focused: Binding(get: { composing }, set: { composing = $0 }),
                              placeholder: "Message \(model.target?.providerName ?? "agent")…",
-                             size: composerTextSize, selection: textSelection)
+                             size: composerTextSize, selection: textSelection,
+                             pasteImages: pasteImages)
                     .overlay(alignment: .topLeading) {
                         if model.draft.isEmpty {
                             Text("Message \(model.target?.providerName ?? "agent")…")

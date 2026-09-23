@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 /// Phren's draft editor. UITextView owns caret movement, selection handles,
 /// the loupe and edge autoscroll, including drafts taller than four lines.
@@ -9,6 +10,9 @@ struct ChatComposer: UIViewRepresentable {
     let placeholder: String
     let size: CGFloat
     let selection: ChatTextSelection
+    /// Images pasted into the draft (edit menu Paste, the keyboard's
+    /// screenshot suggestion) become attachments instead of text.
+    var pasteImages: (([NSItemProvider]) -> Void)? = nil
     @Environment(\.isEnabled) private var enabled
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -24,6 +28,12 @@ struct ChatComposer: UIViewRepresentable {
         view.alwaysBounceVertical = false
         view.delegate = context.coordinator
         view.accessibilityIdentifier = "chat-composer"
+        view.pasteConfiguration = UIPasteConfiguration(acceptableTypeIdentifiers: [
+            UTType.image.identifier, UTType.plainText.identifier, UTType.text.identifier, UTType.url.identifier,
+        ])
+        #if DEBUG && targetEnvironment(simulator)
+        AgentChatFixture.seedPasteboardImage()
+        #endif
         view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         return view
     }
@@ -41,6 +51,7 @@ struct ChatComposer: UIViewRepresentable {
         view.isEditable = enabled
         view.isSelectable = enabled
         view.accessibilityLabel = placeholder
+        view.pasteImages = pasteImages
         if view.text != text {
             let range = view.selectedRange
             let wasAtEnd = NSMaxRange(range) == view.textStorage.length
@@ -102,6 +113,8 @@ struct ChatComposer: UIViewRepresentable {
 /// an active caret/loupe drag; a stationary nonempty range still has handles.
 class ChatSelectionTextView: UITextView {
     var selectionActivityChanged: ((Bool) -> Void)?
+    /// Set on the composer only: where pasted images go.
+    var pasteImages: (([NSItemProvider]) -> Void)?
     private var observedSelectionGestures: [UIGestureRecognizer] = []
     private var reportedSelecting: Bool?
 
@@ -144,6 +157,47 @@ class ChatSelectionTextView: UITextView {
         let result = super.resignFirstResponder()
         selectionDidChange()
         return result
+    }
+
+    // MARK: Image paste
+
+    static func isImage(_ provider: NSItemProvider) -> Bool {
+        provider.registeredTypeIdentifiers.contains { UTType($0)?.conforms(to: .image) == true }
+    }
+
+    private var acceptsImagePaste: Bool { pasteImages != nil && isEditable }
+
+    private var pasteboardImageProviders: [NSItemProvider] {
+        guard UIPasteboard.general.hasImages else { return [] }
+        return UIPasteboard.general.itemProviders.filter(Self.isImage)
+    }
+
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        if action == #selector(paste(_:)), acceptsImagePaste, UIPasteboard.general.hasImages { return true }
+        return super.canPerformAction(action, withSender: sender)
+    }
+
+    override func canPaste(_ itemProviders: [NSItemProvider]) -> Bool {
+        if acceptsImagePaste, itemProviders.contains(where: Self.isImage) { return true }
+        return super.canPaste(itemProviders)
+    }
+
+    override func paste(_ sender: Any?) {
+        // Text wins when the pasteboard carries both, as copied rich text does.
+        if acceptsImagePaste, !UIPasteboard.general.hasStrings,
+           case let images = pasteboardImageProviders, !images.isEmpty {
+            pasteImages?(images)
+            return
+        }
+        super.paste(sender)
+    }
+
+    override func paste(itemProviders: [NSItemProvider]) {
+        guard acceptsImagePaste else { return super.paste(itemProviders: itemProviders) }
+        let images = itemProviders.filter { Self.isImage($0) && !$0.hasItemConformingToTypeIdentifier(UTType.plainText.identifier) }
+        let rest = itemProviders.filter { provider in !images.contains { $0 === provider } }
+        if !images.isEmpty { pasteImages?(images) }
+        if !rest.isEmpty { super.paste(itemProviders: rest) }
     }
 
     private func observeSelectionGestures() {

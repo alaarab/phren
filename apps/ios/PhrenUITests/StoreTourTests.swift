@@ -60,12 +60,12 @@ final class StoreTourTests: XCTestCase {
     func testClaudeQuestionCard() {
         let app = launch(extra: ["--chat-approval-question"])
         openChat(app)
-        XCTAssertTrue(app.staticTexts["Which accent should the project use?"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Design: Which accent should the project use?"].waitForExistence(timeout: 10))
         app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "A softer accent")).firstMatch.tap()
         app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "The conversation")).firstMatch.tap()
         app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "The overview")).firstMatch.tap()
         // Tapping scrolled the card's question list; back to its top.
-        let list = app.scrollViews.containing(NSPredicate(format: "label == %@", "Which screens should change?")).firstMatch
+        let list = app.scrollViews.containing(NSPredicate(format: "label == %@", "Scope: Which screens should change?")).firstMatch
         list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2))
             .press(forDuration: 0.1, thenDragTo: list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)))
         settle(2.5)

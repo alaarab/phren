@@ -1086,10 +1086,9 @@ final class AgentChatTests: XCTestCase {
     func testClaudeQuestionApprovalShowsChoicesAndSendsAnswers() {
         let app = launch(extra: ["--chat-approval-question"])
         app.buttons["live-chat:w7:w7:t9"].tap()
-        XCTAssertTrue(app.staticTexts["Which accent should the project use?"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["Design: Which accent should the project use?"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.staticTexts["Claude has a question"].exists)
-        XCTAssertTrue(app.staticTexts["Design"].exists)
-        XCTAssertTrue(app.staticTexts["Which screens should change?"].exists)
+        XCTAssertTrue(app.staticTexts["Scope: Which screens should change?"].exists)
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Keep the Phren accent")).firstMatch.exists)
         XCTAssertFalse(app.buttons["Approve"].exists)
         XCTAssertFalse(app.staticTexts["Permission needed"].exists)
@@ -1120,7 +1119,7 @@ final class AgentChatTests: XCTestCase {
     func testLongClaudeQuestionExpandsToSheetWithoutLosingAnswers() {
         let app = launch(extra: ["--chat-approval-question", "--chat-approval-question-long"])
         app.buttons["live-chat:w7:w7:t9"].tap()
-        let first = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "The Hook currently resolves")).firstMatch
+        let first = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Identity: The Hook currently resolves")).firstMatch
         XCTAssertTrue(first.waitForExistence(timeout: 8))
         XCTAssertTrue(first.label.hasSuffix("Herdr is not running at all?"), "The question must be shown in full, not truncated")
         XCTAssertTrue(app.staticTexts["0 of 4 answered"].exists)
@@ -1149,6 +1148,71 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(app.buttons["Send answer"].firstMatch.isEnabled)
         app.buttons["Send answer"].firstMatch.tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "→ Descriptors only (Recommended)")).firstMatch.waitForExistence(timeout: 8))
+    }
+
+    /// Wrapping descriptions grow their rows: each row's background holds
+    /// its radio, title and description, and rows never overlap.
+    @MainActor
+    func testQuestionOptionRowsHoldTheirWrappedText() {
+        let app = launch(extra: ["--chat-approval-question", "--chat-approval-question-single"] + contentSizeArguments)
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        XCTAssertTrue(app.staticTexts["Identity: Which fallback should the phone prefer when Herdr is not running?"].waitForExistence(timeout: 8))
+        var previous: CGRect?
+        for option in 0..<3 {
+            let id = "chat-question-option:0:\(option)"
+            let row = app.descendants(matching: .any).matching(identifier: "\(id):row").firstMatch
+            let title = app.descendants(matching: .any).matching(identifier: "\(id):title").firstMatch
+            XCTAssertTrue(row.waitForExistence(timeout: 4) && title.exists, "Option \(option) has its frame markers")
+            XCTAssertTrue(row.frame.insetBy(dx: -0.5, dy: -0.5).contains(title.frame), "Option \(option) title \(title.frame) lies inside its row \(row.frame)")
+            XCTAssertGreaterThanOrEqual(app.buttons[id].frame.height, title.frame.height + 20, "Option \(option) is padded around its text")
+            if let previous { XCTAssertLessThanOrEqual(previous.maxY, row.frame.minY + 0.5, "Option \(option) does not overlap the one above") }
+            previous = row.frame
+        }
+        capture(app, "Claude question with wrapping options")
+        app.buttons["chat-question-option:0:1"].tap()
+        XCTAssertTrue(app.buttons["chat-question-option:0:1"].isSelected)
+        XCTAssertTrue(app.buttons["Send answer"].isEnabled)
+    }
+
+    /// A multi-question prompt with a wide preview: the preview scrolls in its
+    /// own box inside the card, and Show all is its own row below the cut.
+    @MainActor
+    func testMultiQuestionPreviewAndShowAllStayClearOfOptions() {
+        let app = launch(extra: ["--chat-blocked", "--chat-terminal-questions"] + contentSizeArguments)
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        XCTAssertTrue(app.staticTexts["Page header: What should the top of every integration page be?"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["Claude asks"].exists)
+        let window = app.windows.firstMatch.frame
+        let row = app.descendants(matching: .any).matching(identifier: "chat-question-option:0:0:row").firstMatch
+        let preview = app.scrollViews["chat-question-option:0:0:preview"]
+        XCTAssertTrue(row.exists && preview.exists, "The first option carries its preview")
+        XCTAssertLessThanOrEqual(preview.frame.maxX, row.frame.maxX + 0.5, "The preview \(preview.frame) stays inside its row \(row.frame)")
+        XCTAssertLessThanOrEqual(row.frame.maxX, window.maxX - 12, "The card keeps its margin")
+        let showAll = app.buttons["chat-question-show-all"]
+        XCTAssertTrue(showAll.waitForExistence(timeout: 4), "Ten options overflow the card")
+        let scroll = app.scrollViews["chat-question-scroll"]
+        XCTAssertLessThanOrEqual(scroll.frame.maxY, showAll.frame.minY + 0.5, "Show all sits below the cut")
+        let titles = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@", "chat-question-option:", ":title"))
+        var checked = 0
+        for index in 0..<titles.count {
+            let title = titles.element(boundBy: index).frame
+            guard title.minY < scroll.frame.maxY else { continue }
+            checked += 1
+            XCTAssertFalse(title.intersects(showAll.frame), "Show all \(showAll.frame) covers an option title \(title)")
+        }
+        XCTAssertGreaterThan(checked, 0, "Some option titles are visible above Show all")
+        capture(app, "Claude asks with a wide preview")
+        preview.swipeLeft()
+        XCTAssertLessThanOrEqual(row.frame.maxX, window.maxX - 12, "Scrolling the preview does not widen the card")
+        showAll.tap()
+        XCTAssertTrue(app.buttons["chat-question-collapse"].waitForExistence(timeout: 4))
+    }
+
+    /// `PHREN_UI_TEST_CONTENT_SIZE` (passed as TEST_RUNNER_PHREN_UI_TEST_CONTENT_SIZE)
+    /// renders a one-off run at another text size; ordinary runs use the default.
+    private var contentSizeArguments: [String] {
+        guard let size = ProcessInfo.processInfo.environment["PHREN_UI_TEST_CONTENT_SIZE"], !size.isEmpty else { return [] }
+        return ["-UIPreferredContentSizeCategoryName", size]
     }
 
     @MainActor
@@ -1583,6 +1647,25 @@ final class AgentChatTests: XCTestCase {
         XCTAssertFalse(app.buttons["Remove Screenshot.png"].exists)
     }
 
+    /// A screenshot on the clipboard pastes into the composer as an
+    /// attachment, the same chip the + picker adds, not as nothing.
+    @MainActor
+    func testPastedImageBecomesAnAttachment() {
+        let app = launch(extra: ["--chat-paste-image"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        XCTAssertTrue(app.staticTexts["The project screen is ready. What would you like to change?"].waitForExistence(timeout: 5))
+        let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
+        composer.tap()
+        let paste = app.menuItems["Paste"].firstMatch
+        if !paste.waitForExistence(timeout: 2) { composer.tap() }
+        if !paste.waitForExistence(timeout: 3) { composer.press(forDuration: 0.8) }
+        XCTAssertTrue(paste.waitForExistence(timeout: 5), "Paste is offered when the clipboard holds an image")
+        paste.tap()
+        XCTAssertTrue(app.buttons["Preview Clipboard.png"].waitForExistence(timeout: 8), "The pasted image is an attachment chip")
+        XCTAssertEqual((composer.value as? String) ?? "", "", "The image is not pasted into the draft as text")
+        capture(app, "Pasted image attachment")
+    }
+
     @MainActor
     func testFailedUploadRetainsImageAndTextWithoutSending() {
         let app = launch(extra: ["--chat-upload-fails"])
@@ -1719,6 +1802,7 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(showAll.exists)
         XCTAssertLessThanOrEqual(showAll.frame.maxY, label.frame.minY, "Expansion stays above the options")
         let last = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Tell Codex what to do differently.")).firstMatch
+        capture(app, "Terminal choice with a long question")
         XCTAssertTrue(last.isHittable, "The last option is outside the question fade")
         showAll.tap()
         XCTAssertTrue(app.buttons["chat-question-collapse"].waitForExistence(timeout: 4))

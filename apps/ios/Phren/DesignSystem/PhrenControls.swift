@@ -113,11 +113,22 @@ struct PhrenOptionRow: View {
     var icon: String? = nil
     var glyph: AnyView? = nil
     var trailing: AnyView? = nil
+    /// Content below the text, such as a code preview. It is drawn inside the
+    /// row's background but outside its Button, so a scroller in it scrolls.
     var detail: AnyView? = nil
     var radius = PhrenTheme.Radius.questionOption
     var minimumHeight: CGFloat = 44
     /// A choice that is listed but not currently available, such as an offline computer.
     var muted = false
+    /// A hairline around the unselected row, for rows drawn on a card.
+    var outlined = false
+    /// Supporting text color; chat questions use `textSecondary`.
+    var captionColor: Color = PhrenTheme.textMuted
+    /// Spoken value, for text the row's label cannot carry (a scrolled preview).
+    var value: String? = nil
+    /// The row Button's identifier. UI tests also get `<id>:row` and
+    /// `<id>:title` frame markers so layout can be asserted.
+    var identifier: String? = nil
     let action: () -> Void
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -127,7 +138,51 @@ struct PhrenOptionRow: View {
         Text(text).font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
     }
 
+    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: radius, style: .continuous) }
+    private var fill: Color { selected ? PhrenTheme.cyan.opacity(0.1) : PhrenTheme.surfaceRaised }
+    private var stroke: Color { selected ? PhrenTheme.cyan.opacity(0.5) : outlined ? PhrenTheme.borderStrong : .clear }
+    private var markers: Bool { identifier != nil && AppRuntime.isUITesting }
+    /// Where the text starts: padding, the mark, and a glyph when there is one.
+    private var textInset: CGFloat { PhrenTheme.Space.medium + 32 + (glyph != nil || icon != nil ? 32 : 0) }
+
     var body: some View {
+        Group {
+            if let detail {
+                VStack(alignment: .leading, spacing: 0) {
+                    button(bottomPadding: PhrenTheme.Space.small, background: false)
+                    detail
+                        .padding(.leading, textInset)
+                        .padding([.trailing, .bottom], PhrenTheme.Space.medium)
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                .background(fill, in: shape)
+                .overlay(shape.stroke(stroke, lineWidth: 1))
+            } else {
+                button(bottomPadding: PhrenTheme.Space.medium, background: true)
+            }
+        }
+        .disabled(disabled)
+        .opacity(disabled || !isEnabled ? 0.45 : 1)
+        // Behind the row, so the markers never cover the Button for hit tests.
+        .backgroundPreferenceValue(PhrenOptionTitleBounds.self) { anchor in
+            if markers, let identifier {
+                GeometryReader { geometry in
+                    ZStack(alignment: .topLeading) {
+                        Color.clear.accessibilityElement().accessibilityIdentifier("\(identifier):row")
+                        if let anchor {
+                            let bounds = geometry[anchor]
+                            Color.clear.frame(width: bounds.width, height: bounds.height)
+                                .offset(x: bounds.minX, y: bounds.minY)
+                                .accessibilityElement().accessibilityIdentifier("\(identifier):title")
+                        }
+                    }
+                }
+                .allowsHitTesting(false)
+            }
+        }
+    }
+
+    private func button(bottomPadding: CGFloat, background: Bool) -> some View {
         Button(action: action) {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: selected ? (mark == .check ? "checkmark.square.fill" : "checkmark.circle.fill")
@@ -141,37 +196,54 @@ struct PhrenOptionRow: View {
                     Image(systemName: icon).resizable().scaledToFit().frame(width: 18, height: 18).frame(width: 22)
                         .foregroundStyle(PhrenTheme.textSecondary).accessibilityHidden(true)
                 }
-                VStack(alignment: .leading, spacing: PhrenTheme.Space.xs) {
-                    let layout = dynamicTypeSize.isAccessibilitySize
-                        ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
-                        : AnyLayout(HStackLayout(alignment: .top, spacing: 8))
-                    layout {
-                        VStack(alignment: .leading, spacing: PhrenTheme.Space.xs) {
-                            Text(title).foregroundStyle(muted ? PhrenTheme.textMuted : PhrenTheme.text)
-                            if let caption, !caption.isEmpty {
-                                Text(caption).font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
-                            }
+                let layout = dynamicTypeSize.isAccessibilitySize
+                    ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                    : AnyLayout(HStackLayout(alignment: .top, spacing: 8))
+                layout {
+                    VStack(alignment: .leading, spacing: PhrenTheme.Space.xs) {
+                        Text(title).foregroundStyle(muted ? PhrenTheme.textMuted : PhrenTheme.text)
+                            .anchorPreference(key: PhrenOptionTitleBounds.self, value: .bounds) { $0 }
+                        if let caption, !caption.isEmpty {
+                            Text(caption).font(PhrenTypography.caption).foregroundStyle(captionColor)
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        if let trailing { trailing }
                     }
-                    if let detail { detail }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    if let trailing { trailing }
                 }
-                .fixedSize(horizontal: false, vertical: true)
             }
             .font(PhrenTypography.body)
-            .padding(PhrenTheme.Space.medium)
+            .padding(.horizontal, PhrenTheme.Space.medium)
+            .padding(.top, PhrenTheme.Space.medium)
+            .padding(.bottom, bottomPadding)
             .frame(maxWidth: .infinity, minHeight: max(44, minimumHeight), alignment: .leading)
-            .background(selected ? PhrenTheme.cyan.opacity(0.1) : PhrenTheme.surfaceRaised,
-                        in: RoundedRectangle(cornerRadius: radius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous)
-                .stroke(selected ? PhrenTheme.cyan.opacity(0.5) : .clear, lineWidth: 1))
-            .contentShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+            // Never squeezed below its text: a compressed row drew its radio
+            // and title above the background and its caption below it.
+            .fixedSize(horizontal: false, vertical: true)
+            .background(background ? fill : .clear, in: shape)
+            .overlay(shape.stroke(background ? stroke : .clear, lineWidth: 1))
+            .contentShape(shape)
         }
         .buttonStyle(.plain)
-        .disabled(disabled)
-        .opacity(disabled || !isEnabled ? 0.45 : 1)
         .accessibilityAddTraits(selected ? .isSelected : [])
+        .modifier(PhrenOptionAccessibility(value: value, identifier: identifier))
+    }
+}
+
+private struct PhrenOptionTitleBounds: PreferenceKey {
+    static let defaultValue: Anchor<CGRect>? = nil
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) { value = value ?? nextValue() }
+}
+
+private struct PhrenOptionAccessibility: ViewModifier {
+    let value: String?
+    let identifier: String?
+    func body(content: Content) -> some View {
+        switch (value, identifier) {
+        case let (value?, identifier?): content.accessibilityValue(value).accessibilityIdentifier(identifier)
+        case let (value?, nil): content.accessibilityValue(value)
+        case let (nil, identifier?): content.accessibilityIdentifier(identifier)
+        case (nil, nil): content
+        }
     }
 }
 

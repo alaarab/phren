@@ -44,6 +44,20 @@ enum ChatAttachmentPreparation {
         ImageViewerOriginals.remember(data, for: attachment.id)
         return attachment
     }
+    /// An image from the clipboard or a paste: the same preparation as Photos.
+    static func pasted(_ provider: NSItemProvider) async throws -> AgentAttachment {
+        guard let type = provider.registeredTypeIdentifiers.first(where: { UTType($0)?.conforms(to: .image) == true }) else {
+            throw PhrenKitError.validation("No image was found on the clipboard.")
+        }
+        let data: Data = try await withCheckedThrowingContinuation { continuation in
+            _ = provider.loadDataRepresentation(forTypeIdentifier: type) { data, failure in
+                if let data { continuation.resume(returning: data) } else {
+                    continuation.resume(throwing: failure ?? PhrenKitError.validation("No image was found on the clipboard."))
+                }
+            }
+        }
+        return try await preparedImage(data, name: "Clipboard")
+    }
     static func file(_ url: URL) throws -> AgentAttachment {
         let access = url.startAccessingSecurityScopedResource()
         defer { if access { url.stopAccessingSecurityScopedResource() } }
@@ -177,21 +191,14 @@ struct ChatAttachmentPicker: View {
 
     private func pasteImage() {
         guard canAdd, !busy,
-              let provider = UIPasteboard.general.itemProviders.first(where: { provider in
-                  provider.registeredTypeIdentifiers.contains { UTType($0)?.conforms(to: .image) == true }
-              }),
-              let type = provider.registeredTypeIdentifiers.first(where: { UTType($0)?.conforms(to: .image) == true }) else { return }
+              let provider = UIPasteboard.general.itemProviders.first(where: ChatSelectionTextView.isImage) else { return }
         busy = true
-        provider.loadDataRepresentation(forTypeIdentifier: type) { data, failure in
-            Task { @MainActor in
-                defer { busy = false }
-                do {
-                    if let failure { throw failure }
-                    guard let data else { throw PhrenKitError.validation("No image was found on the clipboard.") }
-                    add(try await ChatAttachmentPreparation.preparedImage(data, name: "Clipboard"))
-                    dismiss()
-                } catch { self.error = error.localizedDescription }
-            }
+        Task { @MainActor in
+            defer { busy = false }
+            do {
+                add(try await ChatAttachmentPreparation.pasted(provider))
+                dismiss()
+            } catch { self.error = error.localizedDescription }
         }
     }
 }

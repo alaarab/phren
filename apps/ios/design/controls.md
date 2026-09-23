@@ -70,10 +70,19 @@ retaining its code preview and busy state.
 
 Geometry: 44 minimum height, 12 padding, 10 between leading slots, 22-wide
 radio/check and optional glyph slots (18-point symbols), 4 between title and caption. Radius 12;
-the chat adapter retains its existing radius 10. `glyph` accepts a custom
+the chat adapter retains its existing radius 10 except on question cards. `glyph` accepts a custom
 view such as AgentProviderGlyph or a host color dot; `icon` accepts an SF
 Symbol. `trailing` accepts a passive badge, and `detail` a preview. Slots must
-not contain buttons or other competing actions.
+not contain buttons or other competing actions. The row is never compressed
+below its text: its background always holds the mark, title and caption.
+`detail` is drawn inside the background but below the Button, aligned with
+the text, so a horizontal preview scroller scrolls instead of tapping.
+
+Chat question cards use `outlined` rows: a 1-point borderStrong hairline and
+the caption in textSecondary. Each question is one "Header: question" line
+(header in sessionProject) with its options 8 apart and 16 between questions.
+When the questions pass the card's cap they scroll with a fade, and Show all
+is its own 44-point row below the cut, never drawn over an option.
 
 Normal: surfaceRaised, text title, textMuted caption, textDim empty circle
 or square. Selected: cyan mark, cyan at 0.1 fill, 1-point cyan at 0.5 stroke.

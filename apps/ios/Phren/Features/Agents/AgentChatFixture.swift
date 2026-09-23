@@ -3,6 +3,7 @@ import Foundation
 import PhrenKit
 import PhrenLive
 import UIKit
+import UniformTypeIdentifiers
 
 /// Isolated, in-memory conversations for UI tests; never active on an iPhone.
 @MainActor enum AgentChatFixture {
@@ -85,6 +86,33 @@ import UIKit
         ["question": "Should the shell route reconnect automatically after the link drops, the way a Herdr terminal does?", "header": "Reconnect",
          "options": [["label": "No, end the session", "description": "Each connection is a fresh process; restarting silently would be surprising."], ["label": "Yes, restart the agent"]]],
     ]]
+    /// One question whose three descriptions wrap to two or three lines:
+    /// each row's background must hold its radio, title and description.
+    static let singleQuestionInput: [String: Any] = ["questions": [
+        ["question": "Which fallback should the phone prefer when Herdr is not running?", "header": "Identity",
+         "options": [["label": "Descriptors only (Recommended)", "description": "Keep the lsof-based binding and stop trusting folder or modification time heuristics, so a fresh terminal never inherits another conversation."],
+                     ["label": "Lifecycle binding", "description": "Trust the agent hook's own registration of terminal id plus foreground process ids, and accept that a restarted agent in the same pane looks new."],
+                     ["label": "Ask every time", "description": "Show the candidates and let the person pick, at the cost of one more tap per session."]]],
+    ]]
+    /// A released AskUserQuestion with a wide flow diagram preview and more
+    /// options than fit above the composer: the preview scrolls in its own box
+    /// and Show all sits below the cut, never over an option.
+    static let terminalQuestions: [AgentQuestionPrompt.Question] = [
+        .init(header: "Page header", question: "What should the top of every integration page be?", options: [
+            .init(label: "Status strip (Recommended)", description: "One line with health, last sync and owner; the page's work starts right below it.",
+                  preview: "┌──────────┐    ┌──────────────┐    ┌─────────────┐    ┌────────────┐\n│ Webhook  │ ─▶ │ Health check │ ─▶ │ Sync worker │ ─▶ │ Store repo │\n└──────────┘    └──────────────┘    └─────────────┘    └────────────┘"),
+            .init(label: "Hero card", description: "A large card with the integration's logo, description and a primary action."),
+            .init(label: "Nothing", description: "Start with the integration's settings; health lives in its own section."),
+        ]),
+        .init(header: "Health", question: "Where should an integration's health show?", options: [
+            .init(label: "A1: Header dot", description: "A colored dot beside the page title, with the detail one tap away."),
+            .init(label: "A2: Health section", description: "What failed, when, and the last successful run, as the first section of the page."),
+            .init(label: "A3: Both", description: "The dot for a glance and the section for the detail."),
+        ]),
+        .init(header: "Scope", question: "Which integrations should change first?", multiSelect: true, options: [
+            .init(label: "GitHub"), .init(label: "Linear"), .init(label: "Slack"), .init(label: "Sentry"),
+        ]),
+    ]
     /// The plan Claude wrote in plan mode: more than a screenful, so the card
     /// cuts it and offers the rest.
     static let planMarkdown = "# Plan: subagent and todo cards\n\n## Steps\n\n1. Parse the Task tool in PhrenKit\n2. Draw the agent card\n3. Fold superseded todo lists\n4. Add fixture flags\n5. Write the UI tests\n6. Run the suite on the simulator\n7. Check the cards at accessibility sizes\n8. Verify the plan approval path\n9. Update the changelog\n10. Ask for review\n\n## Notes\n\n- Keep every card in the phren card family\n- No raw JSON on any card\n- Final step marker: run the full suite once more"
@@ -94,6 +122,7 @@ import UIKit
     /// list, so the same prompt is asked as the question card.
     static func terminalPrompt(_ target: AgentChatTarget) -> AgentTerminalPrompt? {
         guard flag("--chat-blocked"), !flag("--chat-password"), !answered else { return nil }
+        if flag("--chat-terminal-questions") { return AgentTerminalPrompt(toolName: "AskUserQuestion", message: nil, questions: terminalQuestions) }
         let input: [String: Any] = ["command": "xcrun simctl list runtimes", "justification": "May I inspect the installed simulator runtimes to resolve the Watch target test failure?"]
         let choice = flag("--chat-terminal-choices") ? AgentPromptChoice(title: flag("--chat-terminal-long-question") ? String(repeating: "Review the requested action and its effect on this project before choosing an answer. ", count: 12) + "Would you like to run the following command?" : "Would you like to run the following command?", body: "xcrun simctl list runtimes",
             options: [.init(label: "Yes, proceed", key: "y", description: "Run the tool and continue."),
@@ -131,7 +160,7 @@ import UIKit
             return try JSONDecoder().decode(AgentApproval.self, from: JSONSerialization.data(withJSONObject: value))
         }
         if flag("--chat-approval-question") {
-            let input = flag("--chat-approval-question-long") ? longQuestionInput : questionInput
+            let input = flag("--chat-approval-question-long") ? longQuestionInput : flag("--chat-approval-question-single") ? singleQuestionInput : questionInput
             let message = String(decoding: try JSONSerialization.data(withJSONObject: input, options: .prettyPrinted), as: UTF8.self)
             return try AgentInteractionStatus.read(JSONSerialization.data(withJSONObject: ["agentStatus": ["source": target.source, "session": target.sessionID, "pendingApproval": ["actionId": "fixture-question-action", "toolName": "AskUserQuestion", "title": "Allow AskUserQuestion?", "message": message, "expiresAt": approvalExpiry]]]), target: target)?.approval
         }
@@ -162,6 +191,12 @@ import UIKit
     /// Where the fixture's project lives on the computer.
     static var root: String { trailer ? "/work/ledger" : tour ? "/work/phren" : "/work/phone" }
     static var image: AgentAttachment { picture(0) }
+    /// `--chat-paste-image`: a screenshot waiting on the clipboard, as after
+    /// taking one, so Paste in the composer can attach it.
+    static func seedPasteboardImage() {
+        guard enabled, flag("--chat-paste-image") else { return }
+        UIPasteboard.general.setData(image.data, forPasteboardType: UTType.png.identifier)
+    }
     /// The tour's pictures are design stills — the app's canvas, a tinted
     /// card, the mascot — in a different tint per picture so four in one
     /// conversation read as four; elsewhere a plain cyan rectangle.
@@ -289,7 +324,7 @@ import UIKit
         // A session launched from a project runs the harness that was picked.
         let launchedKind = launches.last.map(\.kind).flatMap { session.workspaceID == "w9" ? $0 : nil }
         let remote = flag("--agent-work-navigation") && session.host.id.uuidString.hasSuffix("000002")
-        let agent = remote ? "codex" : launchedKind ?? (flag("--chat-copilot") ? "copilot" : (trailer || flag("--chat-claude-queue") || flag("--chat-claude-image") || flag("--chat-read-images") || flag("--chat-approval-question") || flag("--chat-agent-card") || flag("--chat-todos") || flag("--chat-plan-mode") || flag("--chat-web-tools") || flag("--chat-skill-chip") || flag("--chat-mcp-card") || flag("--chat-compaction") || flag("--chat-model-picker") || flag("--chat-phren-tools")) ? "claude" : "codex")
+        let agent = remote ? "codex" : launchedKind ?? (flag("--chat-copilot") ? "copilot" : (trailer || flag("--chat-claude-queue") || flag("--chat-claude-image") || flag("--chat-read-images") || flag("--chat-approval-question") || flag("--chat-terminal-questions") || flag("--chat-agent-card") || flag("--chat-todos") || flag("--chat-plan-mode") || flag("--chat-web-tools") || flag("--chat-skill-chip") || flag("--chat-mcp-card") || flag("--chat-compaction") || flag("--chat-model-picker") || flag("--chat-phren-tools")) ? "claude" : "codex")
         var panes: [[String: Any]] = [["id": "\(session.workspaceID):p1", "label": "1", "title": tour ? "Ship the onboarding flow" : "Polish the phone app", "agent": agent,
                                      "agentStatus": ((flag("--chat-blocked") || flag("--chat-password") || flag("--chat-approval") || flag("--chat-approval-question") || flag("--chat-plan-mode") || flag("--chat-question")) && !answered) ? "blocked" : (flag("--chat-queue-completion") || flag("--chat-history-stalled") || (flag("--chat-working") && !stopped) ? "working" : "idle"), "sessionId": remote ? "00000000-0000-0000-0000-000000000042" : agent == "copilot" ? "00000000-0000-0000-0000-000000000023" : agent == "opencode" ? "ses_fixtureopencode" : "fixture-\(agent)-session", "cwd": root]]
         if flag("--starting-session-fixture") {
