@@ -167,6 +167,44 @@ device, and tapping rechecks the live request. Direct APNs remains an optional,
 separate path for owners with their own credentials. See
 [phone notifications](../apps/ios/design/notifications.md).
 
+### Approval push with your own APNs key
+
+Instant approval and schedule alerts while Phren is suspended come from the
+Hook straight to Apple (APNs), with no relay. They need an APNs key from the
+Apple developer account that signs the app, set up on each computer:
+
+1. In the developer account, open Keys, create a key with Apple Push
+   Notifications service enabled and download `AuthKey_<KEYID>.p8`. Note its
+   Key ID and your Team ID.
+2. Copy the `.p8` into the Hook's directory
+   (`~/.local/share/phren/bridge/`, or `$PHREN_BRIDGE_HOME`) and make it
+   readable only by you: `chmod 600 AuthKey_<KEYID>.p8`.
+3. Write `apns.json` beside it, also mode 600:
+
+   ```json
+   {
+     "keyId": "<KEYID>",
+     "teamId": "<TEAMID>",
+     "topic": "com.phren.ios",
+     "privateKeyPath": "AuthKey_<KEYID>.p8"
+   }
+   ```
+
+   `keyId` and `teamId` are the 10-character IDs from the developer account.
+   `topic` is the app's bundle id. A relative `privateKeyPath` is resolved
+   from the directory of `apns.json`. `PHREN_APNS_CONFIG` points the Hook at
+   a different file.
+4. Restart the Hook (`phren bridge install`) and run `phren bridge doctor`.
+
+The Hook loads the key at startup. Files that other users can read, or that
+belong to someone else, are ignored. Until a key loads, the Hook still accepts
+phones that register for push (the reply to `POST /v1/push/register` carries
+`configured: false`), but it leaves `approvalPush` out of its capabilities,
+`GET /v1/push/status` and `/v1/health/details` report `configured: false`,
+`phren bridge doctor` prints these steps as a warning, and the phone's
+Settings → Notifications says "Instant approval alerts need an APNs key on the
+computer" with the computer's name.
+
 The transcript socket also carries live reply previews. Claude reads pane text
 after the current prompt; Codex and OpenCode supply delta text. Updates are capped at
 twice a second, stay out of history, and give way to the completed entry. Chat

@@ -283,7 +283,7 @@ and add `modules` (enabled module versions), selected store/profile identity
 and a configuration generation to `/v1/health`. `/v1/workspaces`'s `phren` block
 and WS status frames carry the same snapshot. Capability values retain their
 types: `terminal`/`shell` are `"ssh-pty"`, `webPreview` is `"ssh-exec"`,
-`approvalPush` is `"direct-apns"`, and `providers` is a list. Do not coerce these
+`approvalPush` is `"direct-apns"` (present only while an APNs key is loaded), and `providers` is a list. Do not coerce these
 to booleans or claim every declaration is operational.
 
 | Owner | Capabilities and conditions | Phone surface |

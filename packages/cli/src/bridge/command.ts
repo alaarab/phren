@@ -4,7 +4,8 @@ import { dispatch, health } from "./transport.js";
 import { install, rollback, uninstall } from "./install.js";
 import { servers } from "./herdr.js";
 import { agentHook } from "./agent-hooks.js";
-import { provider } from "./protocol.js";
+import { object, provider, type Json } from "./protocol.js";
+import { apnsSetupSteps } from "./push.js";
 import { AccountUsageReader, captureClaudeUsage } from "./usage.js";
 import { acceptComputer, enrollComputer } from "./computers.js";
 import { ARCHIVE_MAX_FOLDERS, archiveFinishedFanouts, FANOUTS_ARCHIVE_USAGE, parseFanoutArchiveFlags } from "./fanouts.js";
@@ -40,15 +41,25 @@ export async function runBridge(args: string[], version: string): Promise<number
     case "status": console.log(JSON.stringify(await health(), null, 2)); break;
     case "doctor": {
       const helper = await health(), muxes = await servers();
+      const push = approvalPushCheck(helper);
       // Chat needs Herdr; a plain project shell or agent over SSH does not.
       console.log(JSON.stringify({ ok: true, helper, herdr: muxes, checks: {
         privateSocket: true, protocol: true, independentHelper: true,
         herdrRunning: muxes.length > 0, terminal: "SSH PTY; authorize the Phren device key with pty",
         shell: muxes.length > 0 ? "available" : "Herdr is not running: chat is unavailable, project shells and agents still open over SSH",
-      } }, null, 2));
+        approvalPush: push.configured ? "configured" : "not configured",
+      }, ...(push.warning ? { warnings: [push.warning] } : {}) }, null, 2));
+      if (push.warning) console.error(`warning: ${push.warning}`);
       break;
     }
     default: throw new Error("Usage: phren bridge <install|status|doctor|usage|update|rollback|uninstall|enroll-computer|fanouts archive>");
   }
   return 0;
+}
+
+/** Doctor's push check, from the running Hook's own capability: only a Hook
+ * that loaded apns.json and its key offers `approvalPush`. */
+export function approvalPushCheck(helper: Json): { configured: boolean; warning?: string } {
+  const configured = object(helper.capabilities).approvalPush === "direct-apns";
+  return configured ? { configured } : { configured, warning: apnsSetupSteps() };
 }

@@ -95,6 +95,22 @@ async function secureFile(file: string): Promise<string | undefined> {
   } catch { return undefined; }
 }
 
+/** What `phren bridge doctor` prints when the Hook has no APNs sender. */
+export function apnsSetupSteps(configFile = process.env.PHREN_APNS_CONFIG || path.join(bridgeRoot(), "apns.json")): string {
+  return [
+    "Approval push is not configured: the phone only alerts while Phren runs, and a registered phone gets nothing while suspended.",
+    "1. In your Apple developer account, create an APNs key (Keys, Apple Push Notifications service) and download AuthKey_<KEYID>.p8.",
+    `2. Save it next to ${configFile} with mode 600.`,
+    `3. Write ${configFile} with mode 600: {"keyId":"<KEYID>","teamId":"<TEAMID>","topic":"com.phren.ios","privateKeyPath":"AuthKey_<KEYID>.p8"}`,
+    "4. Restart the Hook (phren bridge install), then run phren bridge doctor again.",
+  ].join("\n");
+}
+
+/** The capability a phone reads: only a Hook with a loaded APNs sender offers push. */
+export function approvalPushCapability(status: { configured: boolean }): "direct-apns" | undefined {
+  return status.configured ? "direct-apns" : undefined;
+}
+
 export function upsertPushDevice(devices: PushDevice[], value: unknown): PushDevice[] {
   const device = deviceSchema.parse(value);
   return [...devices.filter(item => item.deviceID !== device.deviceID), device].slice(-16);
