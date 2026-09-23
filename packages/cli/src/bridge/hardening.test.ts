@@ -80,15 +80,20 @@ describe("isolated and bounded changes", () => {
     try {
       await changes.before("codex:write", "write-call", home, "", input);
       await writeFile(input.file_path, input.content);
-      await writeFile(path.join(dir, ".env"), "SECRET=never-export\n");
       await changes.after("codex:write", "write-call");
+      // A Write changes only the file it names; a secret a shell call writes
+      // is still captured for that call, redacted.
+      await changes.before("codex:write", "shell-call", dir, "printf SECRET > .env");
+      await writeFile(path.join(dir, ".env"), "SECRET=never-export\n");
+      await changes.after("codex:write", "shell-call");
       const transcript = path.join(home, "write.jsonl");
       await writeFile(transcript, JSON.stringify({ type: "response_item", payload: { type: "function_call_output", call_id: "write-call", output: "Done" } }) + "\n");
       const page = await new TranscriptReader(transcript, "codex", undefined, changes.view("codex:write")).read();
       expect(JSON.stringify(page)).toContain("phren_changes");
       expect(JSON.stringify(page)).toContain("+new line");
       expect(JSON.stringify(page)).not.toContain("SECRET");
-      expect((await changes.view("codex:write").changes("write-call"))?.find(f => f.path === ".env")).toMatchObject({ redacted: true, patch: "" });
+      expect((await changes.view("codex:write").changes("write-call"))?.map(f => f.path)).toEqual(["created.txt"]);
+      expect((await changes.view("codex:write").changes("shell-call"))?.find(f => f.path === ".env")).toMatchObject({ redacted: true, patch: "" });
       expect(await readdir(path.join(home, "bridge/changes-scratch"))).toEqual([]);
     } finally { await changes.close(); }
   });
