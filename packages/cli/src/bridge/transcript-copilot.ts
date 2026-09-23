@@ -7,6 +7,8 @@ export function visibleCopilotEvent(raw: Json): Json | undefined {
   const data = object(raw.data);
   // Copilot includes optional reasoning beside the public message in some
   // versions. Export only the fields used by public text/tool/usage readers.
-  const allowed = ["content", "source", "messageId", "deltaContent", "toolName", "toolCallId", "arguments", "result", "error", "aborted", "inputTokens", "outputTokens", "cacheReadTokens"];
+  // `phase` marks Copilot 1.0.87's final answer (it writes no session.idle);
+  // `success` is false on a failed tool run.
+  const allowed = ["content", "source", "messageId", "deltaContent", "toolName", "toolCallId", "arguments", "result", "error", "success", "phase", "aborted", "inputTokens", "outputTokens", "cacheReadTokens"];
   return { type: raw.type, timestamp: raw.timestamp, data: Object.fromEntries(Object.entries(data).filter(([key]) => allowed.includes(key))) };
 }

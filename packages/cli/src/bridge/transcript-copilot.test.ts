@@ -1,0 +1,39 @@
+import { readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+import { TranscriptReader } from "./transcripts.js";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+/** A real GitHub Copilot CLI 1.0.87 session (resumed from 1.0.86), sanitized:
+ * same lines, event types and field names; neutral text and placeholder ids. */
+const events = path.join(here, "fixtures/copilot/1.0.87/events.jsonl");
+/** The backlog frame PhrenKit decodes in CopilotChatTests. */
+const phoneFixture = path.resolve(here, "../../../../apps/ios/PhrenKit/Tests/PhrenKitTests/Fixtures/copilot-1.0.87-backlog.json");
+const session = "00000000-0000-4000-8000-000000000187";
+
+describe("Copilot 1.0.87 transcript projection", () => {
+  it("keeps the final-answer phase and tool success, and drops reasoning and prompt augmentation", async () => {
+    const page = await new TranscriptReader(events, "copilot").read();
+    expect(page.entries).toHaveLength(60);
+    const counts: Record<string, number> = {};
+    for (const entry of page.entries) counts[String(entry.raw.type)] = (counts[String(entry.raw.type)] ?? 0) + 1;
+    expect(counts).toEqual({ "user.message": 3, "assistant.turn_start": 10, "assistant.message": 13, "assistant.turn_end": 10,
+      "tool.execution_start": 12, "tool.execution_complete": 12 });
+    const finals = page.entries.filter(entry => (entry.raw.data as { phase?: string }).phase === "final_answer");
+    expect(finals.map(entry => entry.line)).toEqual([19, 67, 126]);
+    const completes = page.entries.filter(entry => entry.raw.type === "tool.execution_complete");
+    expect(completes.every(entry => (entry.raw.data as { success?: boolean }).success === true)).toBe(true);
+    const wire = JSON.stringify(page.entries);
+    for (const hidden of ["reasoningText", "reasoningOpaque", "encryptedContent", "transformedContent", "toolTelemetry", "interactionId"]) {
+      expect(wire).not.toContain(hidden);
+    }
+  });
+
+  it("produces the backlog frame the phone's fixture holds", async () => {
+    const page = await new TranscriptReader(events, "copilot").read();
+    const frame = { ...page, type: "backlog", source: "copilot", session };
+    if (process.env.PHREN_UPDATE_FIXTURES === "1") writeFileSync(phoneFixture, `${JSON.stringify(frame, null, 1)}\n`);
+    expect(frame).toEqual(JSON.parse(readFileSync(phoneFixture, "utf8")));
+  });
+});
