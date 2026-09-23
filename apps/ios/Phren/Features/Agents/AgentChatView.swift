@@ -31,7 +31,10 @@ struct AgentChatView: View {
     @State private var refresh = UUID()
     @State private var showingContext = false
     @State private var commandDestination: CommandDestination?
-    @State private var showingAttachments = false
+    @State private var showingAttachmentMenu = false
+    @State private var attachmentSource: ChatAttachmentSource?
+    @State private var attachmentTarget: AgentChatTarget?
+    @State private var attachmentError: String?
     @State private var dictation = ChatDictationController()
     private var dictating: Bool { dictation.isRecording }
     @State private var showingAgentSwitcher = false
@@ -212,6 +215,9 @@ struct AgentChatView: View {
         .environment(\.chatTurnStop, ChatTurnStop(enabled: turnStopEnabled) { sendTask = Task { await model.stop(session) } })
         .environment(\.chatChildAgents, model.target.flatMap { target in childAgents.isEmpty ? nil : ChatChildAgents(session: session, target: target, agents: childAgents) })
         .environment(textSelection)
+        .chatAttachmentSources(source: $attachmentSource, canAdd: model.attachments.count < ChatAttachmentLimit.maximum,
+                               add: { item in if model.target == attachmentTarget { model.add(item) } },
+                               error: $attachmentError)
         .onChange(of: messageMenu.request?.id) { _, id in
             if id != nil { composing = false; textSelection.end() }
         }
@@ -524,7 +530,7 @@ struct AgentChatView: View {
     /// Every sheet this screen can present. UIKit restores the stack's bar
     /// when one goes away; dismissing any of them must re-hide it.
     private var anySheetPresented: Bool {
-        showingAttachments || showingOptions || launchingNewThread || menuCommand != nil
+        showingOptions || launchingNewThread || menuCommand != nil
             || showingModelPicker || showingUsage || showingSecret || showingChildAgents
             || previewImage != nil || showingContext || assigningProject
     }
@@ -538,15 +544,6 @@ struct AgentChatView: View {
             guard !presented else { return }
             DispatchQueue.main.async {
                 NotificationCenter.default.post(name: .phrenReassertNavigationBarHidden, object: nil)
-            }
-        }
-        .sheet(isPresented: $showingAttachments) {
-            if let openingTarget = model.target {
-                ChatAttachmentPicker(canAdd: model.attachments.count < ChatAttachmentLimit.maximum, add: { item in
-                    if model.target == openingTarget { model.add(item) }
-                }, context: project == nil ? nil : {
-                    Task { try? await Task.sleep(for: .milliseconds(350)); showingContext = true }
-                })
             }
         }
         .onChange(of: scenePhase) { _, phase in if phase != .active { stopDictation() } }
@@ -599,6 +596,10 @@ struct AgentChatView: View {
                                   existing: (try? LiveSessionPreferences.read(hostData))?.mapping(hostID: session.host.id, cwd: session.tab.cwd))
             }
         }
+        .phrenDialog(isPresented: $attachmentError.isPresent(), title: "Could not add attachment",
+                     message: attachmentError ?? "",
+                     actions: [.init(id: "ok", title: "OK", role: .cancel) { attachmentError = nil }],
+                     identifier: "chat-attachment-error")
         .task(id: RunIdentity(active: active, refresh: refresh)) {
             guard active else { return }
             await model.run(session)
@@ -794,14 +795,60 @@ struct AgentChatView: View {
                         actions: ChatComposerActions(
                             run: runAgentRequest,
                             preview: { previewImage = $0 },
-                            addAttachment: { showingAttachments = true },
+                            addAttachment: { showingAttachmentMenu.toggle() },
                             switchAgent: { showingAgentSwitcher = true },
                             showChildAgents: { showingChildAgents = true },
                             enterSecret: { showingSecret = true },
                             toggleDictation: { if dictating { stopDictation() } else { startDictation() } },
                             primary: primaryAction,
                             openCommandMenu: openCommandMenu,
-                            pasteImages: pasteImages))
+                            pasteImages: pasteImages),
+                        attachmentMenu: $showingAttachmentMenu, attachmentMenuItems: attachmentMenuItems)
+    }
+
+    /// The + menu: Photos, Camera, Files and Paste, plus Project memory and a
+    /// fixture row. Every row closes the menu, then runs its own action.
+    private var attachmentMenuItems: [PhrenMenuItem] {
+        let canAdd = model.attachments.count < ChatAttachmentLimit.maximum
+        var items: [PhrenMenuItem] = [
+            PhrenMenuItem(id: "photos", title: "Photos", systemImage: "photo.on.rectangle", isEnabled: canAdd) {
+                attachmentTarget = model.target; attachmentSource = .photos
+            },
+            PhrenMenuItem(id: "files", title: "Files", systemImage: "doc", isEnabled: canAdd) {
+                attachmentTarget = model.target; attachmentSource = .files
+            },
+            PhrenMenuItem(id: "paste", title: "Paste image", systemImage: "clipboard",
+                          isEnabled: canAdd && UIPasteboard.general.hasImages) { pasteFromClipboard() },
+        ]
+        if UIImagePickerController.isSourceTypeAvailable(.camera) {
+            items.insert(PhrenMenuItem(id: "camera", title: "Camera", systemImage: "camera", isEnabled: canAdd) {
+                attachmentTarget = model.target; attachmentSource = .camera
+            }, at: 1)
+        }
+        if project != nil {
+            items.append(PhrenMenuItem(id: "context", title: "Project memory", systemImage: "brain", isEnabled: canAdd) {
+                // Let the menu dismiss before the context sheet slides up.
+                Task { try? await Task.sleep(for: .milliseconds(350)); showingContext = true }
+            })
+        }
+        #if DEBUG && targetEnvironment(simulator)
+        if AgentChatFixture.enabled {
+            items.append(PhrenMenuItem(id: "test-image", title: "Add test image", systemImage: "photo", isEnabled: canAdd) {
+                model.add(AgentChatFixture.image)
+            })
+        }
+        #endif
+        return items
+    }
+
+    private func pasteFromClipboard() {
+        Task { @MainActor in
+            do {
+                if let attachment = try await ChatAttachmentPreparation.pasteFromClipboard() {
+                    model.add(attachment)
+                }
+            } catch { attachmentError = error.localizedDescription }
+        }
     }
 
     /// The composer's round button: stop, open the command menu, draw an

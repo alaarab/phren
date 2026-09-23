@@ -67,6 +67,8 @@ struct ChatComposerBar: View {
     let childAgentsError: String?
     let runningChildAgentCount: Int
     let actions: ChatComposerActions
+    @Binding var attachmentMenu: Bool
+    let attachmentMenuItems: [PhrenMenuItem]
     /// The fallback key strip stays collapsed behind the Keys chip.
     @State private var answerKeysExpanded = false
     @ScaledMetric(relativeTo: .body) private var composerTextSize = 14.0
@@ -270,6 +272,7 @@ struct ChatComposerBar: View {
                 Image(systemName: "plus").font(.system(size: 17, weight: .light)).frame(width: 40, height: 40)
                     .contentShape(Rectangle().inset(by: -2))
             }.accessibilityLabel("Add attachment").disabled(model.target == nil || model.sending)
+                .phrenAnchoredMenu(isPresented: $attachmentMenu, items: attachmentMenuItems, identifier: "chat-attach-menu")
             NavigationLink {
                 HerdrTerminalView(host: session.host, session: session, target: model.target)
             } label: {

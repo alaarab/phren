@@ -147,7 +147,7 @@ final class AgentChatImageTests: AgentChatUITestCase {
         app.buttons["live-chat:w7:w7:t9"].tap()
         XCTAssertTrue(app.staticTexts["The project screen is ready. What would you like to change?"].waitForExistence(timeout: 5))
         app.buttons["Add attachment"].tap()
-        app.buttons["Photos"].tap()
+        app.buttons["chat-attach-menu:photos"].tap()
         let picker = app.scrollViews["photosView_content_scroll_view"]
         XCTAssertTrue(picker.waitForExistence(timeout: 8))
         let introduction = picker.buttons["Close"].firstMatch

@@ -6,8 +6,8 @@ import XCTest
 class AgentChatUITestCase: XCTestCase {
     @MainActor func attachImage(_ app: XCUIApplication) {
         app.buttons["Add attachment"].tap()
-        XCTAssertTrue(app.buttons["Add test image"].waitForExistence(timeout: 5))
-        app.buttons["Add test image"].tap()
+        XCTAssertTrue(app.buttons["chat-attach-menu:test-image"].waitForExistence(timeout: 5))
+        app.buttons["chat-attach-menu:test-image"].tap()
     }
 
     @MainActor

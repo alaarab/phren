@@ -2,11 +2,11 @@ import ImageIO
 import PhrenKit
 import PhotosUI
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// How many files one message may carry. Each is uploaded on its own over
 /// SSH, so the cap is about the phone's memory, not the transport.
 enum ChatAttachmentLimit { static let maximum = 20 }
-import UniformTypeIdentifiers
 
 /// Downsample before rendering; newly encoded images omit source metadata.
 enum ChatAttachmentPreparation {
@@ -58,6 +58,13 @@ enum ChatAttachmentPreparation {
         }
         return try await preparedImage(data, name: "Clipboard")
     }
+    /// The clipboard's first image as an attachment, or nil when the
+    /// clipboard holds none.
+    static func pasteFromClipboard() async throws -> AgentAttachment? {
+        guard UIPasteboard.general.hasImages,
+              let provider = UIPasteboard.general.itemProviders.first(where: ChatSelectionTextView.isImage) else { return nil }
+        return try await pasted(provider)
+    }
     static func file(_ url: URL) throws -> AgentAttachment {
         let access = url.startAccessingSecurityScopedResource()
         defer { if access { url.stopAccessingSecurityScopedResource() } }
@@ -76,17 +83,103 @@ enum ChatAttachmentSource: String, Identifiable {
     var id: String { rawValue }
 }
 
+/// The system pickers and their preparation, driven by one optional source.
+/// Setting `source` to `.photos`, `.files` or `.camera` opens the matching
+/// picker; it resets to nil when the picker finishes or is cancelled, after
+/// running the same preparation the sheet used. One code path for the chat
+/// (direct) and the terminal's attachment sheet.
+private struct ChatAttachmentSourceModifier: ViewModifier {
+    @Binding var source: ChatAttachmentSource?
+    let canAdd: Bool
+    let add: (AgentAttachment) -> Void
+    @Binding var error: String?
+
+    @State private var photos: [PhotosPickerItem] = []
+
+    func body(content: Content) -> some View {
+        content
+            .photosPicker(isPresented: present(.photos), selection: $photos,
+                          maxSelectionCount: ChatAttachmentLimit.maximum, matching: .images)
+            .fileImporter(isPresented: present(.files), allowedContentTypes: [.item],
+                          allowsMultipleSelection: true) { result in
+                handleFiles(result)
+            }
+            .fullScreenCover(isPresented: present(.camera)) {
+                ChatCamera { image in cameraFinished(image) }.ignoresSafeArea()
+            }
+            .onChange(of: photos) { _, items in handlePhotos(items) }
+    }
+
+    /// The picker's presentation: present while `source` names it, and clear
+    /// `source` once the system dismisses it, so cancel resets the flow.
+    private func present(_ value: ChatAttachmentSource) -> Binding<Bool> {
+        Binding(
+            get: { source == value && canAdd },
+            set: { if !$0 && source == value { source = nil } }
+        )
+    }
+
+    private func handlePhotos(_ items: [PhotosPickerItem]) {
+        guard !items.isEmpty else { return }
+        Task { @MainActor in
+            do {
+                for item in items {
+                    if let data = try await item.loadTransferable(type: Data.self) {
+                        add(try await ChatAttachmentPreparation.preparedImage(data))
+                    }
+                }
+                source = nil
+            } catch { self.error = error.localizedDescription; source = nil }
+        }
+    }
+
+    private func handleFiles(_ result: Result<[URL], Error>) {
+        Task { @MainActor in
+            defer { source = nil }
+            do {
+                let urls = try result.get()
+                for url in urls.prefix(ChatAttachmentLimit.maximum) {
+                    add(try await Task.detached(priority: .userInitiated) { try ChatAttachmentPreparation.file(url) }.value)
+                }
+            } catch {
+                if (error as? CocoaError)?.code != .userCancelled { self.error = error.localizedDescription }
+            }
+        }
+    }
+
+    private func cameraFinished(_ image: UIImage?) {
+        source = nil
+        guard let image else { return }
+        Task { @MainActor in
+            do {
+                let attachment = try await Task.detached(priority: .userInitiated) {
+                    guard let data = image.jpegData(compressionQuality: 0.9) else {
+                        throw PhrenKitError.validation("The photo couldn't be prepared. Try another photo.")
+                    }
+                    return try ChatAttachmentPreparation.image(data, name: "Camera")
+                }.value
+                add(attachment)
+            } catch { self.error = error.localizedDescription }
+        }
+    }
+}
+
+extension View {
+    func chatAttachmentSources(source: Binding<ChatAttachmentSource?>, canAdd: Bool,
+                               add: @escaping (AgentAttachment) -> Void,
+                               error: Binding<String?>) -> some View {
+        modifier(ChatAttachmentSourceModifier(source: source, canAdd: canAdd, add: add, error: error))
+    }
+}
+
 struct ChatAttachmentPicker: View {
     var initialSource: ChatAttachmentSource? = nil
     let canAdd: Bool
     let add: (AgentAttachment) -> Void
     let context: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
-    @State private var photos: [PhotosPickerItem] = []
-    @State private var showPhotos = false
+    @State private var source: ChatAttachmentSource?
     @State private var openedInitialSource = false
-    @State private var files = false
-    @State private var camera = false
     @State private var busy = false
     @State private var error: String?
     @State private var clipboardHasImage = UIPasteboard.general.hasImages
@@ -94,12 +187,12 @@ struct ChatAttachmentPicker: View {
         NavigationStack {
             PhrenList {
                 Section {
-                    Button("Photos", systemImage: "photo.on.rectangle") { showPhotos = true }
+                    Button("Photos", systemImage: "photo.on.rectangle") { begin(.photos) }
                         .disabled(!canAdd || busy)
                     if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                        Button("Camera", systemImage: "camera") { camera = true }.disabled(!canAdd || busy)
+                        Button("Camera", systemImage: "camera") { begin(.camera) }.disabled(!canAdd || busy)
                     }
-                    Button("Files", systemImage: "doc") { files = true }.disabled(!canAdd || busy)
+                    Button("Files", systemImage: "doc") { begin(.files) }.disabled(!canAdd || busy)
                     Button(action: pasteImage) {
                         PhrenRow(icon: "clipboard", title: "Paste image", chevron: false)
                     }
@@ -124,7 +217,8 @@ struct ChatAttachmentPicker: View {
             .navigationTitle("Add attachment").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() }.disabled(busy) } }
             .interactiveDismissDisabled(busy)
-            .photosPicker(isPresented: $showPhotos, selection: $photos, maxSelectionCount: ChatAttachmentLimit.maximum, matching: .images)
+            .chatAttachmentSources(source: $source, canAdd: canAdd, add: { item in add(item); dismiss() }, error: $error)
+            .onChange(of: source) { _, value in if value == nil { busy = false } }
             .task {
                 guard !openedInitialSource, let initialSource, canAdd else { return }
                 openedInitialSource = true
@@ -134,53 +228,10 @@ struct ChatAttachmentPicker: View {
                 // Finish presenting this sheet before opening the system picker.
                 do { try await Task.sleep(for: .milliseconds(350)) } catch { return }
                 switch initialSource {
-                case .photos: showPhotos = true
-                case .camera: camera = UIImagePickerController.isSourceTypeAvailable(.camera)
-                case .files: files = true
-                }
-            }
-            .fileImporter(isPresented: $files, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
-                busy = true
-                Task {
-                    defer { busy = false }
-                    do {
-                        let urls = try result.get()
-                        for url in urls.prefix(ChatAttachmentLimit.maximum) {
-                            add(try await Task.detached(priority: .userInitiated) { try ChatAttachmentPreparation.file(url) }.value)
-                        }
-                        dismiss()
-                    } catch { self.error = error.localizedDescription }
-                }
-            }
-            .fullScreenCover(isPresented: $camera) {
-                ChatCamera { image in
-                    camera = false
-                    guard let image else { return }
-                    busy = true
-                    Task {
-                        defer { busy = false }
-                        do {
-                            let attachment = try await Task.detached(priority: .userInitiated) {
-                                guard let data = image.jpegData(compressionQuality: 0.9) else {
-                                    throw PhrenKitError.validation("The photo couldn't be prepared. Try another photo.")
-                                }
-                                return try ChatAttachmentPreparation.image(data, name: "Camera")
-                            }.value
-                            add(attachment); dismiss()
-                        } catch { self.error = error.localizedDescription }
-                    }
-                }.ignoresSafeArea()
-            }
-            .onChange(of: photos) { _, items in
-                busy = true
-                Task {
-                    defer { busy = false }
-                    do {
-                        for item in items {
-                            if let data = try await item.loadTransferable(type: Data.self) { add(try await ChatAttachmentPreparation.preparedImage(data)) }
-                        }
-                        if !items.isEmpty { dismiss() }
-                    } catch { self.error = error.localizedDescription }
+                case .photos: begin(.photos)
+                case .camera where UIImagePickerController.isSourceTypeAvailable(.camera): begin(.camera)
+                case .files: begin(.files)
+                default: break
                 }
             }
         }
@@ -189,15 +240,21 @@ struct ChatAttachmentPicker: View {
         }
     }
 
+    private func begin(_ newSource: ChatAttachmentSource) {
+        busy = true
+        source = newSource
+    }
+
     private func pasteImage() {
-        guard canAdd, !busy,
-              let provider = UIPasteboard.general.itemProviders.first(where: ChatSelectionTextView.isImage) else { return }
+        guard canAdd, !busy else { return }
         busy = true
         Task { @MainActor in
             defer { busy = false }
             do {
-                add(try await ChatAttachmentPreparation.pasted(provider))
-                dismiss()
+                if let attachment = try await ChatAttachmentPreparation.pasteFromClipboard() {
+                    add(attachment)
+                    dismiss()
+                }
             } catch { self.error = error.localizedDescription }
         }
     }
