@@ -88,7 +88,7 @@ struct ScheduleHistoryView: View {
                 Text(statusText(run))
                     .font(PhrenTypography.caption)
                     .foregroundStyle(run.status == .failed ? PhrenTheme.danger
-                                     : run.status == .blocked ? PhrenTheme.stateWaiting : PhrenTheme.textSecondary)
+                                     : [.blocked, .needsYou].contains(run.status) ? PhrenTheme.stateWaiting : PhrenTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.vertical, PhrenTheme.Space.small)
@@ -159,8 +159,8 @@ struct ScheduleHistoryView: View {
         if run.status == .blocked, let prompt = run.blockedStartupPrompt, !prompt.isEmpty {
             return "blocked: \(prompt)"
         }
-        guard let reason = run.reason, !reason.isEmpty else { return run.status.rawValue }
-        return "\(run.status.rawValue): \(reason)"
+        guard let reason = run.reason, !reason.isEmpty else { return run.status.label }
+        return "\(run.status.label): \(reason)"
     }
 
     private func statusColor(_ run: ScheduleRun) -> Color {
@@ -168,7 +168,7 @@ struct ScheduleHistoryView: View {
         case .finished: PhrenTheme.stateDone
         case .failed: PhrenTheme.danger
         case .launched, .running: PhrenTheme.stateWorking
-        case .blocked, .skipped: PhrenTheme.stateWaiting
+        case .blocked, .skipped, .needsYou: PhrenTheme.stateWaiting
         }
     }
 

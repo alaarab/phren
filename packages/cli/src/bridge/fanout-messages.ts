@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { appendFile, lstat, mkdir, readdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
-import { containedFanoutRoot, fanoutChildID, manifestSchema, storeRoot, type FanoutManifest } from "./fanouts.js";
+import { archiveFinishedFanouts, containedFanoutRoot, fanoutChildID, manifestSchema, storeRoot, type FanoutManifest } from "./fanouts.js";
 import { atomic, BridgeError, targetSchema, type Target } from "./protocol.js";
 import { childAgent, type ChildAgentRelation } from "./transcripts.js";
 
@@ -78,6 +78,16 @@ export class FanoutMessages {
     await this.drain(job);
     const fresh = (await this.records(job)).find(row => row.message.id === message.id)?.message;
     return { ok: true, message: fresh ?? message };
+  }
+
+  /** Archive every finished worker of one live parent now, instead of after
+   * the sweep's 24 hours. The sweep's own checks apply: a job without an exit
+   * stamp, with a message lock or with queued messages stays put. */
+  async archiveFinished(input: unknown): Promise<{ ok: true; archived: number }> {
+    const { target } = z.object({ target: targetSchema }).strict().parse(input);
+    await this.deps.validate(target);
+    const { moved } = await archiveFinishedFanouts(this.env, { olderThanMs: 0, parent: { session: target.session, provider: target.source } });
+    return { ok: true, archived: moved.length };
   }
 
   async list(targetValue: unknown, childValue: unknown): Promise<{ messages: FanoutMessage[] }> {

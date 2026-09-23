@@ -2596,6 +2596,11 @@ final class AgentChatTests: XCTestCase {
         app.buttons["live-chat:w7:w7:t9"].tap()
         XCTAssertTrue(app.buttons["chat-agent-tree"].waitForExistence(timeout: 8)); app.buttons["chat-agent-tree"].tap()
         let id = running ? "b" + String(repeating: "2", count: 31) : "a" + String(repeating: "1", count: 31)
+        // A finished worker sits inside the folded finished row.
+        if !running {
+            let finished = app.buttons["child-agents-finished"]
+            XCTAssertTrue(finished.waitForExistence(timeout: 5)); finished.tap()
+        }
         let child = app.buttons["child-agent:" + id]
         XCTAssertTrue(child.waitForExistence(timeout: 5)); child.tap()
         let note = app.staticTexts["child-composer-note"]
@@ -2610,6 +2615,32 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(route.hasPrefix("worker|")); XCTAssertTrue(route.hasSuffix("|" + id + "|Review the follow-up"))
         if running { XCTAssertTrue(app.staticTexts["Queued until this worker finishes"].exists) }
         capture(app, running ? "Child worker queued" : "Child worker continued")
+    }
+
+    @MainActor
+    func testFinishedWorkersFoldIntoOneRowAndClear() {
+        let app = launch(extra: ["--chat-agent-card", "--chat-child-workers"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        XCTAssertTrue(app.buttons["chat-agent-tree"].waitForExistence(timeout: 8)); app.buttons["chat-agent-tree"].tap()
+        let finishedID = "child-agent:a" + String(repeating: "1", count: 31)
+        let runningID = "child-agent:b" + String(repeating: "2", count: 31)
+        XCTAssertTrue(app.buttons[runningID].waitForExistence(timeout: 5))
+        let finished = app.buttons["child-agents-finished"]
+        XCTAssertTrue(finished.waitForExistence(timeout: 5))
+        XCTAssertEqual(finished.label, "1 finished worker")
+        XCTAssertFalse(app.buttons[finishedID].exists, "a finished worker starts folded")
+        finished.tap()
+        XCTAssertTrue(app.buttons[finishedID].waitForExistence(timeout: 5))
+        capture(app, "Finished workers expanded")
+        finished.tap()
+        XCTAssertTrue(app.buttons[finishedID].waitForNonExistence(timeout: 5))
+        app.buttons["child-agents-clear-finished"].tap()
+        XCTAssertTrue(finished.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.buttons[runningID].exists, "clearing leaves running workers")
+        let route = app.staticTexts["child-agents-fixture-delivery"]
+        XCTAssertTrue(route.waitForExistence(timeout: 5))
+        XCTAssertTrue(route.label.hasPrefix("archive|"))
+        capture(app, "Finished workers cleared")
     }
 
     @MainActor

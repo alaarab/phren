@@ -204,7 +204,7 @@ export const REGISTRY: Command[] = [
     summary: "Install Phren Hook and enroll phone or computer connections",
     subcommands: [
       { name: "enroll-computer", usage: "phren bridge enroll-computer <name> [--accept <public-key-file>]", summary: "Print or accept a restricted computer dispatch key" },
-      { name: "fanouts archive", usage: "phren bridge fanouts archive [--dry-run]", summary: "Archive finished fan-out jobs older than 24 hours" },
+      { name: "fanouts archive", usage: "phren bridge fanouts archive [--dry-run] [--parent <session-id>] [--older-than <minutes>]", summary: "Archive finished fan-out jobs older than 24 hours, or one parent chat's, or older than N minutes" },
     ],
     run: async args => {
       const { runBridge } = await import("./bridge/command.js");

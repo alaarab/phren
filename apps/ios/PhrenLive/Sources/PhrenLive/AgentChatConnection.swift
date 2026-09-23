@@ -161,6 +161,21 @@ extension PhrenConnection {
         return try AgentFanoutMessage.receipt(data)
     }
 
+    /// Archives this chat's finished fan-out workers on its own computer now,
+    /// instead of after the Hook's 24 hour sweep. Returns how many moved.
+    public static func archiveFinishedChildAgents(host: LiveHost, privateKey: Data, target: AgentChatTarget) async throws -> Int {
+        guard !target.isStarting, target.hostID == host.id, target.muxID == host.muxID else {
+            throw PhrenKitError.validation("The chat belongs to another computer.")
+        }
+        let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: .archiveFinishedChildren(target))
+        return try archivedCount(data)
+    }
+
+    static func archivedCount(_ data: Data) throws -> Int {
+        struct Archived: Decodable { let archived: Int }
+        return try JSONDecoder().decode(Archived.self, from: data).archived
+    }
+
     public static func childAgentMessages(host: LiveHost, privateKey: Data, target: AgentChatTarget,
                                           child: String) async throws -> [AgentFanoutMessage] {
         try validateChildMessageTarget(host: host, target: target, child: child)
@@ -283,6 +298,9 @@ struct GatewayRequest: Sendable {
     }
     static func resumeChild(_ target: AgentChatTarget, child: String, text: String) throws -> Self {
         Self(path: "/v1/subagents/resume", body: try targetBody(target, fields: ["child": child, "text": text]))
+    }
+    static func archiveFinishedChildren(_ target: AgentChatTarget) throws -> Self {
+        Self(path: "/v1/subagents/archive-finished", body: try targetBody(target))
     }
     static func childTranscript(_ target: AgentChatTarget, child: String) -> Self {
         var query = targetQuery(target); query["child"] = child

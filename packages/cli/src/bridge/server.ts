@@ -423,6 +423,8 @@ export async function serve(version: string): Promise<void> {
         const data = await body(request);
         if (url.pathname === "/v1/subagents/resume") {
           result = await fanoutMessages.send(data);
+        } else if (url.pathname === "/v1/subagents/archive-finished") {
+          result = await fanoutMessages.archiveFinished(data);
         } else if (url.pathname === "/v1/code/reindex") {
           result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, typeof data.store === "string" ? data.store : undefined, true)))
             .reindex(z.string().parse(data.project));

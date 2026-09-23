@@ -463,7 +463,7 @@ struct ScheduleRow: View {
         if state?.running == true { return PhrenTheme.stateWorking }
         if !schedule.enabled { return PhrenTheme.textDim }
         if state?.lastRun?.status == .failed { return PhrenTheme.stateWaiting }
-        if state?.lastRun?.status == .blocked { return PhrenTheme.stateWaiting }
+        if state?.lastRun?.status == .blocked || state?.lastRun?.status == .needsYou { return PhrenTheme.stateWaiting }
         return PhrenTheme.stateDone
     }
 
@@ -492,20 +492,21 @@ struct ScheduleRow: View {
         if state?.running == true { return "circle.fill" }
         if state?.lastRun?.status == .failed { return "xmark" }
         if state?.lastRun?.status == .blocked { return "exclamationmark.triangle" }
+        if state?.lastRun?.status == .needsYou { return "questionmark" }
         return "checkmark"
     }
 
     private var lastRunColor: Color {
         if state?.running == true { return PhrenTheme.stateWorking }
         if state?.lastRun?.status == .failed { return PhrenTheme.danger }
-        if state?.lastRun?.status == .blocked { return PhrenTheme.stateWaiting }
+        if state?.lastRun?.status == .blocked || state?.lastRun?.status == .needsYou { return PhrenTheme.stateWaiting }
         return PhrenTheme.stateDone
     }
 
     private var accessibilityText: String {
         var parts = [schedule.name, nextRunText, schedule.computer, harnessName, ScheduleWords.describe(schedule)]
         if let run = state?.lastRun {
-            parts.append("last run \(run.status.rawValue) \(ScheduleWords.relative(run.finishedAt ?? run.startedAt, now: .now))")
+            parts.append("last run \(run.status.label) \(ScheduleWords.relative(run.finishedAt ?? run.startedAt, now: .now))")
         }
         return parts.joined(separator: ", ")
     }

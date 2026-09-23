@@ -35,7 +35,7 @@ export interface SchedulePush {
   name: string;
   computer: string;
   runId: string;
-  status: "running" | "finished" | "failed" | "blocked";
+  status: "running" | "finished" | "needs-you" | "failed" | "blocked";
   reason?: string;
   route?: string;
 }
@@ -66,7 +66,7 @@ export function fanoutBlockedPushPayload(value: FanoutBlockedPush): Record<strin
 }
 
 export function schedulePushPayload(value: SchedulePush): Record<string, unknown> {
-  const state = value.kind === "scheduleStarted" ? "started" : value.kind === "scheduleFinished" ? "finished"
+  const state = value.kind === "scheduleStarted" ? "started" : value.kind === "scheduleFinished" ? (value.status === "needs-you" ? "needs you" : "finished")
     : value.kind === "scheduleBlocked" ? "blocked" : "failed";
   return {
     aps: {

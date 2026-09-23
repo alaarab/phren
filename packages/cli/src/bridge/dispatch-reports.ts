@@ -100,7 +100,7 @@ export function reportBackgroundEvent(content: string, timestamp?: unknown): Jso
     message: { role: "user", content: envelope } } : undefined;
 }
 
-function publicAssistant(raw: Json, source: Provider): string | undefined {
+export function publicAssistant(raw: Json, source: Provider): string | undefined {
   if (source === "codex") {
     const payload = object(raw.payload);
     if (raw.type !== "response_item" || payload.type !== "message" || payload.role !== "assistant" || payload.channel === "analysis") return;

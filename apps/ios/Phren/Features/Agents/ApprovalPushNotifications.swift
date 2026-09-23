@@ -107,7 +107,7 @@ struct SchedulePushNotification: Equatable {
               let computer = value["computer"] as? String, !computer.isEmpty,
               let runID = value["runId"] as? String, !runID.isEmpty,
               let status = value["status"] as? String,
-              ["running", "finished", "failed", "blocked"].contains(status) else { return nil }
+              ["running", "finished", "needs-you", "failed", "blocked"].contains(status) else { return nil }
         self.kind = kind; self.scheduleID = scheduleID; self.project = project; self.name = name
         self.computer = computer; self.runID = runID; self.status = status
         reason = value["reason"] as? String

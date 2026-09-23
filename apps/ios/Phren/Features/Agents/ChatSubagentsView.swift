@@ -11,6 +11,10 @@ struct ChatSubagentsView: View {
     @State private var selected: AgentWorkNavigation?
     @AppStorage("agent-work.history.v1") private var historyData = Data()
     @State private var now = Date.now
+    @State private var finishedExpanded = false
+    @State private var cleared: Set<String> = []
+    @State private var clearing = false
+    @State private var clearError: String?
     private var scope: String { target.id }
     private var history: AgentWorkHistory {
         (try? JSONDecoder().decode(AgentWorkHistory.self, from: historyData)) ?? AgentWorkHistory()
@@ -22,8 +26,12 @@ struct ChatSubagentsView: View {
         let completedWorkers = AgentChild.rows(agents, includeCompleted: true).filter {
             $0.agent.messageDestination == .worker && $0.agent.displayState == .completed
         }
-        return AgentTreeRow.project(visible + completedWorkers)
+        return AgentTreeRow.project(visible + completedWorkers).filter { !cleared.contains($0.id) }
     }
+    /// Finished workers fold into one row so a long fan-out does not bury
+    /// what is still running; failed and refused ones stay in view.
+    private var finishedRows: [AgentTreeRow] { rows.filter { $0.depth == 0 && $0.agent.isFinishedLocalWorker } }
+    private var activeRows: [AgentTreeRow] { rows.filter { !($0.depth == 0 && $0.agent.isFinishedLocalWorker) } }
     private var running: Int { rows.filter { $0.agent.displayState == .running }.count }
     private var refused: Int { rows.filter(\.agent.permissionRefused).count }
     private var failed: Int { rows.filter { $0.agent.displayState == .failed && !$0.agent.permissionRefused }.count }
@@ -51,29 +59,20 @@ struct ChatSubagentsView: View {
                             .accessibilityIdentifier("chat-subagents-empty")
                             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                     } else {
-                        ForEach(rows) { row in
-                            let navigation = navigation(for: row.agent)
-                            HStack(spacing: 4) {
-                                Button { selected = navigation } label: {
-                                    AgentTreeRowView(row: row, resolution: navigation?.resolution,
-                                        age: row.agent.displayState == .failed ? history.age(row.agent, scope: scope, now: now) : nil)
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityIdentifier("child-agent:\(row.agent.computer == nil ? row.agent.id : row.agent.navigationID)")
-                                if row.agent.displayState == .failed {
-                                    Button {
-                                        var next = history
-                                        next.dismissed.insert(scope + "/" + row.agent.navigationID)
-                                        historyData = (try? JSONEncoder().encode(next)) ?? historyData
-                                    } label: {
-                                        Image(systemName: "xmark").frame(width: 44, height: 44)
-                                    }.buttonStyle(.plain).foregroundStyle(PhrenTheme.textMuted)
-                                        .accessibilityLabel("Dismiss failed worker")
-                                        .accessibilityIdentifier("dismiss-child-agent:\(row.agent.id)")
-                                }
+                        ForEach(activeRows) { row in treeRow(row) }
+                        if !finishedRows.isEmpty {
+                            finishedGroup
+                            if finishedExpanded {
+                                ForEach(finishedRows) { row in treeRow(row) }
                             }
                         }
                     }
+                    #if DEBUG && targetEnvironment(simulator)
+                    if AgentChatFixture.enabled {
+                        Text(AgentChatFixture.report.childDelivery).font(.caption2).frame(height: 1).clipped()
+                            .accessibilityIdentifier("child-agents-fixture-delivery")
+                    }
+                    #endif
                     }.padding(.horizontal, 16).padding(.vertical, 8)
                 }
             }
@@ -91,6 +90,92 @@ struct ChatSubagentsView: View {
                 now = .now
                 try? await Task.sleep(for: .seconds(30))
             }
+        }
+    }
+
+    private func treeRow(_ row: AgentTreeRow) -> some View {
+        let navigation = navigation(for: row.agent)
+        return HStack(spacing: 4) {
+            Button { selected = navigation } label: {
+                AgentTreeRowView(row: row, resolution: navigation?.resolution,
+                    age: row.agent.displayState == .failed ? history.age(row.agent, scope: scope, now: now) : nil)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("child-agent:\(row.agent.computer == nil ? row.agent.id : row.agent.navigationID)")
+            if row.agent.displayState == .failed {
+                Button {
+                    var next = history
+                    next.dismissed.insert(scope + "/" + row.agent.navigationID)
+                    historyData = (try? JSONEncoder().encode(next)) ?? historyData
+                } label: {
+                    Image(systemName: "xmark").frame(width: 44, height: 44)
+                }.buttonStyle(.plain).foregroundStyle(PhrenTheme.textMuted)
+                    .accessibilityLabel("Dismiss failed worker")
+                    .accessibilityIdentifier("dismiss-child-agent:\(row.agent.id)")
+            }
+        }
+    }
+
+    private var finishedGroup: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 8) {
+                Button { withAnimation(.snappy(duration: 0.2)) { finishedExpanded.toggle() } } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .semibold))
+                            .rotationEffect(.degrees(finishedExpanded ? 90 : 0))
+                            .accessibilityHidden(true)
+                        Text("\(finishedRows.count) finished")
+                            .font(.subheadline.weight(.medium)).foregroundStyle(PhrenTheme.textSecondary)
+                        Spacer(minLength: 8)
+                    }
+                    .padding(.horizontal, 12)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(finishedRows.count) finished \(finishedRows.count == 1 ? "worker" : "workers")")
+                .accessibilityValue(finishedExpanded ? "Expanded" : "Collapsed")
+                .accessibilityIdentifier("child-agents-finished")
+                Button { Task { await clearFinished() } } label: {
+                    Text(clearing ? "Clearing" : "Clear finished")
+                        .font(.caption.weight(.medium)).foregroundStyle(PhrenTheme.accent)
+                        .padding(.horizontal, 12).frame(minHeight: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(clearing)
+                .accessibilityIdentifier("child-agents-clear-finished")
+            }
+            .sessionCard()
+            if let clearError {
+                Text(clearError).font(.caption).foregroundStyle(PhrenTheme.warning)
+                    .accessibilityIdentifier("child-agents-clear-error")
+            }
+        }
+    }
+
+    /// Asks this chat's Hook to archive its finished workers now, then hides
+    /// the rows it had shown until the next tree read drops them.
+    @MainActor private func clearFinished() async {
+        guard !clearing else { return }
+        let finished = Set(finishedRows.map(\.id))
+        clearing = true; clearError = nil
+        defer { clearing = false }
+        do {
+            #if DEBUG && targetEnvironment(simulator)
+            if AgentChatFixture.enabled { _ = AgentChatFixture.archiveFinishedChildren(target) }
+            else {
+                _ = try await PhrenConnection.archiveFinishedChildAgents(host: session.host,
+                    privateKey: DeviceSSHKey.load(session.host.id), target: target)
+            }
+            #else
+            _ = try await PhrenConnection.archiveFinishedChildAgents(host: session.host,
+                privateKey: DeviceSSHKey.load(session.host.id), target: target)
+            #endif
+            cleared.formUnion(finished)
+            finishedExpanded = false
+        } catch {
+            clearError = "Could not clear finished workers: \(error.localizedDescription)"
         }
     }
 

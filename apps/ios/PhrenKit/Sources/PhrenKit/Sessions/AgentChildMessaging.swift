@@ -44,4 +44,11 @@ public extension AgentChild {
     }
 
     func parentMessage(_ text: String) -> String { "About the \(name) sub-agent: \(text)" }
+
+    /// A fan-out worker this computer's Hook started for the chat, finished
+    /// without a failure: what the tree folds into "N finished". A failed or
+    /// refused worker stays in view; Clear finished archives it on the Hook too.
+    var isFinishedLocalWorker: Bool {
+        computer == nil && remote == nil && (fanout != nil || callId.hasPrefix("fanout:")) && displayState == .completed
+    }
 }

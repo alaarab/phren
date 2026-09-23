@@ -7,6 +7,8 @@ import {
   STARTUP_BLOCK_WINDOW_MS,
   STARTUP_BLOCK_WINDOW_OPEN_MS,
   classifyStartupBlock,
+  finalTurnFromLines,
+  ownerQuestion,
   computerMatches,
   ensureCodexDirTrusted,
   headlessCommand,
@@ -20,6 +22,7 @@ import {
   type SchedulePushSender,
   type Schedule,
   type ScheduleRun,
+  type ScheduleRunOutcome,
   type StartupWatchEnv,
 } from "./schedules.js";
 import type { SchedulePush } from "./push.js";
@@ -85,7 +88,7 @@ const promptLines = [
 interface WatchRun {
   prompts: string[];
   reads: () => number;
-  finished: Promise<{ status: "finished" | "failed"; reason?: string }>;
+  finished: Promise<ScheduleRunOutcome>;
   stop: () => void;
 }
 
@@ -466,5 +469,84 @@ describe("Scheduler", () => {
     const run = await scheduler.launchNow("demo", "7f3a2c1d");
     expect(await scheduler.history()).toMatchObject([{ id: run.id, notified: false, notifyReason: "no push config" }]);
     expect(logs).toEqual([expect.stringContaining("no push config")]);
+  });
+});
+
+describe("a scheduled turn that finished", () => {
+  const target = { workspaceId: "w1", tabId: "w1:t1", paneId: "w1:p1" };
+  const report = "Reviewed the open SR requests.\n\n- Two need a reply\n- One is resolved";
+  const claudeLines = (reply: string) => [
+    JSON.stringify({ type: "user", message: { role: "user", content: "Review the SR requests." } }),
+    JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "Bash", input: {} }], stop_reason: "tool_use" } }),
+    JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "ok" }] } }),
+    JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: reply }], stop_reason: null } }),
+    JSON.stringify({ type: "system", subtype: "turn_duration", durationMs: 81234 }),
+  ];
+
+  async function watchUntil(status: string, lines: string[] | undefined): Promise<ScheduleRunOutcome> {
+    return watchHerdrRun("default", target, new AbortController().signal, { source: "claude", startedAt: 0 }, {
+      pause: async () => {},
+      panes: async () => [{ workspace_id: "w1", tab_id: "w1:t1", pane_id: "w1:p1", agent_status: status }],
+      resolveSession: async () => "aaaaaaaa-1111-4111-8111-111111111111",
+      finalTurn: async source => lines ? finalTurnFromLines(lines, source) : undefined,
+    });
+  }
+
+  it("records a done pane after a completed Claude turn as finished", async () => {
+    expect(await watchUntil("done", claudeLines(report))).toEqual({ status: "finished" });
+    expect(await watchUntil("idle", claudeLines(report))).toEqual({ status: "finished" });
+  });
+
+  it("records a done pane with no readable transcript as finished", async () => {
+    expect(await watchUntil("done", undefined)).toEqual({ status: "finished" });
+  });
+
+  it("records needs-you when the final reply asks the owner to choose", async () => {
+    const reply = `${report}\n\nWhich one should I answer first?\n1. The billing request\n2. The access request`;
+    expect(await watchUntil("done", claudeLines(reply))).toEqual({ status: "needs-you", reason: "Which one should I answer first?" });
+  });
+
+  it("records needs-you with the first line of a closing question", async () => {
+    const reply = `${report}\n\n**Should I send the two replies now,\nor hold them for review?**`;
+    expect(await watchUntil("idle", claudeLines(reply))).toEqual({ status: "needs-you", reason: "Should I send the two replies now," });
+  });
+
+  it("still fails a pane whose status is not one Herdr reports for a live agent", async () => {
+    expect(await watchUntil("gone", claudeLines(report))).toMatchObject({ status: "failed" });
+  });
+
+  it("reads a turn's end from each harness", () => {
+    expect(finalTurnFromLines(claudeLines(report), "claude")).toEqual({ completed: true, lastAssistant: report });
+    expect(finalTurnFromLines(claudeLines(report).slice(0, 4), "claude")).toEqual({ completed: false, lastAssistant: report });
+    const codex = [
+      JSON.stringify({ type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "Done. Merge it?" }] } }),
+      JSON.stringify({ type: "event_msg", payload: { type: "task_complete" } }),
+    ];
+    expect(finalTurnFromLines(codex, "codex")).toEqual({ completed: true, lastAssistant: "Done. Merge it?" });
+    const opencode = [
+      JSON.stringify({ type: "assistant/message", data: { message: { role: "assistant", content: [{ type: "text", text: "All green." }] }, stop_reason: "end_turn" } }),
+    ];
+    expect(finalTurnFromLines(opencode, "opencode")).toEqual({ completed: true, lastAssistant: "All green." });
+  });
+
+  it("tells a question for the owner from a report that lists what it did", () => {
+    expect(ownerQuestion(report)).toBeUndefined();
+    expect(ownerQuestion("Done:\n1. Fixed the parser\n2. Added tests")).toBeUndefined();
+    expect(ownerQuestion("Two ways forward. Pick one:\n1. Revert\n2. Patch forward")).toBe("Two ways forward. Pick one:");
+    expect(ownerQuestion("Finished the sweep.\n\nWant me to open a PR?")).toBe("Want me to open a PR?");
+  });
+
+  it("stores needs-you in history and notifies it as a finish", async () => {
+    const fixture = await storeFixture(schedule());
+    const pushes: SchedulePush[] = [];
+    const scheduler = new Scheduler({ now: () => new Date("2026-09-20T10:00:00.000Z"), store: fixture.store, runsFile: fixture.runs,
+      computer: "Desk", push: fakePush(pushes), launch: async () => ({ launch: { mode: "headless" },
+        completion: Promise.resolve({ status: "needs-you" as const, reason: "Want me to open a PR?" }) }) });
+    await scheduler.launchNow("demo", "7f3a2c1d");
+    const run = await waitForStatus(scheduler, "needs-you");
+    expect(run).toMatchObject({ status: "needs-you", reason: "Want me to open a PR?" });
+    expect((await readScheduleRuns(fixture.runs))[0].status).toBe("needs-you");
+    await waitForPushes(pushes, 1);
+    expect(pushes).toMatchObject([{ kind: "scheduleFinished", status: "needs-you", reason: "Want me to open a PR?" }]);
   });
 });

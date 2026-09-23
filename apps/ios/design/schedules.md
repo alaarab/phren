@@ -193,7 +193,7 @@ words, chips computer, harness, model. Below, runs newest first on a
 `PhrenTimelineRail`: each entry a 44pt row with the state dot, "Sep 20,
 07:30" in `PhrenTypography.subheadline`, duration ("12m 04s") muted
 trailing, and a second line with the status word ("finished", "failed:
-<reason>", "running", "skipped: Desk asleep"). A run with a pane is a
+<reason>", "needs you: <question>" in the waiting color, "running", "skipped: Desk asleep"). A run with a pane is a
 button that opens that session's chat through the existing session route
 (`phren://session?route=`), with a `chevron.right` at 12pt. Identifier
 `schedule-history-row:<runId>`. Empty: "No runs yet" centered muted.

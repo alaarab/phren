@@ -5,6 +5,11 @@ import PhrenKit
 public struct ScheduleRun: Decodable, Equatable, Identifiable, Sendable {
     public enum Status: String, Decodable, Equatable, Sendable {
         case launched, running, blocked, finished, failed, skipped
+        /// Finished its turn by asking the owner to choose or act.
+        case needsYou = "needs-you"
+
+        /// The words a history row shows for the status.
+        public var label: String { self == .needsYou ? "needs you" : rawValue }
     }
 
     public struct Launch: Decodable, Equatable, Sendable {

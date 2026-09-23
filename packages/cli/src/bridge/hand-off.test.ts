@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
@@ -25,8 +25,26 @@ it("lists local sessions and says why enrolled computers were skipped when hooks
   try {
     await writeFile(path.join(root, "hooks.yaml"), "version: 2\ncomputers: []\n", { mode: 0o600 });
     vi.mocked(hookRequest).mockResolvedValueOnce({ computer: { name: "Desk" } }).mockResolvedValueOnce({ groups: [] });
-    const live = await listLiveSessions();
-    expect(live).toMatchObject({ sessions: [], unreachable: [], enrolled: 0 });
+    const live = await listLiveSessions({ store: null });
+    expect(live).toMatchObject({ sessions: [], unreachable: [], notLinked: [], enrolled: 0 });
     expect(live.peerError).toMatch(/^hooks\.yaml is invalid at version: /);
   } finally { vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }); }
+});
+
+it("lists registered computers that are not linked and how long each session has been idle", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "phren-live-")), store = path.join(root, "store");
+  vi.stubEnv("PHREN_BRIDGE_HOME", root);
+  vi.useFakeTimers({ now: new Date("2026-09-22T12:00:00.000Z"), toFake: ["Date"] });
+  try {
+    await writeFile(path.join(root, "hooks.yaml"), "version: 1\ncomputers: []\n", { mode: 0o600 });
+    await mkdir(store);
+    await writeFile(path.join(store, "machines.yaml"), "Desk.local: personal\nLinuxbox: personal\n");
+    const target = { server: "default", workspace: "w1", tab: "t1", pane: "p1", source: "claude", session: "aaaaaaaa-1111-4111-8111-111111111111" };
+    vi.mocked(hookRequest).mockResolvedValueOnce({ computer: { name: "Desk" } }).mockResolvedValueOnce({ groups: [{ label: "phren",
+      children: [{ agent: "claude", agentStatus: "idle", cwd: "/home/sam/phren", target, lastChangedAt: "2026-09-22T11:55:00.000Z" }] }] });
+    const live = await listLiveSessions({ store });
+    expect(live.sessions).toMatchObject([{ computer: "Desk", project: "phren", status: "idle", idleFor: 300 }]);
+    expect(live.notLinked).toEqual([{ name: "Linuxbox" }]);
+    expect(live.enrolled).toBe(0);
+  } finally { vi.useRealTimers(); vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }); }
 });

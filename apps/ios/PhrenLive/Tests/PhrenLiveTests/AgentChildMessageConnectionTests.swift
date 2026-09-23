@@ -27,4 +27,23 @@ final class AgentChildMessageConnectionTests: XCTestCase {
         } catch { XCTAssertTrue(error.localizedDescription.contains("another computer")) }
     }
 
+    func testClearFinishedCarriesOnlyTheParentTarget() throws {
+        let target = try AgentChatTarget(hostID: UUID(), workspaceID: "w", tabID: "w:t", paneID: "w:p", source: "codex", sessionID: "fixture")
+        let request = try GatewayRequest.archiveFinishedChildren(target)
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(request.body)) as? [String: Any])
+        XCTAssertEqual(request.path, "/v1/subagents/archive-finished")
+        XCTAssertEqual(body["target"] as? [String: String], GatewayRequest.targetQuery(target))
+        XCTAssertEqual(Set(body.keys), ["target"])
+        XCTAssertEqual(try PhrenConnection.archivedCount(Data(#"{"ok":true,"archived":3}"#.utf8)), 3)
+    }
+
+    func testClearFinishedRefusesAnotherComputerBeforeUsingItsKey() async throws {
+        let host = try LiveHost(name: "Desk", address: "desk.example", username: "sam")
+        let target = try AgentChatTarget(hostID: UUID(), workspaceID: "w", tabID: "w:t", paneID: "w:p", source: "codex", sessionID: "fixture")
+        do {
+            _ = try await PhrenConnection.archiveFinishedChildAgents(host: host, privateKey: Data(), target: target)
+            XCTFail("The destination must be validated before transport")
+        } catch { XCTAssertTrue(error.localizedDescription.contains("another computer")) }
+    }
+
 }

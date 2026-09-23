@@ -48,6 +48,16 @@ final class AgentChildMessagingTests: XCTestCase {
         XCTAssertThrowsError(try AgentFanoutMessage.receipt(Data(#"{"ok":true}"#.utf8)))
     }
 
+    func testOnlyLocalCompletedWorkersCountAsFinished() throws {
+        XCTAssertTrue(try decode(call: "fanout:parser").isFinishedLocalWorker)
+        XCTAssertTrue(try decode(fields: #", "fanout":{"resumable":true}"#).isFinishedLocalWorker)
+        XCTAssertFalse(try decode().isFinishedLocalWorker, "an in-process sub-agent is not a fan-out job")
+        XCTAssertFalse(try decode(call: "fanout:parser", fields: #", "failed":true"#).isFinishedLocalWorker)
+        XCTAssertFalse(try decode(call: "fanout:parser", fields: #", "reason":"blocked: external_directory /tmp""#).isFinishedLocalWorker)
+        let remote = #", "computer":{"id":"c1000000-0000-0000-0000-000000000002","name":"Linuxbox"}"#
+        XCTAssertFalse(try decode(call: "fanout:parser", fields: remote).isFinishedLocalWorker)
+    }
+
     private func decode(provider: String = "codex", call: String = "spawn:parser", fields: String = "") throws -> AgentChild {
         let json = #"{"id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","provider":"\#(provider)","path":"Parser checks","callId":"\#(call)","state":"completed","children":[]\#(fields)}"#
         return try JSONDecoder().decode(AgentChild.self, from: Data(json.utf8))

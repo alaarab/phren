@@ -142,6 +142,18 @@ phren fanout archive [--dry-run]
 `--dry-run` reports what would move and what would be deleted without touching
 anything.
 
+`phren bridge fanouts archive` runs the same sweep and also takes
+`--parent <session-id>`, which moves only the jobs that parent chat started,
+and `--older-than <minutes>`, which replaces the 24 hours (`0` moves every
+finished job). A job without `exit.txt`, with a `message-lock` or with queued
+messages stays put either way; with `--parent`, a folder without a manifest is
+left alone too.
+
+The phone's agent tree folds finished workers into one "N finished" row and
+offers Clear finished, which calls `POST /v1/subagents/archive-finished` with
+`{ target }`: the Hook validates the live parent and archives that parent's
+finished jobs at any age under the same checks, returning `{ ok, archived }`.
+
 ## OpenCode's own refusals
 
 In `opencode run`, OpenCode rejects some permissions itself (external_directory,

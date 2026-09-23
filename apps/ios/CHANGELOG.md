@@ -10,6 +10,8 @@ number counts up on its own.
 
 ### Changed
 
+- Schedule history shows a run that finished by asking you something as "needs you" with the question, in the waiting color, instead of as a failure.
+- The agent tree folds finished workers into one "N finished" row you can open, and Clear finished archives that chat's finished workers on the computer right away instead of after a day.
 - Failures that used to pass silently now say why. An agent chat shows why approvals and status went quiet while it reconnects, why the sub-agent list could not refresh, and when sub-agents on other computers are missing because the computer's `hooks.yaml` is broken. A Memory search that fails shows its reason. Signing out or removing a store says when the copy on this phone could not be deleted, and local cache writes that fail during sync join the storage notice instead of vanishing.
 - Chat question cards list each question as one "Header: question" line followed by compact bordered options, the description in the secondary text color below the title. An option's background now always holds its radio, title and full description, so rows no longer overlap. A wide option preview scrolls sideways in its own box without widening the card, and Show all is its own row below the cut instead of floating over an option.
 - Pasting an image into the agent chat's message box (the edit menu's Paste or the keyboard's screenshot suggestion) adds it as an attachment, the same as the + picker, within the same attachment limit.

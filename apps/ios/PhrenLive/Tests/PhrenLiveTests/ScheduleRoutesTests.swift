@@ -90,6 +90,24 @@ final class ScheduleRoutesTests: XCTestCase {
         XCTAssertEqual(run.blockedStartupPrompt, "Allow external CLAUDE.md file imports?")
     }
 
+    func testNeedsYouRunDecodesStatusReasonAndLabel() throws {
+        let data = Data(#"""
+        {
+          "id":"run-3","scheduleId":"7f3a2c1d","project":"phone-kit",
+          "startedAt":"2026-09-21T08:00:00Z","finishedAt":"2026-09-21T08:04:00Z","status":"needs-you",
+          "reason":"Which one should I answer first?",
+          "launch":{"mode":"herdr","workspaceId":"w1","tabId":"w1:t1","paneId":"w1:p1"}
+        }
+        """#.utf8)
+
+        let run = try JSONDecoder().decode(ScheduleRun.self, from: data)
+
+        XCTAssertEqual(run.status, .needsYou)
+        XCTAssertEqual(run.status.label, "needs you")
+        XCTAssertEqual(ScheduleRun.Status.failed.label, "failed")
+        XCTAssertEqual(run.reason, "Which one should I answer first?")
+    }
+
     func testSchedulesListDecodesALatestBlockedRun() throws {
         let data = Data(#"""
         {

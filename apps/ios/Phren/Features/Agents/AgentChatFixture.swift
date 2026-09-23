@@ -251,7 +251,12 @@ import UniformTypeIdentifiers
             ["id": auditChild, "provider": "claude", "model": "gpt-5-codex", "path": "Audit the chat timeline", "callId": "agent-audit", "state": "completed", "worktreeName": "phren-color-ui", "branch": "codex/device-color", "children": [] as [Any]],
             ["id": testsChild, "provider": "claude", "path": "Run the full test suite", "callId": "agent-tests", "state": "running", "children": [] as [Any]],
         ] : []
-        if flag("--chat-child-workers") {
+        if flag("--chat-child-workers") && clearedFinishedWorkers {
+            agents = [
+                ["id": testsChild, "provider": "opencode", "path": "Running parser worker", "callId": "fanout:running",
+                 "state": "running", "fanout": ["resumable": true], "children": [] as [Any]],
+            ]
+        } else if flag("--chat-child-workers") {
             agents = [
                 ["id": auditChild, "provider": "codex", "path": "Finished parser worker", "callId": "fanout:finished",
                  "state": "completed", "fanout": ["resumable": true], "children": [] as [Any]],
@@ -311,6 +316,15 @@ import UniformTypeIdentifiers
         let frame: [String: Any] = ["type": "backlog", "source": "claude", "session": child,
                                     "entries": entries, "startLine": 0, "totalLines": entries.count, "hasMore": false]
         return try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: frame), source: "claude", sidechain: true, session: child)
+    }
+    static var clearedFinishedWorkers = false
+    /// Clear finished: the fixture Hook archives the finished worker and
+    /// records the parent it was asked about.
+    static func archiveFinishedChildren(_ target: AgentChatTarget) -> Int {
+        report.childDelivery = "archive|\(target.sessionID)"
+        let archived = clearedFinishedWorkers ? 0 : 1
+        clearedFinishedWorkers = true
+        return archived
     }
     static func resumeChild(_ agent: AgentChild, target: AgentChatTarget, child: String, text: String) throws -> AgentFanoutMessage {
         report.childDelivery = "worker|\(target.sessionID)|\(child)|\(text)"
