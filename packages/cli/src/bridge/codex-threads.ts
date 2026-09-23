@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { mkdir, open, readFile, stat } from "node:fs/promises";
-import { homedir } from "node:os";
+import { codexHome } from "../home-paths.js";
 import path from "node:path";
 import { atomic, bridgeRoot, object, objects, sessionId, type Json } from "./protocol.js";
 
@@ -13,7 +13,6 @@ const STALLED_AFTER_MS = 10 * 60 * 1_000;
 
 interface Emitted { lastOrdinal: number; maxUpdated: number; count: number; turnSignature?: string; done: Record<string, "call" | "queued" | "done"> }
 
-function codexHome(): string { return process.env.CODEX_HOME || path.join(homedir(), ".codex"); }
 export function materializedRoot(): string { return path.join(bridgeRoot(), "codex-threads"); }
 export function materializedPath(session: string): string { return path.join(materializedRoot(), `${session}.jsonl`); }
 

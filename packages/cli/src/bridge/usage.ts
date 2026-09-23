@@ -2,6 +2,7 @@ import { execFile, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdir, open, readFile, readdir, realpath, rename, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
+import { claudeConfigDir, homeDir } from "../home-paths.js";
 import path from "node:path";
 import { promisify } from "node:util";
 import { fanoutRoot } from "./fanouts.js";
@@ -495,8 +496,9 @@ export function claudeScopedWindows(config: unknown, now = new Date()): UsageWin
   }
   return windows;
 }
-const claudeConfigFile = () => path.join(process.env.CLAUDE_CONFIG_DIR || homedir(), ".claude.json");
-const claudeCredentialsFile = () => path.join(process.env.CLAUDE_CONFIG_DIR || path.join(homedir(), ".claude"), ".credentials.json");
+// Claude keeps .claude.json inside CLAUDE_CONFIG_DIR when set, else beside ~/.claude.
+const claudeConfigFile = () => path.join(process.env.CLAUDE_CONFIG_DIR?.trim() ? claudeConfigDir() : homeDir(), ".claude.json");
+const claudeCredentialsFile = () => path.join(claudeConfigDir(), ".credentials.json");
 
 /**
  * The OAuth usage endpoint Claude Code itself reads, mapped to the same

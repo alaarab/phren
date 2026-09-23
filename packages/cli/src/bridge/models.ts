@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
+import { claudeConfigDir } from "../home-paths.js";
 import path from "node:path";
 import { object, objects, type Json } from "./protocol.js";
 
@@ -130,11 +131,6 @@ function claudeEfforts(row: Json): Pick<AgentModel, "supportedReasoningEfforts" 
   const fallback = options.find(option => object(option.badge).message === "Default");
   return { supportedReasoningEfforts: options.map(option => String(option.id)),
     ...(fallback ? { defaultReasoningEffort: String(fallback.id) } : {}) };
-}
-
-function claudeConfigDir(): string {
-  const configured = process.env.CLAUDE_CONFIG_DIR?.trim();
-  return configured ? path.resolve(configured) : path.join(homedir(), ".claude");
 }
 
 /** "2.1.279" is older than "2.1.280"; anything unparseable is not. */

@@ -5,6 +5,7 @@ import { execFile } from "node:child_process";
 import { usageStatusLine } from "./usage.js";
 import { chmod, copyFile, mkdir, open, readFile, rename, symlink, unlink, lstat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
+import { codexHome, claudeConfigDir } from "../home-paths.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -233,8 +234,8 @@ async function missingFile<T>(operation: Promise<T>): Promise<T | undefined> {
 export async function planAgentHooks(program: string, remove = false, modules?: ModuleSnapshot): Promise<SettingsEdit[]> {
   const edits: SettingsEdit[] = [];
   for (const [source, file] of [
-    ["codex", path.join(process.env.CODEX_HOME || path.join(homedir(), ".codex"), "hooks.json")],
-    ["claude", path.join(process.env.CLAUDE_CONFIG_DIR || path.join(homedir(), ".claude"), "settings.json")],
+    ["codex", path.join(codexHome(), "hooks.json")],
+    ["claude", path.join(claudeConfigDir(), "settings.json")],
     ["copilot", path.join(process.env.COPILOT_HOME || path.join(homedir(), ".copilot"), "hooks/phren.json")],
   ]) {
     const metadata = await missingFile(lstat(file));
