@@ -232,7 +232,11 @@ enum ChatInlineCode {
     static func tinted(_ attributed: AttributedString) -> AttributedString {
         let color = PhrenTheme.chatInlineCode
         guard attributed.runs.contains(where: { $0.inlinePresentationIntent?.contains(.code) == true }) else { return attributed }
-        let key = "\(color.description)|\(ChatRenderKey.text(String(attributed.characters)))" as NSString
+        // The same words can carry different links: file paths become links
+        // only once the computer confirms them. Keying on the characters
+        // alone returned the unlinked copy forever.
+        let links = attributed.runs.compactMap { $0.link?.absoluteString }.joined(separator: "\n")
+        let key = "\(color.description)|\(ChatRenderKey.text(String(attributed.characters)))|\(ChatRenderKey.text(links))" as NSString
         if let hit = cache.object(forKey: key) { return hit.value }
         var copy = attributed
         for run in copy.runs where run.inlinePresentationIntent?.contains(.code) == true {
