@@ -24,7 +24,7 @@ vi.mock("node:http", async importOriginal => {
 });
 vi.mock("./herdr.js", async importOriginal => {
   const actual = await importOriginal<typeof import("./herdr.js")>();
-  return { ...actual, snapshot: async () => fixture.snapshot, sharedSnapshot: async () => fixture.snapshot, servers: async () => [], recentServers: async () => [],
+  return { ...actual, snapshot: async () => fixture.snapshot, servers: async () => [], recentServers: async () => [],
     paneIdentity: async (_server: string, pane: any) => pane.agent_session.value,
     paneChatState: async (_server: string, pane: any) => ({ sessionId: pane.agent_session.value }),
     validateTarget: async () => (fixture.snapshot.panes as any[])[0] };
