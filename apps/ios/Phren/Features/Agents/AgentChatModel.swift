@@ -66,6 +66,32 @@ struct QueuedMessage: Identifiable, Equatable {
 
 @Observable @MainActor
 final class AgentChatModel {
+    /// The transcript stream and the approval and status channel.
+    let connection = AgentChatConnection()
+    /// Held and handed-off messages.
+    let outbox = AgentChatOutbox()
+
+    init() {
+        outbox.onChange = { [weak self] items in
+            guard let self, let target = self.target, !self.restoringDraft else { return }
+            AgentChatQueues.items[target.id] = items
+        }
+    }
+
+    var interactionConnected: Bool { get { connection.interactionConnected } set { connection.interactionConnected = newValue } }
+    /// Why the approval and status channel dropped, until it reconnects.
+    var statusError: String? { get { connection.statusError } set { connection.statusError = newValue } }
+    var capabilities: LiveCapabilities? { get { connection.capabilities } set { connection.capabilities = newValue } }
+    var questionsSupported: Bool { get { connection.questionsSupported } set { connection.questionsSupported = newValue } }
+    var asyncQuestionsSupported: Bool { get { connection.asyncQuestionsSupported } set { connection.asyncQuestionsSupported = newValue } }
+    var historyStalled: Bool { get { connection.historyStalled } set { connection.historyStalled = newValue } }
+    var historyStalledSince: Date? { get { connection.historyStalledSince } set { connection.historyStalledSince = newValue } }
+    var receivedAt: Date? { get { connection.receivedAt } set { connection.receivedAt = newValue } }
+    /// Counts reconnect backlogs; the view pins to the end on each when following.
+    var reconnectRevision: Int { get { connection.reconnectRevision } set { connection.reconnectRevision = newValue } }
+    /// Only readiness blockers hold messages locally. Submitted entries are receipts.
+    var queue: [QueuedMessage] { get { outbox.items } set { outbox.items = newValue } }
+
     var panes: [AgentChatPanes.Pane] = []
     var target: AgentChatTarget?
     var history = AgentChatHistory() {
@@ -124,15 +150,13 @@ final class AgentChatModel {
     let reveal = ChatTextReveal()
     var animateReplies = true
     private var hasTranscript = false
-    private(set) var awaitingReply = false { didSet { if awaitingReply != oldValue { prepareTranscript() } } }
+    var awaitingReply = false { didSet { if awaitingReply != oldValue { prepareTranscript() } } }
     private(set) var sentAt: Date? { didSet { if sentAt != oldValue { prepareTranscript() } } }
     private var submittedAfterLine = -1
     var liveActivity: String? { didSet { if liveActivity != oldValue { prepareTranscript() } } }
     /// The agent is summarizing the conversation to reclaim context; the
     /// header says so and the turn stays busy until it finishes.
     var isCompacting = false { didSet { if isCompacting != oldValue { prepareTranscript() } } }
-    var historyStalled = false
-    var historyStalledSince: Date?
     private var preferProgressActivity = false { didSet { if preferProgressActivity != oldValue { prepareTranscript() } } }
     var activityPhase: AgentChatProgress.Phase? {
         if preferProgressActivity { return progress.phase }
@@ -218,7 +242,7 @@ final class AgentChatModel {
         }
     }
 
-    private func acceptReportedModel(_ name: String?) {
+    func acceptReportedModel(_ name: String?) {
         guard let name, name != modelBeforeSwitch else { return }
         modelBeforeSwitch = nil
         if modelName != name { modelName = name }
@@ -228,42 +252,29 @@ final class AgentChatModel {
     /// the live branch from Phren Hook wins over the transcript's stamp
     /// because it is read from git now rather than when the row was written.
     private var transcriptContext = AgentSessionContext()
-    private var statusBranch: String?
+    var statusBranch: String?
     var branch: String? { statusBranch ?? transcriptContext.branch }
-    var capabilities: LiveCapabilities?
-    var questionsSupported = true
-    var asyncQuestionsSupported = false
     var canAnswerQuestion: Bool { question?.isAsync == true ? asyncQuestionsSupported : questionsSupported }
     var progressUnavailable = false
     var messages: [AgentChatMessage] { history.messages }
     var hasMore: Bool { history.hasMore }
     var error: String?
     var deliveryError: String?
-    /// Why the approval and status channel dropped, until it reconnects.
-    var statusError: String?
     var loading = true
     var connected = false
-    /// Counts reconnect backlogs; the view pins to the end on each when following.
-    var reconnectRevision = 0
     var sending = false
     var loadingHistory = false
     var stopping = false
     var needsAnswer = false { didSet { if needsAnswer != oldValue { prepareTranscript() } } }
     var approval: AgentApproval? { didSet { if approval != oldValue { prepareTranscript() } } }
-    private var questionState = AgentQuestionState() { didSet { if questionState.pending != oldValue.pending { prepareTranscript() } } }
+    var questionState = AgentQuestionState() { didSet { if questionState.pending != oldValue.pending { prepareTranscript() } } }
     var question: AgentQuestionPrompt? { questionState.pending.first }
     var pendingQuestionCount: Int { questionState.pending.count }
-    var interactionConnected = false
     var answering = false
     /// What the agent is asking in its terminal, when the Hook saw the request go by.
     var terminalPrompt: AgentTerminalPrompt? { didSet { if terminalPrompt != oldValue { prepareTranscript() } } }
     /// True while the pane's own terminal is reading a password.
     var passwordPrompt = false { didSet { if passwordPrompt != oldValue { prepareTranscript() } } }
-    private var statusTask: Task<Void, Never>?
-    private var progressTask: Task<Void, Never>?
-    private var progressConnected = false
-    private var statusGeneration = UUID()
-    var receivedAt: Date?
     var deliveryStatus: String?
     var draftStorageError: String?
     private(set) var restoringDraft = false
@@ -275,8 +286,6 @@ final class AgentChatModel {
     var draft = "" { didSet { if !restoringDraft, let target { AgentChatDrafts.text[target.id] = draft; persistDraft() } } }
     var attachments: [ChatAttachmentDraft] = [] { didSet { if !restoringDraft, let target { AgentChatDrafts.attachments[target.id] = attachments; persistDraft() } } }
     var sentImages: [ChatAttachmentDraft] = [] { didSet { matchSentImages() } }
-    /// Only readiness blockers hold messages locally. Submitted entries are receipts.
-    var queue: [QueuedMessage] = [] { didSet { if let target, !restoringDraft { AgentChatQueues.items[target.id] = queue } } }
     /// Working activity drives Stop and the timer, never prompt delivery.
     var isBusy: Bool { !needsAnswer && approval == nil && (awaitingReply || isCompacting || (target?.isStarting != true && activityPhase == .working)) }
     var pendingReason: String? {
@@ -290,18 +299,11 @@ final class AgentChatModel {
         if target?.isStarting == true && queue.contains(where: { $0.submittedAfterLine != nil }) { return "Starting" }
         return nil
     }
-    var localPendingMessages: [QueuedMessage] { queue.filter { $0.submittedAfterLine == nil } }
+    var localPendingMessages: [QueuedMessage] { outbox.localPending }
     func pendingLabel(_ item: QueuedMessage) -> String {
-        pendingReason ?? (item.id == failedQueueItem ? "Not sent. Retry or edit." : "Sending…")
+        pendingReason ?? (item.id == outbox.failedItem ? "Not sent. Retry or edit." : "Sending…")
     }
-    private var drainTask: Task<Void, Never>?
-    private var failedQueueItem: UUID?
-    private var lastSession: LiveAgentSession?
-    private var generation = UUID()
-    private var streamTask: Task<Void, Never>?
-    private var streamTarget: AgentChatTarget?
-    private var rejectedStreamTarget: AgentChatTarget?
-    var automaticReconnectSuspended: Bool { target != nil && rejectedStreamTarget == target }
+    var automaticReconnectSuspended: Bool { target != nil && connection.rejectedStreamTarget == target }
 
     func choose(_ pane: AgentChatPanes.Pane, session: LiveAgentSession) {
         do {
@@ -325,7 +327,7 @@ final class AgentChatModel {
         let draftRun = UUID(); draftGeneration = draftRun
         deferredModel = nil; deferredModelSession = nil; modelSwitchNotice = nil; modelBeforeSwitch = nil
         target = chosen
-        rejectedStreamTarget = nil
+        connection.rejectedStreamTarget = nil
         restoringDraft = true
         draft = ""; attachments = []
         draftStorageError = nil
@@ -351,7 +353,7 @@ final class AgentChatModel {
         connected = false; error = nil; deliveryError = nil
         sentImages = []; needsAnswer = false; approval = nil; questionState = AgentQuestionState()
         terminalPrompt = nil; passwordPrompt = false
-        reconciledQueueRows = AgentChatQueues.reconciledRows[chosen.id] ?? []
+        outbox.reconciledRows = AgentChatQueues.reconciledRows[chosen.id] ?? []
         queue = AgentChatQueues.items[chosen.id] ?? []
     }
     private func persistDraft(immediately: Bool = false) {
@@ -391,11 +393,9 @@ final class AgentChatModel {
         pendingPreview = nil; replyPreview = nil; harnessVerb = nil
         persistDraft(immediately: true)
         draftLoadTask?.cancel(); draftGeneration = UUID(); restoringDraft = false
-        progressTask?.cancel(); progressTask = nil
-        streamTask?.cancel(); streamTask = nil; streamTarget = nil
-        statusTask?.cancel(); statusTask = nil; interactionConnected = false; approval = nil
-        target = nil; history = .init(); connected = false; queue = []; drainTask?.cancel(); drainTask = nil
-        rejectedStreamTarget = nil
+        connection.cancelLinks(); approval = nil
+        target = nil; history = .init(); connected = false; queue = []; outbox.drainTask?.cancel(); outbox.drainTask = nil
+        connection.rejectedStreamTarget = nil
         progress = .init(); reveal.finish(); hasTranscript = false; awaitingReply = false; sentAt = nil; liveActivity = nil; isCompacting = false
         historyStalled = false; historyStalledSince = nil; modelName = nil
         transcriptContext = .init(); statusBranch = nil
@@ -408,20 +408,16 @@ final class AgentChatModel {
     }
 
     func run(_ session: LiveAgentSession) async {
-        lastSession = session
-        rejectedStreamTarget = nil
-        let run = UUID(); generation = run; loading = true
+        connection.lastSession = session
+        connection.rejectedStreamTarget = nil
+        let run = UUID(); connection.generation = run; loading = true
         // A new appearance can start before the cancelled run unwinds. Its
         // streams carry the old generation and must not suppress new streams
         // merely because their pane identity is still the same.
-        progressTask?.cancel(); progressTask = nil
-        streamTask?.cancel(); streamTask = nil; streamTarget = nil
-        statusTask?.cancel(); statusTask = nil; interactionConnected = false; approval = nil
+        connection.cancelLinks(); approval = nil
         defer {
-            if generation == run {
-                progressTask?.cancel(); progressTask = nil
-                streamTask?.cancel(); streamTask = nil; streamTarget = nil
-                statusTask?.cancel(); statusTask = nil; interactionConnected = false; approval = nil
+            if connection.generation == run {
+                connection.cancelLinks(); approval = nil
                 connected = false; loading = false
                 reveal.finish()
             }
@@ -430,7 +426,7 @@ final class AgentChatModel {
             do {
                 let list = try await Self.fetchPanes(session)
                 try Task.checkCancellation()
-                guard generation == run else { return }
+                guard connection.generation == run else { return }
                 panes = list.panes
                 if target == nil {
                     let supported = panes.filter { (try? $0.target(hostID: session.host.id, workspaceID: session.workspaceID, tabID: session.tab.id, muxID: session.host.muxID)) != nil }
@@ -448,7 +444,7 @@ final class AgentChatModel {
                 }
                 loading = false
             } catch {
-                guard !Task.isCancelled, generation == run else { return }
+                guard !Task.isCancelled, connection.generation == run else { return }
                 handleConnectionFailure(error)
             }
             do { try await Task.sleep(for: .seconds(target?.isStarting == true ? 2 : 3)) } catch { return }
@@ -473,14 +469,10 @@ final class AgentChatModel {
         connected = false; error = nil
     }
 
-    func shouldBeginStream(_ target: AgentChatTarget) -> Bool {
-        !target.isStarting && streamTarget != target && rejectedStreamTarget != target
-    }
+    func shouldBeginStream(_ target: AgentChatTarget) -> Bool { connection.shouldBeginStream(target) }
     func handleConnectionFailure(_ error: Error) {
         pendingPreview = nil; replyPreview = nil; harnessVerb = nil
-        progressTask?.cancel(); progressTask = nil
-        streamTask?.cancel(); streamTask = nil; streamTarget = nil
-        statusTask?.cancel(); statusTask = nil; interactionConnected = false; approval = nil; isCompacting = false
+        connection.cancelLinks(); approval = nil; isCompacting = false
         historyStalled = false; historyStalledSince = nil
         connected = false; loading = false
         // Polling failures cannot remove a rejected-transcript latch and cause
@@ -491,24 +483,24 @@ final class AgentChatModel {
         pendingPreview = nil; replyPreview = nil; harnessVerb = nil
         connected = false
         if error is AgentChatTranscript.LimitError {
-            rejectedStreamTarget = target
+            connection.rejectedStreamTarget = target
             self.error = error.localizedDescription
         } else {
-            streamTarget = nil; self.error = "Reconnecting… \(error.localizedDescription)"
+            connection.streamTarget = nil; self.error = "Reconnecting… \(error.localizedDescription)"
         }
     }
 
     private func beginStream(_ session: LiveAgentSession, target: AgentChatTarget, run: UUID) {
-        streamTask?.cancel(); streamTarget = target
+        connection.streamTask?.cancel(); connection.streamTarget = target
         beginStatus(session, target: target, run: run)
         beginProgress(session, target: target, run: run)
-        streamTask = Task {
+        connection.streamTask = Task {
             do {
                 #if DEBUG && targetEnvironment(simulator)
                 if AgentChatFixture.enabled {
                     AgentChatFixture.beginStream(target)
                     while !Task.isCancelled {
-                        guard self.target == target, generation == run else { return }
+                        guard self.target == target, connection.generation == run else { return }
                         let frame = try AgentChatFixture.transcript(target)
                         if frame.kind != .append || !frame.messages.isEmpty || !frame.progressEvents.isEmpty || !frame.queueEvents.isEmpty { accept(frame) }
                         try await Task.sleep(for: .milliseconds(500))
@@ -522,12 +514,12 @@ final class AgentChatModel {
                 let updates = PhrenConnection.chatUpdates(host: session.host, privateKey: try DeviceSSHKey.load(session.host.id), target: target, afterLine: afterLine)
                 for try await frame in updates {
                     try Task.checkCancellation()
-                    guard self.target == target, generation == run else { return }
+                    guard self.target == target, connection.generation == run else { return }
                     accept(frame)
                 }
                 throw LiveConnectionError.disconnected
             } catch {
-                guard !Task.isCancelled, generation == run, self.target == target else { return }
+                guard !Task.isCancelled, connection.generation == run, self.target == target else { return }
                 handleStreamFailure(error, target: target)
             }
         }
@@ -551,7 +543,7 @@ final class AgentChatModel {
         if frame.kind != .older { questionState.receive(frame.questionEvents, reset: frame.replacesConversation) }
         reveal.receive(frame, previous: messages, animated: animateReplies && hasTranscript && !hadPreview)
         if frame.messages.contains(where: { $0.line > submittedAfterLine && $0.role != .user }) { awaitingReply = false }
-        if !progressConnected, !frame.progressEvents.isEmpty || frame.replacesConversation { acceptProgress(frame) }
+        if !connection.progressConnected, !frame.progressEvents.isEmpty || frame.replacesConversation { acceptProgress(frame) }
         acceptContext(frame)
         // A backlog after the transcript was already showing is a reconnect
         // (the phone slept, the link dropped). The rows are re-laid out from
@@ -562,32 +554,6 @@ final class AgentChatModel {
         if messages == previousMessages { replyPreview = pendingPreview }
         reconcileHandedOffQueue()
         scheduleDrain()
-    }
-
-    @ObservationIgnored private var reconciledQueueRows: Set<String> = []
-    private func reconcileHandedOffQueue() {
-        guard !queue.isEmpty else { return }
-        var observed = messages.filter { $0.role == .user && $0.localCommand == nil
-            && !reconciledQueueRows.contains($0.id) && !reconciledQueueRows.contains(history.acknowledgementID(for: $0.id)) }
-        queue.removeAll { item in
-            guard let after = item.submittedAfterLine, let text = item.submittedText else { return false }
-            let wanted = AgentQueuedMessages.normalizedText(text)
-            guard let index = observed.firstIndex(where: { row in
-                guard row.line > after else { return false }
-                if row.text == text { return true }
-                let have = AgentQueuedMessages.normalizedText(row.text)
-                if !wanted.isEmpty { return have == wanted }
-                // Pictures with no words of their own: the landed turn is the
-                // image blocks (or the placeholder the parser gives them).
-                return !item.attachments.isEmpty && have.isEmpty && (!row.imageBlocks.isEmpty || !row.uploadImages.isEmpty || row.text == "[Image attachment]")
-            }) else { return false }
-            let id = observed.remove(at: index).id
-            reconciledQueueRows.insert(id)
-            reconciledQueueRows.insert(history.acknowledgementID(for: id))
-            return true
-        }
-        if reconciledQueueRows.count > 4_000 { reconciledQueueRows.formIntersection(messages.flatMap { [$0.id, history.acknowledgementID(for: $0.id)] }) }
-        if let target { AgentChatQueues.reconciledRows[target.id] = reconciledQueueRows }
     }
 
     /// A conversation-replacement snapshot replaces what the transcript said;
@@ -617,180 +583,11 @@ final class AgentChatModel {
         }) { awaitingReply = false }
     }
 
-    private func beginProgress(_ session: LiveAgentSession, target: AgentChatTarget, run: UUID) {
-        // Phren Hook includes real lifecycle and usage events in the chat stream.
-        progressTask?.cancel(); progressTask = nil
-        progressConnected = false; progressUnavailable = false
-    }
-
-    private func beginStatus(_ session: LiveAgentSession, target: AgentChatTarget, run: UUID) {
-        statusTask?.cancel(); interactionConnected = false; approval = nil; isCompacting = false
-        historyStalled = false; historyStalledSince = nil; statusError = nil
-        let statusRun = UUID(); statusGeneration = statusRun
-        statusTask = Task {
-            while !Task.isCancelled {
-                do {
-                    #if DEBUG && targetEnvironment(simulator)
-                    if AgentChatFixture.enabled {
-                        guard self.target == target, generation == run, statusGeneration == statusRun else { return }
-                        asyncQuestionsSupported = !ProcessInfo.processInfo.arguments.contains("--chat-question-unsupported")
-                        if ProcessInfo.processInfo.arguments.contains("--chat-question-unsupported") { questionsSupported = false }
-                        approval = try AgentChatFixture.approval(target)
-                        terminalPrompt = AgentChatFixture.terminalPrompt(target)
-                        let status = try AgentChatFixture.status(target)
-                        passwordPrompt = status.passwordPrompt
-                        historyStalled = status.historyStalled; historyStalledSince = status.historyStalledSince
-                        if !ProcessInfo.processInfo.arguments.contains("--chat-streaming") {
-                            acceptActivity(try AgentChatFixture.panes(session).validate(target).agentStatus)
-                        }
-                        interactionConnected = true
-                        await ApprovalActivityController.shared.sync(approval, session: session, target: target)
-                        try await Task.sleep(for: .milliseconds(250))
-                        continue
-                    }
-                    #endif
-                    for try await status in PhrenConnection.interactionUpdates(host: session.host, privateKey: try DeviceSSHKey.load(session.host.id), target: target) {
-                        try Task.checkCancellation()
-                        guard self.target == target, generation == run, statusGeneration == statusRun else { return }
-                        if awaitingReply, liveActivity != "working", status.activity == "working" { awaitingReply = false }
-                        approval = status.approval.flatMap { ApprovalActivityController.shared.wasHandled($0, target: target) ? nil : $0 }
-                        if terminalPrompt != status.terminalPrompt { terminalPrompt = status.terminalPrompt }
-                        passwordPrompt = status.passwordPrompt
-                        if let prompts = status.pendingQuestions { questionState.replaceAsync(prompts) }
-                        capabilities = status.capabilities
-                        questionsSupported = status.questionsSupported; asyncQuestionsSupported = status.asyncQuestionsSupported
-                        acceptActivity(status.activity); interactionConnected = true
-                        isCompacting = status.compacting
-                        historyStalled = status.historyStalled; historyStalledSince = status.historyStalledSince
-                        acceptReportedModel(status.modelName)
-                        if statusBranch != status.branch { statusBranch = status.branch }
-                        if approval != nil || ["waiting", "blocked"].contains(status.activity ?? "") { awaitingReply = false }
-                        statusError = nil
-                        await ApprovalActivityController.shared.sync(approval, session: session, target: target)
-                    }
-                } catch is CancellationError {
-                } catch {
-                    // The loop retries on its own; say why approvals and status went quiet meanwhile.
-                    if self.target == target, generation == run, statusGeneration == statusRun {
-                        statusError = "Status updates paused: \(error.localizedDescription) Retrying."
-                    }
-                }
-                guard !Task.isCancelled, self.target == target, generation == run, statusGeneration == statusRun else { return }
-                approval = nil; terminalPrompt = nil; interactionConnected = false; isCompacting = false
-                passwordPrompt = false
-                historyStalled = false; historyStalledSince = nil
-                do { try await Task.sleep(for: .seconds(3)) } catch { return }
-            }
-        }
-    }
-
-    /// `updatedInput` answers a Claude AskUserQuestion approval: its own input
-    /// plus the chosen answers, sent with the approval. `decision` is the
-    /// Hook's effective answer when a conductor call offers grant-scoped
-    /// allows; a plain approve/deny is derived from `approve` otherwise.
-    func answer(_ session: LiveAgentSession, approval expected: AgentApproval? = nil, approve: Bool = false,
-                decision: ApprovalDecision? = nil, updatedInput: [String: Any]? = nil,
-                question prompt: AgentQuestionPrompt? = nil, selections: [[Int]] = [], answers: [AgentQuestionAnswer]? = nil) async {
-        guard !answering, !sending, let target else { return }
-        guard (expected != nil && expected == approval && interactionConnected)
-            || (prompt != nil && prompt == question && canAnswerQuestion && connected) else { return }
-        let effective = decision ?? (approve ? .approve : .deny)
-        answering = true; deliveryError = nil
-        defer { answering = false }
-        if let expected { await ApprovalActivityController.shared.answered(target: target, actionID: expected.id) }
-        do {
-            #if DEBUG && targetEnvironment(simulator)
-            if AgentChatFixture.enabled {
-                AgentChatFixture.answered = true; AgentChatFixture.denied = expected != nil && !effective.allows
-                AgentChatFixture.answeredInput = updatedInput
-            } else { try await submitAnswer(session, target: target, approval: expected, decision: effective, updatedInput: updatedInput, question: prompt, selections: selections, answers: answers) }
-            #else
-            try await submitAnswer(session, target: target, approval: expected, decision: effective, updatedInput: updatedInput, question: prompt, selections: selections, answers: answers)
-            #endif
-            guard self.target == target else { return }
-            if approval?.id == expected?.id { approval = nil }
-            if let prompt { questionState.resolve(prompt.id) }
-            deliveryStatus = prompt?.isAsync == true ? "Answer queued for Codex" : "Answer sent"
-        } catch {
-            guard self.target == target else { return }
-            if approval?.id == expected?.id { approval = nil }
-            deliveryError = "Answer wasn't confirmed. Check the conversation or terminal before answering again. Phren hasn't retried it."
-        }
-    }
-    private func submitAnswer(_ session: LiveAgentSession, target: AgentChatTarget, approval: AgentApproval?, decision: ApprovalDecision, updatedInput: [String: Any]?,
-                              question: AgentQuestionPrompt?, selections: [[Int]], answers: [AgentQuestionAnswer]?) async throws {
-        let key = try DeviceSSHKey.load(session.host.id)
-        if let approval { try await PhrenConnection.answerApproval(host: session.host, privateKey: key, target: target, actionID: approval.actionId, approve: decision.allows, decision: decision, updatedInput: updatedInput) }
-        else if let question { try await PhrenConnection.answerQuestions(host: session.host, privateKey: key, target: target, prompt: question, answers: answers ?? selections.map { AgentQuestionAnswer(selections: $0) }) }
-    }
-
     var historyError: String?
-
-    /// One key into the agent's terminal for a prompt only it can see. The
-    /// row stays until the pane's status leaves "needs answer".
-    func answer(_ session: LiveAgentSession, key: AgentAnswerKey) async { await answer(session, keys: [key]) }
-    func answer(_ session: LiveAgentSession, keys: [AgentAnswerKey]) async {
-        guard let target, !answering, !keys.isEmpty else { return }
-        answering = true; deliveryError = nil
-        defer { answering = false }
-        do {
-            #if DEBUG && targetEnvironment(simulator)
-            if AgentChatFixture.enabled { for key in keys { try await AgentChatFixture.answer(target, key: key) }; return }
-            #endif
-            // The Hook takes four keys a call; a long walk goes in pieces.
-            var remaining = keys[...]
-            while !remaining.isEmpty {
-                let chunk = Array(remaining.prefix(4)); remaining = remaining.dropFirst(4)
-                try await PhrenConnection.answerWithKeys(host: session.host, privateKey: try DeviceSSHKey.load(session.host.id), target: target, keys: chunk)
-            }
-            // A key that answers (not a cursor move) clears the card and strip
-            // until the next prompt arrives.
-            if keys.contains(where: { ![.up, .down, .tab, .altUp].contains($0) }) { terminalPrompt = nil; passwordPrompt = false }
-        } catch { deliveryError = error.localizedDescription }
-    }
-
-    /// Answers a released AskUserQuestion: one keys call per question, since
-    /// the Hook sends the chosen digit then advances its own question index
-    /// with Tab (or submits the last with Enter).
-    func answerTerminalQuestions(_ session: LiveAgentSession, answers: [AgentQuestionAnswer]) async {
-        for answer in answers {
-            let keys = answer.selections.sorted().compactMap { AgentAnswerKey(rawValue: String($0 + 1)) }
-            guard !keys.isEmpty else { continue }
-            await self.answer(session, keys: keys)
-        }
-    }
-
-    /// Types a secret the agent asked for (a sudo password, a login) into
-    /// its terminal and presses Enter. The text is never kept on the phone.
-    func answer(_ session: LiveAgentSession, secret: String) async {
-        guard let target, !answering, !secret.isEmpty else { return }
-        answering = true; deliveryError = nil
-        defer { answering = false }
-        do {
-            #if DEBUG && targetEnvironment(simulator)
-            if AgentChatFixture.enabled { try await AgentChatFixture.answer(target, secret: secret); return }
-            #endif
-            try await PhrenConnection.answerWithSecret(host: session.host, privateKey: try DeviceSSHKey.load(session.host.id), target: target, text: secret)
-            terminalPrompt = nil; passwordPrompt = false
-        } catch { deliveryError = error.localizedDescription }
-    }
-
-    /// Types a slash command whose agent answers with a menu, then walks
-    /// that menu to `index`. The command goes through the ordinary send so
-    /// the transcript shows it; the keys follow once the menu has drawn.
-    /// Codex's Full Access confirmation is the Hook's own step: it reads the
-    /// pane and answers "Enable full access?" before closing the walk.
-    func drive(_ session: LiveAgentSession, menuCommand command: String, index: Int) async {
-        draft = command
-        await send(session)
-        guard deliveryError == nil else { return }
-        try? await Task.sleep(for: .milliseconds(700))
-        await answer(session, keys: AgentMenuChoice.keys(selecting: index))
-    }
 
     func showLatest() {
         history = .init(); reveal.finish(); hasTranscript = false
-        streamTask?.cancel(); streamTask = nil; streamTarget = nil
+        connection.streamTask?.cancel(); connection.streamTask = nil; connection.streamTarget = nil
         connected = false; loading = true; historyError = nil
     }
 
@@ -817,77 +614,6 @@ final class AgentChatModel {
         }
     }
 
-    func stop(_ session: LiveAgentSession) async {
-        guard !stopping, !sending, connected, !needsAnswer, let target else { return }
-        stopping = true; deliveryError = nil
-        defer { stopping = false }
-        do {
-            #if DEBUG && targetEnvironment(simulator)
-            if AgentChatFixture.enabled { AgentChatFixture.stopped = true }
-            else { try await PhrenConnection.stopChatTurn(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target) }
-            #else
-            try await PhrenConnection.stopChatTurn(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target)
-            #endif
-            deliveryStatus = "Stop requested"
-        } catch { deliveryError = "Stop wasn't confirmed. \(error.localizedDescription)" }
-        scheduleDrain()
-    }
-
-    // MARK: - Queue
-
-    /// Delivers as soon as the harness can receive input, including mid turn.
-    @discardableResult
-    func sendNow(_ item: QueuedMessage, _ session: LiveAgentSession) async -> Bool {
-        guard !sending, pendingReason == nil,
-              let index = queue.firstIndex(where: { $0.id == item.id }), queue[index].submittedAfterLine == nil else { return false }
-        let sendingTarget = target
-        let result = await deliver(item.text, attachments: queue[index].attachments, session: session) { text in
-            if self.target == sendingTarget, let index = self.queue.firstIndex(where: { $0.id == item.id }) {
-                self.queue[index].submittedAfterLine = self.history.totalLines - 1
-                self.queue[index].submittedText = text
-            }
-        }
-        guard target == sendingTarget else { return false }
-        failedQueueItem = result.delivered ? nil : item.id
-        if let index = queue.firstIndex(where: { $0.id == item.id }) {
-            queue[index].attachments = result.attachments
-            if result.rejected { queue[index].submittedAfterLine = nil; queue[index].submittedText = nil }
-        }
-        reconcileHandedOffQueue()
-        if result.delivered { scheduleDrain() }
-        return result.delivered
-    }
-
-    func remove(_ item: QueuedMessage) {
-        queue.removeAll { $0.id == item.id && $0.submittedAfterLine == nil }
-    }
-
-    /// Pulls a queued message back into the composer to change it.
-    func edit(_ item: QueuedMessage) {
-        guard let index = queue.firstIndex(where: { $0.id == item.id }), queue[index].submittedAfterLine == nil else { return }
-        let item = queue.remove(at: index)
-        draft = draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? item.text : draft + "\n" + item.text
-        attachments += item.attachments.filter { queued in !attachments.contains { $0.id == queued.id } }
-    }
-
-    /// Flush readiness holds as soon as their blocker clears. A working turn
-    /// is not a blocker. Receipts and uncertain deliveries never hold up a
-    /// later unsent message, and never become eligible for automatic replay.
-    private func scheduleDrain() {
-        guard let next = localPendingMessages.first, next.id != failedQueueItem,
-              pendingReason == nil, !sending, drainTask == nil, let session = lastSession else { return }
-        drainTask = Task { @MainActor [weak self] in
-            var delivered = false
-            defer {
-                self?.drainTask = nil
-                if delivered { self?.scheduleDrain() }
-            }
-            guard let self, let next = localPendingMessages.first, next.id != failedQueueItem,
-                  pendingReason == nil, !sending, lastSession == session else { return }
-            delivered = await sendNow(next, session)
-        }
-    }
-
     /// Uploads can be reused after failure; prompt delivery is never replayed.
     func send(_ session: LiveAgentSession, consumeDraft: (() -> Void)? = nil) async {
         guard !sending, target != nil,
@@ -895,7 +621,7 @@ final class AgentChatModel {
         guard !AgentSlashCommand.isCommand(draft) || attachments.isEmpty else {
             deliveryError = "Remove attachments before running a slash command."; return
         }
-        lastSession = session
+        connection.lastSession = session
         let submitted = draft, items = attachments
         // All bridge harnesses accept working-turn input through agent.prompt.
         // Hold only when the connection or a real input prompt prevents it.
@@ -937,7 +663,7 @@ final class AgentChatModel {
     /// Uploads any attachments that still lack a path, then delivers the
     /// prompt. Returns the attachments with the paths that did upload, so a
     /// retry never re-uploads; prompt delivery itself is never replayed.
-    private func deliver(_ submitted: String, attachments items: [ChatAttachmentDraft], session: LiveAgentSession,
+    func deliver(_ submitted: String, attachments items: [ChatAttachmentDraft], session: LiveAgentSession,
                          consumeDraft: (() -> Void)? = nil,
                          submittedToAgent: (String) -> Void = { _ in }) async -> (delivered: Bool, attachments: [ChatAttachmentDraft], rejected: Bool) {
         guard let target else { return (false, items, true) }
