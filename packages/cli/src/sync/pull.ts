@@ -209,11 +209,15 @@ export function startPullPolling(phrenPath: string, options: PollingOptions): { 
           const before = await git(store, ["rev-parse", "HEAD"]);
           if (!before.ok) return;
           const previous = heads.get(store) ?? before.output;
+          // The remote check itself runs once per configured interval
+          // (pollStore keeps the shared timestamp); the 5 s tick only notices
+          // another client's pull, so HEAD is read again only after a check.
+          let after = before;
           if (Date.now() - startedAt >= seconds * 1000) {
             const result = await pollStore(store, seconds, git);
             if (result.status === "error") debugLog(result.detail);
+            if (result.status !== "not-due") after = await git(store, ["rev-parse", "HEAD"]);
           }
-          const after = await git(store, ["rev-parse", "HEAD"]);
           if (!after.ok) return;
           if (after.output !== previous) await options.onChange();
           heads.set(store, after.output);
