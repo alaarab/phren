@@ -66,7 +66,7 @@ struct FileTextView: View {
                     }.disabled(eof || loading).phrenIdentifier("file-text-next")
                 }.padding(.horizontal, 12).background(PhrenTheme.surface)
             }
-        }.phrenIdentifier("file-viewer-\(kind.rawValue)")
+        }.phrenContainerMarker("file-viewer-\(kind.rawValue)", label: "File text")
             .task(id: page) { await read() }
     }
     @MainActor private func read() async {

@@ -20,7 +20,7 @@ struct FilePDFView: View {
                 PhrenIconButton(icon: "chevron.right", label: "Next page") { page += 1 }
                     .disabled(page + 1 >= count).phrenIdentifier("file-pdf-next")
             }.padding(.horizontal, 12).background(PhrenTheme.surface)
-        }.phrenIdentifier("file-viewer-pdf")
+        }.phrenContainerMarker("file-viewer-pdf", label: "PDF")
     }
 }
 private struct PDFSurface: UIViewRepresentable {

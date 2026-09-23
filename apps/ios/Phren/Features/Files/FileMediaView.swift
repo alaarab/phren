@@ -52,7 +52,9 @@ struct FileMediaView: View {
                 }
             }.padding(.horizontal, 12).padding(.bottom, 8).background(PhrenTheme.surface)
         }
-        .phrenIdentifier(audio ? "file-viewer-audio" : "file-viewer-video")
+        // A marker, not the container's own id: that would replace the
+        // transport controls' identifiers for VoiceOver and tests.
+        .phrenContainerMarker(audio ? "file-viewer-audio" : "file-viewer-video", label: audio ? "Audio" : "Video")
         .task(id: url) {
             do {
                 let asset = AVURLAsset(url: url)

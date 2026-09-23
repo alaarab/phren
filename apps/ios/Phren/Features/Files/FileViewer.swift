@@ -203,7 +203,7 @@ struct FileViewer: View {
                     .buttonStyle(.plain)
                 Button { sharing = true } label: { PhrenRow(icon: "square.and.arrow.up", title: "Share", chevron: false) }
                     .buttonStyle(.plain)
-            }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity).phrenIdentifier("file-viewer-file")
+            }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity).phrenContainerMarker("file-viewer-file", label: "File")
         }
     }
 }
