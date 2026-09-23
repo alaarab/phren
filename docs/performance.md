@@ -212,7 +212,7 @@ change. Applying LIMIT before ranking was rejected because it can omit the
 best result or change Unicode tie ordering.
 
 **Workspace overview:** warm latency fell from 33.18 to 8.27 ms. In
-`packages/cli/src/bridge/server.ts`, four workers enrich tabs concurrently and a
+`packages/cli/src/bridge/server-routes.ts`, four workers enrich tabs concurrently and a
 single pane grouping replaces repeated scans. Response order and target
 identity remain unchanged. A deterministic test checks four concurrent branch
 lookups, row order, target identity and current steps; route timing has a
