@@ -10,6 +10,9 @@ number counts up on its own.
 
 ### Changed
 
+- Changes can finish a session: a commit message field and Commit button over the staged files, then Push and Open pull request. Push and the pull request ask first; pushing the default branch says so and needs its own confirmation, a pull request can open as a draft, and a refusal from a commit hook, the remote or GitHub's CLI is shown exactly as the computer printed it. Once the branch has a pull request, its button opens it.
+- A session card shows its branch's pull request: its number, open, draft, merged or closed, and whether checks pass, fail or are still running. The card never asks on its own; it updates when Changes loads or refreshes and when the overview first appears or is refreshed.
+
 - The agent chat's header sits on a solid band of the chat background, and the conversation fades out just below it, so no cut-off line shows beside or above the title while you scroll. A long title keeps both its start and its end, and the project, model and branch each shorten on their own, so a long project name no longer pushes the branch off the line.
 - A Claude chat's live line is Claude's own spinner line, "✻ Whirlpooling… (34s · ↓ 3.1k tokens · thinking)", with a small stop ring at its end that stops the turn like the composer's stop. The finished line says Claude's word in the past tense ("Brewed for 18m 18s") in dim italic. Codex and other agents keep today's line.
 - Claude's narration between tool calls reads as a dim italic "Thinking:" line, folded to one line until you tap it; the reply itself stays ordinary text.

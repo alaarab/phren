@@ -207,7 +207,9 @@ struct LiveSessionsView: View {
         // Once the sessions are known, Siri can name them ("message phren on mini in phren").
         .onChange(of: overview.ready, initial: true) { _, ready in
             guard ready else { return }
-            PhrenAppShortcuts.donateSessions(overview.computers.flatMap { computer in computer.monitor.snapshot?.sessions(on: computer.host) ?? [] })
+            let revealed = overview.computers.flatMap { computer in computer.monitor.snapshot?.sessions(on: computer.host) ?? [] }
+            PhrenAppShortcuts.donateSessions(revealed)
+            SessionPullRequestCache.shared.refreshOnReveal(revealed)
         }
         .onChange(of: sessions.hookAssociations, initial: true) { _, associations in
             for association in associations where preferences?.hosts.first(where: { $0.id == association.hostID })?.hookComputerID != association.computerID {

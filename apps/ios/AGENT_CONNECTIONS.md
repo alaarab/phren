@@ -116,6 +116,18 @@ Unbound or conflicting identities remain unavailable for chat and attachments.
   ahead, uncommitted files and the worker editing there when known. The phone
   sends a row's `id` back as `worktree` on the git routes, `/v1/diff` and
   `/v1/files/range`; the computer resolves it only against its own listing.
+- `POST /v1/git/commit`, `/push`, `/pr`: Changes' commit composer, Push and Open
+  pull request, scoped by `child` or `worktree` like the other git routes. The
+  phone confirms push and pull request in phren dialogs first and sends
+  `confirmDefault: true` only after the person confirmed pushing the default
+  branch (`defaultBranch` from `/v1/git/status`). `ok: false` answers carry the
+  hook's, Git's or gh's output verbatim, shown as the dialog's text. The requests
+  wait up to 120 seconds, since commit hooks and pushes can be slow.
+- `POST /v1/git/pulls` `current`: the checked-out branch's pull request with its
+  state and rolled-up checks. The session card's chip reads it from
+  `SessionPullRequestCache`, which Changes fills when it loads or refreshes and
+  the overview fills on its first reveal and on each manual refresh (sessions on
+  a known branch, three at a time, at most twelve). The card itself never asks.
 - `WS /v1/transcripts`: backlog, append, and older frames with provider JSON rows
   and stable line numbers. History requests include `beforeLine`. Live preview
   frames carry `{preview: {turnStartedAt, text}}` or `{preview: null}` without

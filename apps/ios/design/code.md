@@ -166,3 +166,35 @@ IDs: `changes-tab-workers`, `changes-workers-section:workers`,
 `changes-workers-section:other`, `changes-worktree:<id>`, `changes-workers-empty`,
 `child-agent-changes:<child id>`. ChangesWorkersTests covers the section, a
 worker's bound view, the agent-tree entry and Show ignored with screenshots.
+
+## Commit, push and pull request
+
+The Changes list opens with a publish panel while the pane is on a branch: a
+PhrenTextField (`changes-commit-message`, up to four lines) and a Commit button
+(`changes-commit`), enabled only with staged files and a message, then Push
+(`changes-push`) and Open pull request (`changes-open-pr`). Push reads "Push new
+branch" without an upstream and "Push <n>" with commits ahead. Once the pulls
+data has the branch's own pull request, Open pull request becomes
+`changes-view-pr`, which opens it. A commit or push that lands leaves one quiet
+line under the actions (`changes-publish-landed`); the draft is cleared only on
+success and survives section switches.
+
+Push and the pull request confirm first in phren dialogs (`changes-push-dialog`,
+`changes-pr-dialog`). Pushing the default branch names it in the title, and its
+action is destructive; only that confirmation sends `confirmDefault`. The pull
+request dialog offers Open pull request and Open as draft, and says to push first
+when GitHub has not seen every commit. Refusals open a dialog with the output
+exactly as printed (`changes-commit-refused`, `changes-push-refused`,
+`changes-pr-refused`); a new pull request opens `changes-pr-opened` with View on
+GitHub.
+
+The session card shows the branch's pull request after the branch: number,
+state word (open, draft, merged, closed) in its color, and a checks mark (check,
+cross or clock). It reads `SessionPullRequestCache`, which is filled only when
+Changes loads or refreshes and when the overview first appears or is refreshed.
+IDs: `live-pr:<session>`, `overview-pr:<session>`.
+
+ChangesPublishTests covers commit, push and the pull request with the card chip
+(`--changes-feature-branch`), a hook refusal and the default branch
+(`--changes-commit-hook-fails`), and the overview's refresh
+(`--changes-pull-open`), with screenshots.

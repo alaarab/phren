@@ -226,6 +226,10 @@ final class LiveHostMonitor {
                 if ProcessInfo.processInfo.arguments.contains("--store-tour-fixture") {
                     return try LiveWorkspaces.read(Data(#"{"kind":"herdr","groups":[{"id":"w7","label":"phren","children":[{"id":"w7:t9","label":"1","title":"Ship the onboarding flow","agent":"claude","agentStatus":"working","cwd":"/work/phren","branch":"main","agentPaneCount":2,"paneCount":3}]},{"id":"w8","label":"mina","children":[{"id":"w8:t1","label":"1","title":"Review the deployment","agent":"codex","agentStatus":"waiting","cwd":"/work/mina","branch":"main"}]}]}"#.utf8))
                 }
+                if ProcessInfo.processInfo.arguments.contains("--changes-feature-branch") {
+                    // A finished session on a feature branch, for commit, push and the card's pull request.
+                    return try LiveWorkspaces.read(Data(#"{"kind":"herdr","groups":[{"id":"w7","label":"Phone work","children":[{"id":"w7:t9","label":"1","title":"Polish the phone app","agent":"codex","agentStatus":"done","cwd":"/work/phone/src","branch":"changes/pulls","agentPaneCount":2,"paneCount":3}]},{"id":"w8","label":"Other work","children":[{"id":"w8:t1","label":"1","title":"Choose the deployment target","agent":"claude","agentStatus":"waiting","cwd":"/work/other"}]}]}"#.utf8))
+                }
                 return try LiveWorkspaces.read(Data(#"{"kind":"herdr","groups":[{"id":"w7","label":"Phone work","children":[{"id":"w7:t9","label":"1","title":"Polish the phone app","agent":"codex","agentStatus":"working","cwd":"/work/phone/src","agentPaneCount":2,"paneCount":3}]},{"id":"w8","label":"Other work","children":[{"id":"w8:t1","label":"1","title":"Choose the deployment target","agent":"claude","agentStatus":"waiting","cwd":"/work/other"}]},{"id":"w9","label":"Shell","children":[{"id":"w9:t1","label":"1"}]}]}"#.utf8))
             }
             let extra = ProcessInfo.processInfo.arguments.contains("--multiple-project-sessions")

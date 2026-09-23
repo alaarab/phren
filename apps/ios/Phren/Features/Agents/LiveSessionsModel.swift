@@ -133,7 +133,12 @@ final class LiveSessionsModel {
         overview.configure(configuration)
     }
 
-    func refresh() { refreshID = UUID() }
+    func refresh() {
+        refreshID = UUID()
+        // A manual refresh also asks again for each card's pull request.
+        let sessions = overview.computers.flatMap { $0.monitor.snapshot?.sessions(on: $0.host) ?? [] }
+        Task { await SessionPullRequestCache.shared.refresh(sessions) }
+    }
 
     /// Start or keep polling from the task the monitor owns. A manual refresh
     /// restarts the run; otherwise the going run keeps going.

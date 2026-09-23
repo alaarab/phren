@@ -6,12 +6,61 @@ import PhrenKit
 /// Kept apart from the chat fixture so the two screens evolve independently.
 extension AgentChatFixture {
     static func pulls() throws -> GitPulls {
-        try GitPulls.read(Data(#"""
+        let list = try GitPulls.read(Data(#"""
         {"available":true,"pulls":[
           {"number":42,"title":"Changes: pull requests and a working tree","head":"changes/pulls","base":"main","author":"sam","url":"https://github.com/sam/phren/pull/42","draft":false,"state":"OPEN","updated":"2026-09-20T10:00:00Z"},
           {"number":37,"title":"Draft: working tree browser","head":"changes/tree","base":"main","author":"sam","url":"https://github.com/sam/phren/pull/37","draft":true,"state":"OPEN","updated":"2026-09-19T09:00:00Z"}
         ]}
         """#.utf8))
+        return GitPulls(available: true, pulls: list.pulls, branch: publishBranch, current: publishPull)
+    }
+
+    // MARK: - Commit, push and pull request
+
+    /// `--changes-feature-branch` puts the pane on a finished feature branch
+    /// with no upstream yet; otherwise it is on `main`, the default branch.
+    nonisolated static var featureBranch: Bool { ProcessInfo.processInfo.arguments.contains("--changes-feature-branch") }
+    static var publishBranch: String { featureBranch ? "changes/pulls" : "main" }
+    nonisolated(unsafe) private static var publishUpstream: String? = featureBranch ? nil : "origin/main"
+    nonisolated(unsafe) private static var publishAhead = featureBranch ? 2 : 1
+    nonisolated(unsafe) private static var hookRefusals = ProcessInfo.processInfo.arguments.contains("--changes-commit-hook-fails") ? 1 : 0
+    /// `--changes-pull-open` starts with the branch's pull request open and
+    /// its checks failing; opening one from the phone makes it passing.
+    nonisolated(unsafe) private static var publishPull: GitPulls.Current? = ProcessInfo.processInfo.arguments.contains("--changes-pull-open")
+        ? .init(number: 42, title: "Changes: pull requests and a working tree", url: "https://github.com/sam/phren/pull/42",
+                head: "changes/pulls", base: "main", draft: false, state: .open, checks: .failing)
+        : nil
+
+    static func gitCommit(message: String) throws -> GitPublishResult {
+        guard !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw PhrenKitError.validation("Write a commit message first.") }
+        guard gitFiles.contains(where: \.staged) else { throw PhrenKitError.validation("Nothing is staged. Stage the files to commit first.") }
+        if hookRefusals > 0 {
+            hookRefusals -= 1
+            return GitPublishResult(ok: false, output: "lint-staged: running tasks\n✖ eslint --fix:\n  Sources/App/Settings.swift:4  'accent' is never read\n1 problem (1 error, 0 warnings)")
+        }
+        gitFiles.removeAll(where: \.staged)
+        publishAhead += 1
+        return GitPublishResult(ok: true, sha: String(repeating: "a", count: 40), short: "a1b2c3d",
+                                subject: message.split(separator: "\n").first.map(String.init) ?? message, branch: publishBranch)
+    }
+
+    static func gitPush(confirmDefault: Bool) throws -> GitPublishResult {
+        if publishBranch == "main" && !confirmDefault {
+            throw PhrenKitError.validation("main is the default branch. Confirm to push it.")
+        }
+        let setUpstream = publishUpstream == nil
+        publishUpstream = "origin/\(publishBranch)"
+        publishAhead = 0
+        return GitPublishResult(ok: true, branch: publishBranch, upstream: publishUpstream, setUpstream: setUpstream)
+    }
+
+    static func gitPullRequest(draft: Bool) throws -> GitPublishResult {
+        guard publishUpstream != nil else {
+            return GitPublishResult(ok: false, output: "aborted: you must first push the current branch to a remote, or use the --head flag", reason: "failed")
+        }
+        publishPull = .init(number: 42, title: "Changes: pull requests and a working tree", url: "https://github.com/sam/phren/pull/42",
+                            head: publishBranch, base: "main", draft: draft, state: .open, checks: .passing)
+        return GitPublishResult(ok: true, branch: publishBranch, url: "https://github.com/sam/phren/pull/42")
     }
 
     nonisolated(unsafe) private static var gitFiles: [GitStatus.File] = [
@@ -44,12 +93,13 @@ extension AgentChatFixture {
                                 .init(path: "Tests/ParserTests.swift", status: "?", staged: false, additions: 4, deletions: 0),
                              ])
         }
-        return GitStatus(branch: child == nil ? "main" : "deepseek/compact-phone", upstream: "origin/main", ahead: 1, behind: 0,
+        return GitStatus(branch: child == nil ? publishBranch : "deepseek/compact-phone",
+                  upstream: child == nil ? publishUpstream : "origin/main", ahead: child == nil ? publishAhead : 1, behind: 0,
                   staged: gitFiles.filter(\.staged).count,
                   unstaged: gitFiles.filter { !$0.staged && $0.status != "?" }.count,
                   untracked: gitFiles.filter { $0.status == "?" }.count,
                   additions: gitFiles.reduce(0) { $0 + $1.additions }, deletions: gitFiles.reduce(0) { $0 + $1.deletions },
-                  files: gitFiles)
+                  files: gitFiles, defaultBranch: "main")
     }
 
     static func gitWrite(_ route: String, paths: [String]) throws {

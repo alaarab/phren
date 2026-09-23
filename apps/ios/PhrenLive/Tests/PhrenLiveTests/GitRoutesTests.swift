@@ -75,6 +75,34 @@ final class GitRoutesTests: XCTestCase {
         }
     }
 
+    func testPublishRequestsCarryTheirFieldsAndScope() throws {
+        let target = try target(), worktree = String(repeating: "d", count: 32)
+        func body(_ request: GatewayRequest) throws -> [String: Any] {
+            try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(request.body)) as? [String: Any])
+        }
+        let commit = try PhrenConnection.gitCommitRequest(target: target, child: nil, worktree: worktree, message: "  Finish the parser\n\nBody.\n")
+        XCTAssertEqual(commit.path, "/v1/git/commit")
+        XCTAssertEqual(try body(commit)["message"] as? String, "Finish the parser\n\nBody.")
+        XCTAssertEqual(try body(commit)["worktree"] as? String, worktree)
+        XCTAssertEqual(commit.timeoutSeconds, 120)
+        XCTAssertThrowsError(try PhrenConnection.gitCommitRequest(target: target, child: nil, worktree: nil, message: " \n ")) { error in
+            XCTAssertEqual(error as? PhrenKitError, .validation("Write a commit message first."))
+        }
+
+        let push = try PhrenConnection.gitPushRequest(target: target, child: nil, worktree: nil, confirmDefault: false)
+        XCTAssertEqual(push.path, "/v1/git/push")
+        XCTAssertNil(try body(push)["confirmDefault"], "The default branch is confirmed only on request")
+        let confirmed = try PhrenConnection.gitPushRequest(target: target, child: nil, worktree: nil, confirmDefault: true)
+        XCTAssertEqual(try body(confirmed)["confirmDefault"] as? Bool, true)
+
+        let child = "e" + String(repeating: "3", count: 31)
+        let pr = try PhrenConnection.gitPullRequestRequest(target: target, child: child, worktree: nil, draft: true)
+        XCTAssertEqual(pr.path, "/v1/git/pr")
+        XCTAssertEqual(try body(pr)["draft"] as? Bool, true)
+        XCTAssertEqual(try body(pr)["child"] as? String, child)
+        XCTAssertThrowsError(try PhrenConnection.gitPushRequest(target: target, child: "bad", worktree: nil, confirmDefault: false))
+    }
+
     func testTreeRequestAsksForIgnoredOnlyWhenShown() throws {
         let target = try target()
         let hidden = try PhrenConnection.gitTreeRequest(target: target, path: "video", child: nil)

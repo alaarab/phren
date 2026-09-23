@@ -101,6 +101,7 @@ struct AgentChangesView: View {
         loadTask?.cancel()
         guard active else { return }
         loadTask = Task { await model.load() }
+        model.loadPullsOnce()
     }
 
     /// The top bar's two lines: the branch in body weight, the counts in
@@ -290,6 +291,8 @@ enum ChangesSection: String, CaseIterable, Identifiable {
 @Observable @MainActor
 final class ChangesModel {
     let workingTree = WorkingTreeState()
+    /// The commit draft and publish actions, kept across section switches.
+    let publish = ChangesPublishModel()
     private(set) var status: GitStatus?
     private(set) var error: String?
     /// Bumped by `reload()`; the container observes it and starts a fetch.
@@ -329,6 +332,38 @@ final class ChangesModel {
     }
 
     func reload() { revision &+= 1 }
+
+    /// The branch's pull requests: loaded when the screen opens, on pull to
+    /// refresh, and after a push or a new pull request. The pane's own answer
+    /// also feeds the session card.
+    private(set) var pulls: GitPulls?
+    @ObservationIgnored private var pullsRequested = false
+
+    func loadPullsOnce() {
+        guard !pullsRequested else { return }
+        pullsRequested = true
+        Task { await loadPulls() }
+    }
+
+    func loadPulls() async {
+        do {
+            let value: GitPulls
+            #if DEBUG && targetEnvironment(simulator)
+            if AgentChatFixture.enabled { value = try AgentChatFixture.pulls() }
+            else { value = try await PhrenConnection.gitPulls(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, child: child, worktree: worktree) }
+            #else
+            value = try await PhrenConnection.gitPulls(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, child: child, worktree: worktree)
+            #endif
+            recordPulls(value)
+        } catch {
+            // Optional: the PRs tab reports its own failure; the actions keep working.
+        }
+    }
+
+    func recordPulls(_ value: GitPulls) {
+        pulls = value
+        if child == nil && worktree == nil { SessionPullRequestCache.shared.record(value, for: session) }
+    }
 
     func load() async {
         #if DEBUG && targetEnvironment(simulator)

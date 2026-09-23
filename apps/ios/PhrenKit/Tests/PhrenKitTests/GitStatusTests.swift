@@ -35,6 +35,16 @@ final class GitStatusTests: XCTestCase {
         XCTAssertFalse(status.files[0].staged)
     }
 
+    func testDefaultBranchGuardsThePushDestination() throws {
+        let onMain = try GitStatus.read(Data(#"{"branch":"main","upstream":"origin/main","defaultBranch":"main","files":[]}"#.utf8))
+        XCTAssertTrue(onMain.onDefaultBranch)
+        let tracksMain = try GitStatus.read(Data(#"{"branch":"topic","upstream":"origin/main","defaultBranch":"main","files":[]}"#.utf8))
+        XCTAssertTrue(tracksMain.onDefaultBranch, "A branch whose upstream is main pushes to main")
+        let feature = try GitStatus.read(Data(#"{"branch":"feature/x","upstream":"origin/feature/x","defaultBranch":"main","files":[]}"#.utf8))
+        XCTAssertFalse(feature.onDefaultBranch)
+        XCTAssertNil(try GitStatus.read(Data(#"{"branch":"main","files":[]}"#.utf8)).defaultBranch)
+    }
+
     func testRejectsOversizedPayload() {
         let data = Data(repeating: 0x20, count: 8_388_609)
         XCTAssertThrowsError(try GitStatus.read(data)) { error in

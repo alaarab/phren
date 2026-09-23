@@ -45,6 +45,7 @@ struct ChangesTab: View {
             actions: [.init(id: "ok", title: "OK", role: .cancel) { actionError = nil }],
             identifier: "changes-error-dialog"
         )
+        .modifier(ChangesPublishDialogs(publish: changes.publish, changes: changes))
         .onAppear { reload() }
         .onDisappear { loadTask?.cancel() }
         // The List/Diff toggle lives in the section band above; load the diff
@@ -59,6 +60,10 @@ struct ChangesTab: View {
             LazyVStack(alignment: .leading, spacing: 0) {
                 if let status = changes.status {
                     let rows = status.files
+                    if let branch = status.branch, !branch.isEmpty {
+                        ChangesPublishPanel(status: status, publish: changes.publish)
+                        Divider().overlay(PhrenTheme.border)
+                    }
                     if rows.isEmpty {
                         emptyState("Working tree is clean", icon: "checkmark.circle")
                     } else {
@@ -76,7 +81,7 @@ struct ChangesTab: View {
             .padding(.bottom, 24)
         }
         .phrenScreen()
-        .refreshable { changes.reload(); reload() }
+        .refreshable { changes.reload(); reload(); await changes.loadPulls() }
     }
 
     @ViewBuilder

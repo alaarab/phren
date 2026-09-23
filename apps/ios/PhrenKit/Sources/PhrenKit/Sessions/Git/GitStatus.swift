@@ -48,16 +48,27 @@ public struct GitStatus: Decodable, Equatable, Sendable {
     public let additions: Int
     public let deletions: Int
     public let files: [File]
+    /// The branch a push asks to confirm: the upstream remote's `HEAD`, or
+    /// `main`/`master` when the remote records none. Nil from an older Hook.
+    public let defaultBranch: String?
 
     public init(branch: String?, upstream: String?, ahead: Int, behind: Int, staged: Int, unstaged: Int,
-                untracked: Int, additions: Int, deletions: Int, files: [File]) {
+                untracked: Int, additions: Int, deletions: Int, files: [File], defaultBranch: String? = nil) {
         self.branch = branch; self.upstream = upstream; self.ahead = ahead; self.behind = behind
         self.staged = staged; self.unstaged = unstaged; self.untracked = untracked
         self.additions = additions; self.deletions = deletions; self.files = files
+        self.defaultBranch = defaultBranch
+    }
+
+    /// Pushing this branch would update the default branch.
+    public var onDefaultBranch: Bool {
+        guard let branch, !branch.isEmpty else { return false }
+        let destination = upstream.flatMap { $0.split(separator: "/", maxSplits: 1).last.map(String.init) }
+        return branch == defaultBranch || (destination != nil && destination == defaultBranch)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case branch, upstream, ahead, behind, staged, unstaged, untracked, additions, deletions, files
+        case branch, upstream, ahead, behind, staged, unstaged, untracked, additions, deletions, files, defaultBranch
     }
 
     public init(from decoder: Decoder) throws {
@@ -72,6 +83,7 @@ public struct GitStatus: Decodable, Equatable, Sendable {
         additions = try values.decodeIfPresent(Int.self, forKey: .additions) ?? 0
         deletions = try values.decodeIfPresent(Int.self, forKey: .deletions) ?? 0
         files = try values.decodeIfPresent([File].self, forKey: .files) ?? []
+        defaultBranch = try values.decodeIfPresent(String.self, forKey: .defaultBranch)
     }
 
     /// Git's letter for this file, with anything unrecognised falling back to

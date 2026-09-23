@@ -137,6 +137,12 @@ struct SessionCardContent: View, Equatable {
                         }.font(.system(.caption2, design: .monospaced)).foregroundStyle(PhrenTheme.chatNeutral)
                             .layoutPriority(-1)
                     }
+                    // The branch's pull request, as the Changes screen or the
+                    // overview's refresh last saw it; the card never asks.
+                    if let pull = SessionPullRequestCache.shared.pull(for: session) {
+                        SessionPullRequestChip(pull: pull)
+                            .accessibilityIdentifier("\(identifierPrefix)-pr:\(session.accessibilityKey)")
+                    }
                     if let computer {
                         HStack(spacing: 3) {
                             Image(systemName: "desktopcomputer").font(.system(size: 9, weight: .semibold))

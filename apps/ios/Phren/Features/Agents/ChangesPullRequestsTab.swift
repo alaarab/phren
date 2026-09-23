@@ -8,6 +8,7 @@ struct ChangesPullRequestsTab: View {
     let child: String?
     var worktree: String? = nil
     @Environment(\.openURL) private var openURL
+    @Environment(ChangesModel.self) private var changes
     @State private var model: GitPulls?
     @State private var error: String?
     @State private var loadTask: Task<Void, Never>?
@@ -75,6 +76,7 @@ struct ChangesPullRequestsTab: View {
             #endif
             try Task.checkCancellation()
             model = result; error = nil
+            changes.recordPulls(result)
         } catch {
             if !Task.isCancelled { self.error = error.localizedDescription }
         }
