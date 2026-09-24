@@ -6,6 +6,7 @@
     "outDir": "./dist",
     "rootDir": "./src",
     "strict": true,
+    "allowUnreachableCode": false,
     "declaration": true,
     "esModuleInterop": true,
     "skipLibCheck": true,

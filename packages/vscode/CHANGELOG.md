@@ -5,6 +5,10 @@ changelog is at the repository root. The Marketplace listing shows this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- "Phren: Uninstall Phren" said it would remove config and hooks, then deleted the whole store. The prompt now names the store path and its project and finding counts, the button reads "Delete store and uninstall", and the command is titled "Phren: Uninstall Phren and Delete Store".
+
 ### Changed
 
 - Requires VS Code 1.138 or later (was 1.120). The extension builds against the current VS Code API types (`@types/vscode` 1.138.0) and packages with `@vscode/vsce` 4.

@@ -21,16 +21,51 @@ import {
   uninstallGlobalPhrenPackage,
 } from "./command-utils";
 
+/**
+ * "3 projects, ~47 findings" for the uninstall confirmation, or "" if the store
+ * cannot be read. Counting is best-effort: a wrong number must never block the
+ * command, but a user deciding whether to delete deserves the scale.
+ */
+function summarizeStoreContents(storePath: string): string {
+  try {
+    if (!fs.existsSync(storePath)) return "";
+    const projects = fs
+      .readdirSync(storePath, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && !entry.name.startsWith(".") && entry.name !== "profiles");
+    let findings = 0;
+    for (const project of projects) {
+      const findingsPath = path.join(storePath, project.name, "FINDINGS.md");
+      if (!fs.existsSync(findingsPath)) continue;
+      findings += fs.readFileSync(findingsPath, "utf8").split("\n").filter((line) => line.startsWith("- ")).length;
+    }
+    if (projects.length === 0 && findings === 0) return "";
+    return `${projects.length} project${projects.length === 1 ? "" : "s"}, ~${findings} finding${findings === 1 ? "" : "s"}`;
+  } catch {
+    return "";
+  }
+}
+
 export function registerMachineCommands(ctx: ExtensionContext): vscode.Disposable[] {
   const { phrenClient, outputChannel, treeDataProvider, statusBar, runtimeConfig } = ctx;
 
   const uninstall = vscode.commands.registerCommand("phren.uninstall", async () => {
+    // The old prompt said only "remove Phren config and hooks from this machine",
+    // while the command also deletes the entire store — every finding, note,
+    // task, review-queue entry and session, with no backup. Say what is actually
+    // being deleted, and how much of it, before asking.
+    const summary = summarizeStoreContents(runtimeConfig.storePath);
     const confirmed = await vscode.window.showWarningMessage(
-      "This will remove Phren config and hooks from this machine. Are you sure?",
-      { modal: true },
-      "Uninstall",
+      `Permanently delete the Phren store at ${runtimeConfig.storePath}?`,
+      {
+        modal: true,
+        detail:
+          `This removes Phren's config and hooks from this machine AND deletes the store directory` +
+          `${summary ? ` — ${summary}` : ""}. This cannot be undone; anything not pushed to a remote is lost.\n\n` +
+          `To keep your knowledge and only unhook the editor, cancel and disable the Phren extension instead.`,
+      },
+      "Delete store and uninstall",
     );
-    if (confirmed !== "Uninstall") {
+    if (confirmed !== "Delete store and uninstall") {
       return;
     }
 
