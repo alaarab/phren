@@ -27,7 +27,8 @@ object LiveBridge {
     @Composable fun VoiceCaptureView(targets: List<StoreProject>) = Pending("Capture")
     @Composable fun ProjectComputerRows(storeId: String, project: String) {}
     @Composable fun SkillsView(project: String, storeId: String) = Pending("Skills")
-    @Composable fun TaskListView(storeId: String, project: String) = Pending("Tasks")
+    @Composable fun TaskListView(storeId: String, project: String) = com.phren.android.features.TaskListView(storeId, project)
+    @Composable fun LaunchSessionView(storeId: String, project: String, request: TaskAgentRequest) = Pending("Start agent")
     @Composable fun ProjectKnobsView(storeId: String, project: String) = Pending("Knobs")
     @Composable fun SchedulesView(storeId: String, project: String) = Pending("Schedules")
     @Composable fun CodeView(storeId: String, project: String) = Pending("Code")
