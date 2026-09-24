@@ -136,17 +136,40 @@ final class AppModel {
         var save: (KeychainStore.StoredToken) throws -> Void
         var delete: () -> Void
         static let keychain = Self(load: {
-            await Task.detached(priority: .userInitiated) {
-                let started = CFAbsoluteTimeGetCurrent()
-                let value = KeychainStore.load()
-                #if DEBUG
-                if ProcessInfo.processInfo.environment["PHREN_PERFORMANCE_LOG"] == "1" {
-                    print("[PhrenPerformance] startup keychain off-main=\(!ChatRenderCacheMetrics.isMainThread): \(String(format: "%.3f", (CFAbsoluteTimeGetCurrent() - started) * 1_000)) ms")
+            while true {
+                let result = await Task.detached(priority: .userInitiated) {
+                    let started = CFAbsoluteTimeGetCurrent()
+                    let value = KeychainStore.read()
+                    #if DEBUG
+                    if ProcessInfo.processInfo.environment["PHREN_PERFORMANCE_LOG"] == "1" {
+                        print("[PhrenPerformance] startup keychain off-main=\(!ChatRenderCacheMetrics.isMainThread): \(String(format: "%.3f", (CFAbsoluteTimeGetCurrent() - started) * 1_000)) ms")
+                    }
+                    #endif
+                    return value
+                }.value
+                switch result {
+                case .found(let stored): return stored
+                case .missing: return nil
+                // Launched in the background before the first unlock after a
+                // restart: the token is there but unreadable. Reading it as
+                // "signed out" left Memory on Connect until the app was quit.
+                case .locked: await protectedDataAvailable()
                 }
-                #endif
-                return value
-            }.value
+            }
         }, save: KeychainStore.save, delete: KeychainStore.delete)
+
+        /// Returns once the device is unlocked, checking again every 30 s in
+        /// case the notification came between the check and the wait.
+        @MainActor private static func protectedDataAvailable() async {
+            let unlocked = NotificationCenter.default.notifications(named: UIApplication.protectedDataDidBecomeAvailableNotification)
+            if UIApplication.shared.isProtectedDataAvailable { return }
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask { for await _ in unlocked { return } }
+                group.addTask { try? await Task.sleep(for: .seconds(30)) }
+                await group.next()
+                group.cancelAll()
+            }
+        }
     }
 
     init(client: GitHubClient = GitHubClient(), credentials: Credentials = .keychain,

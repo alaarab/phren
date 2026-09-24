@@ -29,6 +29,16 @@ public enum KeychainStore {
         }
     }
 
+    /// What a read found. `locked` is not "signed out": before the first
+    /// unlock after a restart the Keychain refuses every read
+    /// (`errSecInteractionNotAllowed`) although the token is still there, and
+    /// iOS can launch the app in the background in that window.
+    public enum ReadResult: Equatable, Sendable {
+        case found(StoredToken)
+        case missing
+        case locked
+    }
+
 #if canImport(Security)
     public static func save(_ stored: StoredToken) throws {
         let data = try JSONEncoder().encode(stored)
@@ -51,7 +61,7 @@ public enum KeychainStore {
         }
     }
 
-    public static func load() -> StoredToken? {
+    public static func read() -> ReadResult {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -60,14 +70,21 @@ public enum KeychainStore {
             kSecMatchLimit as String: kSecMatchLimitOne,
         ]
         var result: AnyObject?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let data = result as? Data else { return nil }
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecInteractionNotAllowed { return .locked }
+        guard status == errSecSuccess, let data = result as? Data else { return .missing }
         // Deliberately NOT a versioned/quarantined document, unlike everything
         // in Persistence/: this is a credential, not user data. Nothing is
         // lost if it can't be read — the user signs in again and gets a new
         // token — and copying a token to a quarantine file to preserve it
         // would be strictly worse than dropping it.
-        return try? JSONDecoder().decode(StoredToken.self, from: data)
+        guard let stored = try? JSONDecoder().decode(StoredToken.self, from: data) else { return .missing }
+        return .found(stored)
+    }
+
+    public static func load() -> StoredToken? {
+        if case .found(let stored) = read() { return stored }
+        return nil
     }
 
     public static func delete() {
@@ -89,6 +106,7 @@ public enum KeychainStore {
     private static let memory = MemoryBox()
 
     public static func save(_ stored: StoredToken) throws { memory.set(stored) }
+    public static func read() -> ReadResult { memory.get().map(ReadResult.found) ?? .missing }
     public static func load() -> StoredToken? { memory.get() }
     public static func delete() { memory.set(nil) }
 #endif
