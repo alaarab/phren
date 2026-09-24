@@ -8,7 +8,11 @@ import { currentStep } from "./steps.js";
 
 const thread = "01a0aaaa-1111-7222-8333-444444444444";
 
-describe("Codex thread store", () => {
+// Codex 0.155's thread store is SQLite, read through node:sqlite (Node 22.5+).
+// On Node 20 the Hook skips it and these fixtures cannot be built.
+const hasNodeSqlite = await import("node:sqlite").then(() => true, () => false);
+
+describe.skipIf(!hasNodeSqlite)("Codex thread store", () => {
   let root: string, bridge: string, oldCodex: string | undefined, oldBridge: string | undefined;
   let db: any;
   beforeEach(async () => {
