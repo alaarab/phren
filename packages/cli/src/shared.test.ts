@@ -82,8 +82,8 @@ afterEach(() => {
 
 describe("isValidProjectName", () => {
   it("accepts simple names and rejects traversal, empty and slashed ones", () => {
-    for (const name of ["my-project", "phren", "foo_bar"]) expect(isValidProjectName(name)).toBe(true);
-    for (const name of ["../etc", "foo/../../bar", "..", "", "foo/bar", "foo\\bar"]) {
+    for (const name of ["my-project", "phren", "foo_bar", "phren_01", "project123", "a"]) expect(isValidProjectName(name), name).toBe(true);
+    for (const name of ["../etc", "foo/../../bar", "../../../etc/passwd", "..", ".", ".hidden", "-flag", "", "foo/bar", "foo\\bar"]) {
       expect(isValidProjectName(name), name).toBe(false);
     }
   });
