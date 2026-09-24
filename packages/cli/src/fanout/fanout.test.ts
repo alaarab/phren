@@ -39,7 +39,8 @@ it("owns each harness argv and resume semantics", () => {
   const options = { model: "model", worktree: "/work", job: "/job", review: true, resume: "session" };
   expect(adapters.codex.argv(options)).toEqual(["exec", "resume", "--json", "-o", "/job/final.txt", "-m", "model", "session", "-"]);
   expect(adapters.codex.argv({ ...options, resume: undefined })).toContain("read-only");
-  expect(adapters.opencode.argv(options)).toEqual(["run", "--format", "json", "--dir", "/work", "--model", "model", "--agent", "plan", "--session", "session"]);
+  // OpenCode serves and the launcher drives the session over HTTP.
+  expect(adapters.opencode.argv(options)).toEqual(["serve", "--hostname", "127.0.0.1", "--port", "0"]);
   expect(adapters.claude.argv(options)).toEqual(["-p", "--output-format", "stream-json", "--verbose", "--model", "model", "--permission-mode", "plan", "--resume", "session"]);
 });
 it("writes the Hook job contract with private files and a resumable identity", () => {
@@ -65,16 +66,16 @@ it("finalizes a zero-exit refused worker as failed and captures its session", as
   temp = makeTempDir("fanout-refused-");
   const bin = path.join(temp.path, "bin");
   fs.mkdirSync(bin);
-  fs.writeFileSync(path.join(bin, "opencode"), `#!/bin/sh
+  fs.writeFileSync(path.join(bin, "codex"), `#!/bin/sh
 cat > /dev/null
-printf '%s\\n' '{"type":"step_start","sessionID":"ses_abc123"}'
+printf '%s\\n' '{"type":"thread.started","thread_id":"00000000-0000-4000-8000-000000000002"}'
 printf '%s\\n' 'permission requested: external_directory (/tmp/work); auto-rejecting' >&2
 `, { mode: 0o700 });
   vi.stubEnv("PATH", `${bin}${path.delimiter}${process.env.PATH}`);
-  const options = { store: temp.path, provider: "opencode" as const, model: "opencode-go/mimo-v2-flash", label: "refusal", worktree: temp.path, prompt: "brief", reason: "eligible" };
+  const options = { store: temp.path, provider: "codex" as const, model: "gpt-5.6-terra", label: "refusal", worktree: temp.path, prompt: "brief", reason: "eligible" };
   const reservation = createJob(options);
   expect(await launch(options, reservation)).toBe(1);
-  expect(readJob(temp.path, reservation.manifest.id)).toMatchObject({ status: "failed", exitCode: 0, session: "ses_abc123" });
+  expect(readJob(temp.path, reservation.manifest.id)).toMatchObject({ status: "failed", exitCode: 0, session: "00000000-0000-4000-8000-000000000002" });
   expect(JSON.parse(fs.readFileSync(path.join(reservation.job, "blocked.json"), "utf8"))).toMatchObject({ type: "external_directory", pattern: "/tmp/work" });
   expect(fs.readFileSync(path.join(reservation.job, "exit.txt"), "utf8")).toBe("0\n");
 });
