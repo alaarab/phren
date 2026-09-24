@@ -107,6 +107,41 @@ struct SessionCardContent: View, Equatable {
     }
     private var stateColor: Color { fresh ? session.tab.activity.color : PhrenTheme.textMuted }
 
+    /// The conductor works from the store, not a project: no folder, project
+    /// or branch, just its role, how it stands and where it runs.
+    private var conductorStatus: String {
+        guard fresh else { return stale ? "Stale" : "Connecting" }
+        switch session.tab.activity {
+        case .working: return "Working"
+        case .waiting: return "Needs you"
+        case .error: return "Error"
+        default: return "Idle"
+        }
+    }
+
+    private var conductorLine: some View {
+        HStack(spacing: 6) {
+            Text("Conductor").font(.subheadline.weight(.semibold)).foregroundStyle(PhrenTheme.accent).lineLimit(1)
+            HStack(spacing: 4) {
+                Circle().fill(stateColor).frame(width: 6, height: 6)
+                Text(conductorStatus).font(.caption2.weight(.medium))
+                    .foregroundStyle(session.tab.activity == .waiting || stale ? stateColor : PhrenTheme.sessionMeta)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("conductor-status:\(session.accessibilityKey)")
+            if let computer {
+                HStack(spacing: 3) {
+                    Image(systemName: "desktopcomputer").font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(PhrenTheme.sessionMeta)
+                    Text(computer.name).lineLimit(1).fontWeight(.medium)
+                        .foregroundStyle(PhrenTheme.hostColor(computer.color ?? LiveHost.defaultColor(for: computer.id)))
+                        .accessibilityLabel("on \(computer.name)")
+                }.font(.system(.caption2, design: .monospaced))
+            }
+            if let changedAt = session.tab.lastChangedAt { SessionRelativeTimeLabel(changedAt: changedAt) }
+        }
+    }
+
     var body: some View {
         #if DEBUG
         let _ = ProcessInfo.processInfo.environment["PHREN_PERFORMANCE_LOG"] == "1" ? Self._printChanges() : ()
@@ -123,6 +158,9 @@ struct SessionCardContent: View, Equatable {
             .accessibilityHint("Session details")
             .accessibilityIdentifier(identifierPrefix == "live" ? "live-detail:\(session.workspaceID):\(session.tab.id)" : "\(identifierPrefix)-detail:\(session.accessibilityKey)")
             VStack(alignment: .leading, spacing: 2) {
+                if session.tab.isConductor {
+                    conductorLine
+                } else {
                 HStack(spacing: 6) {
                     if session.usesFolderFallback(mappedProject: project) {
                         Image(systemName: "folder").font(.caption).foregroundStyle(PhrenTheme.textMuted)
@@ -158,17 +196,18 @@ struct SessionCardContent: View, Equatable {
                             .accessibilityIdentifier("\(identifierPrefix)-changed:\(session.accessibilityKey)")
                     }
                 }
+                }
                 if session.tab.isConductor {
-                    HStack(spacing: 4) {
-                        Text("Conductor").fontWeight(.semibold).foregroundStyle(PhrenTheme.accent)
-                        Text("· " + session.tab.displayTitle).foregroundStyle(PhrenTheme.sessionTitle)
-                    }
-                    .font(.footnote).lineLimit(textSize.isAccessibilitySize ? 3 : 1)
+                    // Its latest dispatch or return; the conversation's title until there is one.
+                    Text(ConductorActivityStore.shared.activity[session.host.id]?.line ?? session.tab.displayTitle)
+                        .font(.footnote).foregroundStyle(PhrenTheme.sessionTitle)
+                        .lineLimit(textSize.isAccessibilitySize ? 3 : 1)
+                        .accessibilityIdentifier("conductor-latest:\(session.accessibilityKey)")
                 } else if session.tab.displayTitle != headline {
                     Text(session.tab.displayTitle).font(.footnote).foregroundStyle(PhrenTheme.sessionTitle)
                         .lineLimit(textSize.isAccessibilitySize ? 3 : 1)
                 }
-                if !state.isEmpty || !subtitle.isEmpty {
+                if !session.tab.isConductor, !state.isEmpty || !subtitle.isEmpty {
                     HStack(spacing: 5) {
                         Circle().fill(stateColor).frame(width: 6, height: 6)
                             .accessibilityLabel(session.tab.status)

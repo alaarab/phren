@@ -64,6 +64,34 @@ final class ConductorEntryTests: XCTestCase {
         attachUIScreenshot(running, "Running conductor replaces the launch row")
     }
 
+    /// A conductor working from the store's folder (no project) still takes
+    /// the top slot: its own identity and status, no folder, project, branch
+    /// or pin, and never a row under Working or Done.
+    @MainActor
+    func testConductorInTheStoreFolderTakesTheTopSlotNotDone() {
+        let app = launch(extra: ["--conductor-store-root-fixture"])
+        let card = app.buttons["overview-chat:\(conductorKey)"]
+        XCTAssertTrue(card.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["sessions-start-conductor"].exists, "The running conductor replaces Start a conductor")
+        XCTAssertEqual(app.buttons.matching(identifier: "overview-chat:\(conductorKey)").count, 1)
+        XCTAssertLessThan(card.frame.minY,
+                          app.buttons["overview-chat:A1000000-0000-0000-0000-000000000001:herdr:default:w7:w7:t9"].frame.minY)
+        XCTAssertFalse(app.staticTexts[".phren"].exists, "No folder name")
+        XCTAssertFalse(app.staticTexts["main"].exists, "No branch")
+        XCTAssertFalse(app.buttons["overview-pin:\(conductorKey)"].exists, "No pin")
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Done ·")).firstMatch.exists
+                       || app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "DONE")).firstMatch.exists,
+                       "The finished conductor is not a Done row")
+        let status = app.descendants(matching: .any)["conductor-status:\(conductorKey)"]
+        XCTAssertTrue(status.exists); XCTAssertTrue(status.label.contains("Idle"), status.label)
+        let latest = app.staticTexts["conductor-latest:\(conductorKey)"]
+        XCTAssertTrue(latest.waitForExistence(timeout: 5))
+        XCTAssertEqual(latest.label, "Returned: Phone layout finished", "The second line is its latest dispatch or return")
+        attachUIScreenshot(app, "Conductor in the top slot")
+        card.tap()
+        XCTAssertTrue(app.buttons["chat-options"].waitForExistence(timeout: 8), "One tap opens its chat")
+    }
+
     @MainActor
     func testGrantsOpensFromConductorChatOptions() {
         let app = launch(extra: ["--conductor-running-fixture", "--conductor-grants-fixture"])

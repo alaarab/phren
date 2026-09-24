@@ -77,16 +77,25 @@ final class LiveSessionsModel {
 
     /// The conductor slot ignores search and Focus so its entry never moves
     /// between activity groups or disappears when another session is sought.
-    func conductor(in storeID: String) -> LiveAgentSession? {
-        for computer in overview.computers {
-            for session in computer.monitor.snapshot?.sessions(on: computer.host) ?? [] where session.tab.isConductor {
-                if preferences?.projectMatch(hostID: computer.id, cwd: session.tab.cwd,
-                                               projects: projects)?.project.storeID == storeID {
-                    return session
-                }
-            }
+    /// The store's conductor: one whose folder maps to a project of the
+    /// store, or, for the default store, one running outside every project
+    /// (the store's own folder, `~/.phren`, is not a project).
+    func conductor(in storeID: String, isDefaultStore: Bool = false) -> LiveAgentSession? {
+        var unmapped: LiveAgentSession?
+        for session in conductors {
+            let match = preferences?.projectMatch(hostID: session.host.id, cwd: session.tab.cwd, projects: projects)
+            if match?.project.storeID == storeID { return session }
+            if match == nil, unmapped == nil { unmapped = session }
         }
-        return nil
+        return isDefaultStore ? unmapped : nil
+    }
+
+    /// Every conductor on every computer. None of them is a Working or Done row.
+    var conductors: [LiveAgentSession] {
+        var seen = Set<LiveAgentSession.ID>()
+        return overview.computers.flatMap { computer in
+            (computer.monitor.snapshot?.sessions(on: computer.host) ?? []).filter(\.tab.isConductor)
+        }.filter { seen.insert($0.id).inserted }
     }
 
     static func conductorProject(storeID: String, projects: [SessionProject], registry: MachineRegistry) -> String {

@@ -343,6 +343,10 @@ final class LiveHostMonitor {
                 // A folder no project maps, with a long name: the chat header's location line.
                 return try LiveWorkspaces.read(Data(#"{"kind":"herdr","groups":[{"id":"w7","label":"Phone work","children":[{"id":"w7:t9","label":"1","title":"Continue where the earlier session left off in Codex","agent":"claude","agentStatus":"idle","cwd":"/work/an-unusually-long-project-folder-name-for-the-header"}]}]}"#.utf8))
             }
+            if ProcessInfo.processInfo.arguments.contains("--conductor-store-root-fixture") {
+                // A finished conductor working from the store's own folder, which no project maps.
+                return try LiveWorkspaces.read(Data(#"{"kind":"herdr","groups":[{"id":"w9","label":"Conductor","children":[{"id":"w9:t1","label":"1","title":"Job and purpose","agent":"claude","agentStatus":"done","cwd":"/home/sam/.phren","branch":"main","role":"conductor"}]},{"id":"w7","label":"Phone work","children":[{"id":"w7:t9","label":"1","title":"Polish the phone app","agent":"codex","agentStatus":"working","cwd":"/work/phone/src"}]}]}"#.utf8))
+            }
             if ProcessInfo.processInfo.arguments.contains("--conductor-running-fixture") {
                 return try LiveWorkspaces.read(Data(#"{"kind":"herdr","groups":[{"id":"w9","label":"Phone conductor","children":[{"id":"w9:t1","label":"1","title":"Phone conductor","agent":"codex","agentStatus":"idle","cwd":"/work/phone","role":"conductor"}]},{"id":"w7","label":"Phone work","children":[{"id":"w7:t9","label":"1","title":"Polish the phone app","agent":"codex","agentStatus":"working","cwd":"/work/phone/src"}]}]}"#.utf8))
             }

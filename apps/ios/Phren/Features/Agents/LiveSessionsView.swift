@@ -246,9 +246,11 @@ struct LiveSessionsView: View {
 
     @ViewBuilder
     private func conductorEntry(store: StoreDescriptor, screen: SessionOverviewMonitor.Screen) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if let conductor = sessions.conductor(in: store.id) {
-                sessionCard(conductor, screen: screen)
+        let own = sessions.conductor(in: store.id, isDefaultStore: store.id == model.storeDescriptors.first?.id)
+        return VStack(alignment: .leading, spacing: PhrenTheme.Space.medium) {
+            if let own {
+                sessionCard(own, screen: screen)
+                    .task(id: own.host.id) { await ConductorActivityStore.shared.follow(own.host) }
             } else {
                 Button { showingConductorLaunch = true } label: {
                     ConductorStartRow(storeName: model.storeDescriptors.count > 1 ? store.id : nil)
@@ -256,6 +258,8 @@ struct LiveSessionsView: View {
                 .buttonStyle(.plain)
                 .phrenIdentifier("sessions-start-conductor")
             }
+            // Other stores' conductors sit here too, never among the sessions.
+            ForEach(sessions.conductors.filter { $0.id != own?.id }) { sessionCard($0, screen: screen) }
         }
         .accessibilityElement(children: .contain)
         .phrenIdentifier("sessions-conductor-slot")
@@ -341,9 +345,8 @@ struct LiveSessionsView: View {
                     .accessibilityIdentifier("sessions-empty")
             }
         }
-        let conductorID = conductorStore.flatMap { sessions.conductor(in: $0.id)?.id }
         ForEach(screen.groups) { group in
-            let remaining = group.sessions.filter { $0.id != conductorID }
+            let remaining = group.sessions.filter { !$0.tab.isConductor }
             if !remaining.isEmpty {
                 PhrenGroup("\(group.title) · \(remaining.count)") {
                     ForEach(remaining) { session in

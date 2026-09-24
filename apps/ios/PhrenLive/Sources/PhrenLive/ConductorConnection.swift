@@ -58,3 +58,52 @@ extension PhrenConnection {
         return request
     }
 }
+
+/// The conductor's latest dispatch or return, as one line for its card.
+public struct ConductorActivity: Equatable, Sendable {
+    public let line: String
+    public let at: Date
+    public init(line: String, at: Date) { self.line = line; self.at = at }
+}
+
+extension PhrenConnection {
+    /// The newest dispatch receipt on this computer's Hook, or its return
+    /// when the worker came back after it was placed.
+    public static func conductorActivity(host: LiveHost, privateKey: Data) async throws -> ConductorActivity? {
+        var request = GatewayRequest(path: "/v1/dispatch")
+        request.method = "GET"
+        let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: request)
+        return conductorActivity(from: data)
+    }
+
+    static func conductorActivity(from data: Data) -> ConductorActivity? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let receipts = object["dispatches"] as? [[String: Any]] else { return nil }
+        func date(_ value: Any?) -> Date? { (value as? String).flatMap(ISO8601Dates.parse) }
+        var best: ConductorActivity?
+        for receipt in receipts {
+            let label = (receipt["label"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                ?? (receipt["project"] as? String) ?? "a worker"
+            let candidate: ConductorActivity?
+            if let returned = receipt["returned"] as? [String: Any], let at = date(returned["at"]) {
+                let line: String
+                switch returned["state"] as? String {
+                case "done": line = "Returned: \(label) finished"
+                case "needs-you": line = "Needs you: \(label)" + ((returned["question"] as? String).map { ", \($0)" } ?? "")
+                case "blocked": line = "Blocked: \(label)"
+                default: line = "Gone: \(label) closed"
+                }
+                candidate = .init(line: line, at: at)
+            } else if let at = date(receipt["updatedAt"]) ?? date(receipt["createdAt"]) {
+                let computer = (receipt["computer"] as? String).map { " to \($0)" } ?? ""
+                switch receipt["state"] as? String {
+                case "failed": candidate = .init(line: "Dispatch failed: \(label)", at: at)
+                case "uncertain": candidate = .init(line: "Dispatch unconfirmed: \(label)", at: at)
+                default: candidate = .init(line: "Dispatched \(label)\(computer)", at: at)
+                }
+            } else { candidate = nil }
+            if let candidate, candidate.at > (best?.at ?? .distantPast) { best = candidate }
+        }
+        return best
+    }
+}

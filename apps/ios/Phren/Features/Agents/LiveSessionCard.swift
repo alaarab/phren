@@ -73,8 +73,11 @@ struct LiveSessionCard: View, Equatable {
                 .accessibilityLabel("\(runningAgents) agents running")
                 .accessibilityIdentifier("\(prefix)-running-agents:\(session.accessibilityKey)")
             }
-            SessionPinButton(session: session, pinned: resolvedPin ?? (preferences?.isPinned(session.id) == true),
-                             identifierPrefix: prefix, data: livePreferences.binding)
+            // The conductor has its own place at the top; pinning cannot move it.
+            if !session.tab.isConductor {
+                SessionPinButton(session: session, pinned: resolvedPin ?? (preferences?.isPinned(session.id) == true),
+                                 identifierPrefix: prefix, data: livePreferences.binding)
+            }
             if showHost && showingCloseAction {
                 Button(role: .destructive) {
                     showingCloseAction = false
