@@ -27,6 +27,16 @@ or `phren/<short id>`, and a note (`launch-worktree-note`) that turns to the
 danger color with the reason a name would be refused. Open stays disabled
 while the name is invalid. A conductor has no worktree choice.
 
+Three entry points open the same sheet with the switch already on, labelled
+New session in a worktree: the chat's options (`chat-options-worktree`) and a
+session card's hold menu (`<prefix>-session-actions:worktree`) pre-fill the
+session's project, computer and harness with `phren/<slug of the session
+title>`; the project's agent sheet (`project-agent-sheet:worktree`, the last
+used or first reachable computer) and its sessions page
+(`sessions-open-in-worktree`) suggest `phren/<short id>`. Each appears only
+where the project is known, and never for the conductor. A harness passed in
+this way is not remembered as the launch default; one chosen on the sheet is.
+
 `POST /v1/workspaces/launch` accepts `role: "conductor"` and `effort`, attaches
 the shipped conductor brief, and records the role in Herdr's
 `conductor-<label>` agent name. The overview reports that role to the phone.
