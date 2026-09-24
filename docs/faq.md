@@ -41,6 +41,7 @@ The one rough edge is heavy concurrent writes on the same machine. If two agents
 The common ones are boring infrastructure issues, not mystery behavior:
 
 - No remote configured: auto-save still commits locally, but nothing syncs across machines until you add a remote.
+- Which machine wrote a change: every commit Phren makes in the store ends with the machine's name in brackets (`phren: demo(findings) [Desk]`), so `git log --oneline` in the store shows it.
 - Push failed: the commit stays local and Phren records the last sync error so `phren status`, shell, and web UI can show it.
 - Hooks disabled or stale: retrieval stops, but your files are still there; rerun `phren init` or re-enable hooks with `phren hooks-mode on`.
 - Stale index: search quality drops until the next rebuild; `phren doctor` and `phren status` will flag index trouble.

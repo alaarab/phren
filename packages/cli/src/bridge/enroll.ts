@@ -14,6 +14,7 @@ import { projectSlugFromPath } from "../phren-paths.js";
 import { runBestEffortGit } from "../cli/session-git.js";
 import { mergeStoreUpstream, type RunStoreGit } from "../sync/store-merge.js";
 import { countGit } from "./metrics.js";
+import { storeCommitMessage } from "../machine-identity.js";
 
 /**
  * "Add project" from the phone: the repositories on this computer that phren
@@ -135,7 +136,7 @@ async function publishStore(store: string, project: string): Promise<Pick<Enroll
   const add = await runBestEffortGit(["add", "--sparse", "-A"], store);
   // The same belt-and-suspenders unstage as the Stop hook's auto-save.
   if (add.ok) await runBestEffortGit(["reset", "HEAD", "--", ".env", "**/.env", "*.pem", "*.key", ".config/auth-profiles.json"], store);
-  const commit = add.ok ? await runBestEffortGit(["commit", "-m", `Add project ${project} from iPhone`], store) : add;
+  const commit = add.ok ? await runBestEffortGit(["commit", "-m", storeCommitMessage(`Add project ${project} from iPhone`)], store) : add;
   if (!commit.ok) return { store: "error", storeDetail: commit.error };
   const remotes = await runBestEffortGit(["remote"], store);
   if (!remotes.ok || !remotes.output) return { store: "committed", storeDetail: "no remote configured" };
