@@ -301,6 +301,8 @@ struct AgentChatView: View {
         }
         .onChange(of: requestedChild, initial: true) { _, _ in openRequestedChildIfReady() }
         .onDisappear { visible = false; ChatJourney.cancel(); sendTask?.cancel(); dictation.cancelCleanupTask(); model.flushDrafts() }
+        // Settings → Notifications → Keep screen on holds in a chat too.
+        .keepsScreenAwake()
         .onChange(of: scenePhase) { _, phase in if phase != .active { sendTask?.cancel(); model.flushDrafts() } }
         .onChange(of: currentHost) { _, _ in sendTask?.cancel() }
         .onChange(of: reduceMotion || voiceOver, initial: true) { _, instant in

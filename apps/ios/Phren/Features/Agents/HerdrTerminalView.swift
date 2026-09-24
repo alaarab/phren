@@ -453,11 +453,11 @@ struct HerdrTerminalView: View {
             AgentChatSheet(session: $0.session, initialPane: $0.pane, attachments: $0.attachments, initialChild: $0.child)
         }
         .sheet(isPresented: $showingDictation) { ChatDictationView { text in model.input(text) } }
+        // Settings: no auto-lock while a terminal is up (its own switch, or Agents').
+        .keepsScreenAwake(terminal: true)
         .onReceive(NotificationCenter.default.publisher(for: .GCKeyboardDidConnect)) { _ in hardwareKeyboard = true }
         .onReceive(NotificationCenter.default.publisher(for: .GCKeyboardDidDisconnect)) { _ in hardwareKeyboard = GCKeyboard.coalesced != nil }
         .onAppear {
-            // Settings → Advanced: no auto-lock while a terminal is up.
-            if TerminalSettings.keepsScreenOn { UIApplication.shared.isIdleTimerDisabled = true }
             #if DEBUG && targetEnvironment(simulator)
             if AgentChatFixture.enabled { AgentChatFixture.prepareClipboard() }
             #endif
@@ -466,7 +466,6 @@ struct HerdrTerminalView: View {
             model.terminal.onOpenChat = openChat
             model.terminal.onDictate = { showingDictation = true }
         }.onDisappear {
-            UIApplication.shared.isIdleTimerDisabled = false
             visible = false
             shortcuts = false
             model.terminal.onShortcutGesture = nil

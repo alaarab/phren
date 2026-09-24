@@ -167,8 +167,7 @@ struct LiveSessionsView: View {
                     .accessibilityIdentifier("all-files")
             }
         }
-        .onAppear { if IntegrationSettings.enabled(IntegrationSettings.agentsKeepScreenOnKey, default: false) { UIApplication.shared.isIdleTimerDisabled = true } }
-        .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
+        .keepsScreenAwake()
         .task(id: scenePhase) {
             if scenePhase == .active { sessions.setFocusFilter(await AgentFocusFilterStore.refreshFromSystem()) }
         }
