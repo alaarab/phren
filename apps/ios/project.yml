@@ -133,8 +133,12 @@ targets:
         NSSupportsLiveActivities: true
         BGTaskSchedulerPermittedIdentifiers:
           - com.phren.ios.notifications.refresh
+        # audio: talk mode keeps listening and speaking with the screen
+        # locked, the conductor's walkie-talkie. Nothing else plays audio in
+        # the background.
         UIBackgroundModes:
           - fetch
+          - audio
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
           NSExceptionDomains:

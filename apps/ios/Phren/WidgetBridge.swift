@@ -76,6 +76,22 @@ enum WidgetBridge {
         AgentLaunch.setPending(session)
     }
 
+    /// "Talk to my conductor": the running conductor's chat in talk mode, or
+    /// the conductor launch when none is running. Returns what Siri says.
+    static func talkToConductor() async -> String {
+        guard let conductor = await ConductorSession.current() else {
+            AgentLaunch.setPendingAction(.startConductor)
+            return "No conductor is running. Start one in phren, then talk to it."
+        }
+        AgentLaunch.setPending(conductor, destination: .talk)
+        return "Talking to your conductor on \(conductor.host.name)."
+    }
+
+    /// The pause control: the Agents list confirms before anything stops.
+    static func requestPauseAll() {
+        AgentLaunch.setPendingAction(.pauseAll)
+    }
+
     private static func buildSnapshot(from model: AppModel) -> WidgetSnapshot {
         WidgetSnapshot(
             memoryCount: model.storeContexts.reduce(0) { $0 + $1.snapshot.projects.reduce(0) { $0 + $1.totalFindingCount } },

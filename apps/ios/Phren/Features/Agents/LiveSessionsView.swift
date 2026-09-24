@@ -16,6 +16,8 @@ struct LiveSessionsView: View {
     @State private var schedulesStoreID: String?
     @State private var setupDestination: LiveSessionsModel.SetupAction?
     @State private var showingConductorLaunch = false
+    /// Set by the "Pause all agents" control; the confirmation shows once the overview is in.
+    @State private var pauseAllRequested = false
     @State private var conductorStoreID: String?
     private var conductorStore: StoreDescriptor? {
         model.storeDescriptors.first(where: { $0.id == conductorStoreID })
@@ -200,15 +202,39 @@ struct LiveSessionsView: View {
         }
         .navigationDestination(item: $sessionOpen) { open in
             switch open.destination {
-            case .chat, .dictate, .details:
+            case .chat, .dictate, .details, .talk:
                 AgentChatSheet(session: open.session, attachments: open.attachments, draft: open.draft,
-                               startsDictation: open.destination == .dictate).id(open.id)
+                               startsDictation: open.destination == .dictate,
+                               startsTalk: open.destination == .talk).id(open.id)
             case .terminal: HerdrTerminalView(host: open.session.host, session: open.session).id(open.id)
             }
         }
         .modifier(ScheduleOpenRouting(scheduleOpen: $scheduleOpen, openPending: openPendingSchedule))
+        .modifier(PauseAllAgentsFlow(requested: $pauseAllRequested, ready: overview.ready,
+                                     sessions: overview.computers.flatMap { $0.monitor.snapshot?.sessions(on: $0.host) ?? [] }))
+        #if DEBUG && targetEnvironment(simulator)
+        // UI tests run the Siri and Control Center intents' own app paths.
+        .task {
+            let arguments = ProcessInfo.processInfo.arguments
+            guard AppModel.isUITesting, !UITestFixtures.intentLaunchRan else { return }
+            UITestFixtures.intentLaunchRan = true
+            if arguments.contains("--talk-to-conductor-intent") { _ = await WidgetBridge.talkToConductor() }
+            if arguments.contains("--pause-all-intent") { WidgetBridge.requestPauseAll() }
+        }
+        #endif
         // Siri and Spotlight leave an exact session and destination here.
         .onChange(of: model.pendingChatVersion, initial: true) { _, _ in
+            switch AgentLaunch.takePendingAction() {
+            case .startConductor?:
+                selected = nil; sessionOpen = nil
+                showingConductorLaunch = true
+                return
+            case .pauseAll?:
+                selected = nil; sessionOpen = nil
+                pauseAllRequested = true
+                return
+            case nil: break
+            }
             if let pending = AgentLaunch.takePendingOpen() {
                 if pending.destination == .details, let monitor = sessions.monitor(for: pending.session.host.id) {
                     sessionOpen = nil

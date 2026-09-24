@@ -17,6 +17,8 @@ struct AgentChatView: View {
     @Binding var requestedChild: AgentChildRequest?
     /// Opened by the Action button: start listening as soon as the chat is up.
     var startsDictation = false
+    /// Opened by "talk to my conductor": start talk mode as soon as the chat is up.
+    var startsTalk = false
     @State private var indexedCode: SessionCodeContext?
     @State private var initialized = false
     @State private var messageMenu = ChatMessageMenu()
@@ -146,8 +148,10 @@ struct AgentChatView: View {
         guard let project, let target = model.target, !target.isStarting else { return nil }
         return SessionCodeContext(storeID: project.storeID, project: project.name, host: session.host, target: target)
     }
+    /// Talk mode keeps the conversation read while locked, so its replies arrive.
     private var active: Bool {
-        visible && scenePhase == .active && currentHost?.hasSameConnection(as: session.host) == true
+        visible && (scenePhase == .active || TalkBackground.continues(talk.isOn))
+            && currentHost?.hasSameConnection(as: session.host) == true
     }
     private var transcriptActions: ChatTranscriptActions {
         ChatTranscriptActions(
@@ -278,6 +282,8 @@ struct AgentChatView: View {
                     // Let the push finish first; the microphone prompt and the
                     // keyboard both fight a screen that is still sliding in.
                     Task { try? await Task.sleep(for: .milliseconds(450)); if !dictating { startDictation() } }
+                } else if startsTalk {
+                    Task { try? await Task.sleep(for: .milliseconds(450)); if !talk.isOn { toggleTalk() } }
                 }
             }
             visible = true
@@ -340,7 +346,10 @@ struct AgentChatView: View {
                 NotificationCenter.default.post(name: .phrenReassertNavigationBarHidden, object: nil)
             }
         }
-        .onChange(of: scenePhase) { _, phase in if phase != .active { stopDictation(); talk.stop() } }
+        // Talk mode keeps going with the screen locked or phren in the
+        // background (the audio background mode keeps the microphone and the
+        // voice alive); dictation into the composer does not.
+        .onChange(of: scenePhase) { _, phase in if phase != .active { stopDictation(); if !TalkBackground.continues(talk.isOn) { talk.stop() } } }
         .onDisappear { dictation.tearDown(); talk.stop() }
         .sheet(isPresented: $showingOptions) {
             ChatOptionsSheet(session: session, model: model, project: project, indexedCode: indexedCode,

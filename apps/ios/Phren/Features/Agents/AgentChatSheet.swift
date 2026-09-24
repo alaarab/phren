@@ -49,10 +49,11 @@ struct AgentChatSheet: View {
     private let initialPane: AgentChatPanes.Pane?
     private let initialTarget: AgentChatTarget?
     private let startsDictation: Bool
+    private let startsTalk: Bool
     init(session: LiveAgentSession, initialPane: AgentChatPanes.Pane? = nil,
          initialTarget: AgentChatTarget? = nil,
          attachments: [AgentAttachment] = [], draft: String = "", startsDictation: Bool = false,
-         initialChild: AgentChildRequest? = nil) {
+         startsTalk: Bool = false, initialChild: AgentChildRequest? = nil) {
         _session = State(initialValue: session)
         _incomingAttachments = State(initialValue: attachments)
         _incomingDraft = State(initialValue: draft)
@@ -61,6 +62,7 @@ struct AgentChatSheet: View {
         self.initialPane = initialPane
         self.initialTarget = initialTarget
         self.startsDictation = startsDictation
+        self.startsTalk = startsTalk
     }
     var body: some View {
         AgentChatView(session: session, switchSession: { session = $0 },
@@ -69,6 +71,7 @@ struct AgentChatSheet: View {
                       incomingAttachments: $incomingAttachments, incomingDraft: $incomingDraft,
                       requestedChild: $requestedChild,
                       startsDictation: startsDictation && session.id == initialSessionID,
+                      startsTalk: startsTalk && session.id == initialSessionID,
                       model: AgentChatModels.model(for: session.id, pane: session.id == initialSessionID
                                                    ? initialTarget?.id ?? initialPane?.id : nil)).id(session.id)
     }

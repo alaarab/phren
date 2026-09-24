@@ -6,7 +6,8 @@ import PhrenKit
 /// still in the Shortcuts app, and pinning only orders the activity's rows).
 /// The conductor's three phrases (stage three) pushed the waiting-sessions,
 /// open-terminal and start-agent shortcuts out of the provider; those intents
-/// remain in the Shortcuts app.
+/// remain in the Shortcuts app. "Talk to my conductor" took Tell Conductor's
+/// place: talking covers telling, and Tell stays in the Shortcuts app.
 ///
 /// Every phrase has to contain `\(.applicationName)`; Siri keys on the app
 /// name to route the utterance, and a phrase without it is rejected at build
@@ -82,12 +83,14 @@ struct PhrenAppShortcuts: AppShortcutsProvider {
             systemImageName: "waveform.path.ecg"
         )
         AppShortcut(
-            intent: TellConductorIntent(),
+            intent: TalkToConductorIntent(),
             phrases: [
-                "Tell my conductor \(\.$message) in \(.applicationName)",
+                "Talk to my conductor in \(.applicationName)",
+                "Talk to my \(.applicationName) conductor",
+                "Talk to the conductor in \(.applicationName)",
             ],
-            shortTitle: "Tell Conductor",
-            systemImageName: "wand.and.rays"
+            shortTitle: "Talk to Conductor",
+            systemImageName: "waveform.circle"
         )
         AppShortcut(
             intent: AskConductorIntent(),

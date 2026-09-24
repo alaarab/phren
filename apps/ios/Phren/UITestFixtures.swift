@@ -12,6 +12,8 @@ enum UITestFixtures {
     /// Tabs a UI test closed from the list; the all-sessions fixture leaves
     /// them out of later snapshots the way Herdr would.
     @MainActor static var closedTabs: Set<String> = []
+    /// `--talk-to-conductor-intent` / `--pause-all-intent` run once per launch.
+    @MainActor static var intentLaunchRan = false
     #endif
     enum Bootstrap {
         case agentsOnly
