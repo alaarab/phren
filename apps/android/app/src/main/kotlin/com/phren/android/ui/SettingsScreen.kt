@@ -297,7 +297,7 @@ private fun SettingsRoot(model: AppModel, stack: NavStack) {
         IosSheet({ showAddStore = false }, "Add store", background = PhrenTheme.bg) {
             RepoPickerList(model, model.storeDescriptors.map { it.id }.toSet()) { repo ->
                 showAddStore = false
-                scope.launch { model.addStore(repo) }
+                model.scope.launch { model.addStore(repo) }
             }
         }
     }
@@ -306,7 +306,7 @@ private fun SettingsRoot(model: AppModel, stack: NavStack) {
             "Remove ${store.id} from this device? The GitHub repository is not affected.", null,
             onDismiss = { removingStore = null },
             buttons = listOf(
-                Triple("Remove store", true) { removingStore = null; scope.launch { model.removeStore(store.id) } },
+                Triple("Remove store", true) { removingStore = null; model.scope.launch { model.removeStore(store.id) } },
                 Triple("Cancel", false) { removingStore = null },
             ),
         )
@@ -316,7 +316,7 @@ private fun SettingsRoot(model: AppModel, stack: NavStack) {
             "Sign out and remove the local copies of all stores from this device?", null,
             onDismiss = { confirmSignOut = false },
             buttons = listOf(
-                Triple("Sign out", true) { confirmSignOut = false; scope.launch { model.signOut() } },
+                Triple("Sign out", true) { confirmSignOut = false; model.scope.launch { model.signOut() } },
                 Triple("Cancel", false) { confirmSignOut = false },
             ),
         )

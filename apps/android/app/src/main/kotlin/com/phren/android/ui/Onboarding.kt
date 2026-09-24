@@ -43,6 +43,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
@@ -87,7 +88,7 @@ private fun WelcomeScreen(model: AppModel) {
     var authError by remember { mutableStateOf<String?>(null) }
     var polling by remember { mutableStateOf(false) }
 
-    fun startDeviceFlow() = scope.launch {
+    fun startDeviceFlow() = model.scope.launch {
         authError = null
         if (!DeviceFlowAuth.isConfigured) {
             authError = "GitHub sign-in isn't set up yet — use a token instead."
@@ -160,15 +161,16 @@ private fun WelcomeScreen(model: AppModel) {
 fun ProminentButton(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector? = null, fill: Boolean = true, onClick: () -> Unit) {
     Row(
         Modifier.then(if (fill) Modifier.fillMaxWidth() else Modifier)
-            .background(PhrenTheme.accent, RoundedCornerShape(10.dp))
-            .clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 12.dp),
+            .clip(RoundedCornerShape(50))
+            .background(PhrenTheme.accent)
+            .clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 9.dp),
         horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
     ) {
         if (icon != null) {
             Icon(icon, null, tint = Color.White, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
         }
-        Text(label, style = IosType.body.copy(fontWeight = FontWeight.SemiBold), color = Color.White)
+        Text(label, style = IosType.body, color = Color.White)
     }
 }
 
@@ -203,7 +205,7 @@ private fun PATSignInSheet(model: AppModel, onDismiss: () -> Unit) {
         onDismiss, "Token sign-in", confirmLabel = "Sign in",
         confirmEnabled = token.isNotBlank() && !validating,
         onConfirm = {
-            scope.launch {
+            model.scope.launch {
                 validating = true
                 try {
                     model.signIn(token, KeychainStore.TokenKind.PAT)
@@ -263,12 +265,12 @@ private fun RepoPickerScreen(model: AppModel) {
     val scope = rememberCoroutineScope()
     IosScreen(
         "Choose your store", large = true,
-        leading = { ToolbarButton(ToolbarAction(text = "Sign out") { scope.launch { model.signOut() } }) },
+        leading = { ToolbarButton(ToolbarAction(text = "Sign out") { model.scope.launch { model.signOut() } }) },
     ) {
         RepoPickerList(
             model, emptySet(),
             footer = "Pick the GitHub repository that holds your phren store (it contains phren.root.yaml). Set one up on your computer with `phren team init` or `phren store add`.",
-        ) { repo -> scope.launch { model.addStore(repo) } }
+        ) { repo -> model.scope.launch { model.addStore(repo) } }
     }
 }
 

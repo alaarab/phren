@@ -36,7 +36,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -57,7 +56,6 @@ fun ReviewScreen(model: AppModel, onTriage: (List<StoreQueueEntry>) -> Unit) {
     var editMode by remember { mutableStateOf(false) }
     val selection = remember { mutableStateListOf<String>() }
     var editing by remember { mutableStateOf<StoreQueueEntry?>(null) }
-    val scope = rememberCoroutineScope()
 
     val items = model.mergedReviewQueue.filter { e ->
         (projectFilter == null || e.entry.project == projectFilter) && (!flaggedOnly || e.entry.item.risky)
@@ -65,11 +63,12 @@ fun ReviewScreen(model: AppModel, onTriage: (List<StoreQueueEntry>) -> Unit) {
     val triageDeck = QueueItem.Section.entries.flatMap { s -> items.filter { it.entry.item.section == s } }
     val projectNames = model.mergedReviewQueue.map { it.entry.project }.toSortedSet().toList()
 
-    fun approve(entries: List<StoreQueueEntry>) = scope.launch {
+    // On the model's scope: leaving the tab must not cut a batch short.
+    fun approve(entries: List<StoreQueueEntry>) = model.scope.launch {
         entries.forEach { model.performNow(PendingOp.ApproveQueue(it.entry.project, it.entry.item.line), it.storeId) }
         selection.clear()
     }
-    fun reject(entries: List<StoreQueueEntry>) = scope.launch {
+    fun reject(entries: List<StoreQueueEntry>) = model.scope.launch {
         entries.forEach { model.performNow(PendingOp.RejectQueue(it.entry.project, it.entry.item.line), it.storeId) }
         selection.clear()
     }
