@@ -44,10 +44,11 @@ function commit(repo: string, rel: string, content: string, message: string): st
 function configure(repo: string): void {
   git(repo, "config", "user.email", "sam@example.com");
   git(repo, "config", "user.name", "sam");
-  // Windows runners default core.autocrlf to true, which rewrites LF files as
-  // CRLF when a sync checks them out again.
-  git(repo, "config", "core.autocrlf", "false");
 }
+
+// Windows runners default core.autocrlf to true, which checks LF files out as
+// CRLF. Clones set it off from the first checkout, so no file starts out dirty.
+const LF_CHECKOUT = ["-c", "core.autocrlf=false"];
 
 function fixture(rel: string, initial: string) {
   const tmp = makeTempDir("phren-store-sync-");
@@ -56,14 +57,14 @@ function fixture(rel: string, initial: string) {
   const writer = path.join(tmp.path, "writer");
   const local = path.join(tmp.path, "local");
   git(tmp.path, "init", "--bare", "--initial-branch=main", remote);
-  git(tmp.path, "clone", remote, writer);
+  git(tmp.path, "clone", ...LF_CHECKOUT, remote, writer);
   configure(writer);
   write(writer, ".gitignore", ".runtime/\n.sessions/\n");
   write(writer, rel, initial);
   git(writer, "add", ".");
   git(writer, "commit", "-m", "initial");
   git(writer, "push", "-u", "origin", "main");
-  git(tmp.path, "clone", remote, local);
+  git(tmp.path, "clone", ...LF_CHECKOUT, remote, local);
   configure(local);
   storeRoot.current = local;
   return { local, writer };

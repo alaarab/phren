@@ -195,7 +195,9 @@ describe("isolated and bounded changes", () => {
 });
 
 describe("route scope and admission", () => {
-  it("resolves launch directories, rejects file/outside/symlink escapes, and accepts locator candidates", async () => {
+  // Needs POSIX roots (/etc) and a scratch folder outside home; Windows has no /etc and keeps its
+  // temp folder under the user profile. Launches go through the Hook, which supports macOS and Linux only.
+  it.skipIf(process.platform === "win32")("resolves launch directories, rejects file/outside/symlink escapes, and accepts locator candidates", async () => {
     const dir = await repo("project");
     expect(await launchDirectory(dir)).toBe(dir);
     await expect(launchDirectory(path.join(dir, "plain.txt"))).rejects.toMatchObject({ status: 400 });
@@ -210,7 +212,9 @@ describe("route scope and admission", () => {
       expect(await launchDirectory(project, [{ directory: project }])).toBe(project);
     } finally { await rm(outside, { recursive: true, force: true }); }
   });
-  it("allows only server-recorded or command-named extra diff paths, pane repo, and store", async () => {
+  // Paths named in a shell command line are read as POSIX absolute paths; a Windows path in
+  // `cat C:\...\plain.txt` is not one. The Hook that serves these diffs supports macOS and Linux only.
+  it.skipIf(process.platform === "win32")("allows only server-recorded or command-named extra diff paths, pane repo, and store", async () => {
     const primary = await repo("primary"), sibling = await repo("sibling"), unrelated = await repo("unrelated"), store = await repo(".phren");
     for (const dir of [primary, sibling, unrelated, store]) await appendFile(path.join(dir, "plain.txt"), "after\n");
     await expect(repositoryDiff(primary, [sibling])).rejects.toMatchObject({ status: 403 });

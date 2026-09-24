@@ -56,7 +56,7 @@ it("credits each agent only with its own file when both work in one repository",
 
 it("claims only structured paths, never words of a command line", () => {
   expect(claimedPaths({ command: "cat /etc/hosts > out.txt" }, "/work")).toEqual([]);
-  expect(claimedPaths({ file_path: "src/a.ts" }, "/work")).toEqual(["/work/src/a.ts"]);
-  expect(claimedPaths({ patch: "*** Begin Patch\n*** Update File: b.ts\n*** End Patch" }, "/work")).toEqual(["/work/b.ts"]);
-  expect(claimedPaths({ path: "~/notes.md" }, "/work", "/home/sam")).toEqual(["/home/sam/notes.md"]);
+  expect(claimedPaths({ file_path: "src/a.ts" }, "/work")).toEqual([path.resolve("/work", "src/a.ts")]);
+  expect(claimedPaths({ patch: "*** Begin Patch\n*** Update File: b.ts\n*** End Patch" }, "/work")).toEqual([path.resolve("/work", "b.ts")]);
+  expect(claimedPaths({ path: "~/notes.md" }, "/work", "/home/sam")).toEqual([path.join("/home/sam", "notes.md")]);
 });
