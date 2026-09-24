@@ -28,9 +28,9 @@ struct PhrenToolCard: View, Equatable {
     var body: some View {
         let destination = destination
         VStack(alignment: .leading, spacing: PhrenDensity.toolCardRowSpacing) {
-            ZStack(alignment: .topTrailing) {
-                // The chevron is a sibling control, never a nested button.
-                Button(action: toggle) {
+            // The chevron is a sibling control, never a nested button, and an
+            // overlay so its 44 pt target never makes the row taller.
+            Button(action: toggle) {
                     Group {
                         if model.isExpanded { preview(hasDestination: destination != nil) }
                         else { folded(hasDestination: destination != nil) }
@@ -42,19 +42,21 @@ struct PhrenToolCard: View, Equatable {
                 .accessibilityIdentifier("chat-phren-card:\(callID)")
                 .accessibilityValue(model.isExpanded ? "Expanded" : "Folded")
                 .accessibilityHint(model.isExpanded ? "Fold to a preview" : "Show the full text")
-                if let destination {
-                    Button { opened = destination } label: {
-                        Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(PhrenTheme.phrenCardAccent)
-                            .frame(width: 44, height: 44).contentShape(Rectangle())
+                .overlay(alignment: .topTrailing) {
+                    if let destination {
+                        Button { opened = destination } label: {
+                            Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(PhrenTheme.phrenCardAccent)
+                                .frame(width: 44, height: 44).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(destination.label)
+                        .accessibilityIdentifier("chat-phren-open:\(callID)")
+                        // One place whether folded or open, so nothing jumps:
+                        // centred on the first line.
+                        .offset(x: 12, y: -13)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(destination.label)
-                    .accessibilityIdentifier("chat-phren-open:\(callID)")
-                    // One place whether folded or open, so nothing jumps.
-                    .offset(x: 10, y: -8)
                 }
-            }
             if model.isExpanded {
                 VStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
                     // Expanding unclamps the readable preview above; the raw

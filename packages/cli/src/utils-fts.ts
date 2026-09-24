@@ -56,6 +56,7 @@ export const STOP_WORDS = new Set([
   "other", "into", "over", "such", "only", "own", "same", "also", "back",
   "get", "got", "make", "made", "take", "like", "well", "here", "there",
   "use", "using", "used", "need", "want", "look", "help", "please",
+  "those", "these", "both",
 ]);
 
 // Extract meaningful keywords from a prompt, including bigrams (2-word noun phrases).
