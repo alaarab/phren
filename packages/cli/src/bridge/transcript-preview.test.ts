@@ -115,6 +115,19 @@ describe("live reply previews", () => {
     expect((await stream.update("working", undefined, 1500))?.preview?.turnStartedAt).toBe("2026-09-22T10:01:00Z");
   });
 
+  it("keeps Claude's unbulleted tool summaries out of the reply (Claude Code 2.1.x)", () => {
+    // Recorded shape, 2026-09-24: the group summary sits indented under the
+    // reply's own block, with no ⏺, and a running one carries its command.
+    const running = "❯ Is it compatible\n⏺ Checking the app's minimum Hook version against what npm has:\n\n"
+      + "  Running 1 shell command… \"minimumHook|minHook|requiredHook\" apps/\n  ios/Phren apps/ios/PhrenLive/Sources…\n\n✻ Nesting… (12s · ↓ 640 tokens)\n❯";
+    expect(claudePanePreview(running, "Is it compatible")).toBe("Checking the app's minimum Hook version against what npm has:");
+    const finished = "❯ Is it compatible\n⏺ Looked it up.\n\n  Called phren, ran 1 shell command\n\n⏺ Yes, npm has it.\n❯";
+    expect(claudePanePreview(finished, "Is it compatible")).toBe("Yes, npm has it.");
+    // Prose that merely starts with such a verb stays reply text.
+    const prose = "❯ Is it compatible\n⏺ I checked:\n\n  Ran 3 tests and all passed on the Mini.\n❯";
+    expect(claudePanePreview(prose, "Is it compatible")).toContain("Ran 3 tests and all passed");
+  });
+
   it("reads Claude's own spinner verb and never previews a tool call line", async () => {
     const { claudeSpinnerVerb } = await import("./transcript-preview.js");
     expect(claudeSpinnerVerb("⏺ Reply\n✢ Pondering… (12s · ↑ 1.2k tokens · esc to interrupt)\n❯")).toBe("Pondering");
