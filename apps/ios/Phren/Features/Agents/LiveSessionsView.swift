@@ -90,10 +90,11 @@ struct LiveSessionsView: View {
                                                      subtitle: computer.connecting ? "Connecting…" : computer.host.address,
                                                      icon: "desktopcomputer",
                                                      titleColor: PhrenTheme.hostColor(computer.host.color ?? LiveHost.defaultColor(for: computer.host.id)))
-                                            .overlay(alignment: .trailing) { connectionStatus(computer).padding(.trailing, 4) }
                                     }
                                     .buttonStyle(.plain)
                                     .accessibilityIdentifier("live-host:\(computer.id)")
+                                    // Beside the link, not inside it, so the status keeps its own identity.
+                                    connectionStatus(computer).padding(.leading, 6)
                                     // The terminal needs only SSH, not the Hook: when the
                                     // Hook is down this is still the way onto the machine.
                                     if computer.message != nil, !computer.needsVerification {

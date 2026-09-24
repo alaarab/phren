@@ -135,29 +135,29 @@ final class LiveSessionsTests: XCTestCase {
     }
 
     @MainActor
-    func testSkillsAndInstructionsOpenFromMore() {
+    func testSkillsAndInstructionsOpenFromSettingsAgents() {
         let app = launchLayout(count: 1, extra: ["--project-skills-fixture"])
-        XCTAssertTrue(app.buttons["sessions-more"].waitForExistence(timeout: 5))
-        app.buttons["sessions-more"].tap()
-        let skills = app.buttons["sessions-more-sheet:skills"]
+        XCTAssertFalse(app.buttons["sessions-more"].exists, "Live sessions has no ••• menu")
+        app.tabBars.buttons["Settings"].tap()
+        let skills = app.buttons["settings-skills"]
+        for _ in 0..<4 where !(skills.exists && skills.isHittable) { app.swipeUp() }
         XCTAssertTrue(skills.waitForExistence(timeout: 5))
-        capture(app, "Sessions More")
+        capture(app, "Settings Agents section")
         skills.tap()
         XCTAssertTrue(app.navigationBars["Skills"].waitForExistence(timeout: 5))
-        capture(app, "Skills from Sessions More")
         app.navigationBars.buttons.firstMatch.tap()
-        app.buttons["sessions-more"].tap()
-        let instructions = app.buttons["sessions-more-sheet:instructions"]
+        let instructions = app.buttons["settings-agent-instructions"]
         XCTAssertTrue(instructions.waitForExistence(timeout: 5))
         instructions.tap()
         XCTAssertTrue(app.navigationBars["Agent setup"].waitForExistence(timeout: 5))
     }
 
     @MainActor
-    func testAddComputerFromMoreWithSixSessions() {
+    func testAddComputerUnderComputersWithSixSessions() {
         let app = launchLayout(count: 6)
-        app.buttons["sessions-more"].tap()
-        app.buttons["sessions-more-sheet:add-computer"].tap()
+        let add = app.buttons["sessions-add-computer"]
+        for _ in 0..<6 where !(add.exists && add.isHittable) { app.swipeUp() }
+        add.tap()
         let name = app.textFields["live-host-name"]
         XCTAssertTrue(name.waitForExistence(timeout: 5))
         for id in ["live-host-address", "live-host-port", "live-host-username"] {
@@ -165,16 +165,14 @@ final class LiveSessionsTests: XCTestCase {
         }
         name.tap(); name.typeText("Desk")
         XCTAssertEqual(name.value as? String, "Desk")
-        capture(app, "Add computer from Sessions More")
+        capture(app, "Add computer under Computers")
     }
 
     @MainActor
-    func testMemoryConnectionRemainsAvailableFromMore() {
+    func testMemoryConnectionIsAnIconWhileNeeded() {
         let app = launchLayout(count: 0, extra: ["--agents-without-github"])
-        app.buttons["sessions-more"].tap()
-        let connect = app.buttons["sessions-more-sheet:connectMemory"]
+        let connect = app.buttons["sessions-connect-memory"]
         XCTAssertTrue(connect.waitForExistence(timeout: 5))
-        XCTAssertFalse(app.buttons["sessions-more-sheet:skills"].exists)
         connect.tap()
         XCTAssertTrue(app.staticTexts["Connect project memory"].waitForExistence(timeout: 5))
     }

@@ -415,9 +415,6 @@ final class AgentChatComposerTests: AgentChatUITestCase {
         XCTAssertTrue(backdrop.waitForExistence(timeout: 5))
         XCTAssertTrue(backdrop.frame.contains(composerFrame), "The backdrop covers the entire composer")
         XCTAssertFalse(composer.exists && composer.isHittable, "Input is blocked behind the menu")
-        // The pressed message stays exactly where it was; nothing is lifted or moved.
-        XCTAssertEqual(paragraph.frame.minY, paragraphFrame.minY, accuracy: 1)
-        XCTAssertEqual(composer.frame.minY, composerFrame.minY, accuracy: 1)
         for id in ["copy-paragraph", "select-text", "copy-message"] {
             let action = app.buttons["chat-message-menu:" + id]
             XCTAssertTrue(action.isHittable)
@@ -429,6 +426,10 @@ final class AgentChatComposerTests: AgentChatUITestCase {
         XCTAssertTrue(backdrop.waitForNonExistence(timeout: 5))
         XCTAssertTrue(composer.isHittable)
         XCTAssertTrue(paragraph.exists)
+        // The chat sits under the menu while it is open (hidden from
+        // VoiceOver); opening and closing it moved nothing.
+        XCTAssertEqual(paragraph.frame.minY, paragraphFrame.minY, accuracy: 1)
+        XCTAssertEqual(composer.frame.minY, composerFrame.minY, accuracy: 1)
     }
 
     @MainActor
