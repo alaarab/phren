@@ -848,14 +848,18 @@ final class AgentChatModel {
         if result.rejected { queue.removeAll { $0.id == optimistic.id } }
         else if let index = queue.firstIndex(where: { $0.id == optimistic.id }) { queue[index].attachments = result.attachments }
         reconcileHandedOffQueue()
-        if handedToBubble, !result.delivered {
+        // A message the Hook typed into the terminal may have arrived: its
+        // pending bubble offers Retry. Only an untyped one comes back here.
+        let returnsToComposer = Self.returnsToComposer(delivered: result.delivered, typed: result.typed)
+        if handedToBubble, returnsToComposer {
             attachments = result.attachments.filter { sent in !attachments.contains { $0.id == sent.id } } + attachments
         }
         for uploaded in result.attachments {
             if let index = attachments.firstIndex(where: { $0.id == uploaded.id }) { attachments[index].path = uploaded.path }
         }
         guard result.delivered else {
-            if consumeDraft != nil || handedToBubble { draft = DictationSession.join(submitted, draft) }
+            // Putting a typed message back ahead of the next one sent it twice.
+            if returnsToComposer, consumeDraft != nil || handedToBubble { draft = DictationSession.join(submitted, draft) }
             return
         }
         // A dictation send already cleared its draft before delivery. Even
@@ -865,13 +869,17 @@ final class AgentChatModel {
         persistDraft(immediately: true)
     }
 
+    /// Only a message that never reached the terminal goes back in the
+    /// composer; one the Hook typed may have arrived, and its bubble offers Retry.
+    static func returnsToComposer(delivered: Bool, typed: Bool) -> Bool { !delivered && !typed }
+
     /// Uploads any attachments that still lack a path, then delivers the
     /// prompt. Returns the attachments with the paths that did upload, so a
     /// retry never re-uploads; prompt delivery itself is never replayed.
     func deliver(_ submitted: String, attachments items: [ChatAttachmentDraft], session: LiveAgentSession,
                          consumeDraft: (() -> Void)? = nil,
-                         submittedToAgent: (String) -> Void = { _ in }) async -> (delivered: Bool, attachments: [ChatAttachmentDraft], rejected: Bool) {
-        guard let target else { return (false, items, true) }
+                         submittedToAgent: (String) -> Void = { _ in }) async -> (delivered: Bool, attachments: [ChatAttachmentDraft], rejected: Bool, typed: Bool) {
+        guard let target else { return (false, items, true, false) }
         var sent = items
         sending = true; deliveryError = nil
         consumeDraft?()
@@ -899,7 +907,7 @@ final class AgentChatModel {
             } else {
                 deliveryError = "Attachment upload didn't finish. Your message hasn't been sent. \(error.localizedDescription)"
             }
-            return (false, sent, true)
+            return (false, sent, true, false)
         }
         let paths = sent.compactMap { $0.path }.joined(separator: "\n")
         // The footer ends in a newline: Claude turns the paths into image
@@ -925,10 +933,10 @@ final class AgentChatModel {
                     ChatAttachmentPreparation.preview(item.attachment).map { ChatAttachmentDraft(attachment: $0, path: item.path) }
                 }
             }.value
-            guard self.target == target else { return (true, sent, false) }
+            guard self.target == target else { return (true, sent, false, true) }
             sentImages += previews
             if sentImages.count > 16 { sentImages.removeFirst(sentImages.count - 16) }
-            return (true, sent, false)
+            return (true, sent, false, true)
         } catch {
             awaitingReply = false
             // A slash command is never confirmed: the agent runs it without
@@ -937,13 +945,16 @@ final class AgentChatModel {
             if AgentSlashCommand.isCommand(submitted), case LiveConnectionError.deliveryUnconfirmed = error {
                 sentAt = nil
                 recheckPaneAfterCommand()
-                return (true, sent, false)
+                return (true, sent, false, true)
             }
             let rejected: Bool
             if case LiveConnectionError.gatewayRejection(let status, _) = error { rejected = (400..<500).contains(status) }
             else { rejected = error is PhrenKitError }
             deliveryError = AgentDeliveryMessage.sendFailure(error, rejected: rejected)
-            return (false, sent, rejected)
+            // The Hook answered after typing it; only whether the agent took it is unknown.
+            var typed = false
+            if case LiveConnectionError.deliveryUnconfirmed = error { typed = true }
+            return (false, sent, rejected, typed)
         }
     }
     static func snapshot(_ session: LiveAgentSession, target: AgentChatTarget) async throws -> AgentChatTranscript {

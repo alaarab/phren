@@ -950,6 +950,8 @@ import UniformTypeIdentifiers
             throw LiveConnectionError.deliveryUnconfirmed
         }
         sent.append((target.id, text))
+        // The Hook typed it and the agent took it, but no confirmation came back.
+        if flag("--chat-send-unconfirmed") { throw LiveConnectionError.deliveryUnconfirmed }
         talkSentAt.append(.now)
         askSide(text)
         if flag("--starting-session-fixture"), target.isStarting { startingAttachedAt = Date.now.addingTimeInterval(3) }
