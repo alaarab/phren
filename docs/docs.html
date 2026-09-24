@@ -779,6 +779,7 @@
           </div>
 
           <div class="docs-overview-links">
+            <a href="#iphone" class="docs-pill-link">iPhone app</a>
             <a href="#security" class="docs-pill-link">Security model</a>
             <a href="#faq" class="docs-pill-link">Common questions</a>
             <a href="#architecture" class="docs-pill-link">Architecture</a>
@@ -1019,6 +1020,29 @@ phren hooks list
 
 # Check for errors
 phren hooks errors --limit 5</code></pre>
+      </section>
+
+      <!-- ============================================================ -->
+      <!--  IPHONE APP AND PHREN HOOK                                    -->
+      <!-- ============================================================ -->
+      <section class="docs-section" id="iphone">
+        <h1>iPhone App and Phren Hook</h1>
+        <p class="docs-subtitle">Read your memory and talk to your running agents from your phone. Nothing goes through a phren server.</p>
+
+        <h2 id="ios-app">phren for iPhone <a href="#ios-app" class="anchor-link">#</a></h2>
+        <p>The app shows findings, notes, tasks, and the review queue from your store, and lists the agent sessions on your computers. It is not on the App Store yet. <a href="ios.html">The iPhone page</a> covers what it does and how to get it.</p>
+        <p>It needs:</p>
+        <ul>
+          <li><strong>Your store on GitHub.</strong> The app signs in with a fine-grained GitHub token scoped to that repo. <a href="support.html">Support</a> lists the permissions.</li>
+          <li><strong>Phren Hook</strong> on each computer that runs your agents, for sessions and chat. Memory works without it.</li>
+          <li><strong>SSH</strong> to each computer, and <strong>Tailscale</strong> when you are away from home. No public port is needed.</li>
+        </ul>
+
+        <h2 id="ios-hook">Phren Hook <a href="#ios-hook" class="anchor-link">#</a></h2>
+        <p>Phren Hook is a local helper that connects your phone to the agents on a computer. It needs macOS or Linux, Node.js 20+, <a href="https://herdr.dev">Herdr</a>, SSH, and <code>lsof</code>. Install it as the user who runs your agents:</p>
+        <pre><code>npx --yes @phren/cli@0.2.16 bridge install
+npx --yes @phren/cli@0.2.16 bridge doctor</code></pre>
+        <p>Then open <strong>Agents &rarr; Add computer</strong> in the app and follow the steps. <a href="phren-hook.html">The Phren Hook page</a> covers setup, updates, and troubleshooting.</p>
       </section>
 
       <!-- ============================================================ -->
@@ -1517,6 +1541,121 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
           <div class="ref-card-desc">Unsubscribe from projects in a store.</div>
         </div>
 
+        <h2 id="cli-notes">Notes <a href="#cli-notes" class="anchor-link">#</a></h2>
+        <p>Daily notes are lightweight. They are searchable but not injected into context until you promote one to a finding.</p>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren note add &lt;project&gt; "&lt;text&gt;" [--date YYYY-MM-DD]</div>
+          <div class="ref-card-desc">Add a daily note.</div>
+        </div>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren note list &lt;project&gt; [--date YYYY-MM-DD]</div>
+          <div class="ref-card-desc">List notes.</div>
+        </div>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren note edit|remove &lt;project&gt; &lt;nid&gt;</div>
+          <div class="ref-card-desc">Edit or remove a note.</div>
+        </div>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren note promote &lt;project&gt; &lt;nid&gt; [--type &lt;type&gt;]</div>
+          <div class="ref-card-desc">Promote a note to a finding.</div>
+        </div>
+
+        <h2 id="cli-code">Code Index <a href="#cli-code" class="anchor-link">#</a></h2>
+        <p>Needs the <code>code</code> module: <code>phren modules enable code</code>.</p>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren code index &lt;project&gt; [--full] [--repo &lt;path&gt;]</div>
+          <div class="ref-card-desc">Build or refresh the code index for a project.</div>
+        </div>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren code status &lt;project&gt; [--top &lt;n&gt;]</div>
+          <div class="ref-card-desc">Index counts, languages, and hot symbols.</div>
+        </div>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren code search &lt;project&gt; &lt;query&gt; [--kind k] [--limit n]</div>
+          <div class="ref-card-desc">Ranked symbol search.</div>
+        </div>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren code outline|refs|def|usage ...</div>
+          <div class="ref-card-desc">A file outline, references to a symbol, its definition, or the hottest and coldest symbols.</div>
+        </div>
+
+        <h2 id="cli-schedules">Schedules <a href="#cli-schedules" class="anchor-link">#</a></h2>
+        <p>Scheduled prompts run through Phren Hook on the computer you assign. Needs the <code>schedules</code> module.</p>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren schedule list [project]</div>
+          <div class="ref-card-desc">List scheduled prompts.</div>
+        </div>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren schedule add &lt;project&gt; --name &lt;name&gt; --harness &lt;name&gt; --computer &lt;name&gt; [--model &lt;model&gt;] --every &lt;kind&gt; [timing] (--prompt &lt;text&gt;|--prompt-file &lt;path&gt;)</div>
+          <div class="ref-card-desc">Add a scheduled prompt.</div>
+        </div>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren schedule enable|disable|remove|run &lt;project&gt; &lt;id&gt;</div>
+          <div class="ref-card-desc">Resume, pause, remove, or run a schedule now.</div>
+        </div>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren schedule history [project] [--id &lt;id&gt;] [--limit &lt;n&gt;]</div>
+          <div class="ref-card-desc">Show local schedule runs.</div>
+        </div>
+
+        <h2 id="cli-dispatch">Dispatch <a href="#cli-dispatch" class="anchor-link">#</a></h2>
+        <p>Send work to agents on your enrolled computers through Phren Hook. Needs the <code>conductor</code> module.</p>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren dispatch &lt;computer|anywhere&gt; &lt;project&gt; --label &lt;label&gt; --prompt &lt;brief&gt; [--harness codex|claude|opencode] [--model &lt;model&gt;]</div>
+          <div class="ref-card-desc">Start a worker on a named computer, or on the least busy one.</div>
+        </div>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren dispatch status|returns|sessions</div>
+          <div class="ref-card-desc">Local receipts, unread worker returns, or live sessions on every computer.</div>
+        </div>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren hand-off &lt;computer|local&gt; --session &lt;id&gt; --text &lt;prompt&gt;</div>
+          <div class="ref-card-desc">Send a prompt to an existing agent session.</div>
+        </div>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren bridge enroll-computer &lt;name&gt; [--accept &lt;public-key-file&gt;]</div>
+          <div class="ref-card-desc">Print or accept a restricted dispatch key for another computer.</div>
+        </div>
+
+        <h2 id="cli-modules">Modules &amp; Presets <a href="#cli-modules" class="anchor-link">#</a></h2>
+        <p>Modules turn features on per store or profile. Disabling one keeps its data.</p>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren modules list [--profile &lt;name&gt;]</div>
+          <div class="ref-card-desc">Show each module and whether it is enabled.</div>
+        </div>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren modules enable|disable &lt;name&gt; [--profile &lt;name&gt;]</div>
+          <div class="ref-card-desc">Enable or disable a module: <code>tasks</code>, <code>hook</code>, <code>git</code>, <code>schedules</code>, <code>conductor</code>, <code>fanout</code>, <code>code</code>.</div>
+        </div>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren preset [status|managed|assisted|manual] [-y]</div>
+          <div class="ref-card-desc">Set how much phren wires up. <code>managed</code> (default) sets up hooks, skill links, and self-heal. <code>assisted</code> keeps hooks and MCP but writes nothing outside the store and your agent settings. <code>manual</code> is MCP only. <a href="https://github.com/alaarab/phren/blob/main/docs/footprint.md">footprint.md</a> has the details.</div>
+        </div>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren config mcp-profile [core|full]</div>
+          <div class="ref-card-desc">Choose the MCP tool surface. See <a href="#mcp-profiles">Tool Profiles</a>.</div>
+        </div>
+
         <h2 id="cli-maintenance">Maintenance <a href="#cli-maintenance" class="anchor-link">#</a></h2>
 
         <div class="callout callout-warning" style="margin-bottom:16px">
@@ -1773,10 +1912,14 @@ tags: [devops, deploy]
         <div class="table-scroll"><table class="docs-table">
           <thead><tr><th>Command</th><th>What it does</th></tr></thead>
           <tbody>
-            <tr><td><code>/phren-sync</code></td><td>Pull/push ~/.phren across machines</td></tr>
-            <tr><td><code>/phren-init</code></td><td>Scaffold a new project</td></tr>
-            <tr><td><code>/phren-discover</code></td><td>Research gaps and opportunities</td></tr>
-            <tr><td><code>/phren-consolidate</code></td><td>Find patterns across FINDINGS.md files</td></tr>
+            <tr><td><code>/phren-sync</code></td><td>Pull your store onto this machine or push local changes back</td></tr>
+            <tr><td><code>/phren-init</code></td><td>Set up a new project with a summary, AGENTS.md, tasks, and skill templates</td></tr>
+            <tr><td><code>/phren-discover</code></td><td>Audit your store and say what needs attention</td></tr>
+            <tr><td><code>/phren-consolidate</code></td><td>Find patterns across projects and surface ones that apply everywhere</td></tr>
+            <tr><td><code>/phren-profiles</code></td><td>Change which profile a machine uses and which projects a profile holds</td></tr>
+            <tr><td><code>/phren-summarize</code></td><td>Write the summary paragraph for each topic archive with the model you are already running</td></tr>
+            <tr><td><code>/conductor</code></td><td>Coordinate a project's tasks across your enrolled computers and integrate the returns</td></tr>
+            <tr><td><code>/fanout</code></td><td>Hand bounded work to headless agent workers</td></tr>
           </tbody>
         </table></div>
 
