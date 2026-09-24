@@ -82,10 +82,11 @@ process.stdin.on('end', () => {
 }
 
 describe("POST /v1/subagents/resume", () => {
-  // Fan-out launches through `nice` and stops a served harness by its process
-  // group, both POSIX: on Windows the served OpenCode stays alive. The Hook
-  // that runs fan-out supports macOS and Linux only.
-  it.each((process.platform === "win32" ? ["codex"] : ["codex", "opencode"]) as ("codex" | "opencode")[])("resumes a finished %s worker with stdin in its own worktree and keeps the same job", async provider => {
+  // These two run a real resumed worker. Fan-out launches it through `nice` and
+  // stops a served harness by its process group, both POSIX: Windows has no nice
+  // (the runner's comes from Git for Windows' MSYS, slow and flaky here) and a
+  // served OpenCode stays alive. The Hook that runs fan-out supports macOS and Linux only.
+  it.skipIf(process.platform === "win32").each(["codex", "opencode"] as const)("resumes a finished %s worker with stdin in its own worktree and keeps the same job", async provider => {
     const f = await fixture("completed", provider);
     const text = "Review the fix\n`literal` $(also literal)";
     const result = await f.service.send({ target, child: f.child, text });
@@ -108,7 +109,7 @@ describe("POST /v1/subagents/resume", () => {
     expect(JSON.stringify(transcript.entries)).toContain("Review the fix");
   });
 
-  it("durably queues a running worker and resumes after it finishes, even with a new service", async () => {
+  it.skipIf(process.platform === "win32")("durably queues a running worker and resumes after it finishes, even with a new service", async () => {
     const f = await fixture("running");
     const receipt = await f.service.send({ target, child: f.child, text: "Next round" });
     expect(receipt.message.status).toBe("queued");
