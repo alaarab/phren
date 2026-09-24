@@ -20,6 +20,10 @@ final class TalkModeController {
         /// The reply to the words sent after `line`, once the turn is over.
         var reply: @MainActor (_ after: Int) -> String?
         var now: @MainActor () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
+        /// How long a pause waits before it sends (Manual never does).
+        var pause: TalkPause = .current()
+        /// The words heard so far, shown where a typed message would be.
+        var showHeard: (@MainActor (String) -> Void)? = nil
         var tick: Duration = .milliseconds(200)
     }
 
@@ -30,6 +34,12 @@ final class TalkModeController {
     /// The words of the utterance being heard.
     private(set) var heard = ""
     private(set) var failure: String?
+    /// How far the current pause has run toward sending, 0...1.
+    private(set) var countdown: Double?
+    private(set) var held = false
+    /// The reply being read aloud, whole.
+    private(set) var replyText = ""
+    private(set) var pause = TalkPause.current()
     var isOn: Bool { phase != .off }
 
     @ObservationIgnored private var machine = TalkTurnMachine()
@@ -55,6 +65,8 @@ final class TalkModeController {
             }
             guard !Task.isCancelled else { return }
             self.environment = environment
+            pause = environment.pause
+            machine = TalkTurnMachine(silence: environment.pause.seconds)
             let recognizer = environment.makeRecognizer()
             let session = DictationSession(recognizer: recognizer, transform: SpeechSettings.apply)
             session.onDraftChange = { [weak self] words in self?.heardChanged(words) }
@@ -81,10 +93,25 @@ final class TalkModeController {
         handle(.turnOff)
     }
 
+    /// A tap on the countdown: hold the turn open, or, when held or on
+    /// Manual, send what was heard.
+    func tapCountdown() {
+        guard let environment, phase == .listening else { return }
+        if held || pause == .manual { handle(.sendNow) }
+        else { handle(.hold) }
+        refreshCountdown(at: environment.now())
+    }
+
+    func sendNow() {
+        guard phase == .listening else { return }
+        handle(.sendNow)
+    }
+
     // MARK: Events
 
     private func heardChanged(_ words: String) {
         heard = words
+        environment?.showHeard?(words)
         guard let environment else { return }
         handle(.heard(words, at: environment.now()))
     }
@@ -92,6 +119,7 @@ final class TalkModeController {
     private func tick() {
         guard let environment, isOn else { return }
         handle(.tick(at: environment.now(), voice: (recognizer?.audioLevel ?? 0) > Self.voiceLevel))
+        refreshCountdown(at: environment.now())
         guard phase == .thinking, let line = sentAfterLine, let reply = environment.reply(line) else {
             replySeen = nil
             return
@@ -112,9 +140,16 @@ final class TalkModeController {
         stop()
     }
 
+    private func refreshCountdown(at now: TimeInterval) {
+        let value = machine.countdown(at: now).map { ($0 * 20).rounded() / 20 }
+        if countdown != value { countdown = value }
+    }
+
     private func handle(_ event: TalkTurnMachine.Event) {
         let actions = machine.handle(event)
         phase = machine.phase
+        if held != machine.held { held = machine.held }
+        if phase != .listening { countdown = nil }
         actions.forEach(perform)
     }
 
@@ -135,6 +170,8 @@ final class TalkModeController {
             voice?.stop()
             session.stop()
             heard = ""
+            replyText = ""
+            countdown = nil
             sentAfterLine = nil
         case .send(let words):
             session.send()
@@ -148,6 +185,7 @@ final class TalkModeController {
                 self.handle(.sendFailed)
             }
         case .speak(let text):
+            replyText = text
             speakTask = Task { [weak self] in
                 guard let voice = self?.voice else { return }
                 await voice.speak(text)

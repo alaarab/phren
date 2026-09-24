@@ -26,7 +26,8 @@ import PhrenKit
                 log.entries.append("sent: \(text)")
                 return await TalkModeController.send(text, model: model, session: session)
             },
-            reply: { line in TalkModeController.reply(model: model, after: line) })
+            reply: { line in TalkModeController.reply(model: model, after: line) },
+            pause: .quick)
     }
 
     /// Says the first question once listening starts, and the barge-in

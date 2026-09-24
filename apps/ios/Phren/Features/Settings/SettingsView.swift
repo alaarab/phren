@@ -75,7 +75,7 @@ struct SettingsView: View {
                         .accessibilityIdentifier("settings-keyboard")
                     NavigationLink { TerminalGesturesSettingsView() } label: { settingsRow("Gestures", "hand.draw") }
                         .accessibilityIdentifier("settings-gestures")
-                    NavigationLink { SpeechSettingsView() } label: { settingsRow("Speech", "mic") }
+                    NavigationLink { SpeechSettingsView() } label: { settingsRow("Voice", "mic") }
                         .accessibilityIdentifier("settings-speech")
                 }
                 if model.phase == .ready {

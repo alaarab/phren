@@ -45,7 +45,9 @@ final class TalkModeTests: AgentChatUITestCase {
             "speaking: Running the tests now. I'll tell you when they finish.",
             "spoke",
         ])
-        XCTAssertEqual(seen, ["Listening", "Thinking", "Speaking", "Listening", "Thinking", "Speaking", "Listening"])
+        // Each pause shows its countdown before the send.
+        let countdown = "Sending when you pause · tap to hold", speaking = "Speaking · talk to interrupt"
+        XCTAssertEqual(seen, ["Listening", countdown, "Thinking", speaking, "Listening", countdown, "Thinking", speaking, "Listening"])
 
         app.buttons["talk-stop"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["talk-bar"].waitForNonExistence(timeout: 5))

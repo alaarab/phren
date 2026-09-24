@@ -496,7 +496,12 @@ struct AgentChatView: View {
                             switchAgent: { showingAgentSwitcher = true },
                             showChildAgents: { showingChildAgents = true },
                             enterSecret: { showingSecret = true },
-                            toggleDictation: { if dictating { stopDictation() } else { talk.stop(); startDictation() } },
+                            // Settings > Voice decides what the mic does: dictate into the
+                            // box (never sends on its own) or start talk mode.
+                            toggleDictation: {
+                                if SpeechSettings.micButton() == .talk, !dictating { toggleTalk() }
+                                else if dictating { stopDictation() } else { talk.stop(); startDictation() }
+                            },
                             toggleTalk: toggleTalk,
                             primary: primaryAction,
                             openCommandMenu: openCommandMenu,

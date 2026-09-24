@@ -5,7 +5,7 @@ import XCTest
 
 final class TalkTurnMachineTests: XCTestCase {
     func testListenSendSpeakBargeInAndListenAgain() {
-        var machine = TalkTurnMachine()
+        var machine = TalkTurnMachine(silence: 1.2)
         XCTAssertEqual(machine.handle(.turnOn(at: 0)), [.startListening])
         XCTAssertEqual(machine.phase, .listening)
 
@@ -36,7 +36,7 @@ final class TalkTurnMachineTests: XCTestCase {
     }
 
     func testInputLevelHoldsTheTurnOpenBetweenRecognisedWords() {
-        var machine = TalkTurnMachine()
+        var machine = TalkTurnMachine(silence: 1.2)
         _ = machine.handle(.turnOn(at: 0))
         _ = machine.handle(.heard("Open the", at: 1))
         XCTAssertEqual(machine.handle(.tick(at: 2, voice: true)), [])
@@ -45,7 +45,7 @@ final class TalkTurnMachineTests: XCTestCase {
     }
 
     func testSilenceWithoutWordsSendsNothing() {
-        var machine = TalkTurnMachine()
+        var machine = TalkTurnMachine(silence: 1.2)
         _ = machine.handle(.turnOn(at: 0))
         XCTAssertEqual(machine.handle(.tick(at: 30, voice: false)), [])
         XCTAssertEqual(machine.handle(.heard("   ", at: 31)), [])
@@ -54,7 +54,7 @@ final class TalkTurnMachineTests: XCTestCase {
     }
 
     func testSpeechDuringThinkingSkipsTheReplyAndBecomesTheNextTurn() {
-        var machine = TalkTurnMachine()
+        var machine = TalkTurnMachine(silence: 1.2)
         _ = machine.handle(.turnOn(at: 0))
         _ = machine.handle(.heard("Summarize atlas", at: 1))
         XCTAssertEqual(machine.handle(.tick(at: 2.5, voice: false)), [.send("Summarize atlas")])
@@ -66,7 +66,7 @@ final class TalkTurnMachineTests: XCTestCase {
     }
 
     func testEmptyRepliesFailedSendsAndTurningOff() {
-        var machine = TalkTurnMachine()
+        var machine = TalkTurnMachine(silence: 1.2)
         _ = machine.handle(.turnOn(at: 0))
         _ = machine.handle(.heard("Run it", at: 1))
         _ = machine.handle(.tick(at: 3, voice: false))
@@ -86,6 +86,71 @@ final class TalkTurnMachineTests: XCTestCase {
         XCTAssertEqual(machine.handle(.heard("ignored words", at: 10)), [])
         XCTAssertEqual(machine.handle(.playbackFinished), [])
         XCTAssertEqual(machine.handle(.turnOff), [])
+    }
+
+    func testDefaultPauseIsThreeSecondsAndEachModeWaitsItsOwnTime() {
+        XCTAssertEqual(TalkTurnMachine().silence, 3)
+        for (pause, seconds) in [(TalkPause.quick, 1.5), (.normal, 3), (.relaxed, 5)] {
+            var machine = TalkTurnMachine(silence: pause.seconds)
+            _ = machine.handle(.turnOn(at: 0))
+            _ = machine.handle(.heard("Check the build", at: 1))
+            XCTAssertEqual(machine.handle(.tick(at: 1 + seconds - 0.1, voice: false)), [], "\(pause) waits its full pause")
+            XCTAssertEqual(machine.handle(.tick(at: 1 + seconds, voice: false)), [.send("Check the build")], "\(pause)")
+        }
+    }
+
+    func testManualNeverSendsUntilTapped() {
+        var machine = TalkTurnMachine(silence: TalkPause.manual.seconds)
+        _ = machine.handle(.turnOn(at: 0))
+        _ = machine.handle(.heard("Draft the release notes", at: 1))
+        XCTAssertEqual(machine.handle(.tick(at: 120, voice: false)), [])
+        XCTAssertNil(machine.countdown(at: 120), "Manual has nothing to count down")
+        XCTAssertEqual(machine.handle(.sendNow), [.send("Draft the release notes")])
+        XCTAssertEqual(machine.phase, .thinking)
+    }
+
+    func testHoldKeepsThinkingUntilWordsOrASecondTap() {
+        var machine = TalkTurnMachine(silence: 3)
+        _ = machine.handle(.turnOn(at: 0))
+        _ = machine.handle(.heard("Rename the", at: 1))
+        XCTAssertNil(machine.countdown(at: 1.2), "a breath is not a pause")
+        XCTAssertEqual(machine.countdown(at: 2.5), 0.5, "halfway through a 3 s pause")
+        XCTAssertEqual(machine.handle(.hold), [])
+        XCTAssertTrue(machine.held)
+        XCTAssertNil(machine.countdown(at: 3))
+        XCTAssertEqual(machine.handle(.tick(at: 30, voice: false)), [], "held: no send however long the quiet")
+        // Talking again releases the hold and restarts the pause.
+        _ = machine.handle(.heard("Rename the conductor card", at: 31))
+        XCTAssertFalse(machine.held)
+        XCTAssertEqual(machine.handle(.tick(at: 34, voice: false)), [.send("Rename the conductor card")])
+        // A held turn sends at once on the next tap.
+        _ = machine.handle(.agentFinished(reply: ""))
+        _ = machine.handle(.heard("One more thing", at: 40))
+        _ = machine.handle(.hold)
+        XCTAssertEqual(machine.handle(.sendNow), [.send("One more thing")])
+        XCTAssertFalse(machine.held)
+    }
+
+    func testWordsThatTrailOffWaitLonger() {
+        XCTAssertTrue(TalkTurnMachine.endsMidThought("check the build and"))
+        XCTAssertTrue(TalkTurnMachine.endsMidThought("the parser, um"))
+        XCTAssertTrue(TalkTurnMachine.endsMidThought("first the tests,"))
+        XCTAssertFalse(TalkTurnMachine.endsMidThought("check the brand"))
+        XCTAssertFalse(TalkTurnMachine.endsMidThought("ship it"))
+        var machine = TalkTurnMachine(silence: 3)
+        _ = machine.handle(.turnOn(at: 0))
+        _ = machine.handle(.heard("Look at the parser and", at: 1))
+        XCTAssertEqual(machine.handle(.tick(at: 4.5, voice: false)), [], "a trailing 'and' waits past the normal pause")
+        XCTAssertEqual(machine.handle(.tick(at: 6, voice: false)), [.send("Look at the parser and")])
+    }
+
+    func testMicButtonDefaultsToDictationThatNeverSends() {
+        let defaults = UserDefaults(suiteName: "voice-\(UUID().uuidString)")!
+        XCTAssertEqual(SpeechSettings.micButton(in: defaults), .dictate)
+        XCTAssertEqual(SpeechSettings.replyVoice(in: defaults), .elevenLabs)
+        XCTAssertEqual(TalkPause.current(in: defaults), .normal)
+        defaults.set("talk", forKey: SpeechSettings.micButtonKey)
+        XCTAssertEqual(SpeechSettings.micButton(in: defaults), .talk)
     }
 }
 
@@ -200,14 +265,14 @@ final class TalkModeControllerTests: XCTestCase {
             lastLine: { line },
             send: { words in sent.append(words); return true },
             reply: { after in replies[after] },
-            now: { clock }, tick: .milliseconds(10)))
+            now: { clock }, pause: .quick, tick: .milliseconds(10)))
         try await wait("listening") { talk.phase == .listening }
 
         recognizer.say("What changed in atlas")
         clock += 0.5
         recognizer.say("What changed in atlas today")
         XCTAssertEqual(talk.heard, "What changed in atlas today")
-        clock += 1.3
+        clock += 1.6
         try await wait("sent") { talk.phase == .thinking }
         XCTAssertEqual(sent, ["What changed in atlas today"])
         XCTAssertEqual(talk.heard, "")
@@ -224,7 +289,7 @@ final class TalkModeControllerTests: XCTestCase {
 
         line = 20
         recognizer.say("wait stop and run the tests")
-        clock += 1.3
+        clock += 1.6
         try await wait("second send") { talk.phase == .thinking }
         XCTAssertEqual(sent.last, "wait stop and run the tests")
         replies[20] = "Running them."
@@ -243,7 +308,7 @@ final class TalkModeControllerTests: XCTestCase {
         var clock: TimeInterval = 0
         let talk = TalkModeController()
         talk.start(.init(makeRecognizer: { recognizer }, makeVoice: { _ in FakeVoice() }, permissions: { true },
-                         lastLine: { 0 }, send: { _ in false }, reply: { _ in nil }, now: { clock }, tick: .milliseconds(10)))
+                         lastLine: { 0 }, send: { _ in false }, reply: { _ in nil }, now: { clock }, pause: .quick, tick: .milliseconds(10)))
         try await wait("listening") { talk.phase == .listening }
         recognizer.say("Run it")
         clock += 2

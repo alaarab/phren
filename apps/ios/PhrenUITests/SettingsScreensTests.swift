@@ -87,8 +87,13 @@ final class SettingsScreensTests: XCTestCase {
         XCTAssertEqual(pinch.value as? String, "On")
         back()
 
-        open("settings-speech", title: "Speech")
-        XCTAssertTrue(app.descendants(matching: .any)["speech-language"].waitForExistence(timeout: 3))
+        open("settings-speech", title: "Voice")
+        XCTAssertTrue(app.descendants(matching: .any)["voice-mic-button"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.descendants(matching: .any)["voice-pause"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["voice-reply"].exists)
+        let from = app.textFields["speech-replacement-from"]
+        for _ in 0..<5 where !(from.exists && from.isHittable) { app.swipeUp() }
+        XCTAssertTrue(app.descendants(matching: .any)["speech-language"].exists)
         app.textFields["speech-replacement-from"].tap(); app.textFields["speech-replacement-from"].typeText("fren")
         app.textFields["speech-replacement-to"].tap(); app.textFields["speech-replacement-to"].typeText("phren")
         app.buttons["speech-replacement-add"].tap()
