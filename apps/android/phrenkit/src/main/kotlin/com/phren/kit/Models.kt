@@ -225,8 +225,11 @@ data class Project(
     val taskCount: Int = 0,
     val noteCount: Int = 0,
     val reviewCount: Int = 0,
+    /** Findings the CLI archived to reference/topics, per summary.md. */
+    val archivedCount: Int = 0,
 ) {
     val id: String get() = name
+    val totalFindingCount: Int get() = findingCount + archivedCount
 }
 
 sealed class PhrenKitError(override val message: String) : Exception(message) {

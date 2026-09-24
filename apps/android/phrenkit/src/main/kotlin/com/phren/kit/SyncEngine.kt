@@ -75,7 +75,11 @@ class SyncEngine(
     var storageIssues: List<StorageIssue> = emptyList()
         private set
 
-    @Volatile private var onUpdate: (() -> Unit)? = null
+    /** What changed: content (re-read the snapshot) or just status. */
+    enum class Update { CONTENT, STATUS }
+
+    @Volatile private var onUpdate: ((Update) -> Unit)? = null
+    private var enqueueGeneration = 0
 
     init {
         val (loaded, issue) = PendingOpsQueue.load(queueFile)
@@ -84,17 +88,17 @@ class SyncEngine(
         status = status.copy(pendingCount = queue.pending.size, failedCount = queue.failed.size)
     }
 
-    fun setOnUpdate(callback: () -> Unit) { onUpdate = callback }
+    fun setOnUpdate(callback: (Update) -> Unit) { onUpdate = callback }
 
     suspend fun setWriteContext(context: WriteContext) = withContext(confined) { writeContext = context }
 
     suspend fun currentStatus(): Status = withContext(confined) { status }
 
-    private fun notifyUpdate() { onUpdate?.invoke() }
+    private fun notifyUpdate(update: Update = Update.CONTENT) { onUpdate?.invoke(update) }
 
     private fun setStatus(mutate: (Status) -> Status = { it }) {
         status = mutate(status).copy(pendingCount = queue.pending.size, failedCount = queue.failed.size)
-        notifyUpdate()
+        notifyUpdate(Update.STATUS)
     }
 
     fun close() { scope.coroutineContext[Job]?.cancel() }
@@ -105,20 +109,26 @@ class SyncEngine(
      * One sync pass. `force` skips the ETag shortcut. Concurrent callers
      * serialize; a forced caller always runs its own pass.
      */
-    suspend fun pull(force: Boolean = false): Unit = withContext(confined) {
+    suspend fun pull(force: Boolean = false) = pull(force, emptySet())
+
+    private suspend fun pull(force: Boolean, overwritingPendingPaths: Set<String>): Unit = withContext(confined) {
         pullTask?.let { inFlight ->
             inFlight.await()
             if (!force) return@withContext
         }
         pullGeneration++
         val generation = pullGeneration
-        val task = scope.async { performPull(force) }
+        val task = scope.async { performPull(force, overwritingPendingPaths) }
         pullTask = task
         task.await()
         if (pullGeneration == generation) pullTask = null
     }
 
-    private suspend fun performPull(force: Boolean) {
+    /** A queued edit's file is never overwritten by a pull, unless recovery asks. */
+    private fun preservesPendingFile(path: String, overwriting: Set<String>) =
+        path !in overwriting && queue.pending.any { path in it.editedPaths }
+
+    private suspend fun performPull(force: Boolean, overwritingPendingPaths: Set<String>) {
         setStatus { it.copy(isSyncing = true, lastError = null) }
         try {
             val manifest = store.currentManifest
@@ -141,14 +151,18 @@ class SyncEngine(
                 var changed = false
                 for ((path, sha) in remote) {
                     if (store.blobSha(path) == sha) continue
+                    if (preservesPendingFile(path, overwritingPendingPaths)) continue
                     val data = client.blob(manifest.owner, manifest.repo, sha)
+                    // An edit can be queued while a blob request is in flight.
+                    if (preservesPendingFile(path, overwritingPendingPaths)) continue
                     store.write(path, data.toString(Charsets.UTF_8), sha)
                     changed = true
                 }
                 for (path in store.allPaths()) {
                     if (path in remote || !LocalStore.isSyncedPath(path)) continue
+                    if (preservesPendingFile(path, overwritingPendingPaths)) continue
                     // No blob sha = created locally and never synced; keep it.
-                    if (store.blobSha(path) == null) continue
+                    if (store.blobSha(path) == null && path !in overwritingPendingPaths) continue
                     store.delete(path)
                     changed = true
                 }
@@ -162,8 +176,9 @@ class SyncEngine(
             setStatus { it.copy(lastError = e.message ?: e.toString()) }
         } finally {
             setStatus { it.copy(isSyncing = false) }
+            // An unchanged head still retries edits queued offline, once per pass.
+            if (queue.pending.isNotEmpty()) scheduleFlush()
         }
-        if (queue.pending.isNotEmpty()) scheduleFlush()
     }
 
     // Cold tier
@@ -221,8 +236,10 @@ class SyncEngine(
             throw PhrenKitError.Validation("\"${op.project}\" is read-only in the app — edit it with the phren CLI.")
         }
         // A domain error (empty, secret, ambiguous) surfaces now and nothing is queued.
-        val (paths, deletedShas) = applyLocally(op)
-        queue = queue.copy(pending = queue.pending + QueuedOp(op = op, paths = paths, deletedShas = deletedShas.ifEmpty { null }))
+        val queued = QueuedOp(op = op)
+        val (paths, deletedShas) = applyLocally(op, queued.queuedAt)
+        enqueueGeneration++
+        queue = queue.copy(pending = queue.pending + queued.copy(paths = paths, deletedShas = deletedShas.ifEmpty { null }))
         persistQueue()
         setStatus()
         scheduleFlush()
@@ -231,12 +248,13 @@ class SyncEngine(
     /** Re-queues everything in "Needs attention", re-applying ops parked before their edit landed. */
     suspend fun retryFailed() = withContext(confined) {
         val retrying = queue.failed
+        enqueueGeneration++
         queue = queue.copy(failed = emptyList())
         for (q in retrying) {
             var queued = q
             if (queued.paths?.isEmpty() == true) {
                 try {
-                    val (paths, deleted) = applyLocally(queued.op)
+                    val (paths, deleted) = applyLocally(queued.op, queued.queuedAt)
                     queued = queued.copy(paths = paths, deletedShas = deleted.ifEmpty { null })
                 } catch (e: Exception) {
                     queue = queue.copy(failed = queue.failed + queued.copy(lastError = e.message))
@@ -263,12 +281,36 @@ class SyncEngine(
 
     private fun scheduleFlush() {
         if (!autoFlush || flushJob != null) return
+        val generation = enqueueGeneration
         flushJob = scope.launch {
             flush()
             flushJob = null
-            // An op enqueued between `flush` returning and here would otherwise wait for the next poll.
-            if (queue.pending.isNotEmpty()) scheduleFlush()
+            // Old work may have failed because we're offline; only newly
+            // enqueued work warrants another immediate pass.
+            if (enqueueGeneration != generation && queue.pending.isNotEmpty()) scheduleFlush()
         }
+    }
+
+    /** Moves a skill to another scope, carrying its enabled setting (SyncEngine.moveSkill). */
+    suspend fun moveSkill(skill: Skill, scope: String) = withContext(confined) {
+        if (scope == skill.scope.source) throw PhrenKitError.Validation("The skill is already in $scope.")
+        val destination = if (skill.format == Skill.Format.FOLDER) "$scope/skills/${skill.name}/SKILL.md" else "$scope/skills/${skill.name}.md"
+        if (!LocalStore.isSkillPath(destination)) throw PhrenKitError.Validation("Invalid skill scope or name.")
+        val preferences = SkillPreferences.parse(store.read(SkillPreferences.PATH))
+        val enabled = preferences.explicitSetting(skill.scope.source, skill.name)
+        enqueue(PendingOp.SaveAuthoredFile(destination, skill.content, null))
+        enqueue(PendingOp.DeleteAuthoredFile(skill.path, skill.content))
+        if (enabled != null) {
+            enqueue(PendingOp.SetSkillEnabled(scope, skill.name, enabled, preferences.explicitSetting(scope, skill.name)))
+        }
+    }
+
+    private fun recordCacheFailure(document: String, location: String, error: Exception) {
+        val issue = StorageIssue(
+            kind = StorageIssue.Kind.UNWRITABLE, document = document, location = location, quarantineLocation = null,
+            foundSchemaVersion = null, expectedSchemaVersion = 0, detail = error.toString(),
+        ).also { StorageIssueLog.shared.record(it) }
+        storageIssues = storageIssues.filter { !(it.kind == StorageIssue.Kind.UNWRITABLE && it.document == document) } + issue
     }
 
     /** Runs a flush pass to completion, awaiting one already in flight. */
@@ -316,7 +358,7 @@ class SyncEngine(
                                 break
                             }
                             forgetCachedShas(plan.paths)
-                            pull(force = true)
+                            pull(force = true, overwritingPendingPaths = plan.paths.toSet())
                             val (retryPlan, retryParked) = reapply(plan.ops)
                             plan = retryPlan
                             parked += retryParked
@@ -372,7 +414,8 @@ class SyncEngine(
     private fun forgetCachedShas(paths: List<String>) {
         try {
             store.updateManifest { it.copy(blobShas = it.blobShas - paths.toSet()) }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            recordCacheFailure("cached file versions", "manifest", e)
         }
     }
 
@@ -466,7 +509,7 @@ class SyncEngine(
         val parked = mutableListOf<Parked>()
         for (queued in ops) {
             try {
-                val edits = computeEdits(queued.op, overlay)
+                val edits = computeEdits(queued.op, queued.queuedAt, overlay)
                 edits.forEach { overlay[it.path] = it.content }
                 applied += queued.copy(paths = edits.map { it.path }, deletedShas = null)
             } catch (e: Exception) {
@@ -482,7 +525,8 @@ class SyncEngine(
                     store.blobSha(path)?.let { deleted[path] = it }
                     store.delete(path)
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                recordCacheFailure("local edits", path, e)
             }
         }
         notifyUpdate()
@@ -498,10 +542,10 @@ class SyncEngine(
     private data class FileEdit(val path: String, /** null = delete the file */ val content: String?)
 
     /** Applies the op to local cached content only, reporting touched files. */
-    private fun applyLocally(op: PendingOp): Pair<List<String>, Map<String, String>> {
+    private fun applyLocally(op: PendingOp, createdAt: Instant): Pair<List<String>, Map<String, String>> {
         val paths = mutableListOf<String>()
         val deletedShas = mutableMapOf<String, String>()
-        for (edit in computeEdits(op)) {
+        for (edit in computeEdits(op, createdAt)) {
             paths += edit.path
             if (edit.content != null) store.write(edit.path, edit.content, null)
             else {
@@ -540,7 +584,7 @@ class SyncEngine(
     private fun findingType(raw: String?) = raw?.let { t -> FindingType.entries.firstOrNull { it.rawValue == t } }
 
     /** Maps a domain op to concrete file edits against current local content. */
-    private fun computeEdits(op: PendingOp, overlay: Map<String, String?> = emptyMap()): List<FileEdit> {
+    private fun computeEdits(op: PendingOp, createdAt: Instant, overlay: Map<String, String?> = emptyMap()): List<FileEdit> {
         val project = op.project
         val findingsPath = "$project/FINDINGS.md"
         val reviewPath = "$project/review.md"
@@ -633,7 +677,7 @@ class SyncEngine(
             }
             is PendingOp.AddTask -> {
                 val file = TasksFile(project, read(tasksPath, overlay))
-                file.add(op.text)
+                file.add(op.text, createdAt = ISO8601Dates.string(createdAt, fractionalSeconds = true))
                 listOf(FileEdit(tasksPath, file.render()))
             }
             is PendingOp.CompleteTask -> {
@@ -657,6 +701,56 @@ class SyncEngine(
                     ),
                 )
                 listOf(FileEdit(tasksPath, file.render()))
+            }
+            is PendingOp.SetSkillEnabled -> listOf(
+                FileEdit(SkillPreferences.PATH, SkillPreferences.setting(read(SkillPreferences.PATH, overlay), op.scope, op.name, op.enabled, op.expectedEnabled)),
+            )
+            is PendingOp.SaveAuthoredFile -> {
+                val current = read(op.path, overlay)
+                AuthoredFile.validate(op.path, current, op.expectedContent, op.content)
+                if (op.expectedContent == null && LocalStore.isSkillPath(op.path)) {
+                    val paths = store.allPaths().toMutableSet()
+                    overlay.forEach { (candidate, value) -> if (value == null) paths -= candidate else paths += candidate }
+                    AuthoredFile.conflictingSkillPath(op.path, paths.toList())?.let {
+                        throw PhrenKitError.Duplicate("A skill with that name already exists at $it.")
+                    }
+                }
+                listOf(FileEdit(op.path, op.content))
+            }
+            is PendingOp.DeleteAuthoredFile -> {
+                AuthoredFile.validate(op.path, read(op.path, overlay), op.expectedContent, null)
+                listOf(FileEdit(op.path, null))
+            }
+            is PendingOp.UpdateSkill -> {
+                // Authored prose: the op holds the finished bytes, so replay is deterministic.
+                if (!LocalStore.isSkillPath(op.path)) throw PhrenKitError.Validation("${op.path} is not a skill path.")
+                if (op.content.isEmpty()) throw PhrenKitError.Validation("Refusing to save an empty skill.")
+                SecretScanner.scan(op.content)?.let { throw PhrenKitError.Validation(it) }
+                listOf(FileEdit(op.path, op.content))
+            }
+            is PendingOp.DeleteSkill -> {
+                if (!LocalStore.isSkillPath(op.path)) throw PhrenKitError.Validation("${op.path} is not a skill path.")
+                listOf(FileEdit(op.path, null))
+            }
+            is PendingOp.SetProjectKnobs -> {
+                val path = "$project/${MachineRegistry.PROJECT_FILE}"
+                if (!LocalStore.isProjectConfigPath(path)) throw PhrenKitError.Validation("$path cannot hold project settings.")
+                val current = read(path, overlay)
+                val next = op.knobs.apply(current ?: "")
+                if (!(current == op.expectedContent || current == next)) {
+                    throw PhrenKitError.Validation("$path changed since you opened it. Review the latest version before saving again.")
+                }
+                // Every knob back to "inherit" with no file to edit is a no-op.
+                if (current == null && next.isEmpty()) emptyList() else listOf(FileEdit(path, next))
+            }
+            is PendingOp.SaveSchedules -> {
+                val path = "$project/${SchedulesFile.FILE_NAME}"
+                if (!LocalStore.isSchedulesPath(path)) throw PhrenKitError.Validation("$path cannot hold schedules.")
+                val current = read(path, overlay)
+                if (!(current == op.expectedContent || current == op.content)) {
+                    throw PhrenKitError.Validation("$path changed since you opened it. Review the latest version before saving again.")
+                }
+                listOf(FileEdit(path, op.content))
             }
         }
     }

@@ -120,7 +120,7 @@ class TasksFile(project: String, content: String?) {
             line = line,
             checked = false,
             priority = normalizePriority(line),
-            createdAt = createdAt,
+            createdAt = createdAt ?: ISO8601Dates.string(java.time.Instant.now(), fractionalSeconds = true),
             sessionId = sessionId,
         )
         doc = doc.copy(queue = doc.queue + newItem)

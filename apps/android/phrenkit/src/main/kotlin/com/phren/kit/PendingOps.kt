@@ -79,6 +79,27 @@ sealed class PendingOp {
         val section: String? = null,
     ) : PendingOp()
 
+    @Serializable @SerialName("updateSkill")
+    data class UpdateSkill(val path: String, val content: String) : PendingOp() { override val project get() = scopeOf(path) }
+
+    @Serializable @SerialName("deleteSkill")
+    data class DeleteSkill(val path: String) : PendingOp() { override val project get() = scopeOf(path) }
+
+    @Serializable @SerialName("saveAuthoredFile")
+    data class SaveAuthoredFile(val path: String, val content: String, val expectedContent: String? = null) : PendingOp() { override val project get() = scopeOf(path) }
+
+    @Serializable @SerialName("deleteAuthoredFile")
+    data class DeleteAuthoredFile(val path: String, val expectedContent: String) : PendingOp() { override val project get() = scopeOf(path) }
+
+    @Serializable @SerialName("setSkillEnabled")
+    data class SetSkillEnabled(val scope: String, val name: String, val enabled: Boolean, val expectedEnabled: Boolean? = null) : PendingOp() { override val project get() = scope }
+
+    @Serializable @SerialName("setProjectKnobs")
+    data class SetProjectKnobs(override val project: String, val knobs: ProjectKnobs, val expectedContent: String? = null) : PendingOp()
+
+    @Serializable @SerialName("saveSchedules")
+    data class SaveSchedules(override val project: String, val content: String, val expectedContent: String? = null) : PendingOp()
+
     /** The `(kind)` token of the commit message (cli/session-stop.ts:354-378). */
     val commitKind: String
         get() = when (this) {
@@ -86,6 +107,10 @@ sealed class PendingOp {
             is ApproveQueue, is RejectQueue, is EditQueue -> "update"
             is AddNote, is EditNote, is RemoveNote, is PromoteNote -> "update"
             is AddTask, is CompleteTask, is RemoveTask, is UpdateTask -> "task"
+            is UpdateSkill, is DeleteSkill, is SetSkillEnabled -> "skills"
+            is SetProjectKnobs, is SaveSchedules -> "update"
+            is SaveAuthoredFile -> if (LocalStore.isSkillPath(path)) "skills" else "update"
+            is DeleteAuthoredFile -> if (LocalStore.isSkillPath(path)) "skills" else "update"
         }
 
     val commitMessage: String get() = "phren: $project($commitKind) via $COMMIT_TOOL"
@@ -100,6 +125,13 @@ sealed class PendingOp {
             is RemoveNote -> "$project/notes/$date.md"
             is PromoteNote -> "$project/notes/$date.md"
             is AddTask, is CompleteTask, is RemoveTask, is UpdateTask -> "$project/tasks.md"
+            is SetSkillEnabled -> SkillPreferences.PATH
+            is SetProjectKnobs -> "$project/${MachineRegistry.PROJECT_FILE}"
+            is SaveSchedules -> "$project/${SchedulesFile.FILE_NAME}"
+            is UpdateSkill -> path
+            is DeleteSkill -> path
+            is SaveAuthoredFile -> path
+            is DeleteAuthoredFile -> path
         }
 
     /** Every file the op can write, in the order `computeEdits` emits them (fallback only). */
@@ -127,9 +159,27 @@ sealed class PendingOp {
             is CompleteTask -> "Complete task"
             is RemoveTask -> "Delete task"
             is UpdateTask -> "Update task"
+            is UpdateSkill -> "Save skill: ${skillLabel(path)}"
+            is DeleteSkill -> "Delete skill: ${skillLabel(path)}"
+            is SaveAuthoredFile -> "Save: $path"
+            is DeleteAuthoredFile -> "Delete: $path"
+            is SetSkillEnabled -> "${if (enabled) "Enable" else "Disable"} skill: $scope/$name"
+            is SetProjectKnobs -> "Update project knobs"
+            is SaveSchedules -> "Save schedules"
         }
 
     companion object {
+        /** "global" for a global skill: the commit-message scope for skill ops. */
+        internal fun scopeOf(path: String) = path.split("/").firstOrNull()?.takeIf { it.isNotEmpty() } ?: "global"
+
+        /** `<scope>/skills/<name>.md` and `<scope>/skills/<name>/SKILL.md` both label as `<scope>/<name>`. */
+        private fun skillLabel(path: String): String {
+            val parts = path.split("/")
+            if (parts.size < 3) return path
+            val name = if (parts.size == 4) parts[2] else parts[2].dropLast(3)
+            return "${parts[0]}/$name"
+        }
+
         /** The writing tool named in every commit (`via ios` on iOS). */
         const val COMMIT_TOOL = "android"
 

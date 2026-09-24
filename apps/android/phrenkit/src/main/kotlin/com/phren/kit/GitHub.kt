@@ -177,8 +177,12 @@ interface GitHubAPI {
     suspend fun deleteFile(owner: String, repo: String, path: String, branch: String, message: String, sha: String)
 }
 
+/** Only https://api.github.com is ever followed (GitHubRedirectPolicy). No HTTP cache. */
 internal val sharedHttp: OkHttpClient by lazy {
     OkHttpClient.Builder()
+        .followRedirects(false)
+        .followSslRedirects(false)
+        .cache(null)
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
@@ -266,7 +270,7 @@ class GitHubClient(
         return all
     }
 
-    suspend fun repo(owner: String, name: String): GitHubRepo = get("repos/$owner/$name")
+    suspend fun repo(owner: String, name: String): GitHubRepo = get(repoPath(owner, name))
 
     /** What a store probe learned; `NoAccess` because GitHub 404s both "no file" and "can't read". */
     sealed interface StoreProbe {
@@ -278,7 +282,7 @@ class GitHubClient(
 
     /** Probes for `phren.root.yaml` at the repo root (phren-paths.ts ROOT_MANIFEST_FILENAME). */
     suspend fun probeStore(owner: String, name: String, disambiguate404: Boolean = true): StoreProbe = try {
-        val path = "repos/$owner/$name/contents/phren.root.yaml"
+        val path = repoPath(owner, name) + "/contents/phren.root.yaml"
         val reply = request(path)
         when (reply.status) {
             in 200..299 -> StoreProbe.IsStore
@@ -295,7 +299,7 @@ class GitHubClient(
     suspend fun probeStore(repo: GitHubRepo): StoreProbe = probeStore(repo.owner.login, repo.name, disambiguate404 = false)
 
     private suspend fun repoIsReadable(owner: String, name: String): Boolean = try {
-        request("repos/$owner/$name").status in 200..299
+        request(repoPath(owner, name)).status in 200..299
     } catch (_: Exception) {
         false
     }
@@ -307,7 +311,7 @@ class GitHubClient(
 
     /** Head commit SHA for a branch; null on 304 (nothing changed, the poll was free). */
     override suspend fun headSha(owner: String, repo: String, branch: String): String? {
-        val path = "repos/$owner/$repo/git/ref/heads/$branch"
+        val path = repoPath(owner, repo) + "/git/ref/heads/" + encodePath(branch, nested = true)
         val reply = request(path, etagKey = "ref:$owner/$repo/$branch")
         if (reply.status == 304) return null
         ensureOK(reply.status, reply.data, path = path)
@@ -315,13 +319,13 @@ class GitHubClient(
     }
 
     override suspend fun tree(owner: String, repo: String, sha: String): GitTree {
-        val tree: GitTree = get("repos/$owner/$repo/git/trees/$sha?recursive=1")
+        val tree: GitTree = get(repoPath(owner, repo) + "/git/trees/" + encodePath(sha) + "?recursive=1")
         if (tree.truncated) throw GitHubError.TreeTruncated
         return tree
     }
 
     override suspend fun blob(owner: String, repo: String, sha: String): ByteArray {
-        val blob: GitBlob = get("repos/$owner/$repo/git/blobs/$sha")
+        val blob: GitBlob = get(repoPath(owner, repo) + "/git/blobs/" + encodePath(sha))
         return blob.decoded ?: throw GitHubError.InvalidResponse
     }
 
@@ -334,7 +338,7 @@ class GitHubClient(
             put("branch", branch)
             if (sha != null) put("sha", sha)
         }
-        val endpoint = "repos/$owner/$repo/contents/$path"
+        val endpoint = repoPath(owner, repo) + "/contents/" + encodePath(path, nested = true)
         val reply = request(endpoint, method = "PUT", body = payload.toString())
         if (reply.status == 409 || reply.status == 422) throw GitHubError.ShaConflict(path)
         ensureOK(reply.status, reply.data, "PUT", endpoint)
@@ -347,7 +351,7 @@ class GitHubClient(
             put("sha", sha)
             put("branch", branch)
         }
-        val endpoint = "repos/$owner/$repo/contents/$path"
+        val endpoint = repoPath(owner, repo) + "/contents/" + encodePath(path, nested = true)
         val reply = request(endpoint, method = "DELETE", body = payload.toString())
         if (reply.status == 409 || reply.status == 422) throw GitHubError.ShaConflict(path)
         ensureOK(reply.status, reply.data, "DELETE", endpoint)
@@ -355,6 +359,25 @@ class GitHubClient(
 
     companion object {
         const val API_BASE = "https://api.github.com/"
+        private const val UNRESERVED = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+
+        /** Percent-encodes each segment; refuses traversal, backslashes and control characters. */
+        internal fun encodePath(value: String, nested: Boolean = false): String {
+            val parts = value.split("/")
+            if ((!nested && parts.size != 1) || parts.any { it.isEmpty() || it == "." || it == ".." } ||
+                value.contains('\\') || value.any { it.isISOControl() }
+            ) throw GitHubError.InvalidResponse
+            return parts.joinToString("/") { part ->
+                buildString {
+                    for (b in part.toByteArray(Charsets.UTF_8)) {
+                        val c = b.toInt().toChar()
+                        if (b >= 0 && c in UNRESERVED) append(c) else append("%%%02X".format(b.toInt() and 0xFF))
+                    }
+                }
+            }
+        }
+
+        internal fun repoPath(owner: String, repo: String) = "repos/${encodePath(owner)}/${encodePath(repo)}"
 
         private fun messageOf(data: ByteArray): String? = try {
             (Json.parseToJsonElement(data.decodeToString()).jsonObject["message"] as? JsonPrimitive)?.contentOrNull
