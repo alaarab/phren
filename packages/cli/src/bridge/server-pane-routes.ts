@@ -1,6 +1,6 @@
 import type { ServerResponse } from "node:http";
 import { z } from "zod";
-import type { AgentHooks } from "./agent-hooks.js";
+import type { AgentHooks, DeliveryOutcome } from "./agent-hooks.js";
 import { gitBranches, gitDiscard, gitLog, gitPulls, gitStage, gitStatus, gitTree, gitUnstage } from "./git.js";
 import { fanoutWorktrees } from "./fanouts.js";
 import { gitWorktrees, resolveWorktree, type WorktreeWorker } from "./git-worktrees.js";
@@ -93,6 +93,21 @@ const HERDR_KEYS: Partial<Record<(typeof ANSWER_KEYS)[number], string>> = { Esca
 
 /** A secret typed into a terminal prompt: printable, bounded, never logged. */
 const secretText = z.string().min(1).max(256).refine(t => !/[\x00-\x1f\x7f]/.test(t));
+
+/** An idle agent that has not taken typed text within the first wait
+ * likely lost the Enter while it redrew (an update notice, a resize): the
+ * text sits in its input line. Press Enter once more and wait again. A
+ * pane that turned working took it; one still idle is reported unsubmitted,
+ * so the phone shows the message as not sent instead of waiting forever. */
+async function resubmitIfIdle(agentHooks: AgentHooks, target: Target, text: string): Promise<DeliveryOutcome | "unsubmitted"> {
+  const status = async () => { try { return String(findPane(await snapshot(target.server), target)?.agent_status ?? "unknown"); } catch { return "unknown"; } };
+  if (await status() === "working") return "pending";
+  const late = agentHooks.awaitLateDelivery(target, text);
+  await rpc(target.server, "agent.send_keys", { target: target.pane, keys: ["enter"] });
+  const outcome = await late;
+  if (outcome !== "pending") return outcome;
+  return await status() === "working" ? "pending" : "unsubmitted";
+}
 
 /** One key per character; Herdr's send_keys takes single characters and named
  * keys only, and a tty password read is corrupted by a bracketed paste. */
@@ -192,15 +207,22 @@ export async function paneRoute(ctx: PaneRouteContext, url: URL, data: Json, res
       return { ok: true, delivered: true, sideQuestion: await sideQuestions.ask(target, pane, text) };
     }
     if (target.source === "codex" && /^\s*\/model\s+\S/i.test(text)) throw new BridgeError(422, "Use the model picker to switch Codex models.");
-    const expected = agentHooks.expectDelivery(target, text, String(pane.agent_status) === "working" ? 300 : 1_500);
+    const busy = String(pane.agent_status) === "working";
+    const expected = agentHooks.expectDelivery(target, text, busy ? 300 : 1_500);
     await rpc(target.server, "agent.prompt", { target: target.pane, text });
-    const outcome = await expected;
+    let outcome: DeliveryOutcome | "unsubmitted" = await expected;
+    // Only Claude confirms plain prompts through its hook, and a slash
+    // command opens a menu that a second Enter would answer.
+    if (outcome === "pending" && !busy && target.source === "claude" && !text.trim().startsWith("/")) {
+      outcome = await resubmitIfIdle(agentHooks, target, text);
+    }
     if (outcome === "blocked") throw new BridgeError(409, "The conversation in this pane changed; the message was not delivered. Reopen the chat and send it again.");
     // A bare slash command opens the agent's own menu; the phone may
     // walk it with keys for the next half minute. The command rides
     // along so a Codex /permissions walk can find its confirmation.
     if (/^\/[a-z][a-z0-9_-]*$/i.test(text.trim())) agentHooks.menuOpened(target, text.trim());
     if (outcome === "delivered") { result = { ok: true, delivered: true }; }
+    else if (outcome === "unsubmitted") { result = { ok: true, deliveryUncertain: true, unsubmitted: true }; }
     else {
       // The agent has not submitted it yet (a busy agent queues typed
       // input). Recheck fresh identity and never retry; a late
