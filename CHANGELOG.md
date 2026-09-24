@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.2.16] - 2026-09-24
+
 ### Changed
 
 - iOS: Memory no longer drops to Connect project memory after the phone restarts. Before the first unlock after a restart the Keychain refuses every read, and iOS can launch phren in the background then (background refresh, a notification action, a Live Activity); the app read that refusal as "no token" and stayed signed out until it was quit. It now waits for the unlock and reads the token again. The token was never deleted.

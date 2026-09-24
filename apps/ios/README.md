@@ -480,8 +480,8 @@ Phren connects directly to **Phren Hook**, the independent helper shipped with
 `@phren/cli`. Install it on each computer running your agents:
 
 ```sh
-npx --yes @phren/cli@0.2.14 bridge install
-npx --yes @phren/cli@0.2.14 bridge doctor
+npx --yes @phren/cli@0.2.16 bridge install
+npx --yes @phren/cli@0.2.16 bridge doctor
 ```
 
 Requirements: macOS or Linux, Node 20+, Herdr, SSH/Remote Login, and `lsof`.
@@ -501,10 +501,10 @@ administrator. The bundled helper is copied out of the npm cache into a versione
 folder under `~/.local/share/phren/bridge`; it does not need `npx` at runtime.
 
 ```sh
-npx --yes @phren/cli@0.2.14 bridge status
-npx --yes @phren/cli@0.2.14 bridge update
-npx --yes @phren/cli@0.2.14 bridge rollback
-npx --yes @phren/cli@0.2.14 bridge uninstall
+npx --yes @phren/cli@0.2.16 bridge status
+npx --yes @phren/cli@0.2.16 bridge update
+npx --yes @phren/cli@0.2.16 bridge rollback
+npx --yes @phren/cli@0.2.16 bridge uninstall
 ```
 
 Uninstall stops the background service and removes Phren's agent callbacks.
