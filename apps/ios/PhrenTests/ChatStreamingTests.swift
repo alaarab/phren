@@ -25,6 +25,33 @@ final class ChatStreamingTests: XCTestCase {
         XCTAssertTrue(model.reveal.visible.isEmpty)
     }
 
+    /// Stream a Claude reply, land it, then reconnect with a resume backlog
+    /// that repeats the landed row: the reply shows exactly once.
+    func testStreamedReplyLandedThenResumedShowsOnce() async throws {
+        let model = AgentChatModel()
+        func claude(_ kind: String, _ entries: [[String: Any]], total: Int, extra: [String: Any] = [:]) throws -> AgentChatTranscript {
+            var frame: [String: Any] = ["type": kind, "source": "claude", "totalLines": total, "entries": entries]
+            frame.merge(extra) { $1 }
+            return try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: frame), source: "claude")
+        }
+        let user: [String: Any] = ["line": 6, "raw": ["type": "user", "timestamp": "2026-09-24T08:16:46Z", "message": ["role": "user", "content": "How are they doing?"]]]
+        let reply = "Six of the seven fixes are **combined** on one branch."
+        let landed: [String: Any] = ["line": 26, "raw": ["type": "assistant", "timestamp": "2026-09-24T08:17:10Z",
+            "message": ["role": "assistant", "stop_reason": "end_turn", "content": [["type": "text", "text": reply]]]]]
+        model.accept(try claude("backlog", [user], total: 7))
+        for length in [10, 30, reply.count] {
+            model.accept(try claude("preview", [], total: 0, extra: ["preview": ["turnStartedAt": "2026-09-24T08:16:46Z", "text": String(reply.prefix(length))]]))
+        }
+        model.accept(try claude("append", [landed], total: 27, extra: ["preview": NSNull()]))
+        model.accept(try claude("backlog", [landed], total: 27))
+        for _ in 0..<200 where model.replyPreview != nil || !model.timeline.flatMap(\.messages).contains(where: { $0.text == reply }) {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertNil(model.replyPreview)
+        XCTAssertEqual(model.timeline.flatMap(\.messages).filter { $0.text == reply }.count, 1)
+        XCTAssertEqual(Set(model.timeline.map(\.id)).count, model.timeline.count, "Timeline rows keep unique identities")
+    }
+
     func testPreviewClearsWhenStoppedDisconnectedOrChangingConversation() throws {
         let model = AgentChatModel()
         let preview = try AgentChatTranscript.read(Data(#"{"type":"preview","source":"claude","preview":{"turnStartedAt":"2026-09-22T10:00:00Z","text":"Partial words"}}"#.utf8), source: "claude")
@@ -34,6 +61,14 @@ final class ChatStreamingTests: XCTestCase {
         XCTAssertNil(model.replyPreview)
         model.accept(preview); model.chooseAnother()
         XCTAssertNil(model.replyPreview)
+    }
+
+    /// A message the Hook typed into the terminal may have arrived: putting it
+    /// back in the composer sent it again with the next message.
+    func testOnlyAnUntypedFailedDeliveryReturnsToTheComposer() {
+        XCTAssertFalse(AgentChatModel.returnsToComposer(delivered: false, typed: true), "Unconfirmed after typing")
+        XCTAssertTrue(AgentChatModel.returnsToComposer(delivered: false, typed: false), "Refused or never reached the computer")
+        XCTAssertFalse(AgentChatModel.returnsToComposer(delivered: true, typed: true))
     }
 
     func testCancelledDeliveryExplainsUncertainReceiptWithoutSwiftJargon() {

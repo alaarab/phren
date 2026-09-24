@@ -247,6 +247,29 @@ final class AgentChatQueueTests: AgentChatUITestCase {
         XCTAssertFalse(app.staticTexts["Received in codex on w7:p1: Keep this draft"].exists)
     }
 
+    /// The Hook typed the message and the agent took it, but no confirmation
+    /// came back. It must not return to the composer ahead of the next one,
+    /// which then carried the previous message along (the owner saw it three
+    /// times in a row).
+    @MainActor
+    func testUnconfirmedDeliveryIsNotPutBackAheadOfTheNextMessage() {
+        let app = launch(extra: ["--chat-send-unconfirmed"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        XCTAssertTrue(app.staticTexts["The project screen is ready. What would you like to change?"].waitForExistence(timeout: 5))
+        let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
+        composer.tap(); composer.typeText("How are they doing?")
+        app.buttons["chat-send"].tap()
+        XCTAssertTrue(app.staticTexts["chat-delivery-error"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Received in codex on w7:p1: How are they doing?"].waitForExistence(timeout: 8))
+        XCTAssertFalse((composer.value as? String ?? "").contains("How are they doing?"), "An unconfirmed message stays out of the composer")
+        composer.tap(); composer.typeText("Is the default admin?")
+        app.buttons["chat-send"].tap()
+        XCTAssertTrue(app.staticTexts["Received in codex on w7:p1: Is the default admin?"].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "How are they doing? Is the default admin?")).firstMatch.exists)
+        XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label == %@", "Received in codex on w7:p1: How are they doing?")).count, 1)
+        capture(app, "Unconfirmed deliveries stay out of the next message")
+    }
+
     @MainActor
     func testProjectContextStaysInDraftUntilSentAndSurvivesReopening() {
         let app = launch()
