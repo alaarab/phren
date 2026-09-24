@@ -267,7 +267,7 @@ fun inlineMarkdown(text: String, codeColor: androidx.compose.ui.graphics.Color? 
         when {
             g[1].isNotEmpty() || g[2].isNotEmpty() -> withStyle(androidx.compose.ui.text.SpanStyle(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)) { append(g[1].ifEmpty { g[2] }) }
             g[3].isNotEmpty() || g[4].isNotEmpty() -> withStyle(androidx.compose.ui.text.SpanStyle(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)) { append(g[3].ifEmpty { g[4] }) }
-            g[5].isNotEmpty() -> withStyle(androidx.compose.ui.text.SpanStyle(fontFamily = PhrenType.mono, color = codeColor ?: androidx.compose.ui.graphics.Color.Unspecified)) { append(g[5]) }
+            g[5].isNotEmpty() -> withStyle(androidx.compose.ui.text.SpanStyle(fontFamily = PhrenType.mono, fontFeatureSettings = "liga 0, calt 0", color = codeColor ?: androidx.compose.ui.graphics.Color.Unspecified)) { append(g[5]) }
             g[6].isNotEmpty() -> withStyle(androidx.compose.ui.text.SpanStyle(textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough)) { append(g[6]) }
             else -> withLink(androidx.compose.ui.text.LinkAnnotation.Url(g[8], androidx.compose.ui.text.TextLinkStyles(androidx.compose.ui.text.SpanStyle(color = linkColor)))) { append(g[7]) }
         }

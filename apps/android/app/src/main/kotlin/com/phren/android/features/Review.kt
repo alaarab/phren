@@ -55,6 +55,7 @@ import com.phren.android.design.ToolbarItem
 import com.phren.android.design.phrenIdentifier
 import com.phren.android.design.plainClickable
 import com.phren.android.design.sessionCard
+import com.phren.android.design.tabBarSafeArea
 import com.phren.kit.PendingOp
 import com.phren.kit.QueueItem
 import kotlinx.coroutines.launch
@@ -210,7 +211,7 @@ fun ReviewView(storeId: String, project: String) {
         }
         if (selecting) {
             val allSelected = items.isNotEmpty() && selection.size == items.size
-            Row(Modifier.fillMaxWidth().background(PhrenTheme.surface).padding(16.dp).padding(bottom = 80.dp), verticalAlignment = Alignment.CenterVertically,
+            Row(Modifier.fillMaxWidth().background(PhrenTheme.surface).tabBarSafeArea().padding(16.dp), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(if (allSelected) "Deselect All" else "Select All", style = PhrenType.footnote, color = if (items.isEmpty()) PhrenTheme.textDim else PhrenTheme.navigation,
                     modifier = Modifier.plainClickable(items.isNotEmpty()) { selection = if (allSelected) emptySet() else ids })

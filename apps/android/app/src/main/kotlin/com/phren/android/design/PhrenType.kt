@@ -43,7 +43,8 @@ object PhrenType {
     val caption = style(12, 16, 0.0)
     val caption2 = style(11, 13, 0.07)
 
-    fun TextStyle.mono(): TextStyle = copy(fontFamily = mono, letterSpacing = 0.sp)
+    /** SF Mono has no ligatures; JetBrains Mono's would turn `<!--` and `->` into arrows. */
+    fun TextStyle.mono(): TextStyle = copy(fontFamily = mono, letterSpacing = 0.sp, fontFeatureSettings = "liga 0, calt 0")
     fun TextStyle.medium(): TextStyle = copy(fontWeight = FontWeight.Medium)
     fun TextStyle.semibold(): TextStyle = copy(fontWeight = FontWeight.SemiBold)
     fun TextStyle.bold(): TextStyle = copy(fontWeight = FontWeight.Bold)

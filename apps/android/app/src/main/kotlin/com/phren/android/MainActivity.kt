@@ -132,6 +132,7 @@ private fun MainTabView(model: AppModel) {
 
     Box(Modifier.fillMaxSize().background(PhrenTheme.bg).semantics { testTagsAsResourceId = true }) {
         holder.SaveableStateProvider(model.selectedTab.name) {
+            androidx.compose.runtime.CompositionLocalProvider(com.phren.android.design.LocalTabBarVisible provides true) {
             PhrenNavigationStack(navigators.getValue(model.selectedTab)) {
                 when (model.selectedTab) {
                     AppTab.PROJECTS -> if (ready) ProjectsView() else OnboardingFlow(model)
@@ -140,6 +141,7 @@ private fun MainTabView(model: AppModel) {
                     AppTab.MEMORY -> if (ready) com.phren.android.features.MemoryView() else MemoryConnectionPrompt("Memory")
                     AppTab.SETTINGS -> com.phren.android.features.SettingsView()
                 }
+            }
             }
         }
         Box(Modifier.align(Alignment.BottomCenter)) {

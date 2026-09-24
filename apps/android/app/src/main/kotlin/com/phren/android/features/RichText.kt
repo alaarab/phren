@@ -175,7 +175,7 @@ fun RichText(text: String, reply: String = text, modifier: Modifier = Modifier) 
     val document = remember(text) { RichTextDocument(text) }
     var menuFor by remember { mutableStateOf<RichTextDocument.Block?>(null) }
     var selecting by remember { mutableStateOf<Int?>(null) }
-    val body = TextStyle(fontFamily = PhrenType.mono, fontSize = 14.5.sp, lineHeight = 21.sp, color = PhrenTheme.chatText)
+    val body = TextStyle(fontFamily = PhrenType.mono, fontFeatureSettings = "liga 0, calt 0", fontSize = 14.5.sp, lineHeight = 21.sp, color = PhrenTheme.chatText)
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         for (block in document.blocks) {
             when {
@@ -237,7 +237,7 @@ private fun CodeBlock(text: String, language: String) {
         .combinedClickable(remember { MutableInteractionSource() }, null, onLongClick = { copyToClipboard(context, text); copied = true }, onClick = {})
         .phrenIdentifier("chat-code-block")) {
         Text(CodeHighlighting.highlightedBlock(preview, SyntaxTokenizer.Language.detect(language)),
-            style = TextStyle(fontFamily = PhrenType.mono, fontSize = 14.5.sp, lineHeight = 20.sp, color = PhrenTheme.chatText),
+            style = TextStyle(fontFamily = PhrenType.mono, fontFeatureSettings = "liga 0, calt 0", fontSize = 14.5.sp, lineHeight = 20.sp, color = PhrenTheme.chatText),
             maxLines = 12, modifier = Modifier.fillMaxWidth().padding(12.dp))
         if (language.isNotEmpty() || truncated) {
             Text(if (truncated) "${if (language.isEmpty()) "" else "$language · "}more" else language, style = PhrenType.caption2, color = PhrenTheme.chatNeutralDim,

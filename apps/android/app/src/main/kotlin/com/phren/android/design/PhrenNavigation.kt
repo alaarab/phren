@@ -141,7 +141,7 @@ fun PhrenSheet(onDismiss: () -> Unit, fullScreen: Boolean = false, background: C
                         .then(if (fullScreen) Modifier else Modifier.windowInsetsPadding(WindowInsets.statusBars))
                         .clip(shape).background(background).imePadding(),
                 ) {
-                    CompositionLocalProvider(LocalDismiss provides onDismiss) {
+                    CompositionLocalProvider(LocalDismiss provides onDismiss, LocalTabBarVisible provides false) {
                         val navigator = rememberNavigator()
                         PhrenNavigationStack(navigator) {
                             CompositionLocalProvider(LocalDismiss provides onDismiss) { content() }

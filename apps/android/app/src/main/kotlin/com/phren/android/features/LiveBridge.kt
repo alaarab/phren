@@ -31,7 +31,6 @@ object LiveBridge {
     @Composable fun LaunchSessionView(storeId: String, project: String, request: TaskAgentRequest) = Pending("Start agent")
     @Composable fun SchedulesView(storeId: String, project: String) = Pending("Schedules")
     @Composable fun CodeView(storeId: String, project: String) = Pending("Code")
-    @Composable fun FilesView() = Pending("Files")
 
     @Composable
     fun Pending(title: String) {

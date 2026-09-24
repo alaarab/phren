@@ -443,7 +443,7 @@ fun MemoryView() {
     PhrenNavScreen(
         "Memory",
         trailing = listOf(
-            ToolbarItem(icon = SF("folder"), label = "Files", identifier = "memory-files", raised = true) { navigator.push("files") { LiveBridge.FilesView() } },
+            ToolbarItem(icon = SF("folder"), label = "Files", identifier = "memory-files", raised = true) { navigator.push("files") { FilesView() } },
             ToolbarItem(icon = SF("wrench.and.screwdriver"), label = "Memory maintenance", identifier = "memory-maintenance", raised = true) {
                 navigator.push("maintenance") { MemoryMaintenanceView() }
             },

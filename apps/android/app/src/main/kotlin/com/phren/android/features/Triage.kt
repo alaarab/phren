@@ -262,7 +262,7 @@ fun TriageView(model: AppModel, entries: List<StoreQueueEntry>, onClose: () -> U
                         Text("Done", style = PhrenType.subheadline.copy(fontWeight = FontWeight.Medium), color = PhrenTheme.textSecondary)
                     }
                     Spacer(Modifier.weight(1f))
-                    Text("${if (deck.isEmpty()) total else resolved + 1} of $total", style = PhrenType.caption.copy(fontFamily = PhrenType.mono), color = PhrenTheme.textMuted)
+                    Text("${if (deck.isEmpty()) total else resolved + 1} of $total", style = PhrenType.caption.copy(fontFamily = PhrenType.mono, fontFeatureSettings = "liga 0, calt 0"), color = PhrenTheme.textMuted)
                 }
                 Spacer(Modifier.height(10.dp))
                 val fraction by animateFloatAsState(if (total > 0) resolved.toFloat() / total else 1f, tween(250), label = "progress")
@@ -436,7 +436,7 @@ private fun TriageCardFace(card: TriageCard, showStore: Boolean, secondPass: Boo
         }
         HorizontalDivider(thickness = 0.5.dp, color = PhrenTheme.border)
         Row(Modifier.padding(horizontal = 20.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            val mono = PhrenType.caption2.copy(fontFamily = PhrenType.mono)
+            val mono = PhrenType.caption2.copy(fontFamily = PhrenType.mono, fontFeatureSettings = "liga 0, calt 0")
             Text(card.date, style = mono, color = PhrenTheme.textMuted)
             card.confidence?.let { Text("conf %.0f%%".format(it * 100), style = mono, color = if (it < 0.7) PhrenTheme.amber else PhrenTheme.textMuted) }
             card.machine?.let { Text(it, style = mono, color = PhrenTheme.textDim, maxLines = 1) }
@@ -452,7 +452,7 @@ private fun TriageCardFace(card: TriageCard, showStore: Boolean, secondPass: Boo
 private fun TriageStamp(text: String, color: Color, angle: Float, modifier: Modifier) {
     Text(
         text,
-        style = TextStyle(fontSize = 24.sp, fontWeight = FontWeight.Black, fontFamily = PhrenType.mono, letterSpacing = 2.sp),
+        style = TextStyle(fontSize = 24.sp, fontWeight = FontWeight.Black, fontFamily = PhrenType.mono, fontFeatureSettings = "liga 0, calt 0", letterSpacing = 2.sp),
         color = color,
         modifier = modifier.rotate(angle)
             .shadow(10.dp, RoundedCornerShape(6.dp), ambientColor = color.copy(alpha = 0.35f), spotColor = color.copy(alpha = 0.35f))
@@ -477,7 +477,7 @@ private fun TriageSummary(approved: Int, rejected: Int, skipped: Int, onDone: ()
         Spacer(Modifier.weight(1f))
         PhrenMascot(size = 96.dp)
         Spacer(Modifier.height(22.dp))
-        Text(if (approved + rejected == 0) "Nothing decided" else "Queue triaged", style = PhrenType.title3.copy(fontFamily = PhrenType.mono), color = PhrenTheme.text)
+        Text(if (approved + rejected == 0) "Nothing decided" else "Queue triaged", style = PhrenType.title3.copy(fontFamily = PhrenType.mono, fontFeatureSettings = "liga 0, calt 0"), color = PhrenTheme.text)
         Spacer(Modifier.height(6.dp))
         Text(
             when {
@@ -507,9 +507,9 @@ private fun Stat(value: Int, label: String, color: Color) {
         Modifier.width(92.dp).background(PhrenTheme.surface, RoundedCornerShape(6.dp)).border(1.dp, PhrenTheme.border, RoundedCornerShape(6.dp)).padding(vertical = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("$value", style = TextStyle(fontSize = 30.sp, fontWeight = FontWeight.Bold, fontFamily = PhrenType.mono), color = color)
+        Text("$value", style = TextStyle(fontSize = 30.sp, fontWeight = FontWeight.Bold, fontFamily = PhrenType.mono, fontFeatureSettings = "liga 0, calt 0"), color = color)
         Spacer(Modifier.height(4.dp))
-        Text(label, style = PhrenType.caption2.copy(fontFamily = PhrenType.mono), color = PhrenTheme.textMuted)
+        Text(label, style = PhrenType.caption2.copy(fontFamily = PhrenType.mono, fontFeatureSettings = "liga 0, calt 0"), color = PhrenTheme.textMuted)
     }
 }
 

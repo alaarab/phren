@@ -174,8 +174,14 @@ fun PhrenNavScreen(
 /** The floating tab bar's height plus its gap: content that must stay clear of it (the tab bar's safe area). */
 val TabBarClearance = 62.dp + 8.dp + 8.dp
 
+/** True under the tab view; sheets and full-screen covers provide false. */
+val LocalTabBarVisible = androidx.compose.runtime.compositionLocalOf { false }
+
+/** Keeps fixed bottom content above the floating tab bar, the way iOS's safe area does. */
 @Composable
-fun Modifier.tabBarSafeArea(): Modifier = this.windowInsetsPadding(WindowInsets.navigationBars).padding(bottom = TabBarClearance)
+fun Modifier.tabBarSafeArea(): Modifier =
+    if (LocalTabBarVisible.current) this.windowInsetsPadding(WindowInsets.navigationBars).padding(bottom = TabBarClearance)
+    else this.windowInsetsPadding(WindowInsets.navigationBars)
 
 data class PhrenTab<T>(val tab: T, val label: String, val icon: ImageVector, val badge: Int = 0, val identifier: String? = null)
 

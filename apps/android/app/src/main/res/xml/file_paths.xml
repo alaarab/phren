@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Only the viewer's cache directory is shared, and only on an explicit Share. -->
+<paths>
+    <cache-path name="file-viewer" path="file-viewer/" />
+</paths>

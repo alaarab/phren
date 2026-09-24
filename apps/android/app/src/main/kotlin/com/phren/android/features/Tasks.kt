@@ -73,6 +73,7 @@ import com.phren.android.design.phrenIdentifier
 import com.phren.android.design.plainClickable
 import com.phren.android.design.separatedCard
 import com.phren.android.design.sessionCard
+import com.phren.android.design.tabBarSafeArea
 import com.phren.kit.ISO8601Dates
 import com.phren.kit.LocalStore
 import com.phren.kit.PendingOp
@@ -630,7 +631,7 @@ private fun MoveNoticeLine(state: TaskListState, notice: TaskMoveNotice) {
 
 @Composable
 private fun SelectionActions(state: TaskListState, visible: List<TaskListRow>) {
-    Column(Modifier.fillMaxWidth().background(PhrenTheme.surface).padding(horizontal = 12.dp).padding(bottom = 96.dp)) {
+    Column(Modifier.fillMaxWidth().background(PhrenTheme.surface).tabBarSafeArea().padding(horizontal = 12.dp)) {
         val single = if (state.selectedIDs.size == 1) visible.firstOrNull { it.id in state.selectedIDs } else null
         if (single != null && !single.task.checked) {
             com.phren.android.design.PhrenRow(SF("play"), "Start", chevron = false, enabled = !state.isMoving, modifier = Modifier.phrenIdentifier("task-bulk-Start")) { state.start(single) }
