@@ -2303,6 +2303,14 @@ schedules:
       expect((await api("/v1/speech", { text: "" })).status).toBe(400);
     });
 
+    it("leaves approvalPush out and answers registration with configured:false when no APNs key is loaded", async () => {
+      expect((await api("/v1/health")).data.capabilities).not.toHaveProperty("approvalPush");
+      const reply = await api("/v1/push/register", { deviceID: "8a3f2c1e-5b6d-4e7f-8a9b-0c1d2e3f4a5b", hostID: "1b2c3d4e-5f60-4718-8293-a4b5c6d7e8f9",
+        token: "ab".repeat(32), environment: "development" });
+      expect(reply.data).toEqual({ ok: true, configured: false });
+      expect((await api("/v1/push/status")).data).toMatchObject({ configured: false, devices: 1 });
+    });
+
     it("runs the canary: launches and closes its own conductor, reads an idle transcript, never types into a pane", async () => {
       agentStatus = "idle";
       const run = await api("/v1/canary", {});
