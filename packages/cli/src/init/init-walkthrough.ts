@@ -76,7 +76,17 @@ export async function createWalkthroughStyle(): Promise<WalkthroughStyle> {
 
 export async function createWalkthroughPrompts(): Promise<WalkthroughPromptUi> {
   try {
-    const inquirerModule = await import(String("inquirer"));
+    const ui = walkthroughPromptsFrom(await import(String("inquirer")));
+    if (ui) return ui;
+  } catch {
+    // fallback below
+  }
+  return readlineWalkthroughPrompts();
+}
+
+/** Adapts an Inquirer module, or returns null when it offers neither API. */
+export function walkthroughPromptsFrom(inquirerModule: unknown): WalkthroughPromptUi | null {
+  {
     const maybeFns = inquirerModule as {
       input?: (options: { message: string; default?: string }) => Promise<string>;
       confirm?: (options: { message: string; default?: boolean }) => Promise<boolean>;
@@ -127,7 +137,7 @@ export async function createWalkthroughPrompts(): Promise<WalkthroughPromptUi> {
           defaultValue?: T
         ): Promise<T> => {
           const answer = await prompt([{
-            type: "list",
+            type: "select",
             name: "value",
             message,
             choices: choices.map((choice) => ({ value: choice.value, name: choice.name })),
@@ -137,10 +147,11 @@ export async function createWalkthroughPrompts(): Promise<WalkthroughPromptUi> {
         },
       };
     }
-  } catch {
-    // fallback below
   }
+  return null;
+}
 
+async function readlineWalkthroughPrompts(): Promise<WalkthroughPromptUi> {
   const readline = await import("readline");
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const ask = (message: string): Promise<string> => new Promise((resolve) => rl.question(message, resolve));
