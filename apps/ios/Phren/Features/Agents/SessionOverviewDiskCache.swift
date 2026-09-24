@@ -29,18 +29,31 @@ actor SessionOverviewDiskCache {
               focusFilter: AgentFocusFilter?, now: Date = .now) -> Record? {
         guard hosts.allSatisfy({ !forgottenHosts.contains($0.id) }), let url = file(hosts), let data = try? Data(contentsOf: url), data.count <= 8_388_608,
               let record = try? JSONDecoder().decode(Record.self, from: data), record.version == 1,
-              (0..<60).contains(now.timeIntervalSince(record.savedAt)),
+              (0..<Self.lastKnownAge).contains(now.timeIntervalSince(record.savedAt)),
               record.hosts.map(\.host).sorted(by: Self.ordered) == hosts.sorted(by: Self.ordered),
               record.preferences == preferences, record.screen.focusFilter == focusFilter
         else { return nil }
-        // Do not revive the green status of a snapshot that aged out while
-        // the process was gone, even if the cached screen was recently saved.
-        guard record.hosts.allSatisfy({ host in
+        // A screen saved within the minute shows as it was. An older one is
+        // still the last known list, which beats a blank page on a cold
+        // launch, but it never revives a green status: every computer reads
+        // as connecting and every group as stale until its answer lands.
+        let current = now.timeIntervalSince(record.savedAt) < 60 && record.hosts.allSatisfy({ host in
             record.screen.computers.first { $0.id == host.host.id }?.fresh != true
                 || host.lastUpdated.map { now.timeIntervalSince($0) < 90 } == true
-        }) else { return nil }
-        return record
+        })
+        if current { return record }
+        var stale = record.screen
+        stale.groups = stale.groups.map { .init(id: $0.id, title: $0.title, sessions: $0.sessions, fresh: false) }
+        stale.computers = stale.computers.map {
+            var row = SessionOverviewMonitor.ComputerRow(host: $0.host, connecting: true, fresh: false, message: nil,
+                                                         needsVerification: $0.needsVerification)
+            row.slow = $0.slow
+            return row
+        }
+        return Record(version: record.version, savedAt: record.savedAt, hosts: record.hosts, screen: stale, preferences: record.preferences)
     }
+    /// How long the last rendered list may stand in for a cold launch.
+    static let lastKnownAge: TimeInterval = 86_400
 
     func save(_ record: Record, force: Bool = false) {
         guard record.hosts.allSatisfy({ !forgottenHosts.contains($0.host.id) }), let url = file(record.hosts.map(\.host)) else { return }

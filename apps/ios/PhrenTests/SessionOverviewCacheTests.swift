@@ -26,7 +26,7 @@ final class SessionOverviewCacheTests: XCTestCase {
         XCTAssertNil(loaded)
     }
 
-    func testDiskRoundTripRestoresTheWholeScreenAndExpiresAtSixtySeconds() async throws {
+    func testDiskRoundTripRestoresTheWholeScreenAndAnOlderOneAsStale() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
         let cache = SessionOverviewDiskCache(directory: directory)
@@ -42,7 +42,14 @@ final class SessionOverviewCacheTests: XCTestCase {
         let restored = await reader.load(hosts: [host], preferences: nil, focusFilter: nil, now: now.addingTimeInterval(59))
         XCTAssertEqual(restored?.screen, screen)
         XCTAssertEqual(restored?.hosts.first?.snapshot, snapshot)
-        let expired = await reader.load(hosts: [host], preferences: nil, focusFilter: nil, now: now.addingTimeInterval(60))
+        // Older than a minute: the last known list, but nothing reads as live.
+        let older = await reader.load(hosts: [host], preferences: nil, focusFilter: nil, now: now.addingTimeInterval(600))
+        XCTAssertEqual(older?.screen.groups.first?.sessions, [session])
+        XCTAssertEqual(older?.screen.groups.first?.fresh, false)
+        XCTAssertEqual(older?.screen.computers.first?.fresh, false)
+        XCTAssertEqual(older?.screen.computers.first?.connecting, true)
+        let expired = await reader.load(hosts: [host], preferences: nil, focusFilter: nil,
+                                        now: now.addingTimeInterval(SessionOverviewDiskCache.lastKnownAge))
         XCTAssertNil(expired)
         var changed = host; changed.herdrSession = "other"
         let wrongHost = await reader.load(hosts: [changed], preferences: nil, focusFilter: nil, now: now)
