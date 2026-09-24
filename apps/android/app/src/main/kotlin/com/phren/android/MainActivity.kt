@@ -88,7 +88,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val model = phrenModel
         val fixture = if (BuildConfig.DEBUG) intent?.getStringExtra("fixture") else null
-        if (fixture != null) model.bootstrapFixture(fixture) else model.bootstrap()
+        if (fixture != null) model.bootstrapFixture(fixture, intent.getBooleanExtra("agents", false), intent.getBooleanExtra("offline", false))
+        else model.bootstrap()
         handleDeepLink(intent)
         setContent {
             PhrenMaterialTheme {
@@ -136,7 +137,7 @@ private fun MainTabView(model: AppModel) {
             PhrenNavigationStack(navigators.getValue(model.selectedTab)) {
                 when (model.selectedTab) {
                     AppTab.PROJECTS -> if (ready) ProjectsView() else OnboardingFlow(model)
-                    AppTab.AGENTS -> LiveBridge.Pending("Agents")
+                    AppTab.AGENTS -> com.phren.android.features.LiveSessionsView()
                     AppTab.TASKS -> if (ready) com.phren.android.features.TasksView() else MemoryConnectionPrompt("Tasks")
                     AppTab.MEMORY -> if (ready) com.phren.android.features.MemoryView() else MemoryConnectionPrompt("Memory")
                     AppTab.SETTINGS -> com.phren.android.features.SettingsView()

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The GitHub token never lands in a backup (the Keychain's ThisDeviceOnly). -->
+<!-- The GitHub token and the SSH keys never land in a backup (the Keychain's ThisDeviceOnly). -->
 <full-backup-content>
     <exclude domain="sharedpref" path="phren.secure.xml" />
+    <exclude domain="sharedpref" path="phren.ssh.xml" />
 </full-backup-content>

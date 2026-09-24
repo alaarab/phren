@@ -166,6 +166,13 @@ object PhrenConnection {
 
     suspend fun fetch(host: LiveHost, key: DeviceKey): LiveWorkspaces = LiveWorkspaces.read(fetchData(host, key), requiringHook = true)
 
+    /** The Hook's pushed overview: a frame when it changes, a heartbeat otherwise. Keeps the newest two. */
+    fun overviewUpdates(host: LiveHost, key: DeviceKey): Flow<com.phren.kit.LiveOverviewFrame> = callbackFlow {
+        fetchData(host, key, GatewayRequest.overview) { data -> trySendBlocking(com.phren.kit.LiveOverviewFrame.read(data)) }
+        close()
+        awaitClose()
+    }.buffer(2, kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST)
+
     // Chat
 
     private fun sameComputer(host: LiveHost, target: AgentChatTarget, starting: Boolean = true) {
