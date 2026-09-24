@@ -432,6 +432,11 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           await agentHooks.push.register(data); result = { ok: true, configured: agentHooks.push.status.configured };
         } else if (url.pathname === "/v1/push/answer") {
           await agentHooks.answerPush(z.string().uuid().parse(data.binding), data.decision); result = { ok: true };
+        } else if (url.pathname === "/v1/push/target") {
+          // A tapped notification opens its session; the binding stays unspent.
+          const target = agentHooks.pushTarget(z.string().uuid().parse(data.binding));
+          if (!target) throw new BridgeError(409, "This approval is no longer pending.");
+          result = { target: { server: target.server, workspace: target.workspace, tab: target.tab, pane: target.pane, source: target.source } };
         } else if (url.pathname === "/v1/files") {
           // Files the phone keeps on this computer, outside any session.
           const { name, bytes } = uploadBody(data);

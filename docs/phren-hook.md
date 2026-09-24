@@ -300,6 +300,19 @@ notification types the dialog's yes or allow row, Deny its no or deny row (or
 Escape), after checking the pane still shows the same dialog. A pane that stops
 waiting withdraws its notification; an answer after that is refused.
 
+A permission the Hook held for the phone does not go dead when its 55-second
+hold ends and the agent falls back to its terminal prompt. The Hook reads the
+Yes and No rows the agent draws and keeps the request's own details (the
+command, the tool's fields), so the tab stays marked as waiting on a permission
+(`approvalPending` in `/v1/workspaces`) instead of plain "blocked". The
+notification already on the phone keeps working for ten minutes: Approve or
+Deny held on the lock screen (behind Face ID or the passcode) types that
+dialog's row, and no second notification is sent. For Claude only the row's
+digit is typed, since Claude takes a digit at once and an Enter after it could
+land on the next permission. Tapping the notification opens the session's
+details on the phone, led by the request, through `POST /v1/push/target`,
+which names the session without answering it.
+
 ### Spoken replies for talk mode
 
 The phone's talk mode reads an agent's replies aloud. `POST /v1/speech` with

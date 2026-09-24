@@ -28,6 +28,11 @@ export class PushBindingStore {
     const value = this.values.get(binding); this.values.delete(binding);
     return value && value.expiresAt > this.now() ? value : undefined;
   }
+  /** The binding's action without spending it: a tap that opens the app. */
+  peek(binding: string): PushBinding | undefined {
+    const value = this.values.get(binding);
+    return value && value.expiresAt > this.now() ? value : undefined;
+  }
   dropAction(action: string) { for (const [key, value] of this.values) if (value.action === action) this.values.delete(key); }
   clear() { this.values.clear(); }
   get size() { return this.values.size; }
