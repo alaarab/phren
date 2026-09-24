@@ -41,6 +41,8 @@ export interface WorkerObservation {
   completed?: boolean;
   reply?: string;
   truncated?: boolean;
+  /** The error the harness ended the turn on (Codex's usage limit). */
+  error?: string;
 }
 
 export interface WorkerReaders {
@@ -87,7 +89,7 @@ export async function workerStates(input: unknown, readers: WorkerReaders = defa
     if ((state !== "idle" && state !== "done") || !session) return { state, ...(session ? { session } : {}) };
     const turn = await readers.finalTurn(target.source, session).catch(() => undefined);
     const reply = turn?.lastAssistant ? truncateUtf8(turn.lastAssistant) : undefined;
-    return { state, session, completed: turn?.completed === true,
+    return { state, session, completed: turn?.completed === true, ...(turn?.error ? { error: turn.error } : {}),
       ...(reply ? { reply: reply.text, ...(reply.truncated ? { truncated: true } : {}) } : {}) };
   }));
   return { workers };
@@ -96,7 +98,7 @@ export async function workerStates(input: unknown, readers: WorkerReaders = defa
 const observationSchema = z.object({
   state: z.enum(["working", "idle", "done", "blocked", "unknown", "gone", "unavailable"]),
   session: z.string().max(200).optional(), completed: z.boolean().optional(),
-  reply: z.string().max(REPLY_LIMIT).optional(), truncated: z.boolean().optional(),
+  reply: z.string().max(REPLY_LIMIT).optional(), truncated: z.boolean().optional(), error: z.string().max(500).optional(),
 }).passthrough();
 
 function turnKey(reply: string | undefined): string | undefined {
@@ -116,14 +118,17 @@ export function observe(receipt: Receipt, value: unknown, now: number): boolean 
     if (full.success) { receipt.target = full.data; changed = true; }
   }
   const sawWorking = receipt.worker?.sawWorking === true || seen.state === "working" || seen.state === "blocked";
-  const question = seen.completed && seen.reply ? ownerQuestion(seen.reply) : undefined;
+  // A turn the harness ended on an error (a usage limit) failed, reply or not.
+  const failed = seen.completed && seen.error ? seen.error : undefined;
+  const question = seen.completed && seen.reply && !failed ? ownerQuestion(seen.reply) : undefined;
   let next: WorkerState;
   if (seen.state === "gone") next = "gone";
   else if (seen.state === "working") next = "working";
   else if (seen.state === "blocked") next = "blocked";
+  else if (failed) next = "failed";
   else if (seen.completed) next = question ? "needs-you" : "done";
   else next = sawWorking || now - Date.parse(receipt.createdAt) > IDLE_GRACE_MS ? "done" : "working";
-  const turn = next === "done" || next === "needs-you" ? turnKey(seen.reply) : undefined;
+  const turn = next === "done" || next === "needs-you" ? turnKey(seen.reply) : next === "failed" ? turnKey(failed) : undefined;
   const previous = receipt.worker?.state;
   // The same finished state with a different final reply is a new turn: the
   // worker took more work (a hand_off) and finished again between two polls.
@@ -136,7 +141,7 @@ export function observe(receipt: Receipt, value: unknown, now: number): boolean 
   if (next !== "working") {
     receipt.returned = { state: next, at, read: false,
       ...(seen.reply && (next === "done" || next === "needs-you") ? { reply: seen.reply, ...(seen.truncated ? { truncated: true } : {}) } : {}),
-      ...(question ? { question } : {}), ...(turn ? { turn } : {}) };
+      ...(failed ? { error: failed } : {}), ...(question ? { question } : {}), ...(turn ? { turn } : {}) };
   }
   return true;
 }
@@ -144,10 +149,10 @@ export function observe(receipt: Receipt, value: unknown, now: number): boolean 
 /** One line for the dispatching agent: who returned, how, and where to read it. */
 export function noticeLine(receipts: readonly Receipt[]): string {
   const clean = (value: string, max: number) => value.replace(/[\x00-\x1f\x7f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
-  const word = { "done": "done", "needs-you": "needs you", "blocked": "blocked", "gone": "gone" } as const;
+  const word = { "done": "done", "needs-you": "needs you", "failed": "failed", "blocked": "blocked", "gone": "gone" } as const;
   const describe = (receipt: Receipt, room: number) => {
     const returned = receipt.returned!;
-    const detail = returned.state === "needs-you" ? returned.question
+    const detail = returned.state === "needs-you" ? returned.question : returned.state === "failed" ? returned.error
       : returned.state === "done" ? returned.reply?.split("\n").find(line => line.trim()) : undefined;
     const excerpt = detail ? clean(detail.replace(/[*_`#>]+/g, ""), room) : "";
     return `${clean(receipt.computer, 60)} ${clean(receipt.label, 80)} ${word[returned.state]}${excerpt ? `, ${excerpt}` : ""}`;
@@ -162,7 +167,7 @@ export function returnRow(receipt: Receipt): Json {
   const returned = receipt.returned!;
   return { id: receipt.id, computer: receipt.computer, project: receipt.project, label: receipt.label, harness: receipt.harness,
     state: returned.state, at: returned.at, ...(returned.reply !== undefined ? { reply: returned.reply } : {}),
-    ...(returned.truncated ? { truncated: true } : {}), ...(returned.question ? { question: returned.question } : {}),
+    ...(returned.truncated ? { truncated: true } : {}), ...(returned.error ? { error: returned.error } : {}), ...(returned.question ? { question: returned.question } : {}),
     ...(receipt.target ? { target: receipt.target } : {}) };
 }
 

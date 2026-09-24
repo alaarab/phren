@@ -90,6 +90,19 @@ describe("recording transitions", () => {
     expect(value.returned!.turn).not.toBe(first);
   });
 
+  it("records a turn the harness ended on an error as failed, never done", () => {
+    const limit = "You’ve hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Sep 26th, 2026 6:12 AM.";
+    const value = receipt();
+    observe(value, { state: "working" }, 1000);
+    expect(observe(value, { state: "done", completed: true, error: limit }, 2000)).toBe(true);
+    expect(value.worker!.state).toBe("failed");
+    expect(value.returned).toMatchObject({ state: "failed", error: limit, read: false });
+    expect(value.returned!.reply).toBeUndefined();
+    expect(noticeLine([value])).toContain("failed, You’ve hit your usage limit.");
+    // Herdr turning done into idle is no new return.
+    expect(observe(value, { state: "idle", completed: true, error: limit }, 3000)).toBe(false);
+  });
+
   it("names a question, a blocked pane and a gone worker, and ignores silence", () => {
     const value = receipt();
     observe(value, { state: "working" }, 1000);

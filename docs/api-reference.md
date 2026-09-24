@@ -69,6 +69,7 @@ A return is recorded when a worker's pane changes to one of these states:
 |-------|---------|
 | `done` | The worker finished its turn. `reply` holds its final reply from the transcript, at most 4000 UTF-8 bytes (`truncated` when cut). |
 | `needs-you` | The worker finished by asking the owner something. `question` holds the question line, `reply` the whole reply. |
+| `failed` | The harness ended the worker's turn on an error instead of a reply, such as Codex's usage limit. `error` holds its message. |
 | `blocked` | The worker waits on terminal input, such as a permission prompt. |
 | `gone` | The worker's pane closed or another conversation took it over. |
 

@@ -341,6 +341,6 @@ covers enrollment and placement: a reusable restricted dispatch key, pinned SSH
 peers in the Hook's private `hooks.yaml`, `POST /v1/dispatch` with named or
 `anywhere` placement, durable receipts, the `dispatch` MCP tool, and the
 `phren dispatch` command. The returns loop follows each dispatched worker to
-done, needs-you, blocked or gone, keeps its final reply in the receipt, serves
+done, needs-you, failed, blocked or gone, keeps its final reply in the receipt, serves
 unread returns through `dispatch_returns`, and tells an idle dispatching agent
 in one line. See [Conductor](conductor.md).

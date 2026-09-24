@@ -29,7 +29,7 @@ const remoteTarget = z.union([targetSchema, startingTargetSchema]);
 /** The local pane that asked for the dispatch, where return notices go. */
 export const originPaneSchema = z.object({ server: serverName, workspace: id, tab: id, pane: id }).strict();
 export type OriginPane = z.infer<typeof originPaneSchema>;
-export const workerStates = ["working", "done", "needs-you", "blocked", "gone"] as const;
+export const workerStates = ["working", "done", "needs-you", "failed", "blocked", "gone"] as const;
 export type WorkerState = typeof workerStates[number];
 const timestamp = z.string().datetime();
 const receiptSchema = dispatchSchema.omit({ prompt: true }).extend({
@@ -45,10 +45,10 @@ const receiptSchema = dispatchSchema.omit({ prompt: true }).extend({
   worker: z.object({ state: z.enum(workerStates), since: timestamp, checkedAt: timestamp, sawWorking: z.boolean() }).strict().optional()
     .describe("The worker pane's last observed state."),
   returned: z.object({
-    state: z.enum(["done", "needs-you", "blocked", "gone"]), at: timestamp,
-    reply: z.string().max(4000).optional(), truncated: z.boolean().optional(), question: z.string().max(200).optional(),
+    state: z.enum(["done", "needs-you", "failed", "blocked", "gone"]), at: timestamp,
+    reply: z.string().max(4000).optional(), error: z.string().max(500).optional(), truncated: z.boolean().optional(), question: z.string().max(200).optional(),
     turn: z.string().regex(/^[a-f0-9]{16}$/).optional(), read: z.boolean(), notifiedAt: timestamp.optional(),
-  }).strict().optional().describe("The latest return: the worker finished, needs the owner, is blocked or is gone."),
+  }).strict().optional().describe("The latest return: the worker finished, needs the owner, failed, is blocked or is gone."),
 });
 export type Receipt = z.infer<typeof receiptSchema>;
 type Skipped = { computer: string; reason: string };
