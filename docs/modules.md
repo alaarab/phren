@@ -410,7 +410,7 @@ Concrete suite targets, relative to `packages/cli/src` unless stated otherwise:
 - Package 5: `hooks.test.ts`, `cli-hooks-session.test.ts`,
   `init/preset-integration.test.ts`, `init/init-uninstall.test.ts`,
   `__tests__/init-setup-onboarding.test.ts` and new module footprint snapshots.
-- Package 6: `bridge/bridge.test.ts`, `bridge/server-policy.test.ts`,
+- Package 6: `bridge/bridge.suite.ts`, `bridge/server-policy.test.ts`,
   `bridge/schedules.test.ts`, `bridge/git.test.ts` and new route/teardown fixtures.
 - Package 7: PhrenKit `LiveSessionsTests.swift` and new `ModulesConfigTests.swift`,
   PhrenLive `PhrenConnectionTests.swift`, and app UI `MemoryConnectionTests.swift`,
