@@ -1,5 +1,6 @@
 import PhrenKit
 import SwiftUI
+import os
 import WebKit
 
 struct GraphCommand: Equatable {
@@ -106,6 +107,9 @@ struct GraphWebView: UIViewRepresentable {
             self.onError = onError
         }
 
+        /// Automatic retries of a render call that failed.
+        var renderAttempts = 0
+
         func startTimeout() {
             let task = DispatchWorkItem { [weak self] in
                 guard let self, !self.isReady else { return }
@@ -142,10 +146,21 @@ struct GraphWebView: UIViewRepresentable {
                         self.isRendering = false
                         switch result {
                         case .success:
+                            self.renderAttempts = 0
                             self.lastRenderedPayload = payload
                             self.renderIfReady()
-                        case .failure:
-                            self.onError("The graph couldn't be drawn. Try opening it again.")
+                        case .failure(let error):
+                            // The first call can land while the page is still
+                            // settling (seen on first open; Try again always
+                            // worked): retry twice before showing the error.
+                            os_log("graph render failed (attempt %d): %{public}@", self.renderAttempts + 1, error.localizedDescription)
+                            if self.renderAttempts < 2 {
+                                self.renderAttempts += 1
+                                DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(300 * self.renderAttempts)) { self.renderIfReady() }
+                            } else {
+                                self.renderAttempts = 0
+                                self.onError("The graph couldn't be drawn. Try opening it again.")
+                            }
                         }
                     }
                 }
