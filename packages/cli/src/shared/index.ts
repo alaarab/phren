@@ -2053,6 +2053,24 @@ export function findFtsCacheForPath(phrenPath: string, profile?: string): { exis
   return { exists: false };
 }
 
+/**
+ * The nearest ancestor of `dir` (itself included) that is a git checkout named
+ * `project`, compared case-insensitively. Used only when a project's
+ * registered source folder doesn't exist on this machine.
+ */
+function localCheckoutNamed(dir: string, project: string): string | null {
+  const wanted = project.toLowerCase();
+  let current = dir;
+  for (;;) {
+    if (path.basename(current).toLowerCase() === wanted && fs.existsSync(path.join(current, ".git"))) {
+      return current;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+}
+
 export function detectProject(phrenPath: string, cwd: string, profile?: string): string | null {
   const manifest = readRootManifest(phrenPath);
   if (manifest?.installMode === "project-local") {
@@ -2068,8 +2086,14 @@ export function detectProject(phrenPath: string, cwd: string, profile?: string):
     // Try the project's own store path first (handles team store projects),
     // then fall back to primary phrenPath
     const storePhrenPath = path.dirname(dir);
-    const sourcePath = getProjectSourcePath(storePhrenPath, projectName)
+    const configuredPath = getProjectSourcePath(storePhrenPath, projectName)
       || getProjectSourcePath(phrenPath, projectName);
+    // The store is shared between computers, so the registered folder may be
+    // another machine's (e.g. /home/other/Projects/x). When it doesn't exist
+    // here, fall back to the checkout on this machine named after the project.
+    const sourcePath = configuredPath && fs.existsSync(configuredPath)
+      ? configuredPath
+      : localCheckoutNamed(resolvedCwd, projectName) ?? configuredPath;
     if (!sourcePath) continue;
     // Exact first. Then case-insensitive: a sourcePath written on a
     // case-insensitive filesystem (macOS) and synced here can differ from the
