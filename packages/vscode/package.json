@@ -16,7 +16,7 @@
     "url": "https://github.com/alaarab/phren/issues"
   },
   "engines": {
-    "vscode": "^1.120.0"
+    "vscode": "^1.138.0"
   },
   "categories": [
     "Other"
@@ -800,7 +800,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.2",
-    "@types/vscode": "1.120.0",
+    "@types/vscode": "1.138.0",
     "@vscode/vsce": "^4.0.0",
     "typescript": "^7.0.2"
   }
