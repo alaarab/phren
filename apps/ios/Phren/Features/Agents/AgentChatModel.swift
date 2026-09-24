@@ -553,9 +553,14 @@ final class AgentChatModel {
                 guard connection.generation == run else { return }
                 // A poll that changed nothing must not redraw anything.
                 if panes != list.panes { panes = list.panes }
-                // The conversation kept from the last visit may have been
-                // replaced in its pane since; pick again as a first open does.
-                if reopened, let kept = target, !kept.isStarting, (try? list.validate(kept)) == nil { chooseAnother() }
+                // The conversation may have been replaced in its pane, since
+                // the last visit or while this chat is open (/clear, /new, a
+                // restarted agent): follow the pane's current one at once,
+                // as reopening the chat does, instead of retrying the old.
+                if let kept = target, !kept.isStarting, (try? list.validate(kept)) == nil {
+                    if !reopened { deliveryError = nil }
+                    chooseAnother()
+                }
                 reopened = false
                 if target == nil {
                     let supported = panes.filter { (try? $0.target(hostID: session.host.id, workspaceID: session.workspaceID, tabID: session.tab.id, muxID: session.host.muxID)) != nil }
@@ -915,6 +920,13 @@ final class AgentChatModel {
             return (true, sent, false)
         } catch {
             awaitingReply = false
+            // A slash command is never confirmed: the agent runs it without
+            // reporting a submitted prompt (/clear even replaces the
+            // conversation). Unconfirmed is the expected outcome there.
+            if AgentSlashCommand.isCommand(submitted), case LiveConnectionError.deliveryUnconfirmed = error {
+                sentAt = nil
+                return (true, sent, false)
+            }
             let rejected: Bool
             if case LiveConnectionError.gatewayRejection(let status, _) = error { rejected = (400..<500).contains(status) }
             else { rejected = error is PhrenKitError }

@@ -2,6 +2,24 @@ import XCTest
 
 /// The conversation itself: activity rows, history paging, opening at the end, following the latest reply, links.
 final class AgentChatTranscriptTests: AgentChatUITestCase {
+    /// /clear starts a new conversation in the same pane: the chat follows
+    /// it at once, with no delivery warning, instead of keeping the old one.
+    @MainActor
+    func testClearFollowsTheNewConversationWithoutAWarning() {
+        let app = launch(extra: ["--chat-clear-fixture"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        XCTAssertTrue(app.scrollViews["chat-transcript"].waitForExistence(timeout: 8))
+        let field = app.textViews["chat-composer"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap(); field.typeText("/clear")
+        app.buttons["chat-send"].tap()
+        let fresh = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "A fresh conversation after clear")).firstMatch
+        XCTAssertTrue(fresh.waitForExistence(timeout: 12), "The chat follows the pane's new conversation")
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Delivery wasn't confirmed")).firstMatch.exists)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "conversation changed")).firstMatch.exists)
+        capture(app, "Chat after clear")
+    }
+
     @MainActor
     func testActivityCountsWhileThinkingAndCollapsesAboveTheReply() {
         let app = launch(extra: ["--chat-streaming", "--chat-activity-fixture", "--chat-clear-drafts"])

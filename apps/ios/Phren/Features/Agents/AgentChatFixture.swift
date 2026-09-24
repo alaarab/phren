@@ -371,6 +371,9 @@ import UniformTypeIdentifiers
         let agent = remote ? "codex" : launchedKind ?? (flag("--chat-copilot") ? "copilot" : (trailer || flag("--chat-claude-queue") || flag("--chat-claude-image") || flag("--chat-read-images") || flag("--chat-approval-question") || flag("--chat-terminal-questions") || flag("--chat-agent-card") || flag("--chat-todos") || flag("--chat-plan-mode") || flag("--chat-web-tools") || flag("--chat-skill-chip") || flag("--chat-mcp-card") || flag("--chat-compaction") || flag("--chat-model-picker") || flag("--chat-phren-tools") || flag("--chat-side-answer") || flag("--chat-long-location") || flag("--chat-narration") || flag("--chat-turn-changes-claude")) ? "claude" : "codex")
         var panes: [[String: Any]] = [["id": "\(session.workspaceID):p1", "label": "1", "title": tour ? "Ship the onboarding flow" : flag("--chat-long-location") ? "Continue where the earlier session left off in Codex" : "Polish the phone app", "agent": agent,
                                      "agentStatus": ((flag("--chat-blocked") || flag("--chat-password") || flag("--chat-approval") || flag("--chat-approval-question") || flag("--chat-plan-mode") || flag("--chat-question")) && !answered) ? "blocked" : (flag("--chat-queue-completion") || flag("--chat-history-stalled") || (flag("--chat-working") && !stopped) ? "working" : "idle"), "sessionId": remote ? "00000000-0000-0000-0000-000000000042" : agent == "copilot" ? "00000000-0000-0000-0000-000000000023" : agent == "opencode" ? "ses_fixtureopencode" : "fixture-\(agent)-session", "cwd": root]]
+        if flag("--chat-clear-fixture"), let clearedAt, Date.now.timeIntervalSince(clearedAt) > 0.5 {
+            panes[0]["sessionId"] = "fixture-\(agent)-session-cleared"
+        }
         if flag("--starting-session-fixture") {
             panes[0]["startingToken"] = startingToken
             if startingAttachedAt == nil || Date.now < startingAttachedAt! {
@@ -388,8 +391,16 @@ import UniformTypeIdentifiers
         return try AgentChatPanes.read(JSONSerialization.data(withJSONObject: ["kind": "herdr", "groupId": session.workspaceID, "childId": session.tab.id, "panes": panes]),
                                        workspaceID: session.workspaceID, tabID: session.tab.id)
     }
+    /// `--chat-clear-fixture`: when "/clear" was sent; the pane then runs a
+    /// new conversation, as Claude's /clear starts one.
+    static var clearedAt: Date?
     static func transcript(_ target: AgentChatTarget) throws -> AgentChatTranscript {
         hasReadTranscript = true
+        if target.sessionID.hasSuffix("-cleared") {
+            let raw: [String: Any] = ["type": "assistant", "message": ["role": "assistant", "content": [["type": "text", "text": "A fresh conversation after clear."]]]]
+            return try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: ["type": "backlog", "source": target.source,
+                "entries": [["line": 0, "raw": raw]], "startLine": 0, "totalLines": 1, "hasMore": false]), source: target.source)
+        }
         if flag("--chat-heavy") || flag("--chat-uneven") {
             if let cached = heavyFrames[target.source] { return cached }
             let frame = try AgentChatTranscript.read(ChatHeavyFixture.data(source: target.source, uneven: flag("--chat-uneven")), source: target.source)
@@ -930,6 +941,11 @@ import UniformTypeIdentifiers
             throw LiveConnectionError.gatewayRejection(status: 422, reason: "The selected terminal is unavailable.")
         }
         if flag("--chat-send-fails") { throw LiveConnectionError.disconnected }
+        // Claude runs /clear without a submitted prompt: never confirmed.
+        if flag("--chat-clear-fixture"), text.trimmingCharacters(in: .whitespacesAndNewlines) == "/clear" {
+            clearedAt = .now
+            throw LiveConnectionError.deliveryUnconfirmed
+        }
         sent.append((target.id, text))
         talkSentAt.append(.now)
         askSide(text)
