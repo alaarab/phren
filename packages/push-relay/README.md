@@ -29,7 +29,12 @@ PHREN_RELAY_SECRET=$(openssl rand -hex 32) APNS_KEY_FILE=AuthKey_XXXXXXXXXX.p8 \
   node dist/server.js
 ```
 
-It listens on 127.0.0.1:8787 behind a TLS proxy. `deploy/` has a systemd
+On Cloud Run: `deploy/cloud-run.sh <project> <AuthKey.p8> <key-id> <team-id>`
+builds from the Dockerfile and deploys to two regions, each capped at one
+instance, with the relay secret and the APNs key in Secret Manager. Set a
+budget alert on the billing account.
+
+On a host of your own it listens on 127.0.0.1:8787 behind a TLS proxy. `deploy/` has a systemd
 unit, a Caddy site (Caddy fetches its own certificate) and an nginx block for
 a host that already runs nginx. Point a DNS A record for the relay's name at
 the host. Keep `PHREN_RELAY_SECRET` safe: it is the relay's only state, and a
