@@ -8,6 +8,7 @@ import { createServer } from "node:http";
 import { cpus, hostname, loadavg } from "node:os";
 import path from "node:path";
 import { WebSocketServer } from "ws";
+import { relayTranscription } from "./speech-transcribe.js";
 import { ActivityJournal } from "./activity.js";
 import { countTick } from "./metrics.js";
 import { AgentHooks } from "./agent-hooks.js";
@@ -137,7 +138,7 @@ export async function serve(version: string): Promise<void> {
   http.on("upgrade", (request, socket, head) => {
     try {
       const url = new URL(request.url || "/", "http://phren.local");
-      if (!["/v1/transcripts", "/v1/status", "/v1/overview"].includes(url.pathname) || url.origin !== "http://phren.local") { socket.destroy(); return; }
+      if (!["/v1/transcripts", "/v1/status", "/v1/overview", "/v1/speech/transcribe"].includes(url.pathname) || url.origin !== "http://phren.local") { socket.destroy(); return; }
       requireRoute(modules, "WS", url.pathname);
       // Parsed before the upgrade: an invalid server name is refused as the other routes refuse it.
       const overviewServer = url.pathname === "/v1/overview" ? selectedServer(url) : undefined;
@@ -148,6 +149,7 @@ export async function serve(version: string): Promise<void> {
           ws.clients.delete(oldest);
         }
         if (overviewServer !== undefined) { overview(client, overviewServer, url.searchParams.get("watchApprovals") === "1"); return; }
+        if (url.pathname === "/v1/speech/transcribe") { void relayTranscription(client, url.searchParams).catch(() => client.close(1011, "Transcription unavailable")); return; }
         void stream(client, url).catch(() => client.close(1011, "Conversation unavailable; refresh"));
       });
     } catch { socket.destroy(); }

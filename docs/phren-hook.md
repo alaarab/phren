@@ -303,3 +303,20 @@ installed Apple voice.
 The helper exposes a private Unix socket, not a public HTTP port. SSH keys stay
 in the iPhone Keychain. Images and activity remain local to the computer; see the
 [protocol and storage limits](../apps/ios/AGENT_CONNECTIONS.md).
+
+
+### Dictation through ElevenLabs Scribe
+
+When the phone's Settings > Voice > Input is ElevenLabs Scribe, dictation goes
+through the computer the chat is on. `WS /v1/speech/transcribe` takes 16 kHz
+mono 16-bit PCM as binary frames and relays it to ElevenLabs' `scribe_v2_realtime`
+model with voice-activity commits, using the same `elevenlabs_api_key` as
+`/v1/speech`. The query can carry `language` (an ISO 639 code) and up to 50
+`keyterm` values, the phone's project vocabulary. The Hook answers with text
+frames `{"type":"partial","text":…}` and `{"type":"committed","text":…}`; the
+phone's one text frame, `{"type":"commit"}`, commits what's left when the
+person stops. Errors arrive as `{"type":"error","code":…,"error":…}` with fixed
+messages (`transcribe-unconfigured`, `transcribe-rejected`, `transcribe-quota`,
+`transcribe-busy`, `transcribe-limit`, `transcribe-failed`), never ElevenLabs'
+own text. A socket lasts at most ten minutes. The Hook advertises it as the
+`transcribe` capability; each use is billed to that ElevenLabs account.
