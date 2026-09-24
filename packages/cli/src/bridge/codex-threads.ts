@@ -55,7 +55,12 @@ const materializations = new Map<string, Promise<string | undefined>>();
 function pendingMessage(history: Db, session: string): { id: string; turnStartedAt: string; text: string } | undefined {
   const turn = object(history.prepare("select turn_id, status, started_at from thread_turns where thread_id = ? order by rollout_ordinal desc limit 1").get(session));
   if (turn.status !== "inProgress") return undefined;
-  const row = object(history.prepare("select item_json from thread_items where thread_id = ? and turn_id = ? order by rollout_ordinal desc limit 1").get(session, turn.turn_id));
+  // Queued steering can be appended while the current reply is still growing.
+  // It does not finish that reply or make its partial text safe to persist.
+  const row = object(history.prepare(`select item_json from thread_items where thread_id = ? and turn_id = ?
+    and not (item_type = 'userMessage' and case when json_valid(item_json)
+      then coalesce(json_extract(item_json, '$.status'), '') else '' end = 'queued')
+    order by rollout_ordinal desc limit 1`).get(session, turn.turn_id));
   let item: Json;
   try { item = object(JSON.parse(String(row.item_json))); } catch { return undefined; }
   if (item.type !== "agentMessage" || finished(item) || item.delivery === "async") return undefined;

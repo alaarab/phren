@@ -394,6 +394,7 @@ export class AgentHooks {
       && JSON.stringify(choice.options) === JSON.stringify(expected.options);
     for (let attempt = 0; attempt < 2; attempt++) {
       if (!matches(current)) break;
+      await validateTarget(target, false, true);
       const difference = intended - current.highlightedIndex;
       if (!difference) return;
       await beforeKeys?.();
@@ -401,7 +402,12 @@ export class AgentHooks {
         keys: Array<string>(Math.abs(difference)).fill(difference > 0 ? "down" : "up") });
       await new Promise(resolve => setTimeout(resolve, 150));
       current = visibleTerminalChoice(await this.paneLines(target));
-      if (matches(current) && current.highlightedIndex === intended) return;
+      if (matches(current) && current.highlightedIndex === intended) {
+        // Pane reads and cursor movement can outlive the session the phone
+        // selected. Check its fresh identity before permitting confirmation.
+        await validateTarget(target, false, true);
+        return;
+      }
     }
     throw new BridgeError(409, "Could not move and verify the terminal selection. Open terminal to choose this option.");
   }
@@ -469,6 +475,7 @@ export class AgentHooks {
       if (choice && /\benable full access\b/i.test(choice.title ?? "")) {
         const option = choice.options[0];
         if (option.hasKey === false) await this.moveDialogHighlight(target, choice, option.key);
+        await validateTarget(target, false, true);
         await rpc(target.server, "agent.send_keys", { target: target.pane,
           keys: option.hasKey === false ? ["enter"] : [option.key.toLowerCase(), "enter"] });
         this.clearTerminalPrompt(target);
