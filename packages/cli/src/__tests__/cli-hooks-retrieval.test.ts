@@ -202,21 +202,34 @@ describe("applyRelevanceFloor", () => {
     expect(kept).toHaveLength(1);
   });
 
-  it("keeps a canonical doc for the detected project even with no overlap", () => {
+  it("holds a canonical doc for the detected project to the same bar as any other", () => {
     const rows = [makeDocRow("myapp", "AGENTS.md", "canonical", "unrelated project overview text")];
-    const kept = applyRelevanceFloor(rows, KEYWORDS, null, "myapp");
-    expect(kept).toHaveLength(1);
+    expect(applyRelevanceFloor(rows, KEYWORDS, null, "myapp")).toHaveLength(0);
+    const matching = [makeDocRow("myapp", "AGENTS.md", "canonical", "- Alerts go to the discord webhook.")];
+    expect(applyRelevanceFloor(matching, KEYWORDS, null, "myapp")).toHaveLength(1);
   });
 
-  it("holds cross-project docs to a higher bar than local docs", () => {
-    // 5-token query → denom 5; one shared token ("latency") scores 0.2:
-    // clears the local floor (0.12) but not the cross-project floor (0.25).
-    const fiveTokenQuery = "webhook discord alerts monitor latency";
-    const local = makeDocRow("myapp", "perf.md", "findings", "improving latency on the dashboard");
-    const cross = makeDocRow("other", "perf.md", "findings", "latency tuning notes");
-    const kept = applyRelevanceFloor([local, cross], fiveTokenQuery, null, "myapp");
-    expect(kept.some((r) => r.project === "myapp")).toBe(true);
-    expect(kept.some((r) => r.project === "other")).toBe(false);
+  it("needs two keywords in one bullet, not scattered across a file", () => {
+    const archive = makeDocRow("other", "reference/topics/ops.md", "reference",
+      "- The webhook retries three times.\n- Discord rate limits bursts.\n- Alerts page the on-call.");
+    expect(applyRelevanceFloor([archive], KEYWORDS, null, "myapp")).toHaveLength(0);
+    const together = makeDocRow("other", "reference/topics/ops.md", "reference",
+      "- Unrelated bullet.\n- Discord alerts go through the webhook proxy.");
+    expect(applyRelevanceFloor([together], KEYWORDS, null, "myapp")).toHaveLength(1);
+  });
+
+  it("weighs keywords by rarity: common words together clear nothing", () => {
+    const doc = makeDocRow("max", "notes.md", "findings", "- Push the fix to main before the release.");
+    const common = new Map([["push", 0.22], ["main", 0.18]]);
+    expect(applyRelevanceFloor([doc], "push main", null, "max", undefined, common)).toHaveLength(0);
+    const rare = new Map([["push", 0.22], ["main", 0.45]]);
+    expect(applyRelevanceFloor([doc], "push main", null, "max", undefined, rare)).toHaveLength(1);
+  });
+
+  it("never matches the path: every store path contains .phren", () => {
+    const doc = { ...makeDocRow("objectstudio", "FINDINGS.md", "findings", "- Delegation notes for the studio."),
+      path: "/home/sam/.phren/objectstudio/FINDINGS.md" };
+    expect(applyRelevanceFloor([doc], "phren delegation", null, null, undefined, new Map([["phren", 0.9], ["delegation", 0.9]]))).toHaveLength(0);
   });
 
   it("is a no-op when the floor is 0 (disabled)", () => {
@@ -225,10 +238,13 @@ describe("applyRelevanceFloor", () => {
     expect(kept).toHaveLength(1);
   });
 
-  it("is a no-op when there is no usable query signal", () => {
-    const rows = [makeDocRow("zeta", "notes.md", "findings", "totally unrelated content")];
-    const kept = applyRelevanceFloor(rows, "", null, null);
-    expect(kept).toHaveLength(1);
+  it("injects nothing when the prompt has fewer keywords than a bullet must match (\"Yes\")", () => {
+    const rows = [makeDocRow("zeta", "notes.md", "findings", "- yes, totally unrelated content")];
+    expect(applyRelevanceFloor(rows, "", null, null)).toHaveLength(0);
+    expect(applyRelevanceFloor(rows, "yes", null, null)).toHaveLength(0);
+    // A changed file is still a tie to the work.
+    const changed = makeDocRow("zeta", "auth-config.md", "findings", "anything");
+    expect(applyRelevanceFloor([changed], "yes", { changedFiles: new Set(["auth-config.md"]) }, "zeta")).toHaveLength(1);
   });
 
   it("exposes a sane default floor in (0, 1)", () => {

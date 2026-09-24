@@ -24,29 +24,27 @@ export type HandOffInput = z.infer<typeof handOffSchema>;
 
 type Request = (route: string, data?: Json) => Promise<Json>;
 
-async function targetFromOverview(request: Request, session: string, server?: string): Promise<Target> {
+/** The pane's project (its folder) or workspace label, for the conductor's
+ * card; never a reason to fail a delivery. */
+function labelOf(group: Json, tab: Json): string | undefined {
+  const folder = typeof tab.cwd === "string" && tab.role !== "conductor" ? tab.cwd.split("/").filter(Boolean).at(-1) : undefined;
+  return folder || (typeof group.label === "string" && group.label ? group.label : undefined);
+}
+
+async function findInOverview(request: Request, match: (target: Target) => boolean, server?: string): Promise<{ target: Target; label?: string } | undefined> {
   const route = server ? `/v1/workspaces?server=${encodeURIComponent(server)}` : "/v1/workspaces";
   const overview = await request(route);
   for (const group of objects(overview.groups)) for (const tab of objects(group.children)) {
     const parsed = targetSchema.safeParse(tab.target);
-    if (parsed.success && parsed.data.session === session) return parsed.data;
+    if (parsed.success && match(parsed.data)) return { target: parsed.data, label: labelOf(group, tab) };
   }
-  throw new BridgeError(404, "No live session with that id appears in the workspace overview.");
+  return undefined;
 }
 
-/** The target pane's project (its folder) or workspace label, for the
- * conductor's card; best effort, never a reason to fail a delivery. */
-async function targetLabel(request: Request, target: Target, server?: string): Promise<string | undefined> {
-  try {
-    const overview = await request(server ? `/v1/workspaces?server=${encodeURIComponent(server)}` : "/v1/workspaces");
-    for (const group of objects(overview.groups)) for (const tab of objects(group.children)) {
-      const parsed = targetSchema.safeParse(tab.target);
-      if (!parsed.success || parsed.data.pane !== target.pane || parsed.data.session !== target.session) continue;
-      const folder = typeof tab.cwd === "string" && tab.role !== "conductor" ? tab.cwd.split("/").filter(Boolean).at(-1) : undefined;
-      return folder || (typeof group.label === "string" && group.label ? group.label : undefined);
-    }
-  } catch { /* the card falls back to the pane id */ }
-  return undefined;
+async function targetFromOverview(request: Request, session: string, server?: string): Promise<{ target: Target; label?: string }> {
+  const found = await findInOverview(request, target => target.session === session, server);
+  if (!found) throw new BridgeError(404, "No live session with that id appears in the workspace overview.");
+  return found;
 }
 
 export async function handOff(input: unknown): Promise<{ ok: boolean; delivered: boolean; target: Target; label?: string; granted?: string }> {
@@ -59,12 +57,17 @@ export async function handOff(input: unknown): Promise<{ ok: boolean; delivered:
     if (!peer) throw new BridgeError(404, "Unknown computer. Add its verified connection to hooks.yaml.");
     request = (route, body) => peerRequest(peer!, route, body);
   }
-  const target = data.target ?? await targetFromOverview(request, data.session!, peer?.server);
+  const resolved = data.target ? undefined : await targetFromOverview(request, data.session!, peer?.server);
+  const target = data.target ?? resolved!.target;
   if (peer && target.server !== peer.server) throw new BridgeError(400, "The target belongs to a different Herdr server on that computer.");
   const grant = matchGrant(await listGrants(), { action: "hand_off", project: data.project, computer: data.computer });
   const result = await request("/v1/prompt", { target, text: data.text });
   const delivered = result.ok === true && result.deliveryUncertain !== true;
-  const label = await targetLabel(request, target, peer?.server);
+  // A session id was resolved from the overview already; an explicit target
+  // is looked up once more, best effort, for its label.
+  const label = resolved ? resolved.label
+    : await findInOverview(request, found => found.pane === target.pane && found.session === target.session, peer?.server)
+      .then(found => found?.label, () => undefined);
   return { ok: delivered, delivered, target, ...(label ? { label } : {}), ...(grant ? { granted: grantLabel(grant) } : {}) };
 }
 

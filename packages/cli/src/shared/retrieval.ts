@@ -71,6 +71,17 @@ const LOW_FOCUS_SNIPPET_CHAR_FRACTION = 0.55;
  * PHREN_MIN_QUERY_RELEVANCE (0 disables the floor). */
 const DEFAULT_MIN_QUERY_RELEVANCE = 0.12;
 const CROSS_PROJECT_MIN_QUERY_RELEVANCE = 0.25;
+/** A chunk (one bullet or paragraph) must match this many distinct prompt
+ * keywords before its doc is worth injecting. */
+const MIN_CHUNK_MATCHES = 2;
+/** The matched keywords' summed rarity (normalised IDF, 0..1 each) a chunk
+ * needs. Common words across the index ("main", "push", "agent") weigh little,
+ * project and technical terms a lot, so a prompt of common words clears
+ * nothing. With no detected project (the conductor) the bar is higher. */
+const MIN_CHUNK_RARITY = 0.55;
+const NO_PROJECT_MIN_CHUNK_RARITY = 0.6;
+/** Rarity for a token the index never saw, or when no index is at hand. */
+const DEFAULT_TOKEN_RARITY = 0.5;
 const TASK_RESCUE_MIN_OVERLAP = 0.3;
 const TASK_RESCUE_OVERLAP_MARGIN = 0.12;
 const TASK_RESCUE_SCORE_MARGIN = 0.6;
@@ -223,8 +234,72 @@ function overlapScore(queryTokens: string[], content: string): number {
 }
 
 function docOverlapScore(queryTokens: string[], doc: DocRow): number {
-  const corpus = `${doc.project} ${doc.filename} ${doc.type} ${doc.path}\n${doc.content.slice(0, 5000)}`;
+  // Never the path: every store path contains "/.phren/", so "phren" would match every doc.
+  const corpus = `${doc.project} ${doc.filename} ${doc.type}\n${doc.content.slice(0, 5000)}`;
   return overlapScore(queryTokens, corpus);
+}
+
+/** A doc's bullets (with their continuation lines) or, with none, its
+ * paragraphs: the unit relevance is judged on. Topic archives are one doc
+ * with hundreds of bullets, so a whole-file score matches almost anything. */
+export function contentChunks(content: string, maxChunks = 600): string[] {
+  const chunks: string[] = [];
+  let current: string[] = [];
+  const flush = () => { if (current.length) chunks.push(current.join("\n")); current = []; };
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) { flush(); continue; }
+    if (/^([-*+]|\d+[.)])\s/.test(trimmed) || trimmed.startsWith("#")) flush();
+    current.push(line);
+    if (chunks.length >= maxChunks) break;
+  }
+  flush();
+  return chunks.slice(0, maxChunks);
+}
+
+export interface ChunkMatch { chunk: string; distinct: number; rarity: number }
+
+/** The doc's best chunk for this prompt: most summed keyword rarity among
+ * chunks with the most distinct keyword matches. */
+export function bestChunkMatch(queryTokens: string[], doc: Pick<DocRow, "content">, rarity?: Map<string, number>): ChunkMatch | null {
+  if (!queryTokens.length) return null;
+  const wanted = new Set(queryTokens);
+  let best: ChunkMatch | null = null;
+  for (const chunk of contentChunks(doc.content)) {
+    const tokens = new Set(tokenizeForOverlap(chunk, Number.POSITIVE_INFINITY));
+    let distinct = 0, weight = 0;
+    for (const token of wanted) {
+      if (!tokens.has(token)) continue;
+      distinct += 1;
+      weight += rarity?.get(token) ?? DEFAULT_TOKEN_RARITY;
+    }
+    if (!distinct) continue;
+    if (!best || weight > best.rarity || (weight === best.rarity && distinct > best.distinct)) best = { chunk, distinct, rarity: weight };
+  }
+  return best;
+}
+
+/** How rare each prompt token is across the index: normalised IDF, 1 for a
+ * token in one doc, near 0 for one in every doc. One FTS count per token. */
+/** `tokenRarity` for a prompt's keywords, tokenised as the floor tokenises them. */
+export function promptRarity(db: SqlJsDatabase | null | undefined, keywords: string): Map<string, number> {
+  return tokenRarity(db, tokenizeForOverlap(keywords));
+}
+
+export function tokenRarity(db: SqlJsDatabase | null | undefined, queryTokens: string[]): Map<string, number> {
+  const rarity = new Map<string, number>();
+  if (!db || !queryTokens.length) return rarity;
+  try {
+    const total = Number(queryRows(db, "SELECT COUNT(*) FROM docs", [])?.[0]?.[0] ?? 0);
+    if (!(total > 1)) return rarity;
+    const scale = Math.log(total + 1);
+    for (const token of queryTokens.slice(0, 12)) {
+      if (!/^[a-z0-9_-]+$/.test(token)) continue;
+      const df = Number(queryRows(db, "SELECT COUNT(*) FROM docs WHERE docs MATCH ?", [`"${token}"*`])?.[0]?.[0] ?? 0);
+      rarity.set(token, Math.max(0, Math.min(1, Math.log((total + 1) / (df + 1)) / scale)));
+    }
+  } catch { /* the default rarity stands in */ }
+  return rarity;
 }
 
 function loadSemanticFallbackWindow(
@@ -1086,20 +1161,25 @@ export function applyRelevanceFloor(
   keywords: string,
   gitCtx: { branch?: string; changedFiles?: Set<string> } | null,
   detectedProject: string | null,
-  floor: number = DEFAULT_MIN_QUERY_RELEVANCE
+  floor: number = DEFAULT_MIN_QUERY_RELEVANCE,
+  rarity?: Map<string, number>
 ): DocRow[] {
   if (!(floor > 0)) return rows;
   const queryTokens = tokenizeForOverlap(keywords);
-  if (!queryTokens.length) return rows; // no query signal to judge against
   const changedFiles = gitCtx?.changedFiles ?? new Set<string>();
-  const branch = gitCtx?.branch;
   const crossFloor = Math.max(floor, CROSS_PROJECT_MIN_QUERY_RELEVANCE);
+  // Fewer meaningful keywords than a chunk must match: nothing can be about
+  // this prompt ("Yes"), so only the structural signals remain.
+  const minRarity = detectedProject ? MIN_CHUNK_RARITY : NO_PROJECT_MIN_CHUNK_RARITY;
   return rows.filter((doc) => {
+    // A changed file is a tie to this work; a branch name is not: its words
+    // ("audio") run through a whole project's memory. It still orders results.
     if (fileRelevanceBoost(doc.path, changedFiles) > 0) return true;
-    if (branchMatchBoost(doc.content, branch) > 0) return true;
-    if (detectedProject && doc.project === detectedProject && doc.type === "canonical") return true;
+    if (queryTokens.length < MIN_CHUNK_MATCHES) return false;
+    const match = bestChunkMatch(queryTokens, doc, rarity);
+    if (!match || match.distinct < MIN_CHUNK_MATCHES || match.rarity < minRarity) return false;
     const isCrossProject = Boolean(detectedProject) && doc.project !== detectedProject;
-    return docOverlapScore(queryTokens, doc) >= (isCrossProject ? crossFloor : floor);
+    return overlapScore(queryTokens, match.chunk) >= (isCrossProject ? crossFloor : floor);
   });
 }
 
@@ -1131,7 +1211,10 @@ export function selectSnippets(
     // never get this far on the normal path, but this is the only place that is
     // unconditionally true of everything injected, so it is checked here too.
     if (!isInjectableDocType(doc.type)) continue;
-    let snippet = compactSnippet(extractSnippet(doc.content, keywords, 8), lineBudget, charBudget);
+    // The bullet that matched, not the doc's opening lines.
+    const match = bestChunkMatch(queryTokens, doc);
+    const source = match && match.distinct >= MIN_CHUNK_MATCHES ? match.chunk : extractSnippet(doc.content, keywords, 8);
+    let snippet = compactSnippet(source, lineBudget, charBudget);
     if (!snippet.trim()) continue;
     // Mark findings with stale citations before injection
     if (TRUST_FILTERED_TYPES.has(doc.type)) {
