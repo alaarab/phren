@@ -21,6 +21,14 @@ describe("Phren device key restrictions", () => {
     }
   });
 
+  it("migrates an Android device key the same way", () => {
+    const before = `restrict,port-forwarding,permitopen="127.0.0.1:*",${forcedCommand} ssh-ed25519 AAAA phren-android\n`;
+    expect(upgradeKeys(before)).toEqual({ text: `restrict,pty,${forcedCommand} ssh-ed25519 AAAA phren-android\n`, changed: 1 });
+    // A look-alike comment is someone else's key.
+    const other = before.replace("phren-android", "phren-androids");
+    expect(upgradeKeys(other)).toEqual({ text: other, changed: 0 });
+  });
+
   it("preserves quoted option contents and unrelated keys and policies", () => {
     const constraint = 'from="10.0.0.0/8,192.168.0.0/16",environment="LABEL=keep,port-forwarding,permitopen=\\"127.0.0.1:*\\""';
     const before = `restrict,${constraint},port-forwarding,permitopen="127.0.0.1:*",${forcedCommand} ssh-ed25519 AAAA phren-iphone\n`;
