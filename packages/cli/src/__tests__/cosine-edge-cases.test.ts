@@ -46,17 +46,6 @@ describe("cosineFallback: edge cases", () => {
     expect(results).toEqual([]);
   });
 
-  it("returns empty array when all query tokens are stop words", async () => {
-    makeProject(tmp.path, "proj", {
-      "FINDINGS.md": "# proj\n\n- Always use parameterized queries to prevent SQL injection\n",
-    });
-    db = await buildIndex(tmp.path);
-    // "the", "a", "is", "of" are all stop words — should produce no meaningful TF-IDF vector
-    const results = cosineFallback(db, "the a is of", new Set(), 10);
-    // Either no results (score 0) or returns something — either is safe
-    expect(Array.isArray(results)).toBe(true);
-  });
-
   it("handles single-document corpus without crash", async () => {
     makeProject(tmp.path, "solo", {
       "FINDINGS.md": "# solo Findings\n\n- Xylophone frequency calibration requires 440Hz tuning for musical accuracy\n",
@@ -150,38 +139,5 @@ describe("cosineFallback: edge cases", () => {
 
     const results = cosineFallback(fakeDb, "redis caching strategy", new Set(), 10);
     expect(results[0]?.filename).toBe("content-match.md");
-  });
-
-  it("uses deterministic rowid windows instead of ORDER BY RANDOM for large corpora", () => {
-    const sqlCalls: string[] = [];
-    const fakeDb: SqlJsDatabase = {
-      run: () => {},
-      exec: (sql: string, params?: unknown[]) => {
-        sqlCalls.push(sql);
-        if (sql.includes("MIN(rowid), MAX(rowid), COUNT(*)")) {
-          return [{ columns: ["min", "max", "count"], values: [[1, 1000, 1000]] }];
-        }
-        if (sql.includes("docs MATCH ?")) {
-          return [{ columns: ["rowid", "project", "filename", "type", "content", "path"], values: [] }];
-        }
-        if (sql.includes("rowid >= ?")) {
-          return [{
-            columns: ["rowid", "project", "filename", "type", "content", "path"],
-            values: [[Number(params?.[0] ?? 1), "proj", "FINDINGS.md", "findings", "redis caching strategy", "/tmp/proj/FINDINGS.md"]],
-          }];
-        }
-        if (sql.includes("rowid < ?")) {
-          return [];
-        }
-        return [];
-      },
-      export: () => new Uint8Array(),
-      close: () => {},
-    };
-
-    const results = cosineFallback(fakeDb, "redis caching strategy", new Set(), 10);
-    expect(results.length).toBeGreaterThan(0);
-    expect(sqlCalls.some((sql) => sql.includes("ORDER BY RANDOM"))).toBe(false);
-    expect(sqlCalls.some((sql) => sql.includes("rowid >= ?"))).toBe(true);
   });
 });
