@@ -29,7 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
-import com.phren.android.ui.OnboardingFlow
+import com.phren.android.features.OnboardingFlow
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -138,7 +138,7 @@ private fun MainTabView(model: AppModel) {
                     AppTab.AGENTS -> LiveBridge.Pending("Agents")
                     AppTab.TASKS -> if (ready) com.phren.android.features.TasksView() else MemoryConnectionPrompt("Tasks")
                     AppTab.MEMORY -> if (ready) com.phren.android.features.MemoryView() else MemoryConnectionPrompt("Memory")
-                    AppTab.SETTINGS -> LiveBridge.Pending("Settings")
+                    AppTab.SETTINGS -> com.phren.android.features.SettingsView()
                 }
             }
         }
@@ -158,9 +158,18 @@ private fun MainTabView(model: AppModel) {
                 model.selectedTab = tab
             }
         }
-        if (model.showingMemoryConnection) PhrenSheet({ model.showingMemoryConnection = false }) { OnboardingFlow(model) }
+        if (model.showingMemoryConnection) PhrenSheet({ model.showingMemoryConnection = false }) { OnboardingFlow(model, isPresented = true) }
     }
     LaunchedEffect(model.phase) { if (ready) model.showingMemoryConnection = false }
+    // This version's notes, once, after the store is connected so the sheet never covers onboarding.
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var showingWhatsNew by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    LaunchedEffect(model.phase) {
+        // Debug fixture stores (the UI-test data) never meet the sheet, as under iOS UI tests.
+        val fixture = BuildConfig.DEBUG && model.storeContexts.any { it.descriptor.owner == "sample" }
+        if (ready && !fixture && com.phren.android.features.ReleaseNotesStore.shouldPresent(context, model.prefs)) showingWhatsNew = true
+    }
+    if (showingWhatsNew) PhrenSheet({ showingWhatsNew = false; com.phren.android.features.ReleaseNotesStore.markSeen(model.prefs) }) { com.phren.android.features.WhatsNewSheet() }
 }
 
 @Composable

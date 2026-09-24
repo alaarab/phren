@@ -41,6 +41,11 @@ import androidx.compose.material.icons.rounded.CheckCircleOutline
 import androidx.compose.material.icons.rounded.Checklist
 import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.ContactPage
+import androidx.compose.material.icons.rounded.Palette
+import androidx.compose.material.icons.rounded.KeyboardAlt
+import androidx.compose.material.icons.rounded.Gesture
+import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Circle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Code
@@ -145,6 +150,12 @@ object SF {
     private val map: Map<String, ImageVector> by lazy {
         mapOf(
             "chevron.right" to Icons.Rounded.ChevronRight,
+            "bell" to Icons.Rounded.Notifications,
+            "hand.draw" to Icons.Rounded.Gesture,
+            "keyboard.badge.ellipsis" to Icons.Rounded.KeyboardAlt,
+            "paintpalette" to Icons.Rounded.Palette,
+            "person.text.rectangle" to Icons.Rounded.ContactPage,
+            "textformat" to Icons.Rounded.TextFields,
             "chevron.left" to Icons.Rounded.ChevronLeft,
             "chevron.down" to Icons.Rounded.KeyboardArrowDown,
             "chevron.up" to Icons.Rounded.KeyboardArrowUp,

@@ -60,9 +60,9 @@ private val groupShape = RoundedCornerShape(26.dp)
 
 /** A scrolling inset-grouped form on bg. */
 @Composable
-fun PhrenForm(modifier: Modifier = Modifier, bottomPadding: Dp = 100.dp, content: @Composable ColumnScope.() -> Unit) {
+fun PhrenForm(modifier: Modifier = Modifier, bottomPadding: Dp = 100.dp, scrollState: androidx.compose.foundation.ScrollState = rememberScrollState(), content: @Composable ColumnScope.() -> Unit) {
     Column(
-        modifier.fillMaxSize().background(PhrenTheme.bg).verticalScroll(rememberScrollState())
+        modifier.fillMaxSize().background(PhrenTheme.bg).verticalScroll(scrollState)
             .padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = bottomPadding),
         content = content,
     )
@@ -77,7 +77,7 @@ fun FormSection(header: String? = null, footer: String? = null, modifier: Modifi
         }
         Column(Modifier.fillMaxWidth().clip(groupShape).background(PhrenTheme.surface, groupShape), content = content)
         if (footer != null) {
-            Text(footer, style = PhrenType.footnote, color = PhrenTheme.textMuted, modifier = Modifier.padding(start = 17.dp, end = 17.dp, top = 7.dp))
+            Text(footer, style = PhrenType.footnote, color = PhrenTheme.textSecondary, modifier = Modifier.padding(start = 17.dp, end = 17.dp, top = 7.dp))
         }
     }
 }
@@ -100,8 +100,8 @@ fun FormRow(
     subtitle: String? = null,
     enabled: Boolean = true,
     identifier: String? = null,
-    onClick: (() -> Unit)? = null,
     trailing: (@Composable RowScope.() -> Unit)? = null,
+    onClick: (() -> Unit)? = null,
 ) {
     Row(
         Modifier.fillMaxWidth().heightIn(min = 52.dp)

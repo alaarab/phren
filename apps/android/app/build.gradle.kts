@@ -48,7 +48,22 @@ val copyGraphAssets by tasks.registering(Copy::class) {
     from(iosGraph) { include("index.html", "phren-graph.js") }
     into(layout.buildDirectory.dir("generated/graphAssets/graph"))
 }
-tasks.named("preBuild") { dependsOn(copyGraphAssets) }
+// What's new reads CHANGELOG.md; Settings → Open-source notices reads the
+// notices assembled from licenses/.
+val copyAppDocs by tasks.registering {
+    val changelog = rootProject.file("CHANGELOG.md")
+    val licenses = rootProject.file("licenses")
+    val out = layout.buildDirectory.dir("generated/graphAssets")
+    inputs.file(changelog); inputs.dir(licenses); outputs.dir(out)
+    doLast {
+        val dir = out.get().asFile.apply { mkdirs() }
+        changelog.copyTo(File(dir, "CHANGELOG.md"), overwrite = true)
+        val notices = StringBuilder("Open-source notices for phren for Android\n\n")
+        licenses.listFiles()!!.sortedBy { it.name }.forEach { notices.append("${it.nameWithoutExtension}\n\n").append(it.readText()).append("\n\n") }
+        File(dir, "ThirdPartyNotices.txt").writeText(notices.toString())
+    }
+}
+tasks.named("preBuild") { dependsOn(copyGraphAssets, copyAppDocs) }
 
 dependencies {
     implementation(project(":phrenkit"))

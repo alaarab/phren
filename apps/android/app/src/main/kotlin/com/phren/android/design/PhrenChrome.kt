@@ -134,7 +134,9 @@ fun PhrenNavBar(
     background: Color = PhrenTheme.bg,
 ) {
     Box(Modifier.fillMaxWidth().background(background).then(if (inSheet) Modifier.padding(top = 16.dp) else Modifier.windowInsetsPadding(WindowInsets.statusBars)).height(44.dp)) {
-        val centered = onBack != null || leading.isNotEmpty()
+        // iOS 26 centres an inline title unless a wide trailing group leaves
+        // no room for it; then it sits at the leading edge (Projects, Memory).
+        val centered = onBack != null || leading.isNotEmpty() || trailing.size < 2
         Row(Modifier.align(Alignment.CenterStart).padding(start = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (onBack != null) GlassItem(ToolbarItem(icon = SF("chevron.left"), label = "Back", identifier = "BackButton", onClick = onBack), inCapsule = false)
             if (leading.isNotEmpty()) ToolbarGroup(leading)

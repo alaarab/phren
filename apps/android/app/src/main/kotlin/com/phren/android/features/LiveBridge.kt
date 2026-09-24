@@ -20,6 +20,7 @@ object LiveBridge {
     fun hasComputer(model: AppModel): Boolean = false
     fun allowsSchedules(): Boolean = true
     fun showsCode(model: AppModel): Boolean = true
+    fun terminalFontName(): String = "System monospace"
     fun takePendingProject(): Pair<String, String>? = null
     fun connectComputer(navigator: PhrenNavigator) = navigator.push("connect-computer") { Pending("Add computer") }
 
