@@ -55,7 +55,8 @@ export interface StartupWatchEnv {
   finalTurn?: (source: ScheduleHarness, sessionId: string | undefined) => Promise<FinalTurn | undefined>;
 }
 
-export interface FinalTurn { completed: boolean; lastAssistant?: string }
+/** `error`: the harness ended the turn on an error (Codex's usage limit) instead of a reply. */
+export interface FinalTurn { completed: boolean; lastAssistant?: string; error?: string }
 
 /** The public text of one assistant row, without reasoning or tool output. */
 export function publicAssistant(raw: Json, source: Provider): string | undefined {
@@ -95,10 +96,18 @@ function turnEnded(raw: Json, source: ScheduleHarness): boolean {
   return data.stop_reason === "end_turn";
 }
 
+/** The error a turn ended on, when the harness records one: Codex's
+ * task_complete carries `error.message` (a usage limit, a failed compaction). */
+function turnError(raw: Json, source: ScheduleHarness): string | undefined {
+  if (source !== "codex") return;
+  const error = object(object(raw.payload).error), message = typeof error.message === "string" ? error.message.replace(/\s+/g, " ").trim() : "";
+  return message ? message.slice(0, 500) : undefined;
+}
+
 /** The last assistant reply in a transcript and whether its turn finished.
  * A person's message after the reply opens a new turn, so it clears both. */
 export function finalTurnFromLines(lines: readonly string[], source: ScheduleHarness): FinalTurn {
-  let completed = false, lastAssistant: string | undefined;
+  let completed = false, lastAssistant: string | undefined, error: string | undefined;
   for (const line of lines) {
     if (!line.trim()) continue;
     let raw: Json;
@@ -107,12 +116,12 @@ export function finalTurnFromLines(lines: readonly string[], source: ScheduleHar
     const userTurn = source === "claude" ? raw.type === "user" && !raw.isMeta && typeof object(raw.message).content === "string"
       : source === "codex" ? raw.type === "response_item" && payload.type === "message" && payload.role === "user"
       : raw.type === "user/message";
-    if (userTurn) { completed = false; lastAssistant = undefined; continue; }
+    if (userTurn) { completed = false; lastAssistant = undefined; error = undefined; continue; }
     const text = publicAssistant(raw, source);
     if (text) { lastAssistant = text; completed = false; }
-    if (turnEnded(raw, source)) completed = true;
+    if (turnEnded(raw, source)) { completed = true; error = turnError(raw, source); }
   }
-  return { completed, ...(lastAssistant ? { lastAssistant } : {}) };
+  return { completed, ...(lastAssistant ? { lastAssistant } : {}), ...(completed && error ? { error } : {}) };
 }
 
 /** The final turn of a conversation, read from the tail of its transcript. */
@@ -192,6 +201,7 @@ export async function watchHerdrRun(server: string, target: { workspaceId: strin
       if (status === "idle" || status === "done") {
         if (!sessionId) sessionId = await resolveSession(server, pane);
         const turn = await finalTurn(startup.source, sessionId).catch(() => undefined);
+        if (turn?.completed && turn.error) return { status: "failed", reason: turn.error };
         const question = turn?.completed && turn.lastAssistant ? ownerQuestion(turn.lastAssistant) : undefined;
         return question ? { status: "needs-you", reason: question } : { status: "finished" };
       }

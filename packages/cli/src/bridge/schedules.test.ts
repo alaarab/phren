@@ -519,6 +519,34 @@ describe("a scheduled turn that finished", () => {
     expect(await watchUntil("gone", claudeLines(report))).toMatchObject({ status: "failed" });
   });
 
+  // The shape Codex wrote on 2026-09-24 when a dispatched worker ran out of credits.
+  const usageLimit = "You’ve hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Sep 26th, 2026 6:12 AM.";
+  const codexLimited = [
+    JSON.stringify({ type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "Review the parser." }] } }),
+    JSON.stringify({ type: "event_msg", payload: { type: "task_complete", turn_id: "t1", last_agent_message: null,
+      error: { message: usageLimit, codex_error_info: "usage_limit_exceeded" } } }),
+  ];
+
+  it("reads the error a Codex turn ended on, and forgets it once a later turn starts or succeeds", () => {
+    expect(finalTurnFromLines(codexLimited, "codex")).toEqual({ completed: true, error: usageLimit });
+    const retried = [...codexLimited, JSON.stringify({ type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "Try again." }] } })];
+    expect(finalTurnFromLines(retried, "codex")).toEqual({ completed: false });
+    const succeeded = [...retried,
+      JSON.stringify({ type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "Reviewed." }] } }),
+      JSON.stringify({ type: "event_msg", payload: { type: "task_complete" } })];
+    expect(finalTurnFromLines(succeeded, "codex")).toEqual({ completed: true, lastAssistant: "Reviewed." });
+  });
+
+  it("records a Codex run that hit its usage limit as failed, with the limit as the reason", async () => {
+    const outcome = await watchHerdrRun("default", target, new AbortController().signal, { source: "codex", startedAt: 0 }, {
+      pause: async () => {},
+      panes: async () => [{ workspace_id: "w1", tab_id: "w1:t1", pane_id: "w1:p1", agent_status: "done" }],
+      resolveSession: async () => "aaaaaaaa-1111-4111-8111-111111111111",
+      finalTurn: async source => finalTurnFromLines(codexLimited, source),
+    });
+    expect(outcome).toEqual({ status: "failed", reason: usageLimit });
+  });
+
   it("reads a turn's end from each harness", () => {
     expect(finalTurnFromLines(claudeLines(report), "claude")).toEqual({ completed: true, lastAssistant: report });
     expect(finalTurnFromLines(claudeLines(report).slice(0, 4), "claude")).toEqual({ completed: false, lastAssistant: report });
