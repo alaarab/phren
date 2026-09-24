@@ -33,6 +33,8 @@ final class SessionOverviewMonitor {
         /// Answering, but under load or through a slow gateway; distinct from
         /// unreachable so the last snapshot stays visible.
         var slow: Bool? = nil
+        /// The Hook answers but its overview is slow or timing out; nil on older caches.
+        var busy: Bool? = nil
         var id: UUID { host.id }
     }
     /// One value is published for the entire screen: header, groups, resolved
@@ -207,7 +209,8 @@ final class SessionOverviewMonitor {
         var value = Screen(groups: groups, computers: computers.map {
             ComputerRow(host: $0.host, connecting: $0.monitor.isConnecting,
                         fresh: $0.monitor.isFresh(at: date), message: $0.monitor.message,
-                        needsVerification: $0.monitor.fingerprint != nil, slow: $0.monitor.slowToAnswer)
+                        needsVerification: $0.monitor.fingerprint != nil, slow: $0.monitor.slowToAnswer,
+                        busy: $0.monitor.isBusy(at: date))
         }, focusFilter: configuration.focusFilter, memoryReady: configuration.metadataReady,
            memoryConnected: configuration.memoryConnected, preferencesReadable: configuration.preferences != nil)
         for session in groups.flatMap(\.sessions) {

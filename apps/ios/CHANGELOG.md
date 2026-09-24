@@ -10,6 +10,7 @@ number counts up on its own.
 
 ### Changed
 
+- A computer that is too busy to list its sessions but still answers now reads "Busy" instead of "Offline". Its sessions stay where they were and still open (chat and terminal), and the details fill in when it catches up. "Offline" now means the computer can't be reached at all.
 - Sending a message (typed, dictated or in talk mode) always scrolls the chat to its end, even when you had scrolled up or were reading an older page of history.
 - The chat options' "Repository changes" row is now "Git", with a commit-graph icon instead of the worktree's branch icon. It opens changes, history, branches, pull requests, the working tree, workers and code.
 - The terminal's shortcut and slash-command palette is denser: no "…" button beside every tile (hold a tile for its actions instead), tiles about a third shorter, and no grey hint when it only repeats the command ("/model" over "model").

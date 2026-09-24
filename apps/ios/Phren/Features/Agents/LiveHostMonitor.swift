@@ -10,6 +10,11 @@ final class LiveHostMonitor {
     var fingerprint: String?
     var refreshing = false
     var polling = false
+    /// The Hook answers /v1/health but the overview is slow or timing out: a
+    /// saturated computer, not an unreachable one.
+    private(set) var busy = false
+    /// When the Hook last answered /v1/health while its overview did not.
+    private(set) var healthAnsweredAt: Date?
     /// Answering, but under load or through a slow gateway. Not unreachable.
     var slowToAnswer: Bool { snapshot?.phren?.slowToAnswer == true }
     /// True until this contact period's first request resolves. While the
@@ -22,13 +27,15 @@ final class LiveHostMonitor {
     /// and the overview observe freshness without a per-second clock.
     private(set) var fresh = false
     /// Fresh, or still making first contact since the app became active.
-    var live: Bool { fresh || (awaitingAnswer && message == nil) }
+    var live: Bool { fresh || (awaitingAnswer && message == nil) || isBusy(at: .now) }
     /// A computer that answered and whose answer has aged out.
     var stale: Bool { !live && lastUpdated != nil }
     @ObservationIgnored private var expiry: Task<Void, Never>?
     private var generation = UUID()
     @ObservationIgnored private var refreshRequested = false
     @ObservationIgnored private let fetchSnapshot: (LiveHost, Date?) async throws -> LiveWorkspaces
+    /// Asks the Hook whether it answers at all (`/v1/health`); nil never asks.
+    @ObservationIgnored private let probe: ((LiveHost) async throws -> Void)?
     @ObservationIgnored private let pollInterval: Duration
     @ObservationIgnored var onSnapshotChanged: (() -> Void)?
     @ObservationIgnored private var publishing: Task<Void, Never>?
@@ -97,8 +104,9 @@ final class LiveHostMonitor {
 
     init(pollInterval: Duration = .seconds(10),
          fetch: @escaping (LiveHost, Date?) async throws -> LiveWorkspaces = { try await LiveHostMonitor.fetch($0, previousUpdate: $1) },
-         stream: ((LiveHost) -> AsyncThrowingStream<LiveOverviewFrame, Error>)? = LiveHostMonitor.defaultStream) {
-        self.pollInterval = pollInterval; self.fetchSnapshot = fetch; self.openStream = stream
+         stream: ((LiveHost) -> AsyncThrowingStream<LiveOverviewFrame, Error>)? = LiveHostMonitor.defaultStream,
+         probe: ((LiveHost) async throws -> Void)? = LiveHostMonitor.defaultProbe) {
+        self.pollInterval = pollInterval; self.fetchSnapshot = fetch; self.openStream = stream; self.probe = probe
     }
 
     /// Waits up to `duration`; `refreshNow()` ends the wait early.
@@ -147,6 +155,7 @@ final class LiveHostMonitor {
         if awaitingAnswer { awaitingAnswer = false }
         if message != nil { message = nil }
         if fingerprint != nil { fingerprint = nil }
+        if busy { busy = false; healthAnsweredAt = nil }
     }
 
     /// Whether this answer came from a Hook that pushes its overview.
@@ -206,6 +215,21 @@ final class LiveHostMonitor {
                 accept(value, host: host)
             } catch {
                 guard !Task.isCancelled, generation == run else { return }
+                // A Hook that answers its health check is saturated, not gone:
+                // keep its sessions usable and say it is busy, not offline.
+                if Self.worthProbing(error), let probe, (try? await probe(host)) != nil {
+                    guard !Task.isCancelled, generation == run else { return }
+                    busy = true; healthAnsweredAt = Date()
+                    message = nil
+                    refreshing = false; awaitingAnswer = false
+                    if first { first = false; onFirstRefresh?() }
+                    onSnapshotChanged?()
+                    refreshRequested = false
+                    await pause(pollInterval)
+                    if Task.isCancelled { return }
+                    continue
+                }
+                busy = false; healthAnsweredAt = nil
                 message = (error as? LiveConnectionError)?.localizedDescription
                     ?? (error as? PhrenKitError)?.localizedDescription
                     ?? "Couldn't reach the computer. Check the address, Tailscale, SSH, and Phren Hook."
@@ -248,6 +272,23 @@ final class LiveHostMonitor {
             if Task.isCancelled { return }
         }
     }
+
+    /// Only a request that went unanswered is worth a health check: an
+    /// untrusted or changed host key or a rejected device key is not "busy".
+    static func worthProbing(_ error: Error) -> Bool {
+        switch error {
+        case LiveConnectionError.untrustedHost, LiveConnectionError.changedHost, LiveConnectionError.authentication: return false
+        default: return true
+        }
+    }
+
+    /// The Hook's `/v1/health` for a real computer. UI tests never probe.
+    static let defaultProbe: ((LiveHost) async throws -> Void)? = {
+        #if DEBUG && targetEnvironment(simulator)
+        if AppModel.isUITesting { return nil }
+        #endif
+        return { host in _ = try await PhrenConnection.computerIdentity(host: host, privateKey: DeviceSSHKey.load(host.id)) }
+    }()
 
     /// The Hook's `/v1/overview` stream for a real computer. UI tests poll
     /// their fixtures unless `--overview-stream-fixture` asks for a stream.
@@ -428,7 +469,13 @@ extension LiveHostMonitor {
     /// Cached content keeps its place in the live groups while the phone is
     /// reaching a computer instead of dropping to "Last seen" at once.
     func isLive(at date: Date) -> Bool {
-        isFresh(at: date) || (awaitingAnswer && message == nil)
+        isFresh(at: date) || (awaitingAnswer && message == nil) || isBusy(at: date)
+    }
+
+    /// Answering its health check within the freshness window while the
+    /// overview lags: its last known sessions stay live and tappable.
+    func isBusy(at date: Date) -> Bool {
+        busy && healthAnsweredAt.map { date.timeIntervalSince($0) < Self.freshSeconds } == true
     }
 
     /// Stale is a computer that answered and whose answer has aged out. A
@@ -439,5 +486,5 @@ extension LiveHostMonitor {
 
     /// The phone is reaching this computer, or has not heard from it yet.
     /// A fresh computer is live even while a poll is in flight.
-    var isConnecting: Bool { !fresh && message == nil && (refreshing || awaitingAnswer) }
+    var isConnecting: Bool { !fresh && !busy && message == nil && (refreshing || awaitingAnswer) }
 }
