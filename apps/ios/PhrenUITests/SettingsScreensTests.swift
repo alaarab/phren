@@ -149,7 +149,7 @@ final class SettingsScreensTests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Simulators"].waitForExistence(timeout: 5))
         let row = app.buttons["simulator:11111111-2222-3333-4444-555555555555"]
         XCTAssertTrue(row.waitForExistence(timeout: 5)); row.tap()
-        XCTAssertTrue(app.navigationBars["iPhone 17 Pro"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["iPhone 18 Pro"].waitForExistence(timeout: 5))
         // The screen takes touches; the toolbar sends keys and launches apps.
         let screen = app.descendants(matching: .any)["simulator-screen"].firstMatch
         XCTAssertTrue(screen.waitForExistence(timeout: 3))

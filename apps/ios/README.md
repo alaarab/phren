@@ -777,7 +777,7 @@ commands, repeated mounts, and missing-renderer recovery. Set
 `PHREN_GRAPH_SCREENSHOT=/tmp/graph.png` to save the synthetic test graph image.
 
 `PhrenUITests` exercises native search → focus → save → relaunch → restore in
-an iPhone simulator (`xcodebuild test -scheme Phren -destination 'platform=iOS Simulator,name=iPhone 17 Pro'`).
+an iPhone simulator (`xcodebuild test -scheme Phren -destination 'platform=iOS Simulator,name=iPhone 18 Pro'`).
 It also checks restoring across stores and changing a skill from computer-local
 defaults to an explicit enabled/disabled choice.
 It uses isolated synthetic stores and tokenless clients; the fixture entry point
@@ -792,7 +792,7 @@ relaunches.
 
 ```bash
 xcodebuild test -project Phren.xcodeproj -scheme Phren \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -destination 'platform=iOS Simulator,name=iPhone 18 Pro' \
   -parallel-testing-enabled NO
 ```
 
@@ -803,7 +803,7 @@ xcodebuild does for variables prefixed with `TEST_RUNNER_`:
 
 ```bash
 TEST_RUNNER_PHREN_RUN_TOURS=1 xcodebuild test -project Phren.xcodeproj -scheme Phren \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -destination 'platform=iOS Simulator,name=iPhone 18 Pro' \
   -parallel-testing-enabled NO -only-testing:PhrenUITests/StoreTourTests
 ```
 

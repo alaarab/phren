@@ -56,7 +56,7 @@ private struct SimulatorSection: View {
         .task(id: refresh) {
             do {
                 #if DEBUG && targetEnvironment(simulator)
-                if AgentChatFixture.enabled { simulators = [HostSimulator(udid: "11111111-2222-3333-4444-555555555555", name: "iPhone 17 Pro", runtime: "iOS 26.1")]; return }
+                if AgentChatFixture.enabled { simulators = [HostSimulator(udid: "11111111-2222-3333-4444-555555555555", name: "iPhone 18 Pro", runtime: "iOS 27.0")]; return }
                 #endif
                 simulators = try await PhrenConnection.simulators(host: host, privateKey: DeviceSSHKey.load(host.id))
             } catch { if !Task.isCancelled { self.error = error.localizedDescription } }

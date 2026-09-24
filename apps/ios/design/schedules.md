@@ -249,7 +249,7 @@ long list; same goes for models; and computer."
   the editor is opened for all projects (`schedule-project`).
 - The sheet's Save stays disabled until computer and harness are chosen.
 - The whole editor fits one screen for a daily schedule without scrolling on
-  an iPhone 17 Pro.
+  an iPhone 18 Pro.
 
 The same drop-down is the model picker in chat (`ChatModelPickerSheet`:
 the `/model` command opens the single-select sheet with the same rows, a
