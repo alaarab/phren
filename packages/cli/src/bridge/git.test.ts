@@ -145,6 +145,18 @@ describe("git routes", () => {
     expect(await readFile(path.join(root, "untracked-dir/keep.txt"), "utf8")).toBe("keep\n");
   });
 
+  it("keeps a replacement directory navigable while its tracked file is deleted", async () => {
+    const { root } = await repository();
+    await rm(path.join(root, "root.txt"));
+    await mkdir(path.join(root, "root.txt"));
+    await writeFile(path.join(root, "root.txt/child.ts"), "export const value = 1;\n");
+    const tree = await gitTree(root) as unknown as Tree;
+    expect(tree.entries.find(entry => entry.path === "root.txt"))
+      .toMatchObject({ kind: "dir", fileCount: 1, status: "changed" });
+    expect((await gitTree(root, "root.txt") as unknown as Tree).entries)
+      .toContainEqual({ name: "child.ts", path: "root.txt/child.ts", kind: "file", status: "?" });
+  });
+
   it("bounds cached directory reads in a repository with more than 3000 files", async () => {
     const { root } = await repository();
     await Promise.all(Array.from({ length: 32 }, async (_, index) => {

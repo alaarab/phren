@@ -138,6 +138,27 @@ final class SettingsScreensTests: XCTestCase {
         app.buttons["simulator-apps"].tap()
         XCTAssertTrue(app.buttons["Phren"].waitForExistence(timeout: 3)); app.buttons["Phren"].tap()
         XCTAssertFalse(app.descendants(matching: .any)["simulator-message"].exists)
+        // Replacing alerts with sheets requires explicit dismissal for both
+        // cancellation and submission. Reopening also starts with empty input.
+        for submit in [false, true] {
+            app.buttons["simulator-type"].tap()
+            let field = app.textFields["simulator-type-field"]
+            XCTAssertTrue(field.waitForExistence(timeout: 5))
+            XCTAssertEqual(field.value as? String, "Text")
+            field.tap(); field.typeText("hello")
+            app.navigationBars["Type into the simulator"].buttons[submit ? "Type" : "Cancel"].tap()
+            XCTAssertTrue(field.waitForNonExistence(timeout: 5))
+
+            app.buttons["simulator-apps"].tap()
+            let openURL = app.buttons["simulator-apps-sheet:open-url"]
+            XCTAssertTrue(openURL.waitForExistence(timeout: 5)); openURL.tap()
+            let url = app.textFields["simulator-url-field"]
+            XCTAssertTrue(url.waitForExistence(timeout: 5))
+            XCTAssertEqual(url.value as? String, "https://")
+            url.tap(); url.typeText("https://example.com")
+            app.navigationBars["Open a URL in the simulator"].buttons[submit ? "Open" : "Cancel"].tap()
+            XCTAssertTrue(url.waitForNonExistence(timeout: 5))
+        }
         app.navigationBars.buttons.firstMatch.tap(); app.navigationBars.buttons.firstMatch.tap()
         let files = app.buttons["all-files"]
         XCTAssertTrue(files.waitForExistence(timeout: 5)); files.tap()

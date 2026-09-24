@@ -147,7 +147,9 @@ function claudeVersion(executable = "claude"): Promise<string | undefined> {
   return new Promise(resolve => {
     const child = spawn(executable, ["--version"], { cwd: homedir(), stdio: ["ignore", "pipe", "ignore"] });
     let out = "";
-    const timer = setTimeout(() => { child.kill("SIGTERM"); resolve(undefined); }, 5_000);
+    // A version probe has no work to save. Terminate it even if a wrapper
+    // ignores SIGTERM, so timed-out catalogue refreshes cannot leak children.
+    const timer = setTimeout(() => { child.kill("SIGKILL"); resolve(undefined); }, 5_000);
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => { if (out.length < 4_096) out += chunk; });
     child.on("error", () => { clearTimeout(timer); resolve(undefined); });

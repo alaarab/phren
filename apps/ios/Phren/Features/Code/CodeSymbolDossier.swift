@@ -14,6 +14,10 @@ struct CodeSymbolDossier: View {
     var origin: SessionCodeContext? = nil
     var onOpen: ((_ file: String, _ line: Int) -> Void)? = nil
 
+    // Project navigation has no chat origin, but still owns a store. Keep
+    // definition, references and saved notes in that same explicit scope.
+    var requests: CodeDossierRequests { .init(storeID: storeId, project: project, symbol: symbol) }
+
     @Environment(\.dismiss) private var dismiss
     @State private var definition: CodeDefinition?
     @State private var references: CodeReferences?
@@ -247,7 +251,7 @@ struct CodeSymbolDossier: View {
             }
             #endif
             let result = try await PhrenConnection.codeNote(host: host, privateKey: DeviceSSHKey.load(host.id),
-                note: CodeNoteRequest(project: project, symbol: symbol, file: definition.symbol.file, line: selectedLine, text: note, target: target, store: origin?.storeID))
+                note: requests.note(file: definition.symbol.file, line: selectedLine, text: note, target: target))
             guard result.saved else { noteStatus = "The computer did not confirm the note."; return }
             findings = result.findings
             note = ""
@@ -267,14 +271,36 @@ struct CodeSymbolDossier: View {
         #endif
         guard let host = hosts.first else { return }
         do {
-            async let definitionTask = PhrenConnection.codeDefinition(host: host, privateKey: DeviceSSHKey.load(host.id), project: project, symbol: symbol, storeID: origin?.storeID)
-            async let referencesTask = PhrenConnection.codeReferences(host: host, privateKey: DeviceSSHKey.load(host.id), project: project, symbol: symbol, storeID: origin?.storeID)
+            async let definitionTask = requests.definition { project, symbol, storeID in
+                try await PhrenConnection.codeDefinition(host: host, privateKey: DeviceSSHKey.load(host.id), project: project, symbol: symbol, storeID: storeID)
+            }
+            async let referencesTask = requests.references { project, symbol, storeID in
+                try await PhrenConnection.codeReferences(host: host, privateKey: DeviceSSHKey.load(host.id), project: project, symbol: symbol, storeID: storeID)
+            }
             definition = try await definitionTask
             findings = definition?.findings ?? []
             references = try await referencesTask
         } catch {
             errorText = error.localizedDescription
         }
+    }
+}
+
+struct CodeDossierRequests: Sendable {
+    let storeID: String
+    let project: String
+    let symbol: String
+
+    func definition(using read: (String, String, String) async throws -> CodeDefinition) async throws -> CodeDefinition {
+        try await read(project, symbol, storeID)
+    }
+
+    func references(using read: (String, String, String) async throws -> CodeReferences) async throws -> CodeReferences {
+        try await read(project, symbol, storeID)
+    }
+
+    func note(file: String, line: Int, text: String, target: CodeNoteRequest.Target?) -> CodeNoteRequest {
+        CodeNoteRequest(project: project, symbol: symbol, file: file, line: line, text: text, target: target, store: storeID)
     }
 }
 

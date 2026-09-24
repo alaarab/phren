@@ -59,6 +59,24 @@ describe("Codex thread store", () => {
     expect(await readFile(file, "utf8")).toContain("First words grow");
   });
 
+  it("keeps a reply streaming when queued input follows it in the same turn", async () => {
+    turn("inProgress");
+    insert(1, { type: "userMessage", id: "u1", content: [{ type: "text", text: "Explain this" }] });
+    insert(2, { type: "agentMessage", id: "a1", text: "First words" });
+    const file = (await materializeCodexThread(thread))!;
+    insert(3, { type: "userMessage", id: "u2", status: "queued", content: [{ type: "text", text: "Run checks next" }] });
+    await materializeCodexThread(thread);
+    expect((await codexThreadPreview(thread))?.text).toBe("First words");
+    expect(await readFile(file, "utf8")).not.toContain("First words");
+    insert(2, { type: "agentMessage", id: "a1", text: "First words, now complete" }, 4);
+    turn("completed", 5);
+    await materializeCodexThread(thread);
+    const replies = (await new TranscriptReader(file, "codex").read()).entries
+      .filter(entry => (entry.raw as any).payload?.role === "assistant");
+    expect(replies).toHaveLength(1);
+    expect((replies[0].raw as any).payload.content[0].text).toBe("First words, now complete");
+  });
+
   it("exports the harness queued user item and consumes its identity without duplicating the message", async () => {
     const item = { type: "userMessage", id: "queued-user", status: "queued", content: [{ type: "text", text: "Run checks" }] };
     insert(1, item);

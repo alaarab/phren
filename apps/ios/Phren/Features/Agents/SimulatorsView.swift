@@ -180,9 +180,9 @@ struct SimulatorScreenView: View {
                 .navigationTitle("Type into the simulator")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { text = "" } }
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { text = ""; typing = false } }
                     ToolbarItem(placement: .confirmationAction) {
-                        Button("Type") { let value = text; text = ""; Task { await act("type", ["text": value]) } }
+                        Button("Type") { let value = text; text = ""; typing = false; Task { await act("type", ["text": value]) } }
                     }
                 }
             }
@@ -200,9 +200,9 @@ struct SimulatorScreenView: View {
                 .navigationTitle("Open a URL in the simulator")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { url = "" } }
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { url = ""; opening = false } }
                     ToolbarItem(placement: .confirmationAction) {
-                        Button("Open") { let value = url; url = ""; Task { await act("openurl", ["url": value]) } }
+                        Button("Open") { let value = url; url = ""; opening = false; Task { await act("openurl", ["url": value]) } }
                     }
                 }
             }
