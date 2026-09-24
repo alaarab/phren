@@ -1,5 +1,6 @@
 import { resolveStoreConflicts } from "./conflict-resolve.js";
 import { gitOperationRecovery, inProgressGitOperation } from "./git-state.js";
+import { storeCommitMessage } from "../machine-identity.js";
 
 export interface GitResult { ok: boolean; output: string; error?: string }
 export type RunStoreGit = (cwd: string, args: string[]) => Promise<GitResult>;
@@ -30,7 +31,7 @@ async function commitLocalStoreWrites(cwd: string, git: RunStoreGit, message: st
   const staged = await git(cwd, ["diff", "--cached", "--name-only"]);
   if (!staged.ok) return { committed: false, error: staged.error || "git diff failed" };
   if (!staged.output) return { committed: false };
-  const commit = await git(cwd, ["-c", "commit.gpgsign=false", "commit", "-m", message]);
+  const commit = await git(cwd, ["-c", "commit.gpgsign=false", "commit", "-m", storeCommitMessage(message)]);
   return commit.ok ? { committed: true } : { committed: false, error: commit.error || "git commit failed" };
 }
 
