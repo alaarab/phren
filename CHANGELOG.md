@@ -14,6 +14,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Machines: mapping a machine refuses to rewrite a `machines.yaml` phren cannot parse (usually git conflict markers) and says why, instead of rebuilding it from an empty map and dropping every other machine's mapping. A comments-only file, like the shipped starter, is still written into.
 - Profiles: a project named `my-api` or `my-frontend` is no longer removed from profiles on every session start. Only an entry with no project folder in the store is treated as the old starter sample.
 - Presets: `assisted` and `manual` no longer re-create `~/.phren-context.md` and the generated `MEMORY.md` in Claude Code's memory directory on every session start; only `managed` self-heals them, and doctor does not report them missing under the other presets.
+- `phren update`: the health check and `--refresh-starter` run `dist/index.js` instead of the `mcp/dist/index.js` path removed in 0.1.40, which failed with MODULE_NOT_FOUND. A source checkout is found at the monorepo root, and the staged starter files are cleaned from the store instead of the package.
 - Hook: the live reply preview no longer shows Claude Code's tool summaries as reply text. Claude Code 2.1.x draws a tool group as an unbulleted line under the reply ("Ran 1 shell command", "Called phren, ran 1 shell command", "Running 1 shell command… <command>"); the preview now treats that line and its wrapped command as tool activity.
 
 ## [0.2.16] - 2026-09-24
