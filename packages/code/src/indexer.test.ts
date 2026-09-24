@@ -19,7 +19,7 @@ let store: string;
 function git(...args: string[]): void {
   execFileSync(
     "git",
-    ["-c", "user.name=Fixture Author", "-c", "user.email=fixture@example.com", "-c", "commit.gpgsign=false", ...args],
+    ["-c", "maintenance.auto=false", "-c", "gc.auto=0", "-c", "user.name=Fixture Author", "-c", "user.email=fixture@example.com", "-c", "commit.gpgsign=false", ...args],
     { cwd: repo, stdio: ["ignore", "pipe", "pipe"] },
   );
 }
