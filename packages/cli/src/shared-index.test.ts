@@ -378,10 +378,10 @@ describe("per-machine source paths", () => {
     expect(config.ownership).toBe("repo-managed");
     expect(config.sourcePath).toBe("/Users/me/Sites/multi");
     expect(config.sourcePaths).toEqual({ "linux-box": "/home/me/multi", mac: "/Users/me/Sites/multi" });
-    expect(getProjectSourcePath(phren, "multi", undefined, "linux-box")).toBe("/home/me/multi");
-    expect(getProjectSourcePath(phren, "multi", undefined, "mac")).toBe("/Users/me/Sites/multi");
+    expect(getProjectSourcePath(phren, "multi", undefined, "linux-box")).toBe(path.resolve("/home/me/multi"));
+    expect(getProjectSourcePath(phren, "multi", undefined, "mac")).toBe(path.resolve("/Users/me/Sites/multi"));
     // A machine with no entry of its own uses the shared value.
-    expect(getProjectSourcePath(phren, "multi", undefined, "new-box")).toBe("/Users/me/Sites/multi");
+    expect(getProjectSourcePath(phren, "multi", undefined, "new-box")).toBe(path.resolve("/Users/me/Sites/multi"));
   });
 });
 
