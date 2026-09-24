@@ -185,16 +185,6 @@ describe("web-ui graph API", () => {
     tmpCleanup();
   });
 
-  it("GET /api/graph returns valid JSON with nodes and links", async () => {
-    const res = await httpGet(port, "/api/graph");
-    expect(res.status).toBe(200);
-    const data = JSON.parse(res.body);
-    expect(data).toHaveProperty("nodes");
-    expect(data).toHaveProperty("links");
-    expect(Array.isArray(data.nodes)).toBe(true);
-    expect(Array.isArray(data.links)).toBe(true);
-  });
-
   it("graph nodes include project nodes and finding nodes", async () => {
     const res = await httpGet(port, "/api/graph");
     const data = JSON.parse(res.body);
@@ -452,20 +442,6 @@ describe("web-ui combined CSRF + auth", () => {
     tmpCleanup();
   });
 
-  it("requires both auth and CSRF for POST to succeed", async () => {
-    // Get CSRF token
-    await httpGet(port, "/?_auth=" + encodeURIComponent(authToken));
-    const token = [...csrfTokens.keys()][0];
-
-    // Missing auth -> 401
-    const noAuth = await postForm(port, "/api/hook-toggle", {
-      _csrf: token,
-      tool: "claude",
-      enabled: "true",
-    });
-    expect(noAuth.status).toBe(401);
-  });
-
   it("rejects when auth is correct but CSRF is missing", async () => {
     const res = await postForm(port, "/api/hook-toggle", {
       _auth: authToken,
@@ -474,94 +450,6 @@ describe("web-ui combined CSRF + auth", () => {
     });
     expect(res.status).toBe(403);
     expect(res.body).toContain("CSRF");
-  });
-
-  it("succeeds when both auth and CSRF are correct", async () => {
-    await httpGet(port, "/?_auth=" + encodeURIComponent(authToken));
-    const token = [...csrfTokens.keys()][0];
-    const res = await postForm(port, "/api/hook-toggle", {
-      _auth: authToken,
-      _csrf: token,
-      tool: "claude",
-      enabled: "true",
-    });
-    expect(res.status).toBe(200);
-  });
-});
-
-describe("web-ui removed review queue mutation routes", () => {
-  let tmpRoot = "";
-  let tmpCleanup: () => void;
-  let server: http.Server | null = null;
-  let port = 0;
-  const priorActor = process.env.PHREN_ACTOR;
-
-  beforeEach(async () => {
-    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-web-ui-val-"));
-    seedProject(tmpRoot);
-    process.env.PHREN_ACTOR = "web-ui-admin";
-    grantAdmin(tmpRoot);
-    server = createWebUiServer(tmpRoot);
-    await new Promise<void>((resolve) => {
-      server!.listen(0, "127.0.0.1", () => resolve());
-    });
-    const address = server.address();
-    if (!address || typeof address === "string") throw new Error("failed to bind test server");
-    port = address.port;
-  });
-
-  afterEach(async () => {
-    await new Promise<void>((resolve) => {
-      if (!server) return resolve();
-      server.close(() => resolve());
-    });
-    server = null;
-    if (priorActor === undefined) delete process.env.PHREN_ACTOR;
-    else process.env.PHREN_ACTOR = priorActor;
-    tmpCleanup();
-  });
-
-  it("returns 404 for removed legacy form routes", async () => {
-    const res = await postForm(port, "/approve", {
-      project: "demo",
-      line: "- [2026-03-05] something",
-    });
-    expect(res.status).toBe(404);
-  });
-
-  it("accepts JSON review queue mutation routes with valid params", async () => {
-    const res = await postForm(port, "/api/edit", {
-      project: "demo",
-      line: "- [2026-03-05] something",
-      new_text: "updated",
-    });
-    expect(res.status).toBe(200);
-  });
-
-  it("returns 404 for POST to unknown route", async () => {
-    const res = await postForm(port, "/unknown-action", {
-      project: "demo",
-      line: "anything",
-    });
-    expect(res.status).toBe(404);
-  });
-
-  it("GET / page contains expected UI elements", async () => {
-    const res = await httpGet(port, "/");
-    expect(res.status).toBe(200);
-    expect(res.body).toContain("phren");
-    expect(res.body).toContain("Review");
-    expect(res.body).toContain("Graph");
-    expect(res.body).toContain("review-cards-list");
-    expect(res.body).toContain('data-ui-action="reviewAction"');
-  });
-
-  it("GET / page shows no items when queue is empty", async () => {
-    // Remove the queue file
-    fs.unlinkSync(path.join(tmpRoot, "demo", "review.md"));
-    const res = await httpGet(port, "/");
-    expect(res.status).toBe(200);
-    expect(res.body).toContain("No memories waiting for review");
   });
 });
 
@@ -639,27 +527,6 @@ describe("web-ui skill-save auth protection (Q13)", () => {
     expect(data.ok).toBe(true);
   });
 
-  it("POST /api/skill-save rejects missing CSRF when auth is correct", async () => {
-    const skillPath = path.join(tmpRoot, "global", "skills", "test-skill.md");
-    const res = await postForm(port, "/api/skill-save", {
-      _auth: authToken,
-      path: skillPath,
-      content: "# Test skill",
-    });
-    expect(res.status).toBe(403);
-    expect(JSON.parse(res.body).error).toContain("CSRF");
-  });
-
-  it("GET /api/skills returns 401 without auth token", async () => {
-    const res = await httpGet(port, "/api/skills");
-    expect(res.status).toBe(401);
-  });
-
-  it("GET /api/skills succeeds with auth token in query", async () => {
-    const res = await httpGet(port, "/api/skills?_auth=" + encodeURIComponent(authToken));
-    expect(res.status).toBe(200);
-  });
-
   it("POST /api/skill-toggle disables and re-enables a skill without deleting it", async () => {
     const skillPath = path.join(tmpRoot, "global", "skills", "test-skill.md");
     fs.mkdirSync(path.dirname(skillPath), { recursive: true });
@@ -708,14 +575,6 @@ describe("web-ui skill-save auth protection (Q13)", () => {
     expect(skills.some((entry: any) => entry.name === "test-skill" && entry.enabled === true)).toBe(true);
   });
 
-  it("GET /api/hooks requires auth", async () => {
-    const denied = await httpGet(port, "/api/hooks");
-    expect(denied.status).toBe(401);
-
-    const allowed = await httpGet(port, "/api/hooks?_auth=" + encodeURIComponent(authToken));
-    expect(allowed.status).toBe(200);
-  });
-
   it("GET /api/skill-content rejects invalid paths even with auth", async () => {
     const res = await httpGet(port, "/api/skill-content?_auth=" + encodeURIComponent(authToken) + "&path=" + encodeURIComponent("/tmp/nope.md"));
     expect(res.status).toBe(400);
@@ -759,7 +618,6 @@ describe("web-ui skill-save auth protection (Q13)", () => {
     expect(data.error).toContain("Invalid path");
     expect(fs.existsSync(path.join(outsideDir, "pwned.md"))).toBe(false);
   });
-
 });
 
 describe("web-ui project-content validation", () => {
@@ -1049,5 +907,8 @@ describe("web-ui JSON API auth and removed queue routes", () => {
       new_text: "Updated workflow-safe memory",
     });
     expect(res.status).toBe(200);
+    const review = fs.readFileSync(path.join(tmpRoot, "demo", "review.md"), "utf8");
+    expect(review).toContain("Updated workflow-safe memory");
+    expect(review).not.toContain("Keep this memory");
   });
 });

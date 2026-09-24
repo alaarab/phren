@@ -135,6 +135,7 @@ describe("getWorkflowPolicy", () => {
     writeGovJson(phrenPath, "workflow-policy.json", { taskMode: "bogus" });
     const policy = getWorkflowPolicy(phrenPath);
     expect(policy.taskMode).toBe("auto");
+    expect(policy.findingSensitivity).toBe("balanced");
   });
 
   it("normalizes invalid findingSensitivity to default", () => {
