@@ -96,6 +96,12 @@
       display: none;
     }
 
+    /* Plain links in prose (not cards, pills, or anchor links) */
+    .docs-content a:not([class]) {
+      color: var(--indigo);
+      text-underline-offset: 2px;
+    }
+
     /* Wide tables scroll inside their own box instead of widening the page */
     .table-scroll {
       max-width: 100%;
@@ -1174,13 +1180,13 @@ stateDiagram-v2
             <line x1="50" y1="20" x2="480" y2="20" stroke="#28C840" stroke-width="1.5" stroke-dasharray="4,4"/>
             <line x1="50" y1="48" x2="158" y2="48" stroke="#FF8A90" stroke-width="1" stroke-dasharray="3,5"/>
             <text x="164" y="52" fill="rgba(255,138,144,0.6)" font-size="9">0.8x citation penalty</text>
-            <rect x="330" y="118" width="148" height="60" rx="4" fill="rgba(18,18,42,0.85)" stroke="rgba(232,228,217,0.08)"/>
-            <line x1="338" y1="132" x2="358" y2="132" stroke="#00E5FF" stroke-width="2"/>
-            <text x="362" y="136" fill="#E8E4D9" font-size="9">Default decay</text>
-            <line x1="338" y1="146" x2="358" y2="146" stroke="#9B8DC8" stroke-width="2" stroke-dasharray="6,3"/>
-            <text x="362" y="150" fill="#E8E4D9" font-size="9">Confirmed (3x slower)</text>
-            <line x1="338" y1="160" x2="358" y2="160" stroke="#28C840" stroke-width="1.5" stroke-dasharray="4,4"/>
-            <text x="362" y="164" fill="#E8E4D9" font-size="9">[decision] (never decays)</text>
+            <rect x="60" y="100" width="148" height="52" rx="4" fill="rgba(18,18,42,0.85)" stroke="rgba(232,228,217,0.08)"/>
+            <line x1="68" y1="114" x2="88" y2="114" stroke="#00E5FF" stroke-width="2"/>
+            <text x="92" y="118" fill="#E8E4D9" font-size="9">Default decay</text>
+            <line x1="68" y1="128" x2="88" y2="128" stroke="#9B8DC8" stroke-width="2" stroke-dasharray="6,3"/>
+            <text x="92" y="132" fill="#E8E4D9" font-size="9">Confirmed (3x slower)</text>
+            <line x1="68" y1="142" x2="88" y2="142" stroke="#28C840" stroke-width="1.5" stroke-dasharray="4,4"/>
+            <text x="92" y="146" fill="#E8E4D9" font-size="9">[decision] (never decays)</text>
           </svg>
         </div>
 
