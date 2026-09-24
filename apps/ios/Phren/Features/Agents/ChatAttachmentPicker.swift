@@ -68,13 +68,28 @@ enum ChatAttachmentPreparation {
     static func file(_ url: URL) throws -> AgentAttachment {
         let access = url.startAccessingSecurityScopedResource()
         defer { if access { url.stopAccessingSecurityScopedResource() } }
+        // A file another app provides in Files (its own folder, iCloud Drive,
+        // a cloud drive) is read through the file provider: a plain read of
+        // the picked URL is refused as "you don't have permission". The
+        // coordinated read hands over a readable copy, downloading it first.
+        var coordinationError: NSError?
+        var result: Result<AgentAttachment, Error> = .failure(CocoaError(.fileReadNoPermission))
+        NSFileCoordinator().coordinate(readingItemAt: url, options: .forUploading, error: &coordinationError) { readable in
+            result = Result { try attachment(at: readable, name: url.lastPathComponent) }
+        }
+        if let coordinationError { throw coordinationError }
+        return try result.get()
+    }
+
+    private static func attachment(at url: URL, name: String) throws -> AgentAttachment {
         let values = try url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey, .contentTypeKey])
         guard values.isRegularFile == true, (values.fileSize ?? Int.max) <= AgentAttachment.maximumBytes else {
             throw PhrenKitError.validation("Choose a file smaller than 8 MB.")
         }
         let data = try Data(contentsOf: url)
-        if values.contentType?.conforms(to: .image) == true { return try image(data, name: url.lastPathComponent) }
-        return try AgentAttachment(name: url.lastPathComponent, data: data)
+        let type = values.contentType ?? UTType(filenameExtension: (name as NSString).pathExtension)
+        if type?.conforms(to: .image) == true { return try image(data, name: name) }
+        return try AgentAttachment(name: name, data: data)
     }
 }
 
