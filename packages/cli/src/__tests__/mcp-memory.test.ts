@@ -56,4 +56,3 @@ describe("pin_memory MCP tool", () => {
     expect(content).toContain(`added ${today}`);
   });
 });
-
