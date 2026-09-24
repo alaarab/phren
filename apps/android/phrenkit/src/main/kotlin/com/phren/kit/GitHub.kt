@@ -519,7 +519,8 @@ object KeychainStore {
     enum class TokenKind { @SerialName("oauth") OAUTH, @SerialName("pat") PAT }
 
     @Serializable
-    data class StoredToken(val token: String, val kind: TokenKind)
+    /** [user] is the last verified identity, bound to this credential for offline startup. */
+    data class StoredToken(val token: String, val kind: TokenKind, val user: GitHubUser? = null)
 
     interface Backend {
         fun save(stored: StoredToken)

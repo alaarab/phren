@@ -29,19 +29,35 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
-import com.phren.android.ui.IosSpinner
-import com.phren.android.ui.IosTabBar
 import com.phren.android.ui.OnboardingFlow
-import com.phren.android.ui.PhrenMaterialTheme
-import com.phren.android.ui.PhrenTheme
-import com.phren.android.ui.ProjectsScreen
-import com.phren.android.ui.ReviewScreen
-import com.phren.android.ui.SearchScreen
-import com.phren.android.ui.SettingsScreen
-import com.phren.android.ui.TabItem
-import com.phren.android.ui.TasksScreen
-import com.phren.android.ui.TriageScreen
-import com.phren.android.ui.rememberNavStack
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
+import com.phren.android.design.PhrenNavScreen
+import com.phren.android.design.PhrenNavigationStack
+import com.phren.android.design.PhrenNavigator
+import com.phren.android.design.PhrenSheet
+import com.phren.android.design.PhrenTab
+import com.phren.android.design.PhrenTabBar
+import com.phren.android.design.PhrenTheme
+import com.phren.android.design.PhrenType
+import com.phren.android.design.PhrenMaterialTheme
+import com.phren.android.design.SF
+import com.phren.android.design.phrenIdentifier
+import com.phren.android.design.plainClickable
+import com.phren.android.features.LiveBridge
+import com.phren.android.features.LocalModel
+import com.phren.android.features.ProjectsView
 import com.phren.kit.KeychainStore
 
 /** Process-wide owner of the one [AppModel] (the SwiftUI App struct's @State). */
@@ -52,6 +68,7 @@ class PhrenApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         KeychainStore.backend = KeystoreTokenBackend(this)
+        com.phren.android.design.PhrenAppearance.install(this)
         model = AppModel(this)
         // Live sync runs only while the app is visible; returning to the
         // foreground triggers an immediate catch-up pull.
@@ -70,7 +87,8 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge(SystemBarStyle.dark(Color.TRANSPARENT), SystemBarStyle.dark(Color.TRANSPARENT))
         super.onCreate(savedInstanceState)
         val model = phrenModel
-        model.bootstrap()
+        val fixture = if (BuildConfig.DEBUG) intent?.getStringExtra("fixture") else null
+        if (fixture != null) model.bootstrapFixture(fixture) else model.bootstrap()
         handleDeepLink(intent)
         setContent {
             PhrenMaterialTheme {
@@ -84,69 +102,85 @@ class MainActivity : ComponentActivity() {
         handleDeepLink(intent)
     }
 
-    /** Widget taps: `phren://review`, `phren://tasks`. */
+    /** Widget taps and shortcuts: `phren://projects|agents|tasks|review`. */
     private fun handleDeepLink(intent: Intent?) {
         val uri = intent?.data ?: return
         if (uri.scheme != "phren") return
+        val model = phrenModel
         when (uri.host) {
-            "review" -> phrenModel.selectedTab = AppTab.REVIEW
-            "tasks" -> phrenModel.selectedTab = AppTab.TASKS
+            "review" -> { model.selectedTab = AppTab.PROJECTS; model.showingMemoryMaintenance = true }
+            "projects" -> model.selectedTab = AppTab.PROJECTS
+            "agents" -> model.selectedTab = AppTab.AGENTS
+            "tasks" -> model.selectedTab = AppTab.TASKS
         }
     }
 }
 
 @Composable
 fun RootView(model: AppModel) {
-    when (model.phase) {
-        AppModel.Phase.LOADING -> Box(Modifier.fillMaxSize().background(PhrenTheme.bg), contentAlignment = Alignment.Center) { IosSpinner() }
-        AppModel.Phase.SIGNED_OUT, AppModel.Phase.PICKING_REPO, AppModel.Phase.INITIAL_SYNC -> OnboardingFlow(model)
-        AppModel.Phase.READY -> MainTabView(model)
-    }
+    // GitHub is a memory connection, not the app's authentication boundary:
+    // the tab hierarchy stays up when it signs out.
+    CompositionLocalProvider(LocalModel provides model) { MainTabView(model) }
 }
 
 @Composable
 private fun MainTabView(model: AppModel) {
-    // Each tab keeps its own NavigationStack across tab switches.
-    val projects = rememberNavStack("Projects")
-    val search = rememberNavStack("Search")
-    val settings = rememberNavStack("Settings")
+    // Each tab keeps its own navigation stack across tab switches.
+    val navigators = remember { AppTab.entries.associateWith { PhrenNavigator() } }
     val holder = rememberSaveableStateHolder()
-    var triage by remember { mutableStateOf<List<StoreQueueEntry>?>(null) }
+    val ready = model.phase == AppModel.Phase.READY
 
-    Box(Modifier.fillMaxSize().background(PhrenTheme.bg)) {
-        Column(Modifier.fillMaxSize()) {
-            Box(Modifier.weight(1f)) {
-                holder.SaveableStateProvider(model.selectedTab.name) {
-                    when (model.selectedTab) {
-                        AppTab.PROJECTS -> ProjectsScreen(model, projects)
-                        AppTab.REVIEW -> ReviewScreen(model) { triage = it }
-                        AppTab.TASKS -> TasksScreen(model)
-                        AppTab.SEARCH -> SearchScreen(model, search)
-                        AppTab.SETTINGS -> SettingsScreen(model, settings)
-                    }
+    Box(Modifier.fillMaxSize().background(PhrenTheme.bg).semantics { testTagsAsResourceId = true }) {
+        holder.SaveableStateProvider(model.selectedTab.name) {
+            PhrenNavigationStack(navigators.getValue(model.selectedTab)) {
+                when (model.selectedTab) {
+                    AppTab.PROJECTS -> if (ready) ProjectsView() else OnboardingFlow(model)
+                    AppTab.AGENTS -> LiveBridge.Pending("Agents")
+                    AppTab.TASKS -> if (ready) LiveBridge.Pending("Tasks") else MemoryConnectionPrompt("Tasks")
+                    AppTab.MEMORY -> if (ready) LiveBridge.Pending("Memory") else MemoryConnectionPrompt("Memory")
+                    AppTab.SETTINGS -> LiveBridge.Pending("Settings")
                 }
             }
-            IosTabBar(
+        }
+        Box(Modifier.align(Alignment.BottomCenter)) {
+            PhrenTabBar(
                 listOf(
-                    TabItem(AppTab.PROJECTS, "Projects", Icons.Outlined.GridView),
-                    TabItem(AppTab.REVIEW, "Review", Icons.Outlined.Verified, model.totalReviewCount),
-                    TabItem(AppTab.TASKS, "Tasks", Icons.Outlined.Checklist),
-                    TabItem(AppTab.SEARCH, "Search", Icons.Outlined.Search),
-                    TabItem(AppTab.SETTINGS, "Settings", Icons.Outlined.Settings),
+                    PhrenTab(AppTab.PROJECTS, "Projects", SF("square.grid.2x2.fill"), identifier = "tab-projects"),
+                    PhrenTab(AppTab.AGENTS, "Agents", SF("waveform.path"), identifier = "tab-agents"),
+                    PhrenTab(AppTab.TASKS, "Tasks", SF("checklist"), identifier = "tab-tasks"),
+                    PhrenTab(AppTab.MEMORY, "Memory", SF("point.3.connected.trianglepath.dotted"), identifier = "tab-memory"),
+                    PhrenTab(AppTab.SETTINGS, "Settings", SF("gearshape.fill"), identifier = "tab-settings"),
                 ),
                 model.selectedTab,
             ) { tab ->
                 // Re-tapping the current tab pops to root, like UITabBarController.
-                if (tab == model.selectedTab) when (tab) {
-                    AppTab.PROJECTS -> projects.popToRoot()
-                    AppTab.SEARCH -> search.popToRoot()
-                    AppTab.SETTINGS -> settings.popToRoot()
-                    else -> {}
-                }
+                if (tab == model.selectedTab) navigators.getValue(tab).popToRoot()
                 model.selectedTab = tab
             }
         }
-        // `.fullScreenCover`
-        triage?.let { deck -> TriageScreen(model, deck) { triage = null } }
+        if (model.showingMemoryConnection) PhrenSheet({ model.showingMemoryConnection = false }) { OnboardingFlow(model) }
+    }
+    LaunchedEffect(model.phase) { if (ready) model.showingMemoryConnection = false }
+}
+
+@Composable
+fun MemoryConnectionPrompt(title: String) {
+    val model = LocalModel.current
+    PhrenNavScreen(title) {
+        Column(
+            Modifier.fillMaxSize().padding(28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(18.dp, Alignment.CenterVertically),
+        ) {
+            Icon(SF("brain"), null, tint = PhrenTheme.accent, modifier = Modifier.size(46.dp))
+            Text("Connect your project memory", style = PhrenType.title2.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold), color = PhrenTheme.text, textAlign = TextAlign.Center)
+            Text("Use GitHub to sync findings, skills, and tasks. Your agents and terminals connect directly to your computers.",
+                style = PhrenType.callout, color = PhrenTheme.textMuted, textAlign = TextAlign.Center)
+            Box(
+                Modifier.heightIn(min = 44.dp).background(PhrenTheme.accentSolid, RoundedCornerShape(50))
+                    .plainClickable { model.showingMemoryConnection = true }.phrenIdentifier("connect-memory").padding(horizontal = 18.dp),
+                contentAlignment = Alignment.Center,
+            ) { Text("Connect memory", style = PhrenType.body.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold), color = androidx.compose.ui.graphics.Color.White) }
+        }
     }
 }

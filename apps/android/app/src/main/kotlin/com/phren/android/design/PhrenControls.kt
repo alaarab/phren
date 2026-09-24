@@ -85,6 +85,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.phren.android.design.PhrenType.medium
@@ -303,7 +304,7 @@ fun PhrenOverlay(onDismiss: () -> Unit, dismissOnScrimTap: Boolean = true, align
         var shown by remember { mutableStateOf(false) }
         androidx.compose.runtime.LaunchedEffect(Unit) { shown = true }
         Box(
-            Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f))
+            Modifier.fillMaxSize().semantics { testTagsAsResourceId = true }.background(Color.Black.copy(alpha = 0.5f))
                 .pointerInput(dismissOnScrimTap) { detectTapGestures { if (dismissOnScrimTap) onDismiss() } }
                 .windowInsetsPadding(WindowInsets.safeDrawing),
             contentAlignment = alignment,

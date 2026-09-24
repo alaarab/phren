@@ -76,25 +76,31 @@ data class ToolbarItem(
     val tint: Color? = null,
     val bold: Boolean = false,
     val identifier: String? = null,
+    /** A PhrenIconButton in the bar: accent glyph on a raised circle. */
+    val raised: Boolean = false,
     val onClick: () -> Unit,
 )
 
 @Composable
 private fun GlassItem(item: ToolbarItem, inCapsule: Boolean) {
-    val tint = (item.tint ?: PhrenTheme.navigation).let { if (item.enabled) it else it.copy(alpha = 0.35f) }
+    // iOS 26 glass bar items draw in the label color; only raised icon buttons carry the accent.
+    val base = item.tint ?: if (item.raised) PhrenTheme.accent else PhrenTheme.text
+    val tint = base
     Box(
-        Modifier.heightIn(min = 44.dp).widthIn(min = if (inCapsule) 58.dp else 44.dp)
+        Modifier.height(44.dp).widthIn(min = if (inCapsule && item.raised) 58.dp else 44.dp)
+            .then(if (!inCapsule) Modifier.background(Glass.capsule, CircleShape) else Modifier)
+            .clip(CircleShape)
             .plainClickable(item.enabled, onClick = item.onClick)
             .semantics { contentDescription = item.label }
             .then(if (item.identifier != null) Modifier.phrenIdentifier(item.identifier) else Modifier),
         contentAlignment = Alignment.Center,
     ) {
         if (item.icon != null) {
-            Box(
-                Modifier.size(32.dp).background(if (inCapsule) Glass.item else Glass.circle, CircleShape)
-                    .then(if (inCapsule) Modifier else Modifier.border(0.5.dp, Color.White.copy(alpha = 0.06f), CircleShape)),
-                contentAlignment = Alignment.Center,
-            ) { Icon(item.icon, null, tint = tint, modifier = Modifier.size(20.dp)) }
+            if (item.raised) {
+                Box(Modifier.size(32.dp).background(Glass.item, CircleShape), contentAlignment = Alignment.Center) {
+                    Icon(item.icon, null, tint = tint, modifier = Modifier.size(19.dp))
+                }
+            } else Icon(item.icon, null, tint = tint, modifier = Modifier.size(22.dp))
         } else {
             Text(item.text ?: "", style = if (item.bold) PhrenType.body.semibold() else PhrenType.body, color = tint, modifier = Modifier.padding(horizontal = 14.dp))
         }
@@ -124,10 +130,12 @@ fun PhrenNavBar(
     leading: List<ToolbarItem> = emptyList(),
     trailing: List<ToolbarItem> = emptyList(),
     titleContent: (@Composable () -> Unit)? = null,
+    inSheet: Boolean = false,
+    background: Color = PhrenTheme.bg,
 ) {
-    Box(Modifier.fillMaxWidth().background(PhrenTheme.bg).windowInsetsPadding(WindowInsets.statusBars).height(44.dp)) {
+    Box(Modifier.fillMaxWidth().background(background).then(if (inSheet) Modifier.padding(top = 16.dp) else Modifier.windowInsetsPadding(WindowInsets.statusBars)).height(44.dp)) {
         val centered = onBack != null || leading.isNotEmpty()
-        Row(Modifier.align(Alignment.CenterStart).padding(start = 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.align(Alignment.CenterStart).padding(start = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (onBack != null) GlassItem(ToolbarItem(icon = SF("chevron.left"), label = "Back", identifier = "BackButton", onClick = onBack), inCapsule = false)
             if (leading.isNotEmpty()) ToolbarGroup(leading)
             if (!centered) {
@@ -174,7 +182,7 @@ fun <T> PhrenTabBar(items: List<PhrenTab<T>>, selected: T, onSelect: (T) -> Unit
         ) {
             items.forEach { item ->
                 val active = item.tab == selected
-                val tint = if (active) PhrenTheme.text else PhrenTheme.textMuted
+                val tint = PhrenTheme.text
                 Column(
                     Modifier.weight(1f).fillMaxHeight().clip(CircleShape)
                         .background(if (active) Glass.selectedTab else Color.Transparent, CircleShape)

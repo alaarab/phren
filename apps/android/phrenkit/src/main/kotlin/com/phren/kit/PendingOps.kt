@@ -27,6 +27,9 @@ object InstantSerializer : KSerializer<Instant> {
  * app: adding a subclass makes queues written by the new build unreadable to
  * older ones. See [VersionedDocument]; bump [PendingOpsQueue.CURRENT_SCHEMA_VERSION].
  */
+// `type` is a payload field (AddFinding), so the discriminator gets its own name.
+@OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+@kotlinx.serialization.json.JsonClassDiscriminator("case")
 @Serializable
 sealed class PendingOp {
     abstract val project: String

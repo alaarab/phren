@@ -370,7 +370,7 @@ fun PhrenMascot(size: Dp = 140.dp, bobbing: Boolean = true, glow: Boolean = true
 /** Mascot-led empty state, with optional action buttons below. */
 @Composable
 fun PhrenEmptyState(title: String, message: String, modifier: Modifier = Modifier, actions: (@Composable () -> Unit)? = null) {
-    Column(modifier.padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(modifier.padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center) {
         PhrenMascot(76.dp, bobbing = false, glow = false, modifier = Modifier.alpha(0.8f))
         Spacer(Modifier.height(12.dp))
         Text(title, style = PhrenType.headline, color = PhrenTheme.text)

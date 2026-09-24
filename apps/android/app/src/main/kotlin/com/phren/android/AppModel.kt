@@ -21,6 +21,12 @@ import com.phren.kit.PersistedState
 import com.phren.kit.ProjectQueueItem
 import com.phren.kit.QueuedOp
 import com.phren.kit.SearchIndex
+import com.phren.kit.Skill
+import com.phren.kit.SkillPreferences
+import com.phren.kit.GraphBuilder
+import com.phren.kit.GraphPayload
+import com.phren.kit.GitHubError
+import com.phren.kit.MachineRegistry
 import com.phren.kit.StorageIssue
 import com.phren.kit.StorageIssueLog
 import com.phren.kit.StoreDescriptor
@@ -70,7 +76,13 @@ data class FailedOpEntry(val storeId: String, val storeName: String, val op: Que
 
 data class StoreTaskDoc(val storeId: String, val storeName: String, val doc: TaskDoc)
 
-enum class AppTab { PROJECTS, REVIEW, TASKS, SEARCH, SETTINGS }
+/** The app's tabs, in MainTabView display order. */
+enum class AppTab { PROJECTS, AGENTS, TASKS, MEMORY, SETTINGS }
+
+/** A skill plus the store it came from. */
+data class StoreSkill(val storeId: String, val storeName: String, val skill: Skill) {
+    val id: String get() = "$storeId/${skill.path}"
+}
 
 sealed class StoreWriteError(message: String) : Exception(message) {
     class StoreNotOpen(id: String) : StoreWriteError("Store $id is not open.")
@@ -102,6 +114,30 @@ class AppModel(private val context: Context) {
         private set
     private var lastSurfacedIssueId: String? = null
     var selectedTab by mutableStateOf(AppTab.PROJECTS)
+    var authenticationMessage by mutableStateOf<String?>(null)
+        private set
+    private var authenticationGeneration = java.util.UUID.randomUUID()
+    private var foreground = true
+    private var liveGeneration = java.util.UUID.randomUUID()
+    private var indexedSnapshots = mapOf<String, String>()
+    var searchRevision by mutableStateOf(0)
+        private set
+    var pendingChatVersion by mutableStateOf(0)
+    var pendingProjectVersion by mutableStateOf(0)
+    data class PendingSchedule(val project: String, val scheduleID: String)
+    var pendingSchedule by mutableStateOf<PendingSchedule?>(null)
+        private set
+    var pendingScheduleVersion by mutableStateOf(0)
+    var showingMemoryMaintenance by mutableStateOf(false)
+    var showingMemoryConnection by mutableStateOf(false)
+
+    fun openScheduleHistory(project: String, scheduleID: String) {
+        pendingSchedule = PendingSchedule(project, scheduleID)
+        pendingScheduleVersion += 1
+        selectedTab = AppTab.AGENTS
+    }
+
+    fun clearPendingSchedule() { pendingSchedule = null }
     var storesManifest by mutableStateOf(StoresManifest())
         private set
     private var lastRegistryRaw = mapOf<String, String>()
@@ -214,24 +250,87 @@ class AppModel(private val context: Context) {
 
     fun bootstrap() = scope.launch {
         if (phase != Phase.LOADING) return@launch
+        val generation = authenticationGeneration
         val stored = withContext(Dispatchers.IO) { KeychainStore.load() }
-        if (stored == null) { phase = Phase.SIGNED_OUT; return@launch }
-        client.setToken(stored.token)
-        try {
-            user = client.currentUser()
-        } catch (_: Exception) {
-            KeychainStore.delete()
+        if (generation != authenticationGeneration) return@launch
+        if (stored == null) {
+            selectedTab = AppTab.AGENTS
             phase = Phase.SIGNED_OUT
             return@launch
         }
-        val descriptors = storedDescriptors()
-        if (descriptors.isEmpty()) { phase = Phase.PICKING_REPO; return@launch }
-        PhrenCapture.releaseOffline()
-        descriptors.forEach { openContext(it) }
-        phase = if (storeContexts.isEmpty()) Phase.PICKING_REPO else Phase.READY
-        refresh()
+        client.setToken(stored.token)
+        user = stored.user
+        openSavedStores()
+        // Local data and navigation are available even while /user is stalled.
+        if (!refreshAccount()) return@launch
         refreshStorePermissions()
         pullAllAndGoLive()
+    }
+
+    /** Debug launches only: the iOS UI-test stores, never synced. */
+    fun bootstrapFixture(kind: String) = scope.launch {
+        if (phase != Phase.LOADING) return@launch
+        val owners = if (kind == "store-tour") listOf("sample") else listOf("sample", "team")
+        for (owner in owners) {
+            val dir = File(context.cacheDir, "ui-tests-${java.util.UUID.randomUUID()}")
+            val (store, engine) = withContext(Dispatchers.IO) {
+                val store = LocalStore(dir, owner, "brain", "main")
+                when {
+                    kind == "store-tour" -> com.phren.android.debug.UITestStores.populateTour(store)
+                    kind == "memory" && owner == "sample" -> com.phren.android.debug.UITestStores.populateMemory(store)
+                    else -> {
+                        store.write("demo/FINDINGS.md", "# Findings\n\n- [pattern] Cache repeated requests for offline use\n- [pattern] Retry sync after reconnecting\n- [decision] Connect the phone graph to desktop memory\n", null)
+                        store.write("demo/skills/audit.md", com.phren.kit.SkillFile.template(name = "audit", description = "Review the project", instructions = "Run the checks."), null)
+                    }
+                }
+                store to SyncEngine(client, store, dir)
+            }
+            storeContexts += StoreContext(StoreDescriptor.of(owner, "brain", "main", true), store, engine)
+        }
+        refresh()
+        phase = Phase.READY
+    }
+
+    private suspend fun openSavedStores() {
+        PhrenCapture.releaseOffline()
+        for (d in storedDescriptors()) if (storeContexts.none { it.id == d.id }) openContext(d)
+        refresh()
+        phase = if (storeContexts.isEmpty()) Phase.PICKING_REPO else Phase.READY
+    }
+
+    /**
+     * Only an explicit credential rejection (401) invalidates a saved sign-in.
+     * Offline, timeouts and server errors leave it; the sync loop retries.
+     */
+    private suspend fun refreshAccount(): Boolean {
+        val generation = authenticationGeneration
+        val stored = withContext(Dispatchers.IO) { KeychainStore.load() }
+        if (stored == null || generation != authenticationGeneration) return false
+        try {
+            val verified = client.currentUser()
+            if (generation != authenticationGeneration) return false
+            user = verified
+            try { withContext(Dispatchers.IO) { KeychainStore.save(stored.copy(user = verified)) } } catch (_: Exception) {}
+            appliedJournalRouting.clear()
+            applyWriteContexts()
+        } catch (e: GitHubError.Http) {
+            if (e.status != 401) return generation == authenticationGeneration
+            if (generation != authenticationGeneration) return false
+            val invalidation = java.util.UUID.randomUUID()
+            authenticationGeneration = invalidation
+            withContext(Dispatchers.IO) { KeychainStore.delete() }
+            client.setToken(null)
+            stopLiveAll()
+            if (invalidation != authenticationGeneration) return false
+            authenticationMessage = "GitHub no longer accepts your sign-in. Sign in again to reconnect. Your saved projects and pending changes are still here."
+            phase = Phase.SIGNED_OUT
+            return false
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // A failed request says nothing about whether the token is valid.
+        }
+        return generation == authenticationGeneration
     }
 
     fun storedDescriptors(): List<StoreDescriptor> =
@@ -243,14 +342,28 @@ class AppModel(private val context: Context) {
 
     fun storeDirectory(d: StoreDescriptor): File = LocalStore.defaultDirectory(context.filesDir, d.owner, d.name)
 
-    fun enterForeground() = scope.launch { if (phase == Phase.READY) startLiveAll() }
+    fun enterForeground() = scope.launch {
+        foreground = true
+        if (phase != Phase.READY) return@launch
+        startLiveAll()
+        refreshAccount()
+    }
 
-    fun enterBackground() = scope.launch { storeContexts.forEach { it.engine.stopLive() } }
+    fun enterBackground() = scope.launch { foreground = false; stopLiveAll() }
 
-    /** Staggered by a second so N stores don't poll in lockstep. */
+    private suspend fun stopLiveAll() {
+        liveGeneration = java.util.UUID.randomUUID()
+        storeContexts.forEach { it.engine.stopLive() }
+    }
+
+    /** Staggered by a second so N stores don't wake the radio together. */
     private suspend fun startLiveAll() {
+        if (!foreground) return
+        val generation = liveGeneration
         storeContexts.toList().forEachIndexed { i, c ->
             if (i > 0) delay(1_000)
+            if (!foreground || liveGeneration != generation) return
+            if (storeContexts.none { it === c }) return@forEachIndexed
             c.engine.startLive()
         }
     }
@@ -266,24 +379,34 @@ class AppModel(private val context: Context) {
     }
 
     suspend fun signIn(token: String, kind: KeychainStore.TokenKind) {
+        val generation = java.util.UUID.randomUUID()
+        authenticationGeneration = generation
         val trimmed = token.trim()
         client.setToken(trimmed)
         val u = client.currentUser()
-        withContext(Dispatchers.IO) { KeychainStore.save(KeychainStore.StoredToken(trimmed, kind)) }
+        if (generation != authenticationGeneration) throw kotlinx.coroutines.CancellationException()
+        withContext(Dispatchers.IO) { KeychainStore.save(KeychainStore.StoredToken(trimmed, kind, u)) }
         user = u
-        phase = Phase.PICKING_REPO
+        authenticationMessage = null
+        appliedJournalRouting.clear()
+        openSavedStores()
+        pullAllAndGoLive()
     }
 
     suspend fun signOut() {
+        authenticationGeneration = java.util.UUID.randomUUID()
+        liveGeneration = java.util.UUID.randomUUID()
+        val wipeFailures = mutableListOf<String>()
         for (c in storeContexts) {
             c.engine.stopLive()
             c.engine.close()
-            withContext(Dispatchers.IO) { c.store.wipe() }
+            try { withContext(Dispatchers.IO) { c.store.wipe() } } catch (e: Exception) { wipeFailures += "${c.descriptor.displayName}: ${e.message}" }
         }
         KeychainStore.delete()
         prefs.remove(STORES_KEY)
         client.setToken(null)
         user = null
+        authenticationMessage = null
         storeContexts.clear()
         storeFilter = null
         storesManifest = StoresManifest()
@@ -295,6 +418,11 @@ class AppModel(private val context: Context) {
         StorageIssueLog.shared.removeAll()
         storageIssues = emptyList()
         lastSurfacedIssueId = null
+        indexedSnapshots = emptyMap()
+        searchRevision += 1
+        if (wipeFailures.isNotEmpty()) {
+            authenticationMessage = "Signed out, but this device's copy couldn't be deleted (${wipeFailures.joinToString("; ")}). Its files are still in the app's data folder."
+        }
         WidgetBridge.publish(context, this)
         phase = Phase.SIGNED_OUT
     }
@@ -320,7 +448,9 @@ class AppModel(private val context: Context) {
         val c = storeContexts.firstOrNull { it.id == id } ?: return
         c.engine.stopLive()
         c.engine.close()
-        withContext(Dispatchers.IO) { c.store.wipe() }
+        try { withContext(Dispatchers.IO) { c.store.wipe() } } catch (e: Exception) {
+            lastActionError = "Removed ${c.descriptor.displayName}, but its copy on this device couldn't be deleted: ${e.message}"
+        }
         storeContexts.remove(c)
         if (storeFilter == id) storeFilter = null
         storeRoles.remove(id)
@@ -340,7 +470,9 @@ class AppModel(private val context: Context) {
             }
             storeContexts += StoreContext(descriptor, store, engine)
             appliedJournalRouting.remove(descriptor.id)
-            engine.setOnUpdate { scope.launch { refresh() } }
+            engine.setOnUpdate { update ->
+                scope.launch { if (update == SyncEngine.Update.CONTENT) refresh() else refreshStatus() }
+            }
         } catch (e: Exception) {
             lastActionError = e.message
         }
@@ -360,12 +492,17 @@ class AppModel(private val context: Context) {
                     val (snap, status, cold) = withContext(Dispatchers.IO) {
                         Triple(c.store.snapshot(), c.engine.currentStatus(), c.engine.coldStore.projectSummaries())
                     }
-                    c.snapshot = snap
-                    c.status = status
-                    c.coldSummaries = cold
+                    if (c.snapshot.revision != snap.revision) c.snapshot = snap
+                    if (c.status != status) c.status = status
+                    if (c.coldSummaries != cold) c.coldSummaries = cold
                 }
                 val snapshots = storeContexts.map { it.id to it.snapshot }
-                searchIndex = withContext(Dispatchers.Default) { SearchIndex.of(snapshots) }
+                val revisions = snapshots.associate { it.first to it.second.revision }
+                if (revisions != indexedSnapshots) {
+                    searchIndex = withContext(Dispatchers.Default) { SearchIndex.of(snapshots) }
+                    indexedSnapshots = revisions
+                    searchRevision += 1
+                }
                 syncStatus = aggregateStatus()
                 collectStorageIssues()
                 refreshStoreRegistry()
@@ -376,6 +513,18 @@ class AppModel(private val context: Context) {
         } finally {
             refreshing = false
         }
+    }
+
+    /** A status-only engine update: nothing in the local cache moved. */
+    private suspend fun refreshStatus() {
+        for (c in storeContexts.toList()) {
+            val status = c.engine.currentStatus()
+            if (c.status != status) c.status = status
+        }
+        val status = aggregateStatus()
+        if (syncStatus != status) syncStatus = status
+        collectStorageIssues()
+        WidgetBridge.publish(context, this)
     }
 
     private fun collectStorageIssues() {
@@ -402,6 +551,7 @@ class AppModel(private val context: Context) {
     }
 
     suspend fun pullToRefresh() {
+        if (!refreshAccount()) return
         pullAll()
         refreshStorePermissions()
         refresh()
@@ -415,6 +565,54 @@ class AppModel(private val context: Context) {
             if (canPush != c.descriptor.canPush) { c.updateCanPush(canPush); changed = true }
         }
         if (changed) persistDescriptors(storeDescriptors)
+    }
+
+    // Skills
+
+    val mergedSkills: List<StoreSkill>
+        get() = filteredContexts.flatMap { c -> c.snapshot.skills.map { StoreSkill(c.id, c.descriptor.displayName, it) } }
+
+    suspend fun saveDocument(path: String, content: String, expectedContent: String?, storeId: String) {
+        enqueue(PendingOp.SaveAuthoredFile(path, content, expectedContent), storeId)
+        refresh()
+    }
+
+    suspend fun deleteSkill(entry: StoreSkill) {
+        enqueue(PendingOp.DeleteAuthoredFile(entry.skill.path, entry.skill.content), entry.storeId)
+        refresh()
+    }
+
+    /** Moves a skill to `global` or another project within its own store. */
+    suspend fun moveSkill(entry: StoreSkill, scope: String) {
+        val c = storeContexts.firstOrNull { it.id == entry.storeId } ?: throw StoreWriteError.StoreNotOpen(entry.storeId)
+        if (!c.descriptor.canPush) throw StoreWriteError.ReadOnly(c.descriptor.displayName)
+        c.engine.moveSkill(entry.skill, scope)
+        refresh()
+    }
+
+    fun instructions(scope: String, storeId: String): String? = snapshot(storeId).instructions[scope]
+    fun instructionsPath(scope: String, storeId: String): String =
+        snapshot(storeId).instructionPaths[scope] ?: "$scope/${com.phren.kit.AgentInstructions.FILE_NAME}"
+    fun skills(storeId: String): List<Skill> = snapshot(storeId).skills
+    fun skillPreferences(storeId: String): SkillPreferences = SkillPreferences.parse(snapshot(storeId).skillPreferencesContent)
+
+    suspend fun setSkillEnabled(entry: StoreSkill, enabled: Boolean) {
+        val current = skillPreferences(entry.storeId)
+        val scope = entry.skill.scope.source
+        enqueue(PendingOp.SetSkillEnabled(scope, entry.skill.name, enabled, current.explicitSetting(scope, entry.skill.name)), entry.storeId)
+        refresh()
+    }
+
+    fun machineRegistry(storeId: String): MachineRegistry = snapshot(storeId).machines
+
+    // Graph
+
+    /** One store at a time; node identities stay CLI-compatible. */
+    suspend fun graphPayload(storeId: String, focusProject: String?): GraphPayload {
+        val c = storeContexts.firstOrNull { it.id == storeId } ?: throw StoreWriteError.StoreNotOpen(storeId)
+        val input = withContext(Dispatchers.IO) { c.store.graphInput(c.id) }
+        if (focusProject != null && focusProject !in input.projects) return GraphPayload(emptyList(), emptyList(), emptyList(), 0)
+        return withContext(Dispatchers.Default) { GraphBuilder.build(input, focusProject) }
     }
 
     // Mutations
