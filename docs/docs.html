@@ -8,51 +8,6 @@
   <link rel="icon" type="image/svg+xml" href="phren-icon-64.svg">
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="docs.css">
-  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
-  <script>
-    mermaid.initialize({
-      startOnLoad: true,
-      theme: 'dark',
-      themeVariables: {
-        darkMode: true,
-        background: '#12122a',
-        primaryColor: '#1a1a3e',
-        primaryTextColor: '#E8E4D9',
-        primaryBorderColor: '#00E5FF',
-        secondaryColor: '#2a1a3e',
-        secondaryTextColor: '#E8E4D9',
-        secondaryBorderColor: '#9B8DC8',
-        tertiaryColor: '#1a2a3e',
-        tertiaryTextColor: '#E8E4D9',
-        tertiaryBorderColor: '#FF8A90',
-        lineColor: '#00E5FF',
-        textColor: '#E8E4D9',
-        mainBkg: '#1a1a3e',
-        nodeBorder: '#00E5FF',
-        clusterBkg: '#1a1a3e',
-        clusterBorder: '#9B8DC8',
-        titleColor: '#00E5FF',
-        edgeLabelBackground: '#12122a',
-        nodeTextColor: '#E8E4D9',
-        actorTextColor: '#E8E4D9',
-        actorBorder: '#00E5FF',
-        actorBkg: '#1a1a3e',
-        activationBorderColor: '#00E5FF',
-        activationBkgColor: '#1a1a3e',
-        sequenceNumberColor: '#12122a',
-        signalColor: '#E8E4D9',
-        labelBoxBkgColor: '#1a1a3e',
-        labelBoxBorderColor: '#00E5FF',
-        labelTextColor: '#E8E4D9',
-        loopTextColor: '#E8E4D9',
-        noteBorderColor: '#9B8DC8',
-        noteBkgColor: '#2a1a3e',
-        noteTextColor: '#E8E4D9',
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-        fontSize: '14px'
-      }
-    });
-  </script>
   <style>
     /* Consolidated docs page: override layout for sidebar-only (no right TOC) */
     body.docs-page .docs-layout.docs-consolidated {
@@ -1093,23 +1048,19 @@ phren hooks errors --limit 5</code></pre>
         <p><strong>Citations:</strong> Findings can carry optional citations linking them to source code. Findings with valid citations rank higher; findings with missing citations receive a 0.8x penalty.</p>
 
         <h3 id="c-finding-lifecycle">Lifecycle States</h3>
-        <p>Every finding moves through a lifecycle that determines its retrieval ranking:</p>
+        <p>Every finding moves through a lifecycle that sets its retrieval ranking. A stale finding becomes active again when it is confirmed.</p>
         <pre class="mermaid">
 stateDiagram-v2
     [*] --> Active : add_finding
-    Active --> Superseded : supersede_finding
-    Active --> Contradicted : resolve_contradiction
-    Active --> Retracted : retract_finding
-    Active --> Stale : confidence decay
-    Stale --> Active : re-confirmed
+    Active --> Superseded : supersede
+    Active --> Contradicted : conflict confirmed
+    Active --> Retracted : retract
+    Active --> Stale : decay
+    Stale --> Active
     Stale --> Pruned : maintain prune
     Superseded --> Pruned : maintain prune
     Retracted --> Pruned : maintain prune
-    Active --> InvalidCitation : citation check fails
-
-    state Active {
-      direction LR
-    }
+    Active --> InvalidCitation : bad citation
         </pre>
 
         <div class="table-scroll"><table class="docs-table">
@@ -1177,7 +1128,7 @@ stateDiagram-v2
           </svg>
         </div>
 
-        <p>Findings repeatedly confirmed accumulate a <strong>decay-resistance boost</strong> and decay 3x slower. Pin permanent knowledge to <code>truths.md</code> using <code>pin_memory</code>.</p>
+        <p>Findings repeatedly confirmed accumulate a <strong>decay-resistance boost</strong> and decay 3x slower. Pin permanent knowledge to <code>truths.md</code> with <code>revise_finding</code> (action <code>pin</code>) or <code>phren pin</code>.</p>
 
         <h2 id="c-consolidation">Consolidation <a href="#c-consolidation" class="anchor-link">#</a></h2>
         <p>As <code>FINDINGS.md</code> grows, phren triggers consolidation. It deduplicates entries, archives older ones into collapsed <code>&lt;details&gt;</code> blocks, and promotes patterns appearing in 2+ projects to <code>global/FINDINGS.md</code>.</p>
@@ -1229,7 +1180,7 @@ sequenceDiagram
     participant Phren
     participant Files as ~/.phren
 
-    Agent->>Phren: session_start("my-app")
+    Agent->>Phren: session(action: start, project: my-app)
     Phren->>Files: Read last session summary
     Phren->>Files: Read recent findings
     Phren->>Files: Read task checkpoints
@@ -1238,9 +1189,9 @@ sequenceDiagram
     Note over Agent,Phren: Agent works...
 
     Agent->>Phren: add_finding(...)
-    Agent->>Phren: complete_task(...)
+    Agent->>Phren: manage_task(action: complete)
 
-    Agent->>Phren: session_end("Implemented rate limiting")
+    Agent->>Phren: session(action: end, summary)
     Phren->>Files: Write session summary
     Phren->>Files: Save task checkpoints
         </pre>
@@ -2418,7 +2369,7 @@ refactor: extract keyword logic from hook-prompt</code></pre>
             <tr><td>120+ days</td><td>0.45</td><td>0.36</td></tr>
           </tbody>
         </table></div>
-        <p>Entries below 0.35 are suppressed and move to the review queue. You can pin a truth with <code>pin_memory</code> to make it never decay.</p>
+        <p>Entries below 0.35 are suppressed and move to the review queue. You can pin a truth with <code>phren pin</code> or <code>revise_finding</code> (action <code>pin</code>) to make it never decay.</p>
 
         <h2 id="auto-vs-manual">What gets saved automatically vs manually? <a href="#auto-vs-manual" class="anchor-link">#</a></h2>
         <h3 id="faq-automatic">Automatic</h3>
@@ -2719,6 +2670,56 @@ window.addEventListener('scroll', () => {
 window.addEventListener('resize', updateActiveSidebarLink, { passive: true });
 window.addEventListener('load', updateActiveSidebarLink);
 updateActiveSidebarLink();
+</script>
+<!-- Mermaid loads as a module, so it never blocks first paint. Diagrams change
+     height when they render, so a deep link is re-scrolled once they are in. -->
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: 'dark',
+    themeVariables: {
+      darkMode: true,
+      background: '#12122a',
+      primaryColor: '#1a1a3e',
+      primaryTextColor: '#E8E4D9',
+      primaryBorderColor: '#00E5FF',
+      secondaryColor: '#2a1a3e',
+      secondaryTextColor: '#E8E4D9',
+      secondaryBorderColor: '#9B8DC8',
+      tertiaryColor: '#1a2a3e',
+      tertiaryTextColor: '#E8E4D9',
+      tertiaryBorderColor: '#FF8A90',
+      lineColor: '#00E5FF',
+      textColor: '#E8E4D9',
+      mainBkg: '#1a1a3e',
+      nodeBorder: '#00E5FF',
+      clusterBkg: '#1a1a3e',
+      clusterBorder: '#9B8DC8',
+      titleColor: '#00E5FF',
+      edgeLabelBackground: '#12122a',
+      nodeTextColor: '#E8E4D9',
+      actorTextColor: '#E8E4D9',
+      actorBorder: '#00E5FF',
+      actorBkg: '#1a1a3e',
+      activationBorderColor: '#00E5FF',
+      activationBkgColor: '#1a1a3e',
+      sequenceNumberColor: '#12122a',
+      signalColor: '#E8E4D9',
+      labelBoxBkgColor: '#1a1a3e',
+      labelBoxBorderColor: '#00E5FF',
+      labelTextColor: '#E8E4D9',
+      loopTextColor: '#E8E4D9',
+      noteBorderColor: '#9B8DC8',
+      noteBkgColor: '#2a1a3e',
+      noteTextColor: '#E8E4D9',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      fontSize: '14px'
+    }
+  });
+  await mermaid.run({ querySelector: 'pre.mermaid' });
+  const target = location.hash && document.getElementById(decodeURIComponent(location.hash.slice(1)));
+  if (target) target.scrollIntoView();
 </script>
 <script src="docs.js"></script>
 </body>
