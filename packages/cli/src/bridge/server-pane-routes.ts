@@ -1,4 +1,5 @@
 import type { ServerResponse } from "node:http";
+import { setTimeout as sleep } from "node:timers/promises";
 import { z } from "zod";
 import type { AgentHooks, DeliveryOutcome } from "./agent-hooks.js";
 import { gitBranches, gitDiscard, gitLog, gitPulls, gitStage, gitStatus, gitTree, gitUnstage } from "./git.js";
@@ -109,6 +110,54 @@ async function resubmitIfIdle(agentHooks: AgentHooks, target: Target, text: stri
   return await status() === "working" ? "pending" : "unsubmitted";
 }
 
+/** A busy Claude Code queues typed text on Enter, but after a long paste
+ * ("paste again to expand") it can swallow that Enter and leave the text in
+ * its input line, where it stays after the turn ends. Follow the pane: once
+ * it has stayed finished for two looks while the prompt is still unsubmitted,
+ * press Enter once. A closed or replaced pane, a delivery the conversation
+ * took, or ten minutes end the watch; a pane asking for input is never answered. */
+export function followQueuedDelivery(agentHooks: AgentHooks, target: Target, terminal: unknown, text: string, intervalMs = 2_000): void {
+  const started = Date.now();
+  let finishedLooks = 0;
+  const look = async () => {
+    if (!agentHooks.deliveryPending(target, text) || Date.now() - started > 600_000) return;
+    let pane: Json | undefined;
+    try { pane = findPane(await snapshot(target.server), target); } catch { pane = undefined; }
+    if (!pane) { schedule(); return; }
+    if (pane.terminal_id !== terminal) return;
+    const status = String(pane.agent_status);
+    finishedLooks = status === "idle" || status === "done" ? finishedLooks + 1 : 0;
+    if (finishedLooks >= 2) { await resubmitIfIdle(agentHooks, target, text).catch(() => undefined); return; }
+    schedule();
+  };
+  const schedule = () => { const timer = setTimeout(() => void look(), intervalMs); timer.unref?.(); };
+  schedule();
+}
+
+/** A fresh Claude Code that took its first prompt starts working. One that
+ * stays idle kept the brief in its input line (a long paste can swallow the
+ * Enter): press Enter once, only while it is idle, so a dialog is never
+ * answered. False when it still has not started. */
+async function submitStartingPrompt(server: string, target: { workspace: string; tab: string; pane: string }, terminal: unknown, looks = 4, intervalMs = 500): Promise<boolean> {
+  const status = async () => {
+    try { const pane = findPane(await snapshot(server), target); return pane && pane.terminal_id === terminal ? String(pane.agent_status) : "gone"; }
+    catch { return "unknown"; }
+  };
+  const settled = async () => {
+    for (let look = 0; look < looks; look++) {
+      await sleep(intervalMs);
+      const current = await status();
+      if (current !== "idle" && current !== "done") return current;
+    }
+    return "idle";
+  };
+  const first = await settled();
+  if (first !== "idle") return first !== "gone";
+  await rpc(server, "agent.send_keys", { target: target.pane, keys: ["enter"] });
+  const second = await settled();
+  return second !== "idle" && second !== "gone";
+}
+
 /** One key per character; Herdr's send_keys takes single characters and named
  * keys only, and a tty password read is corrupted by a bracketed paste. */
 function secretKeys(text: string): string[] {
@@ -164,14 +213,21 @@ export async function paneRoute(ctx: PaneRouteContext, url: URL, data: Json, res
     const text = z.string().min(1).max(32768).refine(t => !/[\x00-\x08\x0b-\x1f\x7f]/.test(t)).parse(data.text);
     refuseWorkingSlash(pane, text);
     await rpc(target.server, "agent.prompt", { target: target.pane, text });
-    // A first prompt may create its transcript immediately. Recheck the
-    // terminal/process binding, not the absence of a session. Never retry.
-    let confirmed = false;
-    try {
-      const current = findPane(await snapshot(target.server), target);
-      confirmed = !!current && current.terminal_id === pane.terminal_id && (await paneChatState(target.server, current)).startingToken === target.startingToken;
-    } catch { /* Already delivered; an uncertain reply must not resend. */ }
-    result = { ok: true, ...(!confirmed ? { deliveryUncertain: true } : {}) };
+    // A dispatched worker's brief is often long enough for Claude Code to
+    // swallow the Enter; a slash command opens a menu an Enter would answer.
+    const submitted = target.source !== "claude" || text.trim().startsWith("/")
+      || await submitStartingPrompt(target.server, target, pane.terminal_id);
+    if (!submitted) result = { ok: true, deliveryUncertain: true, unsubmitted: true };
+    else {
+      // A first prompt may create its transcript immediately. Recheck the
+      // terminal/process binding, not the absence of a session. Never retry.
+      let confirmed = false;
+      try {
+        const current = findPane(await snapshot(target.server), target);
+        confirmed = !!current && current.terminal_id === pane.terminal_id && (await paneChatState(target.server, current)).startingToken === target.startingToken;
+      } catch { /* Already delivered; an uncertain reply must not resend. */ }
+      result = { ok: true, ...(!confirmed ? { deliveryUncertain: true } : {}) };
+    }
   } else {
   const target = targetSchema.parse(data.target);
   // Uploads store bytes without answering or interrupting the agent.
@@ -213,8 +269,9 @@ export async function paneRoute(ctx: PaneRouteContext, url: URL, data: Json, res
     let outcome: DeliveryOutcome | "unsubmitted" = await expected;
     // Only Claude confirms plain prompts through its hook, and a slash
     // command opens a menu that a second Enter would answer.
-    if (outcome === "pending" && !busy && target.source === "claude" && !text.trim().startsWith("/")) {
-      outcome = await resubmitIfIdle(agentHooks, target, text);
+    if (outcome === "pending" && target.source === "claude" && !text.trim().startsWith("/")) {
+      if (!busy) outcome = await resubmitIfIdle(agentHooks, target, text);
+      else followQueuedDelivery(agentHooks, target, pane.terminal_id, text);
     }
     if (outcome === "blocked") throw new BridgeError(409, "The conversation in this pane changed; the message was not delivered. Reopen the chat and send it again.");
     // A bare slash command opens the agent's own menu; the phone may
