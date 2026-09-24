@@ -159,13 +159,17 @@ public struct FindingsFile: Sendable {
         public var type: FindingType?
         public var scope: String?
         public var provenance: FindingProvenance?
+        /// Set when promoting a review-queue item: the date it was queued.
+        public var queuedDate: String?
         public var now: Date
 
         public init(type: FindingType? = nil, scope: String? = nil,
-                    provenance: FindingProvenance? = nil, now: Date = Date()) {
+                    provenance: FindingProvenance? = nil, queuedDate: String? = nil,
+                    now: Date = Date()) {
             self.type = type
             self.scope = scope
             self.provenance = provenance
+            self.queuedDate = queuedDate
             self.now = now
         }
     }
@@ -205,6 +209,12 @@ public struct FindingsFile: Sendable {
         if let provenance = options.provenance {
             let sourceComment = buildSourceComment(provenance)
             if !sourceComment.isEmpty { bullet += " \(sourceComment)" }
+        }
+        // A promoted queue item is written today but was captured earlier:
+        // approveQueueItemDetailed passes this as an extra annotation, which
+        // learning.ts places after scope and source, before lifecycle.
+        if let queued = options.queuedDate, !queued.isEmpty {
+            bullet += " <!-- phren:queued \"\(queued)\" -->"
         }
 
         if isDuplicate(of: bullet) {
@@ -327,6 +337,19 @@ public struct FindingsFile: Sendable {
         guard let first = matches.first else { return nil }
         let key = bulletContentKey(first.line)
         return matches.allSatisfy { bulletContentKey($0.line) == key } ? first : nil
+    }
+
+    /// access.ts `existsAsLiveFinding`: does this text already exist as a live
+    /// (non-archived) bullet? Ambiguous counts as present: several bullets
+    /// matched, so approve must not write another copy.
+    public func existsAsLiveFinding(_ text: String) -> Bool {
+        let needle = normalizeFindingText(text)
+        guard !needle.isEmpty else { return false }
+        let active = collectBulletLines(content.components(separatedBy: "\n")).filter { !$0.archived }
+        switch matchIn(active, needle: needle, match: text) {
+        case .found, .ambiguous: return true
+        case .notFound: return false
+        }
     }
 
     /// access.ts:219 `findMatchingFindingBullet` + the archived-check wrapper

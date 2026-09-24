@@ -156,7 +156,8 @@ public enum PendingOp: Codable, Equatable, Sendable {
         switch self {
         case .rejectQueue, .editQueue:
             return [primaryPath, "\(project)/FINDINGS.md"]
-        case .promoteNote:
+        case .promoteNote, .approveQueue:
+            // Approve promotes a queued finding that is not live yet.
             return ["\(project)/FINDINGS.md", primaryPath]
         default:
             return [primaryPath]
