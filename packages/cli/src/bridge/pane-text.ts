@@ -10,6 +10,8 @@ export interface PaneTextRequest {
   source: "visible" | "recent";
   lines: number;
   stripAnsi?: boolean;
+  /** Herdr 0.9 answers plain text whatever `strip_ansi` says; "ansi" keeps the styles. */
+  format?: "ansi";
   timeoutMs?: number;
   /** Names the read in the once-per-target warning; without it a failure is silent. */
   what?: string;
@@ -24,7 +26,8 @@ function readText(result: Json): string {
 /** What a pane draws, or "" when Herdr cannot say: callers treat the text as optional. */
 export async function readPaneText(server: string, pane: string, request: PaneTextRequest): Promise<string> {
   const params = { ...(request.method === "agent.read" ? { target: pane } : { pane_id: pane }),
-    source: request.source, lines: request.lines, strip_ansi: request.stripAnsi ?? true };
+    source: request.source, lines: request.lines, strip_ansi: request.stripAnsi ?? true,
+    ...(request.format ? { format: request.format } : {}) };
   try {
     return readText(await rpc(server, request.method, params, undefined, request.timeoutMs));
   } catch (error) {

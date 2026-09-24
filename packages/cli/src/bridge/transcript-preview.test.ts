@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { appendFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { logger } from "../logger.js";
-import { claudeChrome, claudePanePreview, CodexRolloutPreview, readDeltaPreview, readPreviewPane, TranscriptPreviewStream, unwrapTerminalLines } from "./transcript-preview.js";
+import { claudeBoldMarkdown, claudeChrome, claudePanePreview, CodexRolloutPreview, readDeltaPreview, readPreviewPane, TranscriptPreviewStream, unwrapTerminalLines } from "./transcript-preview.js";
 import { TranscriptReader } from "./transcripts.js";
 import type { Target } from "./protocol.js";
 
@@ -306,6 +306,39 @@ describe("unwrapTerminalLines", () => {
     const pane = "❯ Explain this\n⏺ The preview comes from the terminal, where every line\n  is wrapped to the pane, so it needs joining.\n✻ Pondering… (3s)\n❯";
     expect(claudePanePreview(pane, "Explain this"))
       .toBe("The preview comes from the terminal, where every line is wrapped to the pane, so it needs joining.");
+  });
+});
+
+describe("Claude's bold in the pane preview", () => {
+  const E = "\x1b";
+  it("turns SGR bold into Markdown with whitespace outside the markers", () => {
+    expect(claudeBoldMarkdown(`  - ${E}[0m${E}[1mHere: ${E}[0madded to ${E}[0m${E}[38;2;177;185;249m~/.ssh${E}[0m\r`))
+      .toBe("  - **Here:** added to ~/.ssh");
+    // A color change inside a bold run keeps one run; 38;5;1 is a color, not bold.
+    expect(claudeBoldMarkdown(`${E}[1mone ${E}[38;5;1mtwo${E}[0m ${E}[38;5;1mred${E}[0m`)).toBe("**one two** red");
+    expect(claudeBoldMarkdown(`${E}[1m   ${E}[22mplain`)).toBe("   plain");
+  });
+
+  it("keeps a wrapped bold list item's Markdown and still drops tool lines", () => {
+    const pane = [
+      `❯ Solve all of those above`,
+      `${E}[0m⏺ Understood. That means three more pieces:`,
+      ``,
+      `  1. ${E}[0m${E}[1mMake the missing numbers real${E}[0m instead of leaving them out: people new`,
+      `  and left this week.`,
+      `  2. ${E}[0m${E}[1mScreenshot the healthy, live and empty overview cards on the page by${E}[0m`,
+      `  ${E}[0m${E}[1mloading${E}[0m realistic connected sample data, which stays here.`,
+      `${E}[0m${E}[38;2;78;186;101m⏺ ${E}[0m${E}[1mAgent${E}[0m(Record the missing numbers)`,
+      `  ⎿  Backgrounded agent`,
+      `✻ Shimmying… (14s · ↓ 841 tokens)`,
+      `❯`,
+    ].join("\r\n");
+    expect(claudePanePreview(pane, "Solve all of those above")).toBe([
+      "Understood. That means three more pieces:",
+      "",
+      "1. **Make the missing numbers real** instead of leaving them out: people new and left this week.",
+      "2. **Screenshot the healthy, live and empty overview cards on the page by** **loading** realistic connected sample data, which stays here.",
+    ].join("\n"));
   });
 });
 
