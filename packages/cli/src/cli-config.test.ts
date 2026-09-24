@@ -71,7 +71,7 @@ describe("CLI config: policy", () => {
 
   it("sets and reads back policy values", () => {
     const setResult = runCli(
-      ["config", "policy", "set", "--ttlDays=90", "--autoAcceptThreshold=0.9"],
+      ["config", "policy", "set", "--ttlDays=90", "--autoAcceptThreshold=0.9", "--decay.d30=0.95", "--decay.d60=0.8"],
       { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }
     );
     expect(setResult.exitCode).toBe(0);
@@ -83,20 +83,6 @@ describe("CLI config: policy", () => {
     const policy = JSON.parse(getResult.stdout);
     expect(policy.ttlDays).toBe(90);
     expect(policy.autoAcceptThreshold).toBe(0.9);
-  });
-
-  it("sets nested decay values", () => {
-    const setResult = runCli(
-      ["config", "policy", "set", "--decay.d30=0.95", "--decay.d60=0.8"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }
-    );
-    expect(setResult.exitCode).toBe(0);
-
-    const getResult = runCli(
-      ["config", "policy", "get"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }
-    );
-    const policy = JSON.parse(getResult.stdout);
     expect(policy.decay.d30).toBe(0.95);
     expect(policy.decay.d60).toBe(0.8);
   });
@@ -113,7 +99,7 @@ describe("CLI config: workflow", () => {
 
   it("sets workflow values", () => {
     const setResult = runCli(
-      ["config", "workflow", "set", "--lowConfidenceThreshold=0.6"],
+      ["config", "workflow", "set", "--lowConfidenceThreshold=0.6", "--riskySections=Stale,Conflicts,Deprecated"],
       { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }
     );
     expect(setResult.exitCode).toBe(0);
@@ -124,20 +110,8 @@ describe("CLI config: workflow", () => {
     );
     const workflow = JSON.parse(getResult.stdout);
     expect(workflow.lowConfidenceThreshold).toBe(0.6);
-  });
-
-  it("sets riskySections as comma-separated list", () => {
-    runCli(
-      ["config", "workflow", "set", "--riskySections=Stale,Conflicts,Deprecated"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }
-    );
-    const { stdout } = runCli(
-      ["config", "workflow", "get"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }
-    );
-    const workflow = JSON.parse(stdout);
-    expect(workflow.riskySections).toContain("Stale");
-    expect(workflow.riskySections).toContain("Conflicts");
+    // Comma-separated sections; unknown ones are dropped.
+    expect(workflow.riskySections).toEqual(["Stale", "Conflicts"]);
   });
 });
 
@@ -152,7 +126,7 @@ describe("CLI config: index", () => {
 
   it("sets include and exclude globs", () => {
     runCli(
-      ["config", "index", "set", "--include=**/*.md,**/*.txt", "--exclude=**/node_modules/**"],
+      ["config", "index", "set", "--include=**/*.md,**/*.txt", "--exclude=**/node_modules/**", "--includeHidden=true"],
       { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }
     );
     const { stdout } = runCli(
@@ -163,18 +137,6 @@ describe("CLI config: index", () => {
     expect(index.includeGlobs).toContain("**/*.md");
     expect(index.includeGlobs).toContain("**/*.txt");
     expect(index.excludeGlobs).toContain("**/node_modules/**");
-  });
-
-  it("sets includeHidden flag", () => {
-    runCli(
-      ["config", "index", "set", "--includeHidden=true"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }
-    );
-    const { stdout } = runCli(
-      ["config", "index", "get"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }
-    );
-    const index = JSON.parse(stdout);
     expect(index.includeHidden).toBe(true);
   });
 });
@@ -195,25 +157,13 @@ describe("CLI config: telemetry", () => {
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("enabled");
-  });
 
-  it("disables telemetry", () => {
-    runCli(["config", "telemetry", "on"], { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" });
-    const { stdout, exitCode } = runCli(
-      ["config", "telemetry", "off"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }
-    );
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("disabled");
-  });
+    const off = runCli(["config", "telemetry", "off"], { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" });
+    expect(off.exitCode).toBe(0);
+    expect(off.stdout).toContain("disabled");
 
-  it("resets telemetry", () => {
-    runCli(["config", "telemetry", "on"], { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" });
-    const { stdout } = runCli(
-      ["config", "telemetry", "reset"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }
-    );
-    expect(stdout).toContain("reset");
+    const reset = runCli(["config", "telemetry", "reset"], { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" });
+    expect(reset.stdout).toContain("reset");
   });
 });
 
@@ -226,22 +176,13 @@ describe("CLI config: machines and profiles", () => {
   });
   afterEach(() => cleanup());
 
-  it("lists machines (empty or with data)", () => {
+  it.each(["machines", "profiles"])("lists %s (empty or with data)", (what) => {
     const { stdout, exitCode } = runCli(
-      ["config", "machines"],
+      ["config", what],
       { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }
     );
     expect(exitCode).toBe(0);
-    // Either shows machines or a message about no machines
-    expect(stdout.length).toBeGreaterThan(0);
-  });
-
-  it("lists profiles (empty or with data)", () => {
-    const { stdout, exitCode } = runCli(
-      ["config", "profiles"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }
-    );
-    expect(exitCode).toBe(0);
+    // Either shows entries or a message about none
     expect(stdout.length).toBeGreaterThan(0);
   });
 });
@@ -256,18 +197,11 @@ describe("CLI config: synonyms", () => {
   });
   afterEach(() => cleanup());
 
-  it("lists learned synonyms for a project", () => {
-    const { stdout, exitCode } = runCli(
-      ["config", "synonyms", "list", "demo"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }
-    );
-    expect(exitCode).toBe(0);
-    const payload = JSON.parse(stdout);
-    expect(payload.project).toBe("demo");
-    expect(payload.synonyms).toEqual({});
-  });
+  it("lists, adds and removes learned synonyms", () => {
+    const empty = runCli(["config", "synonyms", "list", "demo"], { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" });
+    expect(empty.exitCode).toBe(0);
+    expect(JSON.parse(empty.stdout)).toMatchObject({ project: "demo", synonyms: {} });
 
-  it("adds and removes learned synonyms", () => {
     const add = runCli(
       ["config", "synonyms", "add", "demo", "latency", "slow,lag"],
       { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }

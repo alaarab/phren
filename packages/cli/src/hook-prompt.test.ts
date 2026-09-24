@@ -23,25 +23,19 @@ describe("parseHookInput", () => {
     const input = JSON.stringify({ prompt: "fix the bug", cwd: "/tmp", session_id: "abc" });
     const result = parseHookInput(input);
     expect(result).toEqual({ prompt: "fix the bug", cwd: "/tmp", sessionId: "abc" });
+    // cwd and session_id are optional.
+    expect(parseHookInput(JSON.stringify({ prompt: "hello" }))).toEqual({ prompt: "hello", cwd: undefined, sessionId: undefined });
   });
 
   it("returns null for empty prompt", () => {
     expect(parseHookInput(JSON.stringify({ prompt: "   " }))).toBeNull();
     expect(parseHookInput(JSON.stringify({ prompt: "" }))).toBeNull();
+    expect(parseHookInput(JSON.stringify({ cwd: "/tmp" }))).toBeNull();
   });
 
   it("returns null for invalid JSON", () => {
     expect(parseHookInput("not json")).toBeNull();
     expect(parseHookInput("")).toBeNull();
-  });
-
-  it("handles missing optional fields", () => {
-    const result = parseHookInput(JSON.stringify({ prompt: "hello" }));
-    expect(result).toEqual({ prompt: "hello", cwd: undefined, sessionId: undefined });
-  });
-
-  it("returns null when prompt key is missing", () => {
-    expect(parseHookInput(JSON.stringify({ cwd: "/tmp" }))).toBeNull();
   });
 });
 
@@ -246,34 +240,19 @@ describe("trackSessionMetrics", () => {
     phrenCleanup();
   });
 
-  it("creates session metrics file and tracks prompts", () => {
-    const selected: SelectedSnippet[] = [{
-      doc: { project: "proj", filename: "f.md", type: "findings", content: "content", path: "/f" },
-      snippet: "snippet",
-      key: "proj:f.md:abc",
-    }];
-    trackSessionMetrics(phrenDir, "session-1", selected);
-
-    const metricsFile = path.join(phrenDir, ".runtime", "session-metrics.json");
-    expect(fs.existsSync(metricsFile)).toBe(true);
-
-    const metrics = JSON.parse(fs.readFileSync(metricsFile, "utf8"));
-    expect(metrics["session-1"]).toBeDefined();
-    expect(metrics["session-1"].prompts).toBe(1);
-    expect(metrics["session-1"].keys["proj:f.md:abc"]).toBe(1);
-  });
-
   it("increments prompt count on repeated calls", () => {
     const selected: SelectedSnippet[] = [{
       doc: { project: "proj", filename: "f.md", type: "findings", content: "content", path: "/f" },
       snippet: "snippet",
       key: "proj:f.md:abc",
     }];
+    const metricsFile = path.join(phrenDir, ".runtime", "session-metrics.json");
     trackSessionMetrics(phrenDir, "session-2", selected);
+    // The first call creates the metrics file and counts one prompt.
+    expect(JSON.parse(fs.readFileSync(metricsFile, "utf8"))["session-2"]).toMatchObject({ prompts: 1, keys: { "proj:f.md:abc": 1 } });
     trackSessionMetrics(phrenDir, "session-2", selected);
     trackSessionMetrics(phrenDir, "session-2", selected);
 
-    const metricsFile = path.join(phrenDir, ".runtime", "session-metrics.json");
     const metrics = JSON.parse(fs.readFileSync(metricsFile, "utf8"));
     expect(metrics["session-2"].prompts).toBe(3);
     expect(metrics["session-2"].keys["proj:f.md:abc"]).toBe(3);
@@ -310,22 +289,16 @@ describe("filterTaskByPriority", () => {
     }
   });
 
-  it("passes items without priority tags through by default", () => {
-    const items = ["- Fix login bug", "- Add dashboard"];
-    const result = filterTaskByPriority(items);
-    expect(result).toEqual(items);
-  });
-
   it("passes [high] and [medium] items through by default", () => {
     const items = [
       "- [high] Fix critical auth issue",
       "- [medium] Improve caching",
       "- [low] Rename variable",
+      "- Fix login bug",
     ];
     const result = filterTaskByPriority(items);
-    expect(result).toHaveLength(2);
-    expect(result[0]).toContain("[high]");
-    expect(result[1]).toContain("[medium]");
+    // Untagged items pass through by default too.
+    expect(result).toEqual(["- [high] Fix critical auth issue", "- [medium] Improve caching", "- Fix login bug"]);
   });
 
   it("filters based on PHREN_TASK_PRIORITY env var", () => {
