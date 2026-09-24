@@ -1547,7 +1547,40 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
       <!-- ============================================================ -->
       <section class="docs-section" id="mcp-tools">
         <h1>MCP Tools</h1>
-        <p class="docs-subtitle">All 59 tools exposed by the phren MCP server. Every tool returns <code>{ ok, message, data?, error? }</code>.</p>
+        <p class="docs-subtitle">The phren MCP server has 70 tools. By default an agent sees 10 of them. Every tool returns <code>{ ok, message, data?, error? }</code>.</p>
+
+        <h2 id="mcp-profiles">Tool Profiles <a href="#mcp-profiles" class="anchor-link">#</a></h2>
+        <p>The server exposes one of two profiles. Switch with <code>phren config mcp-profile core</code> or <code>phren config mcp-profile full</code>, or set <code>PHREN_MCP_PROFILE</code>.</p>
+        <div class="table-scroll"><table class="docs-table">
+          <thead>
+            <tr><th>Profile</th><th>What the agent sees</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>core</code></td><td>The default. 10 tools: the ones used in normal work, plus composites that reach the rest by <code>action</code>.</td></tr>
+            <tr><td><code>full</code></td><td>Every tool from your enabled modules (70 with all modules on), plus the 4 composites.</td></tr>
+          </tbody>
+        </table></div>
+
+        <h3 id="mcp-core">Core Tools</h3>
+        <div class="table-scroll"><table class="docs-table">
+          <thead>
+            <tr><th>Tool</th><th>Use</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>search_knowledge</code></td><td>Search findings, docs, and tasks</td></tr>
+            <tr><td><code>get_memory_detail</code></td><td>Fetch one memory by id</td></tr>
+            <tr><td><code>get_project_summary</code></td><td>A project's summary and docs</td></tr>
+            <tr><td><code>add_finding</code></td><td>Save findings. Pass <code>kind: "note"</code> for a daily note.</td></tr>
+            <tr><td><code>revise_finding</code></td><td>Actions: supersede, retract, edit, remove, link, resolve_contradiction, pin, feedback</td></tr>
+            <tr><td><code>get_tasks</code></td><td>Read tasks</td></tr>
+            <tr><td><code>add_task</code></td><td>Add tasks to the queue</td></tr>
+            <tr><td><code>manage_task</code></td><td>Actions: complete, update, remove, pin, tidy</td></tr>
+            <tr><td><code>session</code></td><td>Actions: start, end, context, history</td></tr>
+            <tr><td><code>phren_admin</code></td><td>Every other tool by name. <code>action: "list_actions"</code> lists them with their parameters.</td></tr>
+          </tbody>
+        </table></div>
+
+        <p>The groups below list the full profile's tools. In <code>core</code>, call them through the composite named above or through <code>phren_admin</code>.</p>
 
         <h2 id="mcp-search">Search &amp; Browse <span class="cat-badge cat-search">10 tools</span> <a href="#mcp-search" class="anchor-link">#</a></h2>
 
@@ -1555,9 +1588,9 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
         <details class="ref-card"><summary><span class="ref-card-name">get_memory_detail</span><span class="ref-card-desc">Fetch full content of a memory by id</span></summary><div class="ref-card-details"><div class="ref-card-params">(id)</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">get_project_summary</span><span class="ref-card-desc">Project summary + file list</span></summary><div class="ref-card-details"><div class="ref-card-params">(name)</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">list_projects</span><span class="ref-card-desc">All projects in active profile</span></summary><div class="ref-card-details"><div class="ref-card-params">()</div></div></details>
-        <details class="ref-card"><summary><span class="ref-card-name">get_findings</span><span class="ref-card-desc">Read recent findings without a search query</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, limit?)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">get_findings</span><span class="ref-card-desc">Read recent findings without a search query</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, limit?, status?)</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">health_check</span><span class="ref-card-desc">Run doctor checks and return health status including consolidation status</span></summary><div class="ref-card-details"><div class="ref-card-params">(include_consolidation?)</div></div></details>
-        <details class="ref-card"><summary><span class="ref-card-name">list_hook_errors</span><span class="ref-card-desc">Recent hook errors</span></summary><div class="ref-card-details"><div class="ref-card-params">()</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">list_hook_errors</span><span class="ref-card-desc">Recent hook errors</span></summary><div class="ref-card-details"><div class="ref-card-params">(limit?)</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">get_review_queue</span><span class="ref-card-desc">Items waiting for review</span></summary><div class="ref-card-details"><div class="ref-card-params">(project?)</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">manage_review_item</span><span class="ref-card-desc">Approve, reject, or edit a review queue item</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, line, action, new_text?)</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">doctor_fix</span><span class="ref-card-desc">Run doctor self-heal and apply fixes</span></summary><div class="ref-card-details"><div class="ref-card-params">()</div></div></details>
@@ -1570,14 +1603,15 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
         <details class="ref-card"><summary><span class="ref-card-name">remove_note</span><span class="ref-card-desc">Remove one note</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, note)</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">promote_note</span><span class="ref-card-desc">Copy a note to durable findings</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, note, findingType?)</div></div></details>
 
-        <h2 id="mcp-tasks">Task Management <span class="cat-badge cat-task">6 tools</span> <a href="#mcp-tasks" class="anchor-link">#</a></h2>
+        <h2 id="mcp-tasks">Task Management <span class="cat-badge cat-task">7 tools</span> <a href="#mcp-tasks" class="anchor-link">#</a></h2>
 
         <details class="ref-card"><summary><span class="ref-card-name">get_tasks</span><span class="ref-card-desc">Read tasks, or fetch a single item by ID/text</span></summary><div class="ref-card-details"><div class="ref-card-params">(project?, id?, item?)</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">add_task</span><span class="ref-card-desc">Add one or more tasks to queue</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, item: string | string[])</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">complete_task</span><span class="ref-card-desc">Move task(s) to done by text match</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, item: string | string[])</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">update_task</span><span class="ref-card-desc">Update text, priority, context, section, pin, promote, work_next, or GitHub link</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, item?, updates)</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">remove_task</span><span class="ref-card-desc">Remove one or more tasks by matching text</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, item: string | string[])</div></div></details>
-        <details class="ref-card"><summary><span class="ref-card-name">tidy_done_tasks</span><span class="ref-card-desc">Archive completed tasks</span></summary><div class="ref-card-details"><div class="ref-card-params">(project?)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">tidy_done_tasks</span><span class="ref-card-desc">Archive completed tasks</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, keep?, dry_run?)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">pin_task</span><span class="ref-card-desc">Pin or unpin a task</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, item, unpin?)</div></div></details>
 
         <h2 id="mcp-findings">Finding Capture <span class="cat-badge cat-finding">9 tools</span> <a href="#mcp-findings" class="anchor-link">#</a></h2>
 
@@ -1589,12 +1623,13 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
         <details class="ref-card"><summary><span class="ref-card-name">edit_finding</span><span class="ref-card-desc">Edit in place preserving metadata</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, old_text, new_text)</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">remove_finding</span><span class="ref-card-desc">Remove one or more findings by match</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, finding: string | string[])</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">push_changes</span><span class="ref-card-desc">Commit and push phren changes</span></summary><div class="ref-card-details"><div class="ref-card-params">(message?)</div></div></details>
-        <details class="ref-card"><summary><span class="ref-card-name">auto_extract_findings</span><span class="ref-card-desc">Extract findings from text</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, text, model?, dryRun?)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">auto_extract_findings</span><span class="ref-card-desc">Extract findings from text with a local Ollama model (<code>git</code> module)</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, text, model?, dryRun?)</div></div></details>
 
-        <h2 id="mcp-memory">Memory Quality <span class="cat-badge cat-memory">2 tools</span> <a href="#mcp-memory" class="anchor-link">#</a></h2>
+        <h2 id="mcp-memory">Memory Quality <span class="cat-badge cat-memory">3 tools</span> <a href="#mcp-memory" class="anchor-link">#</a></h2>
 
         <details class="ref-card"><summary><span class="ref-card-name">pin_memory</span><span class="ref-card-desc">Write canonical pinned memory entries</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, memory)</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">memory_feedback</span><span class="ref-card-desc">Record helpful/reprompt/regression outcomes</span></summary><div class="ref-card-details"><div class="ref-card-params">(key, feedback)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">get_truths</span><span class="ref-card-desc">Read a project's pinned truths</span></summary><div class="ref-card-details"><div class="ref-card-params">(project)</div></div></details>
 
         <h2 id="mcp-data">Data Management <span class="cat-badge cat-data">4 tools</span> <a href="#mcp-data" class="anchor-link">#</a></h2>
 
@@ -1605,11 +1640,11 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
 
         <h2 id="mcp-graph">Fragment Graph <span class="cat-badge cat-graph">5 tools</span> <a href="#mcp-graph" class="anchor-link">#</a></h2>
 
-        <details class="ref-card"><summary><span class="ref-card-name">search_fragments</span><span class="ref-card-desc">Find fragments by name</span></summary><div class="ref-card-details"><div class="ref-card-params">(name)</div></div></details>
-        <details class="ref-card"><summary><span class="ref-card-name">get_related_docs</span><span class="ref-card-desc">Docs linked to a fragment</span></summary><div class="ref-card-details"><div class="ref-card-params">(fragment)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">search_fragments</span><span class="ref-card-desc">Find fragments by name</span></summary><div class="ref-card-details"><div class="ref-card-params">(query, project?, limit?)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">get_related_docs</span><span class="ref-card-desc">Docs linked to a fragment</span></summary><div class="ref-card-details"><div class="ref-card-params">(entity, project?, limit?)</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">read_graph</span><span class="ref-card-desc">Read the fragment graph</span></summary><div class="ref-card-details"><div class="ref-card-params">(project?)</div></div></details>
-        <details class="ref-card"><summary><span class="ref-card-name">link_findings</span><span class="ref-card-desc">Link a finding to a fragment</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, finding_text, fragment, relation?)</div></div></details>
-        <details class="ref-card"><summary><span class="ref-card-name">cross_project_fragments</span><span class="ref-card-desc">Fragments shared across projects</span></summary><div class="ref-card-details"><div class="ref-card-params">()</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">link_findings</span><span class="ref-card-desc">Link a finding to a fragment</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, finding_text, entity, relation?, entity_type?)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">cross_project_fragments</span><span class="ref-card-desc">Fragments shared across projects</span></summary><div class="ref-card-details"><div class="ref-card-params">(entity, exclude_project?, limit?)</div></div></details>
 
         <h2 id="mcp-sessions">Session Management <span class="cat-badge cat-session">4 tools</span> <a href="#mcp-sessions" class="anchor-link">#</a></h2>
 
@@ -1630,7 +1665,7 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
 
         <details class="ref-card"><summary><span class="ref-card-name">list_hooks</span><span class="ref-card-desc">Hook status for all tools + custom hooks</span></summary><div class="ref-card-details"><div class="ref-card-params">(project?)</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">toggle_hooks</span><span class="ref-card-desc">Enable/disable hooks globally or per tool</span></summary><div class="ref-card-details"><div class="ref-card-params">(enabled, tool?, project?, event?)</div></div></details>
-        <details class="ref-card"><summary><span class="ref-card-name">add_custom_hook</span><span class="ref-card-desc">Add a custom integration hook</span></summary><div class="ref-card-details"><div class="ref-card-params">(event, command, timeout?)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">add_custom_hook</span><span class="ref-card-desc">Add a custom integration hook</span></summary><div class="ref-card-details"><div class="ref-card-params">(event, command?, webhook?, secret?, timeout?)</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">remove_custom_hook</span><span class="ref-card-desc">Remove custom hooks by event/command</span></summary><div class="ref-card-details"><div class="ref-card-params">(event, command?)</div></div></details>
 
         <h2 id="mcp-config">Configuration <span class="cat-badge cat-config">2 tools</span> <a href="#mcp-config" class="anchor-link">#</a></h2>
@@ -1641,6 +1676,26 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
         <h2 id="mcp-stores">Store Management <span class="cat-badge cat-data">1 tool</span> <a href="#mcp-stores" class="anchor-link">#</a></h2>
 
         <details class="ref-card"><summary><span class="ref-card-name">store_list</span><span class="ref-card-desc">List registered stores and their sync status</span></summary><div class="ref-card-details"><div class="ref-card-params">()</div></div></details>
+
+        <h2 id="mcp-summaries">Topic Summaries <span class="cat-badge cat-memory">2 tools</span> <a href="#mcp-summaries" class="anchor-link">#</a></h2>
+
+        <details class="ref-card"><summary><span class="ref-card-name">get_topic_summaries</span><span class="ref-card-desc">A project's topic archives with their current summaries</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, topic?, bullets?)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">set_topic_summary</span><span class="ref-card-desc">Store a topic's summary paragraph</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, topic, text)</div></div></details>
+
+        <h2 id="mcp-code">Code Index <span class="cat-badge cat-search">5 tools</span> <a href="#mcp-code" class="anchor-link">#</a></h2>
+        <p>Needs the <code>code</code> module and an index built with <code>phren code index</code>.</p>
+        <details class="ref-card"><summary><span class="ref-card-name">code_search</span><span class="ref-card-desc">Search symbols by name, signature, or doc text</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, query, kind?, limit?)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">code_definition</span><span class="ref-card-desc">A symbol's definition</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, symbol)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">code_references</span><span class="ref-card-desc">Resolved references to a symbol, grouped by file</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, symbol, limit?)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">code_outline</span><span class="ref-card-desc">A file's symbols in source order</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, path)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">code_usage</span><span class="ref-card-desc">Hottest and coldest symbols by reference count</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, top?)</div></div></details>
+
+        <h2 id="mcp-dispatch">Dispatch <span class="cat-badge cat-session">4 tools</span> <a href="#mcp-dispatch" class="anchor-link">#</a></h2>
+        <p>Needs the <code>conductor</code> module and a running <a href="phren-hook.html">Phren Hook</a>.</p>
+        <details class="ref-card"><summary><span class="ref-card-name">dispatch</span><span class="ref-card-desc">Send a worker brief to an enrolled computer</span></summary><div class="ref-card-details"><div class="ref-card-params">(computer, project, harness, model?, prompt, label, parent?, parentTarget?)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">dispatch_returns</span><span class="ref-card-desc">Unread returns from dispatched workers</span></summary><div class="ref-card-details"><div class="ref-card-params">()</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">live_sessions</span><span class="ref-card-desc">Live agent sessions on this and every enrolled computer</span></summary><div class="ref-card-details"><div class="ref-card-params">()</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">hand_off</span><span class="ref-card-desc">Send a prompt to an existing agent session</span></summary><div class="ref-card-details"><div class="ref-card-params">(computer?, target?, session?, project?, text)</div></div></details>
 
         <h2 id="mcp-return">Return Format <a href="#mcp-return" class="anchor-link">#</a></h2>
         <pre><code>{
@@ -1654,7 +1709,7 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
   "ok": false,
   "error": "Project not found: foo"
 }</code></pre>
-        <p>Maintenance tools (<code>phren config</code>, <code>phren maintain</code>) are CLI-only and not exposed via MCP.</p>
+        <p>Maintenance commands (<code>phren maintain</code>) are CLI-only and not exposed over MCP.</p>
       </section>
 
       <!-- ============================================================ -->
@@ -2391,7 +2446,7 @@ phren add</code></pre>
         <p>Phren bootstraps <code>~/.phren/my-project/</code> and adds it to your active profile. For a brand-new scaffold: <code>/phren-init my-project</code></p>
 
         <h2 id="mcp-required">Does phren require MCP? <a href="#mcp-required" class="anchor-link">#</a></h2>
-        <p>No. MCP is recommended for the full 51-tool experience, but phren also works in hooks-only mode where context injection still happens automatically via the prompt hook.</p>
+        <p>No. MCP is recommended because it lets the agent save findings and tasks. Without it, phren runs in hooks-only mode and the prompt hook still injects context.</p>
         <pre><code>phren init --mcp off    # Install without MCP
 phren mcp-mode on       # Toggle anytime</code></pre>
 
