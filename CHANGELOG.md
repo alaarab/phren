@@ -9,6 +9,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 - Hook: the live reply preview no longer shows Claude Code's tool summaries as reply text. Claude Code 2.1.x draws a tool group as an unbulleted line under the reply ("Ran 1 shell command", "Called phren, ran 1 shell command", "Running 1 shell command… <command>"); the preview now treats that line and its wrapped command as tool activity.
 - Topics: phren accepts its own topic configs again. The built-in software, music, writing and creative catalogs gave one keyword (`plugin`, `schema`, `model`, `token`, `arrangement`, `voice`) to two topics, so the `topic-config.json` that `phren init` writes was rejected on every read and the project silently fell back to the default topics. Each keyword now has one owner, and `get_config topic` reports `configError` when a config on disk is being ignored.
+- Web UI: Sync commits again. `/api/sync` staged six extensions in one `git add`, and git exits 128 when any one of them matches nothing; a normal store has no tracked `.yml`, `.jsonl` or `.txt`, so every Sync on a changed store failed with a git fatal. Each extension is now staged on its own.
 
 ## [0.2.16] - 2026-09-24
 
