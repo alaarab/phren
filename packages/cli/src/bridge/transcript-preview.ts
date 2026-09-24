@@ -63,6 +63,12 @@ export function claudePanePreview(rendered: string, prompt: string, previous = "
   for (const [index, line] of body.entries()) {
     if (/^\s*[❯>]/.test(line) || /esc(?:ape)? to interrupt/i.test(line)) break;
     if (/^\s*[✻✽✶✢✳✦·⠁-⣿]/u.test(line) || parseClaudeSpinnerLine(line)) continue;
+    // Claude Code draws a finished or running tool group as an unbulleted,
+    // indented summary under the reply ("  Ran 1 shell command", "  Called
+    // phren, ran 1 shell command", "  Running 1 shell command… grep -rn …").
+    // It starts a block after a blank line; it and its wrapped command lines
+    // are tool activity, which lands as its own entry.
+    if (!body[index - 1]?.trim() && claudeToolSummary(line)) { writing = false; continue; }
     // A running tool group ("⏺ Running 2 agents…") and a tool call
     // ("⏺ Bash(ls)", "⏺ phren - search (MCP)(…)") are not reply
     // text; it lands as its own entry a moment later.
@@ -83,6 +89,14 @@ export function claudePanePreview(rendered: string, prompt: string, previous = "
   const overlap = previous.lastIndexOf(text.split("\n", 1)[0].slice(0, 80));
   return overlap >= 0 && text.startsWith(previous.slice(overlap))
     ? (previous.slice(0, overlap) + text).slice(0, MAX_TEXT) : previous;
+}
+
+const TOOL_SUMMARY_CLAUSE = String.raw`(?:(?:[Cc]alled|[Cc]alling) [\w.-]+(?: \d+ times?)?|(?:[Rr]an|[Rr]unning|[Rr]ead|[Rr]eading|[Ss]earched|[Ss]earching|[Ww]rote|[Ww]riting|[Ee]dited|[Ee]diting|[Uu]pdated|[Uu]pdating|[Ff]etched|[Ff]etching|[Ll]isted|[Ll]isting|[Cc]reated|[Cc]reating|[Ll]aunched|[Ll]aunching) \d+ [a-z]+(?: [a-z]+)?)`;
+const TOOL_SUMMARY = new RegExp(`^ {1,4}${TOOL_SUMMARY_CLAUSE}(?:, ${TOOL_SUMMARY_CLAUSE})*(?:(?:…|\\.\\.\\.)(?:\\s.*)?)?(?: \\(ctrl\\+o to expand\\))?\\s*$`);
+
+/** An unbulleted tool-group summary line, e.g. "  Read 1 file, ran 1 shell command". */
+export function claudeToolSummary(line: string): boolean {
+  return TOOL_SUMMARY.test(line);
 }
 
 /**
