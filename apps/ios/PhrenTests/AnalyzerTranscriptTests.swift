@@ -35,6 +35,17 @@ final class AnalyzerTranscriptTests: XCTestCase {
         XCTAssertEqual(transcript.text, "next words")
     }
 
+    /// Talk mode sends after a pause and starts a new segment at the send. The
+    /// engine can then finalize the sent words with no timestamps and an end
+    /// past the cutoff; that must not bring the sent message back.
+    func testASentMessageFinalizedWithoutTimestampsDoesNotComeBack() {
+        var transcript = AnalyzerTranscript(cutoff: 10)
+        transcript.apply(runs: [Run("Rebase onto main and"), Run(" run the tests.")], start: 6, end: 10.8, isFinal: true)
+        XCTAssertEqual(transcript.text, "")
+        transcript.apply(runs: [Run("Then push it.")], start: 11, end: 12.5, isFinal: true)
+        XCTAssertEqual(transcript.text, "Then push it.")
+    }
+
     func testJoinKeepsOneSpaceAndNoneBeforePunctuation() {
         XCTAssertEqual(AnalyzerTranscript.join("", "  Hello"), "Hello")
         XCTAssertEqual(AnalyzerTranscript.join("Hello", "world"), "Hello world")

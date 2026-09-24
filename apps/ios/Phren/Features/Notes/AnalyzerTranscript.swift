@@ -50,9 +50,11 @@ struct AnalyzerTranscript: Equatable {
     static func text(of runs: [Run], from start: Double, after cutoff: Double) -> String {
         guard start < cutoff - tolerance else { return runs.map(\.text).joined() }
         guard let first = runs.firstIndex(where: { ($0.start ?? -.infinity) >= cutoff - tolerance }) else {
-            // Untimed text can't be split; one timed run before the cutoff
-            // means the rest is old too.
-            return runs.contains { $0.start != nil } ? "" : runs.map(\.text).joined()
+            // Nothing timed after the cutoff: it is the earlier segment, even
+            // with no timestamps at all. Keeping untimed text here brought a
+            // message that talk mode had just sent back into the next one.
+            // Words said after the cutoff arrive in results that start after it.
+            return ""
         }
         return runs[first...].map(\.text).joined()
     }
