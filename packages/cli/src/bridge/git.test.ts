@@ -135,10 +135,13 @@ describe("git routes", () => {
     await gitUnstage(root, ["folder/inner.txt"]);
     await gitDiscard(root, ["folder/inner.txt"]);
     expect(await readFile(path.join(root, "folder/inner.txt"), "utf8")).toBe("one\n");
-    await writeFile(path.join(root, "*.txt"), "literal\n");
-    await writeFile(path.join(root, "keep.txt"), "keep\n");
-    await gitDiscard(root, ["*.txt"]);
-    expect(await readFile(path.join(root, "keep.txt"), "utf8")).toBe("keep\n");
+    // Windows file names cannot contain "*", so the literal pathspec file is POSIX-only.
+    if (process.platform !== "win32") {
+      await writeFile(path.join(root, "*.txt"), "literal\n");
+      await writeFile(path.join(root, "keep.txt"), "keep\n");
+      await gitDiscard(root, ["*.txt"]);
+      expect(await readFile(path.join(root, "keep.txt"), "utf8")).toBe("keep\n");
+    }
     await mkdir(path.join(root, "untracked-dir"));
     await writeFile(path.join(root, "untracked-dir/keep.txt"), "keep\n");
     await expect(gitDiscard(root, ["untracked-dir"])).rejects.toThrow();

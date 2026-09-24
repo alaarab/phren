@@ -1,0 +1,45 @@
+package com.phren.android.features
+
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import com.phren.android.AppModel
+import com.phren.android.StoreProject
+import com.phren.android.design.LocalDismiss
+import com.phren.android.design.LocalNavigator
+import com.phren.android.design.PhrenEmptyState
+import com.phren.android.design.PhrenNavScreen
+import com.phren.android.design.PhrenNavigator
+
+/**
+ * Seams to the sections still being ported (computers, schedules, code,
+ * skills, knobs, tasks). Each entry is replaced by the real screen as its
+ * section lands; until then they say so rather than pretend.
+ */
+object LiveBridge {
+    /** The CLI release the Hook install command names (IntegrationSettingsViews.cliVersion). */
+    const val CLI_VERSION = "0.2.16"
+    const val HOOK_INSTALL_COMMAND = "npx --yes @phren/cli@$CLI_VERSION bridge install"
+    fun hasComputer(model: AppModel): Boolean = false
+    fun allowsSchedules(): Boolean = true
+    fun showsCode(model: AppModel): Boolean = true
+    fun terminalFontName(): String = "System monospace"
+    fun takePendingProject(): Pair<String, String>? = null
+    fun connectComputer(navigator: PhrenNavigator) = navigator.push("connect-computer") { Pending("Add computer") }
+
+    @Composable fun AddProjectView(onAdded: (String) -> Unit) = Pending("Add project")
+    @Composable fun ProjectComputerRows(storeId: String, project: String) {}
+    @Composable fun TaskListView(storeId: String, project: String) = com.phren.android.features.TaskListView(storeId, project)
+    @Composable fun LaunchSessionView(storeId: String, project: String, request: TaskAgentRequest) = Pending("Start agent")
+    @Composable fun SchedulesView(storeId: String, project: String) = Pending("Schedules")
+    @Composable fun CodeView(storeId: String, project: String) = Pending("Code")
+
+    @Composable
+    fun Pending(title: String) {
+        val navigator = LocalNavigator.current
+        val back = LocalDismiss.current ?: navigator::pop
+        PhrenNavScreen(title, onBack = back) {
+            PhrenEmptyState(title, "This screen is still being ported.", Modifier.fillMaxSize())
+        }
+    }
+}

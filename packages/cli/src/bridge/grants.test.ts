@@ -22,7 +22,9 @@ describe("conductor grants", () => {
   });
   afterEach(async () => { vi.useRealTimers(); await rm(root, { recursive: true, force: true }); });
 
-  it("preserves concurrent additions and rejects stale revoke indexes", async () => {
+  // conductor.yaml must be mode 0600; Windows files carry no POSIX mode bits.
+  // The Hook that reads it supports macOS and Linux only.
+  it.skipIf(process.platform === "win32")("preserves concurrent additions and rejects stale revoke indexes", async () => {
     const first = { scope: "project:first", actions: ["dispatch"] };
     const second = { scope: "project:second", actions: ["hand_off"] };
     await Promise.all([addGrant(first, root), addGrant(second, root)]);
@@ -53,7 +55,9 @@ describe("conductor grants", () => {
     expect(matchGrant([restricted], { action: "dispatch", computer: "Linuxbox" }, now)).toBeUndefined();
   });
 
-  it("filters expired grants at list and match time and keeps action scope tight", async () => {
+  // conductor.yaml must be mode 0600; Windows files carry no POSIX mode bits.
+  // The Hook that reads it supports macOS and Linux only.
+  it.skipIf(process.platform === "win32")("filters expired grants at list and match time and keeps action scope tight", async () => {
     await writeFile(path.join(root, "conductor.yaml"), [
       "grants:",
       "  - scope: project:phren",
@@ -74,7 +78,9 @@ describe("conductor grants", () => {
     expect(matchGrant(listed, { action: "dispatch", project: "phren" }, Date.parse(future) + 1)).toBeUndefined();
   });
 
-  it("adds, is idempotent under ensureGrant, and refuses exact duplicates under addGrant", async () => {
+  // conductor.yaml must be mode 0600; Windows files carry no POSIX mode bits.
+  // The Hook that reads it supports macOS and Linux only.
+  it.skipIf(process.platform === "win32")("adds, is idempotent under ensureGrant, and refuses exact duplicates under addGrant", async () => {
     const input = { scope: "project:phren", actions: ["dispatch"] as const };
     expect(await addGrant(input, root)).toMatchObject(input);
     expect(await ensureGrant(input, root)).toMatchObject(input);
@@ -84,7 +90,9 @@ describe("conductor grants", () => {
     expect(await listGrants(root)).toHaveLength(2);
   });
 
-  it("removes by scope with optional set filters and never invents default actions", async () => {
+  // conductor.yaml must be mode 0600; Windows files carry no POSIX mode bits.
+  // The Hook that reads it supports macOS and Linux only.
+  it.skipIf(process.platform === "win32")("removes by scope with optional set filters and never invents default actions", async () => {
     await addGrant({ scope: "global", actions: ["dispatch"] }, root);
     await addGrant({ scope: "global", actions: ["hand_off"] }, root);
     await addGrant({ scope: "project:phren", actions: ["dispatch", "hand_off"], computers: ["Desk"] }, root);

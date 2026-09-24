@@ -10,6 +10,7 @@ number counts up on its own.
 
 ### Changed
 
+- The terminal's shortcut and slash-command palette is denser: no "…" button beside every tile (hold a tile for its actions instead), tiles about a third shorter, and no grey hint when it only repeats the command ("/model" over "model").
 - The chat's Background tray opens as one line, "Background · 2 running" with a chevron, and lists its jobs on a tap. A job's status ("finished · exit 1 · 77m 32s") always stays on one line; the title truncates instead.
 - One Live Activity for all your agents, on every computer. The Dynamic Island and lock screen say "3 working · 1 needs you", list the sessions that need you first, and when an agent asks for permission the request leads the same activity with Deny and Approve (still behind Face ID or the passcode) instead of opening a second one. A session that just finished shows what it said in one line.
 - Replies are summarized on the phone before they are spoken or shown small. "Ask my conductor" in Siri answers in one or two sentences instead of reading out markdown, and "What is it doing" keeps a long last reply's first sentences instead of dropping it. On iPhones with Apple Intelligence the on-device model writes the summary, privately; elsewhere the reply's first sentences are used.

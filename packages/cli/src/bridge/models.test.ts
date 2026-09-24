@@ -132,7 +132,8 @@ describe("model catalogue", () => {
     expect(await catalog.list("copilot")).toEqual([]);
   });
 
-  it("lists OpenCode's models with the Go plan first and the configured one marked", async () => {
+  // The fake opencode is a /bin/sh script, which Windows cannot execute.
+  it.skipIf(process.platform === "win32")("lists OpenCode's models with the Go plan first and the configured one marked", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "phren-opencode-"));
     const bin = path.join(dir, "opencode");
     await writeFile(bin, "#!/bin/sh\nprintf 'opencode/big-pickle\\nopenrouter/deepseek/deepseek-v4.1-flash\\nopencode-go/kimi-k3\\nopencode/mimo-v2.5-free\\nnot a model line\\n'\n", { mode: 0o755 });

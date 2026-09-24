@@ -63,7 +63,9 @@ describe("Codex async question replies", () => {
     }
     expect(() => questionReply(questions, [{ optionIndexes: [], text: "bad\u001binput" }])).toThrow();
   });
-  it("delivers one quoted reply to the exact UUID without terminal input and prevents concurrent/restarted retries", async () => {
+  // The fake codex is an extensionless shebang script, which Windows cannot execute.
+  // Codex replies go through the Hook, which supports macOS and Linux only.
+  it.skipIf(process.platform === "win32")("delivers one quoted reply to the exact UUID without terminal input and prevents concurrent/restarted retries", async () => {
     const bridge = new CodexQuestions(executable);
     const body = { toolUseId: "call-1", answers: [{ optionIndexes: [0] }] };
     const results = await Promise.allSettled([bridge.answer(target, body), bridge.answer(target, body)]);
@@ -72,14 +74,18 @@ describe("Codex async question replies", () => {
     await expect(new CodexQuestions(executable).answer(target, body)).rejects.toThrow("already submitted");
     expect(await new CodexQuestions(executable).pending(target)).toEqual([]);
   });
-  it("keeps an unconfirmed question visible and never retries an ambiguous provider failure", async () => {
+  // The fake codex is an extensionless shebang script, which Windows cannot execute.
+  // Codex replies go through the Hook, which supports macOS and Linux only.
+  it.skipIf(process.platform === "win32")("keeps an unconfirmed question visible and never retries an ambiguous provider failure", async () => {
     await writeFile(executable, "#!/usr/bin/env node\nif (process.argv.includes('--help')) console.log('--thread --message'); else process.exit(1);\n", { mode: 0o700 });
     const bridge = new CodexQuestions(executable), body = { toolUseId: "call-1", answers: [{ optionIndexes: [0] }] };
     await expect(bridge.answer(target, body)).rejects.toThrow("did not confirm");
     expect(await bridge.pending(target)).toHaveLength(1);
     await expect(bridge.answer(target, body)).rejects.toThrow("already submitted");
   });
-  it("does not send when fresh conversation identity changes or provider lacks the inbox command", async () => {
+  // The fake codex is an extensionless shebang script, which Windows cannot execute.
+  // Codex replies go through the Hook, which supports macOS and Linux only.
+  it.skipIf(process.platform === "win32")("does not send when fresh conversation identity changes or provider lacks the inbox command", async () => {
     state.session = "bbbbbbbb-1111-4111-8111-111111111111";
     await expect(new CodexQuestions(executable).answer(target, { toolUseId: "call-1", answers: [{ optionIndexes: [0] }] })).rejects.toThrow("conversation changed");
     await expect(readFile(path.join(directory, "sent.jsonl"))).rejects.toThrow();
