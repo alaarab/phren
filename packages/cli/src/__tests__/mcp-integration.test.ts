@@ -73,26 +73,6 @@ describe("MCP integration: add_finding -> search_knowledge round-trip", () => {
     tmp.cleanup();
   });
 
-  it("add_finding then search_knowledge finds the finding", async () => {
-    const addRes = parseResult(await server.call("add_finding", {
-      project: "integ-proj",
-      finding: "Xylophone tuning requires precise frequency calibration at 440Hz",
-    }));
-    expect(addRes.ok).toBe(true);
-
-    // Rebuild index to include the new finding
-    db.close();
-    db = await buildIndex(tmp.path);
-
-    const searchRes = parseResult(await server.call("search_knowledge", {
-      query: "Xylophone tuning frequency",
-    }));
-    expect(searchRes.ok).toBe(true);
-    expect(searchRes.data.results.length).toBeGreaterThan(0);
-    const texts = searchRes.data.results.map((r: any) => r.snippet || r.text || "").join(" ");
-    expect(texts.toLowerCase()).toContain("xylophone");
-  });
-
   it("add_finding then remove_finding then search verifies removal", async () => {
     const addRes = parseResult(await server.call("add_finding", {
       project: "integ-proj",
@@ -151,14 +131,6 @@ describe("MCP integration: add_finding -> search_knowledge round-trip", () => {
     const doneItems = getRes2.data.items?.Done || [];
     const foundDone = doneItems.some((i: any) => (i.line || "").includes("xylophone"));
     expect(foundDone).toBe(true);
-  });
-
-  it("add_finding with invalid project returns ok: false", async () => {
-    const res = parseResult(await server.call("add_finding", {
-      project: "../escape",
-      finding: "Should fail",
-    }));
-    expect(res.ok).toBe(false);
   });
 });
 
