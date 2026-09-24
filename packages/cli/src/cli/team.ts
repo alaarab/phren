@@ -142,7 +142,7 @@ async function handleTeamInit(args: string[]): Promise<void> {
     }
   }
 
-  // Register in primary store's stores.yaml
+  // Attach it on this machine only (.runtime/attached-stores.yaml)
   const entry: StoreEntry = {
     id: generateStoreId(),
     name,
@@ -157,6 +157,7 @@ async function handleTeamInit(args: string[]): Promise<void> {
   console.log(`  Path: ${storePath}`);
   console.log(`  Role: team`);
   console.log(`  ID: ${entry.id}`);
+  console.log(`  Attached on this machine only. Run phren team join on each other machine that should use it.`);
   if (!remote) {
     console.log(`\nNext: add a remote and push`);
     console.log(`  cd ${storePath}`);
@@ -232,6 +233,7 @@ async function handleTeamJoin(args: string[]): Promise<void> {
   console.log(`  Path: ${storePath}`);
   console.log(`  Role: ${finalRole}`);
   console.log(`  ID: ${entry.id}`);
+  console.log(`  Attached on this machine only. Run phren team join on each other machine that should use it.`);
   if (bootstrap?.description) {
     console.log(`  Description: ${bootstrap.description}`);
   }

@@ -47,8 +47,10 @@ Users want:
 
 ### Store Registry
 
+> **Current layout (2026-09).** Only the primary entry lives in the synced `~/.phren/stores.yaml`. Team and readonly entries, in the same shape, live in `~/.phren/.runtime/attached-stores.yaml` on each machine that joined them, so using a personal store never attaches a machine to a team store. The combined example below shows one machine's view.
+
 ```yaml
-# ~/.phren/stores.yaml
+# ~/.phren/stores.yaml + ~/.phren/.runtime/attached-stores.yaml
 stores:
   - id: "a1b2c3d4"              # Immutable UUID (generated on create/add)
     name: personal
@@ -211,7 +213,7 @@ Journal files are append-only — no conflicts possible. `FINDINGS.md` is regene
 Single source of truth: **the store registry** owns project→store mapping.
 
 ```yaml
-# ~/.phren/stores.yaml
+# ~/.phren/.runtime/attached-stores.yaml (this machine only)
 stores:
   - id: "e5f6g7h8"
     name: arc-team

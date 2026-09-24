@@ -28,8 +28,8 @@ export interface McpContext {
 export type StoreAccessMode = "read" | "write";
 
 /**
- * Error raised when a project is claimed by a store that is declared in
- * stores.yaml but has no directory on this machine. Distinct class so callers
+ * Error raised when a project is claimed by a store that is attached on this
+ * machine but whose directory is missing. Distinct class so callers
  * can special-case it if they ever want to offer an interactive fix.
  */
 export class StoreUnavailableError extends Error {

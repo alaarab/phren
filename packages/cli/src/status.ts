@@ -325,8 +325,8 @@ export async function runStatus() {
         const syncDetail = auth ? ` ${YELLOW}${storeAuthDetail(auth)}${RESET}` : store.remote ? ` remote=${DIM}${store.remote}${RESET}` : "";
         console.log(`    ${store.name} ${DIM}(${store.role}, ${store.sync})${RESET} path=${existsLabel}${syncDetail}`);
       }
-      // A store declared in stores.yaml but absent here is not cosmetic: any
-      // project it claims cannot be written until it is attached.
+      // A store attached here whose folder is gone is not cosmetic: any
+      // project it claims cannot be written until the folder is back.
       const { describeUnavailableStore } = await import("./store-registry.js");
       for (const store of stores.filter((s) => s.available === false)) {
         console.log(`    ${YELLOW}! ${describeUnavailableStore(store)}${RESET}`);

@@ -50,25 +50,73 @@ import { describeAutoSave } from "../sync/outcome.js";
 
 // ── Doctor ──────────────────────────────────────────────────────────────────
 
-function isWrapperActive(tool: string): boolean {
+/**
+ * Where `tool` stands relative to its ~/.local/bin wrapper, as far as this
+ * process can tell. Doctor often runs without the user's shell setup (over
+ * SSH, from a hook or a LaunchAgent), where ~/.local/bin is added only by
+ * .zshrc; then PATH says nothing about what the user's shell runs, and an
+ * installed wrapper is reported as unconfirmed rather than missing.
+ */
+export type WrapperState =
+  | { state: "active" | "missing" | "off-path" }
+  | { state: "shadowed"; by: string };
+
+export function wrapperState(
+  tool: string,
+  env: NodeJS.ProcessEnv = process.env,
+  resolve: (tool: string) => string = resolveOnPath,
+): WrapperState {
   const isWindows = process.platform === "win32";
-  const wrapperName = isWindows ? `${tool}.cmd` : tool;
-  const wrapperPath = homePath(".local", "bin", wrapperName);
-  if (!fs.existsSync(wrapperPath)) return false;
+  const wrapperPath = homePath(".local", "bin", isWindows ? `${tool}.cmd` : tool);
+  if (!fs.existsSync(wrapperPath)) return { state: "missing" };
+  const same = (a: string, b: string) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
+  const dirs = (env.PATH ?? env.Path ?? "").split(path.delimiter).filter(Boolean);
+  if (!dirs.some((dir) => same(dir, path.dirname(wrapperPath)))) return { state: "off-path" };
+  const first = resolve(tool);
+  return first && same(first, wrapperPath) ? { state: "active" } : { state: "shadowed", by: first };
+}
+
+function resolveOnPath(tool: string): string {
   try {
-    const whichCmd = isWindows ? "where.exe" : "which";
-    const whichArgs = isWindows ? [tool] : [tool];
-    const raw = execFileSync(whichCmd, whichArgs, {
+    const raw = execFileSync(process.platform === "win32" ? "where.exe" : "which", [tool], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: EXEC_TIMEOUT_QUICK_MS,
     }).trim();
     // `where.exe` can print multiple paths, one per line; check the first hit.
-    const first = raw.split(/\r?\n/).map((line) => line.trim()).find(Boolean) ?? "";
-    return path.resolve(first).toLowerCase() === path.resolve(wrapperPath).toLowerCase();
+    return raw.split(/\r?\n/).map((line) => line.trim()).find(Boolean) ?? "";
   } catch (err: unknown) {
-    debugLog(`isWrapperActive: resolve ${tool} failed: ${errorMessage(err)}`);
-    return false;
+    debugLog(`wrapperState: resolve ${tool} failed: ${errorMessage(err)}`);
+    return "";
+  }
+}
+
+/** One doctor line per wrapper. The phren wrapper works off PATH too: hooks call it by its full path. */
+export function wrapperCheck(tool: string, state: WrapperState): { name: string; ok: boolean; detail: string } {
+  const where = `~/.local/bin/${tool}${process.platform === "win32" ? ".cmd" : ""}`;
+  const name = tool === "phren" ? "wrapper:phren-cli" : `wrapper:${tool}`;
+  const label = tool === "phren" ? "phren CLI" : tool;
+  switch (state.state) {
+    case "active":
+      return { name, ok: true, detail: `${label} wrapper active via ${where}` };
+    case "off-path":
+      return {
+        name, ok: true,
+        detail: `${label} wrapper installed at ${where}; ~/.local/bin is not on this process's PATH ` +
+          `(shell startup files such as .zshrc add it only to interactive shells), so doctor cannot confirm it comes first there`,
+      };
+    case "shadowed":
+      return {
+        name, ok: false,
+        detail: state.by
+          ? `${tool} resolves to ${state.by} before the wrapper at ${where}; move ~/.local/bin earlier in PATH`
+          : `${label} wrapper at ${where} is on PATH but does not run; check that it is executable`,
+      };
+    case "missing":
+      return {
+        name, ok: false,
+        detail: tool === "phren" ? "phren CLI wrapper missing — run 'npx @phren/cli init' to install" : `${tool} wrapper missing`,
+      };
   }
 }
 
@@ -440,17 +488,28 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
 
   // Store registry health
   try {
-    const { resolveAllStores, storesFilePath, describeUnavailableStore } = await import("../store-registry.js");
-    const storesFile = storesFilePath(phrenPath);
-    if (fs.existsSync(storesFile)) {
+    const { resolveAllStores, storesFilePath, attachedStoresFilePath, describeUnavailableStore, ignoredSyncedStores } =
+      await import("../store-registry.js");
+    if (fs.existsSync(storesFilePath(phrenPath)) || fs.existsSync(attachedStoresFilePath(phrenPath))) {
       const stores = resolveAllStores(phrenPath);
       checks.push({
         name: "store-registry",
         ok: stores.length > 0,
         detail: stores.length > 0
-          ? `${stores.length} stores configured`
+          ? `${stores.length} stores on this machine`
           : "stores.yaml exists but no stores parsed",
       });
+      // Only this machine's attachments are checked. Team stores another
+      // machine joined with an older phren still sit in the synced file.
+      const ignored = ignoredSyncedStores(phrenPath);
+      if (ignored.length > 0) {
+        checks.push({
+          name: "store-registry-synced",
+          ok: true,
+          detail: `ignoring ${ignored.map((s) => s.name).join(", ")} in the synced ${path.basename(storesFilePath(phrenPath))}: ` +
+            `team stores are attached per machine (${attachedStoresFilePath(phrenPath)}); remove them from stores.yaml once every machine runs this phren`,
+        });
+      }
       // Projects claimed by a store that is not attached here cannot be written
       // at all — phren refuses rather than diverting them to the primary store.
       const orphanedClaims = stores
@@ -713,30 +772,13 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
       detail: codexWritable ? `writable: ${codexHooks}` : `not writable: ${codexHooks}`,
     });
   }
-  const wrapperSuffix = process.platform === "win32" ? ".cmd" : "";
   for (const tool of ["copilot", "cursor", "codex"]) {
     // A tool can count as detected from its config folder alone (Copilot's
     // ~/.copilot, say); a wrapper only makes sense around a binary on PATH.
     if (!detected.has(tool) || !commandExists(tool)) continue;
-    const active = isWrapperActive(tool);
-    checks.push({
-      name: `wrapper:${tool}`,
-      ok: active,
-      detail: active
-        ? `${tool} wrapper active via ~/.local/bin/${tool}${wrapperSuffix}`
-        : `${tool} wrapper missing or not first in PATH`,
-    });
+    checks.push(wrapperCheck(tool, wrapperState(tool)));
   }
-
-  // Check phren CLI wrapper
-  const phrenCliActive = isWrapperActive("phren");
-  checks.push({
-    name: "wrapper:phren-cli",
-    ok: phrenCliActive,
-    detail: phrenCliActive
-      ? `phren CLI wrapper active via ~/.local/bin/phren${wrapperSuffix}`
-      : "phren CLI wrapper missing — run 'npx @phren/cli init' to install",
-  });
+  checks.push(wrapperCheck("phren", wrapperState("phren")));
 
   if (fix) {
     const repaired = repairPreexistingInstall(phrenPath);
