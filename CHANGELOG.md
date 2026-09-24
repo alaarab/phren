@@ -5,6 +5,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.2.15] - 2026-09-24
+
+### Fixed
+
+- `phren init`: the setup walkthrough works with Inquirer 13 and later. It asked for the `list` prompt type, which Inquirer 13 removed (now `select`), so `phren init` on a fresh install failed at its first choice with `Prompt type "list" is not registered`. A test checks that every prompt type the walkthrough uses is registered in the installed Inquirer.
+
 ## [0.2.14] - 2026-09-10
 
 ### Added
