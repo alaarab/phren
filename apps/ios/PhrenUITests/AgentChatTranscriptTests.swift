@@ -300,6 +300,39 @@ final class AgentChatTranscriptTests: AgentChatUITestCase {
         XCTAssertFalse(app.buttons["Latest messages"].waitForExistence(timeout: 2), "Returning to the bottom should re-engage follow")
     }
 
+    /// A reply being written renders its Markdown as the finished row will:
+    /// no literal asterisks while it streams, and the row that replaces it
+    /// takes the same frame, so nothing moves but the caret.
+    @MainActor
+    func testStreamingMarkdownPreviewMatchesTheFinishedReply() {
+        let app = launch(extra: ["--chat-streaming", "--chat-markdown-stream", "--chat-clear-drafts"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let transcript = app.scrollViews["chat-transcript"]
+        XCTAssertTrue(transcript.waitForExistence(timeout: 8))
+        let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
+        composer.tap(); composer.typeText("Stream some Markdown")
+        app.buttons["chat-send"].tap()
+        let preview = transcript.descendants(matching: .any).matching(identifier: "chat-reply-preview").firstMatch
+        XCTAssertTrue(preview.waitForExistence(timeout: 8))
+        XCTAssertTrue(preview.label.contains("- Bold phrase opens"), preview.label)
+        XCTAssertFalse(preview.label.contains("**"), preview.label)
+        capture(app, "Markdown reply streaming")
+        let whole = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label ENDSWITH %@", "That is all for now."), object: preview)
+        XCTAssertEqual(XCTWaiter.wait(for: [whole], timeout: 6), .completed, preview.label)
+        XCTAssertFalse(preview.label.contains("**"), preview.label)
+        let streamed = preview.frame
+        let reply = transcript.descendants(matching: .any).matching(identifier: "chat-message:4:0").firstMatch
+        XCTAssertTrue(reply.waitForExistence(timeout: 8))
+        XCTAssertTrue(preview.waitForNonExistence(timeout: 3))
+        XCTAssertEqual(reply.frame.minX, streamed.minX, accuracy: 1)
+        XCTAssertEqual(reply.frame.width, streamed.width, accuracy: 1)
+        XCTAssertEqual(reply.frame.height, streamed.height, accuracy: 1, "The finished row uses the preview's type and spacing")
+        let texts = reply.staticTexts.allElementsBoundByIndex.map(\.label)
+        XCTAssertTrue(texts.contains { $0.hasPrefix("- Bold phrase opens") }, "\(texts)")
+        XCTAssertFalse(texts.contains { $0.contains("**") }, "\(texts)")
+        capture(app, "Markdown reply landed")
+    }
+
     /// The person's message is in the transcript the moment the live line
     /// is: a muted pending bubble above it, which the transcript row replaces.
     @MainActor

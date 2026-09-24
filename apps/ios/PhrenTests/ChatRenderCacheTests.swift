@@ -12,6 +12,24 @@ final class ChatRenderCacheTests: XCTestCase {
         XCTAssertEqual(ChatMessageDisplayCache.text(for: edited, imagePaths: [], hasImages: false, inlineImages: false), "Changed instruction")
     }
 
+    /// A growing reply parses its settled paragraphs once; the blocks must
+    /// be the ones the whole text parses to, at every length.
+    func testStreamingDocumentMatchesTheWholeParseAtEveryLength() {
+        let reply = "Intro with **bold**.\n\n- one\n- two\n\n```swift\nlet a = 1\n\nlet b = 2\n```\n\n## Heading\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\nLast line."
+        for length in 0...reply.count {
+            let text = String(reply.prefix(length))
+            let whole = ChatRichTextDocument(text), streamed = ChatRichTextDocumentCache.streaming(text)
+            XCTAssertEqual(streamed.blocks.map(\.id), whole.blocks.map(\.id), text)
+            XCTAssertEqual(streamed.blocks.map(\.text), whole.blocks.map(\.text), text)
+            XCTAssertEqual(streamed.blocks.map(\.language), whole.blocks.map(\.language), text)
+            XCTAssertEqual(streamed.blocks.map(\.attributed), whole.blocks.map(\.attributed), text)
+            XCTAssertEqual(streamed.blocks.map(\.rows), whole.blocks.map(\.rows), text)
+            XCTAssertEqual(streamed.accessibilityText, whole.accessibilityText, text)
+        }
+        XCTAssertEqual(ChatRichTextDocument.settledPrefix("One\n\nTwo"), "One\n")
+        XCTAssertEqual(ChatRichTextDocument.settledPrefix("```\na\n\nb"), "")
+    }
+
     func testDiffCacheSeparatesChangedPatches() {
         let a = "diff --git a/a.swift b/a.swift\n--- a/a.swift\n+++ b/a.swift\n@@ -1 +1 @@\n-old\n+first\n"
         let b = a.replacingOccurrences(of: "+first", with: "+second")

@@ -9,8 +9,8 @@ struct ChatRichTextDocument {
     /// prose one readable element instead of hundreds of repeated link nodes.
     let condensesAccessibility: Bool
     let accessibilityText: String
-    init(_ text: String) {
-        let blocks = Self.parse(text)
+    init(_ text: String) { self.init(blocks: Self.parse(text)) }
+    init(blocks: [Block]) {
         self.blocks = blocks
         let links = blocks.reduce(0) { count, block in
             count + block.attributed.runs.filter { $0.link != nil }.count
@@ -31,6 +31,23 @@ struct ChatRichTextDocument {
         var attributed = AttributedString()
         var attributedRows: [[AttributedString]] = []
         var rows: [[String]] = []
+        func numbered(_ id: Int) -> Block {
+            .init(id: id, text: text, language: language, heading: heading, attributed: attributed, attributedRows: attributedRows, rows: rows)
+        }
+    }
+    /// Where a growing reply's settled part ends: after its last blank line
+    /// outside a code fence. The parser ends a block at every such line, so
+    /// the text before it parses to the same blocks alone as within the whole.
+    static func settledPrefix(_ text: String) -> Substring {
+        var end = text.startIndex, fenced = false, lineStart = text.startIndex
+        while lineStart < text.endIndex {
+            let lineEnd = text[lineStart...].firstIndex(of: "\n") ?? text.endIndex
+            let line = text[lineStart..<lineEnd]
+            if line.hasPrefix("```") { fenced.toggle() }
+            else if !fenced, line.allSatisfy(\.isWhitespace), lineEnd < text.endIndex { end = lineEnd }
+            lineStart = lineEnd < text.endIndex ? text.index(after: lineEnd) : text.endIndex
+        }
+        return text[..<end]
     }
     private static let tableDivider = try! NSRegularExpression(pattern: #"^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$"#)
     private static func isTableDivider(_ line: String) -> Bool {
@@ -108,5 +125,14 @@ enum ChatRichTextDocumentCache {
         let result = ChatRichTextDocument(text)
         values.setObject(Box(result), forKey: key as NSString, cost: text.utf8.count * 4)
         return result
+    }
+    /// A reply still being written. Its settled paragraphs are parsed once
+    /// and kept; each update parses only the growing tail after them.
+    static func streaming(_ text: String) -> ChatRichTextDocument {
+        let settledText = ChatRichTextDocument.settledPrefix(text)
+        let prefix = String(settledText), tail = String(text[settledText.endIndex...])
+        let settled = prefix.isEmpty ? [] : value(prefix, key: "streaming|" + ChatRenderKey.text(prefix)).blocks
+        let growing = ChatPerformance.measure("Markdown tail") { ChatRichTextDocument(tail).blocks }
+        return ChatRichTextDocument(blocks: settled + growing.map { $0.numbered($0.id + settled.count) })
     }
 }

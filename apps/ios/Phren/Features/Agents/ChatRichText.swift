@@ -27,7 +27,15 @@ struct ChatRichText: View, Equatable {
         let key = cacheKey ?? ChatRenderKey.text(text)
         owner = messageID ?? key
         document = ChatRichTextDocumentCache.value(text, key: key)
+        caret = false
     }
+    /// A reply still being written (`ChatReplyPreviewRow`): the same blocks
+    /// and type as the finished message, ending in a caret.
+    init(streaming document: ChatRichTextDocument, owner: String) {
+        text = document.accessibilityText; reply = ""; messageID = nil; replyLabel = ""
+        self.owner = owner; self.document = document; caret = true
+    }
+    private let caret: Bool
     @ViewBuilder var body: some View {
         if document.condensesAccessibility {
             content
@@ -71,8 +79,13 @@ struct ChatRichText: View, Equatable {
                     .id(block.id)
                 } else {
                     ChatParagraph(block: block, owner: owner, messageID: messageID, reply: reply, replyLabel: replyLabel,
-                                  size: block.heading ? headingSize : textSize)
+                                  size: block.heading ? headingSize : textSize,
+                                  caret: caret && block.id == document.blocks.last?.id).equatable()
                 }
+            }
+            // A reply ending in code or a table has no line to end the caret on.
+            if caret, document.blocks.last.map({ $0.language != nil || !$0.rows.isEmpty }) ?? true {
+                Text(ChatParagraph.caretMark).font(.system(size: textSize, design: .monospaced))
             }
         }
     }
@@ -82,19 +95,30 @@ struct ChatRichText: View, Equatable {
 /// `ChatSelectableText` lies over this Text at the same frame, the word
 /// under the finger already selected, until a tap anywhere else, a scroll,
 /// or Done. The Text stays in the layout, invisible, so nothing moves.
-private struct ChatParagraph: View {
+private struct ChatParagraph: View, Equatable {
     let block: ChatRichTextDocument.Block
     let owner: String
     let messageID: String?
     let reply: String
     let replyLabel: String
     let size: CGFloat
+    let caret: Bool
+    /// A settled paragraph of a growing reply compares equal between
+    /// updates, so only the tail is laid out again.
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.block.id == rhs.block.id && lhs.block.heading == rhs.block.heading && lhs.size == rhs.size && lhs.caret == rhs.caret
+            && lhs.owner == rhs.owner && lhs.messageID == rhs.messageID && lhs.replyLabel == rhs.replyLabel
+            && lhs.block.text == rhs.block.text && lhs.reply == rhs.reply
+    }
+    static var caretMark: AttributedString {
+        var mark = AttributedString(" ▍"); mark.foregroundColor = PhrenTheme.accent; return mark
+    }
     @Environment(ChatTextSelection.self) private var selection: ChatTextSelection?
     @Environment(ChatMessageMenu.self) private var messageMenu: ChatMessageMenu?
     @Environment(\.chatMessageMenuSource) private var menuSource
     var body: some View {
         let selecting = selection?.target(owner, block.id)
-        FileLinkedText(attributed: block.attributed)
+        FileLinkedText(attributed: caret ? block.attributed + Self.caretMark : block.attributed)
             .font(.system(size: size, weight: block.heading ? .semibold : .regular, design: .monospaced))
             .foregroundStyle(PhrenTheme.chatText)
             .lineSpacing(3).tint(PhrenTheme.chatPath)

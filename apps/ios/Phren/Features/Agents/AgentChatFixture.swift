@@ -41,6 +41,9 @@ import UniformTypeIdentifiers
     }
     static let streamingReply = "The reply is arriving word by word. " + String(repeating: "You can follow the changes as they arrive without losing your place in the conversation. ", count: 8)
     static var stopped = false
+    /// A Markdown reply for `--chat-markdown-stream`: a bold phrase and a
+    /// list, previewed as it grows and then landing as the transcript row.
+    static let markdownReply = "Here is what changed on the chat screen:\n\n- **Bold phrase** opens the first item\n- A second item long enough to wrap onto another line\n\nThat is **all** for now."
     static var answered = false
     static var denied = false
     /// What the chat copied and has selected, for tests: reading the
@@ -1000,6 +1003,7 @@ import UniformTypeIdentifiers
         message(0, "assistant", "Ready to stream a reply.")
         // Claude's spinner line as the Hook sends it beside the frames.
         var activity: [String: Any]?
+        var preview: [String: Any]?
         if let start = streamStarts[target.id], let text = sent.last(where: { $0.0 == target.id })?.1 {
             let elapsed = Date.now.timeIntervalSince(start)
             // A slow Hook: the person's row lands with the turn's start.
@@ -1020,9 +1024,16 @@ import UniformTypeIdentifiers
                                 "tokens": ["count": elapsed < 6 ? 3_100 : 4_800, "direction": "down"]]
                 }
             }
+            // The live preview: the list's first item, then the whole reply,
+            // held long enough for a test to read both before the row lands.
+            if flag("--chat-markdown-stream"), elapsed >= 2, elapsed < 7 {
+                let shown = elapsed < 4 ? String(markdownReply.prefix(while: { $0 != "\n" })) + "\n\n- **Bold phrase** opens" : markdownReply
+                preview = ["turnStartedAt": start.formatted(.iso8601), "text": shown]
+            }
             let replies = !(flag("--chat-spinner-fixture") && (stopped || elapsed < 12))
-            if replies, elapsed >= (flag("--chat-activity-fixture") ? 10 : 5) {
-                message(4, "assistant", flag("--chat-activity-fixture") ? "The activity fixture reply is ready." : streamingReply)
+            if replies, elapsed >= (flag("--chat-activity-fixture") ? 10 : flag("--chat-markdown-stream") ? 7 : 5) {
+                message(4, "assistant", flag("--chat-activity-fixture") ? "The activity fixture reply is ready."
+                        : flag("--chat-markdown-stream") ? markdownReply : streamingReply)
                 event(5, ["type": "token_count", "info": ["last_token_usage": ["input_tokens": 128, "output_tokens": 85]]])
             }
             let duration: TimeInterval = flag("--chat-activity-fixture") ? 12 : flag("--chat-spinner-fixture") ? 14 : 9
@@ -1038,7 +1049,12 @@ import UniformTypeIdentifiers
             return try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: ["type": "preview", "source": target.source,
                 "preview": NSNull(), "activityVerb": "Whirlpooling", "activity": activity]), source: target.source)
         }
+        if let preview, kind == "append", delta.isEmpty {
+            return try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: ["type": "preview", "source": target.source,
+                "preview": preview]), source: target.source)
+        }
         var frame: [String: Any] = ["type": kind, "source": target.source, "entries": delta, "startLine": 0, "totalLines": totalLines, "hasMore": false]
+        if let preview { frame["preview"] = preview }
         if let activity { frame["activityVerb"] = "Whirlpooling"; frame["activity"] = activity }
         return try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: frame), source: target.source)
     }
