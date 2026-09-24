@@ -55,6 +55,15 @@ enum SessionStatusText {
         return cleaned.isEmpty ? nil : String(cleaned.prefix(500))
     }
 
+    /// The last reply as Siri says it: whole when it fits, otherwise its
+    /// first sentences that do; nil when not even one whole sentence fits.
+    static func spokenLine(_ value: String?) -> String? {
+        guard let line = cleanedAssistantLine(value) else { return nil }
+        if line.count <= spokenLineLimit { return line }
+        guard let first = ReplySummary.fallback(line, limit: spokenLineLimit), !first.hasSuffix("…") else { return nil }
+        return first
+    }
+
     static func dialog(for report: SessionStatusReport) -> String {
         let subject = "\(report.harnessName) on \(report.projectName) at \(report.entity.computer)"
         let status: String
@@ -67,7 +76,7 @@ enum SessionStatusText {
         case .unknown: status = "has no current status"
         }
         let cachedSummary = cleanedAssistantLine(report.awaySummary?.conciseLine)
-        let lastUpdate = cachedSummary.map { "Away summary: \($0)" } ?? cleanedAssistantLine(report.lastAssistantLine)
+        let lastUpdate = cachedSummary.map { "Away summary: \($0)" } ?? spokenLine(report.lastAssistantLine)
         guard let line = lastUpdate, line.count <= spokenLineLimit else {
             return "\(subject) \(status)."
         }

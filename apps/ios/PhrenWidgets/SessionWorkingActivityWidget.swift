@@ -1,4 +1,5 @@
 import ActivityKit
+import AppIntents
 import Foundation
 import SwiftUI
 import WidgetKit
@@ -6,7 +7,7 @@ import WidgetKit
 struct SessionWorkingActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: SessionWorkingActivityAttributes.self) { context in
-            SessionWorkingSummary(state: context.state)
+            SessionWorkingSummary(state: context.state, isStale: context.isStale)
                 .padding(10)
                 .activityBackgroundTint(WidgetTheme.activityBackground)
                 .activitySystemActionForegroundColor(WidgetTheme.activityText)
@@ -15,26 +16,28 @@ struct SessionWorkingActivityWidget: Widget {
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) { PhrenActivityMark(size: 18) }
                 DynamicIslandExpandedRegion(.center) {
-                    Text(context.state.summary)
+                    Text(context.state.headline)
                         .font(WidgetTheme.Font.caption).foregroundStyle(WidgetTheme.activitySecondary).lineLimit(1).truncationMode(.tail)
 
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        ForEach(context.state.entries.prefix(3)) { entry in
+                    VStack(alignment: .leading, spacing: 6) {
+                        if let approval = context.state.approval {
+                            FleetApprovalBlock(approval: approval, isStale: context.isStale, compact: true)
+                        }
+                        // A request fills the expanded island; the rows are on the lock screen.
+                        ForEach(context.state.entries.prefix(context.state.approval == nil ? 3 : 0)) { entry in
                             AgentRow(entry: entry)
                         }
                     }
+                    // Clear of the island's rounded corners, where a timer clips.
+                    .padding(.horizontal, 6)
 
                 }
             } compactLeading: {
                 PhrenActivityMark(size: 16)
             } compactTrailing: {
-                Text("\(context.state.working)").font(WidgetTheme.Font.caption2.weight(.semibold)).monospacedDigit()
-                    .foregroundStyle(context.state.waiting > 0 ? WidgetTheme.warning : WidgetTheme.cyan)
-                    .padding(.horizontal, 5).padding(.vertical, 2)
-                    .background((context.state.waiting > 0 ? WidgetTheme.warning : WidgetTheme.cyan).opacity(0.15), in: Capsule())
-                    .accessibilityLabel("\(context.state.working) working, \(context.state.waiting) waiting")
+                FleetCompactCounts(state: context.state, isStale: context.isStale)
             } minimal: { PhrenActivityMark(size: 16) }
             .widgetURL(routeURL(context))
         }
@@ -43,6 +46,8 @@ struct SessionWorkingActivityWidget: Widget {
     /// Opens the conversation the activity leads with; the app resolves the
     /// stored route, falling back to the Agents tab when it is gone.
     private func routeURL(_ context: ActivityViewContext<SessionWorkingActivityAttributes>) -> URL? {
+        // A waiting request leads: a tap opens its own conversation.
+        if let approval = context.state.approval, let url = approval.openURL { return url }
         var components = URLComponents()
         components.scheme = "phren"; components.host = "session"
         components.queryItems = [URLQueryItem(name: "route", value: context.attributes.routeID)]
@@ -54,15 +59,25 @@ struct SessionWorkingActivityWidget: Widget {
 /// short row per running agent, then how many more were too many to list.
 private struct SessionWorkingSummary: View {
     let state: SessionWorkingActivityAttributes.ContentState
+    let isStale: Bool
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    private var visibleCount: Int { dynamicTypeSize.isAccessibilitySize ? min(1, state.entries.count) : state.entries.count }
+    /// The lock screen gives an activity about 160 points, so a request on
+    /// top leaves room for two rows rather than five.
+    private var visibleCount: Int {
+        if dynamicTypeSize.isAccessibilitySize { return min(1, state.entries.count) }
+        return state.approval == nil ? state.entries.count : min(2, state.entries.count)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
                 PhrenActivityMark(size: 18)
-                Text(state.summary).font(WidgetTheme.Font.caption).foregroundStyle(WidgetTheme.activitySecondary)
+                Text(state.headline).font(WidgetTheme.Font.caption).foregroundStyle(WidgetTheme.activitySecondary)
                     .lineLimit(1).truncationMode(.tail)
+            }
+            if let approval = state.approval {
+                FleetApprovalBlock(approval: approval, isStale: isStale, compact: true)
+                    .padding(.vertical, 2)
             }
             ForEach(state.entries.prefix(visibleCount)) { entry in
                 AgentRow(entry: entry)
@@ -111,6 +126,18 @@ private struct AgentRow: View {
     private var projectColor: Color { WidgetTheme.projectNameColor(entry.projectColor) }
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            content
+            if let reply = entry.reply, isIdle, !dynamicTypeSize.isAccessibilitySize {
+                Text(reply).privacySensitive().font(WidgetTheme.Font.caption2)
+                    .foregroundStyle(WidgetTheme.activitySecondary)
+                    .lineLimit(1).truncationMode(.tail)
+                    .padding(.leading, 20)
+            }
+        }
+    }
+
+    @ViewBuilder private var content: some View {
         if dynamicTypeSize.isAccessibilitySize {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 5) {
@@ -215,5 +242,93 @@ private struct ProviderActivityGlyph: View {
         } else {
             Image(systemName: "terminal").frame(width: size, height: size)
         }
+    }
+}
+
+/// The island's compact trailing side: the request's word while one waits,
+/// otherwise the working count with the needs-you count beside it. Pinned
+/// widths, so a number never resizes the island.
+private struct FleetCompactCounts: View {
+    let state: SessionWorkingActivityAttributes.ContentState
+    let isStale: Bool
+
+    var body: some View {
+        if let approval = state.approval, !isStale {
+            Text(approval.question ? "Question" : "Approve?")
+                .font(WidgetTheme.Font.caption2.weight(.semibold)).foregroundStyle(WidgetTheme.warning)
+                .lineLimit(1).frame(width: 60, alignment: .trailing)
+        } else {
+            HStack(spacing: 3) {
+                pill("\(state.working)", color: WidgetTheme.cyan)
+                if state.needsYou > 0 { pill("\(state.needsYou)", color: WidgetTheme.warning) }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(state.headline)
+        }
+    }
+
+    private func pill(_ text: String, color: Color) -> some View {
+        Text(text).font(WidgetTheme.Font.caption2.weight(.semibold)).monospacedDigit()
+            .foregroundStyle(color).lineLimit(1)
+            .frame(minWidth: 12).padding(.horizontal, 5).padding(.vertical, 2)
+            .background(color.opacity(0.15), in: Capsule())
+    }
+}
+
+/// The request the fleet activity leads with: who asks, where, what, and
+/// Deny / Approve through the same authenticated intent as the chat card. A
+/// question offers Open, since its choices are made in the app.
+private struct FleetApprovalBlock: View {
+    let approval: SessionWorkingActivityAttributes.PendingApproval
+    let isStale: Bool
+    let compact: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: compact ? 4 : 6) {
+            HStack(spacing: 6) {
+                Image(systemName: isStale ? "clock" : approval.question ? "questionmark.bubble.fill" : "hand.raised.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(isStale ? WidgetTheme.activitySecondary : WidgetTheme.warning)
+                    .frame(width: 14, height: 14)
+                Text(isStale ? "Check current request" : approval.headline)
+                    .font(WidgetTheme.Font.caption.weight(.semibold)).foregroundStyle(WidgetTheme.activityText)
+                    .lineLimit(1).truncationMode(.tail)
+                Spacer(minLength: 4)
+                Text("\(approval.project) · \(approval.host)").privacySensitive()
+                    .font(WidgetTheme.Font.caption2).foregroundStyle(WidgetTheme.activitySecondary)
+                    .lineLimit(1).truncationMode(.tail)
+            }
+            if !isStale {
+                Text(approval.explanation).privacySensitive()
+                    .font(WidgetTheme.Font.caption2).foregroundStyle(WidgetTheme.activitySecondary)
+                    .lineLimit(compact ? 1 : 2).truncationMode(.tail)
+            }
+            actions
+        }
+    }
+
+    @ViewBuilder private var actions: some View {
+        if isStale || approval.question {
+            if let url = approval.openURL {
+                Link(destination: url) { label("Open", prominent: true) }
+            }
+        } else {
+            HStack(spacing: 8) {
+                Button(intent: AnswerApprovalIntent(requestID: approval.requestID, approve: false)) {
+                    label("Deny", prominent: false)
+                }.buttonStyle(.plain)
+                Button(intent: AnswerApprovalIntent(requestID: approval.requestID, approve: true)) {
+                    label("Approve", prominent: true)
+                }.buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func label(_ title: String, prominent: Bool) -> some View {
+        Text(title).font(WidgetTheme.Font.caption.weight(.semibold))
+            .foregroundStyle(prominent ? Color.black : WidgetTheme.activityText)
+            .frame(maxWidth: .infinity, minHeight: compact ? 30 : 34)
+            .background(prominent ? WidgetTheme.accent : Color.white.opacity(0.12), in: Capsule())
+            .contentShape(Capsule())
     }
 }

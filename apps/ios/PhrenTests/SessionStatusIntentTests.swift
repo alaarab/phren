@@ -99,6 +99,10 @@ final class SessionStatusIntentTests: XCTestCase {
                        "Codex on phren at Mini is done. Last update: Tests passed. Ready to merge.")
         let long = try report(state: .working, line: String(repeating: "A", count: SessionStatusText.spokenLineLimit + 1))
         XCTAssertEqual(SessionStatusText.dialog(for: long), "Codex on phren at Mini is working.")
+        // A long reply of several sentences speaks the first ones that fit.
+        let sentences = "Merged the sync fix. " + String(repeating: "Then I checked every other file carefully. ", count: 6)
+        XCTAssertEqual(SessionStatusText.dialog(for: try report(state: .done, line: sentences)),
+                       "Codex on phren at Mini is done. Last update: Merged the sync fix. Then I checked every other file carefully.")
         // Unmapped: the folder the agent sits in, not the Herdr workspace label.
         XCTAssertEqual(SessionStatusText.dialog(for: try report(state: .unknown, project: nil, agent: nil)),
                        "Agent on scratch at Mini has no current status.")

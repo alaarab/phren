@@ -45,11 +45,22 @@ enum ConductorReply {
     static let spokenLimit = 300
 
     static func next(in messages: [AgentChatMessage], after line: Int) -> String? {
-        guard let message = messages.first(where: { $0.role == .assistant && $0.line > line }) else { return nil }
-        let cleaned = message.text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        raw(in: messages, after: line).flatMap(bounded)
+    }
+
+    /// One line of at most `spokenLimit` characters, whitespace collapsed.
+    static func bounded(_ text: String) -> String? {
+        let cleaned = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else { return nil }
         return String(cleaned.prefix(spokenLimit))
+    }
+
+    /// The same reply with its markdown intact, for the summarizer.
+    static func raw(in messages: [AgentChatMessage], after line: Int) -> String? {
+        guard let text = messages.first(where: { $0.role == .assistant && $0.line > line })?.text,
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return text
     }
 }
 
@@ -122,7 +133,7 @@ struct TellConductorIntent: AppIntent {
 
 /// "Hey Siri, ask my conductor whether the checks passed": sends the question
 /// and waits up to 20 seconds for the conductor's next assistant line, then
-/// speaks its first 300 characters.
+/// speaks it, summarized on the phone when it is long.
 struct AskConductorIntent: AppIntent {
     static var title: LocalizedStringResource = "Ask my conductor"
     static var description = IntentDescription(
@@ -149,12 +160,14 @@ struct AskConductorIntent: AppIntent {
         try await ConductorDelivery.send(text, to: conductor, target: delivery.target)
         let reply = try? await AgentReplyWaiter.wait(timeout: .seconds(20)) {
             let transcript = try await SessionStatusService.transcript(session: conductor, target: delivery.target)
-            return ConductorReply.next(in: transcript.messages, after: delivery.baseline)
+            return ConductorReply.raw(in: transcript.messages, after: delivery.baseline)
         }
         guard let reply else {
             return .result(dialog: "The conductor is thinking; open Phren to read the answer")
         }
-        return .result(dialog: "\(reply)")
+        // A long or structured reply is spoken as one or two sentences.
+        let spoken = await ReplySummarizer.shared.summarize(reply) ?? ConductorReply.bounded(reply) ?? reply
+        return .result(dialog: "\(spoken)")
     }
 }
 

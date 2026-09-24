@@ -33,10 +33,40 @@ enum UITestFixtures {
         for activity in Activity<SessionWorkingActivityAttributes>.activities { await activity.end(nil, dismissalPolicy: .immediate) }
     }
 
+    /// The one agents activity as the island and lock screen draw it: three
+    /// working, one waiting on a request, one just finished with its reply.
+    private static func startFleetActivityFixture() {
+        let now = Date.now
+        typealias Entry = SessionWorkingActivityAttributes.Entry
+        let entries: [Entry] = [
+            .init(id: "f1", project: "phren", provider: "claude", computer: "Desk", model: "opus-5-5", branch: "main",
+                  state: "waiting", startedAt: now.addingTimeInterval(-40)),
+            .init(id: "f2", project: "objectstudio", provider: "codex", computer: "Linuxbox", model: "gpt-6-astra",
+                  branch: "fix/export", state: "working", startedAt: now.addingTimeInterval(-600)),
+            .init(id: "f3", project: "phren", provider: "opencode", computer: "Desk", branch: "fleet-island",
+                  state: "working", startedAt: now.addingTimeInterval(-300)),
+            .init(id: "f4", project: "m4l", provider: "claude", computer: "Desk", branch: "limiter",
+                  state: "working", startedAt: now.addingTimeInterval(-120)),
+            .init(id: "f5", project: "phren", provider: "codex", computer: "Linuxbox", branch: "sync-tests",
+                  state: "idle", startedAt: now.addingTimeInterval(-20),
+                  reply: "Merged the sync fix and all 274 UI tests passed."),
+        ]
+        let approval = SessionWorkingActivityAttributes.PendingApproval(
+            requestID: UUID().uuidString, provider: "Claude", project: "phren", host: "Desk",
+            explanation: "Bash: pnpm test --filter @phren/cli", expiresAt: now.addingTimeInterval(600), question: false)
+        let state = SessionWorkingActivityAttributes.ContentState(working: 3, waiting: 1, entries: entries,
+                                                                  startedAt: now.addingTimeInterval(-600), computers: 2,
+                                                                  approval: approval)
+        _ = try? Activity.request(attributes: SessionWorkingActivityAttributes(routeID: UUID().uuidString),
+                                  content: ActivityContent(state: state, staleDate: now.addingTimeInterval(600), relevanceScore: 1),
+                                  pushType: nil)
+    }
+
     static func bootstrap() async throws -> Bootstrap {
         let arguments = ProcessInfo.processInfo.arguments
         let defaults = AppRuntime.defaults
         await endLiveActivities()
+        if arguments.contains("--fleet-activity-fixture") { startFleetActivityFixture() }
         defaults.removeObject(forKey: ProjectAgentRecents.key)
         defaults.removeObject(forKey: AgentLaunch.pendingKey)
         defaults.removeObject(forKey: AgentLaunch.pendingProjectKey)
