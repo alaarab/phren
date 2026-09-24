@@ -28,6 +28,7 @@ import {
   checkSemanticConflicts,
 } from "../shared/content.js";
 import { jaccardTokenize, jaccardSimilarity, stripMetadata, detectConflicts, extractDynamicEntities } from "../content/dedup.js";
+import { scanForSecrets } from "../content/secrets.js";
 import type { PhrenResult } from "../phren-core.js";
 import { runCustomHooks } from "../hooks.js";
 import { incrementSessionFindings } from "./session.js";
@@ -188,33 +189,64 @@ async function handleAddFinding(
     session_id: sessionId,
   };
 
+  const normalizedScope = normalizeMemoryScope(scope ?? "shared");
+  if (!normalizedScope) return mcpResponse({ ok: false, error: `Invalid scope: "${scope}". Use lowercase letters/numbers with '-' or '_' (max 64 chars), e.g. "researcher".` });
+
+  // Size caps apply to every store; they used to sit after the team branch.
+  const findingList = Array.isArray(finding) ? finding : [finding];
+  if (findingList.length > 100) return mcpResponse({ ok: false, error: "Bulk add limited to 100 findings per call." });
+  if (findingList.some((f) => f.length > 5000)) {
+    return mcpResponse({
+      ok: false,
+      error: Array.isArray(finding) ? "One or more findings exceed 5000 character limit." : "Finding text exceeds 5000 character limit.",
+    });
+  }
+
   // Team stores: use append-only journal (no FINDINGS.md mutation, no merge conflicts)
   {
     const storeResolved = resolveStoreForProject(ctx, params.project);
     if (storeResolved.storeRole === "team") {
       const { appendTeamJournal } = await import("../finding/journal.js");
-      const findings = Array.isArray(finding) ? finding : [finding];
-      const added: string[] = [];
-      for (const f of findings) {
-        const taggedFinding = applyFindingTypePrefix(f, findingType);
-        const result = appendTeamJournal(phrenPath, project, taggedFinding, provenance.actor, provenance.machine);
-        if (result.ok) added.push(taggedFinding);
+      // The journal is pushed to a repo shared with colleagues, so it gets the
+      // same secret scan the personal store applies.
+      const rejected: Array<{ finding: string; reason: string }> = [];
+      const accepted: string[] = [];
+      for (const f of findingList) {
+        const secretType = scanForSecrets(f);
+        if (secretType) rejected.push({ finding: f.slice(0, 60), reason: `Contains ${secretType}` });
+        else accepted.push(applyFindingTypePrefix(f, findingType));
       }
-      return mcpResponse({
-        ok: added.length > 0,
-        message: `Added ${added.length} finding(s) to ${params.project} journal`,
-        data: { project: params.project, added, journalMode: true },
+      return withWriteQueue(async () => {
+        const added: string[] = [];
+        const journals = new Set<string>();
+        for (const taggedFinding of accepted) {
+          const result = appendTeamJournal(phrenPath, project, taggedFinding, provenance.actor, provenance.machine);
+          if (result.ok) {
+            added.push(taggedFinding);
+            journals.add(path.join(phrenPath, project, "journal", result.data));
+          } else {
+            rejected.push({ finding: taggedFinding.slice(0, 60), reason: result.error });
+          }
+        }
+        for (const journalPath of journals) updateFileInIndex(journalPath);
+        if (added.length === 0) {
+          return mcpResponse({
+            ok: false,
+            error: `No findings written to ${params.project} journal: ${rejected.map((r) => `"${r.finding}" ${r.reason}`).join("; ")}`,
+            data: { project: params.project, rejected, journalMode: true },
+          });
+        }
+        return mcpResponse({
+          ok: true,
+          message: `Added ${added.length} finding(s) to ${params.project} journal${rejected.length > 0 ? `, ${rejected.length} rejected` : ""}`,
+          data: { project: params.project, added, journalMode: true, ...(rejected.length > 0 ? { rejected } : {}) },
+        });
       });
     }
   }
 
-  const normalizedScope = normalizeMemoryScope(scope ?? "shared");
-  if (!normalizedScope) return mcpResponse({ ok: false, error: `Invalid scope: "${scope}". Use lowercase letters/numbers with '-' or '_' (max 64 chars), e.g. "researcher".` });
-
   if (Array.isArray(finding)) {
     const findings = finding;
-    if (findings.length > 100) return mcpResponse({ ok: false, error: "Bulk add limited to 100 findings per call." });
-    if (findings.some((f) => f.length > 5000)) return mcpResponse({ ok: false, error: "One or more findings exceed 5000 character limit." });
     return withWriteQueue(async () => {
       runCustomHooks(phrenPath, "pre-finding", { PHREN_PROJECT: project });
 
@@ -265,7 +297,6 @@ async function handleAddFinding(
     });
   }
 
-  if (finding.length > 5000) return mcpResponse({ ok: false, error: "Finding text exceeds 5000 character limit." });
   return withWriteQueue(async () => {
     try {
       const taggedFinding = applyFindingTypePrefix(finding, findingType);
@@ -592,6 +623,83 @@ async function handleRemoveFinding(
   });
 }
 
+export interface TeamStoreSyncResult {
+  store: string;
+  pushed: boolean;
+  error?: string;
+}
+
+/**
+ * Commit and push the team-safe pathspecs of every attached team store. Team
+ * stores are independent repos, so push_changes runs this whatever happens to
+ * the primary store.
+ */
+export async function syncTeamStores(phrenPath: string): Promise<TeamStoreSyncResult[]> {
+  const teamResults: TeamStoreSyncResult[] = [];
+  try {
+    const { execFileSync } = await import("child_process");
+    const { getNonPrimaryStores } = await import("../store-registry.js");
+    const teamStores = getNonPrimaryStores(phrenPath).filter((s) => s.role === "team");
+
+    for (const store of teamStores) {
+      if (!fs.existsSync(store.path) || !fs.existsSync(path.join(store.path, ".git"))) continue;
+      const runStoreGit = (args: string[], opts: { timeout?: number; env?: NodeJS.ProcessEnv } = {}): string =>
+        execFileSync("git", args, {
+          cwd: store.path,
+          encoding: "utf8",
+          timeout: opts.timeout ?? EXEC_TIMEOUT_MS,
+          env: nonInteractiveGitEnv(opts.env),
+          stdio: ["ignore", "pipe", "pipe"],
+        }).trim();
+      const mergeStoreGit: RunStoreGit = async (_cwd, gitArgs) => {
+        try { return { ok: true, output: runStoreGit(gitArgs) }; }
+        catch (err: unknown) { return { ok: false, output: "", error: errorMessage(err) }; }
+      };
+
+      try {
+        if (!runStoreGit(["status", "--porcelain"])) continue;
+
+        // Stage each team-safe pathspec individually — a single no-match
+        // (e.g. no */truths.md in this store) used to abort the whole add.
+        for (const spec of TEAM_STORE_PATHSPECS) {
+          try { runStoreGit(["add", "--sparse", "--", spec]); } catch { /* best-effort */ }
+        }
+        if (!runStoreGit(["diff", "--cached", "--name-only"])) continue;
+        const actor = process.env.PHREN_ACTOR || process.env.USER || "unknown";
+        runStoreGit(["commit", "-m", storeCommitMessage(`phren: ${actor} team sync`)]);
+
+        try {
+          runStoreGit(["push"], { timeout: 15000 });
+          teamResults.push({ store: store.name, pushed: true });
+        } catch {
+          try {
+            const merged = await mergeStoreUpstream(store.path, { git: mergeStoreGit, commitLocalWrites: false });
+            if (merged.status !== "updated" && merged.status !== "unchanged") throw new Error(merged.detail);
+            runStoreGit(["push"], { timeout: 15000 });
+            teamResults.push({ store: store.name, pushed: true });
+          } catch (retryErr: unknown) {
+            teamResults.push({ store: store.name, pushed: false, error: errorMessage(retryErr) });
+          }
+        }
+      } catch (storeErr: unknown) {
+        teamResults.push({ store: store.name, pushed: false, error: errorMessage(storeErr) });
+      }
+    }
+  } catch (err: unknown) {
+    debugLog(`syncTeamStores: ${errorMessage(err)}`);
+  }
+  return teamResults;
+}
+
+/** Team-store outcomes appended to a push_changes message, so a failure is visible. */
+function describeTeamSync(results: TeamStoreSyncResult[]): string {
+  if (results.length === 0) return "";
+  const pushed = results.filter((r) => r.pushed).map((r) => r.store);
+  const parts = pushed.length > 0 ? [`Pushed ${pushed.length} team store(s): ${pushed.join(", ")}.`] : [];
+  for (const failure of results.filter((r) => !r.pushed)) parts.push(`Team store "${failure.store}" failed: ${failure.error ?? "unknown error"}.`);
+  return ` ${parts.join(" ")}`;
+}
+
 async function handlePushChanges(
   ctx: McpContext,
   { message }: { message?: string },
@@ -615,9 +723,13 @@ async function handlePushChanges(
       catch (err: unknown) { return { ok: false, output: "", error: errorMessage(err) }; }
     };
 
+    const teamResults = await syncTeamStores(phrenPath);
+    const teamSuffix = describeTeamSync(teamResults);
+    const teamData = teamResults.length > 0 ? { teamStores: teamResults } : {};
+
     try {
       const status = runGit(["status", "--porcelain"]);
-      if (!status) return mcpResponse({ ok: true, message: "Nothing to save. Phren is up to date.", data: { files: 0, pushed: false } });
+      if (!status) return mcpResponse({ ok: true, message: `Nothing to save. Phren is up to date.${teamSuffix}`, data: { files: 0, pushed: false, ...teamData } });
       const files = status.split("\n").filter(Boolean);
       const projectNames = Array.from(
         new Set(
@@ -651,7 +763,7 @@ async function handlePushChanges(
 
       if (!hasRemote) {
         const changedFiles = status.split("\n").filter(Boolean).length;
-        return mcpResponse({ ok: true, message: `Saved ${changedFiles} changed file(s). No remote configured, skipping push.`, data: { files: changedFiles, pushed: false } });
+        return mcpResponse({ ok: true, message: `Saved ${changedFiles} changed file(s). No remote configured, skipping push.${teamSuffix}`, data: { files: changedFiles, pushed: false, ...teamData } });
       }
 
       let pushed = false;
@@ -682,74 +794,16 @@ async function handlePushChanges(
       const changedFiles = status.split("\n").filter(Boolean).length;
       runCustomHooks(phrenPath, "post-save", { PHREN_FILES_CHANGED: String(changedFiles), PHREN_PUSHED: String(pushed) });
       if (pushed) {
-        return mcpResponse({ ok: true, message: `Saved ${changedFiles} changed file(s). Pushed to remote.`, data: { files: changedFiles, pushed: true } });
+        return mcpResponse({ ok: true, message: `Saved ${changedFiles} changed file(s). Pushed to remote.${teamSuffix}`, data: { files: changedFiles, pushed: true, ...teamData } });
       } else {
         return mcpResponse({
           ok: true,
-          message: `Changes were committed but push failed.\n\nGit error: ${lastPushError}\n\nRun 'git push' manually from your phren directory.`,
-          data: { files: changedFiles, pushed: false, pushError: lastPushError },
+          message: `Changes were committed but push failed.\n\nGit error: ${lastPushError}\n\nRun 'git push' manually from your phren directory.${teamSuffix}`,
+          data: { files: changedFiles, pushed: false, pushError: lastPushError, ...teamData },
         });
       }
     } catch (err: unknown) {
-      return mcpResponse({ ok: false, error: `Save failed: ${errorMessage(err)}`, errorCode: "INTERNAL_ERROR" });
-    }
-
-    // Sync team stores: commit and push journal/tasks/truths changes
-    try {
-      const { getNonPrimaryStores } = await import("../store-registry.js");
-      const teamStores = getNonPrimaryStores(phrenPath).filter((s) => s.role === "team");
-      const teamResults: Array<{ store: string; pushed: boolean; error?: string }> = [];
-
-      for (const store of teamStores) {
-        if (!fs.existsSync(store.path) || !fs.existsSync(path.join(store.path, ".git"))) continue;
-        const runStoreGit = (args: string[], opts: { timeout?: number; env?: NodeJS.ProcessEnv } = {}): string =>
-          execFileSync("git", args, {
-            cwd: store.path,
-            encoding: "utf8",
-            timeout: opts.timeout ?? EXEC_TIMEOUT_MS,
-            env: nonInteractiveGitEnv(opts.env),
-            stdio: ["ignore", "pipe", "pipe"],
-          }).trim();
-        const mergeStoreGit: RunStoreGit = async (_cwd, gitArgs) => {
-          try { return { ok: true, output: runStoreGit(gitArgs) }; }
-          catch (err: unknown) { return { ok: false, output: "", error: errorMessage(err) }; }
-        };
-
-        try {
-          const storeStatus = runStoreGit(["status", "--porcelain"]);
-          if (!storeStatus) { teamResults.push({ store: store.name, pushed: false }); continue; }
-
-          // Stage each team-safe pathspec individually — a single no-match
-          // (e.g. no */truths.md in this store) used to abort the whole add.
-          for (const spec of TEAM_STORE_PATHSPECS) {
-            try { runStoreGit(["add", "--sparse", "--", spec]); } catch { /* best-effort */ }
-          }
-          const actor = process.env.PHREN_ACTOR || process.env.USER || "unknown";
-          runStoreGit(["commit", "-m", storeCommitMessage(`phren: ${actor} team sync`)]);
-
-          try {
-            runStoreGit(["push"], { timeout: 15000 });
-            teamResults.push({ store: store.name, pushed: true });
-          } catch {
-            try {
-              const merged = await mergeStoreUpstream(store.path, { git: mergeStoreGit, commitLocalWrites: false });
-              if (merged.status !== "updated" && merged.status !== "unchanged") throw new Error(merged.detail);
-              runStoreGit(["push"], { timeout: 15000 });
-              teamResults.push({ store: store.name, pushed: true });
-            } catch (retryErr: unknown) {
-              teamResults.push({ store: store.name, pushed: false, error: errorMessage(retryErr) });
-            }
-          }
-        } catch (storeErr: unknown) {
-          teamResults.push({ store: store.name, pushed: false, error: errorMessage(storeErr) });
-        }
-      }
-      // Team store results are best-effort — don't fail the primary push for them
-      if (teamResults.length > 0) {
-        debugLog(`push_changes team stores: ${JSON.stringify(teamResults)}`);
-      }
-    } catch {
-      // store-registry not available — skip silently
+      return mcpResponse({ ok: false, error: `Save failed: ${errorMessage(err)}${teamSuffix}`, errorCode: "INTERNAL_ERROR" });
     }
   }));
 }
