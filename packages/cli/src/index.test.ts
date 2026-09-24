@@ -63,11 +63,8 @@ describe("sanitizeFts5Query", () => {
     expect(result).toBe("exact phrase");
   });
 
-  it("returns empty string for empty input", () => {
+  it("returns empty string for empty or whitespace-only input", () => {
     expect(sanitizeFts5Query("")).toBe("");
-  });
-
-  it("returns empty string for whitespace-only input", () => {
     expect(sanitizeFts5Query("   ")).toBe("");
   });
 
@@ -99,29 +96,10 @@ describe("buildRobustFtsQuery", () => {
   });
 });
 
-describe("isValidProjectName", () => {
-  it("rejects null byte", () => {
-    expect(isValidProjectName("foo\0bar")).toBe(false);
-  });
-
-  it("rejects triple dots containing ..", () => {
-    expect(isValidProjectName("...")).toBe(false);
-  });
-});
-
 describe("extractKeywords", () => {
   it("limits to 10 terms (words + bigrams)", () => {
     const result = extractKeywords("one two three four five six seven eight nine ten eleven");
     expect(result.split(" ").length).toBeLessThanOrEqual(10);
-  });
-
-  it("handles empty string", () => {
-    expect(extractKeywords("")).toBe("");
-  });
-
-  it("removes single-character words", () => {
-    const result = extractKeywords("a b c deploy");
-    expect(result).toBe("deploy");
   });
 });
 
@@ -129,28 +107,18 @@ describe("safeProjectPath", () => {
   const base = "/tmp/test-phren";
 
   it("returns resolved path for a valid subdirectory", () => {
-    const result = safeProjectPath(base, "my-project");
-    expect(result).toBe(path.resolve(base, "my-project"));
+    expect(safeProjectPath(base, "my-project")).toBe(path.resolve(base, "my-project"));
+    expect(safeProjectPath(base, "project", "subdir")).toBe(path.resolve(base, "project", "subdir"));
   });
 
   it("rejects traversal that escapes the base", () => {
-    const result = safeProjectPath(base, "..", "etc", "passwd");
-    expect(result).toBeNull();
-  });
-
-  it("rejects simple parent traversal", () => {
-    const result = safeProjectPath(base, "..");
-    expect(result).toBeNull();
+    expect(safeProjectPath(base, "..", "etc", "passwd")).toBeNull();
+    expect(safeProjectPath(base, "..")).toBeNull();
   });
 
   it("allows the base directory itself", () => {
     const result = safeProjectPath(base);
     expect(result).toBe(path.resolve(base));
-  });
-
-  it("allows nested paths within base", () => {
-    const result = safeProjectPath(base, "project", "subdir");
-    expect(result).toBe(path.resolve(base, "project", "subdir"));
   });
 
   it("rejects prefix attacks (base name as substring)", () => {
@@ -169,6 +137,8 @@ describe("isValidProjectName", () => {
   it("rejects punctuation outside hyphen and underscore", () => {
     expect(isValidProjectName("native:-home")).toBe(false);
     expect(isValidProjectName("my.project")).toBe(false);
+    expect(isValidProjectName("foo\0bar")).toBe(false);
+    expect(isValidProjectName("...")).toBe(false);
   });
 });
 
@@ -289,6 +259,8 @@ describe("validateTaskFormat", () => {
     const content = "## Active\n\n- Task A\n";
     const issues = validateTaskFormat(content);
     expect(issues.some(i => i.includes("Missing title heading"))).toBe(true);
+    // No heading at all reports the title and the sections together.
+    expect(validateTaskFormat("no heading here").length).toBeGreaterThanOrEqual(2);
   });
 
   it("flags missing standard sections", () => {
@@ -300,11 +272,6 @@ describe("validateTaskFormat", () => {
   it("accepts content with only Queue section", () => {
     const content = "# task\n\n## Queue\n\n- Task B\n";
     expect(validateTaskFormat(content)).toEqual([]);
-  });
-
-  it("can return multiple issues at once", () => {
-    const issues = validateTaskFormat("no heading here");
-    expect(issues.length).toBeGreaterThanOrEqual(2);
   });
 });
 
@@ -616,19 +583,11 @@ describe("debugLog", () => {
   it("writes to debug.log when PHREN_DEBUG is set", () => {
     process.env.PHREN_DEBUG = "1";
     debugLog("hello from test");
+    debugLog("second");
     const logFile = path.join(tmpDir, ".phren", ".runtime", "debug.log");
     expect(fs.existsSync(logFile)).toBe(true);
     const contents = fs.readFileSync(logFile, "utf8");
     expect(contents).toContain("hello from test");
-  });
-
-  it("appends successive messages", () => {
-    process.env.PHREN_DEBUG = "1";
-    debugLog("first");
-    debugLog("second");
-    const logFile = path.join(tmpDir, ".phren", ".runtime", "debug.log");
-    const contents = fs.readFileSync(logFile, "utf8");
-    expect(contents).toContain("first");
     expect(contents).toContain("second");
   });
 });

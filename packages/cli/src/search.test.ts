@@ -137,7 +137,9 @@ describe("extractKeywords", () => {
   });
 
   it("returns empty string for all-stop-word input", () => {
-    const result = extractKeywords("the is a an and or but in on at");
-    expect(result).toBe("");
+    expect(extractKeywords("the is a an and or but in on at")).toBe("");
+    expect(extractKeywords("")).toBe("");
+    // Single-character words are dropped too.
+    expect(extractKeywords("a b c deploy")).toBe("deploy");
   });
 });

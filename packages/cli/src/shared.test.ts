@@ -81,25 +81,11 @@ afterEach(() => {
 // --- isValidProjectName ---
 
 describe("isValidProjectName", () => {
-  it("accepts simple names", () => {
-    expect(isValidProjectName("my-project")).toBe(true);
-    expect(isValidProjectName("phren")).toBe(true);
-    expect(isValidProjectName("foo_bar")).toBe(true);
-  });
-
-  it("rejects path traversal attempts", () => {
-    expect(isValidProjectName("../etc")).toBe(false);
-    expect(isValidProjectName("foo/../../bar")).toBe(false);
-    expect(isValidProjectName("..")).toBe(false);
-  });
-
-  it("rejects empty names", () => {
-    expect(isValidProjectName("")).toBe(false);
-  });
-
-  it("rejects names with slashes", () => {
-    expect(isValidProjectName("foo/bar")).toBe(false);
-    expect(isValidProjectName("foo\\bar")).toBe(false);
+  it("accepts simple names and rejects traversal, empty and slashed ones", () => {
+    for (const name of ["my-project", "phren", "foo_bar"]) expect(isValidProjectName(name)).toBe(true);
+    for (const name of ["../etc", "foo/../../bar", "..", "", "foo/bar", "foo\\bar"]) {
+      expect(isValidProjectName(name), name).toBe(false);
+    }
   });
 });
 
@@ -969,6 +955,7 @@ describe("getProjectDirs", () => {
     fs.mkdirSync(path.join(phren, ".config"), { recursive: true });
     fs.mkdirSync(path.join(phren, "profiles"), { recursive: true });
     fs.mkdirSync(path.join(phren, "templates"), { recursive: true });
+    fs.mkdirSync(path.join(phren, "global"), { recursive: true });
 
     const dirs = getProjectDirs(phren);
     const names = dirs.map(d => path.basename(d));
@@ -977,16 +964,6 @@ describe("getProjectDirs", () => {
     expect(names).not.toContain(".config");
     expect(names).not.toContain("profiles");
     expect(names).not.toContain("templates");
-  });
-
-  it("excludes global directory from project listing", () => {
-    const phren = makePhren();
-    fs.mkdirSync(path.join(phren, "proj-a"), { recursive: true });
-    fs.mkdirSync(path.join(phren, "global"), { recursive: true });
-
-    const dirs = getProjectDirs(phren);
-    const names = dirs.map(d => path.basename(d));
-    expect(names).toContain("proj-a");
     expect(names).not.toContain("global");
   });
 
@@ -1109,20 +1086,15 @@ describe("filterTrustedFindingsDetailed (extended)", () => {
     // 50 days old = d60 bucket = 0.5 confidence, x0.8 for no citation = 0.4 < 0.9
     expect(result.issues.length).toBe(1);
     expect(result.issues[0].reason).toBe("stale");
-  });
 
-  it("keeps entries when decay is generous even without citation", () => {
-    const d = new Date();
-    d.setDate(d.getDate() - 50);
-    const dateStr = d.toISOString().slice(0, 10);
-    const content = `# proj FINDINGS\n\n## ${dateStr}\n\n- Finding without citation\n`;
-    const result = filterTrustedFindingsDetailed(content, {
+    // Positive control: generous decay keeps the same uncited entry.
+    const kept = filterTrustedFindingsDetailed(content, {
       ttlDays: 365,
       minConfidence: 0.3,
       decay: { d30: 1.0, d60: 1.0, d90: 0.9, d120: 0.8 },
     });
-    expect(result.content).toContain("Finding without citation");
-    expect(result.issues.length).toBe(0);
+    expect(kept.content).toContain("Decaying uncited finding");
+    expect(kept.issues.length).toBe(0);
   });
 
   it("only emits date headings that have surviving entries", () => {
@@ -1295,10 +1267,14 @@ describe("collectNativeMemoryFiles", () => {
     fs.mkdirSync(memDir, { recursive: true });
     fs.writeFileSync(path.join(memDir, "MEMORY-myapp.md"), "# My App Notes");
     fs.writeFileSync(path.join(memDir, "MEMORY-backend.md"), "# Backend Notes");
+    // A second project-key directory is collected too.
+    const otherDir = path.join(tmpRoot, ".claude", "projects", "other-key", "memory");
+    fs.mkdirSync(otherDir, { recursive: true });
+    fs.writeFileSync(path.join(otherDir, "MEMORY-docs.md"), "# Docs Notes");
     const result = collectNativeMemoryFiles();
-    expect(result).toHaveLength(2);
+    expect(result).toHaveLength(3);
     const projects = result.map(r => r.project).sort();
-    expect(projects).toEqual(["backend", "myapp"]);
+    expect(projects).toEqual(["backend", "docs", "myapp"]);
   });
 
   it("handles non-standard .md files with native: prefix", () => {
@@ -1309,16 +1285,6 @@ describe("collectNativeMemoryFiles", () => {
     expect(result).toHaveLength(1);
     expect(result[0].project).toBe("native:proj-key");
     expect(result[0].file).toBe("notes.md");
-  });
-
-  it("collects from multiple project directories", () => {
-    for (const key of ["proj-a", "proj-b"]) {
-      const memDir = path.join(tmpRoot, ".claude", "projects", key, "memory");
-      fs.mkdirSync(memDir, { recursive: true });
-      fs.writeFileSync(path.join(memDir, `MEMORY-${key}.md`), `# ${key} notes`);
-    }
-    const result = collectNativeMemoryFiles();
-    expect(result).toHaveLength(2);
   });
 });
 
