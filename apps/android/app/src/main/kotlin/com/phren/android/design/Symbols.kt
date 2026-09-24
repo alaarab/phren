@@ -140,6 +140,11 @@ import androidx.compose.material.icons.rounded.Computer
 import androidx.compose.material.icons.rounded.DesktopMac
 import androidx.compose.material.icons.rounded.Hub
 import androidx.compose.material.icons.rounded.Timeline
+import androidx.compose.material.icons.outlined.PushPin
+import androidx.compose.material.icons.rounded.Bolt
+import androidx.compose.material.icons.rounded.Bedtime
+import androidx.compose.material.icons.rounded.QuestionMark
+import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.ui.graphics.vector.ImageVector
 
 /**
@@ -313,6 +318,11 @@ object SF {
             "plusminus" to Icons.Rounded.SwapVert,
             "plus.forwardslash.minus" to Icons.Rounded.SwapVert,
             "pin.fill" to Icons.Rounded.PushPin,
+            "pin" to Icons.Outlined.PushPin,
+            "bolt.fill" to Icons.Rounded.Bolt,
+            "pause.fill" to Icons.Rounded.Pause,
+            "moon" to Icons.Rounded.Bedtime,
+            "questionmark" to Icons.Rounded.QuestionMark,
             "note.text" to Icons.AutoMirrored.Rounded.Notes,
             "lightbulb" to Icons.Rounded.Lightbulb,
             "hand.tap" to Icons.Rounded.PanTool,

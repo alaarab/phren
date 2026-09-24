@@ -2,8 +2,10 @@
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="sharedpref" path="phren.secure.xml" />
+        <exclude domain="sharedpref" path="phren.ssh.xml" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="sharedpref" path="phren.secure.xml" />
+        <exclude domain="sharedpref" path="phren.ssh.xml" />
     </device-transfer>
 </data-extraction-rules>

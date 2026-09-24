@@ -99,6 +99,19 @@ class AppModel(private val context: Context) {
     val prefs = PrefsStore.of(context)
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
+    // Live sessions: saved computers, this device's SSH keys, and the one overview the app keeps live.
+    init { com.phren.android.live.LiveCrypto.install() }
+    var livePreferences by mutableStateOf(com.phren.android.live.LivePreferencesStore.of(context))
+        private set
+    val deviceKeys = com.phren.android.live.DeviceKeyStore(context)
+    var overview by mutableStateOf(com.phren.android.live.SessionOverviewMonitor(scope, deviceKeys, context.cacheDir))
+        private set
+    /** Every store's projects, the names a session's folder can map to. */
+    val sessionProjects: List<com.phren.kit.SessionProject>
+        get() = storeDescriptors.flatMap { store ->
+            snapshot(store.id).projects.filter { it.name != "global" }.map { com.phren.kit.SessionProject(store.id, it.name) }
+        }
+
     var phase by mutableStateOf(Phase.LOADING)
         private set
     var user by mutableStateOf<GitHubUser?>(null)
@@ -274,7 +287,7 @@ class AppModel(private val context: Context) {
     }
 
     /** Debug launches only: the iOS UI-test stores, never synced. */
-    fun bootstrapFixture(kind: String) = scope.launch {
+    fun bootstrapFixture(kind: String, agents: Boolean = false, offline: Boolean = false) = scope.launch {
         if (phase != Phase.LOADING) return@launch
         val owners = if (kind == "store-tour") listOf("sample") else listOf("sample", "team")
         for (owner in owners) {
@@ -290,9 +303,20 @@ class AppModel(private val context: Context) {
                         store.write("demo/skills/audit.md", com.phren.kit.SkillFile.template(name = "audit", description = "Review the project", instructions = "Run the checks."), null)
                     }
                 }
+                if (agents && owner == "sample") {
+                    store.write("machines.yaml", com.phren.android.debug.AgentFixtures.machines, null)
+                    for (profile in listOf("mac", "linuxbox")) store.write("profiles/$profile.yaml", com.phren.android.debug.AgentFixtures.profile(profile), null)
+                }
                 store to SyncEngine(client, store, dir)
             }
             storeContexts += StoreContext(StoreDescriptor.of(owner, "brain", "main", true), store, engine)
+        }
+        if (agents) {
+            // Fixture computers live in their own store, never among the real ones (iOS UI tests use separate defaults).
+            livePreferences = com.phren.android.live.LivePreferencesStore(context.getSharedPreferences("phren.fixture", Context.MODE_PRIVATE))
+            livePreferences.write(com.phren.android.debug.AgentFixtures.preferences())
+            overview = com.phren.android.live.SessionOverviewMonitor(scope, deviceKeys, cacheDirectory = null,
+                fixtureFetch = { host, previous -> com.phren.android.debug.AgentFixtures.snapshot(host, previous, offline) }, fixtureOffline = offline)
         }
         refresh()
         phase = Phase.READY
