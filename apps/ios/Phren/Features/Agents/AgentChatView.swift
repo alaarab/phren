@@ -41,6 +41,7 @@ struct AgentChatView: View {
     @State private var talk = TalkModeController()
     @State private var showingAgentSwitcher = false
     @State private var launchingNewThread = false
+    @State private var launchingWorktree: WorktreeLaunchRequest?
     @State private var showingUsage = false
     @State private var showingOptions = false
     @State private var showingModelPicker = false
@@ -324,7 +325,7 @@ struct AgentChatView: View {
     /// Every sheet this screen can present. UIKit restores the stack's bar
     /// when one goes away; dismissing any of them must re-hide it.
     private var anySheetPresented: Bool {
-        showingOptions || launchingNewThread || menuCommand != nil
+        showingOptions || launchingNewThread || launchingWorktree != nil || menuCommand != nil
             || showingModelPicker || showingUsage || showingSecret || showingChildAgents
             || previewImage != nil || showingContext || assigningProject
     }
@@ -354,6 +355,7 @@ struct AgentChatView: View {
         .sheet(isPresented: $launchingNewThread) {
             if let project { LaunchSessionView(storeID: project.storeID, project: project.name, preferredHostID: session.host.id) }
         }
+        .sheet(item: $launchingWorktree) { LaunchSessionView(worktree: $0) }
         .sheet(item: $menuCommand) { item in
             if let menu = AgentMenuChoice.menu(command: item.command, source: model.target?.source ?? "") {
                 ChatMenuPickerSheet(title: menu.title, command: item.command, rows: menu.rows) { index in
@@ -485,6 +487,7 @@ struct AgentChatView: View {
         case .pickModel: showingModelPicker = true
         case .showUsage: showingUsage = true
         case .addContext: showingContext = true
+        case .newWorktree: launchingWorktree = project.flatMap { WorktreeLaunchRequest(session: session, project: $0) }
         }
     }
 

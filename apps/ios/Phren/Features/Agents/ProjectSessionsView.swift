@@ -70,6 +70,7 @@ struct ProjectSessionsView: View {
     @State private var chatSession: LiveAgentSession?
     @State private var terminalSession: LiveAgentSession?
     @State private var launching = false
+    @State private var launchingWorktree: WorktreeLaunchRequest?
     @State private var agentChoice: ProjectAgentChoice?
 
     private var preferences: LiveSessionPreferences? { livePreferences.preferences }
@@ -100,6 +101,10 @@ struct ProjectSessionsView: View {
                     ForEach(discovery.problems, id: \.self) { Text($0).font(.caption).foregroundStyle(.orange) }
                     Button("Open on a computer…", systemImage: "desktopcomputer.and.arrow.down") { launching = true }
                         .accessibilityIdentifier("sessions-open-on-computer")
+                    Button("New session in a worktree", systemImage: "arrow.branch") {
+                        launchingWorktree = WorktreeLaunchRequest(storeID: storeID, project: project)
+                    }
+                    .accessibilityIdentifier("sessions-open-in-worktree")
                     NavigationLink("Manage computers") { LiveSessionsView() }
                 }
                 if !matches.isEmpty {
@@ -136,6 +141,7 @@ struct ProjectSessionsView: View {
             .navigationDestination(item: $chatSession) { AgentChatSheet(session: $0) }
             .navigationDestination(item: $terminalSession) { HerdrTerminalView(host: $0.host, session: $0) }
             .sheet(isPresented: $launching) { LaunchSessionView(storeID: storeID, project: project) }
+            .sheet(item: $launchingWorktree) { LaunchSessionView(worktree: $0) }
             .projectAgentSheet(choice: $agentChoice)
             .onAppear { visible = true }
             .onDisappear { visible = false }

@@ -12,6 +12,16 @@ final class WorktreeBranchTests: XCTestCase {
         XCTAssertEqual(WorktreeBranch.suggested(firstLine: "  ??  ", id: id), "phren/a1b2c3")
     }
 
+    func testSuggestsFromASessionTitle() {
+        // A session's title as Herdr reports it: a status glyph, mixed case, punctuation.
+        XCTAssertEqual(WorktreeBranch.suggested(firstLine: "Polish the phone app", id: id), "phren/polish-the-phone-app")
+        XCTAssertEqual(WorktreeBranch.suggested(firstLine: "\u{2733} Claude Code", id: id), "phren/claude-code")
+        XCTAssertEqual(WorktreeBranch.suggested(firstLine: "Fix #42: the iOS_build (again)", id: id), "phren/fix-42-the-ios-build-again")
+        let long = WorktreeBranch.suggested(firstLine: "Continue where the earlier session left off in Codex", id: id)
+        XCTAssertEqual(long, "phren/continue-where-the-earlier-session-left")
+        XCTAssertNotNil(long.dropFirst(6).range(of: #"^[a-z0-9-]{1,40}$"#, options: .regularExpression))
+    }
+
     func testSlugStopsAtAWordWithinTheLimit() {
         let slug = WorktreeBranch.slug("Move the schedule editor into its own screen and keep every field", limit: 40)
         XCTAssertEqual(slug, "move-the-schedule-editor-into-its-own")

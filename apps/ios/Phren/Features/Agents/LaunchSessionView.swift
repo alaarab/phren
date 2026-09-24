@@ -18,7 +18,9 @@ struct LaunchSessionView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.liveSessionPreferences) private var livePreferences
-    @AppStorage("launch.kind.v1") private var kind = "codex"
+    /// The harness shown: the last one chosen here, unless the caller starts
+    /// from a session's own. Only a choice made on this screen is remembered.
+    @State private var kind: String
     @State private var hostID: UUID?
     @State private var showComputers = false
     @State private var showStores = false
@@ -51,11 +53,14 @@ struct LaunchSessionView: View {
     init(storeID: String, project: String, taskRequest: TaskAgentRequest? = nil,
          preferredHostID: UUID? = nil, initialRole: PhrenConnection.LaunchRole = .agent,
          allowsStoreSelection: Bool = false, onStoreSelected: ((String) -> Void)? = nil,
-         onTaskMoved: ((TaskListRow, PhrenTask.Section) -> Void)? = nil) {
+         onTaskMoved: ((TaskListRow, PhrenTask.Section) -> Void)? = nil,
+         initialKind: PhrenConnection.LaunchKind? = nil, inWorktree: Bool = false, suggestedBranch: String? = nil) {
         _storeID = State(initialValue: storeID)
         _project = State(initialValue: project)
         _role = State(initialValue: initialRole)
-        _worktreeBranch = State(initialValue: WorktreeBranch.suggested(firstLine: taskRequest?.title))
+        _kind = State(initialValue: (initialKind ?? AgentLaunch.defaultHarness).rawValue)
+        _inWorktree = State(initialValue: inWorktree)
+        _worktreeBranch = State(initialValue: suggestedBranch ?? WorktreeBranch.suggested(firstLine: taskRequest?.title))
         self.taskRequest = taskRequest
         self.preferredHostID = preferredHostID
         self.allowsStoreSelection = allowsStoreSelection
@@ -363,6 +368,7 @@ struct LaunchSessionView: View {
                 await prepare()
             }
             .onChange(of: kind) { _, newKind in
+                AppRuntime.defaults.set(newKind, forKey: AgentLaunch.harnessKey)
                 if role == .conductor,
                    let saved = ConductorLaunchSettings.load(storeID: storeID), saved.harness == newKind {
                     modelName = saved.model
@@ -602,6 +608,38 @@ struct LaunchSessionView: View {
         }
     }
 
+}
+
+/// A launch on a new branch in its own worktree, pre-filled from where it was
+/// asked for: a session's gives its computer, its harness and a branch named
+/// after its title; a project's gives a branch with a short id.
+struct WorktreeLaunchRequest: Identifiable {
+    let storeID: String
+    let project: String
+    let hostID: UUID?
+    let kind: PhrenConnection.LaunchKind?
+    let branch: String
+    var id: String { "\(storeID):\(project):\(branch)" }
+
+    init(storeID: String, project: String, hostID: UUID? = nil, kind: PhrenConnection.LaunchKind? = nil,
+         branch: String = WorktreeBranch.suggested(firstLine: nil)) {
+        self.storeID = storeID; self.project = project; self.hostID = hostID; self.kind = kind; self.branch = branch
+    }
+
+    /// Nil for the conductor, which works from the store and never in a worktree.
+    init?(session: LiveAgentSession, project: SessionProject) {
+        guard !session.tab.isConductor else { return nil }
+        self.init(storeID: project.storeID, project: project.name, hostID: session.host.id,
+                  kind: session.tab.agent.flatMap { PhrenConnection.LaunchKind(rawValue: $0.lowercased()) },
+                  branch: WorktreeBranch.suggested(firstLine: session.tab.title))
+    }
+}
+
+extension LaunchSessionView {
+    init(worktree: WorktreeLaunchRequest) {
+        self.init(storeID: worktree.storeID, project: worktree.project, preferredHostID: worktree.hostID,
+                  initialKind: worktree.kind, inWorktree: true, suggestedBranch: worktree.branch)
+    }
 }
 
 struct SessionLaunchAlert: ViewModifier {

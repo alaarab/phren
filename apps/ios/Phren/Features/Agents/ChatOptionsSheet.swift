@@ -10,7 +10,7 @@ import SwiftUI
 struct ChatOptionsSheet: View {
     /// What a row asks the chat to do once this sheet has closed.
     enum Action {
-        case showChanges, linkProject, chooseAnother, pickModel, showUsage, addContext
+        case showChanges, linkProject, chooseAnother, pickModel, showUsage, addContext, newWorktree
     }
 
     let session: LiveAgentSession
@@ -55,6 +55,12 @@ struct ChatOptionsSheet: View {
                             Label("Web servers", systemImage: "globe")
                         }
                         .accessibilityIdentifier("chat-options-web-servers")
+                    }
+                    if let project, WorktreeLaunchRequest(session: session, project: project) != nil {
+                        Button { afterOptions(.newWorktree) } label: {
+                            Label("New session in a worktree", systemImage: "arrow.branch")
+                        }
+                        .accessibilityIdentifier("chat-options-worktree")
                     }
                     if !session.tab.isConductor, project == nil, session.tab.cwd != nil {
                         Button { afterOptions(.linkProject) } label: { Label("Link to project", systemImage: "link") }

@@ -105,6 +105,96 @@ final class LaunchSessionTests: XCTestCase {
         XCTAssertTrue(app.buttons["chat-close"].waitForExistence(timeout: 10), "The worktree session opens into chat")
     }
 
+    /// Launches the fixture on Agents with the project's session listed.
+    @MainActor
+    private func openAgents() -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--session-details-fixture", "--native-chat-fixture"]
+        for attempt in 0..<2 {
+            app.launch()
+            XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 8))
+            app.tabBars.buttons["Agents"].tap()
+            if app.buttons[phoneSession].waitForExistence(timeout: attempt == 0 ? 10 : 20) { break }
+            if attempt == 0 { app.terminate() }
+        }
+        XCTAssertTrue(app.buttons[phoneSession].exists)
+        return app
+    }
+
+    private let phoneSession = "overview-chat:A1000000-0000-0000-0000-000000000001:herdr:default:w7:w7:t9"
+
+    /// The launch sheet opened for a worktree: the switch on and the branch
+    /// already filled, so one tap on Open starts it.
+    @MainActor
+    private func assertWorktreeLaunch(_ app: XCUIApplication, branch expected: String, harness: String? = nil) {
+        XCTAssertTrue(app.navigationBars["Open phone"].waitForExistence(timeout: 8))
+        if let harness {
+            XCTAssertTrue(app.buttons["launch-harness:\(harness)"].isSelected, "The session's own harness is chosen")
+        }
+        XCTAssertTrue(app.buttons["launch-found:/work/phone"].waitForExistence(timeout: 5))
+        let toggle = app.descendants(matching: .any)["launch-worktree"]
+        for _ in 0..<8 where !(toggle.exists && toggle.isHittable) { app.swipeUp() }
+        XCTAssertEqual(toggle.value as? String, "On", "The worktree switch starts on")
+        let branch = app.textFields["launch-worktree-branch"]
+        XCTAssertTrue(branch.waitForExistence(timeout: 3))
+        let value = branch.value as? String ?? ""
+        XCTAssertNotNil(value.range(of: expected, options: .regularExpression), "Branch \(value) matches \(expected)")
+        attachUIScreenshot(app, "Worktree launch pre-filled")
+        let open = app.buttons["launch-open"]
+        for _ in 0..<6 where !open.isHittable { app.swipeUp() }
+        XCTAssertTrue(open.isEnabled, "The pre-filled branch is valid")
+    }
+
+    @MainActor
+    func testChatOptionsStartASessionInAWorktree() {
+        let app = openAgents()
+        app.buttons[phoneSession].tap()
+        let options = app.buttons["chat-options"]
+        XCTAssertTrue(options.waitForExistence(timeout: 8)); options.tap()
+        let row = app.buttons["chat-options-worktree"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "The ••• sheet offers a new session in a worktree")
+        attachUIScreenshot(app, "Chat options worktree row")
+        row.tap()
+        assertWorktreeLaunch(app, branch: "^phren/polish-the-phone-app$", harness: "codex")
+    }
+
+    @MainActor
+    func testSessionHoldMenuStartsASessionInAWorktree() {
+        let app = openAgents()
+        app.buttons[phoneSession].press(forDuration: 1.2)
+        let row = app.buttons["overview-session-actions:worktree"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "The hold menu offers a new session in a worktree")
+        attachUIScreenshot(app, "Session hold menu worktree row")
+        row.tap()
+        assertWorktreeLaunch(app, branch: "^phren/polish-the-phone-app$", harness: "codex")
+    }
+
+    @MainActor
+    func testProjectChoiceStartsASessionInAWorktree() {
+        let app = openAgents()
+        app.tabBars.buttons["Projects"].tap()
+        let project = app.buttons["project:sample/brain:phone"]
+        XCTAssertTrue(project.waitForExistence(timeout: 8))
+        project.press(forDuration: 0.5)
+        let row = app.buttons["project-agent-sheet:worktree"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "Next to the computers, a separate worktree choice")
+        attachUIScreenshot(app, "Project agent sheet worktree row")
+        row.tap()
+        assertWorktreeLaunch(app, branch: #"^phren/[0-9a-f]{6}$"#)
+        app.buttons["launch-cancel"].tap()
+
+        // The project's sessions page offers it beside Open on a computer.
+        project.tap()
+        let computer = app.buttons["project-computer:A1000000-0000-0000-0000-000000000001"]
+        XCTAssertTrue(computer.waitForExistence(timeout: 5)); computer.tap()
+        let sessionsRow = app.buttons["sessions-open-in-worktree"]
+        XCTAssertTrue(sessionsRow.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["sessions-open-on-computer"].exists)
+        attachUIScreenshot(app, "Project sessions worktree row")
+        sessionsRow.tap()
+        assertWorktreeLaunch(app, branch: #"^phren/[0-9a-f]{6}$"#)
+    }
+
     @MainActor
     func testAFailedStartExplainsAndKeepsThePicker() {
         let app = openNewThread(["--launch-fails"])

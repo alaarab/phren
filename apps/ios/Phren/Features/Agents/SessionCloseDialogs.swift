@@ -34,7 +34,8 @@ extension EnvironmentValues {
 }
 
 /// The list's one set of session surfaces: the card actions sheet (link a
-/// project, rename the workspace, close the tab or workspace), the close
+/// project, start a session in a worktree, rename the workspace, close the
+/// tab or workspace), the launch sheet, the close
 /// confirmation, the workspace rename editor and their error dialogs. A
 /// surface per card inside a list that re-renders every second presented for
 /// the wrong row, so the list owns them and cards only ask. On Herdr's
@@ -45,7 +46,9 @@ struct SessionCloseDialogs: ViewModifier {
     @Binding var error: String?
     let monitor: (LiveAgentSession) -> LiveHostMonitor?
     @Environment(\.liveSessionPreferences) private var livePreferences
+    @Environment(AppModel.self) private var model
     @State private var menu: SessionCardMenuRequest?
+    @State private var launchingWorktree: WorktreeLaunchRequest?
     @State private var assigning: SessionCardMenuRequest?
     @State private var renaming: SessionCardMenuRequest?
     @State private var renameError: String?
@@ -96,6 +99,7 @@ struct SessionCloseDialogs: ViewModifier {
             .sheet(item: $renaming) { what in
                 SessionWorkspaceRenameEditor(session: what.session, prefix: what.prefix) { renameError = $0 }
             }
+            .sheet(item: $launchingWorktree) { LaunchSessionView(worktree: $0) }
     }
 
     private var menuActions: [PhrenActionSheet.Action] {
@@ -108,6 +112,15 @@ struct SessionCloseDialogs: ViewModifier {
         if session.tab.cwd != nil {
             actions.append(.init(id: "link", title: what.project == nil ? "Link to project" : "Change project",
                                  icon: "link") { assigning = what })
+        }
+        // Only where the folder resolves to a project, the way the chat's own
+        // options offer it.
+        if let project = livePreferences.preferences?.projectMatch(hostID: session.host.id, cwd: session.tab.cwd,
+                                                                    projects: model.sessionProjects)?.project,
+           let launch = WorktreeLaunchRequest(session: session, project: project) {
+            actions.append(.init(id: "worktree", title: "New session in a worktree", icon: "arrow.branch") {
+                launchingWorktree = launch
+            })
         }
         actions.append(.init(id: "rename", title: "Rename workspace", icon: "pencil") { renaming = what })
         actions.append(.init(id: "close-tab", title: "Close tab", icon: "xmark", role: .destructive) {

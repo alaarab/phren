@@ -104,6 +104,7 @@ private struct ProjectAgentSheet: ViewModifier {
     @Environment(\.liveSessionPreferences) private var preferencesStore
     @AppStorage(ProjectAgentRecents.key) private var recentData = Data()
     @State private var launch: ProjectAgentDestination?
+    @State private var launchWorktree: WorktreeLaunchRequest?
 
     private var preferences: LiveSessionPreferences? { preferencesStore.preferences }
     private var title: String {
@@ -162,6 +163,15 @@ private struct ProjectAgentSheet: ViewModifier {
         if case .project = choice, let recent = ProjectAgentDestination.lastUsed(in: targets) {
             actions.append(action(recent, id: "recent", title: "Open on \(recent.host.name)", prefix: "Last used · "))
         }
+        // A separate choice, so a worktree is found without opening the
+        // launch screen first. The computer is chosen there.
+        if case .project(let storeID, let name) = choice {
+            let host = ProjectAgentDestination.lastUsed(in: targets) ?? targets.first { $0.reachable }
+            actions.append(.init(id: "worktree", title: "New session in a worktree", icon: "arrow.branch",
+                                 caption: "Starts on a new branch of its own") {
+                launchWorktree = WorktreeLaunchRequest(storeID: storeID, project: name, hostID: host?.host.id)
+            })
+        }
         actions += targets.map { destination in
             let rowTitle: String
             let prefix: String
@@ -187,6 +197,7 @@ private struct ProjectAgentSheet: ViewModifier {
             .sheet(item: $launch) { target in
                 LaunchSessionView(storeID: target.storeID, project: target.project, preferredHostID: target.host.id)
             }
+            .sheet(item: $launchWorktree) { LaunchSessionView(worktree: $0) }
             .onChange(of: choice != nil) { _, presented in
                 if presented {
                     let overview = SessionOverviewMonitor.shared
