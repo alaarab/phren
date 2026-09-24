@@ -39,11 +39,16 @@ final class PhrenAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificatio
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        completionHandler([.banner, .list, .sound])
+        completionHandler(NotificationPreferences.presentation(NotificationPreferences.whileOpen()))
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
+        // Settings > Notifications can send every tap to Agents instead of the chat.
+        if response.actionIdentifier == UNNotificationDefaultActionIdentifier, NotificationPreferences.tapOpens() == .agents {
+            Task { @MainActor in AppModel.current?.selectedTab = .agents; completionHandler() }
+            return
+        }
         if response.notification.request.content.userInfo["localKind"] != nil {
             Task { @MainActor in
                 await LocalNotificationRouting.open(response.notification.request.content.userInfo)

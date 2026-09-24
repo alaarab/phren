@@ -1,3 +1,4 @@
+import UserNotifications
 import PhrenKit
 import PhrenLive
 import SwiftUI
@@ -110,46 +111,104 @@ enum PushSetupCheck {
 }
 
 /// What the phone does with an agent's permission requests and the Agents screen.
+/// How a notification shows while phren is open, and where a tap on one goes.
+enum NotificationPreferences {
+    static let whileOpenKey = "notifications.whileOpen.v1"
+    static let tapOpensKey = "notifications.tapOpens.v1"
+    enum WhileOpen: String, CaseIterable { case alert, quiet, off }
+    enum TapOpens: String, CaseIterable { case chat, agents }
+
+    static func whileOpen(in defaults: UserDefaults = AppRuntime.defaults) -> WhileOpen {
+        defaults.string(forKey: whileOpenKey).flatMap(WhileOpen.init(rawValue:)) ?? .alert
+    }
+    static func tapOpens(in defaults: UserDefaults = AppRuntime.defaults) -> TapOpens {
+        defaults.string(forKey: tapOpensKey).flatMap(TapOpens.init(rawValue:)) ?? .chat
+    }
+    /// Alert: banner and sound. Quiet: only in Notification Center. Off: nothing.
+    static func presentation(_ value: WhileOpen) -> UNNotificationPresentationOptions {
+        switch value {
+        case .alert: [.banner, .list, .sound]
+        case .quiet: [.list]
+        case .off: []
+        }
+    }
+}
+
 struct NotificationSettingsView: View {
     @AppStorage(IntegrationSettings.liveActivityKey) private var liveActivity = true
     @AppStorage(IntegrationSettings.agentsKeepScreenOnKey) private var keepScreenOn = false
     @AppStorage(LocalNotificationSettings.approvalsKey) private var approvals = true
     @AppStorage(LocalNotificationSettings.schedulesKey) private var schedules = true
+    @AppStorage(NotificationPreferences.whileOpenKey) private var whileOpen = NotificationPreferences.WhileOpen.alert.rawValue
+    @AppStorage(NotificationPreferences.tapOpensKey) private var tapOpens = NotificationPreferences.TapOpens.chat.rawValue
     @State private var denied = false
+    @State private var choosingOpen = false
+    @State private var choosingTap = false
+    @State private var testSent = false
     @Environment(\.liveSessionPreferences) private var preferencesStore
     /// Connected computers whose Hook reports push `configured: false`.
     @State private var pushMissing: [String] = []
 
+    private let openOptions = [
+        PhrenOption(id: "alert", value: "alert", title: "Alert", caption: "A banner with sound."),
+        PhrenOption(id: "quiet", value: "quiet", title: "Quiet", caption: "Into Notification Center, no banner or sound."),
+        PhrenOption(id: "off", value: "off", title: "Off", caption: "Nothing while you're in phren."),
+    ]
+    private let tapOptions = [
+        PhrenOption(id: "chat", value: "chat", title: "The session's chat"),
+        PhrenOption(id: "agents", value: "agents", title: "Agents"),
+    ]
+    private var enabled: Bool { approvals || schedules }
+    /// One line for what happens where: "Open: Alert · Closed: Live Activity · Tap: Chat".
+    private var summary: String {
+        let open = openOptions.first { $0.value == whileOpen }?.title ?? "Alert"
+        let closed = [approvals || schedules ? "Alerts" : nil, liveActivity ? "Live Activity" : nil].compactMap { $0 }
+        return "Open: \(open) · Closed: \(closed.isEmpty ? "Off" : closed.joined(separator: " + ")) · Tap: \(tapOpens == "agents" ? "Agents" : "Chat")"
+    }
+
     var body: some View {
         PhrenScreen {
-            PhrenGroup("On this iPhone") {
-                PhrenSwitch("Approvals", systemImage: "hand.raised", isOn: $approvals)
-                    .phrenIdentifier("notifications-approvals")
-                PhrenSwitch("Scheduled prompts", systemImage: "clock", isOn: $schedules)
-                    .phrenIdentifier("notifications-schedules")
-                Text("Approvals alert as soon as this phone sees them during its brief background window. Later, iOS may wake Phren to check again; those alerts can arrive late or be missed.")
-                    .font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
-                Text("Schedules register the next due time ahead of time, using the computer's clock. The reminder can arrive while Phren is closed. It does not confirm a run started or finished. Open Phren to refresh later runs and remote edits.")
-                    .font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
-                Text("Immediate remote approval alerts and schedule results while Phren is suspended need an APNs key on your Hook. Local notifications need no key and no relay server.")
-                    .font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
-                if !pushMissing.isEmpty {
-                    Text("Instant approval alerts need an APNs key on the computer. Not set up on \(ListFormatter.localizedString(byJoining: pushMissing)).")
-                        .font(PhrenTypography.caption).foregroundStyle(PhrenTheme.warning)
-                        .phrenIdentifier("notifications-push-unconfigured")
-                }
+            VStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
+                Text(summary).font(PhrenTypography.subheadline.weight(.medium)).foregroundStyle(PhrenTheme.text)
+                    .phrenIdentifier("notifications-summary")
                 if denied {
                     Text("Notifications are off in iOS. Allow them in Settings to receive these alerts.")
                         .font(PhrenTypography.caption).foregroundStyle(PhrenTheme.warning)
                         .phrenIdentifier("notifications-permission-denied")
                 }
             }
-            .phrenContainerMarker("notifications-local-section", label: "On this iPhone")
-            PhrenGroup("Live Activity") {
-                PhrenSwitch("Live Activity for approvals", systemImage: "waveform.path.ecg", isOn: $liveActivity)
+            PhrenGroup("While phren is open") {
+                PhrenSingleSelect(options: openOptions, selection: $whileOpen, placeholder: "Alerts",
+                                  identifier: "notifications-while-open", isPresented: $choosingOpen)
+            }
+            PhrenGroup("While phren is closed") {
+                PhrenSwitch("Approvals", systemImage: "hand.raised", isOn: $approvals)
+                    .phrenIdentifier("notifications-approvals")
+                PhrenSwitch("Scheduled prompts", systemImage: "clock", isOn: $schedules)
+                    .phrenIdentifier("notifications-schedules")
+                PhrenSwitch("Live Activity", systemImage: "waveform.path.ecg", isOn: $liveActivity)
                     .phrenIdentifier("notifications-live-activity")
-                Text("Review requests from the Lock Screen and Dynamic Island while the phone watches a session.")
-                    .font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
+                // One line on whether alerts can reach a closed phren at once.
+                Text(pushMissing.isEmpty
+                     ? "Approvals reach a closed phren within minutes; the Live Activity shows them on the Lock Screen and Dynamic Island."
+                     : "Instant alerts need an APNs key on \(ListFormatter.localizedString(byJoining: pushMissing)); until then they can arrive late.")
+                    .font(PhrenTypography.caption)
+                    .foregroundStyle(pushMissing.isEmpty ? PhrenTheme.textMuted : PhrenTheme.warning)
+                    .phrenIdentifier(pushMissing.isEmpty ? "notifications-closed-note" : "notifications-push-unconfigured")
+            }
+            .phrenContainerMarker("notifications-local-section", label: "While phren is closed")
+            PhrenGroup("When I tap a notification") {
+                PhrenSingleSelect(options: tapOptions, selection: $tapOpens, placeholder: "Opens",
+                                  identifier: "notifications-tap-opens", isPresented: $choosingTap)
+            }
+            VStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
+                Button { sendTest() } label: {
+                    Label(testSent ? "Sent. It arrives in a few seconds." : "Send a test notification", systemImage: "paperplane")
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).foregroundStyle(PhrenTheme.accent)
+                .disabled(!enabled)
+                .phrenIdentifier("notifications-send-test")
             }
             PhrenGroup("Agents") {
                 PhrenSwitch("Keep screen on", systemImage: "sun.max", isOn: $keepScreenOn)
@@ -157,6 +216,10 @@ struct NotificationSettingsView: View {
             }
         }
         .navigationTitle("Notifications").navigationBarTitleDisplayMode(.inline)
+        .phrenSingleSelectSheet(isPresented: $choosingOpen, title: "While phren is open", options: openOptions,
+                                selection: $whileOpen, rowPrefix: "notifications-while-open")
+        .phrenSingleSelectSheet(isPresented: $choosingTap, title: "When I tap a notification", options: tapOptions,
+                                selection: $tapOpens, rowPrefix: "notifications-tap-opens")
         .task {
             if approvals || schedules { denied = !(await LocalNotificationMonitor.shared.requestAuthorization()) }
         }
@@ -169,6 +232,21 @@ struct NotificationSettingsView: View {
         Task {
             if enabling { denied = !(await LocalNotificationMonitor.shared.requestAuthorization()) }
             await LocalNotificationMonitor.shared.settingsChanged()
+        }
+    }
+
+    /// A local notification in three seconds, shown as the choices above say.
+    private func sendTest() {
+        Task {
+            guard await LocalNotificationMonitor.shared.requestAuthorization() else { denied = true; return }
+            let content = UNMutableNotificationContent()
+            content.title = "phren"
+            content.body = "Test notification. This is how an approval or a finished schedule arrives."
+            content.sound = .default
+            let request = UNNotificationRequest(identifier: "phren-test-\(UUID().uuidString)", content: content,
+                                                trigger: UNTimeIntervalNotificationTrigger(timeInterval: 3, repeats: false))
+            try? await UNUserNotificationCenter.current().add(request)
+            testSent = true
         }
     }
 }
