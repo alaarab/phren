@@ -98,14 +98,21 @@ struct ChatSubagentsView: View {
 
     private func treeRow(_ row: AgentTreeRow) -> some View {
         let navigation = navigation(for: row.agent)
-        return HStack(spacing: 4) {
+        let showsChanges = row.agent.computer == nil && row.agent.worktreeName != nil
+        let failed = row.agent.displayState == .failed
+        // The actions sit inside the card's trailing edge, so the card keeps
+        // the full width and saves room for them.
+        let actions = CGFloat((showsChanges ? 1 : 0) + (failed ? 1 : 0))
+        return ZStack(alignment: .trailing) {
             Button { selected = navigation } label: {
                 AgentTreeRowView(row: row, resolution: navigation?.resolution,
-                    age: row.agent.displayState == .failed ? history.age(row.agent, scope: scope, now: now) : nil)
+                    age: failed ? history.age(row.agent, scope: scope, now: now) : nil,
+                    trailingInset: actions * 44)
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("child-agent:\(row.agent.computer == nil ? row.agent.id : row.agent.navigationID)")
-            if row.agent.computer == nil, row.agent.worktreeName != nil {
+            HStack(spacing: 0) {
+            if showsChanges {
                 // Its edits live in its own worktree, which the pane's diff never shows.
                 Button { changesChild = row.agent.id } label: {
                     Image(systemName: "plus.forwardslash.minus").font(.system(size: 16))
@@ -116,7 +123,7 @@ struct ChatSubagentsView: View {
                 .accessibilityLabel("Changes")
                 .accessibilityIdentifier("child-agent-changes:\(row.agent.id)")
             }
-            if row.agent.displayState == .failed {
+            if failed {
                 Button {
                     var next = Self.decodeHistory(historyData)
                     next.dismissed.insert(scope + "/" + row.agent.navigationID)
@@ -127,6 +134,8 @@ struct ChatSubagentsView: View {
                     .accessibilityLabel("Dismiss failed worker")
                     .accessibilityIdentifier("dismiss-child-agent:\(row.agent.id)")
             }
+            }
+            .padding(.trailing, 4)
         }
     }
 
@@ -286,6 +295,8 @@ private struct AgentTreeRowView: View {
     let row: AgentTreeRow
     let resolution: AgentDestinationResolution?
     var age: String? = nil
+    /// Room kept at the card's trailing edge for the buttons drawn over it.
+    var trailingInset: CGFloat = 0
     private var stateName: String {
         switch row.agent.displayState {
         case .running: return "Running"
@@ -346,7 +357,7 @@ private struct AgentTreeRowView: View {
                 }
                 Spacer(minLength: 8)
             }
-            .padding(12).sessionCard()
+            .padding(12).padding(.trailing, trailingInset).sessionCard()
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(rowLabel)
