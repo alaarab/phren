@@ -18,6 +18,9 @@ packages:
     path: PhrenKit
   PhrenLive:
     path: PhrenLive
+  ArgmaxOSS:
+    url: https://github.com/argmaxinc/argmax-oss-swift.git
+    exactVersion: 1.1.0
   SwiftTerm:
     url: https://github.com/migueldeicaza/SwiftTerm.git
     exactVersion: 1.20.0
@@ -83,6 +86,8 @@ targets:
       - package: PhrenKit
       - package: PhrenLive
       - package: SwiftTerm
+      - package: ArgmaxOSS
+        product: WhisperKit
       - target: PhrenWidgets
         embed: true
     preBuildScripts:

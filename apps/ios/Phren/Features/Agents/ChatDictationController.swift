@@ -6,7 +6,10 @@ import SwiftUI
 /// chat screen; the chat's model stays the one source of the draft.
 @Observable @MainActor
 final class ChatDictationController {
-    let session = DictationSession(recognizer: SpeechTranscriber(), transform: SpeechSettings.apply)
+    private(set) var session = DictationSession(recognizer: SpeechSettings.makeRecognizer(), transform: SpeechSettings.apply)
+    /// The engine `session` was made with; a change in Settings > Voice (or
+    /// Whisper finishing its download) takes effect at the next start.
+    @ObservationIgnored private var engine = SpeechSettings.activeInput()
     /// Apple Intelligence's tightened candidate, shown until one is chosen.
     var preview: DictationCleanupPreview?
     @ObservationIgnored private var base = ""
@@ -26,6 +29,11 @@ final class ChatDictationController {
                 model.deliveryError = "Allow microphone and speech recognition in iPhone Settings to dictate."; return
             }
             guard !Task.isCancelled, isActive() else { return }
+            let chosen = SpeechSettings.activeInput()
+            if chosen != engine, !session.isRecording {
+                session = DictationSession(recognizer: SpeechSettings.makeRecognizer(), transform: SpeechSettings.apply)
+                engine = chosen
+            }
             base = model.draft + (model.draft.isEmpty || model.draft.hasSuffix(" ") || model.draft.hasSuffix("\n") ? "" : " ")
             attach(model)
             model.deliveryError = nil

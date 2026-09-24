@@ -19,6 +19,32 @@ enum SpeechSettings {
     /// Apple's best installed voice (also the fallback when the Mac can't).
     enum ReplyVoice: String, CaseIterable { case elevenLabs, apple }
 
+    static let inputKey = "voice.input.v1"
+    /// Who turns speech into words. Apple is built in; Whisper runs on the
+    /// phone once its model is downloaded; Scribe runs through the computer.
+    enum Input: String, CaseIterable { case apple, whisper }
+
+    static func input(in defaults: UserDefaults = AppRuntime.defaults) -> Input {
+        defaults.string(forKey: inputKey).flatMap(Input.init(rawValue:)) ?? .apple
+    }
+
+    /// Whisper's language: the chosen one's code, or nil to let it detect.
+    static var whisperLanguage: String? {
+        let id = AppRuntime.defaults.string(forKey: localeKey) ?? ""
+        return id.isEmpty ? Locale.current.language.languageCode?.identifier : Locale(identifier: id).language.languageCode?.identifier
+    }
+
+    /// The recogniser for the chosen engine, falling back to Apple's
+    /// silently when the choice can't run yet (Whisper still downloading).
+    @MainActor static func makeRecognizer() -> any DictationRecognizing {
+        activeInput() == .whisper ? WhisperRecognizer() : SpeechTranscriber()
+    }
+
+    /// The engine that actually runs: the choice, or Apple while it can't.
+    @MainActor static func activeInput() -> Input {
+        input() == .whisper && WhisperModelStore.shared.isReady ? .whisper : .apple
+    }
+
     static func micButton(in defaults: UserDefaults = AppRuntime.defaults) -> MicButton {
         defaults.string(forKey: micButtonKey).flatMap(MicButton.init(rawValue:)) ?? .dictate
     }
@@ -77,6 +103,11 @@ struct SpeechSettingsView: View {
     @AppStorage(SpeechSettings.micButtonKey) private var micButton = SpeechSettings.MicButton.dictate.rawValue
     @AppStorage(SpeechSettings.replyVoiceKey) private var replyVoice = SpeechSettings.ReplyVoice.elevenLabs.rawValue
     @AppStorage(TalkPause.key) private var pause = TalkPause.normal.rawValue
+    @AppStorage(SpeechSettings.inputKey) private var input = SpeechSettings.Input.apple.rawValue
+    @State private var showingInput = false
+    private var whisper: WhisperModelStore { .shared }
+    private let inputOptions = [PhrenOption(id: "apple", value: "apple", title: "Apple · built in"),
+                                PhrenOption(id: "whisper", value: "whisper", title: "Whisper · on the phone, \(WhisperModelStore.sizeLabel) download")]
     @State private var showingMic = false
     @State private var showingReply = false
     @State private var showingPause = false
@@ -103,12 +134,54 @@ struct SpeechSettingsView: View {
             }
     }
 
+    /// Whisper's model: download it (Wi-Fi only), follow the download, or
+    /// remove it to free the space.
+    @ViewBuilder private var whisperRow: some View {
+        switch whisper.state {
+        case .absent:
+            Button { whisper.download() } label: {
+                Label("Download the Whisper model · \(WhisperModelStore.sizeLabel), Wi-Fi only", systemImage: "arrow.down.circle")
+            }
+            .accessibilityIdentifier("voice-whisper-download")
+            Text("Using Apple until it's downloaded.").font(.caption).foregroundStyle(PhrenTheme.textMuted)
+                .accessibilityIdentifier("voice-fallback-note")
+        case .downloading(let fraction):
+            HStack {
+                ProgressView(value: fraction).tint(PhrenTheme.accent)
+                Text("\(Int(fraction * 100))%").font(.caption.monospacedDigit()).foregroundStyle(PhrenTheme.textMuted)
+                Button("Cancel") { whisper.cancelDownload() }.font(.caption)
+            }
+            .accessibilityIdentifier("voice-whisper-progress")
+            Text("Using Apple until it's downloaded.").font(.caption).foregroundStyle(PhrenTheme.textMuted)
+                .accessibilityIdentifier("voice-fallback-note")
+        case .ready:
+            HStack {
+                Label("Whisper model downloaded · \(WhisperModelStore.sizeLabel)", systemImage: "checkmark.circle")
+                    .foregroundStyle(PhrenTheme.text)
+                Spacer()
+                Button("Remove", role: .destructive) { whisper.remove() }.font(.caption)
+                    .accessibilityIdentifier("voice-whisper-remove")
+            }
+        case .failed(let reason):
+            Text(reason).font(.caption).foregroundStyle(PhrenTheme.warning)
+            Button { whisper.download() } label: { Label("Try the download again", systemImage: "arrow.clockwise") }
+                .accessibilityIdentifier("voice-whisper-download")
+        }
+    }
+
     var body: some View {
         PhrenList {
             Section {
+                PhrenSingleSelect(options: inputOptions, selection: $input, placeholder: "Input",
+                                  identifier: "voice-input", isPresented: $showingInput)
+                if input == SpeechSettings.Input.whisper.rawValue { whisperRow }
                 Button { testing = true } label: { Label("Tap to try a test transcription", systemImage: "mic.circle.fill") }
                     .accessibilityIdentifier("speech-test")
-            } footer: { Text("Recognition runs on the phone with Apple's speech engine. Nothing leaves the device.") }
+            } header: { Text("Input") } footer: {
+                Text(input == SpeechSettings.Input.whisper.rawValue
+                     ? "Whisper is better with technical words and stays on the phone. Until its model is downloaded, Apple's engine is used."
+                     : "Recognition runs on the phone with Apple's speech engine. Nothing leaves the device.")
+            }
             Section {
                 PhrenSingleSelect(options: micOptions, selection: $micButton, placeholder: "Mic button",
                                   identifier: "voice-mic-button", isPresented: $showingMic)
@@ -166,6 +239,8 @@ struct SpeechSettingsView: View {
         }
         .phrenSingleSelectSheet(isPresented: $showingLanguage, title: "Language", options: localeOptions,
                                 selection: $localeID, rowPrefix: "speech-language")
+        .phrenSingleSelectSheet(isPresented: $showingInput, title: "Input", options: inputOptions,
+                                selection: $input, rowPrefix: "voice-input")
         .phrenSingleSelectSheet(isPresented: $showingMic, title: "Mic button", options: micOptions,
                                 selection: $micButton, rowPrefix: "voice-mic-button")
         .phrenSingleSelectSheet(isPresented: $showingPause, title: "Send after a pause", options: pauseOptions,

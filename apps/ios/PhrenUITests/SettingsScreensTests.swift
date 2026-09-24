@@ -91,6 +91,21 @@ final class SettingsScreensTests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["voice-mic-button"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.descendants(matching: .any)["voice-pause"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["voice-reply"].exists)
+        // Whisper is opt-in: choosing it offers the download (never starts it)
+        // and says Apple is used meanwhile.
+        XCTAssertFalse(app.buttons["voice-whisper-download"].exists, "Nothing to download while Apple is the input")
+        app.descendants(matching: .any)["voice-input"].firstMatch.tap()
+        let whisperOption = app.buttons["voice-input:whisper"]
+        XCTAssertTrue(whisperOption.waitForExistence(timeout: 3)); whisperOption.tap()
+        let download = app.buttons["voice-whisper-download"]
+        XCTAssertTrue(download.waitForExistence(timeout: 3))
+        XCTAssertTrue(download.label.contains("632 MB") && download.label.contains("Wi-Fi"), download.label)
+        XCTAssertTrue(app.staticTexts["voice-fallback-note"].exists)
+        attachUIScreenshot(app, "Voice settings with Whisper chosen")
+        app.descendants(matching: .any)["voice-input"].firstMatch.tap()
+        let appleOption = app.buttons["voice-input:apple"]
+        XCTAssertTrue(appleOption.waitForExistence(timeout: 3)); appleOption.tap()
+        XCTAssertTrue(download.waitForNonExistence(timeout: 3))
         let from = app.textFields["speech-replacement-from"]
         for _ in 0..<5 where !(from.exists && from.isHittable) { app.swipeUp() }
         XCTAssertTrue(app.descendants(matching: .any)["speech-language"].exists)
