@@ -19,7 +19,6 @@ final class PhonePerformanceTests: XCTestCase {
             XCTAssertEqual(AgentChatTranscript.boundedMessageText(bridged), String(bridged.prefix(64_000)))
         }
     }
-
 }
 
 

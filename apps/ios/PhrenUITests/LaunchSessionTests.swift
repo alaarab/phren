@@ -194,5 +194,4 @@ final class LaunchSessionTests: XCTestCase {
         sessionsRow.tap()
         assertWorktreeLaunch(app, branch: #"^phren/[0-9a-f]{6}$"#)
     }
-
 }

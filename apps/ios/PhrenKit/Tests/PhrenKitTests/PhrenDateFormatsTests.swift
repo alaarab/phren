@@ -37,5 +37,4 @@ final class PhrenDateFormatsTests: XCTestCase {
                        Date(timeIntervalSince1970: 1_789_948_800))
         XCTAssertNil(PhrenDateFormats.utc("yyyy-MM-dd").date(from: "2026-13-40"), "Strict parsing")
     }
-
 }

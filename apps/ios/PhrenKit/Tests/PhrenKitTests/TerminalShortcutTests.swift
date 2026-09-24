@@ -103,15 +103,16 @@ final class TerminalShortcutTests: XCTestCase {
         XCTAssertEqual(claude.shortcuts.filter { $0.id == shortcutID }.count, 1)
         XCTAssertEqual(claude.shortcuts.last?.id, shortcutID)
         try migrated.validate()
-    }
-    func testVersion1LayoutAlreadyCarryingShortcutIsNotDuplicated() throws {
-        let shortcutID = TerminalShortcutPreferences.permissionModeShortcut.id
-        let v1Data = try legacyV1Payload { _ in } // Claude panel already has the shortcut, as in defaults().
-        let migrated = try TerminalShortcutPreferences.read(v1Data)
-        XCTAssertEqual(migrated.version, 2)
-        let claude = migrated.panels.first { $0.id == .claude }!
-        XCTAssertEqual(claude.shortcuts.filter { $0.id == shortcutID }.count, 1)
-        XCTAssertEqual(Set(claude.shortcuts.map(\.id)).count, claude.shortcuts.count)
+        // Folded from testVersion1LayoutAlreadyCarryingShortcutIsNotDuplicated.
+        do {
+            let shortcutID = TerminalShortcutPreferences.permissionModeShortcut.id
+            let v1Data = try legacyV1Payload { _ in } // Claude panel already has the shortcut, as in defaults().
+            let migrated = try TerminalShortcutPreferences.read(v1Data)
+            XCTAssertEqual(migrated.version, 2)
+            let claude = migrated.panels.first { $0.id == .claude }!
+            XCTAssertEqual(claude.shortcuts.filter { $0.id == shortcutID }.count, 1)
+            XCTAssertEqual(Set(claude.shortcuts.map(\.id)).count, claude.shortcuts.count)
+        }
     }
     func testVersion2LayoutWithoutShortcutStaysRemovedAfterRead() throws {
         var value = TerminalShortcutPreferences.defaults()

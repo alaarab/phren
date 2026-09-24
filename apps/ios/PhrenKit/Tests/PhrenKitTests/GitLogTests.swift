@@ -45,5 +45,4 @@ final class GitLogTests: XCTestCase {
             XCTAssertEqual(error as? PhrenKitError, .validation("The commit history is too large."))
         }
     }
-
 }

@@ -30,11 +30,6 @@ final class AccountUsageTests: XCTestCase {
         XCTAssertFalse(claude.stale)
         XCTAssertEqual(MergedAccountUsage.merge([("Desk", nil)], at: now), [])
     }
-    func testUnavailableDoesNotInventZeroUsage() throws {
-        let value = try AccountUsageSnapshot.read(Data(#"{"accounts":[{"source":"codex","windows":[],"message":"Sign in"}]}"#.utf8))
-        XCTAssertTrue(value.accounts[0].windows.isEmpty)
-        XCTAssertNil(value.accounts[0].updatedDate)
-    }
     /// The header ring draws primaryWindow: Claude's 7-day all-models window
     /// (never the 5-hour or per-model weekly one), and Codex's first window.
     func testRingBindsToClaudesSevenDayAllModelsWindow() throws {
@@ -124,6 +119,12 @@ final class AccountUsageTests: XCTestCase {
         XCTAssertTrue(value.accounts[1].windows.isEmpty)
         XCTAssertNil(value.accounts[0].spend)
         XCTAssertNil(value.accounts[0].accountId)
+        // Folded from testUnavailableDoesNotInventZeroUsage.
+        do {
+            let value = try AccountUsageSnapshot.read(Data(#"{"accounts":[{"source":"codex","windows":[],"message":"Sign in"}]}"#.utf8))
+            XCTAssertTrue(value.accounts[0].windows.isEmpty)
+            XCTAssertNil(value.accounts[0].updatedDate)
+        }
     }
     func testInvalidProviderPercentDateAndDuplicateWindowsAreRejected() throws {
         let valid = #"{"accounts":[{"source":"codex","windows":[{"id":"primary","name":"5-hour limit","usedPercent":0,"resetsAt":"2026-09-12T09:00:00Z"}]}]}"#

@@ -47,5 +47,4 @@ final class ConductorGrantsRequestTests: XCTestCase {
         XCTAssertThrowsError(try PhrenConnection.conductorGrantRemoveRequest(index: -1))
         XCTAssertThrowsError(try PhrenConnection.conductorGrantRemoveRequest(index: 64))
     }
-
 }

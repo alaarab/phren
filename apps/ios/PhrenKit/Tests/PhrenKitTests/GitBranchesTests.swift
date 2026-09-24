@@ -24,6 +24,11 @@ final class GitBranchesTests: XCTestCase {
         XCTAssertEqual(branches.remote.map(\.name), ["origin/main", "origin/release/1.0"])
         XCTAssertEqual(branches.local.first?.upstream, "origin/main")
         XCTAssertNil(branches.local.last?.upstream)
+        // Folded from testReadsNullCurrentForDetachedHead.
+        do {
+            let branches = try GitBranches.read(Data(#"{"current":null,"local":[],"remote":[]}"#.utf8))
+            XCTAssertNil(branches.current)
+        }
     }
 
     func testTrackingIsOnlyShownWhenTheBranchMoved() throws {
@@ -33,15 +38,9 @@ final class GitBranchesTests: XCTestCase {
         XCTAssertNil(branches.local[2].tracking)
     }
 
-    func testReadsNullCurrentForDetachedHead() throws {
-        let branches = try GitBranches.read(Data(#"{"current":null,"local":[],"remote":[]}"#.utf8))
-        XCTAssertNil(branches.current)
-    }
-
     func testRejectsOversizedPayload() {
         XCTAssertThrowsError(try GitBranches.read(Data(count: 8_388_609))) { error in
             XCTAssertEqual(error as? PhrenKitError, .validation("The branch list is too large."))
         }
     }
-
 }

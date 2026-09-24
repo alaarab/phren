@@ -54,11 +54,11 @@ final class StoresManifestTests: XCTestCase {
         // "alpha" physically sitting in "work-shared" itself is correct —
         // no claim against its own store.
         XCTAssertNil(manifest.claimingEntry(for: "alpha", physicalStoreName: "work-shared"))
-    }
-
-    func testClaimingEntryIsNilForUnclaimedProjects() {
-        let manifest = StoresManifest.parse(sample)
-        XCTAssertNil(manifest.claimingEntry(for: "unrelated-project", physicalStoreName: "phren"))
+        // Folded from testClaimingEntryIsNilForUnclaimedProjects.
+        do {
+            let manifest = StoresManifest.parse(sample)
+            XCTAssertNil(manifest.claimingEntry(for: "unrelated-project", physicalStoreName: "phren"))
+        }
     }
 
     func testClaimingEntryNeverMatchesThePrimaryRole() {
@@ -100,10 +100,10 @@ final class StoresManifestTests: XCTestCase {
 
     func testMissingStoresKeyYieldsEmptyManifest() {
         XCTAssertEqual(StoresManifest.parse("version: 1\n").stores, [])
-    }
-
-    func testEmptyContentYieldsEmptyManifest() {
-        XCTAssertEqual(StoresManifest.parse("").stores, [])
+        // Folded from testEmptyContentYieldsEmptyManifest.
+        do {
+            XCTAssertEqual(StoresManifest.parse("").stores, [])
+        }
     }
 
     func testEntryMissingNameIsSkipped() {

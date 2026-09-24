@@ -56,13 +56,13 @@ final class GraphIdentityTests: XCTestCase {
             "[pitfall] Use the shared cache for repeated lookups",
             "must resolve to the pitfall line, not the identically-worded pattern line"
         )
-    }
-
-    func testUnresolvableScoreKeyReturnsNil() {
-        XCTAssertNil(GraphBuilder.findBulletText(
-            project: "myproj", scoreKey: "myproj/FINDINGS.md:000000000000",
-            findingsMarkdown: "- [pattern] something else entirely"
-        ))
+        // Folded from testUnresolvableScoreKeyReturnsNil.
+        do {
+            XCTAssertNil(GraphBuilder.findBulletText(
+                project: "myproj", scoreKey: "myproj/FINDINGS.md:000000000000",
+                findingsMarkdown: "- [pattern] something else entirely"
+            ))
+        }
     }
 
     /// A node id must survive the trip through the renderer's JSON.
@@ -129,7 +129,6 @@ final class SkillPathTests: XCTestCase {
         XCTAssertFalse(LocalStore.isSkillPath("global/skills/..md"))
         XCTAssertFalse(LocalStore.isSkillPath("global/skills/.hidden.md"))
     }
-
 }
 
 final class SkillFileTests: XCTestCase {

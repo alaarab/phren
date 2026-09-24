@@ -162,10 +162,10 @@ final class JournalFileTests: XCTestCase {
         """)
         XCTAssertEqual(file.findings().first?.actor, "hand-editor")
         XCTAssertEqual(file.entries, ["Someone appended this by hand"])
-    }
-
-    func testEmptyFileHasNoEntries() {
-        XCTAssertTrue(JournalFile(date: date, actor: "tester").entries.isEmpty)
-        XCTAssertTrue(JournalFile(date: date, actor: "tester").findings().isEmpty)
+        // Folded from testEmptyFileHasNoEntries.
+        do {
+            XCTAssertTrue(JournalFile(date: date, actor: "tester").entries.isEmpty)
+            XCTAssertTrue(JournalFile(date: date, actor: "tester").findings().isEmpty)
+        }
     }
 }

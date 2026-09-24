@@ -27,15 +27,6 @@ final class TeamBootstrapTests: XCTestCase {
         XCTAssertNil(TeamBootstrap.parse("name:\n"))
     }
 
-    /// A bootstrap that names no role still means team — the file only exists
-    /// in a store created by `phren team init`, which always writes
-    /// `default_role: team`.
-    func testMissingRoleStillMeansTeam() throws {
-        let bootstrap = try XCTUnwrap(TeamBootstrap.parse("name: arc-team\n"))
-        XCTAssertNil(bootstrap.defaultRole)
-        XCTAssertEqual(bootstrap.role, "team")
-    }
-
     /// store-registry.ts:231 — a `default_role` outside the three known roles
     /// is dropped rather than believed.
     func testUnknownRoleIsDropped() throws {
@@ -45,6 +36,12 @@ final class TeamBootstrapTests: XCTestCase {
 
         let readonly = try XCTUnwrap(TeamBootstrap.parse("name: vendor-docs\ndefault_role: readonly\n"))
         XCTAssertEqual(readonly.role, "readonly")
+        // Folded from testMissingRoleStillMeansTeam.
+        do {
+            let bootstrap = try XCTUnwrap(TeamBootstrap.parse("name: arc-team\n"))
+            XCTAssertNil(bootstrap.defaultRole)
+            XCTAssertEqual(bootstrap.role, "team")
+        }
     }
 
     func testReadsTolerantly() throws {
@@ -67,5 +64,4 @@ final class TeamBootstrapTests: XCTestCase {
         XCTAssertEqual(crlf.name, "arc-team")
         XCTAssertEqual(crlf.role, "team")
     }
-
 }

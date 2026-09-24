@@ -250,5 +250,4 @@ final class AgentChatImageTests: AgentChatUITestCase {
         XCTAssertTrue(app.buttons["Remove Screenshot.png"].exists)
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Received in codex")).firstMatch.exists)
     }
-
 }

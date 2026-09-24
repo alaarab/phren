@@ -95,5 +95,4 @@ final class GitHubReposTests: XCTestCase {
         XCTAssertEqual(probe, .notStore)
         XCTAssertEqual(StubURLProtocol.requests.count, 1)
     }
-
 }
