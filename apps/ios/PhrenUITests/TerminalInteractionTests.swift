@@ -155,10 +155,24 @@ final class TerminalInteractionTests: XCTestCase {
         XCTAssertEqual(try state(app).input, before, "Holding Ctrl must not send a key")
         app.buttons["Codex shortcuts"].tap()
         let command = app.buttons["terminal-command:codex:/model"]
-        let actions = app.buttons["terminal-command-actions:codex:/model"]
         XCTAssertTrue(command.waitForExistence(timeout: 3))
         XCTAssertGreaterThanOrEqual(command.frame.width, 44, "The command keeps its own tap target")
-        XCTAssertLessThanOrEqual(command.frame.maxX, actions.frame.minX, "Shortcut actions must not cover the command")
+        XCTAssertLessThanOrEqual(command.frame.height, 50, "Tiles stay dense")
+        XCTAssertFalse(app.buttons["terminal-command-actions:codex:/model"].exists, "No separate actions button beside a tile")
+        // Holding a tile opens its actions instead.
+        command.press(forDuration: 0.8)
+        let edit = app.buttons.matching(NSPredicate(format: "label == %@", "Edit Shortcut")).firstMatch
+        XCTAssertTrue(edit.waitForExistence(timeout: 3))
+        let cancel = app.buttons.matching(NSPredicate(format: "label == %@", "Cancel")).firstMatch
+        if cancel.exists { cancel.tap() } else { app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)).tap() }
+        XCTAssertTrue(edit.waitForNonExistence(timeout: 3))
+        XCTAssertEqual(try state(app).input, before, "Holding a command does not send it")
+        // Closing the sheet by tapping outside can close the panel too.
+        if !command.waitForExistence(timeout: 1) {
+            app.buttons["terminal-control:control"].press(forDuration: 0.6)
+            app.buttons["Codex shortcuts"].tap()
+            XCTAssertTrue(command.waitForExistence(timeout: 3))
+        }
         command.tap()
         XCTAssertEqual(try state(app).input, before + "/model ", "A command waits for explicit Enter")
         // A tapped shortcut closes the panel, like a menu item.
