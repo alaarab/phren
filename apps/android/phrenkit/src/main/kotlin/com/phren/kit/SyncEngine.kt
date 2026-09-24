@@ -607,9 +607,33 @@ class SyncEngine(
                 listOf(FileEdit(findingsPath, file.content))
             }
             is PendingOp.ApproveQueue -> {
-                val file = ReviewFile(read(reviewPath, overlay) ?: "")
-                file.approve(op.line)
-                listOf(FileEdit(reviewPath, file.content))
+                // access.ts `approveQueueItemDetailed`: approve means "this belongs in memory",
+                // so it writes the finding when it is not already live, then dequeues.
+                // `phren extract` queues candidates below autoAcceptThreshold without
+                // writing them to FINDINGS.md, so for those the queue line is the only copy.
+                val review = ReviewFile(read(reviewPath, overlay) ?: "")
+                val needle = ReviewFile.findingsTextFor(op.line)
+                val edits = mutableListOf<FileEdit>()
+                if (needle.isNotEmpty()) {
+                    val findings = FindingsFile(read(findingsPath, overlay) ?: "")
+                    if (!findings.existsAsLiveFinding(needle)) {
+                        // Team stores never line-splice FINDINGS.md; the add goes to the journal.
+                        if (writeContext.usesTeamJournal) edits += journalEdit(project, needle, null, overlay)
+                        else try {
+                            // The observation's own provenance, not this device's: approving is not authoring.
+                            findings.add(project, needle, FindingsFile.AddOptions(
+                                provenance = ReviewFile.capturedProvenanceFor(op.line), queuedDate = ReviewFile.queuedDateFor(op.line)))
+                            edits += FileEdit(findingsPath, findings.content)
+                        } catch (_: PhrenKitError.Duplicate) {
+                            // Present only in an archive block (the CLI's already_archived): just dequeue.
+                        }
+                        // Any other failure (a secret in the text) propagates, so the queue
+                        // line stays rather than being dequeued over content never promoted.
+                    }
+                }
+                review.approve(op.line)
+                edits += FileEdit(reviewPath, review.content)
+                edits
             }
             is PendingOp.RejectQueue -> {
                 // access.ts:709 — remove the queue line AND the finding (missing tolerated).

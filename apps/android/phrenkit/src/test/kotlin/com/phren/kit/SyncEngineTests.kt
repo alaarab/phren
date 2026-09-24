@@ -83,7 +83,27 @@ class SyncEngineTests {
     private val second = "- [2026-07-26] Second queued finding"
     private val third = "- [2026-07-26] Third queued finding"
 
-    private fun makeEngine(local: Map<String, String>, remote: Map<String, String> = emptyMap()): Pair<SyncEngine, FakeGitHubClient> = runBlocking {
+    private fun liveFindings(project: String) = "# $project Findings\n\n## 2026-07-20\n\n" +
+        listOf("First", "Second", "Third", "Fourth").mapIndexed { i, n -> "- $n queued finding <!-- fid:0000f00${i + 1} -->\n" }.joinToString("")
+
+    /**
+     * Every seeded review.md gets a FINDINGS.md already holding its queued findings,
+     * locally and on any seeded remote. Approve only removes the queue line when the
+     * finding is already live, so these tests keep exercising coalescing over review.md
+     * alone; promotion (approve writing FINDINGS.md) is covered by ReviewApproveTests.
+     */
+    private fun withLiveFindings(files: Map<String, String>): Map<String, String> {
+        val out = files.toMutableMap()
+        for (path in files.keys.filter { it.endsWith("/review.md") }) {
+            val project = path.removeSuffix("/review.md")
+            out.putIfAbsent("$project/FINDINGS.md", liveFindings(project))
+        }
+        return out
+    }
+
+    private fun makeEngine(localFiles: Map<String, String>, remoteFiles: Map<String, String> = emptyMap()): Pair<SyncEngine, FakeGitHubClient> = runBlocking {
+        val local = withLiveFindings(localFiles)
+        val remote = withLiveFindings(remoteFiles)
         val store = LocalStore(directory, "o", "r", "main")
         local.forEach { (p, c) -> store.write(p, c, "stale-$p") }
         val client = FakeGitHubClient(remote)
@@ -137,7 +157,9 @@ class SyncEngineTests {
         directory.mkdirs()
         val store = LocalStore(directory, "o", "r", "main")
         store.write("myproj/review.md", reviewSeed, GitBlob.sha(pushed))
-        val client = FakeGitHubClient(mapOf("myproj/review.md" to pushed))
+        val findings = liveFindings("myproj")
+        store.write("myproj/FINDINGS.md", findings, GitBlob.sha(findings))
+        val client = FakeGitHubClient(mapOf("myproj/review.md" to pushed, "myproj/FINDINGS.md" to findings))
         val engine = SyncEngine(client, store, directory)
         engine.setAutoFlush(false)
         engine.enqueue(PendingOp.ApproveQueue("myproj", first))

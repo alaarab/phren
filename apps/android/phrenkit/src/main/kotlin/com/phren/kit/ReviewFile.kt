@@ -57,18 +57,26 @@ class ReviewFile(content: String) {
         return idx
     }
 
-    /** access.ts:700 `approveQueueItem` — remove the line from review.md only. */
-    fun approve(lineText: String) {
+    /**
+     * Remove a queue line, touching nothing else: only the review.md half of
+     * approve or reject. Approve must also write the finding when it is not
+     * already there (`phren extract` queues candidates it never wrote), which
+     * SyncEngine composes with [FindingsFile].
+     */
+    fun dequeue(lineText: String) {
         val lines = content.split("\n").toMutableList()
         lines.removeAt(lineIndex(lineText, lines))
         content = FindingsFile.normalizeWrite(lines)
     }
 
+    /** The review.md half of `approveQueueItemDetailed` (access.ts). */
+    fun approve(lineText: String) = dequeue(lineText)
+
     /**
      * The review.md half of `rejectQueueItem` (access.ts:709). The caller
      * composes this with `FindingsFile.remove` using [findingsTextFor].
      */
-    fun reject(lineText: String) = approve(lineText)
+    fun reject(lineText: String) = dequeue(lineText)
 
     /**
      * The review.md half of `editQueueItem` (access.ts:728) — rewrites the line
@@ -142,6 +150,12 @@ class ReviewFile(content: String) {
             val withoutConfidence = CONFIDENCE_STRIP.replaceAll(rawText, "").jsTrimmed
             return ParsedQueueLine(date, normalizeQueueEntryText(withoutConfidence), confidence, source?.machine, source?.model)
         }
+
+        /** Capture provenance recorded on the queue line: a promoted finding carries where the observation came from. */
+        fun capturedProvenanceFor(lineText: String): FindingProvenance? = parseSourceComment(lineText)
+
+        /** The date the item was queued, recorded on a promoted finding as `<!-- phren:queued "YYYY-MM-DD" -->`. */
+        fun queuedDateFor(lineText: String): String? = parseQueueLine(lineText).date
 
         /** The parsed queue text used as the FINDINGS.md match needle (access.ts:717,732). */
         fun findingsTextFor(lineText: String): String = parseQueueLine(lineText).text
