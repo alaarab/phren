@@ -522,9 +522,20 @@ object KeychainStore {
     /** [user] is the last verified identity, bound to this credential for offline startup. */
     data class StoredToken(val token: String, val kind: TokenKind, val user: GitHubUser? = null)
 
+    /**
+     * What a read found. [Locked] is not "signed out": the credential store
+     * refused the read (device not yet unlocked, Keystore unavailable) although
+     * the token may still be there.
+     */
+    sealed interface ReadResult {
+        data class Found(val stored: StoredToken) : ReadResult
+        data object Missing : ReadResult
+        data object Locked : ReadResult
+    }
+
     interface Backend {
         fun save(stored: StoredToken)
-        fun load(): StoredToken?
+        fun read(): ReadResult
         fun delete()
     }
 
@@ -532,11 +543,12 @@ object KeychainStore {
     var backend: Backend = object : Backend {
         @Volatile private var value: StoredToken? = null
         override fun save(stored: StoredToken) { value = stored }
-        override fun load(): StoredToken? = value
+        override fun read(): ReadResult = value?.let { ReadResult.Found(it) } ?: ReadResult.Missing
         override fun delete() { value = null }
     }
 
     fun save(stored: StoredToken) = backend.save(stored)
-    fun load(): StoredToken? = backend.load()
+    fun read(): ReadResult = backend.read()
+    fun load(): StoredToken? = (read() as? ReadResult.Found)?.stored
     fun delete() = backend.delete()
 }

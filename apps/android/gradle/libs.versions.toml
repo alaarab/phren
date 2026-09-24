@@ -1,18 +1,18 @@
 [versions]
 agp = "9.4.1"
 kotlin = "2.4.20"
-coroutines = "1.10.2"
-serialization = "1.9.0"
-okhttp = "5.1.0"
+coroutines = "1.11.0"
+serialization = "1.11.0"
+okhttp = "5.5.0"
 composeBom = "2026.09.00"
-activityCompose = "1.11.0"
-navigationCompose = "2.9.4"
-lifecycle = "2.9.4"
+activityCompose = "1.13.0"
+navigationCompose = "2.10.2"
+lifecycle = "2.11.0"
 glance = "1.2.0"
-workManager = "2.10.4"
+workManager = "2.12.0"
 junit = "4.13.2"
-sshj = "0.40.0"
-bouncycastle = "1.82"
+sshj = "0.41.1"
+bouncycastle = "1.86"
 
 [libraries]
 coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
@@ -39,6 +39,8 @@ work-runtime = { module = "androidx.work:work-runtime-ktx", version.ref = "workM
 junit = { module = "junit:junit", version.ref = "junit" }
 sshj = { module = "com.hierynomus:sshj", version.ref = "sshj" }
 bouncycastle-prov = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bouncycastle" }
+bouncycastle-util = { module = "org.bouncycastle:bcutil-jdk18on", version.ref = "bouncycastle" }
+bouncycastle-pkix = { module = "org.bouncycastle:bcpkix-jdk18on", version.ref = "bouncycastle" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

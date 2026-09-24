@@ -16,6 +16,9 @@ dependencies {
     // PhrenLive: SSH to each computer's Phren Hook (swift-nio-ssh on iOS).
     api(libs.sshj)
     api(libs.bouncycastle.prov)
+    // One Bouncy Castle release across sshj's transitive modules.
+    api(libs.bouncycastle.util)
+    api(libs.bouncycastle.pkix)
     testImplementation(kotlin("test"))
     testImplementation(libs.junit)
     testImplementation(libs.coroutines.test)

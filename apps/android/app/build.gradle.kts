@@ -25,6 +25,10 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+    // Bouncy Castle and sshj each ship the same license files; the app's notices cover them.
+    packaging {
+        resources.excludes += setOf("META-INF/LICENSE.md", "META-INF/NOTICE.md", "META-INF/versions/*/OSGI-INF/MANIFEST.MF")
+    }
     buildFeatures {
         compose = true
         buildConfig = true

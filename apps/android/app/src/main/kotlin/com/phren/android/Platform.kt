@@ -37,10 +37,14 @@ class PrefsStore(private val prefs: SharedPreferences) : KeyValueStore {
 class KeystoreTokenBackend(context: Context) : KeychainStore.Backend {
     private val prefs = context.getSharedPreferences("phren.secure", Context.MODE_PRIVATE)
     private val json = Json { ignoreUnknownKeys = true }
+    private val userManager = context.getSystemService(android.os.UserManager::class.java)
+
+    private fun keyStore() = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+
+    private fun existingKey(): SecretKey? = (keyStore().getEntry(ALIAS, null) as? KeyStore.SecretKeyEntry)?.secretKey
 
     private fun key(): SecretKey {
-        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        (keyStore.getEntry(ALIAS, null) as? KeyStore.SecretKeyEntry)?.let { return it.secretKey }
+        existingKey()?.let { return it }
         val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
         generator.init(
             KeyGenParameterSpec.Builder(ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
@@ -60,14 +64,30 @@ class KeystoreTokenBackend(context: Context) : KeychainStore.Backend {
             .commit()
     }
 
-    /** A credential, not user data: an unreadable one is dropped, not quarantined. */
-    override fun load(): KeychainStore.StoredToken? = try {
-        val iv = Base64.decode(prefs.getString("iv", null) ?: return null, Base64.NO_WRAP)
-        val sealed = Base64.decode(prefs.getString("token", null) ?: return null, Base64.NO_WRAP)
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, iv)) }
-        json.decodeFromString(KeychainStore.StoredToken.serializer(), cipher.doFinal(sealed).decodeToString())
-    } catch (_: Exception) {
-        null
+    /**
+     * A credential, not user data: an undecodable one is dropped, not quarantined.
+     * A Keystore that refuses the read (still locked, or its daemon not up yet)
+     * is [KeychainStore.ReadResult.Locked], never "signed out".
+     */
+    override fun read(): KeychainStore.ReadResult {
+        val iv = Base64.decode(prefs.getString("iv", null) ?: return KeychainStore.ReadResult.Missing, Base64.NO_WRAP)
+        val sealed = Base64.decode(prefs.getString("token", null) ?: return KeychainStore.ReadResult.Missing, Base64.NO_WRAP)
+        if (!userManager.isUserUnlocked) return KeychainStore.ReadResult.Locked
+        val key = try {
+            existingKey() ?: return KeychainStore.ReadResult.Missing
+        } catch (_: Exception) {
+            return KeychainStore.ReadResult.Locked
+        }
+        val plain = try {
+            Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, iv)) }.doFinal(sealed)
+        } catch (_: javax.crypto.AEADBadTagException) {
+            return KeychainStore.ReadResult.Missing
+        } catch (_: Exception) {
+            return KeychainStore.ReadResult.Locked
+        }
+        return runCatching { json.decodeFromString(KeychainStore.StoredToken.serializer(), plain.decodeToString()) }
+            .map { KeychainStore.ReadResult.Found(it) as KeychainStore.ReadResult }
+            .getOrDefault(KeychainStore.ReadResult.Missing)
     }
 
     override fun delete() { prefs.edit().clear().commit() }

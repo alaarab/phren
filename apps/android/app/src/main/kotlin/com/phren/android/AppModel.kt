@@ -251,8 +251,14 @@ class AppModel(private val context: Context) {
     fun bootstrap() = scope.launch {
         if (phase != Phase.LOADING) return@launch
         val generation = authenticationGeneration
-        val stored = withContext(Dispatchers.IO) { KeychainStore.load() }
+        // A locked credential store is not "signed out": wait for it and read again.
+        var read = withContext(Dispatchers.IO) { KeychainStore.read() }
+        while (read == KeychainStore.ReadResult.Locked && generation == authenticationGeneration) {
+            kotlinx.coroutines.delay(2_000)
+            read = withContext(Dispatchers.IO) { KeychainStore.read() }
+        }
         if (generation != authenticationGeneration) return@launch
+        val stored = (read as? KeychainStore.ReadResult.Found)?.stored
         if (stored == null) {
             selectedTab = AppTab.AGENTS
             phase = Phase.SIGNED_OUT
