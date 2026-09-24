@@ -43,6 +43,48 @@ describe("SessionLog fold and projection", () => {
     expect(log.length).toBe(6);
   });
 
+  it("compacts a second time over a surface that already holds a summary", () => {
+    // A long session compacts more than once. The summary node is numbered with
+    // the seq of the first event it shadows, so the surface stays seq-ascending
+    // and the second range resolves against the post-compaction surface.
+    const log = memLog();
+    for (let i = 0; i < 8; i++) {
+      log.append("user/message", { message: user(`m${i}`), source: "user", turn: i });
+    }
+    log.replaceMessageRange(1, 4, user("[compact 1]"));
+    expect(log.getMessages().map((m) => m.content)).toEqual(["m0", "[compact 1]", "m5", "m6", "m7"]);
+
+    for (let i = 8; i < 12; i++) {
+      log.append("user/message", { message: user(`m${i}`), source: "user", turn: i });
+    }
+    // The range starts at the existing summary and ends inside the messages it
+    // retained — the case where a summary numbered with its own (later) seq
+    // resolves a start that sorts after its end.
+    log.replaceMessageRange(1, 3, user("[compact 2]"));
+    const expected = ["m0", "[compact 2]", "m7", "m8", "m9", "m10", "m11"];
+    expect(log.getMessages().map((m) => m.content)).toEqual(expected);
+
+    // Nothing was deleted, and a cold derivation agrees with the live cache.
+    expect(log.length).toBe(14);
+    log.assertReconstructs();
+    expect(deriveMessages(log.all).map((m) => m.content)).toEqual(expected);
+  });
+
+  it("a twice-compacted log survives a restore round-trip", () => {
+    const log = memLog();
+    for (let i = 0; i < 6; i++) {
+      log.append("user/message", { message: user(`m${i}`), source: "user", turn: i });
+    }
+    log.replaceMessageRange(0, 2, user("[c1]"));
+    log.append("user/message", { message: user("m6"), source: "user", turn: 6 });
+    log.replaceMessageRange(0, 2, user("[c2]"));
+    const expected = log.getMessages().map((m) => m.content);
+
+    const restored = SessionLog.restore(log.header, log.all.map((e) => ({ ...e })));
+    expect(restored.getMessages().map((m) => m.content)).toEqual(expected);
+    restored.assertReconstructs();
+  });
+
   it("incremental cache stays consistent across appends and replaces", () => {
     const log = memLog();
     log.append("user/message", { message: user("a"), source: "user", turn: 0 });

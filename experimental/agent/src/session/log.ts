@@ -63,6 +63,18 @@ const KNOWN_EVENT_TYPES = new Set<string>(["user/message", "assistant/message", 
 const SURFACE_TYPES = new Set<string>(["user/message", "assistant/message", "tool/results"]);
 
 interface SurfaceNode {
+  /**
+   * Position of this node in log order. For a plain event it is the event's own
+   * seq; for a summary produced by `log/replace` it is the range's `start` — the
+   * seq of the first event it shadows, NOT the replace event's own seq.
+   *
+   * That distinction is the whole ordering invariant: the replace event is
+   * appended after everything it shadows, so numbering the summary with its own
+   * seq would push a large number into the middle of the surface. Both the range
+   * walk below and `replaceMessageRange`'s index→seq mapping assume the surface
+   * is seq-ascending, so a second compaction would then resolve a range whose
+   * start sorted after its end and fail (or splice the wrong span).
+   */
   seq: number;
   message: LlmMessage;
 }
@@ -92,12 +104,12 @@ export function deriveSurface(events: readonly SessionEvent[]): SurfaceNode[] {
       const { start, end, message } = event.data as SessionEventMap["log/replace"];
       const from = surface.findIndex((n) => n.seq >= start);
       if (from === -1) {
-        surface.push({ seq: event.seq, message });
+        surface.push({ seq: start, message });
         continue;
       }
       let to = from;
       while (to < surface.length && surface[to].seq <= end) to++;
-      surface.splice(from, to - from, { seq: event.seq, message });
+      surface.splice(from, to - from, { seq: start, message });
     }
   }
   return surface;

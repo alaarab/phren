@@ -13,6 +13,7 @@ import {
   approveQueueItemDetailed,
   rejectQueueItem,
   rejectQueueItemDetailed,
+  dequeueQueueItem,
   readReviewQueue,
   readFindings,
   FINDINGS_FILENAME,
@@ -276,6 +277,45 @@ describe("rejectQueueItem: live findings", () => {
     expect(findings.data).toHaveLength(1);
     expect(findings.data[0].text).toContain("retry budget");
     expect(readQueueFile()).not.toContain("Always validate webhook signatures");
+  });
+});
+
+describe("dequeueQueueItem: drops the question, keeps the knowledge", () => {
+  it("removes the queue line and leaves a live finding in FINDINGS.md", () => {
+    writeFindings([
+      `- Always validate webhook signatures before parsing the body`,
+      `- Keep the retry budget below the upstream timeout`,
+    ]);
+    const line = `- [2026-03-01] Always validate webhook signatures before parsing the body`;
+    writeQueue([line]);
+
+    const result = dequeueQueueItem(tmpDir, PROJECT, line);
+    expect(result.ok).toBe(true);
+
+    const findings = readFindings(tmpDir, PROJECT);
+    if (!findings.ok) return;
+    expect(findings.data).toHaveLength(2);
+    expect(readQueueFile()).not.toContain("Always validate webhook signatures");
+  });
+
+  it("leaves archived content in reference/topics alone", () => {
+    const topicFile = writeTopicDoc("database", [
+      `- Postgres advisory locks are per-session, not per-transaction`,
+    ]);
+    const line = `- [2026-03-01] Postgres advisory locks are per-session, not per-transaction`;
+    writeQueue([line]);
+
+    expect(dequeueQueueItem(tmpDir, PROJECT, line).ok).toBe(true);
+    expect(fs.readFileSync(topicFile, "utf8")).toContain("advisory locks");
+    expect(readQueueFile()).not.toContain("advisory locks");
+  });
+
+  it("reports NOT_FOUND for a line that is not in the queue", () => {
+    writeQueue([`- [2026-03-01] Something else entirely`]);
+    const result = dequeueQueueItem(tmpDir, PROJECT, `- [2026-03-01] Never queued`);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe(PhrenError.NOT_FOUND);
   });
 });
 
