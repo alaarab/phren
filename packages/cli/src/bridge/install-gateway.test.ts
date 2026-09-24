@@ -21,7 +21,9 @@ const relay = `#!${process.execPath}
 process.stdin.pipe(process.stdout);
 `;
 
-describe("Phren SSH gateway", () => {
+// The SSH gateway is a POSIX shell script relaying to a Unix socket, installed only on
+// macOS and Linux (install.ts refuses Windows).
+describe.skipIf(process.platform === "win32")("Phren SSH gateway", () => {
   let root: string, bin: string, socket: string, timing: string, server: Server;
 
   beforeEach(async () => {

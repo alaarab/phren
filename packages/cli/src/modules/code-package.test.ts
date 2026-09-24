@@ -40,11 +40,29 @@ function run(module: string, script: string, env: NodeJS.ProcessEnv): string {
   });
 }
 
+/** A fake npm in `directory` that runs `source` as a Node module: an `npm`
+ * shell script on POSIX, an `npm.cmd` batch file on Windows. */
+function writeNpm(directory: string, source: string): void {
+  fs.mkdirSync(directory, { recursive: true });
+  const script = path.join(directory, "npm-stub.mjs");
+  fs.writeFileSync(script, source);
+  if (process.platform === "win32") {
+    fs.writeFileSync(path.join(directory, "npm.cmd"), `@"${process.execPath}" "${script}" %*\r\n`);
+  } else {
+    fs.writeFileSync(path.join(directory, "npm"), `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(script)} "$@"\n`, { mode: 0o700 });
+  }
+}
+
+/** A PATH with no real npm on it. */
+const NO_NPM_PATH = process.platform === "win32" ? path.join(path.parse(process.cwd()).root, "phren-no-npm") : "/bin:/usr/bin";
+
 function baseEnv(home: string, overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   // A failing npm shadows any real install when a test does not supply one.
-  fs.mkdirSync(path.join(home, "bin"), { recursive: true });
-  fs.writeFileSync(path.join(home, "bin", "npm"), "#!/bin/sh\nexit 1\n", { mode: 0o700 });
-  const env: NodeJS.ProcessEnv = { ...process.env, HOME: home, PATH: path.join(home, "bin") };
+  writeNpm(path.join(home, "bin"), "process.exit(1);\n");
+  // Windows spells it Path and matches names case-insensitively: drop every
+  // spelling so the child sees only the PATH set here.
+  const env: NodeJS.ProcessEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toUpperCase() !== "PATH"));
+  Object.assign(env, { HOME: home, USERPROFILE: home, PATH: path.join(home, "bin") });
   delete env.PHREN_CODE_PACKAGE; delete env.PHREN_PATH; delete env.PHREN_BRIDGE_HOME;
   return { ...env, ...overrides };
 }
@@ -91,38 +109,35 @@ it("finds a global npm install through the mise shims PATH", () => {
   const root = tempDir("code-global-");
   const home = path.join(root, "home");
   const shims = path.join(home, ".local", "share", "mise", "shims");
-  fs.mkdirSync(shims, { recursive: true });
   const globalRoot = path.join(root, "global");
-  fs.writeFileSync(path.join(shims, "npm"), `#!/bin/sh\nprintf '%s\\n' ${JSON.stringify(globalRoot)}\n`, { mode: 0o700 });
+  writeNpm(shims, `console.log(${JSON.stringify(globalRoot)});\n`);
   writePackage(path.join(globalRoot, "@phren", "code"), "global");
   const module = copyModule(path.join(root, "modules"));
-  const output = run(module, LOAD_SCRIPT(module), baseEnv(home, { PATH: "/bin:/usr/bin", FAKE_GLOBAL_ROOT: globalRoot }));
+  const output = run(module, LOAD_SCRIPT(module), baseEnv(home, { PATH: NO_NPM_PATH, FAKE_GLOBAL_ROOT: globalRoot }));
   expect(JSON.parse(output)).toEqual({ marker: "global", from: path.join(globalRoot, "@phren", "code") });
 });
 
-const INSTALL_NPM = `#!/bin/sh
-if [ "$1" = "root" ]; then printf '%s\\n' "$FAKE_GLOBAL_ROOT"; exit 0; fi
-prefix=""
-while [ $# -gt 0 ]; do if [ "$1" = "--prefix" ]; then shift; prefix="$1"; fi; shift; done
-mkdir -p "$prefix/node_modules/@phren/code"
-cat > "$prefix/node_modules/@phren/code/package.json" <<'JSON'
-{"name":"@phren/code","type":"module","exports":{".":"./index.mjs"}}
-JSON
-printf 'export const marker = "npm-installed";\\n' > "$prefix/node_modules/@phren/code/index.mjs"
+const INSTALL_NPM = `import * as fs from "node:fs";
+import * as path from "node:path";
+const args = process.argv.slice(2);
+if (args[0] === "root") { console.log(process.env.FAKE_GLOBAL_ROOT); process.exit(0); }
+const target = path.join(args[args.indexOf("--prefix") + 1], "node_modules", "@phren", "code");
+fs.mkdirSync(target, { recursive: true });
+fs.writeFileSync(path.join(target, "package.json"), '{"name":"@phren/code","type":"module","exports":{".":"./index.mjs"}}');
+fs.writeFileSync(path.join(target, "index.mjs"), 'export const marker = "npm-installed";\\n');
 `;
 
 it("installs into the store runtime packages with npm when nothing is installed", () => {
   const root = tempDir("code-install-");
   const home = path.join(root, "home");
   const shims = path.join(home, ".local", "share", "mise", "shims");
-  fs.mkdirSync(shims, { recursive: true });
-  fs.writeFileSync(path.join(shims, "npm"), INSTALL_NPM, { mode: 0o700 });
+  writeNpm(shims, INSTALL_NPM);
   const store = path.join(root, "store");
   const module = copyModule(path.join(root, "modules"));
   const output = run(module, `const code = await import(${JSON.stringify(pathToFileURL(module).href)});
 const loaded = await code.installCodePackage(${JSON.stringify(store)});
 console.log(JSON.stringify({ marker: loaded.marker, from: code.loadedFrom() }));`,
-    baseEnv(home, { PATH: "/bin:/usr/bin", FAKE_GLOBAL_ROOT: path.join(root, "empty-global") }));
+    baseEnv(home, { PATH: NO_NPM_PATH, FAKE_GLOBAL_ROOT: path.join(root, "empty-global") }));
   expect(JSON.parse(output.trim().split("\n").at(-1)!)).toEqual({
     marker: "npm-installed", from: path.join(store, ".runtime", "packages", "node_modules", "@phren", "code"),
   });

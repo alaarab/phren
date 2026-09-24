@@ -23,7 +23,8 @@ beforeEach(async () => {
 });
 afterEach(async () => { vi.restoreAllMocks(); vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }); });
 
-describe("simulator input hardening", () => {
+// iOS Simulator input runs on macOS only (simulators.ts refuses every other platform).
+describe.skipIf(process.platform === "win32")("simulator input hardening", () => {
   it.each([
     { action: "type", text: "a".repeat(501) }, { action: "type", text: "line\nnext" },
     ...Array.from({ length: 32 }, (_, code) => ({ action: "type", text: "a" + String.fromCharCode(code), submit: code !== 10 })),

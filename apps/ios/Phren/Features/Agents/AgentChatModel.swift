@@ -808,6 +808,9 @@ final class AgentChatModel {
     }
 
     /// Uploads can be reused after failure; prompt delivery is never replayed.
+    /// Counts sends; the transcript scrolls to its end on each one.
+    var sentRevision = 0
+
     func send(_ session: LiveAgentSession, consumeDraft: (() -> Void)? = nil) async {
         guard !sending, target != nil,
               !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty else { return }
@@ -815,6 +818,8 @@ final class AgentChatModel {
             deliveryError = "Remove attachments before running a slash command."; return
         }
         connection.lastSession = session
+        // Every send (typed, dictated, talk mode) moves the chat to its end.
+        sentRevision &+= 1
         let submitted = draft, items = attachments
         // All bridge harnesses accept working-turn input through agent.prompt.
         // Hold only when the connection or a real input prompt prevents it.

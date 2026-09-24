@@ -44,7 +44,7 @@ struct ChatOptionsSheet: View {
                         // Pushed on the chat's own stack at full height, as
                         // it was from the header.
                         Button { afterOptions(.showChanges) } label: {
-                            Label("Repository changes", systemImage: "arrow.triangle.branch")
+                            Label("Git", systemImage: "point.topleft.down.to.point.bottomright.curvepath")
                         }
                         .accessibilityIdentifier("chat-diff")
                     }
