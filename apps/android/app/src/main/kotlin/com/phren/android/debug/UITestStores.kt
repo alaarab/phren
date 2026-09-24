@@ -180,4 +180,13 @@ object UITestStores {
 """.trimIndent(), null)
         store.write("hub/FINDINGS.md", "# hub Findings\n", null)
     }
+
+    /** populateWorkflow: long and short tasks, a second project, and a review queue. */
+    fun populateWorkflow(store: LocalStore, owner: String) {
+        val longTask = "Large migration plan. " + "Update the shared modules and verify behavior across projects. ".repeat(18) + "END OF PLAN"
+        val now = java.time.format.DateTimeFormatter.ISO_INSTANT.format(java.time.Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS))
+        store.write("demo/tasks.md", "# Demo tasks\n## Active\n## Queue\n- [ ] $longTask [high] <!-- bid:dead0001 created:2026-01-01T12:00:00.000Z -->\n  Context: Keep the full plan available from task details.\n- [ ] A short follow-up task <!-- bid:dead0002 created:$now -->\n- [ ] Check the finished app <!-- bid:dead0003 -->\n## Done\n", null)
+        store.write("api/tasks.md", "# API tasks\n## Active\n- [ ] Fold sections with Reduce Motion respected <!-- bid:dead0211 -->\n- [ ] Keep header counts unfiltered <!-- bid:dead0212 -->\n- [ ] Leave folded projects alone when All runs <!-- bid:dead0213 -->\n## Queue\n- [ ] Show Active and Queue counts on every header <!-- bid:dead0201 created:2026-09-20T09:00:00.000Z -->\n## Done\n", null)
+        store.write("demo/review.md", "# Review\n## Review\n- [2026-09-06] Candidate for $owner memory\n- [2026-09-06] Another candidate for $owner memory\n## Stale\n- [2026-09-05] Recheck an older convention\n", null)
+    }
 }

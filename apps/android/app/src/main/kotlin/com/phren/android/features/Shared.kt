@@ -47,6 +47,8 @@ import com.phren.android.design.plainClickable
 import com.phren.kit.Finding
 import com.phren.kit.FindingType
 import kotlinx.coroutines.delay
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.withLink
 import kotlinx.coroutines.launch
 
 /** The app model, provided once at the root (`@Environment(AppModel.self)`). */
@@ -250,4 +252,26 @@ fun TextEntrySheet(
 
 fun kotlinx.coroutines.CoroutineScope.launchSafely(block: suspend () -> Unit) = launch {
     try { block() } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { android.util.Log.e("Phren", "action failed", e) }
+}
+
+/**
+ * `Text(.init(string))`: SwiftUI's inline Markdown — **bold**, *italic*,
+ * `code`, ~~strike~~ and [links](url). Block syntax stays literal, as there.
+ */
+fun inlineMarkdown(text: String): androidx.compose.ui.text.AnnotatedString = androidx.compose.ui.text.buildAnnotatedString {
+    val pattern = Regex("""\*\*(.+?)\*\*|__(.+?)__|(?<![*\w])\*(?!\s)(.+?)(?<!\s)\*(?!\w)|(?<![_\w])_(?!\s)(.+?)(?<!\s)_(?!\w)|`([^`]+)`|~~(.+?)~~|\[([^\]]+)]\(([^)\s]+)\)""")
+    var index = 0
+    for (m in pattern.findAll(text)) {
+        append(text.substring(index, m.range.first))
+        val g = m.groupValues
+        when {
+            g[1].isNotEmpty() || g[2].isNotEmpty() -> withStyle(androidx.compose.ui.text.SpanStyle(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)) { append(g[1].ifEmpty { g[2] }) }
+            g[3].isNotEmpty() || g[4].isNotEmpty() -> withStyle(androidx.compose.ui.text.SpanStyle(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)) { append(g[3].ifEmpty { g[4] }) }
+            g[5].isNotEmpty() -> withStyle(androidx.compose.ui.text.SpanStyle(fontFamily = PhrenType.mono)) { append(g[5]) }
+            g[6].isNotEmpty() -> withStyle(androidx.compose.ui.text.SpanStyle(textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough)) { append(g[6]) }
+            else -> withLink(androidx.compose.ui.text.LinkAnnotation.Url(g[8], androidx.compose.ui.text.TextLinkStyles(androidx.compose.ui.text.SpanStyle(color = PhrenTheme.link)))) { append(g[7]) }
+        }
+        index = m.range.last + 1
+    }
+    append(text.substring(index))
 }

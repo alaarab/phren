@@ -600,7 +600,7 @@ private fun TaskRowContent(state: TaskListState, row: TaskListRow, canWrite: Boo
             Modifier.weight(1f).plainClickable { if (state.isSelecting) state.select(row) else state.openDetails(row) }.phrenIdentifier("task-detail:${row.id}"),
             verticalArrangement = Arrangement.spacedBy(5.dp),
         ) {
-            Text(row.displayLine, style = PhrenType.callout, color = if (done) PhrenTheme.textMuted else PhrenTheme.text, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            Text(inlineMarkdown(row.displayLine), style = PhrenType.callout, color = if (done) PhrenTheme.textMuted else PhrenTheme.text, maxLines = 2, overflow = TextOverflow.Ellipsis,
                 textDecoration = if (row.task.checked) TextDecoration.LineThrough else null)
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (!state.isProjectScoped) TagChip(row.project, PhrenTheme.ChipRole.PROJECT)
@@ -756,10 +756,10 @@ fun TaskDetailsView(initial: TaskListRow, onMoved: (TaskListRow, PhrenTask.Secti
                 FormRow("Start an agent on this task", icon = SF("sparkles"), identifier = "task-start-agent") { launching = true }
             }
             FormSection {
-                SelectionContainer { Text(row.displayLine, style = PhrenType.body, color = PhrenTheme.text, modifier = Modifier.padding(16.dp)) }
+                SelectionContainer { Text(inlineMarkdown(row.displayLine), style = PhrenType.body, color = PhrenTheme.text, modifier = Modifier.padding(16.dp)) }
             }
             row.task.context?.let { ctx ->
-                FormSection("Context") { SelectionContainer { Text(ctx, style = PhrenType.body, color = PhrenTheme.text, modifier = Modifier.padding(16.dp)) } }
+                FormSection("Context") { SelectionContainer { Text(inlineMarkdown(ctx), style = PhrenType.body, color = PhrenTheme.text, modifier = Modifier.padding(16.dp)) } }
             }
             FormSection {
                 val fields = buildList {

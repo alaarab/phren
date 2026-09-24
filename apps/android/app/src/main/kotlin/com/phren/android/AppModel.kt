@@ -279,6 +279,7 @@ class AppModel(private val context: Context) {
                     kind == "store-tour" -> com.phren.android.debug.UITestStores.populateTour(store)
                     kind == "memory" && owner == "sample" -> com.phren.android.debug.UITestStores.populateMemory(store)
                     else -> {
+                        if (kind == "workflow") com.phren.android.debug.UITestStores.populateWorkflow(store, owner)
                         store.write("demo/FINDINGS.md", "# Findings\n\n- [pattern] Cache repeated requests for offline use\n- [pattern] Retry sync after reconnecting\n- [decision] Connect the phone graph to desktop memory\n", null)
                         store.write("demo/skills/audit.md", com.phren.kit.SkillFile.template(name = "audit", description = "Review the project", instructions = "Run the checks."), null)
                     }

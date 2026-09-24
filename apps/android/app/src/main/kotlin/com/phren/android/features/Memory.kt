@@ -693,7 +693,5 @@ private fun kindColor(item: MemoryItem): Color = when (item.kind) {
     MemoryItem.Kind.PROJECT -> PhrenTheme.sessionProject
 }
 
-@Composable
-fun MemoryMaintenanceView() = LiveBridge.Pending("Maintenance")
 
 @Suppress("unused") private fun unused(m: AppModel) = m
