@@ -195,6 +195,7 @@ struct ChatTranscriptPane: View {
             pinToBottom(proxy)
         }
         .onChange(of: sendScrollToken) { _, _ in pinAfterSend(proxy) }
+        .onChange(of: model.sentRevision) { _, _ in pinAfterSend(proxy) }
     }
 
     /// The rows inside the scroll view: pane choice, connection notices,
@@ -239,7 +240,14 @@ struct ChatTranscriptPane: View {
         sendScrollTask = Task { @MainActor in
             await Task.yield()
             suppressComposingPin = false
-            guard atBottom, !model.loadingHistory else { return }
+            // A send always shows its own message, even from far up the
+            // transcript or an older page of history.
+            if model.timelineState.hasNewer {
+                cancelHistory(); requestedHistoryLine = nil
+                model.showLatest(); actions.reconnect()
+            }
+            atBottom = true
+            guard !model.loadingHistory else { return }
             pinToBottom(proxy)
             do { try await Task.sleep(for: .milliseconds(350)) } catch { return }
             guard atBottom, !model.loadingHistory else { return }

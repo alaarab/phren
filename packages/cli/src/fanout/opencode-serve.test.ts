@@ -76,7 +76,9 @@ function fakePush() {
     notifyFanoutBlocked: vi.fn(async () => true) } as unknown as ApprovalPushService };
 }
 
-describe("an OpenCode fan-out worker asks the phone", () => {
+// Fan-out runs under the Hook (macOS and Linux only), and the fake opencode is an
+// extensionless shebang script, which Windows cannot execute.
+describe.skipIf(process.platform === "win32")("an OpenCode fan-out worker asks the phone", () => {
   let temp: ReturnType<typeof makeTempDir>, store: string, logFile: string;
   beforeEach(() => {
     temp = makeTempDir("fanout-serve-");

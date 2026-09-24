@@ -302,6 +302,27 @@ final class AgentChatTranscriptTests: AgentChatUITestCase {
     }
 
     @MainActor
+    func testSendingFromFarUpScrollsTheChatToItsEnd() {
+        let app = launch(extra: ["--chat-heavy"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let tail = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Heavy fixture reply 19.")).firstMatch
+        XCTAssertTrue(tail.waitForExistence(timeout: 15))
+        // Read back through the conversation until the chat stops following.
+        let latest = app.buttons["Latest messages"]
+        for _ in 0..<6 where !latest.exists { app.swipeDown(velocity: .fast) }
+        XCTAssertTrue(latest.waitForExistence(timeout: 3), "Scrolling up leaves the end")
+        let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
+        composer.tap()
+        composer.typeText("Back to the end")
+        app.buttons["chat-send"].tap()
+        // The owner's rule (2026-09-24): a send always shows the chat's end.
+        XCTAssertTrue(latest.waitForNonExistence(timeout: 5), "A send scrolls to the end even from far up")
+        let sent = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Back to the end")).firstMatch
+        XCTAssertTrue(sent.waitForExistence(timeout: 5))
+        XCTAssertTrue(sent.isHittable, "The sent message is on screen")
+    }
+
+    @MainActor
     func testStalledCodexHistoryOffersANewThreadWithoutWaitingState() {
         let app = launch(extra: ["--chat-history-stalled"])
         app.buttons["live-chat:w7:w7:t9"].tap()

@@ -30,7 +30,7 @@ import { applyStarterTemplateUpdates, applyTemplate, getHookEntrypointCheck } fr
 import { VERSION } from "./init/shared.js";
 import { collectNativeMemoryFiles } from "./shared.js";
 
-describe.sequential("mcp mode configuration", () => {
+describe("mcp mode configuration", () => {
   let tmpRoot: string;
   let homeDir: string;
   let phrenPath: string;

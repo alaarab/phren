@@ -3,6 +3,12 @@
 The VS Code extension versions separately from `@phren/cli`; the CLI's own
 changelog is at the repository root. The Marketplace listing shows this file.
 
+## [Unreleased]
+
+### Changed
+
+- Requires VS Code 1.138 or later (was 1.120). The extension builds against the current VS Code API types (`@types/vscode` 1.138.0) and packages with `@vscode/vsce` 4.
+
 ## [0.6.3] - 2026-09-05
 
 ### Fixed
