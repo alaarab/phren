@@ -65,8 +65,9 @@ describe("bridge enroll", () => {
     // A file URL is not accepted from the phone; the https form is checked
     // separately below. Point git at the local origin through its insteadOf
     // rewrite so the clone itself is exercised offline.
+    // Git config strings read backslashes as escapes: write a Windows path with slashes.
     const config = path.join(home, ".gitconfig");
-    await writeFile(config, `[url "${path.join(home, "upstream/")}"]\n\tinsteadOf = https://example.test/o/\n`);
+    await writeFile(config, `[url "${path.join(home, "upstream/").replaceAll("\\", "/")}"]\n\tinsteadOf = https://example.test/o/\n`);
     const result = await enrollProject({ cloneUrl: "https://example.test/o/delta.git" }, { ...env, GIT_CONFIG_GLOBAL: config });
     expect(result).toMatchObject({ ok: true, project: "delta", directory: path.join(home, "work/delta"), cloned: true });
     expect(git(path.join(home, "work/delta"), "log", "-1", "--format=%s")).toContain("init");

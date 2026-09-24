@@ -33,7 +33,9 @@ function ask(): Promise<string> {
   });
 }
 
-describe("an approval pushed to a closed phone", () => {
+// The Hook's agent socket is a Unix domain socket at a file path, which Node cannot
+// listen on under Windows; the Hook supports macOS and Linux only.
+describe.skipIf(process.platform === "win32")("an approval pushed to a closed phone", () => {
   let bridge: string, previous: string | undefined, hooks: AgentHooks;
   const sent: { binding: string; expiresAt: string }[] = [];
   const keys = () => vi.mocked(rpc).mock.calls.filter(call => call[1] === "agent.send_keys").map(call => call[2]?.keys);
