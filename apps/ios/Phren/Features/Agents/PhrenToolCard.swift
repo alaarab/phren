@@ -171,6 +171,7 @@ struct PhrenToolCard: View, Equatable {
     /// result, or the first line of what it wrote.
     private var foldedSummary: String {
         if presentation.status == .failed, let issue = presentation.issues.first { return issue }
+        if case .handOff(let target) = presentation.conductor, presentation.status != .failed { return "→ " + target }
         if !presentation.items.isEmpty {
             return "\(presentation.items.count) \(presentation.verb.localizedCaseInsensitiveContains("finding") ? "findings" : "tasks")"
         }
@@ -198,7 +199,18 @@ struct PhrenToolCard: View, Equatable {
                 status
                 if hasDestination { Color.clear.frame(width: 16, height: 14).accessibilityHidden(true) }
             }
-            if !presentation.items.isEmpty {
+            if case .sessions(let groups, let missing) = presentation.conductor {
+                conductorSessions(groups, missing: missing)
+            } else if case .handOff(let target) = presentation.conductor {
+                // Where it went, then the prompt: one line, all of it on a tap.
+                Text("→ " + target).font(PhrenTypography.caption.weight(.semibold))
+                    .foregroundStyle(PhrenTheme.phrenCardAccent).lineLimit(model.isExpanded ? nil : 1)
+                    .accessibilityIdentifier("chat-phren-handoff:\(callID)")
+                if !presentation.body.isEmpty {
+                    Text(presentation.body).font(PhrenTypography.monoFootnote).foregroundStyle(PhrenTheme.textSecondary)
+                        .lineLimit(model.isExpanded ? nil : 1).frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } else if !presentation.items.isEmpty {
                 // One row per task or finding the call added.
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(Array(presentation.items.enumerated()), id: \.offset) { index, item in
@@ -232,6 +244,59 @@ struct PhrenToolCard: View, Equatable {
                 Text("· \(title)").font(PhrenTypography.monoCaption).foregroundStyle(PhrenTheme.textSecondary).lineLimit(model.isExpanded ? nil : 1)
             }
         }
+    }
+
+    /// live_sessions as the owner reads it: each computer's sessions, one
+    /// row each (state dot, project, title, idle time), and the computers it
+    /// couldn't see on one muted line.
+    private func conductorSessions(_ groups: [PhrenToolPresentation.SessionGroup], missing: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(Array(groups.enumerated()), id: \.offset) { _, group in
+                VStack(alignment: .leading, spacing: 3) {
+                    Label(group.computer, systemImage: "desktopcomputer")
+                        .font(PhrenTypography.caption.weight(.semibold)).foregroundStyle(PhrenTheme.textMuted)
+                        .labelStyle(.titleAndIcon)
+                    ForEach(Array(group.rows.prefix(model.isExpanded ? 60 : 8).enumerated()), id: \.offset) { index, row in
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Circle().fill(Self.color(row.status)).frame(width: 7, height: 7)
+                                .accessibilityLabel(row.status == "needs-you" ? "needs you" : row.status)
+                            Text(row.conductor ? "Conductor" : row.project ?? row.label ?? "Session")
+                                .foregroundStyle(row.conductor ? PhrenTheme.accent : PhrenTheme.sessionProject)
+                                .fontWeight(.medium).lineLimit(1)
+                            Text(row.title ?? "").foregroundStyle(PhrenTheme.textSecondary).lineLimit(1)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            if let idle = row.idleFor, row.status != "working" {
+                                Text(Self.idle(idle)).foregroundStyle(PhrenTheme.textMuted).monospacedDigit().lineLimit(1)
+                            }
+                        }
+                        .font(PhrenTypography.caption)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("chat-phren-session:\(callID):\(group.computer):\(index)")
+                    }
+                    if !model.isExpanded, group.rows.count > 8 {
+                        Text("+\(group.rows.count - 8) more").font(PhrenTypography.caption).foregroundStyle(PhrenTheme.textMuted)
+                    }
+                }
+            }
+            if !missing.isEmpty {
+                Text("Not checked: " + missing.joined(separator: ", ")).font(PhrenTypography.caption)
+                    .foregroundStyle(PhrenTheme.textMuted).lineLimit(model.isExpanded ? nil : 1)
+                    .accessibilityIdentifier("chat-phren-sessions-missing:\(callID)")
+            }
+        }
+    }
+
+    static func color(_ status: String) -> Color {
+        switch status {
+        case "working": PhrenTheme.stateWorking
+        case "needs-you": PhrenTheme.stateWaiting
+        case "done": PhrenTheme.stateDone
+        default: PhrenTheme.textMuted
+        }
+    }
+
+    static func idle(_ seconds: Int) -> String {
+        seconds < 60 ? "now" : seconds < 3_600 ? "\(seconds / 60)m" : seconds < 86_400 ? "\(seconds / 3_600)h" : "\(seconds / 86_400)d"
     }
 
     @ViewBuilder private var status: some View {

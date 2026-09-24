@@ -524,7 +524,25 @@ import UniformTypeIdentifiers
             let project = tour ? "phren" : "phone"
             let saved = tour ? "XCUITest: reading UIPasteboard from the runner raises the paste prompt and hangs the run — verify copies through an in-app signal instead."
                 : String(repeating: "Keep queue identities when a real turn replaces its pending copy. ", count: 12)
-            let calls: [(String, String, [String: Any], [String: Any])] = [
+            let paneTarget: [String: Any] = ["server": "default", "workspace": "w1P", "tab": "w1P:t2", "pane": "w1P:p2", "source": "claude", "session": "804efd90"]
+            // `--chat-conductor-tools`: the conductor's own calls, as phren_admin actions.
+            let conductorCalls: [(String, String, [String: Any], [String: Any])] = flag("--chat-conductor-tools") ? [
+                ("sessions", "phren_admin", ["action": "live_sessions"], ["ok": true, "message": "4 live sessions across 2 computers.", "data": [
+                    "sessions": [
+                        ["computer": "Mini", "project": "phren", "label": "phren", "title": "Claude sesh in herdr", "status": "idle", "idleFor": 1768, "target": paneTarget],
+                        ["computer": "Mini", "project": "ObjectStudio", "label": "objectstudio", "title": "MCP livemcp", "status": "working"],
+                        ["computer": "Mini", "label": "Conductor", "title": "Job and purpose", "status": "done", "role": "conductor", "idleFor": 120],
+                        ["computer": "Omarchy", "project": "hub", "label": "hub", "title": "Get on main latest", "status": "blocked", "idleFor": 2040],
+                    ],
+                    "unreachable": [["computer": "Linuxbox", "error": "timed out"]],
+                    "notLinked": [["name": "MacBookPro"]]]]),
+                ("handoff", "phren_admin", ["action": "hand_off", "target": String(decoding: try JSONSerialization.data(withJSONObject: paneTarget), as: UTF8.self),
+                                            "text": "From the conductor, for the owner: you're now paired with the ObjectStudio agent on this Mac.\nTake turns on the MacBook for tests."],
+                 ["ok": true, "message": "Prompt delivered to the existing session.", "data": ["ok": true, "delivered": true, "label": "objectstudio", "target": paneTarget]]),
+                ("dispatch", "phren_admin", ["action": "dispatch", "computer": "Mac.attlocal.net", "project": "phren", "harness": "claude", "model": "opus", "label": "voice", "prompt": "Rework dictation."],
+                 ["ok": false, "error": "Unknown computer. Add its verified connection to hooks.yaml."]),
+            ] : []
+            let calls: [(String, String, [String: Any], [String: Any])] = conductorCalls + [
                 ("finding", "add_finding", ["project": project, "findingType": "pitfall", "finding": saved], ["ok": true]),
                 ("task", "add_task", ["project": project, "item": PhrenToolCardFixture.task], ["ok": true, "data": ["project": project, "item": PhrenToolCardFixture.task]]),
                 ("complete", "manage_task", ["project": project, "action": "complete", "item": "Pin curated font downloads"], ["ok": true]),

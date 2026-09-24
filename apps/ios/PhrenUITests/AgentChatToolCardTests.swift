@@ -2,6 +2,31 @@ import XCTest
 
 /// Tool cards: phren, web, skills, MCP servers, todos, folded reads and shell runs, long output and patches.
 final class AgentChatToolCardTests: AgentChatUITestCase {
+    /// The conductor's live_sessions, hand_off and dispatch calls draw their
+    /// own cards, grouped and named, with the raw call still one tap away.
+    @MainActor
+    func testConductorToolsDrawTheirOwnCards() {
+        let app = launch(extra: ["--chat-phren-tools", "--chat-conductor-tools"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let sessions = app.buttons["chat-phren-card:phren-sessions"]
+        XCTAssertTrue(sessions.waitForExistence(timeout: 8))
+        XCTAssertTrue(sessions.label.contains("Live sessions"), sessions.label)
+        XCTAssertTrue(sessions.label.contains("4 sessions on 2 computers"), sessions.label)
+        sessions.tap()
+        let row = app.descendants(matching: .any)["chat-phren-session:phren-sessions:Omarchy:0"]
+        XCTAssertTrue(row.waitForExistence(timeout: 3))
+        XCTAssertTrue(row.label.contains("needs you") && row.label.contains("hub"), row.label)
+        XCTAssertTrue(app.descendants(matching: .any)["chat-phren-sessions-missing:phren-sessions"].exists)
+        XCTAssertTrue(app.buttons["chat-phren-raw:phren-sessions"].exists, "The raw call stays")
+        let handoff = app.buttons["chat-phren-card:phren-handoff"]
+        XCTAssertTrue(handoff.exists)
+        XCTAssertTrue(handoff.label.contains("objectstudio (w1P:p2)"), handoff.label)
+        let dispatch = app.buttons["chat-phren-card:phren-dispatch"]
+        XCTAssertTrue(dispatch.exists)
+        XCTAssertTrue(dispatch.label.contains("Unknown computer"), dispatch.label)
+        capture(app, "Conductor tool cards")
+    }
+
     @MainActor
     func testWriteAndEditShowChangeRowsBeforeExpanding() {
         let app = launch(extra: ["--chat-write-changes"])

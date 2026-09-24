@@ -28,6 +28,29 @@ public struct PhrenToolPresentation: Equatable, Sendable {
     public let issues: [String]
     public let target: Target?
     public let searchResults: [SearchResult]
+    /// The conductor's own tools, drawn as their own cards.
+    public let conductor: Conductor?
+
+    public enum Conductor: Equatable, Sendable {
+        /// `live_sessions`: the sessions by computer, and the computers it
+        /// couldn't see (not linked or unreachable), on one line.
+        case sessions(groups: [SessionGroup], missing: [String])
+        /// `hand_off`: where the prompt went; the prompt is `body`.
+        case handOff(target: String)
+    }
+    public struct SessionGroup: Equatable, Sendable {
+        public let computer: String
+        public let rows: [SessionRow]
+    }
+    public struct SessionRow: Equatable, Sendable {
+        /// working, idle, done, needs-you (blocked/waiting) or unknown.
+        public let status: String
+        public let project: String?
+        public let label: String?
+        public let title: String?
+        public let idleFor: Int?
+        public let conductor: Bool
+    }
 
     public struct SearchResult: Equatable, Sendable {
         public let title: String
@@ -80,7 +103,21 @@ public struct PhrenToolPresentation: Equatable, Sendable {
         tag = tool == "add_finding" ? Self.nonempty(value("findingType", "finding_type")) : nil
         var details: [Field] = []
         let action = value("action").lowercased()
-        switch tool {
+        // The conductor's tools, called directly or through phren_admin's action.
+        let conductorTool = ["live_sessions", "hand_off", "dispatch"].first { tool == $0 || (tool == "phren_admin" && action == $0) }
+        switch conductorTool ?? tool {
+        case "live_sessions": verb = "Live sessions"; body = ""
+        case "hand_off":
+            verb = "Hand off"
+            body = value("text", "prompt")
+        case "dispatch":
+            verb = "Dispatch"
+            body = ""
+            for (name, keys) in [("Computer", ["computer"]), ("Harness", ["harness"]), ("Model", ["model"]), ("Label", ["label"])] {
+                if let found = keys.compactMap({ values[$0] }).map({ Self.plain($0) }).first(where: { !$0.isEmpty }) {
+                    details.append(.init(name: name, value: found))
+                }
+            }
         case "add_finding": verb = "Save finding"; body = value("finding", "text", "content")
         case "add_task": verb = "Add task"; body = value("task", "item", "text")
         case "complete_task": verb = "Completed a task"; body = value("item", "task", "id")
@@ -108,6 +145,14 @@ public struct PhrenToolPresentation: Equatable, Sendable {
         // A malformed input never replaces the raw reader with invented data.
         fields = details
         var summary: String?, resultTitles: [String] = []
+        var conductorView: Conductor?
+        if conductorTool == "hand_off" {
+            let targetValue = values["target"].flatMap { ($0 as? [String: Any]) ?? ($0 as? String).flatMap { Self.object($0) as? [String: Any] } }
+                ?? data["target"] as? [String: Any]
+            let pane = (targetValue?["pane"] as? String) ?? Self.nonempty(value("session")).map { String($0.prefix(8)) } ?? "a session"
+            let label = (data["label"] as? String) ?? Self.nonempty(value("project"))
+            conductorView = .handOff(target: label.map { "\($0) (\(pane))" } ?? pane)
+        }
         if failed {
             summary = Self.nonempty(Self.firstLine(failure ?? result.map(Self.readable) ?? "")) ?? "Call failed"
         } else if tool == "search_knowledge", result != nil {
@@ -122,10 +167,36 @@ public struct PhrenToolPresentation: Equatable, Sendable {
                     return Self.nonempty(Self.firstLine(hit))
                 }
             }
+        } else if conductorTool == "live_sessions", result != nil {
+            let rows = (data["sessions"] as? [[String: Any]] ?? []).map { item -> (String, SessionRow) in
+                let raw = (item["status"] as? String ?? "").lowercased()
+                let status = ["blocked", "waiting"].contains(raw) ? "needs-you" : ["working", "idle", "done"].contains(raw) ? raw : "unknown"
+                return (item["computer"] as? String ?? "?", SessionRow(
+                    status: status, project: item["project"] as? String, label: item["label"] as? String,
+                    title: item["title"] as? String, idleFor: (item["idleFor"] as? NSNumber)?.intValue,
+                    conductor: item["role"] as? String == "conductor"))
+            }
+            var order: [String] = [], byComputer: [String: [SessionRow]] = [:]
+            for (computer, row) in rows {
+                if byComputer[computer] == nil { order.append(computer) }
+                byComputer[computer, default: []].append(row)
+            }
+            let unreachable = (data["unreachable"] as? [[String: Any]] ?? []).compactMap { $0["computer"] as? String }
+            let unlinked = (data["notLinked"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String }
+            conductorView = .sessions(groups: order.map { SessionGroup(computer: $0, rows: byComputer[$0]!) },
+                                      missing: unreachable.map { "\($0) (unreachable)" } + unlinked)
+            summary = "\(rows.count) \(rows.count == 1 ? "session" : "sessions") on \(order.count) \(order.count == 1 ? "computer" : "computers")"
+        } else if conductorTool == "hand_off", result != nil {
+            summary = data["delivered"] as? Bool == false ? "Not confirmed" : "Delivered"
+        } else if conductorTool == "dispatch", result != nil {
+            let state = data["state"] as? String
+            let id = (data["id"] as? String).map { String($0.prefix(8)) }
+            summary = [state.map { $0 == "accepted" ? "Accepted" : $0.capitalized }, id.map { "receipt \($0)" }].compactMap { $0 }.joined(separator: " · ")
+            if summary?.isEmpty == true { summary = nil }
         } else if tool == "get_memory_detail", result != nil {
             summary = Self.nonempty(Self.firstLine(data["title"] ?? data["content"] ?? data["text"] ?? envelope["message"] ?? response ?? ""))
         }
-        resultSummary = summary; titles = resultTitles
+        resultSummary = summary; titles = resultTitles; conductor = conductorView
         toolName = name
         // A call that adds several at once lists them, instead of one comma-joined line.
         let listKey = ["item", "task", "finding"].first { (values[$0] as? [Any])?.count ?? 0 > 1 }
