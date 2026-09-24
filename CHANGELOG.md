@@ -8,6 +8,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 
 - Hook: the live reply preview no longer shows Claude Code's tool summaries as reply text. Claude Code 2.1.x draws a tool group as an unbulleted line under the reply ("Ran 1 shell command", "Called phren, ran 1 shell command", "Running 1 shell command… <command>"); the preview now treats that line and its wrapped command as tool activity.
+- Review queue: expiring a stale review item no longer deletes the finding it asks about. `phren-agent` expired items with `rejectQueueItem`, which also removes the finding from FINDINGS.md and `reference/topics/`, so a governance question about a live finding timing out deleted the finding. Expiry now uses the new `dequeueQueueItem` in `@phren/cli/data/access`, which removes only the queue line, and its notice names the items it dropped. `/review expire 0` now means never instead of falling back to 14 days.
+- Agent (experimental): `edit_file` writes a replacement containing `$` exactly as given. It used `String.replace`, which expands `$$`, `$&`, `` $` ``, `$'` and `$1`, so shell variables, template literals and regex source were changed on write. An empty `old_string` is now refused.
+- Agent (experimental): a session can be compacted more than once. A compaction summary took the seq of its own replace event, larger than every message after it, so the second compaction failed with "replace range outside surface". The summary now takes the seq of the first message it replaces.
 
 ## [0.2.16] - 2026-09-24
 
