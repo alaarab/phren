@@ -2,6 +2,112 @@ import { describe, it, expect } from "vitest";
 import { mergeFindings, extractConflictVersions, validateFinding } from "./content/validate.js";
 import { isValidProjectName } from "./utils.js";
 
+describe("mergeFindings: nothing is dropped on a sync conflict", () => {
+  // These run unattended (push_changes, session-stop conflict recovery) and the
+  // result is committed and pushed, so anything lost here is lost on every
+  // machine at once.
+  const ours = [
+    "# proj Findings",
+    "",
+    "<!-- consolidated: 2026-05-01 -->",
+    "",
+    "## 2026-08-16",
+    "",
+    "- [pattern] Pool the DB connections at the edge <!-- fid:aaaabbbb -->",
+    "  - rationale: connection storms during deploy",
+    "  - owner: platform team",
+    '  <!-- phren:cite {"file":"src/db.ts","line":12} -->',
+    "",
+    "- [gotcha] The webhook retries with the same idempotency key",
+    "",
+  ].join("\n");
+
+  const theirs = [
+    "# proj Findings",
+    "",
+    "## 2026-08-16",
+    "",
+    "- [decision] Ship the new auth flow behind a flag",
+    "",
+    "## Open questions",
+    "",
+    "- Do we still need the legacy shim?",
+    "",
+    "<details><summary>phren:archive</summary>",
+    "",
+    "- [decision] Old auth flow archived 2026-01-02",
+    "",
+    "</details>",
+    "",
+  ].join("\n");
+
+  it("keeps hand-written continuation lines under a finding", () => {
+    const merged = mergeFindings(ours, theirs);
+    expect(merged).toContain("  - rationale: connection storms during deploy");
+    expect(merged).toContain("  - owner: platform team");
+    // The citation used to be lost too: an indented detail line ended the block
+    // before the parser reached the comment.
+    expect(merged).toContain('<!-- phren:cite {"file":"src/db.ts","line":12} -->');
+  });
+
+  it("keeps a non-date section and an archive block that only theirs had", () => {
+    const merged = mergeFindings(ours, theirs);
+    expect(merged).toContain("## Open questions");
+    expect(merged).toContain("- Do we still need the legacy shim?");
+    expect(merged).toContain("<details><summary>phren:archive</summary>");
+    expect(merged).toContain("</details>");
+    expect(merged).toContain("<!-- consolidated: 2026-05-01 -->");
+  });
+
+  it("never promotes an archived finding into the live date section", () => {
+    const merged = mergeFindings(ours, theirs);
+    const liveSection = merged.split("<details")[0];
+    expect(liveSection).not.toContain("Old auth flow archived");
+    expect(merged).toContain("- [decision] Old auth flow archived 2026-01-02");
+  });
+
+  it("never silently drops content, on any shape — it merges or it refuses", () => {
+    // The guarantee, stated directly: for awkward documents the merge either
+    // round-trips every content line or throws so the user resolves by hand. It
+    // must never quietly return a pruned file that then gets committed.
+    const shapes = [
+      // A fenced code block sitting loose in a date section.
+      "# F\n\n## 2026-08-16\n\n- [pattern] Something\n\n```sql\nSELECT 1;\n```\n",
+      // A nested list under a finding.
+      "# F\n\n## 2026-08-16\n\n- [decision] Pick Postgres\n  - because: JSONB\n    - and: partial indexes\n",
+      // A prose paragraph between sections.
+      "# F\n\nSome hand-written intro paragraph.\n\n## 2026-08-16\n\n- [gotcha] Careful here\n",
+      // A table in an archive block.
+      "# F\n\n## 2026-08-16\n\n- [pattern] X\n\n<details><summary>phren:archive</summary>\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n</details>\n",
+      // A second non-date section after the dates.
+      "# F\n\n## 2026-08-16\n\n- [pattern] X\n\n## Notes\n\nfree text under a heading\n",
+    ];
+
+    const contentLines = (doc: string) =>
+      doc
+        .split("\n")
+        .slice(1)
+        .map((line) => line.trim())
+        .filter((line) => line !== "" && !/^## \d{4}-\d{2}-\d{2}$/.test(line));
+
+    for (const a of shapes) {
+      for (const b of shapes) {
+        let merged: string;
+        try {
+          merged = mergeFindings(a, b);
+        } catch (err) {
+          expect(String(err)).toMatch(/Refusing to auto-merge/);
+          continue;
+        }
+        const present = new Set(merged.split("\n").map((line) => line.trim()));
+        for (const line of [...contentLines(a), ...contentLines(b)]) {
+          expect(present.has(line), `lost "${line}"`).toBe(true);
+        }
+      }
+    }
+  });
+});
+
 describe("mergeFindings", () => {
   it("preserves provenance comments after bullet lines", () => {
     const ours = [
