@@ -1,4 +1,5 @@
 import type { ServerResponse } from "node:http";
+import path from "node:path";
 import { z } from "zod";
 import type { AgentHooks, DeliveryOutcome } from "./agent-hooks.js";
 import { gitBranches, gitDiscard, gitLog, gitPulls, gitStage, gitStatus, gitTree, gitUnstage } from "./git.js";
@@ -77,7 +78,7 @@ export function herdrWorktreeWorkers(s: Json): WorktreeWorker[] {
   const workers: WorktreeWorker[] = [];
   for (const pane of objects(s.panes)) {
     const cwd = pane.foreground_cwd || pane.cwd;
-    if (typeof pane.agent !== "string" || typeof cwd !== "string" || !cwd.startsWith("/")) continue;
+    if (typeof pane.agent !== "string" || typeof cwd !== "string" || !path.isAbsolute(cwd)) continue;
     const name = paneAgentName(s, pane);
     workers.push({ cwd, label: name || pane.agent, provider: pane.agent,
       ...(typeof pane.agent_status === "string" ? { state: pane.agent_status } : {}) });

@@ -27,7 +27,9 @@ it("assembles a git-ignored 12 MiB video in bounded ranges and checks metadata w
     chunks.push(Buffer.from(result.data, "base64"));
   }
   expect(Buffer.concat(chunks).equals(bytes)).toBe(true);
-  expect(await readFileRange(root, path.join(root, "video/render.mp4"), bytes.length, 100)).toMatchObject({ length: 0, eof: true });
+  // Requested paths use the phone's forward slashes, never Windows backslashes.
+  const absolute = path.join(root, "video/render.mp4").replaceAll("\\", "/");
+  expect(await readFileRange(root, absolute, bytes.length, 100)).toMatchObject({ length: 0, eof: true });
   await expect(readFileRange(root, "video/render.mp4", bytes.length + 1, 100)).rejects.toMatchObject({ status: 416 });
 });
 

@@ -127,7 +127,9 @@ describe("push honesty", () => {
     }
   });
 
-  it("offers direct-apns once apns.json and its key load", async () => {
+  // The APNs key and apns.json must be mode 0600; Windows files carry no POSIX mode bits.
+  // The Hook that sends pushes supports macOS and Linux only.
+  it.skipIf(process.platform === "win32")("offers direct-apns once apns.json and its key load", async () => {
     const root = await bridgeHome();
     const { privateKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
     await writeFile(path.join(root, "AuthKey_ABCDE12345.p8"), privateKey.export({ type: "pkcs8", format: "pem" }), { mode: 0o600 });

@@ -48,7 +48,9 @@ beforeEach(() => {
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 
-it("lets every open stream share one snapshot per window", async () => {
+// Every test in this file talks to a fake Herdr over a Unix domain socket at a file path,
+// which Node cannot listen on under Windows; Herdr and the Hook are macOS/Linux only.
+it.skipIf(process.platform === "win32")("lets every open stream share one snapshot per window", async () => {
   // Three chats ticking together, then again inside the window.
   await Promise.all([1, 2, 3].map(() => validateTarget(target, false, false, 2_500)));
   now += 2_000;
@@ -64,28 +66,28 @@ it("lets every open stream share one snapshot per window", async () => {
   expect(calls.get("session.snapshot")).toBe(3);
 });
 
-it("detects a changed conversation within one window", async () => {
+it.skipIf(process.platform === "win32")("detects a changed conversation within one window", async () => {
   await validateTarget(target, false, false, 2_500);
   panes = [pane(other)];
   now += 2_500;
   await expect(validateTarget(target, false, false, 2_500)).rejects.toMatchObject({ status: 409 });
 });
 
-it("detects a pane that disappeared within one window", async () => {
+it.skipIf(process.platform === "win32")("detects a pane that disappeared within one window", async () => {
   await validateTarget(target, false, false, 2_500);
   panes = [];
   now += 2_500;
   await expect(validateTarget(target, false, false, 2_500)).rejects.toMatchObject({ status: 409 });
 });
 
-it("never keeps a failed snapshot", async () => {
+it.skipIf(process.platform === "win32")("never keeps a failed snapshot", async () => {
   vi.stubEnv("PHREN_HERDR_HOME", path.join(root, "missing"));
   await expect(sharedSnapshot("default")).rejects.toMatchObject({ status: 503 });
   vi.stubEnv("PHREN_HERDR_HOME", root);
   expect(objects(await sharedSnapshot("default"))).toHaveLength(1);
 });
 
-it("skips the process probe when Herdr reports the session", async () => {
+it.skipIf(process.platform === "win32")("skips the process probe when Herdr reports the session", async () => {
   expect(await paneChatState("default", pane(), { tokenWhenIdentified: false })).toEqual({ sessionId: session });
   expect(calls.get("pane.process_info")).toBeUndefined();
   // Other callers still get the starting token, from one probe.
@@ -95,7 +97,7 @@ it("skips the process probe when Herdr reports the session", async () => {
   expect(calls.get("pane.process_info")).toBe(1);
 });
 
-it("reads a pane's processes once when the session is not reported", async () => {
+it.skipIf(process.platform === "win32")("reads a pane's processes once when the session is not reported", async () => {
   const unreported = { ...pane(), agent_session: undefined };
   // No open transcript: identity is unknown and the lifecycle binding decides.
   vi.stubEnv("PHREN_BRIDGE_HOME", path.join(root, "bridge"));
@@ -103,7 +105,7 @@ it("reads a pane's processes once when the session is not reported", async () =>
   expect(calls.get("pane.process_info")).toBe(1);
 });
 
-it("reuses the server list and knows the panes it already holds", async () => {
+it.skipIf(process.platform === "win32")("reuses the server list and knows the panes it already holds", async () => {
   expect(knownPanes(15_000)).toBeUndefined();
   expect((await recentServers()).map(server => server.session)).toEqual(["default", "work"]);
   await recentServers(); now += 29_000; await recentServers();
@@ -117,7 +119,7 @@ it("reuses the server list and knows the panes it already holds", async () => {
   expect(knownPanes(15_000)).toBeUndefined();
 });
 
-it("keeps a branch while HEAD is unchanged and rereads it after a checkout", async () => {
+it.skipIf(process.platform === "win32")("keeps a branch while HEAD is unchanged and rereads it after a checkout", async () => {
   const repo = path.join(root, "repo");
   await mkdir(repo);
   const git = (...args: string[]) => execFileSync("git", ["-C", repo, ...args], { stdio: "ignore" });

@@ -39,7 +39,8 @@ describe("live reply previews", () => {
     expect(await readDeltaPreview(source, file)).toBeNull();
   });
 
-  it("does not follow an OpenCode preview sidecar symlink", async () => {
+  // O_NOFOLLOW does not exist on Windows, and the Hook supports macOS and Linux only.
+  it.skipIf(process.platform === "win32")("does not follow an OpenCode preview sidecar symlink", async () => {
     const root = await scratch(), file = path.join(root, "opencode.events.jsonl");
     const other = path.join(root, "other.json");
     await writeFile(other, JSON.stringify({ turnStartedAt: start, text: "Other file" }));

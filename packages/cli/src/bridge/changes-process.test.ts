@@ -1,11 +1,15 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+// /tmp keeps POSIX paths short; Windows has no /tmp.
+const scratchRoot = process.platform === "win32" ? tmpdir() : "/tmp";
 const state = vi.hoisted(() => ({ exec: vi.fn() }));
 vi.mock("node:child_process", () => ({ execFile: Object.assign(() => {}, { [Symbol.for("nodejs.util.promisify.custom")]: state.exec }) }));
 import { ToolChanges } from "./changes.js";
 afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); });
 it("passes an AbortSignal to running Git and cancels it at the hook budget", async () => {
-  const home = await mkdtemp("/tmp/phren-abort-"); vi.stubEnv("HOME", home); vi.stubEnv("PHREN_BRIDGE_HOME", home + "/bridge"); vi.stubEnv("PHREN_PATH", home + "/store");
+  const home = await mkdtemp(path.join(scratchRoot, "phren-abort-")); vi.stubEnv("HOME", home); vi.stubEnv("PHREN_BRIDGE_HOME", home + "/bridge"); vi.stubEnv("PHREN_PATH", home + "/store");
   let signal: AbortSignal | undefined;
   state.exec.mockImplementation((_file, _args, options) => new Promise((_resolve, reject) => {
     signal = options.signal;

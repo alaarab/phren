@@ -30,7 +30,9 @@ it("names the target by its project folder, from the overview it already read", 
   expect(vi.mocked(hookRequest).mock.calls).toHaveLength(2);
 });
 
-it("lists local sessions and says why enrolled computers were skipped when hooks.yaml is broken", async () => {
+// hooks.yaml must be mode 0600; Windows files carry no POSIX mode bits, so the
+// privacy refusal comes before the parse error this test reads. The Hook supports macOS and Linux only.
+it.skipIf(process.platform === "win32")("lists local sessions and says why enrolled computers were skipped when hooks.yaml is broken", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "phren-live-"));
   vi.stubEnv("PHREN_BRIDGE_HOME", root);
   try {

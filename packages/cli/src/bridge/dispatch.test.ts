@@ -131,7 +131,9 @@ describe("dispatch receipts and selection", () => {
     expect(stored).toMatchObject({ parent, parentTarget, computerId: remoteID });
   });
 
-  it("records granted on a matching receipt and leaves it off when no grant covers the call", async () => {
+  // conductor.yaml must be mode 0600; Windows files carry no POSIX mode bits.
+  // The Hook that reads it supports macOS and Linux only.
+  it.skipIf(process.platform === "win32")("records granted on a matching receipt and leaves it off when no grant covers the call", async () => {
     expect((await new DispatchService().dispatch({ ...brief, computer: "Desk" })).granted).toBeUndefined();
     await addGrant({ scope: "project:phren", actions: ["dispatch"], computers: ["Desk"] }, root);
     const granted = await new DispatchService().dispatch({ ...brief, computer: "Desk" });

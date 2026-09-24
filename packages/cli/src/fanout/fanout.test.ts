@@ -37,7 +37,7 @@ describe("fan-out routing", () => {
 });
 it("owns each harness argv and resume semantics", () => {
   const options = { model: "model", worktree: "/work", job: "/job", review: true, resume: "session" };
-  expect(adapters.codex.argv(options)).toEqual(["exec", "resume", "--json", "-o", "/job/final.txt", "-m", "model", "session", "-"]);
+  expect(adapters.codex.argv(options)).toEqual(["exec", "resume", "--json", "-o", path.join("/job", "final.txt"), "-m", "model", "session", "-"]);
   expect(adapters.codex.argv({ ...options, resume: undefined })).toContain("read-only");
   // OpenCode serves and the launcher drives the session over HTTP.
   expect(adapters.opencode.argv(options)).toEqual(["serve", "--hostname", "127.0.0.1", "--port", "0"]);
@@ -49,7 +49,8 @@ it("writes the Hook job contract with private files and a resumable identity", (
   const { job, manifest } = createJob(options, { CODEX_THREAD_ID: options.resume });
   expect(readJob(temp.path, manifest.id)).toMatchObject({ parent: { provider: "codex", session: options.resume }, resumes: options.resume, reason: options.reason, status: "running", eventLog: "events.jsonl" });
   expect(fs.readFileSync(path.join(job, "prompt.txt"), "utf8")).toBe(options.prompt);
-  expect(fs.statSync(path.join(job, "prompt.txt")).mode & 0o777).toBe(0o600);
+  // Windows has no POSIX mode bits to check.
+  if (process.platform !== "win32") expect(fs.statSync(path.join(job, "prompt.txt")).mode & 0o777).toBe(0o600);
 });
 it("detects sixty repeated calls with canonical input ordering but allows varied work", () => {
   const watch = new LoopWatchdog();

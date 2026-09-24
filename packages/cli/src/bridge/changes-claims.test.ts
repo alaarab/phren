@@ -2,6 +2,9 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { execFile } from "node:child_process";
 import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { tmpdir } from "node:os";
+// /tmp keeps POSIX paths short; Windows has no /tmp.
+const scratchRoot = process.platform === "win32" ? tmpdir() : "/tmp";
 import { promisify } from "node:util";
 import { claimedPaths, ToolChanges } from "./changes.js";
 
@@ -9,7 +12,7 @@ const exec = promisify(execFile);
 let home: string, repo: string, changes: ToolChanges;
 
 beforeEach(async () => {
-  home = await realpath(await mkdtemp("/tmp/phren-claims-"));
+  home = await realpath(await mkdtemp(path.join(scratchRoot, "phren-claims-")));
   vi.stubEnv("HOME", home); vi.stubEnv("PHREN_BRIDGE_HOME", path.join(home, "bridge")); vi.stubEnv("PHREN_PATH", path.join(home, "store"));
   repo = path.join(home, "repo");
   const git = (...args: string[]) => exec("git", ["-c", "user.name=sam", "-c", "user.email=sam@example.com", "-C", repo, ...args]);
@@ -53,7 +56,7 @@ it("credits each agent only with its own file when both work in one repository",
 
 it("claims only structured paths, never words of a command line", () => {
   expect(claimedPaths({ command: "cat /etc/hosts > out.txt" }, "/work")).toEqual([]);
-  expect(claimedPaths({ file_path: "src/a.ts" }, "/work")).toEqual(["/work/src/a.ts"]);
-  expect(claimedPaths({ patch: "*** Begin Patch\n*** Update File: b.ts\n*** End Patch" }, "/work")).toEqual(["/work/b.ts"]);
-  expect(claimedPaths({ path: "~/notes.md" }, "/work", "/home/sam")).toEqual(["/home/sam/notes.md"]);
+  expect(claimedPaths({ file_path: "src/a.ts" }, "/work")).toEqual([path.resolve("/work", "src/a.ts")]);
+  expect(claimedPaths({ patch: "*** Begin Patch\n*** Update File: b.ts\n*** End Patch" }, "/work")).toEqual([path.resolve("/work", "b.ts")]);
+  expect(claimedPaths({ path: "~/notes.md" }, "/work", "/home/sam")).toEqual([path.join("/home/sam", "notes.md")]);
 });

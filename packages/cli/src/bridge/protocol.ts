@@ -53,9 +53,25 @@ export async function atomic(file: string, value: unknown, mode = 0o600): Promis
   const text = typeof value === "string" ? value : JSON.stringify(value);
   await writeFile(temporary, text, { mode, flag: "wx" });
   try {
-    await rename(temporary, file);
+    await renameOver(temporary, file);
   } finally {
     await unlink(temporary).catch(() => {});
+  }
+}
+
+/**
+ * Windows refuses to replace a file another handle holds open (a concurrent
+ * reader, or another writer's rename landing at the same moment) with EPERM,
+ * EACCES or EBUSY, where POSIX replaces it atomically. Those holds last
+ * milliseconds, so retry briefly before giving up.
+ */
+async function renameOver(from: string, to: string): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try { return await rename(from, to); } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code ?? "";
+      if (process.platform !== "win32" || attempt >= 20 || !["EPERM", "EACCES", "EBUSY"].includes(code)) throw error;
+      await new Promise(resolve => setTimeout(resolve, 5 * (attempt + 1)));
+    }
   }
 }
 

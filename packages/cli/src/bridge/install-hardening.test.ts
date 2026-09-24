@@ -25,7 +25,9 @@ beforeEach(async () => {
 });
 afterEach(async () => { vi.restoreAllMocks(); vi.unstubAllEnvs(); await rm(state.home, { recursive: true, force: true }); });
 
-it("pins both roots in dispatch and launchd, sets launchd Umask, and pre-creates a private service log", async () => {
+// Every test in this file covers the launchd/systemd install, which install.ts refuses on
+// Windows ("Phren Hook supports macOS and Linux.").
+it.skipIf(process.platform === "win32")("pins both roots in dispatch and launchd, sets launchd Umask, and pre-creates a private service log", async () => {
   const root = process.env.PHREN_BRIDGE_HOME!;
   await mkdir(root); await writeFile(path.join(root, "service.log"), "previous\n", { mode: 0o644 });
   state.exec.mockImplementation(async (file: string, args: string[]) => {
@@ -48,13 +50,13 @@ it("pins both roots in dispatch and launchd, sets launchd Umask, and pre-creates
   expect(JSON.parse(await readFile(path.join(root, "installed.json"), "utf8")).gateway).toBe("node");
 });
 
-it("creates the service log privately even when service startup is disabled", async () => {
+it.skipIf(process.platform === "win32")("creates the service log privately even when service startup is disabled", async () => {
   await install("0.2.14", true);
   const log = await stat(path.join(process.env.PHREN_BRIDGE_HOME!, "service.log"));
   expect(log.size).toBe(0); expect(log.mode & 0o777).toBe(0o600);
 });
 
-it("runs the Linux unit at a lower nice value", async () => {
+it.skipIf(process.platform === "win32")("runs the Linux unit at a lower nice value", async () => {
   vi.spyOn(process, "platform", "get").mockReturnValue("linux");
   await install("0.2.14");
   const unitFile = await readFile(path.join(state.home, ".config/systemd/user/phren-hook.service"), "utf8");
@@ -62,7 +64,7 @@ it("runs the Linux unit at a lower nice value", async () => {
   expect(unitFile).toContain("Restart=on-failure");
 });
 
-it("reconciles Hook and Git owners independently and preserves user hooks", async () => {
+it.skipIf(process.platform === "win32")("reconciles Hook and Git owners independently and preserves user hooks", async () => {
   const { reconcileModuleHooks } = await import("./install.js");
   const { setModuleEnabled, initializeModules } = await import("../modules/config.js");
   const store = path.join(state.home, "store");
@@ -95,7 +97,7 @@ it("reconciles Hook and Git owners independently and preserves user hooks", asyn
   expect(config.hooks.PostToolUse[0]).toEqual(own);
 });
 
-it("replaces the OpenCode plugin copies it wrote and leaves a user's own copy alone", () => {
+it.skipIf(process.platform === "win32")("replaces the OpenCode plugin copies it wrote and leaves a user's own copy alone", () => {
   const shipped = `${OPENCODE_PLUGIN_MARKER} and replaced on every update.\nexport const v = 2;\n`;
   expect(opencodePluginNeedsWrite(undefined, shipped)).toBe(true);
   expect(opencodePluginNeedsWrite(shipped, shipped)).toBe(false);
@@ -103,12 +105,12 @@ it("replaces the OpenCode plugin copies it wrote and leaves a user's own copy al
   expect(opencodePluginNeedsWrite("export const mine = true;\n", shipped)).toBe(false);
 });
 
-it("names the launchd domain for a session", () => {
+it.skipIf(process.platform === "win32")("names the launchd domain for a session", () => {
   expect(launchDomain(501, true)).toBe("gui/501");
   expect(launchDomain(501, false)).toBe("user/501");
 });
 
-it("bootstraps into gui/<uid> when someone is logged in at the screen", async () => {
+it.skipIf(process.platform === "win32")("bootstraps into gui/<uid> when someone is logged in at the screen", async () => {
   const uid = process.getuid!();
   await install("0.2.14");
   const calls = state.exec.mock.calls.filter(([file]) => file === "launchctl").map(([, args]) => (args as string[]).slice(0, 2).join(" "));
@@ -116,7 +118,7 @@ it("bootstraps into gui/<uid> when someone is logged in at the screen", async ()
     `bootstrap gui/${uid}`, `kickstart gui/${uid}/com.phren.hook`]);
 });
 
-it("falls back to user/<uid> over an SSH login with no GUI session and says how to move it", async () => {
+it.skipIf(process.platform === "win32")("falls back to user/<uid> over an SSH login with no GUI session and says how to move it", async () => {
   const uid = process.getuid!();
   state.exec.mockImplementation(async (file: string, args: string[]) => {
     if (file === "launchctl" && args[0] === "print") throw Object.assign(new Error("Could not find domain"), { stderr: "Bad request.\n" });
@@ -128,7 +130,7 @@ it("falls back to user/<uid> over an SSH login with no GUI session and says how 
   expect(log.mock.calls.flat().join("\n")).toContain(`runs in user/${uid}. After a screen login, run phren bridge install again`);
 });
 
-it("prints the exact launchctl commands when bootstrap fails", async () => {
+it.skipIf(process.platform === "win32")("prints the exact launchctl commands when bootstrap fails", async () => {
   const uid = process.getuid!();
   state.exec.mockImplementation(async (file: string, args: string[]) => {
     if (file === "launchctl" && args[0] === "bootstrap") throw Object.assign(new Error("failed"), { stderr: "Bootstrap failed: 125: Domain does not support specified action\n" });

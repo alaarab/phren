@@ -203,7 +203,7 @@ describe("child agent relationships", () => {
       const tree = await childAgentTree("claude", parent);
       expect(tree).toHaveLength(1);
       expect(tree[0]).toMatchObject({ provider: "claude", path: "Review scripts", callId: "tool-claude", state: "completed", model: "claude-fable-5-1" });
-      expect(tree[0].transcript).toMatch(new RegExp(`/subagents/agent-${agentId}\\.jsonl$`));
+      expect(tree[0].transcript).toMatch(new RegExp(`[\\\\/]subagents[\\\\/]agent-${agentId}\\.jsonl$`));
       expect(publicChildAgents(tree)[0]).toMatchObject({ model: "claude-fable-5-1" });
       expect(publicChildAgents(tree)[0]).not.toHaveProperty("session");
       expect(publicChildAgents(tree)[0]).not.toHaveProperty("transcript");

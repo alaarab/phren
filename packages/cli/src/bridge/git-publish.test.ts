@@ -181,7 +181,8 @@ describe("git publish routes", () => {
     await rejects(gitPush(root, undefined), 409, /no origin remote/);
   });
 
-  it("reports a missing or signed-out gh, and opens or finds the branch's pull request", async () => {
+  // The fake gh is a /bin/sh script, which Windows cannot execute.
+  it.skipIf(process.platform === "win32")("reports a missing or signed-out gh, and opens or finds the branch's pull request", async () => {
     const { root, git } = await clone();
     await git("checkout", "-q", "-b", "feature/pr");
     process.env.PATH = bareBin;
@@ -203,7 +204,8 @@ describe("git publish routes", () => {
     expect(await gitPullRequest(root, false)).toEqual({ ok: false, reason: "failed", output: "aborted: you must first push the current branch to a remote, or use the --head flag" });
   });
 
-  it("carries the current branch's pull request and its checks in the pulls data", async () => {
+  // The fake gh is a /bin/sh script, which Windows cannot execute.
+  it.skipIf(process.platform === "win32")("carries the current branch's pull request and its checks in the pulls data", async () => {
     const { root, git } = await clone();
     await git("checkout", "-q", "-b", "feature/pr");
     expect(await gitPulls(root)).toEqual({ available: true, pulls: [], branch: "feature/pr", current: null });

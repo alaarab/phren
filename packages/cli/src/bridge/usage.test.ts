@@ -136,7 +136,8 @@ describe("account usage", () => {
     expect(JSON.stringify(value)).not.toContain("private session title");
     expect(openCodeUsage("no cost here").message).toContain("opencode stats");
   });
-  it("says whether OpenCode is missing, signed out or failing", async () => {
+  // The fake opencode is a /bin/sh script, which Windows cannot execute.
+  it.skipIf(process.platform === "win32")("says whether OpenCode is missing, signed out or failing", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "phren-opencode-"));
     try {
       expect((await readOpenCodeUsage(path.join(root, "missing-opencode"), now)).message).toMatch(/not installed/);

@@ -30,6 +30,14 @@ function npmPath(): string {
   return entries.join(path.delimiter);
 }
 
+/** Run npm. On Windows npm is `npm.cmd`, which only a shell can start (a
+ * plain spawn of it fails with EINVAL), and the shell needs each argument quoted. */
+function npm(args: string[], options: { encoding?: "utf8"; stdio?: "inherit"; timeout: number }): string {
+  const env = { ...process.env, PATH: npmPath() };
+  if (process.platform !== "win32") return String(execFileSync("npm", args, { ...options, env }) ?? "");
+  return String(execFileSync("npm.cmd", args.map(arg => `"${arg}"`), { ...options, env, shell: true }) ?? "");
+}
+
 /** The entry file an installed package declares, without executing anything. */
 function packageEntry(directory: string): string {
   const manifest = JSON.parse(fs.readFileSync(path.join(directory, "package.json"), "utf8")) as {
@@ -50,7 +58,7 @@ async function importDirectory(directory: string): Promise<CodePackage> {
 
 function globalPackageDirectory(): string | undefined {
   try {
-    const root = execFileSync("npm", ["root", "-g"], { encoding: "utf8", timeout: 10_000, env: { ...process.env, PATH: npmPath() } }).trim();
+    const root = npm(["root", "-g"], { encoding: "utf8", timeout: 10_000 }).trim();
     return root ? path.join(root, "@phren", "code") : undefined;
   } catch { return undefined; }
 }
@@ -122,7 +130,7 @@ export async function installCodePackage(store: string): Promise<CodePackage> {
     console.log(`@phren/code linked from ${workspace} into ${linked}.`);
     return code;
   }
-  try { execFileSync("npm", ["install", "--prefix", packages, "@phren/code"], { stdio: "inherit", timeout: 120_000, env: { ...process.env, PATH: npmPath() } }); }
+  try { npm(["install", "--prefix", packages, "@phren/code"], { stdio: "inherit", timeout: 120_000 }); }
   catch { throw new Error(`${CODE_PACKAGE_HINT}\nInstallation failed. Run: npm install --prefix ${packages} @phren/code`); }
   const installed = await loadCodePackage(store);
   if (!installed) throw new Error(`${CODE_PACKAGE_HINT}\nRun: npm install --prefix ${packages} @phren/code`);

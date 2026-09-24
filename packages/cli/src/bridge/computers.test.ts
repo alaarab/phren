@@ -10,7 +10,9 @@ describe("computer enrollment", () => {
   beforeEach(async () => { root = await mkdtemp(path.join(tmpdir(), "phren-computer-")); });
   afterEach(async () => { await rm(root, { recursive: true, force: true }); });
 
-  it("creates one private identity and prints the phone's restricted forced command", async () => {
+  // Privacy is enforced with POSIX mode bits (0600), which Windows files do not carry.
+  // The Hook that reads these files supports macOS and Linux only.
+  it.skipIf(process.platform === "win32")("creates one private identity and prints the phone's restricted forced command", async () => {
     const line = await enrollComputer("Desk", root);
     expect(line).toMatch(/^restrict,pty,command="sh ~\/\.local\/share\/phren\/bridge\/dispatch" ssh-ed25519 \S+ phren-computer:Desk$/);
     expect(line).not.toContain("port-forwarding");
@@ -20,7 +22,9 @@ describe("computer enrollment", () => {
     expect(line).not.toContain("PRIVATE KEY");
   });
 
-  it("accepts idempotently, preserves existing keys and refuses silent key replacement", async () => {
+  // Privacy is enforced with POSIX mode bits (0600), which Windows files do not carry.
+  // The Hook that reads these files supports macOS and Linux only.
+  it.skipIf(process.platform === "win32")("accepts idempotently, preserves existing keys and refuses silent key replacement", async () => {
     const line = await enrollComputer("Desk", root), ssh = path.join(root, "ssh");
     await acceptComputer("Desk", line, ssh);
     const file = path.join(ssh, "authorized_keys");
@@ -46,7 +50,9 @@ describe("computer enrollment", () => {
     expect(await readFile(file, "utf8")).toBe("unchanged");
   });
 
-  it("requires a private peer file and pins SSH independently of user configuration", async () => {
+  // Privacy is enforced with POSIX mode bits (0600), which Windows files do not carry.
+  // The Hook that reads these files supports macOS and Linux only.
+  it.skipIf(process.platform === "win32")("requires a private peer file and pins SSH independently of user configuration", async () => {
     const line = await enrollComputer("Desk", root);
     const key = line.slice(line.indexOf("ssh-ed25519"));
     const hostKey = publicComputerKey(key);
@@ -63,7 +69,9 @@ describe("computer enrollment", () => {
     await expect(hookPeers(root)).rejects.toThrow("0600");
   });
 
-  it("reads optional peers: no file is no peers, a broken file names its problem", async () => {
+  // Privacy is enforced with POSIX mode bits (0600), which Windows files do not carry.
+  // The Hook that reads these files supports macOS and Linux only.
+  it.skipIf(process.platform === "win32")("reads optional peers: no file is no peers, a broken file names its problem", async () => {
     expect(await optionalHookPeers(root)).toEqual({ peers: [] });
     const file = path.join(root, "hooks.yaml");
     await writeFile(file, "version: 1\ncomputers: [{ name: Desk }]\n", { mode: 0o600 });

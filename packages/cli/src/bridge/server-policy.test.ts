@@ -3,7 +3,8 @@ vi.mock("node:fs/promises", async importOriginal => ({ ...await importOriginal<t
   mkdir: async () => { throw new Error("fixture: storage unavailable"); },
 }));
 import { serve } from "./server.js";
-it("sets a private process umask before its first storage operation, even on failed startup", async () => {
+// Windows has no process umask (process.umask() always reads 0 there).
+it.skipIf(process.platform === "win32")("sets a private process umask before its first storage operation, even on failed startup", async () => {
   const previous = process.umask(0o022);
   try {
     await expect(serve("test")).rejects.toThrow("fixture: storage unavailable");

@@ -3,6 +3,9 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { appendFile, mkdir, mkdtemp, open, readdir, readFile, realpath, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { tmpdir } from "node:os";
+// /tmp keeps POSIX paths short; Windows has no /tmp.
+const scratchRoot = process.platform === "win32" ? tmpdir() : "/tmp";
 import { promisify } from "node:util";
 import { conversationNamedPaths, TranscriptReader, visibleEvent } from "./transcripts.js";
 import { ToolChanges, capturesChanges, pruneChanges, startChangeRetention } from "./changes.js";
@@ -13,7 +16,7 @@ import { serverName } from "./protocol.js";
 const exec = promisify(execFile);
 let home: string;
 beforeEach(async () => {
-  home = await realpath(await mkdtemp("/tmp/phren-hardening-"));
+  home = await realpath(await mkdtemp(path.join(scratchRoot, "phren-hardening-")));
   vi.stubEnv("HOME", home); vi.stubEnv("PHREN_BRIDGE_HOME", path.join(home, "bridge"));
   vi.stubEnv("PHREN_PATH", path.join(home, ".phren")); vi.stubEnv("PHREN_HERDR_HOME", path.join(home, "herdr"));
 });
@@ -23,7 +26,9 @@ async function repo(name: string) {
   const dir = path.join(home, name); await mkdir(dir, { recursive: true });
   await git(dir, "init", "-q", "-b", "main");
   await writeFile(path.join(dir, "plain.txt"), "before\n");
-  await git(dir, "add", "."); await git(dir, "commit", "-qm", "initial");
+  // No auto maintenance: Git 2.47+ detaches it after a commit, and its
+  // transient files in .git/objects race the object-count checks.
+  await git(dir, "add", "."); await git(dir, "-c", "maintenance.auto=false", "-c", "gc.auto=0", "commit", "-qm", "initial");
   return dir;
 }
 async function fileCount(dir: string): Promise<number> {
@@ -192,7 +197,9 @@ describe("isolated and bounded changes", () => {
 });
 
 describe("route scope and admission", () => {
-  it("resolves launch directories, rejects file/outside/symlink escapes, and accepts locator candidates", async () => {
+  // Needs POSIX roots (/etc) and a scratch folder outside home; Windows has no /etc and keeps its
+  // temp folder under the user profile. Launches go through the Hook, which supports macOS and Linux only.
+  it.skipIf(process.platform === "win32")("resolves launch directories, rejects file/outside/symlink escapes, and accepts locator candidates", async () => {
     const dir = await repo("project");
     expect(await launchDirectory(dir)).toBe(dir);
     await expect(launchDirectory(path.join(dir, "plain.txt"))).rejects.toMatchObject({ status: 400 });
@@ -200,14 +207,16 @@ describe("route scope and admission", () => {
     await expect(launchDirectory("/etc")).rejects.toMatchObject({ status: 403 });
     await symlink("/etc", path.join(home, "escape"));
     await expect(launchDirectory(path.join(home, "escape"))).rejects.toMatchObject({ status: 403 });
-    const outside = await realpath(await mkdtemp("/tmp/phren-located-"));
+    const outside = await realpath(await mkdtemp(path.join(scratchRoot, "phren-located-")));
     try {
       const project = path.join(outside, "project"); await mkdir(project);
       await expect(launchDirectory(project)).rejects.toMatchObject({ status: 403 });
       expect(await launchDirectory(project, [{ directory: project }])).toBe(project);
     } finally { await rm(outside, { recursive: true, force: true }); }
   });
-  it("allows only server-recorded or command-named extra diff paths, pane repo, and store", async () => {
+  // Paths named in a shell command line are read as POSIX absolute paths; a Windows path in
+  // `cat C:\...\plain.txt` is not one. The Hook that serves these diffs supports macOS and Linux only.
+  it.skipIf(process.platform === "win32")("allows only server-recorded or command-named extra diff paths, pane repo, and store", async () => {
     const primary = await repo("primary"), sibling = await repo("sibling"), unrelated = await repo("unrelated"), store = await repo(".phren");
     for (const dir of [primary, sibling, unrelated, store]) await appendFile(path.join(dir, "plain.txt"), "after\n");
     await expect(repositoryDiff(primary, [sibling])).rejects.toMatchObject({ status: 403 });

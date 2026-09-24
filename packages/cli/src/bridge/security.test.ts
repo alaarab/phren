@@ -54,7 +54,9 @@ describe("Phren preview dispatcher", () => {
     "phren-hook v1 shell L3RtcA sh", "phren-hook v1 shell L3RtcA claude extra", "phren-hook v1 shell L3RtcA\n",
     "phren-hook v1 shell " + Buffer.from("relative/dir").toString("base64url"),
     "phren-hook v1 shell " + Buffer.from("/tmp/x\u0000y").toString("base64url"),
-    "phren-hook v1 shell " + Buffer.from("/usr/bin").toString("base64url") + " claude",
+    // An existing folder outside every workspace; Windows has no /usr/bin, and
+    // a missing folder is refused earlier, with 400.
+    ...process.platform === "win32" ? [] : ["phren-hook v1 shell " + Buffer.from("/usr/bin").toString("base64url") + " claude"],
   ])("rejects destination or command injection: %j", async command => {
     await expect(dispatch(command)).rejects.toMatchObject({ status: 403 });
   });
