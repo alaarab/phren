@@ -17,7 +17,7 @@ function publishInProgress(): boolean {
   return process.env.npm_command === "publish" || process.env.npm_lifecycle_event === "prepublishOnly";
 }
 
-describe.sequential("1.10.x release hardening gates", () => {
+describe("1.10.x release hardening gates", () => {
   let tmpRoot: string;
   let tmpCleanup: () => void;
   let homeDir: string;
