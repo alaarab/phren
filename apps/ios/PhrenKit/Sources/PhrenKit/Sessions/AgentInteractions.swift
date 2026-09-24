@@ -113,6 +113,18 @@ public struct AgentPromptChoice: Decodable, Equatable, Sendable {
         ])
     }
 
+    /// The key Approve types, as the Hook's own push answer picks it: the
+    /// yes/allow row, else the first row.
+    public var approveKey: AgentAnswerKey? {
+        let yes = options.first { $0.label.range(of: #"^(yes|allow|approve|proceed|continue|run)\b"#, options: [.regularExpression, .caseInsensitive]) != nil }
+        return (yes ?? options.first)?.answerKey
+    }
+    /// The key Reject types: the no/deny row, else Escape.
+    public var rejectKey: AgentAnswerKey {
+        let no = options.first { $0.label.range(of: #"^(no|deny|reject|don'?t|cancel|skip)\b"#, options: [.regularExpression, .caseInsensitive]) != nil }
+        return no?.answerKey ?? .escape
+    }
+
     /// The key the chosen option names; nil when nothing was selected.
     public func answerKey(selections: [Int]) -> AgentAnswerKey? {
         guard let index = selections.first, options.indices.contains(index) else { return nil }

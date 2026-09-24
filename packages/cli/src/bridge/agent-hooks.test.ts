@@ -164,3 +164,49 @@ describe("terminal dialogs reach a phone with phren closed", () => {
     expect(notify).not.toHaveBeenCalled();
   });
 });
+
+describe("a permission left in the terminal after its hook let go", () => {
+  const claude: Target = { ...target, source: "claude" };
+  const screen = " Tool use\n\n   phren - Add Task Tool: (MCP)\n\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n\n Esc to cancel · Tab to amend";
+  const pane = { pane_id: "w1:p1", workspace_id: "w1", tab_id: "w1:t1", agent: "claude", agent_status: "blocked" };
+  let hooks: AgentHooks;
+
+  beforeEach(() => {
+    hooks = new AgentHooks();
+    (hooks as unknown as { push: unknown }).push = { available: false, notify: vi.fn(), status: { configured: false } };
+    vi.mocked(validateTarget).mockReset().mockResolvedValue({});
+    vi.mocked(rpc).mockReset().mockImplementation(async (_server, method) => {
+      if (method === "agent.read") return { read: { text: screen } };
+      throw new Error(`Unexpected RPC ${method}`);
+    });
+    (hooks as unknown as { rememberTerminalPrompt(target: Target, body: unknown): void })
+      .rememberTerminalPrompt(claude, { tool: "mcp__phren__add_task", input: { project: "global", item: ["Check"] } });
+  });
+
+  it("keeps the request's details, answers with the pane's rows and marks the tab as needing permission", async () => {
+    expect(hooks.pendingPanes("default", { panes: [pane] }).has("w1:p1")).toBe(false);
+    await hooks.observeWaitingPanes("default", [pane], async () => claude);
+    const prompt = hooks.terminalPrompt(claude);
+    expect(prompt?.toolName).toBe("mcp__phren__add_task");
+    expect(prompt?.choice).toMatchObject({ title: "Do you want to proceed?", options: [{ label: "Yes", key: "1" }, { label: "No", key: "2" }, { key: "Escape" }] });
+    // Claude takes the digit alone; an Enter could approve the next ask.
+    expect(await hooks.dialogAnswerKeys(claude, ["1"])).toEqual(["1"]);
+    expect(hooks.pendingPanes("default", { panes: [pane] }).has("w1:p1")).toBe(true);
+    expect(hooks.pendingPanes("default", { panes: [{ ...pane, agent_status: "working" }] }).size).toBe(0);
+  });
+
+  it("pushes the released permission once and Approve types only its yes digit", async () => {
+    const notify = vi.fn(async () => true);
+    (hooks as unknown as { push: unknown }).push = { available: true, notify, status: { configured: true } };
+    vi.mocked(rpc).mockImplementation(async (_server, method) => {
+      if (method === "agent.read") return { read: { text: screen } };
+      if (method === "agent.send_keys") return { ok: true };
+      throw new Error(`Unexpected RPC ${method}`);
+    });
+    await hooks.observeWaitingPanes("default", [pane], async () => claude);
+    await hooks.observeWaitingPanes("default", [pane], async () => claude);
+    expect(notify).toHaveBeenCalledTimes(1);
+    await hooks.answerPush((notify.mock.calls[0][0] as { binding: string }).binding, "approve");
+    expect(vi.mocked(rpc).mock.calls.filter(call => call[1] === "agent.send_keys").map(call => call[2]?.keys)).toEqual([["1"]]);
+  });
+});

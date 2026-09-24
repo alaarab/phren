@@ -18,7 +18,25 @@ extension PhrenConnection {
         let body = try JSONSerialization.data(withJSONObject: ["binding": binding.uuidString.lowercased(),
                                                                "decision": approve ? "approve" : "deny"])
         try requireOK(await fetchData(host: host, key: .init(rawRepresentation: privateKey),
-                                      request: .init(path: "/v1/push/answer", body: body)))
+                                      // A lock-screen answer runs in iOS's short background
+                                      // window; fail in time to say so.
+                                      request: .init(path: "/v1/push/answer", body: body, timeoutSeconds: 20)))
+    }
+
+    /// Where a pushed approval's request lives, without answering it: a tapped
+    /// notification opens that session. Nil once the binding is spent or expired.
+    public static func approvalPushTarget(host: LiveHost, privateKey: Data, binding: UUID) async throws
+        -> (server: String, workspaceID: String, tabID: String, source: String)? {
+        let body = try JSONSerialization.data(withJSONObject: ["binding": binding.uuidString.lowercased()])
+        let bytes = try await fetchData(host: host, key: .init(rawRepresentation: privateKey),
+                                        request: .init(path: "/v1/push/target", body: body, maximumResponseBytes: 4_096))
+        guard let frame = try JSONSerialization.jsonObject(with: bytes) as? [String: Any],
+              let target = frame["target"] as? [String: Any],
+              let server = target["server"] as? String, let workspace = target["workspace"] as? String,
+              let tab = target["tab"] as? String, let source = target["source"] as? String,
+              AgentChatTarget.validID(server), !server.contains(":"), [workspace, tab].allSatisfy(AgentChatTarget.validID),
+              AgentChatTarget.sources.contains(source) else { return nil }
+        return (server, workspace, tab, source)
     }
 
     public static func accountUsage(host: LiveHost, privateKey: Data) async throws -> AccountUsageSnapshot {

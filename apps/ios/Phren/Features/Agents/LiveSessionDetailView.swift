@@ -9,6 +9,8 @@ struct LiveSessionDetailView: View {
     @State private var assigning = false
     @State private var copiedFolder = false
     @State private var closingSession = false
+    /// The permission this session waits on, read when the overview marks it.
+    @State private var permission: SessionPermission?
     let sessionID: LiveAgentSession.ID
     let monitor: LiveHostMonitor
 
@@ -30,43 +32,53 @@ struct LiveSessionDetailView: View {
                     let project = match?.project
                     ScrollView {
                         VStack(spacing: 14) {
-                            // The hero: who is running, what it is doing, in its state's tint.
-                            VStack(spacing: 12) {
-                                AgentProviderGlyph(source: session.tab.agent, size: 44)
-                                    .frame(width: 88, height: 88)
-                                    .background(session.tab.activity.color.opacity(0.14), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-                                Text(session.tab.displayTitle).font(.title2.weight(.bold)).multilineTextAlignment(.center)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                HStack(spacing: 6) {
-                                    if project == nil { Image(systemName: "folder").foregroundStyle(PhrenTheme.textMuted) }
-                                    Text(session.projectDisplayName(project?.name)).font(.system(.subheadline, design: .monospaced))
-                                        .foregroundStyle(project.map { PhrenTheme.projectColor(storeId: $0.storeID, project: $0.name) } ?? PhrenTheme.textMuted)
-                                    if let branch = session.tab.branch, !branch.isEmpty {
+                            // A permission waiting leads the page, as Moshi's does.
+                            if let permission {
+                                SessionPermissionHero(session: session, permission: permission,
+                                                      project: session.projectDisplayName(project?.name),
+                                                      projectColor: project.map { PhrenTheme.projectColor(storeId: $0.storeID, project: $0.name) } ?? PhrenTheme.textMuted)
+                                SessionPermissionRequest(permission: permission)
+                            } else {
+                                // The hero: who is running, what it is doing, in its state's tint.
+                                VStack(spacing: 12) {
+                                    AgentProviderGlyph(source: session.tab.agent, size: 44)
+                                        .frame(width: 88, height: 88)
+                                        .background(session.tab.activity.color.opacity(0.14), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                                    Text(session.tab.displayTitle).font(.title2.weight(.bold)).multilineTextAlignment(.center)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    HStack(spacing: 6) {
+                                        if project == nil { Image(systemName: "folder").foregroundStyle(PhrenTheme.textMuted) }
+                                        Text(session.projectDisplayName(project?.name)).font(.system(.subheadline, design: .monospaced))
+                                            .foregroundStyle(project.map { PhrenTheme.projectColor(storeId: $0.storeID, project: $0.name) } ?? PhrenTheme.textMuted)
+                                        if let branch = session.tab.branch, !branch.isEmpty {
+                                            Text("·").foregroundStyle(PhrenTheme.textDim)
+                                            Label(branch, systemImage: "arrow.triangle.branch").font(.system(.caption, design: .monospaced)).foregroundStyle(PhrenTheme.chatNeutral)
+                                        }
                                         Text("·").foregroundStyle(PhrenTheme.textDim)
-                                        Label(branch, systemImage: "arrow.triangle.branch").font(.system(.caption, design: .monospaced)).foregroundStyle(PhrenTheme.chatNeutral)
-                                    }
-                                    Text("·").foregroundStyle(PhrenTheme.textDim)
-                                    Text(session.host.name).font(.subheadline).fontWeight(.medium)
-                                        .foregroundStyle(PhrenTheme.hostColor(session.host.color ?? LiveHost.defaultColor(for: session.host.id)))
-                                    if let date = session.tab.lastChangedAt {
-                                        SessionRelativeTimeLabel(changedAt: date)
-                                    }
-                                }.lineLimit(1).minimumScaleFactor(0.8)
-                                Text((session.tab.status + (stale ? " · stale" : "")).uppercased())
-                                    .font(.caption.weight(.bold)).tracking(1.2)
-                                    .foregroundStyle(fresh ? session.tab.activity.color : PhrenTheme.textMuted)
-                                    .padding(.horizontal, 14).padding(.vertical, 6)
-                                    .background((fresh ? session.tab.activity.color : PhrenTheme.textMuted).opacity(0.14), in: Capsule())
+                                        Text(session.host.name).font(.subheadline).fontWeight(.medium)
+                                            .foregroundStyle(PhrenTheme.hostColor(session.host.color ?? LiveHost.defaultColor(for: session.host.id)))
+                                        if let date = session.tab.lastChangedAt {
+                                            SessionRelativeTimeLabel(changedAt: date)
+                                        }
+                                    }.lineLimit(1).minimumScaleFactor(0.8)
+                                    Text((session.tab.status + (stale ? " · stale" : "")).uppercased())
+                                        .font(.caption.weight(.bold)).tracking(1.2)
+                                        .foregroundStyle(fresh ? session.tab.activity.color : PhrenTheme.textMuted)
+                                        .padding(.horizontal, 14).padding(.vertical, 6)
+                                        .background((fresh ? session.tab.activity.color : PhrenTheme.textMuted).opacity(0.14), in: Capsule())
+                                }
+                                .frame(maxWidth: .infinity).padding(.vertical, 28).padding(.horizontal, 20)
+                                .background(session.tab.activity.color.opacity(fresh ? 0.08 : 0.03), in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.large, style: .continuous))
                             }
-                            .frame(maxWidth: .infinity).padding(.vertical, 28).padding(.horizontal, 20)
-                            .background(session.tab.activity.color.opacity(fresh ? 0.08 : 0.03), in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.large, style: .continuous))
 
                             // The two ways in, side by side.
                             HStack(spacing: 10) {
                                 AgentConversationLink(session: session) {
                                     Label("Chat", systemImage: "bubble.left.and.bubble.right").font(.body.weight(.semibold))
                                         .frame(maxWidth: .infinity, minHeight: 44)
-                                        .background(PhrenTheme.accent.opacity(0.9), in: Capsule()).foregroundStyle(.black)
+                                        // Approve is the one accent while a permission waits.
+                                        .background(permission == nil ? PhrenTheme.accent.opacity(0.9) : PhrenTheme.surface, in: Capsule())
+                                        .foregroundStyle(permission == nil ? Color.black : PhrenTheme.text)
                                 }
                                 .buttonStyle(.plain).disabled(!fresh)
                                 .accessibilityLabel("Chat with agent")
@@ -80,6 +92,7 @@ struct LiveSessionDetailView: View {
                                 .accessibilityLabel("Open terminal")
                                 .accessibilityIdentifier("session-detail-terminal")
                             }
+                            if let permission { SessionPermissionActions(session: session, permission: permission) }
                             if stale { Text("Reconnect this computer to resume its session.").font(.caption).foregroundStyle(PhrenTheme.textMuted) }
 
                             SessionAwaySummaryCard(
@@ -139,6 +152,11 @@ struct LiveSessionDetailView: View {
                         .padding(16)
                     }
                     .background(PhrenTheme.bg)
+                    // Read what it asks whenever the overview marks it waiting.
+                    .task(id: session.tab.approvalPending == true) {
+                        guard session.tab.approvalPending == true else { permission = nil; return }
+                        permission = await SessionPermission.load(session)
+                    }
                     .phrenDialog(isPresented: $closingSession, title: "Close this session?",
                                  message: "\u{201C}\(session.tab.displayTitle)\u{201D} on \(session.host.name) closes; an agent running in it stops.",
                                  actions: [

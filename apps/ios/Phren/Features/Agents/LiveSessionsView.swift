@@ -200,7 +200,7 @@ struct LiveSessionsView: View {
         }
         .navigationDestination(item: $sessionOpen) { open in
             switch open.destination {
-            case .chat, .dictate:
+            case .chat, .dictate, .details:
                 AgentChatSheet(session: open.session, attachments: open.attachments, draft: open.draft,
                                startsDictation: open.destination == .dictate).id(open.id)
             case .terminal: HerdrTerminalView(host: open.session.host, session: open.session).id(open.id)
@@ -210,6 +210,11 @@ struct LiveSessionsView: View {
         // Siri and Spotlight leave an exact session and destination here.
         .onChange(of: model.pendingChatVersion, initial: true) { _, _ in
             if let pending = AgentLaunch.takePendingOpen() {
+                if pending.destination == .details, let monitor = sessions.monitor(for: pending.session.host.id) {
+                    sessionOpen = nil
+                    selected = OverviewSelection(session: pending.session, monitor: monitor)
+                    return
+                }
                 selected = nil
                 let content = AgentLaunch.takePendingContent(for: pending.session)
                 sessionOpen = SessionOpen(session: pending.session, destination: pending.destination,
@@ -273,7 +278,11 @@ struct LiveSessionsView: View {
                                resolvedProject: screen.projects[session.id] ?? preferences?.projectMatch(hostID: session.host.id, cwd: session.tab.cwd,
                                                                                                        projects: model.sessionProjects)?.project.name,
                                resolvedPin: preferences?.isPinned(session.id) == true,
-                               onChat: { sessionOpen = SessionOpen(session: session, destination: .chat) }, onDetails: {
+                               onChat: {
+            // A session waiting on a permission opens on it, as Moshi does.
+            if session.tab.approvalPending == true, let monitor { selected = OverviewSelection(session: session, monitor: monitor) }
+            else { sessionOpen = SessionOpen(session: session, destination: .chat) }
+        }, onDetails: {
             if let monitor { selected = OverviewSelection(session: session, monitor: monitor) }
         }, onClose: { request, confirm in
             if confirm { closeRequest = request }

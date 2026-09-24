@@ -185,7 +185,10 @@ struct LiveHostView: View {
 
     private func sessionCards(_ entries: [LiveAgentSession]) -> some View {
         ForEach(entries) { session in
-            LiveSessionCard(session: session, fresh: monitor.live, stale: monitor.stale, onDetails: { selected = session }, onClose: { request, confirm in
+            LiveSessionCard(session: session, fresh: monitor.live, stale: monitor.stale,
+                            // A session waiting on a permission opens on it; others open the chat.
+                            onChat: session.tab.approvalPending == true ? { selected = session } : nil,
+                            onDetails: { selected = session }, onClose: { request, confirm in
                 if confirm { closeRequest = request } else { SessionCloseDialogs.perform(request, monitor: monitor) { closeError = $0 } }
             })
             .equatable().separatedSessionRow()

@@ -16,7 +16,8 @@ enum LocalNotificationRouting {
                   let session = try? AgentLaunch.session(host: host, workspaceID: workspace, tabID: tab,
                     label: info["label"] as? String ?? "Permission request", agent: source,
                     agentStatus: nil, cwd: info["cwd"] as? String ?? "/") else { return }
-            AgentLaunch.setPending(session)
+            // Like Moshi: the request with Approve and Deny, not the chat.
+            AgentLaunch.setPending(session, destination: .details)
         } else if kind == "schedule" {
             guard let project = info["project"] as? String, let scheduleID = info["scheduleID"] as? String,
                   let fire = info["fireDate"] as? TimeInterval else { return }

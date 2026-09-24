@@ -61,7 +61,12 @@ final class PhrenAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificatio
             return
         }
         guard ["PHREN_APPROVE", "PHREN_DENY"].contains(response.actionIdentifier) else {
-            Task { @MainActor in AppModel.current?.selectedTab = .agents; completionHandler() }
+            // Tapping an approval opens its session's details, led by the request.
+            let info = response.notification.request.content.userInfo
+            Task { @MainActor in
+                if !(await ApprovalPushNotifications.open(info)) { AppModel.current?.selectedTab = .agents }
+                completionHandler()
+            }
             return
         }
         Task {
@@ -202,13 +207,61 @@ enum ApprovalPushNotifications {
         }
     }
 
+    /// What a pushed approval's notification carries: an opaque binding, the
+    /// computer it came from and when it stops being answerable.
+    struct Push: Equatable {
+        let binding: UUID
+        let hostID: UUID
+        let expiresAt: Date
+        init?(userInfo: [AnyHashable: Any]) {
+            guard let value = userInfo["phren"] as? [String: Any], let bindingText = value["binding"] as? String,
+                  let binding = UUID(uuidString: bindingText), let hostText = value["host"] as? String,
+                  let hostID = UUID(uuidString: hostText), let expiration = value["expiresAt"] as? String,
+                  let expiresAt = ISO8601Dates.parse(expiration) else { return nil }
+            self.binding = binding; self.hostID = hostID; self.expiresAt = expiresAt
+        }
+    }
+    enum Outcome: Equatable { case sent, failed(String) }
+
+    private static var savedHosts: [LiveHost] {
+        (try? LiveSessionPreferences.read(AppRuntime.defaults.data(forKey: "sessions.live.preferences.v1") ?? Data()))?.hosts ?? []
+    }
+
+    /// Approve or Deny from the notification (the system has already asked for
+    /// Face ID or the passcode). A failure is never silent: it comes back as a
+    /// notification saying the answer did not arrive.
     static func answer(_ userInfo: [AnyHashable: Any], approve: Bool) async {
-        guard let value = userInfo["phren"] as? [String: Any], let bindingText = value["binding"] as? String,
-              let binding = UUID(uuidString: bindingText), let hostText = value["host"] as? String,
-              let hostID = UUID(uuidString: hostText), let expiration = value["expiresAt"] as? String,
-              let expiresAt = ISO8601Dates.parse(expiration), expiresAt > .now,
-              let host = (try? LiveSessionPreferences.read(AppRuntime.defaults.data(forKey: "sessions.live.preferences.v1") ?? Data()))?.hosts.first(where: { $0.id == hostID }),
-              let key = try? DeviceSSHKey.load(host.id) else { return }
-        try? await PhrenConnection.answerApprovalPush(host: host, privateKey: key, binding: binding, approve: approve)
+        let outcome = await answer(userInfo, approve: approve, hosts: savedHosts) { host, binding in
+            try await PhrenConnection.answerApprovalPush(host: host, privateKey: DeviceSSHKey.load(host.id), binding: binding, approve: approve)
+        }
+        guard case .failed(let reason) = outcome else { return }
+        let content = UNMutableNotificationContent()
+        content.title = approve ? "Approval didn't reach the agent" : "Deny didn't reach the agent"
+        content.body = "\(reason) Open phren to answer it."
+        content.sound = .default
+        try? await UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "approval-failed-\(UUID().uuidString)", content: content, trigger: nil))
+    }
+
+    static func answer(_ userInfo: [AnyHashable: Any], approve: Bool, hosts: [LiveHost], now: Date = .now,
+                       send: (LiveHost, UUID) async throws -> Void) async -> Outcome {
+        guard let push = Push(userInfo: userInfo) else { return .failed("This notification can't be answered from here.") }
+        guard push.expiresAt > now else { return .failed("This request expired.") }
+        guard let host = hosts.first(where: { $0.id == push.hostID }) else { return .failed("Its computer isn't set up on this phone.") }
+        do { try await send(host, push.binding); return .sent }
+        catch { return .failed(error.localizedDescription) }
+    }
+
+    /// Opens the session a tapped approval belongs to, on its details page.
+    @MainActor
+    static func open(_ userInfo: [AnyHashable: Any]) async -> Bool {
+        guard let push = Push(userInfo: userInfo), let host = savedHosts.first(where: { $0.id == push.hostID }),
+              let key = try? DeviceSSHKey.load(host.id),
+              let target = try? await PhrenConnection.approvalPushTarget(host: host, privateKey: key, binding: push.binding) else { return false }
+        var destination = host
+        if target.server != (host.herdrSession ?? "default") { destination.herdrSession = target.server }
+        guard let session = try? AgentLaunch.session(host: destination, workspaceID: target.workspaceID, tabID: target.tabID,
+                                                     label: "Permission request", agent: target.source, agentStatus: "blocked", cwd: "/") else { return false }
+        AgentLaunch.setPending(session, destination: .details)
+        return true
     }
 }

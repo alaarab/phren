@@ -197,7 +197,8 @@ enum AgentLaunch {
     static let pendingContentKey = "agents.pendingChatContent.v1"
     /// `dictate` is the chat with the microphone already listening — the
     /// Action button's "talk to the last session".
-    enum Destination: String, Codable { case chat, terminal, dictate }
+    /// `details` is the session's details page, led by a permission it waits on.
+    enum Destination: String, Codable { case chat, terminal, dictate, details }
     struct Pending: Codable {
         var hostID: UUID, workspaceID: String, tabID: String, label: String, agent: String, cwd: String
         var muxID: String? = nil

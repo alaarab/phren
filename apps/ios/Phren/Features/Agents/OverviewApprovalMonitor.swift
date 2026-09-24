@@ -9,12 +9,14 @@ final class OverviewApprovalMonitor {
     struct Request {
         let target: AgentChatTarget
         let approval: AgentApproval?
+        /// A permission the agent draws in its terminal after the hold ended.
+        var terminalPrompt: AgentTerminalPrompt? = nil
     }
     private let read: (LiveAgentSession) async throws -> [Request]
     private let sync: (AgentApproval?, LiveAgentSession, AgentChatTarget) async -> Void
     private var observed: [AgentChatTarget: LiveAgentSession] = [:]
 
-    init(read: @escaping (LiveAgentSession) async throws -> [Request] = OverviewApprovalMonitor.read,
+    init(read: @escaping (LiveAgentSession) async throws -> [Request] = OverviewApprovalMonitor.pending,
          sync: @escaping (AgentApproval?, LiveAgentSession, AgentChatTarget) async -> Void = {
              await ApprovalActivityController.shared.sync($0, session: $1, target: $2)
          }) {
@@ -50,7 +52,7 @@ final class OverviewApprovalMonitor {
         }
     }
 
-    private static func read(_ session: LiveAgentSession) async throws -> [Request] {
+    static func pending(_ session: LiveAgentSession) async throws -> [Request] {
         let panes = try await AgentChatModel.fetchPanes(session)
         // A tab can contain several agents. Never substitute its first pane
         // for the pane whose authenticated status actually has a request.
@@ -63,7 +65,7 @@ final class OverviewApprovalMonitor {
                         statusGroup.addTask {
                             for try await status in PhrenConnection.interactionUpdates(host: session.host,
                                 privateKey: try DeviceSSHKey.load(session.host.id), target: target) {
-                                return Request(target: target, approval: status.approval)
+                                return Request(target: target, approval: status.approval, terminalPrompt: status.terminalPrompt)
                             }
                             return nil
                         }

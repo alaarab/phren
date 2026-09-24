@@ -71,6 +71,33 @@ final class SessionDetailsTests: XCTestCase {
     }
 
     @MainActor
+    func testPermissionLeftInTheTerminalLeadsTheDetailsAndIsApproved() {
+        let app = launch(extra: ["--details-approval-fixture"])
+        // The card names the wait instead of a bare "Blocked", and a tap on it
+        // opens the request rather than the chat.
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Permission needed")).firstMatch.waitForExistence(timeout: 5))
+        app.buttons["live-chat:w8:w8:t1"].tap()
+        XCTAssertTrue(app.navigationBars["Session details"].waitForExistence(timeout: 5))
+        let hero = app.descendants(matching: .any).matching(identifier: "session-approval").firstMatch
+        XCTAssertTrue(hero.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Manage task"].exists)
+        XCTAssertTrue(app.staticTexts["PERMISSION"].exists)
+        XCTAssertTrue(app.staticTexts["Do you want to proceed?"].exists)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "action: complete")).firstMatch.exists)
+        let approve = app.buttons["session-approval-approve"], deny = app.buttons["session-approval-deny"]
+        XCTAssertTrue(approve.isHittable && deny.isHittable)
+        XCTAssertGreaterThanOrEqual(approve.frame.height, 44)
+        // Hero first, then the ways in, then the answer, like Moshi.
+        XCTAssertLessThan(hero.frame.maxY, app.buttons["session-detail-terminal"].frame.minY)
+        XCTAssertLessThan(app.buttons["session-detail-terminal"].frame.maxY, approve.frame.minY)
+        XCTAssertGreaterThan(approve.frame.minX, deny.frame.minX)
+        capture(app, "Permission leading the session details")
+        approve.tap()
+        XCTAssertTrue(app.staticTexts["Approved. Claude continues."].waitForExistence(timeout: 5))
+        XCTAssertFalse(approve.exists)
+    }
+
+    @MainActor
     func testClosedSessionRemovesActionsFromItsOpenDetails() {
         let app = launch(extra: ["--session-details-removed"])
         app.buttons["live-detail:w7:w7:t9"].tap()
