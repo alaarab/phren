@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir } from "./test-helpers.js";
-import { getBuiltinTopics, pinProjectTopicSuggestion, readProjectTopics, suggestTopics, writeProjectTopics } from "./project-topics.js";
+import { getBuiltinTopicConfig, getBuiltinTopics, pinProjectTopicSuggestion, readProjectTopics, suggestTopics, writeProjectTopics } from "./project-topics.js";
 
 let tmpDir = "";
 let tmpCleanup: (() => void) | undefined;
@@ -24,6 +24,64 @@ beforeEach(() => {
 afterEach(() => {
   tmpCleanup?.();
   tmpCleanup = undefined;
+});
+
+describe("builtin topic catalogs pass phren's own validator", () => {
+  // Every shipped domain used to fail it: `phren init` wrote a topic-config.json
+  // built from these catalogs, and every subsequent read rejected the file on a
+  // cross-topic duplicate keyword and silently fell back to source:"default".
+  // Per-project topics were dead on arrival for 4 of the 7 domains, and the
+  // topics editor could not save phren's own defaults.
+  const DOMAINS = ["software", "music", "game", "research", "writing", "creative", "other"];
+
+  it.each(DOMAINS)("%s round-trips through write then read as custom", (domain) => {
+    const project = `p-${domain}`;
+    makeProject(tmpDir, project, {});
+    // Exactly what ensureProjectScaffold persists on `phren init`.
+    const shipped = getBuiltinTopicConfig(domain).map((topic) => ({
+      slug: topic.name,
+      label: topic.name,
+      description: topic.description,
+      keywords: topic.keywords,
+    }));
+
+    const written = writeProjectTopics(tmpDir, project, shipped);
+    expect(written.ok, written.ok ? "" : written.error).toBe(true);
+
+    const readBack = readProjectTopics(tmpDir, project);
+    expect(readBack.source).toBe("custom");
+    expect(readBack.error).toBeUndefined();
+  });
+
+  it.each(DOMAINS)("%s has no keyword owned by two topics", (domain) => {
+    const owner = new Map<string, string>();
+    const collisions: string[] = [];
+    for (const topic of getBuiltinTopicConfig(domain)) {
+      for (const keyword of topic.keywords ?? []) {
+        const existing = owner.get(keyword);
+        if (existing && existing !== topic.name) collisions.push(`"${keyword}": ${existing} vs ${topic.name}`);
+        else owner.set(keyword, topic.name);
+      }
+    }
+    expect(collisions).toEqual([]);
+  });
+
+  it("reports why a rejected topic-config.json is being ignored", () => {
+    makeProject(tmpDir, "broken", {
+      "topic-config.json": JSON.stringify({
+        version: 1,
+        domain: "software",
+        topics: [
+          { slug: "alpha", label: "Alpha", description: "a", keywords: ["shared"] },
+          { slug: "beta", label: "Beta", description: "b", keywords: ["shared"] },
+        ],
+      }),
+    });
+
+    const result = readProjectTopics(tmpDir, "broken");
+    expect(result.source).toBe("default");
+    expect(result.error).toContain("Duplicate topic keyword");
+  });
 });
 
 describe("project topic config", () => {
