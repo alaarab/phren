@@ -520,7 +520,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         ownership: z.enum(PROJECT_OWNERSHIP_MODES).optional()
           .describe("How Phren should treat repo-facing instruction files: phren-managed, detached, or repo-managed."),
         store: z.string().optional()
-          .describe("Target store name (from stores.yaml). If omitted, auto-routes to the store that claims this project, or falls back to the primary store."),
+          .describe("Target store name (one attached on this machine). If omitted, auto-routes to the store that claims this project, or falls back to the primary store."),
       }),
     },
     (params) => handleAddProject(ctx, params),
