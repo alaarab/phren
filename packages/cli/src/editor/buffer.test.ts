@@ -120,6 +120,8 @@ describe("edits", () => {
     expect(cut.register).toEqual(["two"]);
     const pasted = applyEditorKey(cut, "p");
     expect(pasted.lines).toEqual(["one", "three", "two"]);
+    // p with nothing yanked does nothing
+    expect(keys(start("one"), "p").lines).toEqual(["one"]);
   });
 
   it("dd on the last remaining line leaves an empty buffer, not no buffer", () => {
@@ -131,10 +133,6 @@ describe("edits", () => {
     expect(yanked.lines).toEqual(["one", "two"]);
     expect(yanked.dirty).toBe(false);
     expect(applyEditorKey(yanked, "P").lines).toEqual(["one", "one", "two"]);
-  });
-
-  it("p with nothing yanked does nothing", () => {
-    expect(keys(start("one"), "p").lines).toEqual(["one"]);
   });
 });
 
@@ -194,9 +192,7 @@ describe("commands", () => {
     expect(refused.message).toContain("unsaved changes");
     const forced = applyEditorKey(type(applyEditorKey(dirty, ":"), "q!"), "\r");
     expect(forced.wantClose).toBe(true);
-  });
-
-  it(":q closes straight away when nothing changed", () => {
+    // A clean buffer closes straight away.
     expect(applyEditorKey(type(applyEditorKey(start("x"), ":"), "q"), "\r").wantClose).toBe(true);
   });
 
