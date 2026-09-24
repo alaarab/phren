@@ -263,6 +263,10 @@ withFrozenDate("2026-07-26T13:00:00.000Z", () => {
     must(access.approveQueueItem(store, project, queue.data[0].line), "approve queue item"));
 });
 snapshot("review-after-approve.md", `${project}/review.md`);
+// Approve's point is the FINDINGS.md write: a candidate `phren extract` queued
+// is only in review.md. Snapshotting review.md alone let a port that just
+// removed the queue line pass.
+snapshot("findings-after-approve.md", `${project}/FINDINGS.md`);
 
 must(access.rejectQueueItem(store, project, queue.data[1].line), "reject queue item");
 snapshot("review-after-reject.md", `${project}/review.md`);

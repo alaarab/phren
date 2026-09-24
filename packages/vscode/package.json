@@ -146,7 +146,7 @@
       },
       {
         "command": "phren.uninstall",
-        "title": "Phren: Uninstall Phren"
+        "title": "Phren: Uninstall Phren and Delete Store"
       },
       {
         "command": "phren.setMachineAlias",

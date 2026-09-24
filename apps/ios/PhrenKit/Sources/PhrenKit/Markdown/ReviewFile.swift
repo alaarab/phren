@@ -120,20 +120,43 @@ public struct ReviewFile: Sendable {
         return idx
     }
 
-    /// access.ts:700 `approveQueueItem` — remove the line from review.md only;
-    /// the finding already lives in FINDINGS.md.
-    public mutating func approve(lineText: String) throws {
+    /// Remove a queue line, touching nothing else.
+    ///
+    /// This is only the review.md half of approve or reject. Approve must also
+    /// write the finding when it is not already there: `phren extract` queues
+    /// every candidate below autoAcceptThreshold without writing it to
+    /// FINDINGS.md, so for those the queue line is the only copy. SyncEngine
+    /// composes this with `FindingsFile` (see `computeEdits`).
+    public mutating func dequeue(lineText: String) throws {
         var lines = content.components(separatedBy: "\n")
         let idx = try lineIndex(of: lineText, in: lines)
         lines.remove(at: idx)
         content = FindingsFile.normalizeWrite(lines)
     }
 
+    /// The review.md half of `approveQueueItemDetailed` (access.ts).
+    public mutating func approve(lineText: String) throws {
+        try dequeue(lineText: lineText)
+    }
+
     /// The review.md half of `rejectQueueItem` (access.ts:709). The caller
     /// composes this with `FindingsFile.remove` using `findingsTextFor(lineText:)`,
     /// tolerating a not-found finding exactly like the CLI does.
     public mutating func reject(lineText: String) throws {
-        try approve(lineText: lineText)
+        try dequeue(lineText: lineText)
+    }
+
+    /// Capture provenance recorded on the queue line, if any. A promoted
+    /// finding carries where the observation came from, not the device that
+    /// approved it, as `approveQueueItemDetailed` does.
+    public static func capturedProvenanceFor(lineText: String) -> FindingProvenance? {
+        parseSourceComment(lineText)
+    }
+
+    /// The date the item was queued, recorded on a promoted finding as
+    /// `<!-- phren:queued "YYYY-MM-DD" -->`.
+    public static func queuedDateFor(lineText: String) -> String? {
+        parseQueueLine(lineText).date
     }
 
     /// The parsed queue text used as the FINDINGS.md match needle for
