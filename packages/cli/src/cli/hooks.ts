@@ -65,6 +65,7 @@ export {
   applyTrustFilter,
   rankResults,
   applyRelevanceFloor,
+  promptRarity,
   DEFAULT_MIN_QUERY_RELEVANCE,
   selectSnippets,
   type SelectedSnippet,
@@ -96,6 +97,7 @@ import {
   applyTrustFilter,
   rankResults,
   applyRelevanceFloor,
+  promptRarity,
   DEFAULT_MIN_QUERY_RELEVANCE,
   selectSnippets,
   detectTaskIntent,
@@ -280,7 +282,8 @@ export async function handleHookPrompt() {
     // than pad to a quota with noise (env PHREN_MIN_QUERY_RELEVANCE=0 disables).
     const relevanceFloor = clampFloat(process.env.PHREN_MIN_QUERY_RELEVANCE, DEFAULT_MIN_QUERY_RELEVANCE, 0, 1);
     const preFloorCount = rows.length;
-    rows = applyRelevanceFloor(rows, keywords, gitCtx, detectedProject, relevanceFloor);
+    debugLog(`relevance-floor candidates: ${rows.slice(0, 12).map((row) => `${row.project}/${row.filename}`).join(", ")}`);
+    rows = applyRelevanceFloor(rows, keywords, gitCtx, detectedProject, relevanceFloor, promptRarity(db, keywords));
     if (rows.length !== preFloorCount) {
       debugLog(`relevance-floor: ${preFloorCount} -> ${rows.length} rows (floor=${relevanceFloor})`);
     }

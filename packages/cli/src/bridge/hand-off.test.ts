@@ -21,6 +21,15 @@ it("resolves an existing session and delivers one prompt through its live target
   ]);
 });
 
+it("names the target by its project folder, from the overview it already read", async () => {
+  const target = { server: "default", workspace: "w1", tab: "t1", pane: "p1", source: "claude",
+    session: "aaaaaaaa-1111-4111-8111-111111111111" };
+  vi.mocked(hookRequest).mockResolvedValueOnce({ groups: [{ label: "Studio", children: [{ target, cwd: "/home/sam/ObjectStudio" }] }] })
+    .mockResolvedValueOnce({ ok: true });
+  expect(await handOff({ session: target.session, text: "Rebase first" })).toEqual({ ok: true, delivered: true, target, label: "ObjectStudio" });
+  expect(vi.mocked(hookRequest).mock.calls).toHaveLength(2);
+});
+
 it("lists local sessions and says why enrolled computers were skipped when hooks.yaml is broken", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "phren-live-"));
   vi.stubEnv("PHREN_BRIDGE_HOME", root);
