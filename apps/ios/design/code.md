@@ -40,8 +40,16 @@ Phone screenshots are checked by the simulator runner.
   preserve observation time. Old indexes fall back to file parse time until
   the next scan records fingerprints. This is index observation time, not Git
   author time. Each row opens its file in the code viewer at the symbol.
-- Without the code module on that computer (a computer page entry), the browser
-  shows the project name as its title and Files only: no header, search or modes.
+- Opened from the project page, the browser starts on a computer that keeps
+  the code index (else the first saved computer) and lets the Hook pick the
+  checkout. One quiet 44-point line under the title (`code-place`) names the
+  computer and chosen checkout and opens a phren single-select of every saved
+  computer's located checkouts (`code-place:<host-id>:<folder>`); choosing one
+  returns to the root. Session entries keep their own computer and show no line.
+- Without the code module on that computer, the browser shows the project
+  name as its title and Files only: no header, search or modes. The project
+  page's Code cell stays while any computer is saved, reading Files instead of
+  the symbol count.
 
 ## Code viewer
 
@@ -73,11 +81,10 @@ Everything else is the file's own content, with no captions.
   read-only with colors and no links.
 
 Entry points into the browser: the project page's Code cell, the session's
-Changes Code tab and chat options Code (all `CodeView`), a computer's Files
-page Project files and the Memory tab's Files Computers rows (a project, then
-its located checkout; one checkout opens directly), and the Changes working
+Changes Code tab and chat options Code (all `CodeView`), and the Changes working
 tree, whose unchanged or ignored text files open in `CodeFileView` from the
-pane's repository.
+pane's repository. A computer's Files page keeps its uploads and Memory's Files
+keeps the store's own files; neither lists projects.
 
 ## Routes and wire data
 
@@ -126,10 +133,11 @@ and a picture, so no Hook is needed. Five-row fixture usage pages exercise
 middle ranks and both jumps. Tests cover the checkout tree, a nested unindexed
 file, an outline jump, a tapped name to its dossier and Go to definition in
 another file, Recent opening the file at the symbol, a picture keeping the file
-viewer, a computer's Files page opening the browser, search to dossier, and
+viewer, choosing another computer's checkout, search to dossier, and
 kind filtering. Screenshots include `Code home tree`, `Code file`,
 `Code outline`, `Code symbol panel`, `Code definition in another file`,
-`Computer project browser`, `Code middle usage`, `Code search`, and
+`Code computer and checkout`, `Code file on a chosen checkout`,
+`Code middle usage`, `Code search`, and
 `Code dossier`. Route tests cover complete pagination, path boundaries, tree
 counts, empty files and recency; PhrenKit validates the new envelopes.
 

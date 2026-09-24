@@ -38,9 +38,6 @@ private struct HostFilesSection: View {
     @Binding var preview: FileViewerItem?
     var body: some View {
         Section {
-            NavigationLink { RepositoryProjectsView(host: host) } label: {
-                Label("Project files", systemImage: "folder")
-            }.phrenIdentifier("files-projects:\(host.id.uuidString)")
             Button { importing = true } label: { Label(busy ? "Uploading…" : "Upload a file to \(host.name)", systemImage: "square.and.arrow.up") }
                 .disabled(busy).accessibilityIdentifier("files-upload:\(host.id.uuidString)")
             if let files {

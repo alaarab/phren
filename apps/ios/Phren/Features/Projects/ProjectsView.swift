@@ -311,7 +311,7 @@ struct ProjectDetailView: View {
                 .accessibilityLabel("Project schedules")
                 .accessibilityIdentifier("project-schedules-row")
             }
-            if SessionOverviewMonitor.shared.allowsCode() {
+            if showsCode {
                 NavigationLink { CodeView(storeId: storeId, project: project) } label: {
                     controlCell(icon: "curlybraces", title: "Code", value: codeSummary)
                 }
@@ -325,7 +325,7 @@ struct ProjectDetailView: View {
         .overlay {
             GeometryReader { geometry in
                 let count = 2 + (SessionOverviewMonitor.shared.allowsSchedules() ? 1 : 0)
-                    + (SessionOverviewMonitor.shared.allowsCode() ? 1 : 0)
+                    + (showsCode ? 1 : 0)
                 ForEach(1..<count, id: \.self) { index in
                     controlDivider.position(x: geometry.size.width * CGFloat(index) / CGFloat(count), y: 26)
                 }
@@ -386,8 +386,14 @@ struct ProjectDetailView: View {
 
     /// The project's symbol count from the first computer that serves the code
     /// index; "Index" until it answers, and nothing when no computer can.
+    /// The project's one code browser: symbols where a computer keeps the
+    /// code index, and the checkout's files on any saved computer.
+    private var showsCode: Bool {
+        SessionOverviewMonitor.shared.allowsCode() || !(preferencesStore.preferences?.hosts.isEmpty ?? true)
+    }
+
     private var codeSummary: String {
-        guard let codeSymbols else { return "Index" }
+        guard let codeSymbols else { return SessionOverviewMonitor.shared.allowsCode() ? "Index" : "Files" }
         return "\(codeSymbols) symbols"
     }
 

@@ -18,8 +18,8 @@ remains immediately below the navigation bar. The grid no longer repeats
 the screen title in a section header. The store filter, empty state,
 project rows and hold-to-open-agent flow retain their behavior.
 
-Files opens the existing store and repository browser. Memory maintenance
-opens the existing project maintenance list. Review widget links hand off
+Files opens the store's own files; a project's code lives on its Code page.
+Memory maintenance opens the existing project maintenance list. Review widget links hand off
 to Memory before opening maintenance. These destinations do not live in
 Projects' navigation stack.
 

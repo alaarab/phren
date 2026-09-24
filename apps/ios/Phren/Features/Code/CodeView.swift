@@ -9,10 +9,15 @@ struct CodeView: View {
     let storeId: String
     let project: String
     var origin: SessionCodeContext? = nil
-    /// A computer chosen from its own page; the project page lets the index pick.
+    /// A computer fixed by the caller (a session's own); otherwise the page
+    /// starts on a computer with the code index and offers the others.
     var host: LiveHost? = nil
     /// The checkout folder that computer located for the project.
     var checkout: String? = nil
+
+    /// Where the project is browsed when no computer came with the page: a
+    /// computer, and one of the checkouts it located (nil lets the Hook choose).
+    struct Place: Hashable { let host: UUID; let checkout: String? }
 
     private enum Mode: String, CaseIterable { case files = "Files", usage = "Usage", recent = "Recent" }
     private struct Request: Hashable {
@@ -59,13 +64,25 @@ struct CodeView: View {
     @State private var scrollTarget: Int?
     @State private var openedFile: CodeFileLocation?
     @State private var viewer: FileViewerItem?
+    @State private var place: Place?
+    @State private var showPlaces = false
+    @State private var places: [PhrenOption<Place?>] = []
+    @State private var placesLoading = false
     @FocusState private var searchFocused: Bool
 
     private var hosts: [LiveHost] {
         if let origin { return [origin.host] }
         if let host { return [host] }
-        return (preferencesStore.preferences?.hosts ?? []).filter { SessionOverviewMonitor.shared.allows(.code, on: $0) }
+        // Computers that keep a code index first; any other still lists files.
+        let saved = preferencesStore.preferences?.hosts ?? []
+        let ordered = saved.filter { SessionOverviewMonitor.shared.allows(.code, on: $0) }
+            + saved.filter { !SessionOverviewMonitor.shared.allows(.code, on: $0) }
+        guard let place, let chosen = ordered.first(where: { $0.id == place.host }) else { return ordered }
+        return [chosen] + ordered.filter { $0.id != chosen.id }
     }
+    private var folder: String? { checkout ?? place?.checkout }
+    /// The page chooses its own computer and checkout.
+    private var choosesPlace: Bool { host == nil && origin == nil }
     /// Whether the computer serves the code index; without it the browser
     /// still lists and opens every file.
     private var indexed: Bool {
@@ -73,11 +90,10 @@ struct CodeView: View {
         if CodeFixture.enabled { return true }
         #endif
         if origin != nil { return true }
-        if let host { return SessionOverviewMonitor.shared.allows(.code, on: host) }
-        return !hosts.isEmpty
+        return hosts.first.map { SessionOverviewMonitor.shared.allows(.code, on: $0) } ?? false
     }
     private var context: CodeBrowserContext {
-        CodeBrowserContext(storeId: storeId, project: project, host: hosts.first, checkout: checkout, origin: origin, indexed: indexed)
+        CodeBrowserContext(storeId: storeId, project: project, host: hosts.first, checkout: folder, origin: origin, indexed: indexed)
     }
     private var request: Request {
         Request(mode: indexed ? mode : .files, query: indexed ? query.trimmingCharacters(in: .whitespacesAndNewlines) : "", directory: directory,
@@ -92,6 +108,7 @@ struct CodeView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
+                    if choosesPlace, let current = hosts.first { placeRow(current) }
                     if indexed && indexOff {
                         offCard
                     } else if indexed {
@@ -170,12 +187,39 @@ struct CodeView: View {
         }
         .navigationDestination(item: $openedFile) { CodeFileView(context: context, path: $0.path, line: $0.line) }
         .fullScreenCover(item: $viewer) { FileViewer(item: $0) }
-        .task { if indexed { await loadStatus() } }
+        .phrenSingleSelectSheet(isPresented: $showPlaces, title: "Browse on", options: places, selection: $place,
+                                rowPrefix: "code-place", loading: placesLoading, loadingLabel: "Finding \(project)…",
+                                message: !placesLoading && places.isEmpty ? "No computer found a checkout of \(project)." : nil)
+        .task(id: showPlaces) { if showPlaces { await loadPlaces() } }
+        .onChange(of: place) { _, _ in
+            directory = ""; usageFile = ""; resetUsage()
+            status = nil; statusError = nil; indexOff = false; errorText = nil; revision += 1
+        }
+        .task(id: place) { if indexed { await loadStatus() } }
         .task(id: request) { await load(request) }
         .task(id: "\(showFiles):\(pickerDirectory)") { if showFiles { await loadPicker() } }
         .onChange(of: kind) { _, _ in resetUsage() }
         .onChange(of: usageFile) { _, _ in resetUsage() }
         .onChange(of: mode) { _, _ in searchFocused = false }
+    }
+
+    /// The computer and checkout being browsed, one quiet line that opens
+    /// the choice of every computer's located checkouts.
+    private func placeRow(_ current: LiveHost) -> some View {
+        Button { showPlaces = true } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "desktopcomputer").accessibilityHidden(true)
+                Text(folder.map { "\(current.name) · \($0)" } ?? current.name).lineLimit(1).truncationMode(.middle)
+                Image(systemName: "chevron.up.chevron.down").font(PhrenTheme.Font.caption2).accessibilityHidden(true)
+                Spacer(minLength: 0)
+            }
+            .font(PhrenTheme.Font.caption).foregroundStyle(PhrenTheme.textSecondary)
+            .frame(minHeight: 44).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Browsing on \(current.name)\(folder.map { ", \($0)" } ?? "")")
+        .accessibilityHint("Choose another computer or checkout")
+        .accessibilityIdentifier("code-place")
     }
 
     /// One quiet line under the title: what the index holds and how fresh it is.
@@ -428,7 +472,7 @@ struct CodeView: View {
                     let indexed = indexed
                     async let counts: [CodeTreeEntry]? = indexed ? (try? await PhrenConnection.codeTree(host: host, privateKey: key, project: project, directory: requested.directory, storeID: storeId)) : nil
                     do {
-                        let listing = try await PhrenConnection.repositoryFiles(host: host, privateKey: key, project: project, directory: checkout ?? "", path: requested.directory)
+                        let listing = try await PhrenConnection.repositoryFiles(host: host, privateKey: key, project: project, directory: folder ?? "", path: requested.directory)
                         let tree = await counts
                         try Task.checkCancellation()
                         entries = CodeBrowserEntry.merge((listing.entries ?? []).map { CodeBrowserEntry(path: $0.path, directory: $0.kind == "directory") }, counts: tree ?? [])
@@ -455,6 +499,28 @@ struct CodeView: View {
     private func matches(_ symbol: CodeSymbol, _ requested: Request) -> Bool {
         (requested.directory.isEmpty || symbol.file.hasPrefix(requested.directory + "/")) &&
         (requested.kind.isEmpty || symbol.kind == requested.kind || (requested.kind == "types" && ["class", "struct", "enum", "interface", "type"].contains(symbol.kind)))
+    }
+
+    /// Every saved computer's checkouts of the project, index computers first.
+    @MainActor private func loadPlaces() async {
+        placesLoading = true
+        defer { if !Task.isCancelled { placesLoading = false } }
+        var found: [PhrenOption<Place?>] = []
+        for host in hosts {
+            let folders: [PhrenConnection.LocatedFolder]
+            #if DEBUG && targetEnvironment(simulator)
+            if CodeFixture.enabled { folders = CodeFixture.located(project, on: host) }
+            else { folders = (try? await PhrenConnection.locateProject(host: host, privateKey: DeviceSSHKey.load(host.id), project: project)) ?? [] }
+            #else
+            folders = (try? await PhrenConnection.locateProject(host: host, privateKey: DeviceSSHKey.load(host.id), project: project)) ?? []
+            #endif
+            if Task.isCancelled { return }
+            found += folders.map { located in
+                PhrenOption(id: "\(host.id.uuidString):\(located.directory)", value: Place(host: host.id, checkout: located.directory),
+                            title: host.name, caption: located.directory, icon: "desktopcomputer")
+            }
+        }
+        places = found
     }
 
     @MainActor private func loadPicker() async {

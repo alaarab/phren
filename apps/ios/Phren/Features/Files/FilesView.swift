@@ -7,8 +7,6 @@ struct FilesView: View {
     @State private var storeId: String?
     @State private var query = ""
     @State private var target: FileTarget?
-    @Environment(\.liveSessionPreferences) private var preferencesStore
-    private var hosts: [LiveHost] { preferencesStore.preferences?.hosts ?? [] }
 
     struct FileTarget: Identifiable, Hashable {
         let storeId: String
@@ -39,14 +37,6 @@ struct FilesView: View {
 
     var body: some View {
         PhrenScrollScreen(spacing: 4) {
-            if !hosts.isEmpty {
-                PhrenSectionHeader(title: "Computers", count: hosts.count)
-                ForEach(hosts) { host in
-                    NavigationLink { RepositoryProjectsView(host: host) } label: {
-                        PhrenMenuRow(title: host.name, subtitle: "Browse project files", icon: "desktopcomputer", compact: true)
-                    }.buttonStyle(.plain)
-                }
-            }
             if contexts.isEmpty {
                 PhrenEmptyState(title: "No store", message: "Connect a store to browse its files.")
             } else {
@@ -172,57 +162,6 @@ struct DocumentContentView: View {
             } else {
                 ScrollView([.horizontal, .vertical]) { CodeTextView(code: content, language: language) }
             }
-        }
-    }
-}
-
-/// A computer's projects, each opening the project code browser on the
-/// checkout that computer located.
-struct RepositoryProjectsView: View {
-    let host: LiveHost
-    @Environment(AppModel.self) private var model
-    var body: some View {
-        PhrenList {
-            ForEach(model.mergedProjects.filter { $0.project.name != "global" }) { item in
-                NavigationLink { RepositoryLocationsView(host: host, storeId: item.storeId, project: item.project.name) } label: {
-                    Label(item.project.name, systemImage: "folder")
-                }.phrenIdentifier("repository-project:\(item.storeId):\(item.project.name)")
-            }
-        }.navigationTitle(host.name).phrenScreen()
-    }
-}
-
-/// One located checkout opens straight into the browser; several are listed.
-private struct RepositoryLocationsView: View {
-    let host: LiveHost
-    let storeId: String
-    let project: String
-    @State private var folders: [PhrenConnection.LocatedFolder]?
-    @State private var error: String?
-    var body: some View {
-        Group {
-            if let folders, folders.count == 1 {
-                CodeView(storeId: storeId, project: project, host: host, checkout: folders[0].directory)
-            } else {
-                PhrenList {
-                    if let folders {
-                        if folders.isEmpty { Text("No checkout found on this computer.") }
-                        ForEach(folders) { folder in
-                            NavigationLink { CodeView(storeId: storeId, project: project, host: host, checkout: folder.directory) } label: {
-                                Label(folder.directory, systemImage: "folder").lineLimit(2)
-                            }
-                        }
-                    } else if let error { Text(error).foregroundStyle(PhrenTheme.warning) }
-                    else { Text("Finding project…").foregroundStyle(PhrenTheme.textMuted) }
-                }.navigationTitle(project).phrenScreen()
-            }
-        }
-        .task {
-            #if DEBUG && targetEnvironment(simulator)
-            if CodeFixture.enabled { folders = [.init(directory: "/home/sam/Projects/\(project)", source: "phren", lastSeen: nil)]; return }
-            #endif
-            do { folders = try await PhrenConnection.locateProject(host: host, privateKey: DeviceSSHKey.load(host.id), project: project) }
-            catch { if !Task.isCancelled { self.error = error.localizedDescription } }
         }
     }
 }

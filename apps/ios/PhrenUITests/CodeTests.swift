@@ -128,22 +128,37 @@ final class CodeTests: XCTestCase {
         close.tap()
     }
 
+    /// The project's Code page is the one way into a project's files: it
+    /// starts on a computer and offers every computer's located checkouts,
+    /// and a computer's own Files page no longer lists projects.
     @MainActor
-    func testComputerFilesOpenTheProjectBrowser() {
+    func testProjectCodeChoosesTheComputerAndCheckout() {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--session-details-fixture", "--native-chat-fixture", "--code-fixture"]
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 8)); app.tabBars.buttons["Agents"].tap()
+        XCTAssertTrue(app.tabBars.buttons["Projects"].waitForExistence(timeout: 10)); app.tabBars.buttons["Projects"].tap()
+        tap(app.buttons["project:sample/brain:demo"])
+        tap(app.buttons["project-code-row"])
+        let place = app.buttons["code-place"]
+        tap(place)
+        let review = app.buttons["code-place:A1000000-0000-0000-0000-000000000001:/home/sam/Projects/demo-review"]
+        XCTAssertTrue(review.waitForExistence(timeout: 8), "Every computer's located checkouts are offered")
+        capture(app, "Code computer and checkout")
+        review.tap()
+        let chosen = NSPredicate(format: "label CONTAINS %@", "/home/sam/Projects/demo-review")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: chosen, object: place)], timeout: 5), .completed, place.label)
+        XCTAssertTrue(app.buttons["code-tree:typescript"].waitForExistence(timeout: 8), "The chosen checkout's files are listed")
+        tap(app.buttons["code-tree:README.md"])
+        XCTAssertTrue(app.descendants(matching: .any)["code-file:README.md"].firstMatch.waitForExistence(timeout: 8))
+        capture(app, "Code file on a chosen checkout")
+
+        XCTAssertTrue(app.tabBars.buttons["Agents"].exists); app.tabBars.buttons["Agents"].tap()
         let host = app.buttons["live-host:A1000000-0000-0000-0000-000000000001"]
         for _ in 0..<14 { if host.exists && host.isHittable { break }; app.swipeUp() }
         tap(host)
         tap(app.buttons["host-files"])
-        tap(app.buttons["files-projects:A1000000-0000-0000-0000-000000000001"])
-        tap(app.buttons["repository-project:sample/brain:demo"])
-        XCTAssertTrue(app.buttons["code-tree:typescript"].waitForExistence(timeout: 8), "The computer's project files open in the code browser")
-        tap(app.buttons["code-tree:README.md"])
-        XCTAssertTrue(app.descendants(matching: .any)["code-file:README.md"].firstMatch.waitForExistence(timeout: 8))
-        capture(app, "Computer project browser")
+        XCTAssertTrue(app.buttons["files-upload:A1000000-0000-0000-0000-000000000001"].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.buttons["files-projects:A1000000-0000-0000-0000-000000000001"].exists, "Project files live on the project's Code page")
     }
 
     @MainActor

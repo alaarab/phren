@@ -1,6 +1,7 @@
 #if DEBUG && targetEnvironment(simulator)
 import Foundation
 import PhrenKit
+import PhrenLive
 
 /// A small fixed code index for UI tests, so the Code screen can be exercised
 /// without a Hook. A dozen symbols across three files, chosen to cover a class
@@ -214,6 +215,14 @@ enum CodeFixture {
         }
         return entries.map { CodeBrowserEntry(path: $0.key, directory: $0.value) }
             .sorted { $0.directory != $1.directory ? $0.directory : $0.name < $1.name }
+    }
+
+    /// Each computer's checkouts of a project: the usual folder, and on the
+    /// fixture's first computer a second worktree beside it.
+    static func located(_ project: String, on host: LiveHost) -> [PhrenConnection.LocatedFolder] {
+        let first = host.id.uuidString == "A1000000-0000-0000-0000-000000000001"
+        return [.init(directory: "/home/sam/Projects/\(project)", source: "phren", lastSeen: nil)]
+            + (first ? [.init(directory: "/home/sam/Projects/\(project)-review", source: "activity", lastSeen: nil)] : [])
     }
 
     /// Resolved uses by file, pointing at the declarations in `symbols`.
