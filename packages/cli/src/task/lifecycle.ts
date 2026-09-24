@@ -64,10 +64,15 @@ const PASTED_CONTENT_RE = new RegExp([
 // because the observed echoes wrap filler around an incidental verb — "Its literally just the
 // start of the day LMAO" clears the substance floor on "start" but is not a task.
 const CONVERSATIONAL_FILLER_RE = /\b(?:lmao|lmfao|rofl|lol+|haha+|idk|idc|tbh|ngl|smh|wtf|meh|yolo)\b/i;
-// Claude Code wraps bracketed-paste input — every message from the phone, and any
-// multi-line paste — as <pasted_content id="…">…</pasted_content id="…">. The wrapper
-// is the terminal's bookkeeping; the text inside is what the person typed.
-const PASTED_CONTENT_WRAPPER_RE = /<pasted_content\b[^>]*>\n?([\s\S]*?)\n?<\/pasted_content\b[^>]*>/g;
+// Claude Code wraps bracketed-paste input as <pasted_content id="…">…</pasted_content id="…">:
+// any multi-line paste, every message typed in from the phone, and every message another
+// agent relays into the pane. The text inside cannot be told apart from someone else's
+// words (a relayed conductor message rewrote a task's Context three times), so it never
+// files or touches a task; only what was typed outside the wrapper counts.
+const PASTED_CONTENT_WRAPPER_RE = /<pasted_content\b[^>]*>[\s\S]*?<\/pasted_content\b[^>]*>/g;
+// A message relayed from another agent: "From the conductor, a correction: …",
+// "From tidy-phren: …". One name (optionally after "the"), then a comma or colon.
+const RELAYED_MESSAGE_RE = /^\s*from\s+(?:the\s+)?(?!(?:now|here|there|then|scratch|today|tomorrow)\b)[\w.-]+\s*[,:]/i;
 // Frames another agent or the harness put in the prompt: a cross-session message, a
 // sub-agent hand-back, a delivery/idle notice, a task or system notification, a system
 // reminder. Not the person's request. Matched anywhere, since a harness may put the
@@ -78,14 +83,15 @@ const AGENT_FRAME_RE = /<\/?(?:agent-message|cross-session-message|task-notifica
 const REPLY_OPENER_RE = /^(?:yep|yeah|yes|yup|ya|nah|no|nope|ok|okay|right|correct|exactly|indeed|true|sure|fine|agreed|(?:just\s+)?curious|(?:i(?:'|’)?m\s+)?wondering|i wonder)\b/i;
 const QUESTION_RE = /\?\s*$/;
 
-/** The person's text with the terminal's paste wrappers removed. */
-export function unwrapPromptFrames(prompt: string): string {
-  return prompt.includes("<pasted_content") ? prompt.replace(PASTED_CONTENT_WRAPPER_RE, "$1").trim() : prompt;
+/** What the person typed: the prompt without pasted blocks. */
+export function typedPromptText(prompt: string): string {
+  return prompt.includes("<pasted_content") ? prompt.replace(PASTED_CONTENT_WRAPPER_RE, " ").trim() : prompt;
 }
 
-/** A frame from another agent or the harness, rather than something the person asked. */
+/** A frame from another agent or the harness, or a message relayed from one,
+ *  rather than something the person asked. */
 export function isAgentFramePrompt(prompt: string): boolean {
-  return AGENT_FRAME_RE.test(prompt);
+  return AGENT_FRAME_RE.test(prompt) || RELAYED_MESSAGE_RE.test(prompt);
 }
 
 /** A reply or a question: conversation with the agent, not a request for work. */
@@ -336,7 +342,7 @@ export function handleTaskPromptLifecycle(args: {
     debugLog(`task lifecycle skipped ${args.project}: machine-originated prompt`);
     return { mode, noticeLines: [] };
   }
-  const prompt = unwrapPromptFrames(args.prompt);
+  const prompt = typedPromptText(args.prompt);
   // Suppression takes absolute priority — user explicitly said not to create a task.
   if (hasSuppressTaskIntent(prompt)) {
     debugLog(`task lifecycle suppressed ${args.project}: suppress-task intent detected`);
@@ -407,13 +413,12 @@ export function handleTaskPromptLifecycle(args: {
   // Something the person asked to track ("add this to task") goes to Active, as does
   // a match on a task that is already there. What the hook picked up on its own is a
   // guess about the work: it waits in Queue until someone takes it up.
+  // An existing task keeps its own Context and GitHub link: a later prompt that
+  // matches it is not a better description of the work.
   const section = reusable || hasExplicitTaskSignal(prompt) ? "active" : "queue";
-  const update = updateTask(args.phrenPath, args.project, targetMatch || summary, {
-    section,
-    context: summary,
-    replace_context: true,
-    ...issueMeta,
-  });
+  const update = updateTask(args.phrenPath, args.project, targetMatch || summary, reusable
+    ? { section }
+    : { section, context: summary, replace_context: true, ...issueMeta });
   if (!update.ok) {
     debugLog(`task lifecycle update ${args.project}: ${update.error}`);
     return { mode, noticeLines: [] };
