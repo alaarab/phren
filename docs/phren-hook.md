@@ -10,8 +10,8 @@ Requires macOS or Linux, Node 20 or newer, Herdr, SSH, and `lsof`. Linux uses a
 systemd user service; macOS uses a LaunchAgent in your signed-in user session.
 
 ```sh
-npx --yes @phren/cli@0.2.14 bridge install
-npx --yes @phren/cli@0.2.14 bridge doctor
+npx --yes @phren/cli@0.2.16 bridge install
+npx --yes @phren/cli@0.2.16 bridge doctor
 ```
 
 Keep Tailscale connected on the iPhone and computer for remote access. Funnel and
@@ -224,10 +224,10 @@ prompt that prevents delivery.
 ## Maintain and diagnose
 
 ```sh
-npx --yes @phren/cli@0.2.14 bridge status
-npx --yes @phren/cli@0.2.14 bridge update
-npx --yes @phren/cli@0.2.14 bridge rollback
-npx --yes @phren/cli@0.2.14 bridge uninstall
+npx --yes @phren/cli@0.2.16 bridge status
+npx --yes @phren/cli@0.2.16 bridge update
+npx --yes @phren/cli@0.2.16 bridge rollback
+npx --yes @phren/cli@0.2.16 bridge uninstall
 ```
 
 `update` installs the version of the CLI you invoke; choose an explicit newer
