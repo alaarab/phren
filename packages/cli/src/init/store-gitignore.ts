@@ -40,12 +40,3 @@ export const STORE_SECRET_GITIGNORE_LINES = [
   // Legacy module migration backups were once written into the working tree.
   ".config/modules.yaml.migration-backup",
 ] as const;
-
-/**
- * Whether a .gitignore body already covers every secret-bearing entry.
- * Compares whole trimmed lines, so a commented-out entry does not count.
- */
-export function missingSecretGitignoreLines(content: string): string[] {
-  const present = new Set(content.split("\n").map((line) => line.trim()));
-  return STORE_SECRET_GITIGNORE_LINES.filter((entry) => !present.has(entry));
-}
