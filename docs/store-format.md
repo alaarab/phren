@@ -20,7 +20,7 @@ implementation does not have to rediscover them by reading regexes.
 ```
 <store>/
   phren.root.yaml          # store manifest — version, installMode, syncMode
-  stores.yaml              # optional: registry of additional stores
+  stores.yaml              # optional: the primary store's entry (team stores are attached per machine in .runtime/attached-stores.yaml)
   machines.yaml            # optional: machine-name -> profile-name
   profiles/<name>.yaml     # which projects a machine loads
   <project>/

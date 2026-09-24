@@ -16,6 +16,8 @@ import {
   generateStoreId,
   readTeamBootstrap,
   storesFilePath,
+  attachedStoresFilePath,
+  ignoredSyncedStores,
   getUnavailableStores,
   describeUnavailableStore,
   type StoreRegistry,
@@ -503,6 +505,7 @@ stores:
     });
 
     it("reads role \"secondary\" as \"team\" with a warning, not as a broken entry", () => {
+      fs.mkdirSync(path.join(tmp.path, "work"));
       fs.writeFileSync(
         storesFilePath(phrenDir),
         oneBadRole().replace("role: sidecar", "role: secondary")
@@ -578,6 +581,7 @@ stores:
     });
 
     it("a valid registry stays non-lossy and mutable", () => {
+      fs.mkdirSync(path.join(tmp.path, "work"));
       fs.writeFileSync(
         storesFilePath(phrenDir),
         oneBadRole().replace("role: sidecar", "role: team")
@@ -594,6 +598,85 @@ stores:
         sync: "pull-only",
       });
       expect(readStoreRegistry(phrenDir)!.stores).toHaveLength(3);
+    });
+  });
+
+  // ── attachments are per machine ─────────────────────────────────────────
+
+  describe("team stores are attached per machine, never through the synced store", () => {
+    const primary = (): StoreEntry => ({
+      id: "aaa11111", name: "personal", path: phrenDir, role: "primary", sync: "managed-git",
+    });
+    const team = (name: string, id: string): StoreEntry => ({
+      id, name, path: path.join(tmp.path, name), role: "team", sync: "managed-git",
+      remote: `git@example.com:${name}.git`,
+    });
+    const syncedYaml = (...stores: StoreEntry[]) =>
+      `version: 1\nstores:\n${stores.map((s) =>
+        `  - id: "${s.id}"\n    name: ${s.name}\n    path: "${s.path.replace(/\\/g, "/")}"\n    role: ${s.role}\n    sync: ${s.sync}\n`).join("")}`;
+
+    it("joining a team store writes it to this machine's attached-stores.yaml, not the synced stores.yaml", () => {
+      fs.mkdirSync(path.join(tmp.path, "work"));
+      addStoreToRegistry(phrenDir, team("work", "bbb22222"));
+
+      expect(fs.readFileSync(storesFilePath(phrenDir), "utf8")).not.toContain("work");
+      expect(attachedStoresFilePath(phrenDir)).toBe(path.join(phrenDir, ".runtime", "attached-stores.yaml"));
+      expect(fs.readFileSync(attachedStoresFilePath(phrenDir), "utf8")).toContain("work");
+      expect(resolveAllStores(phrenDir).map((s) => s.name)).toEqual(["personal", "work"]);
+    });
+
+    it("another machine on the same personal store sees only the primary", () => {
+      fs.mkdirSync(path.join(tmp.path, "work"));
+      addStoreToRegistry(phrenDir, team("work", "bbb22222"));
+
+      // What git sync carries to the second machine: stores.yaml, not .runtime/.
+      const other = path.join(tmp.path, "other", ".phren");
+      fs.mkdirSync(other, { recursive: true });
+      fs.copyFileSync(storesFilePath(phrenDir), storesFilePath(other));
+
+      expect(resolveAllStores(other).map((s) => s.name)).toEqual(["personal"]);
+      expect(getUnavailableStores(other)).toEqual([]);
+    });
+
+    it("moves synced team entries into attached-stores.yaml once, keeping only those cloned here", () => {
+      fs.mkdirSync(path.join(tmp.path, "work"));
+      const synced = syncedYaml(primary(), team("work", "bbb22222"), team("elsewhere", "ccc33333"));
+      fs.writeFileSync(storesFilePath(phrenDir), synced);
+
+      expect(resolveAllStores(phrenDir).map((s) => s.name)).toEqual(["personal", "work"]);
+      expect(fs.readFileSync(attachedStoresFilePath(phrenDir), "utf8")).toContain("bbb22222");
+      expect(fs.readFileSync(attachedStoresFilePath(phrenDir), "utf8")).not.toContain("ccc33333");
+      // Machines still on an older phren read the synced file, so it stays.
+      expect(fs.readFileSync(storesFilePath(phrenDir), "utf8")).toBe(synced);
+      expect(ignoredSyncedStores(phrenDir).map((s) => s.name)).toEqual(["elsewhere"]);
+    });
+
+    it("ignores team entries that reach the synced file after the move", () => {
+      fs.writeFileSync(storesFilePath(phrenDir), syncedYaml(primary(), team("work", "bbb22222")));
+      expect(resolveAllStores(phrenDir).map((s) => s.name)).toEqual(["personal"]);
+
+      // An older phren on another machine joins a store whose folder happens
+      // to exist here too; this machine never joined it.
+      fs.mkdirSync(path.join(tmp.path, "late"));
+      fs.writeFileSync(storesFilePath(phrenDir), syncedYaml(primary(), team("work", "bbb22222"), team("late", "ddd44444")));
+      expect(resolveAllStores(phrenDir).map((s) => s.name)).toEqual(["personal"]);
+    });
+
+    it("attaching and detaching leave the synced file alone, including other machines' entries", () => {
+      const synced = syncedYaml(primary(), team("elsewhere", "ccc33333"));
+      fs.writeFileSync(storesFilePath(phrenDir), synced);
+
+      addStoreToRegistry(phrenDir, team("work", "bbb22222"));
+      expect(fs.readFileSync(storesFilePath(phrenDir), "utf8")).toBe(synced);
+      removeStoreFromRegistry(phrenDir, "work");
+      expect(fs.readFileSync(storesFilePath(phrenDir), "utf8")).toBe(synced);
+      expect(resolveAllStores(phrenDir).map((s) => s.name)).toEqual(["personal"]);
+    });
+
+    it("an attached store whose folder is gone says how to restore or detach it", () => {
+      addStoreToRegistry(phrenDir, team("work", "bbb22222"));
+      const [missing] = getUnavailableStores(phrenDir);
+      expect(describeUnavailableStore(missing)).toMatch(/attached on this machine.*git clone git@example.com:work.git.*phren store remove work/s);
     });
   });
 

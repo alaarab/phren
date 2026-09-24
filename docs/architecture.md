@@ -280,7 +280,9 @@ Phren supports multiple knowledge stores with three roles:
 
 ### Store Registry
 
-All stores are registered in `~/.phren/stores.yaml`. Each store has an immutable UUID for provenance tracking and a mutable display name. The registry is the single source of truth for project-to-store routing.
+The primary store is listed in `~/.phren/stores.yaml`, which syncs with the store, so every machine on it agrees on its id. Team and readonly stores are attached per machine in `~/.phren/.runtime/attached-stores.yaml`, which never syncs: joining a team store on one machine never attaches it on another, and `phren doctor` checks only this machine's stores. Each store has an immutable UUID for provenance tracking and a mutable display name. Together the two files are the single source of truth for project-to-store routing on a machine.
+
+Older versions listed team stores in the synced `stores.yaml`. The first run of this version on a machine moves the ones whose folder exists there into `attached-stores.yaml`, ignores the rest, and leaves the synced file as it is for machines still on an older version.
 
 ### Multi-Store Data Flow
 
