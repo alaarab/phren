@@ -15,7 +15,7 @@
   },
   "overrides": [
     {
-      "includes": ["**/*.test.ts", "**/test-helpers.ts"],
+      "includes": ["**/*.test.ts", "**/*.suite.ts", "**/test-helpers.ts"],
       "linter": { "enabled": false }
     }
   ],
