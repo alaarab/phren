@@ -4,7 +4,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { removeGitExcludes, removePhrenHomeSymlinks, removePhrenWrappers } from "./teardown.js";
 
-describe.sequential("teardown helpers", () => {
+describe("teardown helpers", () => {
   let tmpRoot: string;
   let homeDir: string;
   let cleanup: () => void;
