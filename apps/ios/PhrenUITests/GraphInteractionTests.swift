@@ -216,12 +216,12 @@ final class GraphInteractionTests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Skills"].waitForExistence(timeout: 5))
         // The synthesized edge drag occasionally lands before the push has
         // settled and is swallowed; a second one is still the same gesture.
-        for _ in 0..<2 where !app.navigationBars["Live sessions"].exists {
+        for _ in 0..<2 where !app.navigationBars["Settings"].exists {
             app.coordinate(withNormalizedOffset: CGVector(dx: 0.001, dy: 0.55))
                 .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.55)))
-            _ = app.navigationBars["Live sessions"].waitForExistence(timeout: 4)
+            _ = app.navigationBars["Settings"].waitForExistence(timeout: 4)
         }
-        XCTAssertTrue(app.navigationBars["Live sessions"].waitForExistence(timeout: 5),
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5),
                       "Normal back gestures must still work outside the graph")
         app.tabBars.buttons["Settings"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
