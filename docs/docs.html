@@ -824,7 +824,7 @@
             <p>Run init to configure hooks and MCP for your agents:</p>
             <pre><code>phren init</code></pre>
             <p>Expected output:</p>
-            <pre><code>phren init v0.1.34
+            <pre><code>phren init
   Detected agents: Claude Code, Copilot
   Created ~/.phren/
   Registered MCP server in ~/.claude/settings.json
@@ -965,12 +965,14 @@ projects:
 
         <h2 id="gs-syncing">Syncing Across Machines <a href="#gs-syncing" class="anchor-link">#</a></h2>
         <p><code>~/.phren</code> is a git repo. Sync across machines:</p>
-        <pre><code># On your current machine
-phren push_changes "sync from laptop"
+        <pre><code># On a new machine
+git clone &lt;your-store-remote&gt; ~/.phren
+phren profile switch work   # map this machine to a profile
+phren init -y               # wire MCP, hooks, and project links
 
-# On a new machine
-phren init  # pulls from remote</code></pre>
-        <p>The <code>SessionStart</code> hook automatically runs <code>git pull</code> at the start of every session. Periodic checks are off by default; enable checks every minute with <code>phren config pull-interval 60</code> while an MCP server is running.</p>
+# Pull the latest on any machine
+phren store sync</code></pre>
+        <p>The <code>Stop</code> hook commits and pushes your changes after each response. The <code>SessionStart</code> hook automatically runs <code>git pull</code> at the start of every session. Periodic checks are off by default; enable checks every minute with <code>phren config pull-interval 60</code> while an MCP server is running.</p>
 
         <h2 id="gs-agents">Agent Setup <a href="#gs-agents" class="anchor-link">#</a></h2>
         <p><code>phren init</code> auto-configures all detected agents:</p>
@@ -1078,20 +1080,21 @@ stateDiagram-v2
         </table></div>
 
         <h2 id="c-trust-decay">Trust &amp; Decay <a href="#c-trust-decay" class="anchor-link">#</a></h2>
-        <p>Every finding starts with full confidence (1.0). As it ages, confidence decays through a stepped schedule:</p>
+        <p>Every finding starts with full confidence (1.0). As it ages, confidence falls in a straight line between these points. The defaults come from the retention policy; change them with <code>phren config policy</code>.</p>
 
         <div class="table-scroll"><table class="docs-table">
           <thead>
-            <tr><th>Age</th><th>Multiplier</th><th>Effect</th></tr>
+            <tr><th>Age</th><th>Cited finding</th><th>Uncited finding (0.8x)</th></tr>
           </thead>
           <tbody>
-            <tr><td>0 -- 30 days</td><td>1.0</td><td>Full confidence</td></tr>
-            <tr><td>30 -- 60 days</td><td>0.9</td><td>Slightly reduced</td></tr>
-            <tr><td>60 -- 90 days</td><td>0.75</td><td>Moderate reduction</td></tr>
-            <tr><td>90 -- 120 days</td><td>0.5</td><td>Low confidence</td></tr>
-            <tr><td>120+ days</td><td>suppressed</td><td>Excluded from retrieval</td></tr>
+            <tr><td>0 to 30 days</td><td>1.00</td><td>0.80</td></tr>
+            <tr><td>60 days</td><td>0.85</td><td>0.68</td></tr>
+            <tr><td>90 days</td><td>0.65</td><td>0.52</td></tr>
+            <tr><td>120 days</td><td>0.45</td><td>0.36</td></tr>
+            <tr><td>Past 120 days</td><td colspan="2">Stale: past the default TTL (<code>ttlDays</code>)</td></tr>
           </tbody>
         </table></div>
+        <p>A finding below 0.35 confidence (<code>minInjectConfidence</code>) is left out of injected context.</p>
 
         <div class="decay-curve">
           <span class="decay-curve-label y-axis">Confidence</span>
@@ -1112,9 +1115,9 @@ stateDiagram-v2
             <text x="265" y="175" fill="rgba(232,228,217,0.35)" font-size="10" text-anchor="middle">60</text>
             <text x="373" y="175" fill="rgba(232,228,217,0.35)" font-size="10" text-anchor="middle">90</text>
             <text x="480" y="175" fill="rgba(232,228,217,0.35)" font-size="10" text-anchor="middle">120+</text>
-            <polyline points="50,20 158,20 265,34 373,55 445,90 480,160" fill="none" stroke="#00E5FF" stroke-width="2.5" stroke-linejoin="round"/>
-            <polyline points="50,20 158,20 265,34 373,55 445,90 480,160" fill="none" stroke="#00E5FF" stroke-width="6" stroke-linejoin="round" opacity="0.15"/>
-            <polyline points="50,20 158,20 265,25 373,34 445,55 480,76" fill="none" stroke="#9B8DC8" stroke-width="2" stroke-linejoin="round" stroke-dasharray="6,3"/>
+            <polyline points="50,20 158,20 265,41 373,69 480,97 480,160" fill="none" stroke="#00E5FF" stroke-width="2.5" stroke-linejoin="round"/>
+            <polyline points="50,20 158,20 265,41 373,69 480,97 480,160" fill="none" stroke="#00E5FF" stroke-width="6" stroke-linejoin="round" opacity="0.15"/>
+            <polyline points="50,20 373,20 480,27" fill="none" stroke="#9B8DC8" stroke-width="2" stroke-linejoin="round" stroke-dasharray="6,3"/>
             <line x1="50" y1="20" x2="480" y2="20" stroke="#28C840" stroke-width="1.5" stroke-dasharray="4,4"/>
             <line x1="50" y1="48" x2="158" y2="48" stroke="#FF8A90" stroke-width="1" stroke-dasharray="3,5"/>
             <text x="164" y="52" fill="rgba(255,138,144,0.6)" font-size="9">0.8x citation penalty</text>
@@ -2415,18 +2418,8 @@ refactor: extract keyword logic from hook-prompt</code></pre>
         </ul>
 
         <h2 id="trust-decay">How does trust decay work? <a href="#trust-decay" class="anchor-link">#</a></h2>
-        <p>Every finding has a confidence score. The score degrades over time:</p>
-        <div class="table-scroll"><table class="docs-table">
-          <thead><tr><th>Age</th><th>Cited entry</th><th>Uncited entry</th></tr></thead>
-          <tbody>
-            <tr><td>0-30 days</td><td>1.00</td><td>0.80</td></tr>
-            <tr><td>31-60 days</td><td>1.00</td><td>0.80</td></tr>
-            <tr><td>61-90 days</td><td>0.85</td><td>0.68</td></tr>
-            <tr><td>91-120 days</td><td>0.65</td><td>0.52</td></tr>
-            <tr><td>120+ days</td><td>0.45</td><td>0.36</td></tr>
-          </tbody>
-        </table></div>
-        <p>Entries below 0.35 are suppressed and move to the review queue. You can pin a truth with <code>phren pin</code> or <code>revise_finding</code> (action <code>pin</code>) to make it never decay.</p>
+        <p>Every finding has a confidence score that falls as it ages: 1.00 for the first 30 days, then 0.85 at 60 days, 0.65 at 90, and 0.45 at 120. An uncited finding scores 0.8x. <a href="#c-trust-decay">Trust &amp; Decay</a> has the full table.</p>
+        <p>Entries below 0.35 are left out of injected context. You can pin a truth with <code>phren pin</code> or <code>revise_finding</code> (action <code>pin</code>) to make it never decay.</p>
 
         <h2 id="auto-vs-manual">What gets saved automatically vs manually? <a href="#auto-vs-manual" class="anchor-link">#</a></h2>
         <h3 id="faq-automatic">Automatic</h3>
@@ -2483,9 +2476,11 @@ projects:
   - api-server
   - shared-lib</code></pre>
         <p>Each profile lists the project directories that should be synced and linked. The <code>global</code> entry is special: it contains skills and config that apply everywhere.</p>
-        <pre><code>phren config profiles                              # List all profiles
-:profile add-project work my-new-project            # Add a project
-:profile remove-project work old-project            # Remove a project</code></pre>
+        <pre><code>phren config profiles       # list profiles and their projects
+phren profile switch work   # map this machine to the work profile</code></pre>
+        <p>To change a profile's projects, run these in the interactive shell's <code>:</code> palette, or use the <code>/phren-profiles</code> skill:</p>
+        <pre><code>:profile add-project work my-new-project
+:profile remove-project work old-project</code></pre>
 
         <h2 id="machines">Machines <a href="#machines" class="anchor-link">#</a></h2>
         <p>The <code>machines.yaml</code> file maps hostnames to profiles. When <code>phren init</code> runs on a new machine, it reads the current hostname, applies the mapped profile, and refreshes local integration config.</p>
