@@ -1905,9 +1905,9 @@ phren init
 # From marketplace
 ext install alaarab.phren-vscode
 
-# Or build from source
-cd ~/phren/vscode-extension
-npm install && npm run compile</code></pre>
+# Or build from source, in a clone of the phren repo
+pnpm install
+pnpm --filter phren-vscode run compile</code></pre>
 
         <div class="callout callout-warning">
           <div class="callout-title">Important</div>
@@ -2098,14 +2098,14 @@ sequenceDiagram
         <p>Clone, build, and test in under a minute.</p>
         <pre><code>git clone https://github.com/alaarab/phren.git
 cd phren
-npm install
-npm run build
-npm test</code></pre>
-        <p>The build compiles TypeScript from <code>mcp/src/</code> into <code>mcp/dist/</code> and marks the entry point executable.</p>
+pnpm install
+pnpm build
+pnpm test</code></pre>
+        <p>The repo is a pnpm workspace built with turborepo. <code>pnpm build</code> compiles every package; the CLI builds from <code>packages/cli/src/</code> into <code>packages/cli/dist/</code>.</p>
         <h3>Prerequisites</h3>
         <ul>
           <li>Node.js 20+</li>
-          <li>npm 9+</li>
+          <li>pnpm 10 (the version is pinned in <code>package.json</code>; <code>corepack enable</code> picks it up)</li>
         </ul>
 
         <h2 id="project-structure">Project Structure <a href="#project-structure" class="anchor-link">#</a></h2>
@@ -2115,31 +2115,33 @@ npm test</code></pre>
             <tr><th>Path</th><th>What it does</th></tr>
           </thead>
           <tbody>
-            <tr><td><code>packages/cli/src/index.ts</code></td><td>CLI routing + MCP server bootstrap (59 public tools across 13 modules)</td></tr>
-            <tr><td><code>mcp/src/shared.ts</code></td><td>Shared path/runtime helpers and core exports</td></tr>
-            <tr><td><code>mcp/src/cli.ts</code></td><td>CLI subcommands (search, doctor, shell, etc.)</td></tr>
-            <tr><td><code>mcp/src/utils.ts</code></td><td>FTS5 sanitization, synonym expansion, keyword extraction</td></tr>
-            <tr><td><code>mcp/src/init.ts</code></td><td><code>phren init</code>: configures MCP + hooks</td></tr>
-            <tr><td><code>mcp/src/link.ts</code></td><td>Profile sync, symlinks, hooks, context</td></tr>
-            <tr><td><code>mcp/src/data-access.ts</code></td><td>Task CRUD, machine/profile listing, learning management</td></tr>
-            <tr><td><code>mcp/src/mcp-*.ts</code></td><td>MCP tool modules (search/tasks/finding/memory/data/graph/session/ops/skills/hooks/extract/config)</td></tr>
-            <tr><td><code>mcp/src/skill-registry.ts</code></td><td>Skill precedence, alias collision handling, visibility gating</td></tr>
-            <tr><td><code>mcp/src/governance-policy.ts</code></td><td>RBAC, policy files, actor resolution</td></tr>
-            <tr><td><code>mcp/src/memory-ui-server.ts</code></td><td>Web UI server, auth/CSRF/CSP/loopback security</td></tr>
-            <tr><td><code>mcp/src/telemetry.ts</code></td><td>Opt-in local telemetry collection and summaries</td></tr>
-            <tr><td><code>starter/</code></td><td>Template files copied to ~/.phren on init</td></tr>
-            <tr><td><code>docs/</code></td><td>GitHub Pages site and documentation</td></tr>
-            <tr><td><code>skills/</code></td><td>Phren slash command definitions</td></tr>
+            <tr><td><code>packages/cli/src/index.ts</code></td><td>Entry point: invocation routing and the MCP server</td></tr>
+            <tr><td><code>packages/cli/src/cli-registry.ts</code></td><td>Command catalog behind help and dispatch</td></tr>
+            <tr><td><code>packages/cli/src/mcp/profile.ts</code></td><td>The core and full tool profiles and the composite tools</td></tr>
+            <tr><td><code>packages/cli/src/tools/</code></td><td>MCP tool modules, one file per domain</td></tr>
+            <tr><td><code>packages/cli/src/shared/index.ts</code></td><td>FTS5 indexer</td></tr>
+            <tr><td><code>packages/cli/src/utils.ts</code></td><td>FTS5 sanitization, synonym expansion, keyword extraction</td></tr>
+            <tr><td><code>packages/cli/src/init/init.ts</code></td><td><code>phren init</code>: configures MCP and hooks for detected agents</td></tr>
+            <tr><td><code>packages/cli/src/link/</code></td><td>Reconciles machine and profile wiring, hooks, and local context</td></tr>
+            <tr><td><code>packages/cli/src/data/access.ts</code></td><td>Task CRUD, machine and profile listing, finding management</td></tr>
+            <tr><td><code>packages/cli/src/governance/</code></td><td>Policy, RBAC, review queue, audit log, locks</td></tr>
+            <tr><td><code>packages/cli/src/ui/</code></td><td>Web UI server and pages</td></tr>
+            <tr><td><code>packages/cli/src/bridge/</code></td><td>Phren Hook: the phone and computer bridge, dispatch, schedules</td></tr>
+            <tr><td><code>packages/cli/starter/</code></td><td>Templates and <code>phren-*</code> skills copied to <code>~/.phren</code> on init</td></tr>
+            <tr><td><code>packages/code/</code></td><td>Optional code symbol index (<code>@phren/code</code>)</td></tr>
+            <tr><td><code>packages/vscode/</code></td><td>VS Code extension</td></tr>
+            <tr><td><code>apps/ios/</code></td><td>phren for iPhone (not part of the pnpm workspace)</td></tr>
+            <tr><td><code>docs/</code></td><td>GitHub Pages site and developer docs</td></tr>
           </tbody>
         </table></div>
 
         <h2 id="testing">Testing <a href="#testing" class="anchor-link">#</a></h2>
         <p>Running the test suite and filtering by pattern.</p>
-        <pre><code>npm test                              # run all tests
-npm test -- --grep "pattern"          # filter by test name
-npm test -- mcp/src/data-access.test  # run one file
-npx vitest --watch                    # watch mode</code></pre>
-        <p>Test files live as <code>*.test.ts</code> in <code>mcp/src/</code>. When adding a new feature, add tests in the same directory as the source file.</p>
+        <pre><code>pnpm test                                  # run all tests
+pnpm test -t "pattern"                     # filter by test name
+pnpm test packages/cli/src/utils           # run matching files
+pnpm exec vitest                           # watch mode</code></pre>
+        <p>Run tests from the repo root. Test files sit next to their source as <code>*.test.ts</code>. Add tests for a new feature in the same directory.</p>
 
         <h2 id="code-style">Code Style <a href="#code-style" class="anchor-link">#</a></h2>
         <p>Read <code>AGENTS.md</code> for the full set of conventions. The highlights:</p>
@@ -2174,7 +2176,7 @@ npx vitest --watch                    # watch mode</code></pre>
         <ol>
           <li>Create a feature branch from <code>main</code></li>
           <li>Make your changes with tests</li>
-          <li>Run <code>npm run build && npm test</code> and make sure everything passes</li>
+          <li>Run <code>pnpm build &amp;&amp; pnpm test &amp;&amp; pnpm lint</code> and make sure everything passes</li>
           <li>Keep commits focused: one logical change per commit</li>
           <li>Write commit messages that explain <em>why</em>, not just <em>what</em></li>
         </ol>
@@ -2201,17 +2203,17 @@ refactor: extract keyword logic from hook-prompt</code></pre>
         <h2 id="adding-mcp-tool">Adding a New MCP Tool <a href="#adding-mcp-tool" class="anchor-link">#</a></h2>
         <p>Five steps to ship a new tool.</p>
         <ol>
-          <li>Add the tool definition in the correct module (<code>mcp/src/mcp-&lt;domain&gt;.ts</code>) following the existing <code>server.registerTool()</code> pattern</li>
+          <li>Add the tool definition in the matching module (<code>packages/cli/src/tools/&lt;domain&gt;.ts</code>) following the existing <code>server.registerTool()</code> pattern</li>
           <li>Implement the handler: call data-access functions, return <code>{ ok, message, data }</code></li>
-          <li>Register or verify the module from <code>mcp/src/index.ts</code> if you created a new module</li>
+          <li>Import a new module from <code>packages/cli/src/index.ts</code>. A tool outside the core list is reachable in the core profile through <code>phren_admin</code>.</li>
           <li>Add tests in the relevant <code>*.test.ts</code> file</li>
           <li>Update docs: <code>docs/api-reference.md</code>, <code>docs/llms-install.md</code>, <code>docs/llms-full.txt</code>, and integration/security/governance docs when behavior affects hooks, skills, RBAC, web UI, or telemetry</li>
         </ol>
 
         <h3 id="adding-global-skill">Adding a Global Skill</h3>
         <ol>
-          <li>Create a markdown file in <code>global/skills/your-skill.md</code></li>
-          <li>Follow the existing skill format: name, description, steps</li>
+          <li>Create <code>packages/cli/starter/global/skills/your-skill/SKILL.md</code></li>
+          <li>Follow the existing skills: frontmatter with <code>name</code> and <code>description</code>, then the steps</li>
           <li>Test locally by running <code>phren init</code> and invoking <code>/your-skill</code> in a Claude Code session</li>
         </ol>
 
