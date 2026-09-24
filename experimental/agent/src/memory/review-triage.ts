@@ -9,7 +9,7 @@
  */
 import type { PhrenContext } from "./context.js";
 import type { LlmMessage, LlmProvider } from "../providers/types.js";
-import { readReviewQueue, rejectQueueItem, type QueueItem } from "@phren/cli/data/access";
+import { readReviewQueue, dequeueQueueItem, type QueueItem } from "@phren/cli/data/access";
 
 export interface QueueStatusItem {
   text: string;
@@ -71,23 +71,46 @@ export function resolveExpireDays(): number {
   return DEFAULT_EXPIRE_DAYS;
 }
 
+export interface ExpireResult {
+  expired: number;
+  /** Texts that were dropped, so the notice can name them instead of a bare count. */
+  texts: string[];
+}
+
 /**
- * Auto-reject review items older than expireDays. Undated items never expire.
- * Re-reads the queue so every rejected line round-trips exactly. Never throws.
+ * Drop review lines older than expireDays. Undated items never expire.
+ *
+ * Expiry *dequeues only*. It deliberately does not use `rejectQueueItem`: reject
+ * destroys the content wherever it lives, and governance queues findings that are
+ * already live in FINDINGS.md ("is this still true?"). Auto-rejecting those on a
+ * timer would silently delete knowledge nobody chose to delete — the queue line
+ * timing out means "stop asking", not "this was wrong".
+ *
+ * Re-reads the queue so every dropped line round-trips exactly. Never throws.
  */
-export function expireStaleItems(ctx: PhrenContext, expireDays: number): { expired: number } {
-  if (!ctx.project || expireDays <= 0) return { expired: 0 };
-  let expired = 0;
+export function expireStaleItems(ctx: PhrenContext, expireDays: number): ExpireResult {
+  if (!ctx.project || expireDays <= 0) return { expired: 0, texts: [] };
+  const texts: string[] = [];
   try {
     for (const item of listQueueItems(ctx)) {
       if (item.ageDays === null || item.ageDays <= expireDays) continue;
-      const result = rejectQueueItem(ctx.phrenPath, ctx.project, item.line);
-      if (result.ok) expired++;
+      const result = dequeueQueueItem(ctx.phrenPath, ctx.project, item.line);
+      if (result.ok) texts.push(item.text);
     }
   } catch {
     // best effort — whatever expired, expired
   }
-  return { expired };
+  return { expired: texts.length, texts };
+}
+
+/** Notice for expired items — names what was dropped rather than a bare count. */
+export function formatExpiryNotice(result: ExpireResult): string | null {
+  if (result.expired === 0) return null;
+  const shown = result.texts.slice(0, 3).map((text) => (text.length > 60 ? `${text.slice(0, 60)}…` : text));
+  const more = result.expired - shown.length;
+  const list = shown.map((text) => `"${text}"`).join(", ");
+  const suffix = more > 0 ? `, +${more} more` : "";
+  return `Review queue: removed ${result.expired} stale item${result.expired === 1 ? "" : "s"} — ${list}${suffix} (unreviewed; existing findings untouched)`;
 }
 
 /** One-line session-start banner; null when the queue is empty. */

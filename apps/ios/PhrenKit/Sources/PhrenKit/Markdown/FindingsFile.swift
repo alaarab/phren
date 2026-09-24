@@ -159,13 +159,17 @@ public struct FindingsFile: Sendable {
         public var type: FindingType?
         public var scope: String?
         public var provenance: FindingProvenance?
+        /// Set when promoting a review-queue item: the date it was queued.
+        public var queuedDate: String?
         public var now: Date
 
         public init(type: FindingType? = nil, scope: String? = nil,
-                    provenance: FindingProvenance? = nil, now: Date = Date()) {
+                    provenance: FindingProvenance? = nil, queuedDate: String? = nil,
+                    now: Date = Date()) {
             self.type = type
             self.scope = scope
             self.provenance = provenance
+            self.queuedDate = queuedDate
             self.now = now
         }
     }
@@ -189,7 +193,11 @@ public struct FindingsFile: Sendable {
         let today = String(nowIso.prefix(10))
 
         var normalizedLearning = learning
-        if extractFindingType("- " + normalizedLearning) == nil, let type = options.type {
+        // core/finding.ts:16-28 `applyFindingTypePrefix`: the test is anchored
+        // and accepts any bracketed tag. `extractFindingType` is unanchored, so a
+        // `[bug]` mid-sentence suppressed the caller's type, and it knows only the
+        // decay types, so `[tradeoff]`/`[architecture]` were tagged twice.
+        if let type = options.type, !Self.findingTagPrefix.test(normalizedLearning) {
             normalizedLearning = "[\(type.rawValue)] \(normalizedLearning)"
         }
 
@@ -201,6 +209,12 @@ public struct FindingsFile: Sendable {
         if let provenance = options.provenance {
             let sourceComment = buildSourceComment(provenance)
             if !sourceComment.isEmpty { bullet += " \(sourceComment)" }
+        }
+        // A promoted queue item is written today but was captured earlier:
+        // approveQueueItemDetailed passes this as an extra annotation, which
+        // learning.ts places after scope and source, before lifecycle.
+        if let queued = options.queuedDate, !queued.isEmpty {
+            bullet += " <!-- phren:queued \"\(queued)\" -->"
         }
 
         if isDuplicate(of: bullet) {
@@ -325,6 +339,19 @@ public struct FindingsFile: Sendable {
         return matches.allSatisfy { bulletContentKey($0.line) == key } ? first : nil
     }
 
+    /// access.ts `existsAsLiveFinding`: does this text already exist as a live
+    /// (non-archived) bullet? Ambiguous counts as present: several bullets
+    /// matched, so approve must not write another copy.
+    public func existsAsLiveFinding(_ text: String) -> Bool {
+        let needle = normalizeFindingText(text)
+        guard !needle.isEmpty else { return false }
+        let active = collectBulletLines(content.components(separatedBy: "\n")).filter { !$0.archived }
+        switch matchIn(active, needle: needle, match: text) {
+        case .found, .ambiguous: return true
+        case .notFound: return false
+        }
+    }
+
     /// access.ts:219 `findMatchingFindingBullet` + the archived-check wrapper
     /// shared by editFinding/removeFinding.
     private func matchBullet(lines: [String], match: String, project: String) throws -> Int {
@@ -391,6 +418,9 @@ public struct FindingsFile: Sendable {
     static func normalizeContent(_ joined: String) -> String {
         trimEnd(JSRegex(#"\n{3,}"#).replaceAll(joined, with: "\n\n")) + "\n"
     }
+
+    /// core/finding.ts:16 `FINDING_TAG_PREFIX_RE`.
+    static let findingTagPrefix = JSRegex(#"^\s*\[[^\]]+\]\s*"#)
 
     static func randomHexId() -> String {
         // crypto.randomBytes(4).toString("hex")
