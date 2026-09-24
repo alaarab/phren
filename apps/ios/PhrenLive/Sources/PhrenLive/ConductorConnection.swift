@@ -90,6 +90,7 @@ extension PhrenConnection {
                 switch returned["state"] as? String {
                 case "done": line = "Returned: \(label) finished"
                 case "needs-you": line = "Needs you: \(label)" + ((returned["question"] as? String).map { ", \($0)" } ?? "")
+                case "failed": line = "Failed: \(label)" + ((returned["error"] as? String).map { ", \($0)" } ?? "")
                 case "blocked": line = "Blocked: \(label)"
                 default: line = "Gone: \(label) closed"
                 }

@@ -10,6 +10,8 @@ final class ConductorActivityTests: XCTestCase {
         XCTAssertEqual(PhrenConnection.conductorActivity(from: Data(dispatched.utf8))?.line, "Dispatched Soak test to Desk")
         let asking = #"{"dispatches":[{"id":"3","label":"Migration","state":"accepted","createdAt":"2026-09-24T01:10:00Z","updatedAt":"2026-09-24T01:10:02Z","returned":{"state":"needs-you","at":"2026-09-24T01:20:00Z","question":"Which schema?","read":false}}]}"#
         XCTAssertEqual(PhrenConnection.conductorActivity(from: Data(asking.utf8))?.line, "Needs you: Migration, Which schema?")
+        let failed = #"{"dispatches":[{"id":"4","label":"Parser","state":"accepted","createdAt":"2026-09-24T01:10:00Z","updatedAt":"2026-09-24T01:10:02Z","returned":{"state":"failed","at":"2026-09-24T01:20:00Z","error":"You’ve hit your usage limit.","read":false}}]}"#
+        XCTAssertEqual(PhrenConnection.conductorActivity(from: Data(failed.utf8))?.line, "Failed: Parser, You’ve hit your usage limit.")
         XCTAssertNil(PhrenConnection.conductorActivity(from: Data(#"{"dispatches":[]}"#.utf8)))
     }
 }
