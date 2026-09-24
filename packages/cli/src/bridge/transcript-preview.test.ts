@@ -130,6 +130,23 @@ describe("live reply previews", () => {
     // A narrow pane: the titled rule keeps one dash, and a running call carries a suffix.
     expect(claudePanePreview("❯ Explain this\n⏺ Filing it:\n⏺ Calling phren… (ctrl+o to expand)\n✢ Crunching… (26s)\n Claude sesh in herdr on pjren js not in co… ─\n❯\n─────", "Explain this"))
       .toBe("Filing it:");
+    // A narrow pane wraps the next call's description; its command under
+    // "⎿" wraps too. Neither is reply text (seen on the phone, 2026-09-24).
+    const pane = [
+      "❯ And I didn't use the words retire",
+      "⏺ Agreed. \"Retirement\" claims Power Portal is going away, which",
+      "  hasn't been decided. First, checking where the word shows up:",
+      "",
+      "⏺ Finding retire wording around Power",
+      "  Portal reports",
+      "  ⎿  $ grep -rn -i \"retire\" src docs --include=*.ts",
+      "     --include=*.tsx --include=*.md | command",
+      "     grep -v -i \"retired_\\|RETIRED_DELTEK\"",
+      "✶ Fiddle-faddling… (14s · ↓ 663 tokens)",
+      "❯",
+    ].join("\n");
+    expect(claudePanePreview(pane, "And I didn't use the words retire"))
+      .toBe("Agreed. \"Retirement\" claims Power Portal is going away, which hasn't been decided. First, checking where the word shows up:");
   });
 
   it("parses Claude's whole spinner line into its verb, time, tokens and thinking state", async () => {

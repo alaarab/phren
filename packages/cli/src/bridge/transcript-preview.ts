@@ -41,10 +41,18 @@ export function claudePanePreview(rendered: string, prompt: string, previous = "
   // A "⏺" block whose next line is a "⎿" result is a tool call, collapsed
   // ("⏺ Running 1 shell command…") or not; it lands as its own entry.
   const toolBlock = (index: number) => {
+    let wrapped = false;
     for (let next = index + 1; next < body.length; next++) {
       if (!body[next].trim()) continue;
       // A result ("⎿") or a sub-agent tree ("├─ Plan · 0 tool uses") follows a tool call.
-      return /^\s*(?:│\s*)?[⎿├└]/.test(rawBody[next]);
+      // A narrow pane wraps the call's description ("⏺ Finding retire wording
+      // around Power" / "Portal reports"); its "⎿", indented under the call as
+      // Claude draws it, comes after the wrap. A new block, the prompt or a
+      // blank line after text ends the search.
+      if ((wrapped ? /^\s+(?:│\s*)?[⎿├└]/ : /^\s*(?:│\s*)?[⎿├└]/).test(rawBody[next])) return true;
+      wrapped = true;
+      if (/^\s*[⏺●❯>]/.test(body[next])) return false;
+      if (!body[next + 1]?.trim()) return false;
     }
     return false;
   };
