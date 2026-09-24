@@ -106,6 +106,31 @@ describe("opencode file approvals", () => {
     expect(JSON.parse(await readFile(answerFile(store), "utf8"))).toEqual({ id: "per_ext2", decision: "approve" });
     await expect(hooks.answerPush(push.sent[0].binding, "approve")).rejects.toThrow("no longer pending");
   });
+
+  it("holds a fan-out request only when the named job's manifest confirms the session", async () => {
+    const push = fakePush(), hooks = new AgentHooks(push.service);
+    const job = path.join(store, ".runtime", "agent-fanouts", "opencode-abc");
+    await mkdir(job, { recursive: true });
+    const manifest = { schemaVersion: 1, id: "opencode-abc", provider: "opencode", taskLabel: "worker", cwd: store, worktree: store,
+      eventLog: "events.jsonl", createdAt: new Date().toISOString(), startedAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      status: "running", session: "ses_other1", parent: { provider: "opencode", session } };
+    await writeFile(path.join(job, "manifest.json"), JSON.stringify(manifest));
+    const worker = "ses_worker1", request = path.join(store, ".runtime", "approvals", `opencode-${worker}.request.json`);
+    await writeFile(request, JSON.stringify({ id: "per_w1", sessionID: worker, type: "external_directory", title: "Allow?", message: "m",
+      fanout: "opencode-abc", expiresAt: new Date(Date.now() + 30_000).toISOString() }));
+    await hooks.sweepOpencodeApprovals();
+    expect(push.sent).toHaveLength(0);
+    // Once the manifest names the worker, an opencode parent gets a token-shaped action id.
+    await writeFile(path.join(job, "manifest.json"), JSON.stringify({ ...manifest, session: worker }));
+    await mkdir(path.dirname(bindingFile(bridge)), { recursive: true });
+    await writeFile(bindingFile(bridge), JSON.stringify({ terminal: "term-1", source: "opencode", session, pids: [process.pid], workspace: "w1", tab: "w1:t1" }));
+    await hooks.sweepOpencodeApprovals();
+    expect(push.sent).toHaveLength(1);
+    const approval = hooks.approval(target);
+    expect(String(approval?.actionId)).toMatch(/^[0-9a-f]{32}$/);
+    await hooks.answer(target, String(approval!.actionId), "deny");
+    expect(JSON.parse(await readFile(path.join(store, ".runtime", "approvals", `opencode-${worker}.answer.json`), "utf8"))).toEqual({ id: "per_w1", decision: "deny" });
+  });
 });
 
 it("recognizes conductor tool names without splitting hand_off", () => {

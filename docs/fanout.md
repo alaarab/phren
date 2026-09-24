@@ -41,7 +41,9 @@ Explicit `--provider` and `--model` choices still respect quotas and caps.
 Reservation and concurrency checks share a store lock. Swift briefs check
 running xcodebuild processes against a cap of two. All workers run at nice 15.
 Codex, OpenCode and Claude own their argv and resume semantics in adapters.
-Claude uses `claude -p --output-format stream-json`. A fresh review uses the
+Claude uses `claude -p --output-format stream-json`. OpenCode runs under
+`opencode serve` and the launcher drives its session over HTTP (see
+[permission asks](#permission-asks-reach-the-phone)). A fresh review uses the
 provider's read-only or planning mode. Codex resumes retain their original
 sandbox and worktree; a review prompt cannot change that inherited sandbox.
 
@@ -71,6 +73,8 @@ Each job is a directory under the store's private runtime root:
 | --- | --- |
 | `PHREN_FANOUT_JOB` | The job id. Its presence tells the opencode plugin it is running headless. |
 | `PHREN_FANOUT_DIR` | The absolute job directory. The plugin writes `blocked.json` here. |
+| `PHREN_FANOUT_APPROVALS` | `1` for an OpenCode worker the launcher drives: the plugin leaves an ask it would refuse to the phone. |
+| `OPENCODE_SERVER_PASSWORD` | A random password for this worker's `opencode serve`, so only the launcher can answer its asks. |
 
 When `PHREN_FANOUT_DIR` is unset the plugin falls back to
 `<store>/.runtime/agent-fanouts/<PHREN_FANOUT_JOB>`.
@@ -80,7 +84,9 @@ When `PHREN_FANOUT_DIR` is unset the plugin falls back to
 A headless worker has nobody watching the phone's approval queue. The opencode
 plugin grants `edit`, `bash` and `webfetch` in the worker's own worktree and
 allows `external_directory` only under the worktree's grandparent (the scratch
-root). Anything else is refused, which aborts the worker's turn.
+root). Anything else is refused, which aborts the worker's turn. With
+`PHREN_FANOUT_APPROVALS=1` it goes to the phone instead (next section), and
+OpenCode 1.18 does not call this plugin hook at all.
 
 When it refuses, the plugin writes `blocked.json` before returning the denial:
 
@@ -154,13 +160,51 @@ offers Clear finished, which calls `POST /v1/subagents/archive-finished` with
 `{ target }`: the Hook validates the live parent and archives that parent's
 finished jobs at any age under the same checks, returning `{ ok, archived }`.
 
-## OpenCode's own refusals
+## Permission asks reach the phone
 
-In `opencode run`, OpenCode rejects some permissions itself (external_directory,
-doom_loop) before any plugin sees them and prints `permission requested: <type>
-(<pattern>); auto-rejecting` to stderr. The launcher captures stderr into the job
-directory, and the Hook reads only the final 16 KiB of `stderr.log` when no
-`blocked.json` exists. The last matching refusal becomes the failure reason
+`opencode run` answers every permission ask itself: it prints `permission
+requested: <type> (<pattern>); auto-rejecting` and rejects it, before any plugin
+or phone can answer. So `phren fanout run` starts an OpenCode worker with
+`opencode serve --hostname 127.0.0.1 --port 0` in the worktree, under a random
+`OPENCODE_SERVER_PASSWORD`, and drives it over HTTP: it creates the session with
+the rules `opencode run` gives one (`question`, `plan_enter` and `plan_exit`
+denied), sends the brief with `prompt_async`, and follows `/event`, writing the
+same `tool_use`, `step_start`, `step_finish`, `text` and `error` lines to
+`events.jsonl` that `opencode run --format json` prints. The worker is done when
+its session goes idle; the launcher then stops the server.
+
+Routine reads never ask: a worktree's own `opencode.json` `permission` rules
+decide those inside OpenCode. `doom_loop` is allowed, because the watchdog above
+stops a real loop with a clearer reason. Any other ask for the worker's session
+or one of its subagents is relayed, one at a time:
+
+1. The launcher writes `<store>/.runtime/approvals/opencode-<worker session>.request.json`,
+   the file the Phren plugin writes for a pane, with `id` (the OpenCode
+   permission id), `type`, `title` (`Allow <type> for <label>?`), `message`
+   (`<type>: <patterns>`), `fanout` (the job id), `createdAt` and `expiresAt`
+   (one hour later; `PHREN_FANOUT_APPROVAL_MS` overrides it).
+2. The Hook holds it once the named job's manifest confirms the worker session,
+   a running status and a parent. It pushes it to registered phones and shows it
+   as the pending approval of the parent conversation, so the phone's existing
+   approval card answers it; the action id has the parent's shape (a UUID, or 32
+   hex characters for an opencode parent). The worker row in `/v1/subagents`
+   stays `running` with `reason: "needs-you: <type>: <patterns>"`, never blocked
+   or finished.
+3. The answer, from the card or the push, lands in
+   `opencode-<worker session>.answer.json`. Allow replies `once` and the same
+   session carries on to completion. Deny replies `reject` with a message telling
+   the worker not to retry and to report what it could not do, which OpenCode
+   hands the model as feedback instead of ending the turn, so the worker finishes
+   and says so. With no answer before `expiresAt`, the same happens with a
+   message saying nobody answered.
+
+Each decision is also recorded in `events.jsonl` as a `phren/permission` line.
+A denied ask leaves no `blocked.json`; the job ends `completed` unless the
+session itself failed.
+
+Workers started by older launchers with `opencode run` still refuse on their
+own. The Hook reads only the final 16 KiB of their `stderr.log` when no
+`blocked.json` exists, and the last matching refusal becomes the failure reason
 `blocked: <type> <pattern>`. Explicit failed or cancelled manifest states are
 also preserved internally even when an exit code is absent.
 
