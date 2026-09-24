@@ -135,6 +135,7 @@ final class SpeechTranscriber: DictationRecognizing {
     @ObservationIgnored private var transcript = AnalyzerTranscript()
     @ObservationIgnored private var legacyRequest: SFSpeechAudioBufferRecognitionRequest?
     @ObservationIgnored private var legacyTask: SFSpeechRecognitionTask?
+    @ObservationIgnored private var legacyTranscript = LegacyTranscript()
     @ObservationIgnored private var segmentTimer: Task<Void, Never>?
 
     init(locale: Locale = SpeechSettings.locale) {
@@ -395,18 +396,22 @@ final class SpeechTranscriber: DictationRecognizing {
             request.requiresOnDeviceRecognition = true
         }
         legacyRequest = request
+        legacyTranscript = LegacyTranscript()
         relay.route(to: request)
         legacyTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
             Task { @MainActor in
                 guard let self, self.segmentID == id else { return }
+                var heard: String?
                 if let result {
-                    receive(.partial(result.bestTranscription.formattedString))
+                    heard = self.legacyTranscript.accept(result.bestTranscription.formattedString,
+                                                         at: ProcessInfo.processInfo.systemUptime)
+                    receive(.partial(heard ?? ""))
                 }
                 guard self.segmentID == id else { return }
                 if let error {
                     receive(.failed(error.localizedDescription))
                 } else if let result, result.isFinal {
-                    receive(.finished(result.bestTranscription.formattedString))
+                    receive(.finished(heard ?? result.bestTranscription.formattedString))
                 }
             }
         }

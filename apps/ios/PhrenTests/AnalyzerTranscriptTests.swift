@@ -58,6 +58,28 @@ final class AnalyzerTranscriptTests: XCTestCase {
     }
 }
 
+final class LegacyTranscriptTests: XCTestCase {
+    func testARestartAfterAPauseKeepsTheWordsAlreadyHeard() {
+        var transcript = LegacyTranscript()
+        XCTAssertEqual(transcript.accept("Please open", at: 0), "Please open")
+        XCTAssertEqual(transcript.accept("Please open the atlas project", at: 0.5), "Please open the atlas project")
+        // The recogniser starts over after a pause with only the new words.
+        XCTAssertEqual(transcript.accept("Then", at: 3), "Please open the atlas project Then")
+        XCTAssertEqual(transcript.accept("Then run the tests", at: 3.4), "Please open the atlas project Then run the tests")
+        // Starting over with the same first word is still a restart.
+        XCTAssertEqual(transcript.accept("Then check", at: 6), "Please open the atlas project Then run the tests Then check")
+    }
+
+    func testRevisionsWhileTalkingReplaceTheGuess() {
+        var transcript = LegacyTranscript()
+        _ = transcript.accept("I want to fix the fire", at: 0)
+        XCTAssertEqual(transcript.accept("I want to fix the file", at: 0.3), "I want to fix the file")
+        XCTAssertEqual(transcript.accept("I want to fix", at: 0.5), "I want to fix", "a quick shorter guess is a revision")
+        XCTAssertEqual(transcript.accept("I want to fix the file.", at: 2), "I want to fix the file.", "a correction after a pause is not a restart")
+        XCTAssertEqual(transcript.banked, "")
+    }
+}
+
 /// Runs recorded speech through the real `SpeechAnalyzer` pipeline: two
 /// sentences with 65 seconds of room noise between them, fed faster than
 /// real time. Nothing may be dropped or repeated across the pause.
