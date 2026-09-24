@@ -9,6 +9,9 @@ enum PhrenDensity {
     static let chatHeaderTop: CGFloat = 4
     /// The gap between the composer and the home indicator.
     static let composerBottom: CGFloat = 4
+    /// The gap between the composer and the keyboard's suggestion bar
+    /// (owner, September 24: the box sat almost on it).
+    static let composerAboveKeyboard: CGFloat = 10
     /// The gap between two transcript entries.
     static let transcriptRowSpacing: CGFloat = 6
     /// An expanded tool card: its internal padding and the gap between rows.

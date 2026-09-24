@@ -119,6 +119,7 @@ number counts up on its own.
 
 ### Fixed
 
+- A long message stays inside the chat's message box. With an attachment above it, the box stayed short while the text grew, so the draft ran above the box's top edge and over the + / terminal / agents / microphone row. The box now grows with the draft to four lines and scrolls inside after that, and it sits a little higher above the keyboard's suggestion bar.
 - A chat attachment that reached the computer reports success. When another request on the same SSH connection failed (a stream that ended, a poll that timed out), the phone closed the connection under the upload, which then said "Attachment upload didn't finish" (tcpShutdown) although the file was already stored. A failed request now only takes its connection out of use: requests already running on it finish first, and new requests open a fresh connection.
 - Focus in the Memory map lands on the focused node. Focus shows the node's neighbourhood, which lays the map out again, and the camera stayed where the node used to be, often leaving it off screen. A tap on the map also selects the node under your finger; it had selected the node under the previous tap, or nothing.
 - Project numbers tell the truth. The number beside a project in the Memory

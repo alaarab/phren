@@ -74,6 +74,8 @@ struct ChatComposerBar: View {
     /// The fallback key strip stays collapsed behind the Keys chip.
     @State private var answerKeysExpanded = false
     @ScaledMetric(relativeTo: .body) private var composerTextSize = 14.0
+    /// A software keyboard is up: the box keeps a gap above its suggestion bar.
+    @State private var keyboardUp = false
 
     private var dictating: Bool { dictation.isRecording }
     private var answerTerminalLink: ChatAnswerTerminalLink { ChatAnswerTerminalLink(session: session, target: model.target) }
@@ -100,6 +102,11 @@ struct ChatComposerBar: View {
                 buttonRow(mode)
             }
             .padding(.top, 2)
+            // The box is always as tall as its draft. Left compressible, a
+            // tight layout (an attachment chip above it, the keyboard up)
+            // squeezed it while the editor kept its height, so the text ran
+            // over the box's top edge and the button row.
+            .fixedSize(horizontal: false, vertical: true)
             .background(PhrenTheme.chatPanel, in: RoundedRectangle(cornerRadius: 22))
             .overlay { RoundedRectangle(cornerRadius: 22).strokeBorder(PhrenTheme.border, lineWidth: 0.5) }
             .accessibilityElement(children: .contain)
@@ -107,8 +114,29 @@ struct ChatComposerBar: View {
             .disabled(model.restoringDraft)
         }
         .buttonStyle(.plain).foregroundStyle(PhrenTheme.chatText)
-        .padding(.horizontal, 10).padding(.top, 6).padding(.bottom, PhrenDensity.composerBottom)
+        .padding(.horizontal, 10).padding(.top, 6)
+        .padding(.bottom, keyboardUp ? PhrenDensity.composerAboveKeyboard : PhrenDensity.composerBottom)
         .background(PhrenTheme.chatCanvas.ignoresSafeArea(.container, edges: .bottom))
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
+            keyboardChanged(note)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { note in
+            keyboardChanged(note, hiding: true)
+        }
+    }
+
+    /// Follows the keyboard's frame, moving with its own animation. A
+    /// hardware keyboard's shortcut bar counts as up too; the gap is small.
+    private func keyboardChanged(_ note: Notification, hiding: Bool = false) {
+        let frame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect) ?? .zero
+        let screen = (note.object as? UIScreen)?.bounds ?? frame
+        let up = !hiding && frame.height > 0 && frame.minY < screen.maxY - 1
+        #if DEBUG && targetEnvironment(simulator)
+        if AgentChatFixture.enabled { AgentChatFixture.report.keyboardTop = up ? Double(frame.minY) : 0 }
+        #endif
+        guard up != keyboardUp else { return }
+        let duration = note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0.25
+        withAnimation(.easeOut(duration: duration)) { keyboardUp = up }
     }
 
     private var attachments: some View {
@@ -131,7 +159,9 @@ struct ChatComposerBar: View {
                     }.padding(8).background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: 14))
                 }
             }
-        }.accessibilityIdentifier("chat-attachments")
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityIdentifier("chat-attachments")
     }
 
     @ViewBuilder private var terminalAnswer: some View {

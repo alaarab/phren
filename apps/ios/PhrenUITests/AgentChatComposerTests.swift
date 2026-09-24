@@ -141,6 +141,60 @@ final class AgentChatComposerTests: AgentChatUITestCase {
         XCTAssertEqual(keepsUp(app, composer, "dictation twice", cap: four), one + 2 * line, accuracy: 1.5)
     }
 
+    /// A long typed draft (owner, September 24): the box grows with it, the
+    /// editor stays inside the box and above its button row, and past four
+    /// lines it scrolls there, with and without an attachment above. With the
+    /// keyboard up the box keeps a gap above the keyboard's suggestion bar.
+    @MainActor
+    func testLongDraftStaysInsideTheBoxAboveTheButtonRow() {
+        longDraftStaysInsideTheBox(attachment: false)
+    }
+
+    @MainActor
+    func testLongDraftWithAnAttachmentStaysInsideTheBox() {
+        longDraftStaysInsideTheBox(attachment: true)
+    }
+
+    @MainActor private func longDraftStaysInsideTheBox(attachment: Bool) {
+        let app = launch(extra: ["--chat-clear-drafts"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let composer = app.textViews["chat-composer"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 8))
+        let box = app.descendants(matching: .any).matching(identifier: "chat-message-box").firstMatch
+        if attachment {
+            attachImage(app)
+            XCTAssertTrue(app.descendants(matching: .any)["chat-attachments"].waitForExistence(timeout: 5))
+        }
+        let emptyBox = settledHeight(box)
+        composer.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        composer.typeText("Please look at the chat composer again, because when I type a long message the text runs out of the box and over the buttons")
+        let four = keepsUp(app, composer, "long draft")
+        XCTAssertGreaterThan(box.frame.height, emptyBox + 30, "The box grows with a wrapped draft")
+        holdsDraft(app, composer, box, "long draft")
+        composer.typeText(" and it keeps going for a few more lines so the editor has to scroll inside the box instead of spilling out of it")
+        XCTAssertEqual(keepsUp(app, composer, "longer draft", cap: four), four, accuracy: 1, "Past four lines the box scrolls")
+        holdsDraft(app, composer, box, "longer draft")
+        capture(app, attachment ? "Long draft with an attachment, keyboard up" : "Long draft, keyboard up")
+    }
+
+    /// The editor inside the box and above the button row, the box's bottom
+    /// a keyboard gap above the keyboard.
+    @MainActor private func holdsDraft(_ app: XCUIApplication, _ composer: XCUIElement, _ box: XCUIElement, _ step: String) {
+        let editor = composer.frame, frame = box.frame
+        let buttons = app.buttons["Add attachment"].frame
+        XCTAssertGreaterThanOrEqual(editor.minY, frame.minY, "\(step): the editor starts inside the box (\(editor) in \(frame))")
+        XCTAssertLessThanOrEqual(editor.maxY, buttons.minY + 0.5, "\(step): the editor ends above the button row (\(editor), buttons \(buttons))")
+        XCTAssertLessThanOrEqual(buttons.maxY, frame.maxY + 0.5, "\(step): the button row stays in the box")
+        // XCUITest's keyboard frame starts below the suggestion bar; the app
+        // reports the top UIKit gives it, suggestion bar included.
+        let keyboardTop = selectionReport(app)["keyboardTop"] as? Double ?? 0
+        XCTAssertGreaterThan(keyboardTop, 0, "\(step): the keyboard is up")
+        let gap = keyboardTop - frame.maxY
+        XCTAssertGreaterThanOrEqual(gap, 9.5, "\(step): the box keeps its gap above the suggestion bar (box \(frame), keyboard top \(keyboardTop))")
+        XCTAssertLessThanOrEqual(gap, 10.5, "\(step): the gap stays modest")
+    }
+
     /// The composer's settled height, after checking that the box holds its
     /// text: as tall as the text up to the cap, and never scrolled while the
     /// whole draft fits.

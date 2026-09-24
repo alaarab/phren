@@ -62,8 +62,12 @@ import UniformTypeIdentifiers
         var selectionEndY = 0.0
         /// The composer's scroll offset, text height and visible height.
         var composer: [Double] = []
+        /// The top of the keyboard, suggestion bar included, in screen
+        /// points; 0 while it is down. XCUITest's keyboard frame leaves the
+        /// suggestion bar out.
+        var keyboardTop = 0.0
         var json: String {
-            let report: [String: Any] = ["copied": copied, "selected": selected, "composer": composer,
+            let report: [String: Any] = ["copied": copied, "selected": selected, "composer": composer, "keyboardTop": keyboardTop,
                                        "selectionEndX": selectionEndX, "selectionEndY": selectionEndY]
             return String(decoding: (try? JSONSerialization.data(withJSONObject: report, options: .sortedKeys)) ?? Data(), as: UTF8.self)
         }

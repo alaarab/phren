@@ -8,6 +8,7 @@ final class ChatDensityTests: XCTestCase {
     func testChatChromeAndTranscriptMeasurements() {
         XCTAssertEqual(PhrenDensity.chatHeaderTop, 4)
         XCTAssertEqual(PhrenDensity.composerBottom, 4)
+        XCTAssertEqual(PhrenDensity.composerAboveKeyboard, 10)
         XCTAssertEqual(PhrenDensity.transcriptRowSpacing, 6)
     }
 
