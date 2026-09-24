@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="phren_bg">#0A0A1A</color>
+    <color name="phren_accent">#9058F0</color>
+    <color name="phren_text">#ECE9F5</color>
+</resources>

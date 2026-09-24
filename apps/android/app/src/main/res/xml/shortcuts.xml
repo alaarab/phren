@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="add_task"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_task"
+        android:shortcutShortLabel="@string/shortcut_task_short"
+        android:shortcutLongLabel="@string/shortcut_task_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.phren.android"
+            android:targetClass="com.phren.android.CaptureActivity">
+            <extra android:name="com.phren.android.extra.KIND" android:value="task" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="add_note"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_note"
+        android:shortcutShortLabel="@string/shortcut_note_short"
+        android:shortcutLongLabel="@string/shortcut_note_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.phren.android"
+            android:targetClass="com.phren.android.CaptureActivity">
+            <extra android:name="com.phren.android.extra.KIND" android:value="note" />
+        </intent>
+    </shortcut>
+</shortcuts>
