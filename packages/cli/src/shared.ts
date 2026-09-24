@@ -77,6 +77,7 @@ export {
   getProjectDirs,
   listInvalidProjectDirs,
   collectNativeMemoryFiles,
+  nativeMemoryEnabled,
   computePhrenLiveStateToken,
   getPhrenPath,
   qualityMarkers,
@@ -85,21 +86,6 @@ export {
   ftsCacheRoot,
   ensureFtsCacheRootPrivate,
 } from "./phren-paths.js";
-
-export {
-  PROACTIVITY_LEVELS,
-  type ProactivityLevel,
-  parseProactivityLevel,
-  getProactivityLevel,
-  getProactivityLevelForFindings,
-  getProactivityLevelForTask,
-  hasExplicitFindingSignal,
-  hasExplicitTaskSignal,
-  hasExecutionIntent,
-  hasDiscoveryIntent,
-  shouldAutoCaptureFindingsForLevel,
-  shouldAutoCaptureTaskForLevel,
-} from "./proactivity.js";
 
 const MEMORY_SCOPE_PATTERN = /^[a-z][a-z0-9_-]{0,63}$/;
 

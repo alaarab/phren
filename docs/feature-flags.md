@@ -1,5 +1,10 @@
 # Feature Flags
 
+[Modules](modules.md) are the outer enablement boundary. Configure them with
+`phren modules enable|disable <name> [--profile <name>]`; feature flags and
+management presets apply only within enabled modules. A flag cannot restore a
+disabled module's tools, hooks or background work.
+
 phren uses environment variables as feature flags to control optional behaviors. Defaults are mixed — some flags ship on, some ship off; each section below states its own default. A flag that defaults to enabled is turned off by setting it to `0`, `false`, `off`, or `no`; a flag that defaults to disabled is turned on by setting it to `1` (or any value other than that disable list).
 
 ## Precedence with management presets
@@ -12,6 +17,10 @@ The [management preset](footprint.md) is the coarse control; these flags are the
 4. Built-in `managed` defaults (when no preset is set).
 
 The `manual` preset writes `PHREN_FEATURE_AUTO_CAPTURE=0`, `PHREN_FEATURE_AUTO_EXTRACT=0`, and `PHREN_FEATURE_DAILY_MAINTENANCE=0` into `~/.phren/.env` at install so its automations stay off; you can flip any of them back on individually there.
+
+## PHREN_FEATURE_NATIVE_MEMORY
+
+Default: **off**. When on, phren also indexes Claude Code's own memory files (`~/.claude/projects/*/memory/*.md`) and can inject them as context. Off by default since 0.2.0: phren indexes phren, and Claude's memory directory is Claude's. Set `PHREN_FEATURE_NATIVE_MEMORY=1` to restore the old behaviour.
 
 ## PHREN_FEATURE_TOOL_HOOK
 
@@ -191,6 +200,28 @@ With this flag, when fragment extraction finds a shared fragment between new and
 ```bash
 export PHREN_FEATURE_SEMANTIC_CONFLICT=1
 export PHREN_LLM_KEY=sk-...
+```
+
+## PHREN_FEATURE_AGENTS
+
+**Default:** disabled
+
+Shows the coding agents running on this machine on the shell's knowledge graph. phren does not spawn or supervise them; it asks whatever is already running them and joins each one onto a phren project by the directory it is working in, using the same project detection the hooks use (so a git worktree resolves to the repository it came from).
+
+Two providers ship built in and are used when available:
+
+- **Herdr** — `herdr agent list`, which reports every agent pane, its status, its directory and which one is focused. Answers in a few milliseconds.
+- **phren-agent** — agents from `phren-agent --multi`, published to `.runtime/agents/`.
+
+Anything that prints the same record shape is a provider, so tmux or Zellij users need a few lines of shell rather than a change to phren.
+
+In the Graph view, `a` toggles the overlay, `Tab` cycles agents, and `↵` brings the highlighted agent to the front through its own host. Agents appear as a coloured marker beside the project they are working in — green while working, grey when done, red on error — and are listed in the details pane.
+
+Off by default because it runs an external binary on a timer. With no provider available the overlay never appears.
+
+```bash
+export PHREN_FEATURE_AGENTS=1
+export PHREN_HERDR_TIMEOUT_MS=3000   # optional, clamped to 250–30000
 ```
 
 ## PHREN_FEATURE_FACT_EXTRACT

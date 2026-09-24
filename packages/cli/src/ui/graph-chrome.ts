@@ -191,4 +191,55 @@ body:has(#tab-graph.active) .header-brand { color: #dbe6ff; }
   border-color: rgba(103, 232, 249, 0.55);
   color: #e6f6ff;
 }
+/* Dossier header: title block left, icon-button tools (prev/next, edit,
+   delete, close) right. Every target is a 44px circle. */
+.phren-dossier-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.phren-dossier-tools {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+}
+.phren-dossier-iconbtn {
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 1px solid rgba(103, 232, 249, 0.22);
+  border-radius: 999px;
+  background: rgba(12, 15, 30, 0.9);
+  color: #dbe4ff;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.phren-dossier-iconbtn:hover {
+  border-color: rgba(103, 232, 249, 0.55);
+  color: #e6f6ff;
+}
+.phren-dossier-iconbtn.danger {
+  color: #ef9898;
+}
+.phren-dossier-iconbtn svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.phren-dossier-count {
+  font: 600 10px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.06em;
+  color: #8b96c9;
+  white-space: nowrap;
+  padding: 0 2px;
+}
 `;

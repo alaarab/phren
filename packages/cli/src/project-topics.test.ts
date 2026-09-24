@@ -100,7 +100,7 @@ describe("project topic config", () => {
 
   it("produces deterministic topic suggestions from project language", () => {
     makeProject(tmpDir, "game", {
-      "CLAUDE.md": "Rendering, shaders, frame timing, and combat gameplay all matter in this project.",
+      "AGENTS.md": "Rendering, shaders, frame timing, and combat gameplay all matter in this project.",
       "summary.md": "A game project with shader pipelines and combat systems.",
       "FINDINGS.md": [
         "# game FINDINGS",
@@ -140,7 +140,7 @@ describe("project topic config", () => {
 
   it("uses adaptive defaults when project content exists", () => {
     makeProject(tmpDir, "demo", {
-      "CLAUDE.md": "Auth, token lifecycle, and oauth flow; auth checks around jwt refresh.",
+      "AGENTS.md": "Auth, token lifecycle, and oauth flow; auth checks around jwt refresh.",
       "FINDINGS.md": "# demo FINDINGS\n\n- OAuth token refresh loop under auth middleware\n- JWT token expires before refresh\n",
       "reference/notes.md": "# Notes\n\nAuth middleware and token validation behavior.",
     });
@@ -158,7 +158,7 @@ describe("project topic config", () => {
 
   it("lets pinned topic suggestions override adaptive suggestions", () => {
     makeProject(tmpDir, "music", {
-      "CLAUDE.md": "This project talks about stems and arrangement.",
+      "AGENTS.md": "This project talks about stems and arrangement.",
       "FINDINGS.md": "# music FINDINGS\n\n- Stem export breaks for arrangement revisions\n",
     });
     const pinResult = pinProjectTopicSuggestion(tmpDir, "music", {

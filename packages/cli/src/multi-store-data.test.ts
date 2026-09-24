@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
-import { makeTempDir } from "./test-helpers.js";
+import { makeTempDir, initTestPhrenRoot } from "./test-helpers.js";
 import { writeStoreRegistry, type StoreRegistry } from "./store-registry.js";
 import { storeAwareProjectPath } from "./store-routing.js";
 import { appendReviewQueue } from "./governance/policy.js";
@@ -47,6 +47,8 @@ describe("multi-store data layer", () => {
     tmp = makeTempDir("multi-store-data-test-");
     phrenDir = path.join(tmp.path, ".phren");
     teamDir = path.join(tmp.path, "team-store");
+    initTestPhrenRoot(phrenDir);
+    initTestPhrenRoot(teamDir);
     fs.mkdirSync(phrenDir, { recursive: true });
     fs.mkdirSync(teamDir, { recursive: true });
     delete process.env.PHREN_FEDERATION_PATHS;

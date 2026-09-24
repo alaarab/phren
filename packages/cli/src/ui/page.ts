@@ -1,3 +1,4 @@
+import { moduleEnabled } from "../modules/runtime.js";
 import { WEB_UI_STYLES, renderWebUiScript } from "./assets.js";
 import { renderGraphScript } from "./graph.js";
 import { FINDING_CAPTURE_UI_STYLES, LAYOUT_VIEWPORT_STYLES, NOTES_UI_STYLES, PROJECT_REFERENCE_UI_STYLES, REVIEW_UI_STYLES, SETTINGS_TAB_UI_STYLES, TASK_UI_STYLES } from "./styles.js";
@@ -28,6 +29,7 @@ function h(s: string): string {
 }
 
 export function renderWebUiPage(_phrenPath: string, authToken?: string, nonce?: string): string {
+  const tasksEnabled = moduleEnabled(_phrenPath, "tasks");
   const nonceAttr = nonce ? ` nonce="${h(nonce)}"` : "";
 
   return `<!doctype html>
@@ -132,7 +134,7 @@ ${NOTES_UI_STYLES}
     <button class="nav-item" data-tab="activity">Activity</button>
     <button class="nav-item" data-tab="search">Search</button>
     <button class="nav-item" data-tab="graph">Graph</button>
-    <button class="nav-item" data-tab="tasks">Tasks</button>
+    ${tasksEnabled ? '<button class="nav-item" data-tab="tasks">Tasks</button>' : ""}
     <button class="nav-item" data-tab="skills">Skills</button>
     <button class="nav-item" data-tab="hooks">Hooks</button>
     <button class="nav-item" data-tab="settings">Settings</button>
@@ -228,7 +230,7 @@ ${NOTES_UI_STYLES}
   <div id="tab-search" class="tab-content">
     <div style="max-width:720px;margin:0 auto">
       <div style="display:flex;gap:8px;margin-bottom:16px">
-        <input type="text" id="search-query" placeholder="Search fragments, findings, tasks..." style="flex:1;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;background:var(--surface);color:var(--ink);font-size:var(--text-base);font-family:var(--font);outline:none" />
+        <input type="text" id="search-query" placeholder="${tasksEnabled ? "Search fragments, findings, tasks..." : "Search fragments and findings..."}" style="flex:1;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;background:var(--surface);color:var(--ink);font-size:var(--text-base);font-family:var(--font);outline:none" />
         <div id="search-project-wrap" style="position:relative">
           <button id="search-project-btn" type="button" onclick="window._phrenToggleProjectDropdown()" style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;background:var(--surface);color:var(--ink);font-size:var(--text-sm);cursor:pointer;font-family:var(--font);min-width:120px;text-align:left;white-space:nowrap">All projects</button>
           <div id="search-project-dropdown" style="display:none;position:absolute;top:100%;left:0;z-index:50;margin-top:4px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);box-shadow:0 4px 12px rgba(0,0,0,.15);max-height:240px;overflow-y:auto;min-width:160px"></div>
@@ -236,7 +238,7 @@ ${NOTES_UI_STYLES}
         <select id="search-type-filter" style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;background:var(--surface);color:var(--ink);font-size:var(--text-sm)">
           <option value="">All types</option>
           <option value="finding">Findings</option>
-          <option value="task">Tasks</option>
+          ${tasksEnabled ? '<option value="task">Tasks</option>' : ""}
           <option value="reference">Reference</option>
           <option value="summary">Summaries</option>
         </select>
@@ -253,7 +255,6 @@ ${NOTES_UI_STYLES}
   <div id="tab-graph" class="tab-content">
     <div class="graph-container">
       <div id="graph-canvas" aria-label="Knowledge graph"></div>
-      <div class="graph-tooltip" id="graph-tooltip"></div>
       <div class="graph-controls">
         <button id="graph-zoom-in" title="Zoom in">+</button>
         <button id="graph-zoom-out" title="Zoom out">-</button>
@@ -267,7 +268,6 @@ ${NOTES_UI_STYLES}
       </div>
       <div id="graph-node-popover" style="display:none;position:absolute;left:0;top:0;z-index:12;max-width:min(440px,calc(100% - 24px));pointer-events:none">
         <div id="graph-node-popover-card" class="card" style="pointer-events:auto;position:relative;box-shadow:var(--shadow-lg);border:1px solid var(--border);background:color-mix(in srgb, var(--surface) 96%, transparent);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)">
-          <button id="graph-node-close" type="button" aria-label="Close selected node" title="Close" style="position:absolute;top:10px;right:10px;width:38px;height:38px;border-radius:999px;border:1px solid var(--border);background:var(--surface-raised);color:var(--ink);cursor:pointer;font-size:20px;line-height:1;display:grid;place-items:center">×</button>
           <div id="graph-node-content" style="padding:18px 18px 16px 18px"></div>
         </div>
       </div>

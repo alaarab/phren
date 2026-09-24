@@ -129,7 +129,7 @@ describe("mcp-search: type filter", () => {
     makeProject(tmp.path, "myapp", {
       "FINDINGS.md": "# myapp Findings\n\n## 2026-03-01\n\n- Authentication uses OAuth2 with PKCE flow\n",
       "summary.md": "# myapp\nAuthentication and authorization service for the platform.",
-      "CLAUDE.md": "# myapp instructions\nAlways check authentication before accessing resources.",
+      "AGENTS.md": "# myapp instructions\nAlways check authentication before accessing resources.",
     });
     // Add a reference doc
     writeFile(
@@ -359,7 +359,7 @@ describe("mcp-search: list_projects", () => {
     });
     makeProject(tmp.path, "beta", {
       "summary.md": "# beta\nBeta project for testing.",
-      "CLAUDE.md": "# beta\nUse npm.",
+      "AGENTS.md": "# beta\nUse npm.",
     });
 
     db = await buildIndex(tmp.path);
@@ -410,7 +410,7 @@ describe("mcp-search: get_project_summary", () => {
     makeProject(tmp.path, "myapp", {
       "summary.md": "# myapp\nA web application for task management.",
       "FINDINGS.md": "# myapp Findings\n\n- Always validate inputs\n",
-      "CLAUDE.md": "# Instructions\nUse TypeScript.",
+      "AGENTS.md": "# Instructions\nUse TypeScript.",
     });
 
     db = await buildIndex(tmp.path);

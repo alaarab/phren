@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import * as yaml from "js-yaml";
-import { makeTempDir, writeFile, grantAdmin } from "./test-helpers.js";
+import { makeTempDir, writeFile, grantAdmin, resetTestPhrenPath } from "./test-helpers.js";
 import { writeProjectTopics } from "./project-topics.js";
 import {
   buildIndex,
@@ -45,14 +45,14 @@ function makeProject(phrenDir: string, name: string, files: Record<string, strin
 }
 
 beforeEach(() => {
-  delete process.env.PHREN_PATH;
+  resetTestPhrenPath();
   delete process.env.PHREN_PROFILE;
   delete process.env.PHREN_DEBUG;
   delete process.env.PROJECTS_DIR;
 });
 
 afterEach(() => {
-  delete process.env.PHREN_PATH;
+  resetTestPhrenPath();
   delete process.env.PHREN_PROFILE;
   delete process.env.PHREN_DEBUG;
   delete process.env.PHREN_ACTOR;
@@ -273,6 +273,13 @@ describe("detectProject", () => {
     expect(result).toBe("myproject");
   });
 
+  it("falls back to a case-insensitive match, for a sourcePath synced from a case-insensitive filesystem", () => {
+    const phren = makePhren();
+    makeProject(phren, "myproject", { "SUMMARY.md": "# Summary" });
+    expect(detectProject(phren, "/home/user/MyProject/src")).toBe("myproject");
+    expect(detectProject(phren, "/home/user/myprojectx")).toBeNull();
+  });
+
   it("returns null when no project matches", () => {
     const phren = makePhren();
     makeProject(phren, "myproject", { "SUMMARY.md": "# Summary" });
@@ -393,7 +400,7 @@ describe("buildIndex", () => {
     grantAdmin(phren);
     writeFile(path.join(phren, "global", "shared", "shared-snippet.md"), "imported snippet about testing");
     makeProject(phren, "proj", {
-      "CLAUDE.md": "# Config\n@import shared/shared-snippet.md",
+      "AGENTS.md": "# Config\n@import shared/shared-snippet.md",
     });
     const db = await buildIndex(phren);
     const rows = queryRows(db, "SELECT * FROM docs WHERE docs MATCH ?", ["imported"]);
@@ -401,16 +408,16 @@ describe("buildIndex", () => {
     db.close();
   });
 
-  it("indexes repo-owned CLAUDE.md for repo-managed projects instead of the phren copy", async () => {
+  it("indexes repo-owned AGENTS.md for repo-managed projects instead of the phren copy", async () => {
     const phren = makePhren();
     grantAdmin(phren);
     const projectsDir = path.join(phren, "..", "repos");
     process.env.PROJECTS_DIR = projectsDir;
     fs.mkdirSync(path.join(projectsDir, "proj"), { recursive: true });
-    writeFile(path.join(projectsDir, "proj", "CLAUDE.md"), "# Repo Instructions\nrepoownedtoken");
+    writeFile(path.join(projectsDir, "proj", "AGENTS.md"), "# Repo Instructions\nrepoownedtoken");
 
     makeProject(phren, "proj", {
-      "CLAUDE.md": "# Phren Instructions\nphrencopytoken",
+      "AGENTS.md": "# Phren Instructions\nphrencopytoken",
       "FINDINGS.md": "- searchable finding",
       "phren.project.yaml": yaml.dump({ ownership: "repo-managed", sourcePath: path.join(projectsDir, "proj") }, { lineWidth: 1000 }),
     });
@@ -418,7 +425,7 @@ describe("buildIndex", () => {
     const db = await buildIndex(phren);
     const repoRows = queryRows(db, "SELECT * FROM docs WHERE docs MATCH ?", ["repoownedtoken"]);
     const phrenRows = queryRows(db, "SELECT * FROM docs WHERE docs MATCH ?", ["phrencopytoken"]);
-    const claudeDoc = queryDocBySourceKey(db, phren, "proj/CLAUDE.md");
+    const claudeDoc = queryDocBySourceKey(db, phren, "proj/AGENTS.md");
 
     expect(repoRows).not.toBeNull();
     expect(phrenRows).toBeNull();

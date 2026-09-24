@@ -1,10 +1,228 @@
 # MCP API Reference
 
-Phren exposes 59 MCP tools across 13 modules through the Model Context Protocol. These are available to any MCP-compatible client when the phren server is running.
+Phren exposes 70 MCP tools across 16 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the seven built-in [Modules](modules.md). **`core`**, the default, exposes the seven memory tools plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default ten. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
 
-All tools return structured JSON: `{ ok, message, data?, error? }`.
+## Core profile
 
-Module layout: search, tasks, findings, daily notes, memory quality, data management, fragment graph, sessions, operations/review, skills, hooks, extraction, configuration.
+| Tool | Does | Stands for (full-profile names) |
+|------|------|--------------------------------|
+| `search_knowledge` | Search the store | None |
+| `get_memory_detail` | Fetch one memory entry in full | None |
+| `get_project_summary` | A project's summary and counts | None |
+| `add_finding` | Save a finding; `kind: "note"` saves a daily note instead | `add_note` |
+| `revise_finding` | `action`: supersede, retract, edit, remove, link, resolve_contradiction, pin, feedback | `supersede_finding`, `retract_finding`, `edit_finding`, `remove_finding`, `link_findings`, `resolve_contradiction`, `pin_memory`, `memory_feedback` |
+| `get_tasks` | List tasks | None |
+| `add_task` | Add a task | None |
+| `manage_task` | `action`: complete, update, remove, pin, tidy | `complete_task`, `update_task`, `remove_task`, `pin_task`, `tidy_done_tasks` |
+| `session` | `action`: start, end, context, history | `session_start`, `session_end`, `session_context`, `session_history` |
+| `phren_admin` | `action`: any remaining tool by name, or `list_actions` | skills, hooks, config, notes, review queue, export/import, doctor, health, stores, projects, fragment graph, extraction, topic summaries (`get_topic_summaries`, `set_topic_summary`), code index (`code_search`, `code_definition`, `code_references`, `code_outline`, `code_usage`), dispatch and hand-off |
+
+A composite takes `action` plus the target tool's own parameters, validated against that tool's schema; a miss returns the parameter list. A nested object parameter (`manage_task` `updates`, `set_config` `settings`, `add_finding` `citation`) may arrive as a real object or as its JSON string (some hosts serialize what a passthrough schema does not name); both are accepted, and a decoded value that misses its own schema fails at the inner field rather than as a type error on the parameter. `phren_admin list_actions` returns every admin action with its full parameter list. The individual tool sections below still describe each tool's parameters; in the core profile, reach them through the composite that stands for them.
+
+Most tools return structured JSON: `{ ok, message, data?, error? }`. The five code query tools return compact text.
+
+Module layout: search, tasks, findings, daily notes, memory quality, data management, fragment graph, sessions, operations/review, skills, hooks, extraction, configuration, topic summaries, code index, dispatch and hand-off.
+
+## Cross-computer dispatch
+
+### `dispatch`
+
+Send a worker brief through the local Phren Hook to an enrolled computer. In the
+core profile use `phren_admin(action: "dispatch", ...)`; full exposes `dispatch`
+directly. The local Hook must be running. Enroll the sender's computer key on the
+receiver with `phren bridge enroll-computer <name>` and its `--accept` command,
+then configure verified SSH peers in the local Hook's private `hooks.yaml`.
+See [Conductor](conductor.md) for setup, trust boundaries and worker contracts.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `computer` | string | yes | Enrolled name, or `anywhere` for the connected peer with the fewest working agents. |
+| `project` | string | yes | Project slug whose `phren.project.yaml` sourcePath exists on the receiver. No local checkout paths. |
+| `harness` | enum | yes | `codex`, `claude`, or `opencode`. |
+| `model` | string | no | Explicit remote model, up to 200 characters; otherwise its configured default. |
+| `prompt` | string | yes | Worker brief, up to 32768 characters. |
+| `label` | string | yes | Task label, up to 200 characters. |
+| `parent` | object | no | Conversation identity to retain in the dispatch receipt. |
+| `parentTarget` | object | no | Live local target used to validate the parent identity. |
+
+Returns the receipt in `data`: dispatch ID, computer, project, harness/model,
+label, timestamps, state, remote target when known, grant match (`granted`), and an optional error.
+`accepted` means first-prompt acceptance, not task completion. `uncertain` means
+delivery might have occurred; never retry it automatically. Receipts are available
+through `phren dispatch status`. Remote leads and their workers appear in
+`/v1/subagents`. When the call comes from an agent running in a Herdr pane,
+the receipt keeps that pane as `origin` for return notices. After placement
+the Hook follows the worker (see `dispatch_returns`), and receipts gain
+`worker` (its last observed state) and `returned` (the latest return).
+
+CLI equivalent:
+`phren dispatch Desk phren --harness codex --label 'Checks' --prompt 'Run the assigned checks'`.
+
+### `dispatch_returns`
+
+List unread returns from dispatched workers, oldest first, and mark them read.
+No parameters. In the core profile use `phren_admin(action: "dispatch_returns")`.
+
+A return is recorded when a worker's pane changes to one of these states:
+
+| State | Meaning |
+|-------|---------|
+| `done` | The worker finished its turn. `reply` holds its final reply from the transcript, at most 4000 UTF-8 bytes (`truncated` when cut). |
+| `needs-you` | The worker finished by asking the owner something. `question` holds the question line, `reply` the whole reply. |
+| `blocked` | The worker waits on terminal input, such as a permission prompt. |
+| `gone` | The worker's pane closed or another conversation took it over. |
+
+Each row carries `id` (the dispatch ID), `computer`, `project`, `label`,
+`harness`, `state`, `at` and the worker's `target` for `hand_off`. A worker
+that takes more work after `done` and finishes again produces a new return.
+The dispatching Hook asks each enrolled computer about its open dispatches at
+most every 15 seconds, in one request per computer. Dispatches are followed
+for 24 hours or until the worker is gone. When the dispatching agent is idle,
+the Hook also types one line into it, at most once every two minutes, for
+example `Return: Linuxbox parser checks done, tests passed (dispatch <id>).
+Call dispatch_returns.` It never types into a working agent.
+
+CLI equivalent: `phren dispatch returns`.
+
+### `live_sessions`
+
+List every live agent session on this computer and each enrolled computer:
+computer, project (none for a conductor), harness, status, `idleFor` (seconds
+since the tab last changed, when the Hook has seen it change), role, branch,
+model and the `target` that `hand_off` takes. Computers that could not be
+reached come back in `unreachable`. Computers registered in the store's
+`machines.yaml` but not linked in `hooks.yaml` come back in
+`notLinked: [{ name, aliases? }]`: their sessions were not checked, which is not
+the same as nothing running there. Names are compared by their first DNS label,
+ignoring case, against this computer's names and each peer's name, address and
+aliases; registered names sharing a first label are one entry. `enrolled` counts this Hook's peers, and `peerError`
+says why none were read when `hooks.yaml` is broken. No parameters. In the
+core profile use `phren_admin(action: "live_sessions")`.
+
+CLI equivalent: `phren dispatch sessions`.
+
+### `hand_off`
+
+Deliver a prompt to an existing session through the local Hook or a verified
+peer. In the core profile use `phren_admin(action: "hand_off", ...)`; full
+exposes `hand_off` directly. Supply exactly one of `target` or `session`.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `computer` | string | no | Enrolled computer name. Omit for the local Hook. |
+| `target` | object | one of | Complete live Hook target. |
+| `session` | string | one of | Session id resolved through the selected Hook's workspace overview. |
+| `text` | string | yes | Prompt to deliver, up to 32768 characters. |
+| `project` | string | no | Project scope for standing-grant matching. |
+
+Returns `{ ok, delivered, target, granted }`. CLI equivalent:
+`phren hand-off local --session <id> --text 'Continue with the review'`.
+
+### Standing grants
+
+`GET /v1/conductor/grants` lists grants. `POST /v1/conductor/grants` adds a
+validated `scope`, `actions` and optional `computers` rule.
+`DELETE /v1/conductor/grants` takes an `index` and optional `expected` grant;
+a changed row returns 409 instead of revoking a different grant.
+Concurrent writes are serialized per store and protected by a file lock.
+See [Conductor](conductor.md) for scope and matching rules.
+
+### Hook workspace launch fields
+
+`POST /v1/workspaces/launch` accepts `role: "agent" | "conductor"` (default
+`agent`) and `effort: "low" | "medium" | "high"` (default `medium`). A
+conductor launch supports Claude, Codex and OpenCode, attaches the shipped
+conductor brief, prefixes the Herdr agent name with `conductor-`, and returns
+`role: "conductor"`. Workspace overview tabs report that role. A second running
+conductor for the store is rejected with status 409 and the existing target.
+
+An agent launch may add `worktree: { branch }`. The Hook runs `git worktree add
+-b <branch> <repo>/.claude/worktrees/<name> HEAD` from the project folder's
+repository, where `<name>` is the branch with `/` and `.` turned into `-`, and
+starts the agent in the same folder inside the new worktree. The reply adds
+`worktree: { path, branch }`. A folder outside Git, a repository with no
+commits, an existing branch or worktree folder answer 409, an invalid branch
+name 400, and a conductor with a worktree 400, all before Herdr is asked for
+anything. A failed Herdr create removes the new worktree and branch.
+
+---
+
+## Scheduled prompts
+
+A project's `schedules.yaml` names an assigned computer, a harness, and one of
+five timing forms (interval, daily, weekly, once, cron) that the assigned
+computer's Phren Hook evaluates in its local time. Manage them with
+`phren schedule list|add|remove|enable|disable|run|history`; `run` and `history`
+call the local Hook, the other commands edit the store file directly. See
+[Scheduled prompts](schedules.md) for the store format, timing forms and run
+history.
+
+---
+
+## Model catalogue
+
+`GET /v1/models?source=<codex|claude|opencode>` on Phren Hook returns the
+`/model` menu of the agent that source names, shaped as
+`{ "models": [ { "id", "name", "description", "isDefault" } ] }`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | The model identifier sent to `POST /v1/model`. The Hook caps Codex ids at 100 characters; OpenCode catalogue ids are not capped. |
+| `name` | string | The display name the picker shows, at most 100 characters. |
+| `description` | string? | Optional caption under the name, at most 300 characters. |
+| `isDefault` | boolean? | Present and `true` on the harness default; the picker marks it with a chip. |
+| `defaultReasoningEffort` | string? | Codex's default effort from its app-server catalogue. |
+| `supportedReasoningEfforts` | string[]? | Codex's supported effort identifiers. |
+
+Per source: Codex comes from its app-server `model/list` (hidden entries
+dropped, at most 32). Claude reads the newest
+`<CLAUDE_CONFIG_DIR>/cache/model-catalog/*-cc.json`, defaulting to `~/.claude`.
+It preserves the terminal's names, main/overflow order and default, filters
+minimum client versions against `claude --version`, and adds a 1M context row
+for the default. The built-in menu is used only when no usable cached catalogue
+is available. OpenCode comes from `opencode models`
+(`provider/model` ids, the Go plan first, the configured default marked, at
+most 400). An unknown source returns an empty `models` list, and answers are
+cached per source for ten minutes. The phone's chat picker shows a
+`model-loading` row until this route answers, never another harness's list,
+and falls back to its per-harness built-in names only when the route fails.
+The phone keeps at most 64 rows and only ids the model route accepts: up to 100
+characters of letters, digits, and `. - _ [ ] : /`, one token with no
+whitespace.
+
+`POST /v1/model { target, model, effort? }` switches an established, idle pane.
+The reply is `{ ok: true, model, name, effort? }` only after verification.
+Codex receives bare `/model`, optionally walks through `All models`, matches
+the catalogue's display name, verifies the cursor before Enter, then chooses
+the requested or default reasoning effort and verifies the new model in its
+status line. An unreadable menu, missing row, or unconfirmed result returns an
+error; open menus are escaped without interrupting a working or replacement
+session. Claude receives `/model <id-or-alias>` and must show its confirmation.
+With `effort`, Claude then receives `/effort <level>` and must answer "Set
+effort level to" below that confirmation (a cap's lower level is returned as
+`effort`); the level must be one the catalogue lists for the model, or low,
+medium, high, xhigh or max when it lists none.
+OpenCode returns 422 with a direction to use its terminal `/models` picker.
+
+A working pane returns 409 before any model command is typed. `/v1/prompt`
+also refuses every slash command while working, except Claude Code's
+`/btw <question>` side question, which is made to run beside a turn.
+
+`/v1/prompt` with `/btw <question>` on a Claude pane answers
+`{ ok: true, delivered: true, sideQuestion: { id } }` at once. Claude writes
+nothing of a side question to its session file, so the Hook reads the panel
+from the pane (scrolling a long answer to its end), closes it with Escape and
+sends the result on the conversation's `/v1/transcripts` stream as
+`{ type: "side-answer", source, session, id, question, state, answer? }`, with
+`state` one of `pending`, `answer`, `error` (no answer within 90 s, or the pane
+changed) or `cancelled` (closed in the terminal). The frame is sent only to a
+stream opened with `sideAnswers=1`, and never becomes a transcript row. While
+the question is open every other input to that pane returns 409, since typed
+keys would land in the panel. `POST /v1/side-question/dismiss { target, id }`
+cancels a pending question (closing its panel) or forgets an answered one. The phone offers
+`Switch after this turn`, holds only the model selection until the pane goes
+idle, allows cancellation, and displays a verified switch as a system row.
+An uncertain result is never retried automatically.
 
 ---
 
@@ -36,6 +254,8 @@ Search the user's personal project store using FTS5 full-text search with synony
 | `include_history` | boolean | no | Include historical findings (`superseded`, `retracted`). Defaults to `false`. |
 | `synthesize` | boolean | no | Generate a short synthesis paragraph from top hits (requires LLM endpoint/key configuration). |
 
+A findings result carries `symbol` (and `symbols`) when a `symbol:` citation is present, so a client can show which code symbol the finding is about.
+
 ### `get_project_summary`
 
 Get a project's summary card and list of indexed documents.
@@ -64,6 +284,8 @@ List recent findings for a project without requiring a search query.
 | `include_superseded` | boolean | no | Include superseded findings (legacy compatibility flag). |
 | `include_history` | boolean | no | Include historical findings (`superseded`, `retracted`). |
 | `status` | enum | no | Filter by lifecycle status: `active`, `superseded`, `contradicted`, `stale`, `invalid_citation`, `retracted`. |
+
+Each returned finding includes its `citationData` and a top-level `symbol` when it carries a `symbol:` citation.
 
 ---
 
@@ -225,12 +447,14 @@ Record a single insight to a project's FINDINGS.md. Call this the moment you dis
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name. |
 | `finding` | string or string[] | yes | The insight, as a single bullet point (or an array of bullet points for batch capture). Be specific enough to act on without extra context. |
-| `citation` | object | no | Optional source citation: `{ file?, line?, repo?, commit?, task_item? }`. |
+| `citation` | object | no | Optional source citation: `{ file?, line?, repo?, commit?, symbol?, task_item? }`. |
 | `sessionId` | string | no | Optional session ID from `session_start`. Pass it if you want session metrics to include this write. |
 | `findingType` | enum | no | Prefix the finding inline with a type tag. One of: `decision`, `pitfall`, `pattern`, `bug`. |
 | `scope` | string | no | Optional memory scope label (defaults to `shared`; for example `researcher` or `builder`). |
 
 The finding is always saved as `active`. `add_finding` never auto-marks a finding as `contradicted`: instead it runs cheap lexical heuristics (no extra LLM/API call) and, when an existing finding looks like a possible duplicate or contradiction, returns it in the response as `potentialDuplicates` / `potentialConflicts` for the calling agent to judge. If a returned candidate is a genuine contradiction, resolve it explicitly with `resolve_contradiction` (or `supersede_finding`); if it is unrelated, ignore it. (Opt-in LLM-confirmed contradiction detection is still available via `PHREN_FEATURE_SEMANTIC_CONFLICT`.)
+
+`citation.symbol` names a code symbol as `Name`, `Type.member` or `name()`. When the project has a code index, the finding text is scanned for a symbol that resolves to exactly one declaration (four or more characters, and not a local variable unless exported) and that symbol is attached automatically; the finding text is never rewritten. An explicit `symbol` is validated against the index and stored either way: an unresolved one is kept with `symbol_unresolved` set, the symbol counterpart of an invalid file citation, and the trust filter treats it as `invalid_citation`.
 
 ### `supersede_finding`
 
@@ -341,7 +565,7 @@ Record feedback on whether an injected memory was helpful or noisy.
 ### `add_project`
 
 Bootstraps a repo or working directory into phren and adds it to the active profile. Pass the path explicitly; when no `profile` is provided, phren uses `PHREN_PROFILE` or the current machine mapping from `machines.yaml`.
-Creates or copies `CLAUDE.md`, `summary.md`, `FINDINGS.md`, and `tasks.md` under `~/.phren/<project>`.
+Creates or copies `AGENTS.md`, `summary.md`, `FINDINGS.md`, and `tasks.md` under `~/.phren/<project>`.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -351,7 +575,7 @@ Creates or copies `CLAUDE.md`, `summary.md`, `FINDINGS.md`, and `tasks.md` under
 
 ### `export_project`
 
-Export a project's data (findings, task, summary, CLAUDE.md) as portable JSON.
+Export a project's data (findings, task, summary, AGENTS.md) as portable JSON.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -389,6 +613,13 @@ Find fragments and related docs by name.
 | `limit` | number | no | Max results (default 10). |
 
 ### `get_related_docs`
+
+Compatibility: graph tools use the established `entity` / `entity_type` parameter
+keys for fragments. `manual-links.json` retains `entity` / `entityType`, and the
+rebuildable SQLite graph retains `entities`, `entity_links`, and `global_entities`.
+These internal names do not introduce additional user-facing concepts. The
+`canonical` document type and `search --type canonical` continue to mean
+`truths.md`. Keeping these identifiers avoids breaking existing tools and filters.
 
 Get docs linked to a named fragment.
 
@@ -516,6 +747,14 @@ Delete a skill file.
 ### `toggle_skill`
 
 Enable or disable a skill without deleting its file.
+Choices are stored in the synced `.config/skill-preferences.json` (schema 1,
+`enabledSkills` keys `<source-scope>:<lowercase-name>`). An explicit shared
+choice takes precedence over legacy machine-local `disabledSkills`; absent
+keys keep that computer's existing preference. Selecting an inherited global
+skill changes its global source setting for all projects. It does not create
+a project override of the global skill. Updated desktop clients apply phone
+changes to existing managed mirrors after pulling; agent reload boundaries
+still apply.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -601,13 +840,19 @@ Read recent hook/debug failures from runtime logs.
 
 Read review queue items for one project or all active-profile projects. The review queue is read-only.
 
+The optional queue is retained for quarantined candidates and deliberate manual
+triage (September 2026 decision). Normal agent memory capture does not require
+the user to approve each finding. `memory_feedback` adjusts retrieval ranking;
+it does not replace the trust boundary around unreviewed candidate content.
+There is not sufficient usage evidence to remove the working queue safely.
+
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `project` | string | no | Optional project filter. |
 
 ### `manage_review_item`
 
-Manage a review queue item: approve (**promotes** the queued line into FINDINGS.md through the same path a direct add uses — dedup, fid assignment, citation metadata, and the findings-cap auto-archive all apply; if the finding is already live or already archived to `reference/topics/`, approve just dequeues it), reject (removes from queue AND from FINDINGS.md), or edit (updates text in both).
+Manage a review queue item: approve (**promotes** the queued line into FINDINGS.md through the same path a direct add uses, dedup, fid assignment, citation metadata, and the findings-cap auto-archive all apply; if the finding is already live or already archived to `reference/topics/`, approve just dequeues it), reject (removes from queue AND from FINDINGS.md), or edit (updates text in both).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -628,7 +873,7 @@ Run doctor self-heal checks and apply fixes (missing files, broken symlinks, sta
 
 List all registered phren stores and their sync status. Shows the primary store plus any team or readonly stores from the store registry.
 
-*No parameters — accepts an empty input.*
+*No parameters. Accepts an empty input.*
 
 ---
 
@@ -671,7 +916,7 @@ Update configuration for a specific domain. Unified setter for all config domain
 **Domain-specific settings:**
 
 - **proactivity**: `{ level: "high"|"medium"|"low", scope?: "base"|"findings"|"tasks" }`
-- **taskMode**: `{ mode: "off"|"manual"|"suggest"|"auto" }`
+- **taskMode**: `{ mode: "off"|"manual"|"suggest"|"auto" }`. In `auto`, the prompt hook files what it picks up on its own into **Queue**; a prompt that asks to be tracked ("add this to task") goes to Active, as does a prompt matching a task already in Active. Task proactivity `high` captures any actionable request, `medium` only prompts with that explicit signal, `low` none. Text inside terminal paste wrappers (`<pasted_content>`, which also carry phone messages and messages relayed into the pane) never files or touches a task, only what was typed outside them; neither do messages relayed from another agent ("From the conductor, ...", "From tidy-phren: ..."), nor frames from another agent or the harness (`<agent-message>` hand-backs, `<cross-session-message>`, delivery notices, `[SYSTEM NOTIFICATION]`, `<task-notification>`, `<system-reminder>`), questions, and replies that ask for nothing are never filed and never touch an existing task. A prompt that matches an existing task moves it to Active but never rewrites its Context or GitHub link. The hook never completes a task: a saved turn leaves the task where it is, and completion is explicit.
 - **findingSensitivity**: `{ level: "minimal"|"conservative"|"balanced"|"aggressive" }`
 - **retention**: `{ ttlDays?, retentionDays?, autoAcceptThreshold?, minInjectConfidence?, decay?: { d30?, d60?, d90?, d120? } }`
 - **workflow**: `{ lowConfidenceThreshold?, riskySections?, taskMode?, findingSensitivity? }`
@@ -704,3 +949,218 @@ Update configuration for a specific domain. Unified setter for all config domain
 ---
 
 Maintenance tools (govern, prune, consolidate, extract) are CLI-only. See `phren config` and `phren maintain`.
+
+---
+
+## Topic Summaries
+
+Summaries written by the agent itself, with the model it is already running as; no API key and no local model. Driven by the `/phren-summarize` skill. In the core profile both are reached through `phren_admin`.
+
+### `get_topic_summaries`
+
+Every `reference/topics` file of a project with its bullet count, its current `## Now` text and whether that text is structural or prose. Pass `topic` to also get that topic's newest bullets.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name, optionally store-qualified. |
+| `topic` | string | no | A topic slug from the list; returns its newest bullets. |
+| `bullets` | number | no | How many of the newest bullets to return for `topic` (5–200, default 60). |
+
+---
+
+### `set_topic_summary`
+
+Store the paragraph you wrote as the topic's `## Now` block and refresh the project's `What phren knows` block. Refused, with the offending names returned, if the paragraph names anything the topic's bullets do not.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name, optionally store-qualified. |
+| `topic` | string | yes | Topic slug, as listed by `get_topic_summaries`. |
+| `text` | string | yes | Four to six plain sentences; only facts the bullets state, names spelled as the bullets spell them. |
+
+---
+
+## Code Index
+
+Read tools over the local symbol index the `code` module keeps per project under `<store>/.runtime/code/<project>.sqlite`. The module is off by default; enable it with `phren modules enable code`, then build the index with `phren code index <project>` (`--repo <path>` for a checkout the project does not register). Results are compact text, one line per hit, not JSON. The `/code` skill drives them.
+
+### `code_search`
+
+Ranked symbol search over names, signatures and doc comments. Use it instead of grep when you want a symbol rather than raw text. Ranking is exact name, then prefix, then FTS5 relevance, then usage count.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name, optionally store-qualified. |
+| `query` | string | yes | Symbol name, or words from its signature or doc comment. |
+| `kind` | enum | no | `function`, `method`, `class`, `struct`, `enum`, `interface`, `type` or `variable`. |
+| `limit` | number | no | Maximum hits (1-100, default 20). |
+
+### `code_definition`
+
+Go to a symbol's definition. Accepts `Foo`, `Foo.bar` and `bar()`; returns the file and lines, signature, doc, the last change (blame hash and date, never a name) and a source snippet of at most 40 lines. When a common name matches several symbols it prefers an exported, non-variable declaration and reports the candidate count. After the snippet it adds a `Findings` block, one line per finding that cites the symbol (its id and first 160 characters), read from the project's FINDINGS.md and archived topic files.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name, optionally store-qualified. |
+| `symbol` | string | yes | A symbol name: `Foo`, `Foo.bar` or `bar()`. |
+
+### `code_references`
+
+Every resolved reference to a symbol, grouped by file, with a total and a candidate count when the name is ambiguous. Accepts the same name forms as `code_definition`. Only references the index could resolve to exactly one definition are counted.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name, optionally store-qualified. |
+| `symbol` | string | yes | A symbol name: `Foo`, `Foo.bar` or `bar()`. |
+| `limit` | number | no | Maximum reference lines (1-500, default 200). |
+
+### `code_outline`
+
+A file's symbols in source order, nested under their parent class or container, with line, signature and doc. Use it before reading a large file.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name, optionally store-qualified. |
+| `path` | string | yes | Project-relative file path, as stored in the index. |
+
+### `code_usage`
+
+The hottest and coldest symbols by resolved-reference count, so cold code is visible too. Local variables are excluded from the hot list so a busy local or a one-letter loop name cannot dominate it.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name, optionally store-qualified. |
+| `top` | number | no | How many hot and how many cold symbols (1-100, default 10). |
+
+CLI equivalents: `phren code search <project> <query> [--kind k] [--limit n]`, `phren code def <project> <symbol>`, `phren code refs <project> <symbol>`, `phren code outline <project> <path>`, `phren code usage <project> [--top n]`.
+
+### Hook routes
+
+The `code` module exposes these routes through Hook's private HTTP pipe. All
+require `project`; GET routes accept optional `store` in the query, and POST
+routes accept it in the JSON body. The selector must resolve uniquely to an
+available registered store by ID, name or GitHub repository name. Omitting it
+uses the Hook's base store. A selected read-only store rejects note and reindex
+writes. A missing index returns 404 with the `phren code index` command.
+
+| Method and path | Other inputs | Result |
+| --- | --- | --- |
+| `GET /v1/code/status` | None | File, symbol and reference counts, languages, kinds, last index time and top symbols. |
+| `GET /v1/code/tree` | `directory`, optional relative directory | `{project, directory, entries}`; immediate indexed children with `path`, `directory`, descendant `files`, `symbols` and `languages`. |
+| `GET /v1/code/search` | `q`, optional `kind`, `directory`, `limit` (1-500, default 20) | `{project, query, symbols}` ranked by exact name, prefix, full-text relevance and usage. |
+| `GET /v1/code/outline` | `path`, relative file path | `{project, path, entries}` in source order with nested members. |
+| `GET /v1/code/outline-summary` | `paths`, a JSON array of 1-200 relative paths | `{project, entries}` with symbol totals and up to three leading kinds per file or directory, including descendants. Duplicate paths are collapsed. |
+| `GET /v1/code/file-references` | `path`, relative file path | `{project, path, references}`: every resolved use made from that file, in line order, each with `line`, `kind`, `name`, the declaration as a file-qualified `symbol` (`file::Container.name`), its `file`, `targetLine` and `targetKind`. At most 5000 rows. The phone's code viewer makes these names tappable. |
+| `GET /v1/code/definition` | `symbol` | `{project, definition}` with declaration, snippet, last Git change and `findings` citing the symbol. |
+| `GET /v1/code/references` | `symbol`, optional `limit` (1-500, default 200) | `{project, references}` with resolved references grouped by file. |
+| `GET /v1/code/usage` | `top` (1-100, default 10) | `{project, usage: {hot, cold}}`, the older compact ranking. |
+| `GET /v1/code/usage-page` | Optional `kind`, `file`, `directory`, `offset` (default 0), `limit` (1-100, default 50), `end=0\|1` | `{project, entries, total, offset, limit, maxUses}` across all symbols, including variables and zero uses. `end=1` selects the last page. |
+| `GET /v1/code/recent` | Optional `directory` | `{project, entries}` for the 30 most recently changed symbols; `indexedAt` is the millisecond time the index observed the change. |
+| `POST /v1/code/reindex` | None beyond `project` and optional `store` | Runs an incremental scan and returns status. |
+| `POST /v1/code/note` | `symbol`, `file`, `line`, `text`, optional `target` | Saves a symbol-cited finding, then optionally delivers it to an agent. See below. |
+
+Hook `kind` accepts the individual symbol kinds above plus `types`, the family
+of class, struct, enum, interface and type declarations. Directory scopes match
+descendants by literal path boundary. Definition and reference queries accept
+`Name`, `Type.member`, `name()` and `file::Type.member` to stay in one file.
+Usage pages sort by descending reference count, then name, file, line and ID;
+`maxUses` covers the filtered distribution, not only the current page.
+
+#### Code notes
+
+`POST /v1/code/note` takes this JSON shape:
+
+```json
+{
+  "store": "personal",
+  "project": "demo",
+  "symbol": "src/parser.ts::Parser.parse",
+  "file": "src/parser.ts",
+  "line": 42,
+  "text": "Keep this empty-input case in the regression tests.",
+  "target": { "session": "<session-id>" }
+}
+```
+
+Omit `target` to save only, or use `{ "harness": "codex" }` to dispatch a new
+worker (`codex`, `claude`, `opencode`). A session target hands off locally;
+a new worker uses conductor placement with `computer: "anywhere"`. Sending
+requires the conductor module. The selected line must still belong to the
+indexed symbol and its returned snippet; otherwise the route returns 409 and
+asks the caller to refresh. Text is trimmed, nonempty and at most 4500 characters.
+
+The result is `{ok: true, saved: true, findings, delivery?}`. Save happens before
+delivery. A delivery error is returned inside `delivery` without undoing the
+finding; callers must not treat `saved: true` as proof of delivery or retry an
+uncertain send automatically. Session Code entry points keep their explicit
+recipient instead of presenting another chooser.
+
+See [Code index](code-index.md), [Phren Hook](phren-hook.md) and the
+[connection contract](../packages/cli/src/bridge/AGENT_CONNECTIONS.md).
+
+### Repository files and tree
+
+`GET /v1/projects/files?project=&directory=&path=` browses a checkout discovered
+by Hook. Optional `directory` must exactly match a discovered checkout; omitted,
+the first candidate is used. `path` is relative and defaults to its root.
+Directories return `{path, kind: "directory", truncated, entries}` with at most
+500 entries, directories first. Files return `{path, kind: "file", size, data}`
+with up to 2 MiB of file content encoded as base64. Symlinks, `.git`, traversal and paths
+outside the selected checkout are refused. This route is read-only.
+
+`POST /v1/git/tree` takes the session's full target, optional `child` or
+`worktree`, relative `path` and optional `ignored: true`. It returns one directory
+with descendant file counts and a snapshot version; with `ignored`, the level's
+git-ignored folders and files are added, marked `ignored: true`.
+
+`POST /v1/git/worktrees` lists the pane repository's other worktrees (`git worktree
+list --porcelain`): `{worktrees: [{id, path, branch, head, ahead, behind, changed,
+main?, locked?, worker?: {label, provider, child?, state?}}]}`. `ahead`/`behind`
+are against the pane's HEAD, `changed` counts uncommitted files, and `worker`
+names a fan-out job, this conversation's sub-agent or a Herdr agent (by its
+agent name) editing there. Every other
+`/v1/git/*` route, `/v1/diff` and `/v1/files/range` accept `worktree=<id>`,
+resolved only against that listing. The bounded repository cache is keyed by HEAD and a file/status hash;
+it expires after two seconds and is invalidated by status refresh and mutations.
+Opening a directory does not collect diff statistics or upstream history.
+
+### Commit, push and pull request
+
+Each takes the session's full target and optional `child` or `worktree`, like
+the other `/v1/git/*` routes, and answers `{ok: true, ...}` or, when Git or gh
+refused, `{ok: false, output}` with the output exactly as printed (stdout and
+stderr interleaved, at most 64 KiB). Input errors are ordinary 400/409 errors.
+
+| Route | Body | Answer |
+| --- | --- | --- |
+| `POST /v1/git/commit` | `message` (required, at most 20,000 characters) | `{ok, sha, short, subject, branch, output?}`. Commits the index only; 409 when nothing is staged. Hooks always run (never `--no-verify`), and a hook's refusal is `{ok: false, output}`. |
+| `POST /v1/git/push` | `confirmDefault?: true` | `{ok, branch, remote, upstream, setUpstream, output}`. Pushes the current branch to its upstream, or to `origin` with the upstream set. Never forced. The default branch (the remote's `HEAD`, else `main`/`master`) is 409 without `confirmDefault`; a detached HEAD or missing remote is 409. |
+| `POST /v1/git/pr` | `draft?: true` | `{ok, url, branch, draft?, existing?}` through `gh pr create --fill`. `{ok: false, reason: "missing" \| "auth", message}` when gh is not installed or not signed in; `reason: "failed"` with gh's `output` otherwise. |
+
+`POST /v1/git/pulls` also returns `branch` and `current`: the checked-out
+branch's pull request in any state, `{number, title, url, head, base, draft,
+state, checks}`, where `checks` is `passing`, `failing`, `pending` or null.
+`POST /v1/git/status` returns `defaultBranch`, the branch a push asks to confirm.
+
+### Live transcript previews
+
+The transcript WebSocket includes `preview: {turnStartedAt, text}` or
+`preview: null` on backlog/append frames, or sends a standalone `type: "preview"`
+frame with the same conversation identity. Claude previews come from pane text anchored to the current
+prompt; Codex and OpenCode use their delta text. Updates arrive at most twice
+a second. Preview text stays out of history and never advances the transcript
+cursor. A completed entry clears the preview without the throttle delay. The
+phone replaces it in place and keeps the reveal progress, avoiding duplicate
+text. Reconnect history retains existing rows unless Hook explicitly resets
+the conversation.
+
+### `GET /v1/usage`
+
+Account limits and spend for the phone's Account usage screen: `{accounts: [...]}`, each account carrying `source` (`codex`, `claude`, `opencode`, `opencode-go`, `openrouter`), `windows`, optional `updatedAt`, `message`, `spend`, `accountName`, `accountId` and, for Claude, `origin`. The optional `?sources=` comma list names the sources the phone understands; an older phone that sends none gets the original four so it never meets a source it cannot read.
+
+Each Claude number has one documented source:
+
+- `five_hour` ("5-hour limit") and `seven_day` ("7-day, all models") come from Claude Code's documented status-line `rate_limits` payload, reported as `origin: "status-line"`, or from the OAuth usage endpoint when the computer's sign-in token is readable, reported as `origin: "oauth"`. The phone captions the card with that origin and the report's age ("from Claude Code status line, updated 6 s ago").
+- A per-model weekly window such as `seven_day_fable` ("7-day, Fable") comes from Claude Code's own usage snapshot in `~/.claude.json` (`cachedUsageUtilization`, `kind: weekly_scoped`) when the status line does not carry it, and then carries its own `asOf` so the phone can show how old it is; the live endpoint reports the same window without `asOf`.
+
+Every window carries its own `resetsAt`. A per-model window is its own allowance with its own denominator, not a subset of `seven_day`, so it can show a higher percentage than the all-models window without contradicting it; the phone labels it "only" (for example "7-day, Fable only") and shows its own reset time. The Live sessions header ring binds to `five_hour`, the window the Account usage page shows first, never a higher window.

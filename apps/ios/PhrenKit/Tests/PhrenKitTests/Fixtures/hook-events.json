@@ -1,0 +1,179 @@
+[
+  {
+    "source": "codex",
+    "events": [
+      {
+        "type": "event_msg",
+        "payload": {
+          "type": "task_started"
+        }
+      },
+      {
+        "type": "event_msg",
+        "payload": {
+          "type": "token_count",
+          "info": {
+            "last_token_usage": {
+              "input_tokens": 1500,
+              "cached_input_tokens": 1200,
+              "output_tokens": 83
+            }
+          }
+        }
+      },
+      {
+        "type": "event_msg",
+        "payload": {
+          "type": "task_complete"
+        }
+      }
+    ],
+    "phase": "finished",
+    "input": 1500,
+    "output": 83
+  },
+  {
+    "source": "codex",
+    "events": [
+      {
+        "type": "event_msg",
+        "payload": {
+          "type": "task_started"
+        }
+      },
+      {
+        "type": "event_msg",
+        "payload": {
+          "type": "token_count",
+          "info": {
+            "last_token_usage": {
+              "input_tokens": 1500,
+              "cached_input_tokens": 1200,
+              "output_tokens": 83
+            }
+          }
+        }
+      },
+      {
+        "type": "event_msg",
+        "payload": {
+          "type": "task_completed"
+        }
+      }
+    ],
+    "phase": "finished",
+    "input": 1500,
+    "output": 83
+  },
+  {
+    "source": "codex",
+    "events": [
+      {
+        "type": "event_msg",
+        "payload": {
+          "type": "task_started"
+        }
+      },
+      {
+        "type": "event_msg",
+        "payload": {
+          "type": "token_count",
+          "info": {
+            "last_token_usage": {
+              "input_tokens": 1500,
+              "cached_input_tokens": 1200,
+              "output_tokens": 83
+            }
+          }
+        }
+      },
+      {
+        "type": "event_msg",
+        "payload": {
+          "type": "turn_aborted"
+        }
+      }
+    ],
+    "phase": "stopped",
+    "input": 1500,
+    "output": 83
+  },
+  {
+    "source": "codex",
+    "events": [
+      {
+        "type": "event_msg",
+        "payload": {
+          "type": "task_started"
+        }
+      },
+      {
+        "type": "event_msg",
+        "payload": {
+          "type": "token_count",
+          "info": {
+            "last_token_usage": {
+              "input_tokens": 1500,
+              "cached_input_tokens": 1200,
+              "output_tokens": 83
+            }
+          }
+        }
+      },
+      {
+        "type": "event_msg",
+        "payload": {
+          "type": "task_aborted"
+        }
+      }
+    ],
+    "phase": "stopped",
+    "input": 1500,
+    "output": 83
+  },
+  {
+    "source": "copilot",
+    "events": [
+      {
+        "type": "assistant.turn_start",
+        "data": {}
+      },
+      {
+        "type": "assistant.usage",
+        "data": {
+          "inputTokens": 300,
+          "outputTokens": 25,
+          "cacheReadTokens": 200
+        }
+      },
+      {
+        "type": "abort",
+        "data": {}
+      }
+    ],
+    "phase": "stopped",
+    "input": 300,
+    "output": 25
+  },
+  {
+    "source": "claude",
+    "events": [
+      {
+        "type": "assistant",
+        "message": {
+          "role": "assistant",
+          "content": [],
+          "usage": {
+            "input_tokens": 40,
+            "output_tokens": 9,
+            "cache_read_input_tokens": 25,
+            "cache_creation_input_tokens": 15
+          }
+        }
+      }
+    ],
+    "phase": null,
+    "input": 80,
+    "output": 9
+  }
+]

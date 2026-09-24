@@ -1,10 +1,11 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { findPhrenPath, getProjectDirs } from "@phren/cli/paths";
+import { findPhrenPath } from "@phren/cli/paths";
 import { resolveRuntimeProfile } from "@phren/cli/runtime-profile";
-import { buildIndex } from "@phren/cli/shared";
-import { searchKnowledgeRows, rankResults } from "@phren/cli/shared/retrieval";
+import { buildIndex, detectProject } from "@phren/cli/shared";
+import { searchKnowledgeRows, rankResults, isInjectableDocType } from "@phren/cli/shared/retrieval";
+import { storeAwareProjectPath } from "@phren/cli/store-routing";
 import { readTasks } from "@phren/cli/data/tasks";
 import { readFindings } from "@phren/cli/data/access";
 
@@ -28,29 +29,10 @@ export async function buildPhrenContext(projectOverride?: string): Promise<Phren
     let project: string | null = projectOverride ?? null;
     if (!project) {
       try {
-        const projectDirs = getProjectDirs(phrenPath, profile || undefined);
-        const cwd = process.cwd();
-        for (const dir of projectDirs) {
-          const name = path.basename(dir);
-          try {
-            const configPath = path.join(dir, "project.yaml");
-            if (fs.existsSync(configPath)) {
-              const content = fs.readFileSync(configPath, "utf-8");
-              const sourceMatch = content.match(/source:\s*(.+)/);
-              if (sourceMatch?.[1]) {
-                const sourcePath = sourceMatch[1].trim().replace(/^['"]|['"]$/g, "");
-                if (cwd.startsWith(sourcePath) || cwd === sourcePath) {
-                  project = name;
-                  break;
-                }
-              }
-            }
-          } catch { /* skip */ }
-          if (path.basename(cwd) === name) {
-            project = name;
-            break;
-          }
-        }
+        // The CLI's own resolver: reads phren.project.yaml sourcePath entries,
+        // handles project-local installs, team stores, git worktrees, and picks
+        // the longest matching sourcePath so nested projects resolve correctly.
+        project = detectProject(phrenPath, process.cwd(), profile || undefined);
       } catch { /* no project detection */ }
     }
 
@@ -63,7 +45,10 @@ export async function buildPhrenContext(projectOverride?: string): Promise<Phren
 /** Read truths.md pinned entries for a project. */
 function readTruths(phrenPath: string, project: string): string[] {
   try {
-    const truthsPath = path.join(phrenPath, project, "truths.md");
+    // Store-aware: upsertCanonical writes via storeAwareProjectPath, so team-store
+    // truths live under the store root, not necessarily <phrenPath>/<project>/.
+    const truthsPath = storeAwareProjectPath(phrenPath, project, "truths.md")
+      ?? path.join(phrenPath, project, "truths.md");
     if (!fs.existsSync(truthsPath)) return [];
     const content = fs.readFileSync(truthsPath, "utf-8");
     return content.split("\n").filter((line) => line.startsWith("- "));
@@ -75,48 +60,34 @@ function readTruths(phrenPath: string, project: string): string[] {
 const CLAUDE_MD_MAX_CHARS = 4000;
 
 /**
- * Collect CLAUDE.md files by walking up from cwd to the filesystem root,
- * then checking the user-level ~/.claude/CLAUDE.md.
+ * Collect project rule files (AGENTS.md and legacy CLAUDE.md) by walking up from cwd
+ * to the filesystem root, then checking the user-level ~/.claude/CLAUDE.md.
  * Returns entries most-specific first (cwd → parent → ... → user-level).
  */
-function collectClaudeMdFiles(): { filePath: string; content: string }[] {
+function collectRuleFiles(): { filePath: string; content: string }[] {
   const seen = new Set<string>();
   const results: { filePath: string; content: string }[] = [];
+  const read = (resolved: string) => {
+    if (seen.has(resolved)) return;
+    seen.add(resolved);
+    try {
+      if (fs.existsSync(resolved)) {
+        const content = fs.readFileSync(resolved, "utf-8").trim();
+        if (content) results.push({ filePath: resolved, content });
+      }
+    } catch { /* skip unreadable */ }
+  };
 
-  // Walk from cwd up to root
   let dir = process.cwd();
   while (true) {
-    const candidate = path.join(dir, "CLAUDE.md");
-    const resolved = path.resolve(candidate);
-    if (!seen.has(resolved)) {
-      seen.add(resolved);
-      try {
-        if (fs.existsSync(resolved)) {
-          const content = fs.readFileSync(resolved, "utf-8").trim();
-          if (content) {
-            results.push({ filePath: resolved, content });
-          }
-        }
-      } catch { /* skip unreadable */ }
-    }
+    read(path.resolve(dir, "AGENTS.md"));
+    read(path.resolve(dir, "CLAUDE.md"));
     const parent = path.dirname(dir);
     if (parent === dir) break; // reached root
     dir = parent;
   }
 
-  // Check user-level ~/.claude/CLAUDE.md
-  const userLevel = path.resolve(os.homedir(), ".claude", "CLAUDE.md");
-  if (!seen.has(userLevel)) {
-    seen.add(userLevel);
-    try {
-      if (fs.existsSync(userLevel)) {
-        const content = fs.readFileSync(userLevel, "utf-8").trim();
-        if (content) {
-          results.push({ filePath: userLevel, content });
-        }
-      }
-    } catch { /* skip */ }
-  }
+  read(path.resolve(os.homedir(), ".claude", "CLAUDE.md"));
 
   return results;
 }
@@ -170,21 +141,45 @@ export async function buildContextSnippet(ctx: PhrenContext, taskKeywords: strin
     } catch { /* silent */ }
   }
 
-  // Section 4: CLAUDE.md hierarchy (cwd → parent dirs → ~/.claude/CLAUDE.md)
+  // Section 4: project rule files (AGENTS.md / legacy CLAUDE.md), cwd → parents → ~/.claude/CLAUDE.md
   try {
-    const claudeFiles = collectClaudeMdFiles();
-    if (claudeFiles.length > 0) {
-      let combined = claudeFiles
+    const ruleFiles = collectRuleFiles();
+    if (ruleFiles.length > 0) {
+      let combined = ruleFiles
         .map((f) => `<!-- ${f.filePath} -->\n${f.content}`)
         .join("\n\n---\n\n");
       if (combined.length > CLAUDE_MD_MAX_CHARS) {
         combined = combined.slice(0, CLAUDE_MD_MAX_CHARS) + "\n\n<!-- truncated -->";
       }
-      sections.push(`## CLAUDE.md\n\n${combined}`);
+      sections.push(`## Project instructions\n\n${combined}`);
     }
   } catch { /* silent */ }
 
-  // Section 5: FTS5 search
+  // Section 5: Available skills catalog — the model should know what skills
+  // exist (name + description) instead of guessing names for run_skill.
+  try {
+    const { getScopedSkills } = await import("@phren/cli/skill/registry");
+    const skills = getScopedSkills(ctx.phrenPath, ctx.profile, ctx.project ?? undefined)
+      .filter((s) => s.enabled);
+    if (skills.length > 0) {
+      const lines = skills.slice(0, 20).map(
+        (s) => `- ${s.name}${s.description ? ` — ${s.description}` : ""}`,
+      );
+      sections.push(`## Available skills (invoke with run_skill)\n\n${lines.join("\n")}`);
+    }
+  } catch { /* silent */ }
+
+  // Section 6: Review queue awareness — count + top items, clearly labeled as
+  // unverified so candidates are visible without leaking as facts.
+  if (ctx.project) {
+    try {
+      const { getQueueStatus, formatQueueContextSection } = await import("./review-triage.js");
+      const section = formatQueueContextSection(getQueueStatus(ctx, 3));
+      if (section) sections.push(section);
+    } catch { /* silent */ }
+  }
+
+  // Section 7: FTS5 search
   try {
     const db = await buildIndex(ctx.phrenPath, ctx.profile || undefined);
     const result = await searchKnowledgeRows(db, {
@@ -196,8 +191,13 @@ export async function buildContextSnippet(ctx: PhrenContext, taskKeywords: strin
     });
     const ranked = rankResults(result.rows ?? [], taskKeywords, null, ctx.project || null, ctx.phrenPath, db);
 
-    if (ranked.length > 0) {
-      const snippets = ranked.slice(0, 5).map((r: { project: string; filename: string; content?: string }) => {
+    // Automatic injection path: drop non-injectable doc types (notes, review-queue).
+    // Notes are the user's private scratch space and review.md is a quarantine of
+    // unapproved candidates — neither may reach a prompt without an explicit search.
+    const injectable = ranked.filter((r: { type?: string }) => isInjectableDocType(r.type ?? ""));
+
+    if (injectable.length > 0) {
+      const snippets = injectable.slice(0, 5).map((r: { project: string; filename: string; content?: string }) => {
         const content = r.content?.slice(0, 400) ?? "";
         return `[${r.project}/${r.filename}] ${content}`;
       });

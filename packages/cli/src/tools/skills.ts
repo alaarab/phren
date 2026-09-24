@@ -242,11 +242,11 @@ export function register(server: McpServer, ctx: McpContext): void {
 
       const verb = enabled ? "Enable" : "Disable";
       return withWriteQueue(async () => {
-        setSkillEnabledAndSync(phrenPath, project, result.name, enabled);
+        setSkillEnabledAndSync(phrenPath, result.source, result.name, enabled);
         return mcpResponse({
           ok: true,
-          message: `${verb}d skill "${result.name}" in ${project}.`,
-          data: { name: result.name, project, enabled },
+          message: `${verb}d skill "${result.name}" in ${result.source}${result.source === "global" ? " (all projects)" : ""}.`,
+          data: { name: result.name, project: result.source, enabled },
         });
       });
     }

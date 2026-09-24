@@ -2,19 +2,24 @@ import SwiftUI
 import PhrenKit
 
 struct OnboardingFlow: View {
+    var isPresented = false
     @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
-            switch model.phase {
-            case .signedOut:
-                WelcomeView()
-            case .pickingRepo:
-                RepoPickerView()
-            case .initialSync:
-                InitialSyncView()
-            default:
-                ProgressView()
+            Group {
+                switch model.phase {
+                case .signedOut: WelcomeView()
+                case .pickingRepo: RepoPickerView()
+                case .initialSync: InitialSyncView()
+                default: ProgressView("Loading memory…")
+                }
+            }
+            .toolbar {
+                if isPresented {
+                    ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
+                }
             }
         }
     }
@@ -28,26 +33,24 @@ struct WelcomeView: View {
     @State private var deviceCode: DeviceCodeResponse?
     @State private var authError: String?
     @State private var polling = false
+    @State private var authTask: Task<Void, Never>?
 
     var body: some View {
-        VStack(spacing: 24) {
-            Spacer()
-            // The bobbing pixel-art mascot + the site's typewriter finding card.
-            PhrenMascotView(size: 130)
-            Text("phren")
-                .font(.system(.largeTitle, design: .monospaced).bold())
+        ScrollView {
+        VStack(alignment: .leading, spacing: 20) {
+            PhrenMascotView(size: 84, bobbing: false, glow: false)
+                .padding(.top, 20)
+            Text("Connect project memory")
+                .font(.system(.largeTitle).weight(.semibold))
                 .foregroundStyle(PhrenTheme.text)
-            Text("memory that travels with your agents")
-                .font(.callout.monospaced())
-                .foregroundStyle(PhrenTheme.lavender)
-                .multilineTextAlignment(.center)
-            TypewriterFindingCard()
-                .padding(.top, 4)
-            Text("Connect a GitHub token to open your phren store. It's stored only in this device's Keychain.")
-                .font(.footnote)
+            Text("Findings, skills, and tasks — synced with your GitHub repositories.")
+                .font(.callout)
                 .foregroundStyle(PhrenTheme.textMuted)
-                .multilineTextAlignment(.center)
-            Spacer()
+            Text("Agents and terminals work without GitHub. Connect memory whenever you're ready.")
+                .font(.footnote).foregroundStyle(PhrenTheme.textMuted)
+            if let message = model.authenticationMessage {
+                Text(message).font(.footnote).foregroundStyle(PhrenTheme.warning)
+            }
 
             if let code = deviceCode {
                 DeviceCodeView(code: code, polling: polling)
@@ -59,44 +62,53 @@ struct WelcomeView: View {
             }
 
             VStack(spacing: 12) {
+                if DeviceFlowAuth.isConfigured {
+                    Button {
+                        authTask = Task { await startDeviceFlow() }
+                    } label: {
+                        Label("Sign in with GitHub", systemImage: "person.crop.circle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent).tint(PhrenTheme.accentSolid)
+                    .disabled(polling)
+                }
                 Button {
+                    authTask?.cancel()
                     showPATSheet = true
                 } label: {
                     Label("Connect with a GitHub token", systemImage: "key.fill")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
-
-                if DeviceFlowAuth.isConfigured {
-                    Button("Sign in with GitHub instead") {
-                        Task { await startDeviceFlow() }
-                    }
-                    .font(.footnote)
-                    .disabled(polling)
-                }
+                .buttonStyle(.bordered)
             }
-            .padding(.bottom)
+            .padding(.top, 8)
+            Text("Your sign-in is saved in this device's Keychain. Sync goes directly to GitHub.")
+                .font(.caption).foregroundStyle(PhrenTheme.textDim)
         }
-        .padding()
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(24)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        }
         .background(PhrenTheme.bg)
+        .navigationTitle("Memory").navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showPATSheet) {
             PATSignInSheet()
         }
+        .onDisappear { authTask?.cancel() }
     }
 
     private func startDeviceFlow() async {
+        guard !polling else { return }
         authError = nil
         guard DeviceFlowAuth.isConfigured else {
             authError = "GitHub sign-in isn't set up yet — use a token instead."
             return
         }
+        polling = true
+        defer { polling = false; deviceCode = nil }
         let auth = DeviceFlowAuth()
         do {
             let code = try await auth.requestCode()
             deviceCode = code
-            polling = true
-            defer { polling = false }
             #if canImport(UIKit)
             if let url = URL(string: code.verificationUri) {
                 await UIApplication.shared.open(url)
@@ -104,6 +116,7 @@ struct WelcomeView: View {
             #endif
             switch try await auth.waitForAuthorization(code) {
             case .authorized(let token):
+                try Task.checkCancellation()
                 try await model.signIn(token: token, kind: .oauth)
             case .expired:
                 authError = "The code expired — try again."
@@ -113,9 +126,8 @@ struct WelcomeView: View {
                 break
             }
         } catch {
-            authError = "Couldn't reach GitHub: \(error.localizedDescription)"
+            if !Task.isCancelled { authError = "Couldn't reach GitHub: \(error.localizedDescription)" }
         }
-        deviceCode = nil
     }
 }
 
@@ -156,12 +168,11 @@ struct PATSignInSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            PhrenForm {
                 Section {
                     Link("Create a token on GitHub", destination: URL(string: "https://github.com/settings/personal-access-tokens/new")!)
-                    SecureField("github_pat_… or ghp_…", text: $token)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
+                    PhrenSecureField("github_pat_… or ghp_…", text: $token, identifier: "onboarding-token",
+                                     monospaced: true, surface: .bare)
                 } header: {
                     Text("Personal access token")
                 } footer: {
@@ -281,7 +292,7 @@ struct RepoPickerList: View {
     }
 
     var body: some View {
-        List {
+        PhrenList {
             if !likelyStores.isEmpty || probing {
                 Section {
                     if likelyStores.isEmpty {
@@ -322,7 +333,7 @@ struct RepoPickerList: View {
                 }
             }
             Section {
-                TextField("owner/repo", text: $manualEntry)
+                PhrenTextField("owner/repo", text: $manualEntry, identifier: "onboarding-manual-repo", surface: .bare)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                 Button("Open") {

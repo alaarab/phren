@@ -14,7 +14,7 @@ final class StoreAndSearchTests: XCTestCase {
         XCTAssertFalse(LocalStore.isWritablePath("phren.root.yaml"))
         XCTAssertFalse(LocalStore.isWritablePath("stores.yaml"))
         XCTAssertFalse(LocalStore.isWritablePath(".phren-team.yaml"))
-        XCTAssertFalse(LocalStore.isWritablePath("myproj/CLAUDE.md"))
+        XCTAssertTrue(LocalStore.isWritablePath("myproj/AGENTS.md"))
         XCTAssertFalse(LocalStore.isWritablePath("myproj/summary.md"))
         XCTAssertFalse(LocalStore.isWritablePath("myproj/truths.md"))
         XCTAssertFalse(LocalStore.isWritablePath("myproj/reference/topic.md"))
@@ -30,7 +30,7 @@ final class StoreAndSearchTests: XCTestCase {
         // assertions that fail the moment someone "simplifies" the split by
         // relaxing isProjectDirName, which isWritablePath delegates to.
         XCTAssertFalse(LocalStore.isWritablePath("global/FINDINGS.md"))
-        XCTAssertFalse(LocalStore.isWritablePath("global/CLAUDE.md"))
+        XCTAssertTrue(LocalStore.isWritablePath("global/AGENTS.md"))
         XCTAssertFalse(LocalStore.isWritablePath("global/tasks.md"))
         XCTAssertFalse(LocalStore.isWritablePath("global/review.md"))
         XCTAssertFalse(LocalStore.isWritablePath("global/notes/2026-07-26.md"))
@@ -56,7 +56,7 @@ final class StoreAndSearchTests: XCTestCase {
     /// them is a project, so nothing under any of them syncs or writes.
     func testReservedDirectoriesAreNeitherSyncedNorWritable() {
         for reserved in ["profiles", "templates", "scripts", ".config", ".runtime", ".sessions"] {
-            for leaf in ["FINDINGS.md", "tasks.md", "review.md", "summary.md", "CLAUDE.md", "truths.md"] {
+            for leaf in ["FINDINGS.md", "tasks.md", "review.md", "summary.md", "AGENTS.md", "truths.md"] {
                 let path = "\(reserved)/\(leaf)"
                 XCTAssertFalse(LocalStore.isSyncedPath(path), "\(path) must not sync")
                 XCTAssertFalse(LocalStore.isWritablePath(path), "\(path) must not be writable")
@@ -72,7 +72,7 @@ final class StoreAndSearchTests: XCTestCase {
 
     func testGlobalSyncsAsAReadOnlyProject() {
         XCTAssertTrue(LocalStore.isSyncedPath("global/FINDINGS.md"))
-        XCTAssertTrue(LocalStore.isSyncedPath("global/CLAUDE.md"))
+        XCTAssertTrue(LocalStore.isSyncedPath("global/AGENTS.md"))
         // Only those two: `global`'s tasks/review/notes are CLI machinery with
         // no phone surface, and paying for them would be paying for nothing.
         XCTAssertFalse(LocalStore.isSyncedPath("global/tasks.md"))
@@ -87,6 +87,25 @@ final class StoreAndSearchTests: XCTestCase {
         XCTAssertFalse(LocalStore.isReadOnlyProject("myproj"))
         // A name that isn't a project at all is not "a read-only project".
         XCTAssertFalse(LocalStore.isReadOnlyProject("profiles"))
+    }
+
+    func testAgentInstructionsPreferAgentsAndRetainLegacyFallbackPath() async throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("phren-instructions-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = try LocalStore(rootDirectory: dir, owner: "o", repo: "r", branch: "main")
+
+        try await store.write("legacy/CLAUDE.md", content: "# Legacy", blobSha: nil)
+        var snapshot = await store.snapshot()
+        XCTAssertEqual(snapshot.instructions["legacy"], "# Legacy")
+        XCTAssertEqual(snapshot.instructionPaths["legacy"], "legacy/CLAUDE.md")
+
+        try await store.write("legacy/AGENTS.md", content: "# Canonical", blobSha: nil)
+        snapshot = await store.snapshot()
+        XCTAssertEqual(snapshot.instructions["legacy"], "# Canonical")
+        XCTAssertEqual(snapshot.instructionPaths["legacy"], "legacy/AGENTS.md")
+        let retainedLegacy = await store.read("legacy/CLAUDE.md")
+        XCTAssertEqual(retainedLegacy, "# Legacy")
     }
 
     /// The bug this branch exists for: `journal/` used to be excluded from the

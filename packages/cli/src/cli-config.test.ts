@@ -45,6 +45,22 @@ describe("CLI config: help", () => {
   });
 });
 
+describe("CLI config: pull interval", () => {
+  it("persists a machine-local interval, reports overrides, and rejects invalid values", () => {
+    const { phrenDir, cleanup } = setupPhrenDir();
+    const env = { PHREN_PATH: phrenDir, PHREN_PULL_INTERVAL_SECONDS: "" };
+    try {
+      expect(runCli(["config", "pull-interval"], env).stdout).toContain("off (default)");
+      expect(runCli(["config", "pull-interval", "600"], env).exitCode).toBe(0);
+      expect(runCli(["config", "pull-interval"], env).stdout).toContain("600 seconds (install preferences)");
+      expect(runCli(["config", "pull-interval", "10"], env).exitCode).toBe(1);
+      expect(runCli(["config", "pull-interval"], env).stdout).toContain("600 seconds");
+      expect(runCli(["config", "pull-interval"], { ...env, PHREN_PULL_INTERVAL_SECONDS: "120" }).stdout).toContain("120 seconds (PHREN_PULL_INTERVAL_SECONDS)");
+      expect(runCli(["config", "pull-interval", "off"], env).stdout).toContain("Pull interval: off");
+    } finally { cleanup(); }
+  });
+});
+
 describe("CLI config: policy", () => {
   let phrenDir: string;
   let cleanup: () => void;

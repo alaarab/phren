@@ -27,7 +27,7 @@ app, and this app is a developer tool, not a list app.
 **Primary** — 29 chars:
 
 ```
-Review what your agents know
+Explore what your agents know
 ```
 
 Alternatives:
@@ -51,9 +51,8 @@ required — it costs nothing and widens discovery).
 ## Promotional text (170 max, editable without a new build)
 
 ```
-Your coding agents learn things every session. phren keeps that knowledge
-in a git repo you own — and this app is how you review it, approve it, and
-throw out what's wrong, from your phone.
+Explore your agents' memory, check their sessions, and add direction from
+your phone. Your knowledge stays in a Git repository you own.
 ```
 
 ## Description (4000 max)
@@ -65,15 +64,23 @@ AI coding agents (npm: @phren/cli).
 Your agents accumulate knowledge as they work — architectural decisions,
 pitfalls, patterns that only show up once you've hit them. phren stores
 that knowledge as markdown in a git repository you own. This app is how
-you govern it while you're away from your desk.
+you explore it while you're away from your desk.
 
 
-REVIEW QUEUE, BUILT FOR VOLUME
+MEMORY AND AGENTS AT A GLANCE
 
-Findings your agents captured automatically land in a review queue for you
-to approve or reject. Triage mode shows one item at a time, full screen:
-swipe right to keep it, left to discard. Undo is always there. A backlog
-of hundreds becomes a few minutes of thumb work in a queue at the bus stop.
+Explore connected findings in a memory graph, manage skills and project
+instructions, and search what your agents know. The Agents tab can read
+live Herdr sessions through an optional SSH connection to your computer's
+Moshi hook. No Phren gateway is required.
+
+Open a live tab directly in Moshi, or let phren find a project's session
+from its working directory. Choose between real sessions when several match.
+
+Your agents capture and use memory while they work. Optional maintenance
+groups candidates, stale memories, and conflicts by project. Copy a request
+into your agent conversation, or select entries to manage yourself.
+You do not need to review every agent action.
 
 
 CAPTURE WITHOUT OPENING THE APP
@@ -106,7 +113,8 @@ ALSO INCLUDED
 • On-device search across everything, no network round trip
 • Multiple stores — personal and team repositories side by side, with
   badges so you always know which repo you're writing to
-• Home Screen and Lock Screen widgets for your review count and top task
+• Active tasks at a glance, with a separate searchable backlog and full details
+• Home Screen and Lock Screen widgets for your memory count and top task
 • Live sync — new findings appear within seconds while an agent works on
   another machine
 

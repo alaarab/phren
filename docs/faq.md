@@ -5,20 +5,20 @@
 Yes — pick a lower-touch **management preset**. Phren ships three:
 
 - **managed** (default) — the full experience: MCP + hooks + `~/.claude/CLAUDE.md` and skills symlinks + `~/.local/bin` wrappers + repo mirroring, re-healed every session.
-- **assisted** — hooks and MCP stay on (you keep context injection, auto-capture, and store git sync), but phren **never writes outside its own store and your agent's settings**. No CLAUDE.md symlink, no skills symlinks, no wrappers, no self-heal. It prints a snippet so you can reference `global/CLAUDE.md` and skills from your own files (re-print with `phren snippet`).
+- **assisted** — hooks and MCP stay on (you keep context injection, auto-capture, and store git sync), but phren **never writes outside its own store and your agent's settings**. No AGENTS.md symlink, no skills symlinks, no wrappers, no self-heal. It prints a snippet so you can reference `global/AGENTS.md` and skills from your own files (re-print with `phren snippet`).
 - **manual** — phren runs as an MCP server only. No hooks, no automations, no auto-commit. A pull-based knowledge base your agent calls on demand.
 
 Set it at install with `phren init --preset assisted` (or `manual`), switch anytime with `phren preset assisted`, and see exactly what phren touches on your machine with `phren status`. Full path-by-path breakdown: [footprint.md](footprint.md).
 
 Individual capabilities can still be fine-tuned via `install-preferences.json` (they override the preset), and the `PHREN_FEATURE_*` env flags always win at runtime.
 
-## How is this different from just using CLAUDE.md?
+## How is this different from just using AGENTS.md?
 
-`CLAUDE.md` loads the entire file on every prompt. If your file is 2,000 tokens, you pay 2,000 tokens every single time, whether the content is relevant or not. With five agents running in parallel, that's 10,000 tokens of context before anyone types a word.
+`AGENTS.md` loads the entire file on every prompt. If your file is 2,000 tokens, you pay 2,000 tokens every single time, whether the content is relevant or not. With five agents running in parallel, that's 10,000 tokens of context before anyone types a word.
 
 Phren searches what you wrote and injects only what matches the current prompt. By default it targets roughly 550 tokens with `PHREN_CONTEXT_TOKEN_BUDGET`, regardless of how large your knowledge base grows. You can run more agents in parallel for the same cost, and they're not reading noise.
 
-`CLAUDE.md` is also static. Phren learns as you work. Every bug traced, every decision made, every pattern discovered gets saved automatically. The next session starts with that knowledge already in context.
+`AGENTS.md` is also static. Phren learns as you work. Every bug traced, every decision made, every pattern discovered gets saved automatically. The next session starts with that knowledge already in context.
 
 ## Does this slow down my prompts?
 
@@ -32,13 +32,16 @@ They all read and write the same `~/.phren` directory. Concurrent reads are safe
 
 In practice: an agent on Codex hits a pitfall and saves a finding. On the next git pull cycle, a Claude Code session on a different machine has it in context. No coordination code, no message passing. It's just a shared git repo.
 
-The one rough edge is heavy concurrent writes on the same machine. If two agents are pushing at exactly the same moment you can get a push conflict or a locally saved commit that has not been pushed yet. Phren retries transient git failures, rebases and auto-merges safe markdown conflicts in the background sync worker, and surfaces remaining failures in status, shell, and web UI. Under extreme parallelism, think of Phren as eventually consistent rather than strongly coordinated.
+Periodic checks are off by default. Enable them with `phren config pull-interval 60` to check shared Git stores every minute while an MCP server is running, sharing one check per store across clients. A check compares the remote commit; only changed refs are fetched, and only clean fast-forwards are applied. Use `phren config pull-interval 600` for ten minutes or `phren config pull-interval off` to stop periodic checks on this machine. Pulled content refreshes the memory index and existing managed skill/instruction mirrors. The manual preset and project-local installs do not poll by default, and a closed MCP server does not run a timer. SessionStart/Stop hooks keep their existing sync behavior.
+
+The one rough edge is heavy concurrent writes on the same machine. If two agents are pushing at exactly the same moment you can get a push conflict or a locally saved commit that has not been pushed yet. Phren retries transient git failures, merges remote commits with union handling for safe markdown conflicts, and surfaces remaining failures in status, shell, and web UI. Under extreme parallelism, think of Phren as eventually consistent rather than strongly coordinated.
 
 ## What failure modes should I expect?
 
 The common ones are boring infrastructure issues, not mystery behavior:
 
 - No remote configured: auto-save still commits locally, but nothing syncs across machines until you add a remote.
+- Which machine wrote a change: every commit Phren makes in the store ends with the machine's name in brackets (`phren: demo(findings) [Desk]`), so `git log --oneline` in the store shows it.
 - Push failed: the commit stays local and Phren records the last sync error so `phren status`, shell, and web UI can show it.
 - Hooks disabled or stale: retrieval stops, but your files are still there; rerun `phren init` or re-enable hooks with `phren hooks-mode on`.
 - Stale index: search quality drops until the next rebuild; `phren doctor` and `phren status` will flag index trouble.
@@ -156,7 +159,7 @@ Project setup note:
 
 ## Does phren require MCP?
 
-No. MCP is recommended. It gives agents 59 tools across 13 modules for reading and writing memory directly. But phren also works in hooks-only mode, where context injection still happens automatically via the prompt hook. The simpler default story is still markdown + git + local FTS5; semantic and LLM-assisted paths are optional layers, not prerequisites.
+No. MCP is recommended. It gives agents ten tools by default (the `core` profile), with the full 59 one call away through `phren_admin` or the `full` profile, for reading and writing memory directly. But phren also works in hooks-only mode, where context injection still happens automatically via the prompt hook. The simpler default story is still markdown + git + local FTS5; semantic and LLM-assisted paths are optional layers, not prerequisites.
 
 ```bash
 phren init --mcp off

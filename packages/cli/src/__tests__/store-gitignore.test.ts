@@ -27,6 +27,7 @@ describe("store .gitignore templates", () => {
     expect(STORE_SECRET_GITIGNORE_LINES).toContain(".sessions/");
     expect(STORE_SECRET_GITIGNORE_LINES).toContain(".env");
     expect(STORE_SECRET_GITIGNORE_LINES).toContain(".config/auth-profiles.json");
+    expect(STORE_SECRET_GITIGNORE_LINES).toContain(".config/modules.yaml.migration-backup");
   });
 
   it("the shared-mode starter template covers every secret-bearing entry", () => {

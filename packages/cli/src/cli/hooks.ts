@@ -1,3 +1,4 @@
+import { moduleEnabled } from "../modules/runtime.js";
 // cli-hooks.ts — Thin orchestrator. Delegates to focused modules:
 //   shared-retrieval.ts     — shared search, scoring, ranking, snippet selection
 //   cli-hooks-citations.ts  — citation parsing and validation
@@ -12,8 +13,7 @@ import {
   getPhrenPath,
 } from "../shared.js";
 import {
-  mergeConfig,
-} from "../shared/governance.js";
+  mergeConfig, recordLookupEvents } from "../shared/governance.js";
 import {
   loadIndexForHook,
   detectProject,
@@ -27,6 +27,7 @@ import {
   extractKeywordEntries,
   isFeatureEnabled,
   clampInt,
+  clampFloat,
   errorMessage,
 } from "../utils.js";
 import { getHooksEnabledPreference } from "../init/init.js";
@@ -63,6 +64,9 @@ export {
   searchDocuments,
   applyTrustFilter,
   rankResults,
+  applyRelevanceFloor,
+  promptRarity,
+  DEFAULT_MIN_QUERY_RELEVANCE,
   selectSnippets,
   type SelectedSnippet,
 } from "../shared/retrieval.js";
@@ -92,10 +96,12 @@ import {
   searchDocumentsAsync,
   applyTrustFilter,
   rankResults,
+  applyRelevanceFloor,
+  promptRarity,
+  DEFAULT_MIN_QUERY_RELEVANCE,
   selectSnippets,
   detectTaskIntent,
-  type SelectedSnippet,
-} from "../shared/retrieval.js";
+  type SelectedSnippet, wantsTasks } from "../shared/retrieval.js";
 import { buildHookOutput } from "./hooks-output.js";
 import {
   getGitContext,
@@ -104,6 +110,8 @@ import {
 import { approximateTokens, SNIPPET_OVERHEAD_TOKENS } from "../shared/retrieval.js";
 import { resolveRuntimeProfile } from "../runtime-profile.js";
 import { handleTaskPromptLifecycle } from "../task/lifecycle.js";
+import { bestFindingNodeId } from "../finding-graph-id.js";
+import { readKnowsBlock } from "../content/summarize.js";
 
 // Auto-learn from prompts was removed — it learned conversational noise ("bro", "idk", typos)
 // as synonyms for high-frequency terms. Manual `phren config synonyms add` still works.
@@ -216,7 +224,7 @@ export async function handleHookPrompt() {
 
   // Resolve git context AFTER the enabled check — it spawns 3 git processes and is
   // wasted work when the project has hooks disabled.
-  const gitCtx = getGitContext(cwd);
+  const gitCtx = moduleEnabled(getPhrenPath(), "git") ? getGitContext(cwd) : null;
 
   const resolvedConfig = mergeConfig(getPhrenPath(), detectedProject ?? undefined);
 
@@ -244,13 +252,15 @@ export async function handleHookPrompt() {
     // Notes are intentionally available to explicit search, but are personal scratch
     // context and should never be injected into an agent prompt automatically.
     rows = rows.filter((row) => row.type !== "notes");
+    // Tasks are a backlog, not memory: only when the prompt is about the work.
+    if (!wantsTasks(prompt, intent)) rows = rows.filter((row) => row.type !== "task");
     stage.trustMs = Date.now() - tTrust0;
     if (!rows.length) process.exit(0);
 
     const findingsProactivity = resolvedConfig.proactivity.findings
       ?? resolvedConfig.proactivity.base
       ?? getProactivityLevelForFindings(getPhrenPath());
-    if (isFeatureEnabled("PHREN_FEATURE_AUTO_EXTRACT", true) && findingsProactivity !== "low" && sessionId && detectedProject && cwd) {
+    if (moduleEnabled(getPhrenPath(), "git") && isFeatureEnabled("PHREN_FEATURE_AUTO_EXTRACT", true) && findingsProactivity !== "low" && sessionId && detectedProject && cwd) {
       const marker = sessionMarker(getPhrenPath(), `extracted-${sessionId}-${detectedProject}`);
       if (!fs.existsSync(marker)) {
         try {
@@ -267,6 +277,18 @@ export async function handleHookPrompt() {
     stage.rankMs = Date.now() - tRank0;
     if (!rows.length) process.exit(0);
 
+    // Relevance floor: inject signal or nothing. Ranking scores on priors too,
+    // so a doc can rank well with no real tie to this prompt — drop those rather
+    // than pad to a quota with noise (env PHREN_MIN_QUERY_RELEVANCE=0 disables).
+    const relevanceFloor = clampFloat(process.env.PHREN_MIN_QUERY_RELEVANCE, DEFAULT_MIN_QUERY_RELEVANCE, 0, 1);
+    const preFloorCount = rows.length;
+    debugLog(`relevance-floor candidates: ${rows.slice(0, 12).map((row) => `${row.project}/${row.filename}`).join(", ")}`);
+    rows = applyRelevanceFloor(rows, keywords, gitCtx, detectedProject, relevanceFloor, promptRarity(db, keywords));
+    if (rows.length !== preFloorCount) {
+      debugLog(`relevance-floor: ${preFloorCount} -> ${rows.length} rows (floor=${relevanceFloor})`);
+    }
+    if (!rows.length) process.exit(0);
+
     let safeTokenBudget = clampInt(process.env.PHREN_CONTEXT_TOKEN_BUDGET, 550, 180, 10000);
     const safeLineBudget = clampInt(process.env.PHREN_CONTEXT_SNIPPET_LINES, 6, 2, 100);
     const safeCharBudget = clampInt(process.env.PHREN_CONTEXT_SNIPPET_CHARS, 520, 120, 10000);
@@ -280,9 +302,25 @@ export async function handleHookPrompt() {
     }
 
     const tSelect0 = Date.now();
-    const { selected, usedTokens } = selectSnippets(rows, keywords, safeTokenBudget, safeLineBudget, safeCharBudget);
+    let { selected, usedTokens } = selectSnippets(rows, keywords, safeTokenBudget, safeLineBudget, safeCharBudget);
     stage.selectMs = Date.now() - tSelect0;
     if (!selected.length) process.exit(0);
+
+    // Once per session per project: the "What phren knows" paragraph from
+    // summary.md, so the agent gets the shape of a project's archive before
+    // individual bullets. Written by `phren maintain summarize`; absent until then.
+    if (detectedProject && sessionId) {
+      const knowsMarker = sessionMarker(getPhrenPath(), `knows-${sessionId}-${detectedProject}`);
+      if (!fs.existsSync(knowsMarker)) {
+        const knows = readKnowsBlock(getPhrenPath(), detectedProject);
+        if (knows) {
+          const text = knows.text.length > 520 ? `${knows.text.slice(0, 519)}…` : knows.text;
+          selected = [{ doc: { project: detectedProject, filename: "summary.md", type: "summary", content: knows.text, path: knows.path }, snippet: text, key: `knows:${detectedProject}` }, ...selected.filter((s) => s.key !== `knows:${detectedProject}`)];
+          usedTokens += approximateTokens(text) + SNIPPET_OVERHEAD_TOKENS;
+          try { fs.writeFileSync(knowsMarker, ""); } catch (err: unknown) { debugLog(`knows marker: ${errorMessage(err)}`); }
+        }
+      }
+    }
 
     // Injection budget: cap total injected tokens across all content
     const maxInjectTokens = clampInt(process.env.PHREN_MAX_INJECT_TOKENS, 2000, 200, 20000);
@@ -311,18 +349,47 @@ export async function handleHookPrompt() {
       debugLog(`injection-budget: trimmed ${selected.length} -> ${kept.length} snippets to fit ${maxInjectTokens} token budget`);
     }
 
+    // Live activity: what a prompt pulled in is a recall as much as a search
+    // hit is, and it is by far the most common kind. Recording it here is what
+    // lets the terminal graph's watch mode, and anything else tailing the log,
+    // light up while an agent works. Best-effort: logging must never break
+    // the hook.
+    try {
+      const at = new Date().toISOString();
+      // The prompt, not the expanded keyword string: the feed shows this to a
+      // person, and "retry retry backoff backoff jitter" is not what they asked.
+      const asked = prompt.replace(/\s+/g, " ").trim().slice(0, 160);
+      recordLookupEvents(getPhrenPath(), budgetSelected.map((s) => {
+        const nodeId = s.doc.type === "findings" ? bestFindingNodeId(s.doc.project, s.doc.content, keywords) : null;
+        return {
+          at,
+          query: asked,
+          project: s.doc.project,
+          filename: s.doc.filename,
+          type: s.doc.type,
+          path: s.doc.path,
+          snippet: s.snippet,
+          source: "hook",
+          ...(nodeId ? { nodeId } : {}),
+          ...(sessionId ? { session: sessionId } : {}),
+        };
+      }));
+    } catch (err: unknown) {
+      debugLog(`hook-prompt lookup-events: ${errorMessage(err)}`);
+    }
+
     const parts = buildHookOutput(budgetSelected, budgetUsedTokens, intent, gitCtx, detectedProject, stage, safeTokenBudget, getPhrenPath(), sessionId);
     const taskLevel = resolvedConfig.proactivity.tasks
       ?? resolvedConfig.proactivity.base
       ?? getProactivityLevelForTask(getPhrenPath());
-    const taskLifecycle = handleTaskPromptLifecycle({
+    const taskLifecycle = moduleEnabled(getPhrenPath(), "tasks") ? handleTaskPromptLifecycle({
       phrenPath: getPhrenPath(),
       prompt,
       project: detectedProject,
       sessionId,
       intent,
       taskLevel,
-    });
+    }) : { noticeLines: [] };
     if (taskLifecycle.noticeLines.length > 0) {
       parts.push("");
       parts.push(...taskLifecycle.noticeLines);

@@ -2,11 +2,12 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "js-yaml";
+import { loadYamlDocument } from "./phren-core.js";
 import { readInstallPreferences } from "./init/preferences.js";
 import { debugLog } from "./shared.js";
 import { errorMessage } from "./utils.js";
 import { storeAwareProjectPath } from "./store-routing.js";
-import { withFileLock } from "./shared/governance.js";
+import { withFileLock } from "./governance/locks.js";
 import type { RetentionPolicyPatch } from "./governance/policy.js";
 
 export const PROJECT_OWNERSHIP_MODES = ["phren-managed", "detached", "repo-managed"] as const;
@@ -115,7 +116,7 @@ export function readProjectConfig(phrenPath: string, project: string): ProjectCo
     return cached.config;
   }
   try {
-    const parsed = yaml.load(fs.readFileSync(configPath, "utf8"), { schema: yaml.CORE_SCHEMA });
+    const parsed = loadYamlDocument(fs.readFileSync(configPath, "utf8"), (text) => yaml.load(text, { schema: yaml.CORE_SCHEMA }));
     const config = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as ProjectConfig : {};
     _projectConfigCache.set(configPath, { mtimeMs, config });
     return config;

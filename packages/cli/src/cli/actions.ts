@@ -146,7 +146,15 @@ export async function handleDoctor(args: string[]) {
     process.exit(0);
   }
 
-  const result = await runDoctor(getPhrenPath(), fix, checkData);
+  const confirmStoreRemoval = async (message: string): Promise<boolean> => {
+    // Unlike init's general confirmation helper, absent stdin is never consent.
+    if (!process.stdin.isTTY || !process.stdout.isTTY || process.env.CI === "true") return false;
+    const { createInterface } = await import("node:readline/promises");
+    const prompt = createInterface({ input: process.stdin, output: process.stdout });
+    try { return /^(y|yes)$/i.test((await prompt.question(`${message} [y/N] `)).trim()); }
+    finally { prompt.close(); }
+  };
+  const result = await runDoctor(getPhrenPath(), fix, checkData, confirmStoreRemoval);
   if (agentsOnly) {
     const agentChecks = result.checks.filter((check) =>
       check.name.includes("cursor") || check.name.includes("copilot") || check.name.includes("codex") || check.name.includes("windsurf")
@@ -311,8 +319,12 @@ export async function handleMemoryUi(args: string[]) {
   });
 }
 
-export async function handleShell(_args: string[], profile: string) {
-  await startShell(getPhrenPath(), profile);
+export async function handleShell(args: string[], profile: string) {
+  const phrenPath = getPhrenPath();
+  const { parseShellArgs, resolveShellStartup } = await import("../shell/startup.js");
+  const { startup, warnings } = resolveShellStartup(parseShellArgs(args), { phrenPath, profile });
+  if (warnings.length) startup.notice = warnings.join(" ");
+  await startShell(phrenPath, profile, startup);
 }
 
 export async function handleUpdate(args: string[]) {

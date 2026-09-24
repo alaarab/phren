@@ -32,7 +32,7 @@ Users want:
 | Profiles | ✅ | Machine→profile mapping, project filtering |
 | Git sync | ✅ | Stop hook: commit + push, pull with markdown merge |
 | Scope isolation | ✅ | Memory scopes (researcher/builder/shared) |
-| Conflict resolution | ✅ | Auto-merge for FINDINGS.md and tasks.md |
+| Conflict resolution | ✅ | tasks.md merged per task id against the merge base; generated `## Now` and `What phren knows` blocks take the incoming side; FINDINGS.md and the task archive union-merge; any other conflict aborts and names its files |
 
 ## Design Principles (from review)
 
@@ -47,8 +47,10 @@ Users want:
 
 ### Store Registry
 
+> **Current layout (2026-09).** Only the primary entry lives in the synced `~/.phren/stores.yaml`. Team and readonly entries, in the same shape, live in `~/.phren/.runtime/attached-stores.yaml` on each machine that joined them, so using a personal store never attaches a machine to a team store. The combined example below shows one machine's view.
+
 ```yaml
-# ~/.phren/stores.yaml
+# ~/.phren/stores.yaml + ~/.phren/.runtime/attached-stores.yaml
 stores:
   - id: "a1b2c3d4"              # Immutable UUID (generated on create/add)
     name: personal
@@ -211,7 +213,7 @@ Journal files are append-only — no conflicts possible. `FINDINGS.md` is regene
 Single source of truth: **the store registry** owns project→store mapping.
 
 ```yaml
-# ~/.phren/stores.yaml
+# ~/.phren/.runtime/attached-stores.yaml (this machine only)
 stores:
   - id: "e5f6g7h8"
     name: arc-team
@@ -253,9 +255,9 @@ Stop Hook
 ├─ For each store where role == team:
 │   ├─ git add journal/ only (append-only files)
 │   ├─ git commit -m "phren: $PHREN_ACTOR findings"
-│   └─ git pull --rebase && git push
+│   └─ fetch, merge with union-safe store files, then push
 ├─ For each store where role == readonly:
-│   └─ git pull only
+│   └─ fetch and fast-forward or merge
 └─ Update health.json per store
 ```
 

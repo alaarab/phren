@@ -4,50 +4,28 @@ import { ROOT } from "./types.js";
 import {
   baseColorForNode,
   buildFullAdjacency,
+  dossierPosition,
   ensureTopicFilters,
   nodeDetail,
   normalizeNode,
   searchTextForNode,
   state,
+  stepDossier,
 } from "./state.js";
 import { applyHighlight, refreshNodeVisual } from "./nodes.js";
-import { resetLabels, refreshLabels, updateEagerLabelText } from "./labels.js";
+import { benchLabelTick, forgetEagerLabel, resetLabels, refreshLabels, updateEagerLabelText } from "./labels.js";
 import { applyFilters, disposeScene, setupForceGraph } from "./scene.js";
 import { buildFilterBar, buildHudOverlays } from "./hud.js";
-import { clearSelection, fitCameraToGraph, getNodeAt, hideTooltip, runIntro, selectNode } from "./interactions.js";
+import { clearSelection, fitCameraToGraph, getNodeAt, peekNode, runIntro, screenPosFor, selectNode } from "./interactions.js";
+import { setSelectionViewport, zoomCamera } from "./selection-camera.js";
 import { disposePulses, mascot, startMascot, stopMascot, walkTo } from "./mascot.js";
 import { refreshProjectPanel } from "./project-panel.js";
 
 function mount(payload: GraphPayload): void {
   state.container = document.getElementById("graph-canvas");
-  state.tooltip = document.getElementById("graph-tooltip");
   if (!state.container) {
     console.error("[phrenGraph] #graph-canvas not found");
     return;
-  }
-
-  if (state.tooltip) {
-    Object.assign(state.tooltip.style, {
-      position: "absolute",
-      pointerEvents: "none",
-      zIndex: "1000",
-      maxWidth: "320px",
-      padding: "9px 12px",
-      borderRadius: "6px",
-      fontSize: "12px",
-      fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
-      backgroundColor: "rgba(8,10,22,0.92)",
-      color: "#dbe4ff",
-      border: "1px solid rgba(103,232,249,0.25)",
-      boxShadow: "0 4px 18px rgba(0,0,0,0.5), 0 0 14px rgba(103,232,249,0.08)",
-      opacity: "0",
-      transition: "opacity 150ms ease-in-out",
-      whiteSpace: "pre-wrap",
-      wordBreak: "break-word",
-      lineHeight: "1.5",
-      letterSpacing: "0.01em",
-    });
-    state.tooltip.classList.add("graph-tooltip");
   }
 
   state.payload = payload || {};
@@ -109,6 +87,7 @@ function disposeNodeObject(fgNode: FGNode): void {
   // Detach the eager label's CSS2DObject from the scene graph BEFORE removing
   // its element — otherwise CSS2DRenderer re-appends the element on its next
   // pass and the label lingers as a ghost after a remount (e.g. post-delete).
+  if (fgNode.__labelObj) forgetEagerLabel(fgNode.id);
   fgNode.__labelObj?.removeFromParent();
   if (fgNode.__labelEl) fgNode.__labelEl.remove();
   fgNode.__group = undefined;
@@ -213,7 +192,6 @@ function removeNode(nodeId: string, opts?: { animate?: boolean }): boolean {
     if (mascot.currentNodeId === nodeId) mascot.currentNodeId = null;
     if (mascot.targetNodeId === nodeId) mascot.targetNodeId = null;
     buildFullAdjacency();
-    hideTooltip();
     applyFilters({ resetCamera: false, emitSelection: false });
     if (wasSelected) notifyClearOnce();
   };
@@ -272,7 +250,6 @@ function removeNode(nodeId: string, opts?: { animate?: boolean }): boolean {
 function destroy(): void {
   stopMascot();
   disposePulses();
-  hideTooltip();
   if (state.ambientRafId) cancelAnimationFrame(state.ambientRafId);
   state.ambientRafId = 0;
   state.themeObserver?.disconnect();
@@ -290,7 +267,6 @@ function destroy(): void {
   }
   state.fg = null;
   state.container = null;
-  state.tooltip = null;
   // A mount after destroy is a fresh scene — let the intro (and its camera
   // fit) run again rather than being treated as a camera-preserving remount.
   state.introPlayed = false;
@@ -299,16 +275,11 @@ function destroy(): void {
 // ── Window globals ──────────────────────────────────────────────────────
 
 ROOT.graphZoom = function graphZoom(factor: number): void {
-  if (!state.fg) return;
-  const camera = state.fg.camera();
-  const target = state.fg.controls()?.target || new THREE.Vector3();
-  const dir = new THREE.Vector3().subVectors(camera.position, target);
-  dir.multiplyScalar(1 / Math.max(factor, 0.05));
-  const next = new THREE.Vector3().addVectors(target, dir);
-  state.fg.cameraPosition({ x: next.x, y: next.y, z: next.z }, undefined, 160);
+  zoomCamera(factor);
 };
 
 ROOT.graphReset = function graphReset(): void {
+  clearSelection();
   fitCameraToGraph(500);
 };
 
@@ -345,9 +316,21 @@ ROOT.phrenGraph = {
   clearSelection,
   selectNode,
   focusNode: selectNode,
+  peekNode(nodeId: string) {
+    if (!state.fgNodeById.has(nodeId)) return;
+    // An explicit host camera request owns the view even during first settle.
+    state.firstSettle = false;
+    state.introPlayed = true;
+    peekNode(nodeId);
+  },
   walkTo,
   getNodeAt,
+  screenPosFor,
+  setSelectionViewport,
   getNodeDetail: nodeDetail,
+  /** Dossier navigation: prev/next in the ranked list the list mode shows. */
+  stepDossier,
+  dossierPosition,
   getData() {
     return {
       nodes: state.hostNodes.slice(),
@@ -359,4 +342,6 @@ ROOT.phrenGraph = {
   removeNode,
   updateNode,
   destroy,
+  /** Browser frame-budget probe for apps/ios/scripts/test-graph.mjs. */
+  benchLabels: (frames?: number) => benchLabelTick(frames),
 };

@@ -6,7 +6,7 @@ sends to their *own* GitHub repository is not collected by you.
 
 The distinction that matters: "collect" means transmitted off device **in
 a way you or your third-party partners can access**. This app has no
-server and no SDKs, so nothing qualifies.
+developer-operated server and no analytics or telemetry SDKs.
 
 ---
 
@@ -18,11 +18,11 @@ server and no SDKs, so nothing qualifies.
 
 Justification, if ever challenged:
 
-- No analytics, crash reporting, or telemetry framework is linked. The app
-  has zero third-party SDKs.
-- The only network destination is `api.github.com`, reached with a token
-  the user creates, writing to a repository the user owns. The developer
-  has no access to it.
+- No analytics, crash reporting, or telemetry framework is linked. SwiftNIO
+  SSH and Swift Crypto implement optional direct computer connections.
+- Store access goes directly to GitHub. Optional live status goes directly
+  to a computer the user adds, through authenticated SSH to its Moshi hook.
+  The developer receives neither store content nor live session metadata.
 - The GitHub token is stored in the device Keychain and is never
   transmitted anywhere except to GitHub as an authorization header.
 - Speech is transcribed by Apple's Speech framework, on-device wherever
@@ -39,11 +39,12 @@ which is accurate here and worth having.
 no advertising identifier access, and `NSPrivacyTracking` is `false` in the
 privacy manifest. Do **not** add the ATT prompt.
 
-**Export compliance (asked on every upload)** — the app uses only standard
-HTTPS and the system Keychain, which is exempt. Setting
-`ITSAppUsesNonExemptEncryption` to `NO` in Info.plist makes App Store
-Connect stop asking. Answer: *"Does your app use encryption? — Yes, but
-only standard/exempt encryption."*
+**Export compliance** — SSH adds bundled cryptographic implementation through
+Swift Crypto. The previous OS-only HTTPS answer no longer describes the app,
+so `project.yml` no longer pre-fills `ITSAppUsesNonExemptEncryption = NO`.
+Complete App Store Connect's questionnaire for this binary before distribution
+and record any required documentation/code in the release configuration.
+See [Apple's encryption documentation workflow](https://developer.apple.com/help/app-store-connect/manage-app-information/determine-and-upload-app-encryption-documentation/).
 
 **Content rights** — the app displays only content from the user's own
 repository. No third-party content is bundled.

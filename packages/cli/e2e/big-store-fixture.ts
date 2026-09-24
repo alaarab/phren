@@ -58,7 +58,15 @@ function hash(s: string): number {
 }
 
 function findingsFor(project: string, others: string[]): string {
-  const lines = [`# ${project} FINDINGS`, "", "## 2026-04-12", ""];
+  // Date the findings as *today*. A hard-coded date rots: once it ages past
+  // the retention TTL (120 days, governance/policy.ts) the trust filter strips
+  // the bullet bodies, leaving only the "# <project> FINDINGS" header — so
+  // search returns no bullet for bestFindingNodeId to resolve, and the
+  // activity feed's nodeId assertion starts failing on a wall-clock date
+  // rather than on a code change. The lookup-events unit test documents the
+  // same trap.
+  const today = new Date().toISOString().slice(0, 10);
+  const lines = [`# ${project} FINDINGS`, "", `## ${today}`, ""];
   const count = 18 + (hash(project) % 10); // 18–27 findings
   for (let i = 0; i < count; i++) {
     const seed = hash(project) + i;
@@ -118,7 +126,7 @@ export function seedBigStore(phrenDir: string, profile = "work"): void {
     const dir = path.join(phrenDir, project);
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, "summary.md"), `# ${project}\n\n${project} is a core service in the platform. It owns its data and exposes HTTP/gRPC APIs.\n`);
-    fs.writeFileSync(path.join(dir, "CLAUDE.md"), `# ${project}\n\nConventions and entry points for working in ${project}.\n`);
+    fs.writeFileSync(path.join(dir, "AGENTS.md"), `# ${project}\n\nConventions and entry points for working in ${project}.\n`);
     fs.writeFileSync(path.join(dir, "FINDINGS.md"), findingsFor(project, others));
     fs.writeFileSync(path.join(dir, "tasks.md"), tasksFor(project));
     for (const ref of referenceDocs(project)) {

@@ -91,6 +91,9 @@ const tasks = await import(path.join(dist, "data/tasks.js"));
 const learning = await import(path.join(dist, "content/learning.js"));
 const policy = await import(path.join(dist, "governance/policy.js"));
 const journal = await import(path.join(dist, "finding/journal.js"));
+const skillState = await import(path.join(dist, "skill/state.js"));
+const { entryScoreKey } = await import(path.join(dist, "governance/scores.js"));
+const { findingStableId } = await import(path.join(dist, "finding-graph-id.js"));
 
 /** Run `fn` with `new Date()` frozen to a fixed instant (bare `new Date()`
  *  only — same shape as the pre-existing per-call freeze further down).
@@ -122,8 +125,11 @@ fs.writeFileSync(path.join(store, "phren.root.yaml"), "installMode: shared\nsync
 // but `swift-writes/` is the *other* direction's committed corpus
 // (SwiftWritesFixturesTests.swift, Task 2 bidirectional conformance): it is
 // regenerated only by `PHREN_REGENERATE_SWIFT_FIXTURES=1 swift test`, never
-// by this script, so it must survive the wipe untouched.
-const PRESERVE_ON_WIPE = new Set(["swift-writes"]);
+// by this script, so it must survive the wipe untouched. The hand-authored
+// Hook protocol corpus is shared by Swift and TypeScript and must survive too.
+// The Copilot backlog frame is written by the Hook's transcript-copilot.test.ts
+// (PHREN_UPDATE_FIXTURES=1) from its sanitized real session.
+const PRESERVE_ON_WIPE = new Set(["swift-writes", "hook-events.json", "copilot-1.0.87-backlog.json"]);
 fs.mkdirSync(fixturesDir, { recursive: true });
 for (const entry of fs.readdirSync(fixturesDir)) {
   if (PRESERVE_ON_WIPE.has(entry)) continue;
@@ -294,9 +300,9 @@ writeJson("notes-parsed.json", parsedNotes.data.map(({ path: _p, ...rest }) => r
 withFixedIds(["aa853063"], () =>
   must(tasks.addTask(store, project, "Ship the iOS app [high]", { createdAt: "2026-07-20T10:00:00.000Z" }), "add task 1"));
 withFixedIds(["58b9b427"], () =>
-  must(tasks.addTask(store, project, "Write fixture generator"), "add task 2"));
+  must(tasks.addTask(store, project, "Write fixture generator", { createdAt: "2026-07-21T10:00:00.000Z" }), "add task 2"));
 withFixedIds(["013d708f"], () =>
-  must(tasks.addTask(store, project, "Investigate flaky sync test [low]"), "add task 3"));
+  must(tasks.addTask(store, project, "Investigate flaky sync test [low]", { createdAt: "2026-07-22T10:00:00.000Z" }), "add task 3"));
 snapshot("tasks-after-add.md", `${project}/tasks.md`);
 
 must(tasks.completeTask(store, project, "Write fixture generator"), "complete task");
@@ -380,7 +386,7 @@ snapshot("findings-nonstandard-tag-after-edit.md", `${project}/FINDINGS.md`);
 // every time text changes — pin the actual (documented-as-rough) behaviour:
 // a rename with no re-supplied tags silently drops both.
 withFixedIds(["0000b001"], () =>
-  must(tasks.addTask(store, project, "Ship urgent fix [high]"), "add task 4 (pin/priority gap)"));
+  must(tasks.addTask(store, project, "Ship urgent fix [high]", { createdAt: "2026-07-23T10:00:00.000Z" }), "add task 4 (pin/priority gap)"));
 must(tasks.pinTask(store, project, "Ship urgent fix"), "pin task 4");
 snapshot("tasks-pinned-before-text-edit.md", `${project}/tasks.md`);
 must(tasks.updateTask(store, project, "Ship urgent fix", { text: "Ship urgent fix (renamed)" }), "text-only update on pinned+prioritised task");
@@ -422,6 +428,25 @@ snapshot("findings-unicode-supersede-after.md", `${project}/FINDINGS.md`);
   const newEntry = supersedeRead.data.find((f) => f.stableId === "0000a004");
   writeJson("findings-unicode-supersede-parsed.json", { old: oldEntry, new: newEntry });
 }
+
+skillState.setSkillEnabled(store, "myproj", "Audit.MD", false);
+skillState.setSkillEnabled(store, "global", "audit", true);
+snapshot("skill-preferences.json", skillState.SKILL_PREFERENCES_PATH);
+
+// Graph identity must survive fixture regeneration too: derive hashes from
+// the same CLI functions that build desktop graph nodes.
+const graphSamples = [
+  ["myproj", "FINDINGS.md", "[pattern] Use the shared cache for repeated lookups"],
+  ["myproj", "FINDINGS.md", "Plain untagged finding with enough length"],
+  ["myproj", "FINDINGS.md", "[pitfall] Use the shared cache for repeated lookups"],
+  ["other-proj", "tasks.md", "Ship the iOS app"],
+  ["myproj", "FINDINGS.md", "[bug]   collapses\n   runs   of\twhitespace"],
+  ["myproj", "FINDINGS.md", "[decision] " + "x".repeat(300)],
+];
+writeJson("graph-identity.json", graphSamples.map(([project, filename, snippet]) => {
+  const scoreKey = entryScoreKey(project, filename, snippet);
+  return { project, filename, snippet, scoreKey, nodeId: findingStableId(scoreKey) };
+}));
 
 fs.rmSync(store, { recursive: true, force: true });
 console.log("done");

@@ -1,0 +1,507 @@
+import Crypto
+import Foundation
+import NIOCore
+import NIOHTTP1
+import NIOWebSocket
+import PhrenKit
+
+extension PhrenConnection {
+    public static func chatUpdates(host: LiveHost, privateKey: Data, target: AgentChatTarget, afterLine: Int? = nil) -> AsyncThrowingStream<AgentChatTranscript, Error> {
+        AsyncThrowingStream(bufferingPolicy: .bufferingOldest(8)) { continuation in
+            let worker = Task {
+                do {
+                    guard !target.isStarting, target.hostID == host.id && target.muxID == host.muxID else { throw PhrenKitError.validation("The chat belongs to another computer.") }
+                    guard afterLine.map({ $0 >= 0 }) ?? true else { throw PhrenKitError.validation("The chat transcript cursor is invalid.") }
+                    let request = GatewayRequest.transcript(target, streaming: true, afterLine: afterLine)
+                    _ = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: request) { data in
+                        let frame = try AgentChatTranscript.read(data, source: target.source)
+                        if case .dropped = continuation.yield(frame) { throw LiveConnectionError.oversized }
+                    }
+                    continuation.finish()
+                } catch { continuation.finish(throwing: error) }
+            }
+            continuation.onTermination = { _ in worker.cancel() }
+        }
+    }
+
+    public static func chatHistory(host: LiveHost, privateKey: Data, target: AgentChatTarget, beforeLine: Int) async throws -> AgentChatTranscript {
+        guard !target.isStarting, target.hostID == host.id && target.muxID == host.muxID, beforeLine > 0 else { throw PhrenKitError.validation("This history has no earlier destination.") }
+        let key = try Curve25519.Signing.PrivateKey(rawRepresentation: privateKey)
+        let data: Data
+        do {
+            // A history page should not download a fresh backlog or wait for
+            // a WebSocket polling cycle before asking for the requested range.
+            data = try await fetchData(host: host, key: key, request: .history(target, beforeLine: beforeLine))
+        } catch let error as LiveConnectionError {
+            switch error {
+            case .response(404), .gatewayRejection(status: 404, reason: _):
+                // Existing computers remain usable until their Hook is updated.
+                data = try await fetchData(host: host, key: key, request: .transcript(target, beforeLine: beforeLine))
+            default: throw error
+            }
+        }
+        let result = try AgentChatTranscript.read(data, source: target.source)
+        guard result.kind == .older, result.messages.allSatisfy({ $0.line < beforeLine }),
+              !result.hasMore || result.startLine.map({ $0 >= 0 && $0 < beforeLine }) == true else {
+            throw PhrenKitError.validation("The computer returned a different history range.")
+        }
+        return result
+    }
+
+    public static func uploadChatAttachment(host: LiveHost, privateKey: Data, target: AgentChatTarget, attachment: AgentAttachment) async throws -> String {
+        guard target.hostID == host.id && target.muxID == host.muxID else { throw PhrenKitError.validation("The chat belongs to another computer.") }
+        // Uploading a file does not send input to the agent. The Hook checks
+        // the conversation binding itself; sendChat separately gates delivery.
+        if target.isStarting {
+            // Before there is a conversation directory, use the existing
+            // computer-file upload. Prompt delivery still revalidates the pane.
+            return try await uploadFile(host: host, privateKey: privateKey, name: attachment.uploadName, data: attachment.data)
+        }
+        let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: .upload(attachment, target: target))
+        return try AgentAttachment.uploadedPath(from: data)
+    }
+
+    /// Answers a prompt the agent draws in its terminal (a menu, a y/n, a
+    /// trust question) with one of the few keys the Hook accepts. The
+    /// caller cannot supply key sequences or text.
+    public static func answerWithKeys(host: LiveHost, privateKey: Data, target: AgentChatTarget, keys: [AgentAnswerKey]) async throws {
+        guard target.hostID == host.id && target.muxID == host.muxID else { throw PhrenKitError.validation("The chat belongs to another computer.") }
+        guard !keys.isEmpty, keys.count <= 4 else { throw PhrenKitError.validation("Press one key at a time.") }
+        // The Hook decides whether the agent is holding a prompt; a second
+        // round trip to ask first only slowed the answer down.
+        let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: .keys(target, keys: keys))
+        guard (try JSONSerialization.jsonObject(with: data) as? [String: Any])?["ok"] as? Bool == true else {
+            throw PhrenKitError.validation("The key was not confirmed. Check the terminal.")
+        }
+    }
+
+    /// Types a secret the agent asked for at a prompt the terminal holds (a
+    /// sudo password, a login). The Hook sends it one key at a time and never
+    /// stores or echoes it; the phone does not keep it either.
+    public static func answerWithSecret(host: LiveHost, privateKey: Data, target: AgentChatTarget, text: String) async throws {
+        guard target.hostID == host.id && target.muxID == host.muxID else { throw PhrenKitError.validation("The chat belongs to another computer.") }
+        guard (1...256).contains(text.count),
+              !text.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
+            throw PhrenKitError.validation("Enter 1 to 256 characters without control characters or newlines.")
+        }
+        // The Hook refuses a secret unless the terminal is holding a prompt.
+        let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: .secret(target, text: text))
+        guard (try JSONSerialization.jsonObject(with: data) as? [String: Any])?["ok"] as? Bool == true else {
+            throw PhrenKitError.validation("The secret was not confirmed. Check the terminal.")
+        }
+    }
+
+    /// Only Escape is exposed. The caller cannot supply terminal key sequences.
+    /// Dismiss a `/btw` side answer. A pending one is cancelled and its
+    /// terminal panel closed; an answered one stops being delivered.
+    public static func dismissSideAnswer(host: LiveHost, privateKey: Data, target: AgentChatTarget, id: String) async throws {
+        guard !target.isStarting, target.hostID == host.id && target.muxID == host.muxID else { throw PhrenKitError.validation("The chat belongs to another computer.") }
+        _ = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: try GatewayRequest.dismissSideAnswer(target, id: id))
+    }
+
+    public static func stopChatTurn(host: LiveHost, privateKey: Data, target: AgentChatTarget) async throws {
+        guard !target.isStarting, target.hostID == host.id && target.muxID == host.muxID else { throw PhrenKitError.validation("The chat belongs to another computer.") }
+        // The Hook refuses Escape unless the agent is still working.
+        let request = try GatewayRequest.stop(target)
+        let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: request)
+        guard (try JSONSerialization.jsonObject(with: data) as? [String: Any])?["ok"] as? Bool == true else {
+            throw PhrenKitError.validation("The stop request was not confirmed. Check the terminal.")
+        }
+    }
+    public static func chatPanes(host: LiveHost, privateKey: Data, workspaceID: String, tabID: String) async throws -> AgentChatPanes {
+        guard AgentChatTarget.validID(workspaceID), AgentChatTarget.validID(tabID) else {
+            throw PhrenKitError.validation("This workspace has no usable chat destination.")
+        }
+        let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: .panes(workspaceID, tabID))
+        return try AgentChatPanes.read(data, workspaceID: workspaceID, tabID: tabID)
+    }
+
+    /// A bounded recent-history snapshot from the hook's WebSocket, then close.
+    /// One-shot callers can use this without subscribing to live updates.
+    public static func chatTranscript(host: LiveHost, privateKey: Data, target: AgentChatTarget) async throws -> AgentChatTranscript {
+        guard !target.isStarting, target.hostID == host.id && target.muxID == host.muxID else { throw PhrenKitError.validation("The chat belongs to another computer.") }
+        var request = GatewayRequest.transcript(target)
+        request.streaming = false
+        let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: request)
+        return try AgentChatTranscript.read(data, source: target.source)
+    }
+
+    /// The models the agent on that computer can switch to, as its own menu
+    /// would list them. Read-only; sources the Hook does not know yield [].
+    public static func models(host: LiveHost, privateKey: Data, source: String) async throws -> [AgentModelChoice] {
+        guard AgentChatTarget.sources.contains(source) else { throw PhrenKitError.validation("Unknown agent.") }
+        let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: GatewayRequest(path: "/v1/models?source=\(source)", maximumResponseBytes: 262_144))
+        return try AgentModelChoice.read(data)
+    }
+
+    public static func switchModel(host: LiveHost, privateKey: Data, target: AgentChatTarget, model: String, effort: String? = nil) async throws -> AgentModelSwitch {
+        guard !target.isStarting, target.hostID == host.id && target.muxID == host.muxID else {
+            throw PhrenKitError.validation("The chat is starting or belongs to another computer.")
+        }
+        let request = try GatewayRequest.model(target, model: model, effort: effort)
+        try Task.checkCancellation()
+        do {
+            // Never retry a request that may already have changed the terminal.
+            let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: request)
+            return try AgentModelSwitch.read(data)
+        } catch LiveConnectionError.gatewayRejection(status: 409, reason: let reason)
+                    where reason == AgentModelSwitchError.working.localizedDescription {
+            throw AgentModelSwitchError.working
+        }
+    }
+
+    public static func childAgents(host: LiveHost, privateKey: Data, target: AgentChatTarget) async throws -> AgentChildTree {
+        guard !target.isStarting, target.hostID == host.id && target.muxID == host.muxID else { throw PhrenKitError.validation("The chat belongs to another computer.") }
+        let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: .childAgents(target))
+        return try AgentChildTree.read(data)
+    }
+
+    public static func resumeChildAgent(host: LiveHost, privateKey: Data, target: AgentChatTarget,
+                                        child: String, text: String) async throws -> AgentFanoutMessage {
+        try validateChildMessageTarget(host: host, target: target, child: child)
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, text.utf8.count <= 32_768,
+              !text.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) && $0 != "\n" && $0 != "\t" }) else {
+            throw PhrenKitError.validation("Enter a message up to 32 KB without terminal control characters.")
+        }
+        let request = try GatewayRequest.resumeChild(target, child: child, text: text)
+        let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: request)
+        return try AgentFanoutMessage.receipt(data)
+    }
+
+    /// Archives this chat's finished fan-out workers on its own computer now,
+    /// instead of after the Hook's 24 hour sweep. Returns how many moved.
+    public static func archiveFinishedChildAgents(host: LiveHost, privateKey: Data, target: AgentChatTarget) async throws -> Int {
+        guard !target.isStarting, target.hostID == host.id, target.muxID == host.muxID else {
+            throw PhrenKitError.validation("The chat belongs to another computer.")
+        }
+        let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: .archiveFinishedChildren(target))
+        return try archivedCount(data)
+    }
+
+    static func archivedCount(_ data: Data) throws -> Int {
+        struct Archived: Decodable { let archived: Int }
+        return try JSONDecoder().decode(Archived.self, from: data).archived
+    }
+
+    public static func childAgentMessages(host: LiveHost, privateKey: Data, target: AgentChatTarget,
+                                          child: String) async throws -> [AgentFanoutMessage] {
+        try validateChildMessageTarget(host: host, target: target, child: child)
+        var query = GatewayRequest.targetQuery(target); query["child"] = child
+        let request = GatewayRequest(path: GatewayRequest.path("/v1/subagents/messages", query), maximumResponseBytes: 8_388_608)
+        let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: request)
+        return try AgentFanoutMessage.list(data)
+    }
+
+    private static func validateChildMessageTarget(host: LiveHost, target: AgentChatTarget, child: String) throws {
+        guard !target.isStarting, target.hostID == host.id, target.muxID == host.muxID,
+              child.range(of: "^[a-f0-9]{32}$", options: .regularExpression) != nil else {
+            throw PhrenKitError.validation("This child conversation belongs to another computer or is invalid.")
+        }
+    }
+
+    public static func childAgentTranscript(host: LiveHost, privateKey: Data, target: AgentChatTarget, child: String, provider: String) async throws -> AgentChatTranscript {
+        guard !target.isStarting, target.hostID == host.id && target.muxID == host.muxID,
+              child.range(of: "^[a-f0-9]{32}$", options: .regularExpression) != nil,
+              AgentChatTarget.sources.contains(provider) else { throw PhrenKitError.validation("This child conversation is invalid.") }
+        let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: .childTranscript(target, child: child))
+        return try AgentChatTranscript.read(data, source: provider, sidechain: true, session: child)
+    }
+
+    /// Follow a child agent's transcript as it grows, through the parent
+    /// conversation's socket. The frames name the child by its public id.
+    public static func childAgentUpdates(host: LiveHost, privateKey: Data, target: AgentChatTarget, child: String, provider: String) -> AsyncThrowingStream<AgentChatTranscript, Error> {
+        AsyncThrowingStream(bufferingPolicy: .bufferingOldest(8)) { continuation in
+            let worker = Task {
+                do {
+                    guard !target.isStarting, target.hostID == host.id && target.muxID == host.muxID,
+                          child.range(of: "^[a-f0-9]{32}$", options: .regularExpression) != nil,
+                          AgentChatTarget.sources.contains(provider) else { throw PhrenKitError.validation("This child conversation is invalid.") }
+                    let request = GatewayRequest.childTranscriptStream(target, child: child)
+                    _ = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: request) { data in
+                        // An older Hook ignores `child` and would stream the parent; its
+                        // frames name the parent session and are refused here.
+                        let frame = try AgentChatTranscript.read(data, source: provider, sidechain: true, session: child)
+                        if case .dropped = continuation.yield(frame) { throw LiveConnectionError.oversized }
+                    }
+                    continuation.finish()
+                } catch { continuation.finish(throwing: error) }
+            }
+            continuation.onTermination = { _ in worker.cancel() }
+        }
+    }
+
+    public static func childAgentHistory(host: LiveHost, privateKey: Data, target: AgentChatTarget, child: String, provider: String, beforeLine: Int) async throws -> AgentChatTranscript {
+        guard !target.isStarting, target.hostID == host.id && target.muxID == host.muxID, beforeLine > 0,
+              child.range(of: "^[a-f0-9]{32}$", options: .regularExpression) != nil,
+              AgentChatTarget.sources.contains(provider) else { throw PhrenKitError.validation("This history has no earlier destination.") }
+        let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: .childHistory(target, child: child, beforeLine: beforeLine))
+        let result = try AgentChatTranscript.read(data, source: provider, sidechain: true, session: child)
+        guard result.kind == .older, result.messages.allSatisfy({ $0.line < beforeLine }) else {
+            throw PhrenKitError.validation("The computer returned a different history range.")
+        }
+        return result
+    }
+
+    public static func sendChat(host: LiveHost, privateKey: Data, target: AgentChatTarget, text: String) async throws {
+        guard target.hostID == host.id && target.muxID == host.muxID else { throw PhrenKitError.validation("The chat belongs to another computer.") }
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, text.utf8.count <= 32_768,
+              !text.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) && $0 != "\n" && $0 != "\t" }) else {
+            throw PhrenKitError.validation("Enter a message up to 32 KB without terminal control characters.")
+        }
+        // No preflight: the Hook validates the pane's conversation with fresh
+        // identity right before it types, which is the check that matters,
+        // and a second SSH round trip per send was most of the delay.
+        try Task.checkCancellation()
+        let request = try GatewayRequest.prompt(target, text: text)
+        // Exactly one attempt. An interrupted reply must not replay terminal input.
+        let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: request)
+        try confirmChatDelivery(data)
+    }
+
+    static func confirmChatDelivery(_ data: Data) throws {
+        guard let result = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              result["ok"] as? Bool == true, result["deliveryUncertain"] as? Bool != true else {
+            // This is after prompt dispatch. Never label it a preflight
+            // validation rejection or make the pending prompt safe to replay.
+            throw LiveConnectionError.deliveryUnconfirmed
+        }
+    }
+}
+
+struct GatewayRequest: Sendable {
+    var path: String
+    var body: Data? = nil
+    /// HTTP method override. Nil derives GET from an empty body and POST otherwise.
+    var method: String? = nil
+    var maximumResponseBytes = 1_048_576
+    var webSocket = false
+    var streaming = false
+    var beforeLine: Int?
+    var initialMessages: [Data] = []
+    var terminalSocket: HerdrTerminalSocket?
+    /// Set for `/v1/speech/transcribe`: the socket the microphone's audio goes up.
+    var speechSocket: SpeechStreamSocket?
+    var terminalRoute: TerminalRoute?
+    var terminalColumns = 80
+    var terminalRows = 24
+    var timeoutSeconds: Int?
+    static let workspaces = Self(path: "/v1/workspaces?watchApprovals=1")
+    /// The pushed overview; the socket stays open while the phone watches.
+    static let overview = Self(path: "/v1/overview?watchApprovals=1", webSocket: true, streaming: true)
+    static func panes(_ workspace: String, _ tab: String) -> Self {
+        Self(path: path("/v1/workspaces/panes", ["groupId": workspace, "childId": tab]))
+    }
+    static func targetQuery(_ target: AgentChatTarget) -> [String: String] {
+        ["server": String(target.muxID.dropFirst("herdr:".count)), "workspace": target.workspaceID,
+         "tab": target.tabID, "pane": target.paneID, "source": target.source, "session": target.sessionID]
+    }
+    static func transcript(_ target: AgentChatTarget, streaming: Bool = false, beforeLine: Int? = nil, afterLine: Int? = nil) -> Self {
+        var query = targetQuery(target)
+        if let afterLine { query["afterLine"] = String(afterLine) }
+        // The live stream also carries `/btw` side answers; older Hooks ignore the flag.
+        if streaming { query["sideAnswers"] = "1" }
+        return Self(path: path("/v1/transcripts", query), webSocket: true, streaming: streaming, beforeLine: beforeLine)
+    }
+    static func history(_ target: AgentChatTarget, beforeLine: Int) -> Self {
+        var query = targetQuery(target); query["beforeLine"] = String(beforeLine)
+        return Self(path: path("/v1/transcripts/history", query), maximumResponseBytes: 8_388_608)
+    }
+    static func childAgents(_ target: AgentChatTarget) -> Self {
+        Self(path: path("/v1/subagents", targetQuery(target)))
+    }
+    static func resumeChild(_ target: AgentChatTarget, child: String, text: String) throws -> Self {
+        Self(path: "/v1/subagents/resume", body: try targetBody(target, fields: ["child": child, "text": text]))
+    }
+    static func archiveFinishedChildren(_ target: AgentChatTarget) throws -> Self {
+        Self(path: "/v1/subagents/archive-finished", body: try targetBody(target))
+    }
+    static func childTranscript(_ target: AgentChatTarget, child: String) -> Self {
+        var query = targetQuery(target); query["child"] = child
+        return Self(path: path("/v1/subagents/transcript", query), maximumResponseBytes: 8_388_608)
+    }
+    static func childTranscriptStream(_ target: AgentChatTarget, child: String) -> Self {
+        var query = targetQuery(target); query["child"] = child
+        return Self(path: path("/v1/transcripts", query), webSocket: true, streaming: true)
+    }
+    static func childHistory(_ target: AgentChatTarget, child: String, beforeLine: Int) -> Self {
+        var query = targetQuery(target); query["child"] = child; query["beforeLine"] = String(beforeLine)
+        return Self(path: path("/v1/transcripts/history", query), maximumResponseBytes: 8_388_608)
+    }
+    static func targetBody(_ target: AgentChatTarget, fields: [String: Any] = [:]) throws -> Data {
+        var body = fields; body["target"] = targetQuery(target)
+        return try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
+    }
+    static func upload(_ attachment: AgentAttachment, target: AgentChatTarget) throws -> Self {
+        Self(path: "/v1/upload", body: try targetBody(target, fields: ["name": attachment.uploadName, "data": attachment.data.base64EncodedString()]))
+    }
+    static func dismissSideAnswer(_ target: AgentChatTarget, id: String) throws -> Self {
+        guard UUID(uuidString: id) != nil else { throw PhrenKitError.validation("That side answer is not valid.") }
+        return Self(path: "/v1/side-question/dismiss", body: try targetBody(target, fields: ["id": id]))
+    }
+    static func stop(_ target: AgentChatTarget) throws -> Self {
+        Self(path: "/v1/keys", body: try targetBody(target, fields: ["keys": ["Escape"]]))
+    }
+    static func keys(_ target: AgentChatTarget, keys: [AgentAnswerKey]) throws -> Self {
+        if target.isStarting {
+            var route: [String: Any] = targetQuery(target)
+            route.removeValue(forKey: "session")
+            route["starting"] = true; route["startingToken"] = target.startingToken
+            return Self(path: "/v1/keys", body: try JSONSerialization.data(withJSONObject: ["target": route, "keys": keys.map(\.rawValue)], options: [.sortedKeys]))
+        }
+        return Self(path: "/v1/keys", body: try targetBody(target, fields: ["keys": keys.map(\.rawValue)]))
+    }
+    static func secret(_ target: AgentChatTarget, text: String) throws -> Self {
+        if target.isStarting {
+            var route: [String: Any] = targetQuery(target)
+            route.removeValue(forKey: "session")
+            route["starting"] = true; route["startingToken"] = target.startingToken
+            return Self(path: "/v1/secret", body: try JSONSerialization.data(withJSONObject: ["target": route, "text": text], options: [.sortedKeys]))
+        }
+        return Self(path: "/v1/secret", body: try targetBody(target, fields: ["text": text]))
+    }
+    static func model(_ target: AgentChatTarget, model: String, effort: String? = nil) throws -> Self {
+        guard !target.isStarting, AgentModelChoice.command(for: model) != nil else {
+            throw PhrenKitError.validation("Choose a model for an established conversation.")
+        }
+        var fields: [String: Any] = ["model": model]
+        if let effort { fields["effort"] = effort }
+        return Self(path: "/v1/model", body: try targetBody(target, fields: fields))
+    }
+    static func prompt(_ target: AgentChatTarget, text: String) throws -> Self {
+        if target.isStarting {
+            var route: [String: Any] = targetQuery(target)
+            route.removeValue(forKey: "session")
+            route["starting"] = true; route["startingToken"] = target.startingToken
+            return Self(path: "/v1/prompt", body: try JSONSerialization.data(withJSONObject: ["target": route, "text": text], options: [.sortedKeys]))
+        }
+        return Self(path: "/v1/prompt", body: try targetBody(target, fields: ["text": text]))
+    }
+    func scoped(to host: LiveHost) -> Self {
+        guard path.hasPrefix("/v1/workspaces") || path.hasPrefix("/v1/overview") else { return self }
+        var copy = self
+        var parts = URLComponents(string: path)!
+        var items = parts.queryItems ?? []; items.removeAll { $0.name == "mux" }
+        items.append(URLQueryItem(name: "mux", value: host.muxID)); parts.queryItems = items
+        copy.path = parts.string!
+        return copy
+    }
+    static func path(_ path: String, _ query: [String: String]) -> String {
+        var parts = URLComponents()
+        parts.path = path
+        parts.queryItems = query.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
+        return parts.string!
+    }
+}
+
+func installTranscriptHandlers(channel: Channel, exchange: Exchange, request: GatewayRequest) -> EventLoopFuture<Void> {
+    let handshake = TranscriptHandshake(exchange: exchange, path: request.path)
+    let upgrader = NIOWebSocketClientUpgrader(maxFrameSize: 8_388_608, upgradePipelineHandler: { channel, _ in
+        channel.pipeline.addHandler(TranscriptFrames(exchange: exchange, streaming: request.streaming, beforeLine: request.beforeLine,
+                                                    initialMessages: request.initialMessages, terminalSocket: request.terminalSocket,
+                                                    speechSocket: request.speechSocket))
+    })
+    let config: NIOHTTPClientUpgradeConfiguration = (upgraders: [upgrader], completionHandler: { context in
+        context.pipeline.removeHandler(handshake, promise: nil)
+    })
+    return channel.pipeline.addHandler(SSHHTTPBytes()).flatMap {
+        channel.pipeline.addHTTPClientHandlers(withClientUpgrade: config)
+    }.flatMap { channel.pipeline.addHandler(handshake) }
+}
+
+// Handler state is confined to the channel's event loop.
+private final class TranscriptHandshake: ChannelInboundHandler, RemovableChannelHandler, @unchecked Sendable {
+    typealias InboundIn = HTTPClientResponsePart
+    typealias OutboundOut = HTTPClientRequestPart
+    let exchange: Exchange
+    let path: String
+    init(exchange: Exchange, path: String) { self.exchange = exchange; self.path = path }
+    func channelActive(context: ChannelHandlerContext) {
+        let head = HTTPRequestHead(version: .http1_1, method: .GET, uri: path,
+                                   headers: HTTPHeaders([("Host", "phren.local")]))
+        context.write(wrapOutboundOut(.head(head)), promise: nil)
+        context.writeAndFlush(wrapOutboundOut(.end(nil))).whenFailure { [exchange] in exchange.finish(.failure($0)) }
+    }
+    func channelRead(context: ChannelHandlerContext, data: NIOAny) {
+        if case .head(let head) = unwrapInboundIn(data) { exchange.finish(.failure(LiveConnectionError.response(Int(head.status.code)))) }
+    }
+    func errorCaught(context: ChannelHandlerContext, error: Error) { exchange.finish(.failure(error)) }
+    func channelInactive(context: ChannelHandlerContext) { exchange.finish(.failure(LiveConnectionError.disconnected)) }
+}
+
+final class TranscriptFrames: ChannelInboundHandler, @unchecked Sendable {
+    typealias InboundIn = WebSocketFrame
+    typealias OutboundOut = WebSocketFrame
+    let exchange: Exchange
+    private var body = Data()
+    private var receiving = false
+    private let streaming: Bool
+    private let beforeLine: Int?
+    private var requestedOlder = false
+    private var heartbeat: RepeatedTask?
+    private var lastReceived = NIODeadline.now()
+    private let initialMessages: [Data]
+    private let terminalSocket: HerdrTerminalSocket?
+    private let speechSocket: SpeechStreamSocket?
+    init(exchange: Exchange, streaming: Bool = false, beforeLine: Int? = nil,
+         initialMessages: [Data] = [], terminalSocket: HerdrTerminalSocket? = nil, speechSocket: SpeechStreamSocket? = nil) {
+        self.exchange = exchange; self.streaming = streaming; self.beforeLine = beforeLine
+        self.initialMessages = initialMessages; self.terminalSocket = terminalSocket; self.speechSocket = speechSocket
+    }
+    func handlerAdded(context: ChannelHandlerContext) {
+        terminalSocket?.attach(context.channel)
+        speechSocket?.attach(context.channel)
+        for data in initialMessages {
+            context.writeAndFlush(wrapOutboundOut(WebSocketFrame(fin: true, opcode: .text, maskKey: .random(), data: ByteBuffer(bytes: data))), promise: nil)
+        }
+        guard streaming else { return }
+        let channel = context.channel
+        heartbeat = context.eventLoop.scheduleRepeatedTask(initialDelay: .seconds(20), delay: .seconds(20)) { [weak self] _ in
+            guard let self, !self.exchange.finished else { return }
+            if NIODeadline.now() - self.lastReceived > .seconds(45) {
+                self.exchange.finish(.failure(LiveConnectionError.timeout))
+            } else {
+                channel.writeAndFlush(WebSocketFrame(fin: true, opcode: .ping, maskKey: .random(), data: ByteBuffer()))
+                    .whenFailure { [exchange = self.exchange] in exchange.finish(.failure($0)) }
+            }
+        }
+    }
+    func handlerRemoved(context: ChannelHandlerContext) { heartbeat?.cancel(); heartbeat = nil }
+    func channelRead(context: ChannelHandlerContext, data: NIOAny) {
+        let frame = unwrapInboundIn(data)
+        guard !exchange.finished else { return }
+        lastReceived = .now()
+        switch frame.opcode {
+        case .ping:
+            context.writeAndFlush(wrapOutboundOut(WebSocketFrame(fin: true, opcode: .pong, maskKey: .random(), data: frame.data)), promise: nil)
+            return
+        case .pong: return
+        case .text, .binary:
+            guard frame.opcode != .binary || terminalSocket != nil else { exchange.finish(.failure(LiveConnectionError.disconnected)); return }
+            guard !receiving else { exchange.finish(.failure(LiveConnectionError.disconnected)); return }
+            receiving = true
+        case .continuation:
+            guard receiving else { exchange.finish(.failure(LiveConnectionError.disconnected)); return }
+        default: exchange.finish(.failure(LiveConnectionError.disconnected)); return
+        }
+        guard body.count + frame.data.readableBytes <= (terminalSocket == nil ? 8_388_608 : 1_048_576) else {
+            exchange.finish(.failure(LiveConnectionError.oversized)); return
+        }
+        body.append(contentsOf: frame.data.readableBytesView)
+        if frame.fin {
+            let completed = body
+            body = Data(); receiving = false
+            if let beforeLine {
+                if !requestedOlder {
+                    requestedOlder = true
+                    let request = "{\"type\":\"older\",\"beforeLine\":\(beforeLine),\"limit\":200}"
+                    context.writeAndFlush(wrapOutboundOut(WebSocketFrame(fin: true, opcode: .text, maskKey: .random(), data: ByteBuffer(string: request))), promise: nil)
+                    return
+                }
+                guard let value = try? JSONSerialization.jsonObject(with: completed) as? [String: Any], value["type"] as? String == "older" else { return }
+            }
+            exchange.receive(completed)
+        }
+    }
+    func errorCaught(context: ChannelHandlerContext, error: Error) { exchange.finish(.failure(error)) }
+    func channelInactive(context: ChannelHandlerContext) { heartbeat?.cancel(); heartbeat = nil; exchange.finish(.failure(LiveConnectionError.disconnected)) }
+}

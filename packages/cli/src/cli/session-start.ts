@@ -1,3 +1,4 @@
+import { moduleEnabled } from "../modules/runtime.js";
 /**
  * Session start hook handler and onboarding notices.
  * Extracted from hooks-session.ts for modularity.
@@ -38,7 +39,7 @@ import {
   readSessionStateFile,
   writeSessionStateFile,
 } from "../session/utils.js";
-import { runBestEffortGit, countUnsyncedCommits } from "./session-git.js";
+import { runBestEffortGit, countUnsyncedCommits, pullAtSessionStart } from "./session-git.js";
 import { scheduleBackgroundMaintenance } from "./session-background.js";
 import { runDoctor } from "./hooks-context.js";
 
@@ -54,7 +55,7 @@ function projectHasBootstrapSignals(phrenPath: string, project: string): boolean
   }
 
   const tasksPath = path.join(projectDir, TASKS_FILENAME);
-  if (fs.existsSync(tasksPath)) {
+  if (moduleEnabled(path.dirname(projectDir), "tasks") && fs.existsSync(tasksPath)) {
     const tasks = fs.readFileSync(tasksPath, "utf8");
     if (/^-\s+\[(?: |x|X)\]/m.test(tasks)) return true;
   }
@@ -182,7 +183,7 @@ export async function handleHookSessionStart() {
   const pull = !gitRepo.ok
     ? { ok: false, error: gitRepo.detail }
     : hasRemote
-      ? await runBestEffortGit(["pull", "--rebase", "--quiet"], phrenPath)
+      ? await pullAtSessionStart(phrenPath)
       : {
           ok: true,
           output: gitRepo.initialized
@@ -205,6 +206,7 @@ export async function handleHookSessionStart() {
       lastPullDetail: pull.ok ? (pull.output || "pull ok") : (pull.error || "pull failed"),
       lastSuccessfulPullAt: pull.ok && hasRemote ? startedAt : undefined,
       unsyncedCommits,
+      ...("counts" in pull && pull.counts ? pull.counts : {}),
     },
   });
   appendAuditLog(
@@ -220,7 +222,7 @@ export async function handleHookSessionStart() {
     for (const store of otherStores) {
       if (!fs.existsSync(store.path) || !fs.existsSync(path.join(store.path, ".git"))) continue;
       try {
-        await runBestEffortGit(["pull", "--rebase", "--quiet"], store.path);
+        await pullAtSessionStart(store.path);
       } catch (err: unknown) {
         debugLog(`session-start store-pull ${store.name}: ${errorMessage(err)}`);
       }

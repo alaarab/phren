@@ -1,0 +1,205 @@
+import { createPrivateKey, sign } from "node:crypto";
+import { readFile, stat } from "node:fs/promises";
+import { connect } from "node:http2";
+import path from "node:path";
+import { z } from "zod";
+import { atomic, bridgeRoot } from "./protocol.js";
+
+const deviceSchema = z.object({
+  deviceID: z.string().uuid(),
+  hostID: z.string().uuid(),
+  token: z.string().regex(/^[0-9a-f]{64}$/),
+  environment: z.enum(["development", "production"]),
+  kinds: z.array(z.enum(["approval", "scheduleStarted", "scheduleFinished", "scheduleFailed", "scheduleBlocked"])).max(5).default(["approval"]),
+});
+export type PushDevice = z.infer<typeof deviceSchema>;
+
+const configSchema = z.object({
+  keyId: z.string().regex(/^[A-Z0-9]{10}$/),
+  teamId: z.string().regex(/^[A-Z0-9]{10}$/),
+  topic: z.string().regex(/^[A-Za-z0-9.-]{1,255}$/).default("com.phren.ios"),
+  privateKeyPath: z.string().min(1),
+});
+type APNsConfig = z.infer<typeof configSchema>;
+
+export interface ApprovalPush { binding: string; provider: string; question: boolean; expiresAt: string;
+  /** What the request is, when the provider names it (an opencode permission
+   * ask): shown in the alert so the phone can answer without opening Phren. */
+  title?: string; message?: string }
+export interface FanoutBlockedPush { job: string; label: string; provider: string; reason: string }
+export type SchedulePushKind = "scheduleStarted" | "scheduleFinished" | "scheduleFailed" | "scheduleBlocked";
+export interface SchedulePush {
+  kind: SchedulePushKind;
+  scheduleId: string;
+  project: string;
+  name: string;
+  computer: string;
+  runId: string;
+  status: "running" | "finished" | "needs-you" | "failed" | "blocked";
+  reason?: string;
+  route?: string;
+}
+export interface SchedulePushResult { notified: boolean; reason?: string }
+
+export function scheduleCollapseId(kind: SchedulePushKind, runId: string): string {
+  return `${runId.slice(0, 63 - kind.length)}-${kind}`;
+}
+
+export function approvalPushPayload(value: ApprovalPush, host?: string): Record<string, unknown> {
+  const label = value.provider === "claude" ? "Claude" : value.provider === "codex" ? "Codex" : value.provider === "opencode" ? "opencode" : "Your agent";
+  return {
+    aps: {
+      alert: { title: value.title ?? (value.question ? `${label} has a question` : `${label} needs approval`),
+        body: value.message ?? "Open Phren to review the request." },
+      sound: "default", category: value.question ? "PHREN_AGENT_QUESTION" : "PHREN_AGENT_APPROVAL",
+      "interruption-level": "time-sensitive",
+    },
+    phren: { version: 1, binding: value.binding, expiresAt: value.expiresAt, ...(host ? { host } : {}) },
+  };
+}
+
+export function fanoutBlockedPushPayload(value: FanoutBlockedPush): Record<string, unknown> {
+  return {
+    aps: { alert: { title: `${value.label} blocked`, body: value.reason }, sound: "default", category: "PHREN_FANOUT" },
+    phren: { kind: "fanoutBlocked", job: value.job, provider: value.provider, label: value.label, reason: value.reason },
+  };
+}
+
+export function schedulePushPayload(value: SchedulePush): Record<string, unknown> {
+  const state = value.kind === "scheduleStarted" ? "started" : value.kind === "scheduleFinished" ? (value.status === "needs-you" ? "needs you" : "finished")
+    : value.kind === "scheduleBlocked" ? "blocked" : "failed";
+  return {
+    aps: {
+      alert: { title: `${value.name} ${state}`, body: `${value.project} on ${value.computer}${value.reason ? `. ${value.reason}` : ""}` },
+      sound: "default", category: "PHREN_SCHEDULE",
+    },
+    phren: { kind: value.kind, scheduleId: value.scheduleId, project: value.project, name: value.name,
+      computer: value.computer, runId: value.runId, status: value.status, ...(value.reason ? { reason: value.reason } : {}),
+      ...(value.route ? { route: value.route } : {}) },
+  };
+}
+
+async function secureJSON<T>(file: string, schema: z.ZodType<T>): Promise<T | undefined> {
+  try {
+    const metadata = await stat(file);
+    if ((metadata.mode & 0o077) !== 0 || (process.getuid && metadata.uid !== process.getuid())) return undefined;
+    return schema.parse(JSON.parse(await readFile(file, "utf8")));
+  } catch { return undefined; }
+}
+
+async function secureFile(file: string): Promise<string | undefined> {
+  try {
+    const metadata = await stat(file);
+    if (!metadata.isFile() || (metadata.mode & 0o077) !== 0 || (process.getuid && metadata.uid !== process.getuid())) return undefined;
+    return await readFile(file, "utf8");
+  } catch { return undefined; }
+}
+
+/** What `phren bridge doctor` prints when the Hook has no APNs sender. */
+export function apnsSetupSteps(configFile = process.env.PHREN_APNS_CONFIG || path.join(bridgeRoot(), "apns.json")): string {
+  return [
+    "Approval push is not configured: the phone only alerts while Phren runs, and a registered phone gets nothing while suspended.",
+    "1. In your Apple developer account, create an APNs key (Keys, Apple Push Notifications service) and download AuthKey_<KEYID>.p8.",
+    `2. Save it next to ${configFile} with mode 600.`,
+    `3. Write ${configFile} with mode 600: {"keyId":"<KEYID>","teamId":"<TEAMID>","topic":"com.phren.ios","privateKeyPath":"AuthKey_<KEYID>.p8"}`,
+    "4. Restart the Hook (phren bridge install), then run phren bridge doctor again.",
+  ].join("\n");
+}
+
+/** The capability a phone reads: only a Hook with a loaded APNs sender offers push. */
+export function approvalPushCapability(status: { configured: boolean }): "direct-apns" | undefined {
+  return status.configured ? "direct-apns" : undefined;
+}
+
+export function upsertPushDevice(devices: PushDevice[], value: unknown): PushDevice[] {
+  const device = deviceSchema.parse(value);
+  return [...devices.filter(item => item.deviceID !== device.deviceID), device].slice(-16);
+}
+
+const base64url = (value: string | Buffer) => Buffer.from(value).toString("base64url");
+
+class APNsSender {
+  private jwt?: { value: string; created: number };
+  constructor(private config: APNsConfig, private key: string, private now = Date.now) {}
+  private token(): string {
+    const created = Math.floor(this.now() / 1000);
+    if (this.jwt && created - this.jwt.created < 50 * 60) return this.jwt.value;
+    const header = base64url(JSON.stringify({ alg: "ES256", kid: this.config.keyId }));
+    const claims = base64url(JSON.stringify({ iss: this.config.teamId, iat: created }));
+    const input = `${header}.${claims}`;
+    const signature = sign("sha256", Buffer.from(input), { key: createPrivateKey(this.key), dsaEncoding: "ieee-p1363" });
+    const value = `${input}.${base64url(signature)}`;
+    this.jwt = { value, created };
+    return value;
+  }
+  send(device: PushDevice, payload: Record<string, unknown>, headers: { expiration: string; collapseId: string }): Promise<boolean> {
+    const authority = device.environment === "production" ? "https://api.push.apple.com" : "https://api.sandbox.push.apple.com";
+    return new Promise(resolve => {
+      const client = connect(authority); let settled = false;
+      const finish = (ok: boolean) => { if (settled) return; settled = true; client.close(); resolve(ok); };
+      client.once("error", () => finish(false));
+      const request = client.request({ ":method": "POST", ":path": `/3/device/${device.token}`,
+        authorization: `bearer ${this.token()}`, "apns-topic": this.config.topic, "apns-push-type": "alert",
+        "apns-priority": "10", "apns-expiration": headers.expiration, "apns-collapse-id": headers.collapseId });
+      request.on("response", headers => finish(Number(headers[":status"]) === 200));
+      request.once("error", () => finish(false)); request.setTimeout(10_000, () => { request.close(); finish(false); });
+      request.end(JSON.stringify(payload));
+    });
+  }
+}
+
+/** Direct Hook -> APNs delivery. Apple receives only a short-lived opaque
+ * binding; conversation identity, action id, command and SSH key stay local. */
+export class ApprovalPushService {
+  private devices: PushDevice[] = [];
+  private sender?: APNsSender;
+  private readonly devicesFile = path.join(bridgeRoot(), "push-devices.json");
+  async start() {
+    this.devices = await secureJSON(this.devicesFile, z.array(deviceSchema).max(16)) ?? [];
+    const configFile = process.env.PHREN_APNS_CONFIG || path.join(bridgeRoot(), "apns.json");
+    const config = await secureJSON(configFile, configSchema);
+    if (!config) return;
+    const keyPath = path.isAbsolute(config.privateKeyPath) ? config.privateKeyPath : path.resolve(path.dirname(configFile), config.privateKeyPath);
+    const key = await secureFile(keyPath);
+    if (key) this.sender = new APNsSender(config, key);
+  }
+  get available() { return this.sender !== undefined && this.devices.length > 0; }
+  get status() { return { supported: true, configured: this.sender !== undefined, devices: this.devices.length }; }
+  async register(value: unknown) {
+    this.devices = upsertPushDevice(this.devices, value);
+    await atomic(this.devicesFile, JSON.stringify(this.devices));
+  }
+  async notify(value: ApprovalPush): Promise<boolean> {
+    if (!this.sender || !this.devices.length) return false;
+    const devices = this.devices.filter(device => device.kinds.includes("approval"));
+    if (!devices.length) return false;
+    return (await Promise.all(devices.map(device => this.sender!.send(device, approvalPushPayload(value, device.hostID), {
+      expiration: String(Math.floor(Date.parse(value.expiresAt) / 1000)), collapseId: value.binding,
+    })))).some(Boolean);
+  }
+  /** A headless worker whose permission the plugin refused. Approval-registered
+   * phones already accept agent alerts; the payload carries the reason so the
+   * notification is actionable on its own. */
+  async notifyFanoutBlocked(value: FanoutBlockedPush): Promise<boolean> {
+    if (!this.sender || !this.devices.length) return false;
+    const devices = this.devices.filter(device => device.kinds.includes("approval"));
+    if (!devices.length) return false;
+    return (await Promise.all(devices.map(device => this.sender!.send(device, fanoutBlockedPushPayload(value), {
+      expiration: "0", collapseId: `fanout-${value.job}`,
+    })))).some(Boolean);
+  }
+  async notifySchedule(value: SchedulePush): Promise<SchedulePushResult> {
+    if (!this.sender) return { notified: false, reason: "no push config" };
+    let devices = this.devices.filter(device => device.kinds.includes(value.kind));
+    if (!devices.length && value.kind === "scheduleBlocked") devices = this.devices.filter(device => device.kinds.includes("scheduleFailed"));
+    if (!devices.length) return { notified: false, reason: "no registered devices" };
+    try {
+      const notified = (await Promise.all(devices.map(device => this.sender!.send(device, schedulePushPayload(value), {
+        expiration: "0", collapseId: scheduleCollapseId(value.kind, value.runId),
+      })))).some(Boolean);
+      return notified ? { notified: true } : { notified: false, reason: "push delivery failed" };
+    } catch {
+      return { notified: false, reason: "push delivery failed" };
+    }
+  }
+}

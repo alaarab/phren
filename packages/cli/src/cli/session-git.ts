@@ -3,20 +3,15 @@
  * Extracted from hooks-session.ts for modularity.
  */
 import { execFileSync } from "child_process";
-import * as fs from "fs";
 import * as path from "path";
-import {
-  EXEC_TIMEOUT_MS,
-  debugLog,
-  errorMessage,
-} from "./hooks-context.js";
-import { runGit } from "../utils.js";
-import { isTaskFileName } from "../data/tasks.js";
-import {
-  autoMergeConflicts,
-  mergeTask,
-  mergeFindings,
-} from "../shared/content.js";
+import { EXEC_TIMEOUT_MS, debugLog } from "../shared.js";
+import { errorMessage, runGit } from "../utils.js";
+import { nonInteractiveGitEnv } from "../utils-helpers.js";
+import { withFileLock } from "../governance/locks.js";
+import { runtimeFile } from "../phren-paths.js";
+import { mergeStoreUpstream, type RunStoreGit } from "../sync/store-merge.js";
+import { aheadBehind, logSyncOutcome, type AheadBehind } from "../sync/outcome.js";
+import { activeStoreAuthFailure, authBackoffActive, isGitAuthFailure, storeAuthDetail, withStoreAuthBackoff } from "../sync/auth.js";
 
 // ── Git context ─────────────────────────────────────────────────────────────
 
@@ -56,7 +51,7 @@ function shouldRetryGitCommand(args: string[]): boolean {
   return cmd === "push" || cmd === "pull" || cmd === "fetch";
 }
 
-export async function runBestEffortGit(args: string[], cwd: string): Promise<{ ok: boolean; output?: string; error?: string }> {
+async function runBestEffortGitCommand(args: string[], cwd: string): Promise<{ ok: boolean; output: string; error?: string }> {
   const retries = shouldRetryGitCommand(args) ? 2 : 0;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
@@ -65,27 +60,33 @@ export async function runBestEffortGit(args: string[], cwd: string): Promise<{ o
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
         timeout: EXEC_TIMEOUT_MS,
+        env: nonInteractiveGitEnv(),
       }).trim();
       return { ok: true, output };
     } catch (err: unknown) {
       const message = errorMessage(err);
-      if (attempt < retries && isTransientGitError(message)) {
+      if (attempt < retries && !isGitAuthFailure(message) && isTransientGitError(message)) {
         const delayMs = 500 * (attempt + 1);
         await new Promise((resolve) => setTimeout(resolve, delayMs));
         continue;
       }
-      return { ok: false, error: message };
+      return { ok: false, output: "", error: message };
     }
   }
-  return { ok: false, error: "git command failed" };
+  return { ok: false, output: "", error: "git command failed" };
+}
+
+const guardedSessionGit = withStoreAuthBackoff((cwd, args) => runBestEffortGitCommand(args, cwd));
+export async function runBestEffortGit(args: string[], cwd: string): Promise<{ ok: boolean; output?: string; error?: string }> {
+  return guardedSessionGit(cwd, args);
 }
 
 /**
  * True when local HEAD and the tracking branch share no common ancestor.
  *
  * This is what happens when a store's remote is re-initialized: every
- * `pull --rebase` fails, the rebase is aborted, and the next commit re-enters
- * the same loop forever. A generic "pull failed" sends the user chasing
+ * an ordinary pull cannot reconcile it, and the next commit re-enters the
+ * same loop forever. A generic "pull failed" sends the user chasing
  * network problems, so it is worth naming — no retry will ever fix it.
  *
  * Returns false when there is no upstream, or when git cannot answer; callers
@@ -121,7 +122,7 @@ export const TEAM_STORE_PATHSPECS = [
   "*/FINDINGS.md.bak",
   "*/summary.md",
   "*/review.md",
-  "*/CLAUDE.md",
+  "*/AGENTS.md",
   "*/topic-config.json",
   "*/phren.project.yaml",
   "*/reference/**",
@@ -144,107 +145,45 @@ export async function countUnsyncedCommits(cwd: string): Promise<number> {
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
-// ── Merge helpers ───────────────────────────────────────────────────────────
+const runSessionStoreGit: RunStoreGit = async (cwd, args) => {
+  const result = await runBestEffortGitCommand(args, cwd);
+  return { ok: result.ok, output: result.output ?? "", error: result.error };
+};
 
-function isMergeableMarkdown(relPath: string): boolean {
-  const filename = path.basename(relPath).toLowerCase();
-  return filename === "findings.md" || isTaskFileName(filename);
+/** Startup pulls share the store's Git lock and never rewrite local commits. */
+export async function pullAtSessionStart(cwd: string, git: RunStoreGit = runSessionStoreGit, now = Date.now()): Promise<{ ok: boolean; output?: string; error?: string; counts?: AheadBehind }> {
+  const result = await pullAtSessionStartUnlogged(cwd, git, now);
+  const counts = await aheadBehind(cwd, git);
+  logSyncOutcome(cwd, "session-start-pull", { ok: result.ok, detail: result.ok ? result.output : result.error, counts });
+  return counts ? { ...result, counts } : result;
 }
 
-async function snapshotLocalMergeableFiles(cwd: string): Promise<Map<string, string>> {
-  const upstream = await runBestEffortGit(["rev-parse", "--abbrev-ref", "@{upstream}"], cwd);
-  if (!upstream.ok || !upstream.output) return new Map();
-  const changed = await runBestEffortGit(["diff", "--name-only", `${upstream.output.trim()}..HEAD`], cwd);
-  if (!changed.ok || !changed.output) return new Map();
-
-  const snapshots = new Map<string, string>();
-  for (const relPath of changed.output.split("\n").map((line) => line.trim()).filter(Boolean)) {
-    if (!isMergeableMarkdown(relPath)) continue;
-    const fullPath = path.join(cwd, relPath);
-    if (!fs.existsSync(fullPath)) continue;
-    snapshots.set(relPath, fs.readFileSync(fullPath, "utf8"));
-  }
-  return snapshots;
-}
-
-async function reconcileMergeableFiles(cwd: string, snapshots: Map<string, string>): Promise<boolean> {
-  let changedAny = false;
-
-  for (const [relPath, localBeforePull] of snapshots.entries()) {
-    const fullPath = path.join(cwd, relPath);
-    if (!fs.existsSync(fullPath)) continue;
-    const current = fs.readFileSync(fullPath, "utf8");
-    const filename = path.basename(relPath).toLowerCase();
-    const merged = filename === "findings.md"
-      ? mergeFindings(current, localBeforePull)
-      : mergeTask(current, localBeforePull);
-    if (merged === current) continue;
-    fs.writeFileSync(fullPath, merged);
-    changedAny = true;
-  }
-
-  if (!changedAny) return false;
-
-  const add = await runBestEffortGit(["add", "--", ...snapshots.keys()], cwd);
-  if (!add.ok) return false;
-  const commit = await runBestEffortGit(["commit", "-m", "auto-merge markdown recovery"], cwd);
-  return commit.ok;
+async function pullAtSessionStartUnlogged(cwd: string, git: RunStoreGit, now: number): Promise<{ ok: boolean; output?: string; error?: string }> {
+  try {
+    return await withFileLock(runtimeFile(cwd, "git-op"), async () => {
+      const auth = activeStoreAuthFailure(cwd);
+      if (authBackoffActive(auth, now)) return { ok: false, error: storeAuthDetail(auth!) };
+      const result = await mergeStoreUpstream(cwd, {
+        git: withStoreAuthBackoff(git, () => now),
+        commitMessage: "auto-save phren (session start)",
+      });
+      return result.status === "updated" || result.status === "unchanged"
+        ? { ok: true, output: result.detail }
+        : { ok: false, error: result.detail };
+    });
+  } catch (err: unknown) { return { ok: false, error: errorMessage(err) }; }
 }
 
 export async function recoverPushConflict(cwd: string): Promise<{ ok: boolean; detail: string; pullStatus: "ok" | "error"; pullDetail: string }> {
-  const localSnapshots = await snapshotLocalMergeableFiles(cwd);
-  const pull = await runBestEffortGit(["pull", "--rebase", "--quiet"], cwd);
-  if (pull.ok) {
-    const reconciled = await reconcileMergeableFiles(cwd, localSnapshots);
-    const retryPush = await runBestEffortGit(["push"], cwd);
-    return {
-      ok: retryPush.ok,
-      detail: retryPush.ok
-        ? (reconciled ? "commit pushed after pull --rebase and markdown reconciliation" : "commit pushed after pull --rebase")
-        : (retryPush.error || "push failed after pull --rebase"),
-      pullStatus: "ok",
-      pullDetail: pull.output || "pull --rebase ok",
-    };
+  const merged = await mergeStoreUpstream(cwd, { git: withStoreAuthBackoff(runSessionStoreGit), commitLocalWrites: false });
+  if (merged.status !== "updated" && merged.status !== "unchanged") {
+    return { ok: false, detail: merged.detail, pullStatus: "error", pullDetail: merged.detail };
   }
-
-  const conflicted = await runBestEffortGit(["diff", "--name-only", "--diff-filter=U"], cwd);
-  const conflictedOutput = conflicted.output?.trim() || "";
-  if (!conflicted.ok || !conflictedOutput) {
-    await runBestEffortGit(["rebase", "--abort"], cwd);
-    return {
-      ok: false,
-      detail: pull.error || "pull --rebase failed",
-      pullStatus: "error",
-      pullDetail: pull.error || "pull --rebase failed",
-    };
-  }
-
-  if (!autoMergeConflicts(cwd)) {
-    await runBestEffortGit(["rebase", "--abort"], cwd);
-    return {
-      ok: false,
-      detail: `rebase conflicts require manual resolution: ${conflictedOutput}`,
-      pullStatus: "error",
-      pullDetail: `rebase conflicts require manual resolution: ${conflictedOutput}`,
-    };
-  }
-
-  const continued = await runBestEffortGit(["-c", "core.editor=true", "rebase", "--continue"], cwd);
-  if (!continued.ok) {
-    await runBestEffortGit(["rebase", "--abort"], cwd);
-    return {
-      ok: false,
-      detail: continued.error || "rebase --continue failed",
-      pullStatus: "error",
-      pullDetail: continued.error || "rebase --continue failed",
-    };
-  }
-
   const retryPush = await runBestEffortGit(["push"], cwd);
   return {
     ok: retryPush.ok,
-    detail: retryPush.ok ? "commit pushed after auto-merge recovery" : (retryPush.error || "push failed after auto-merge recovery"),
+    detail: retryPush.ok ? "commit pushed after merging remote changes" : (retryPush.error || "push failed after merging remote changes"),
     pullStatus: "ok",
-    pullDetail: "pull --rebase recovered via auto-merge",
+    pullDetail: merged.detail,
   };
 }

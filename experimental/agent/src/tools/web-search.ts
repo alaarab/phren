@@ -27,12 +27,12 @@ export function createWebSearchTool(): AgentTool {
       },
       required: ["query"],
     },
-    async execute(input) {
+    async execute(input, signal) {
       const query = input.query as string;
       const limit = Math.min((input.limit as number) || 5, 10);
 
       try {
-        const results = await searchDuckDuckGo(query, limit);
+        const results = await searchDuckDuckGo(query, limit, signal);
         if (results.length === 0) {
           return { output: "No search results found." };
         }
@@ -56,7 +56,7 @@ interface SearchResult {
   snippet: string;
 }
 
-async function searchDuckDuckGo(query: string, limit: number): Promise<SearchResult[]> {
+async function searchDuckDuckGo(query: string, limit: number, signal?: AbortSignal): Promise<SearchResult[]> {
   const encoded = encodeURIComponent(query);
   const url = `https://html.duckduckgo.com/html/?q=${encoded}`;
 
@@ -65,7 +65,7 @@ async function searchDuckDuckGo(query: string, limit: number): Promise<SearchRes
       "User-Agent": "phren-agent/0.1 (search tool)",
       "Accept": "text/html",
     },
-    signal: AbortSignal.timeout(10_000),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000),
   });
 
   if (!res.ok) {

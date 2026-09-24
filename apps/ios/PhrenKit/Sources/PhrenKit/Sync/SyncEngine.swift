@@ -64,6 +64,7 @@ public actor SyncEngine {
     private var writeContext = WriteContext()
     private var liveTask: Task<Void, Never>?
     private var flushTask: Task<Void, Never>?
+    private var enqueueGeneration = 0
     private var pullTask: Task<Void, Never>?
     private var pullGeneration = 0
     /// Tests drive `flushNow()` by hand so a background flush can't push the
@@ -74,9 +75,20 @@ public actor SyncEngine {
     /// `StorageIssueLog`, which already has them.
     public private(set) var storageIssues: [StorageIssue] = []
 
+    /// What an `onUpdate` callback is being told about, so the app can price
+    /// its response: a status flip is a couple of field reads, a content
+    /// change is a re-parse of the store.
+    public enum Update: Sendable {
+        /// Files in the local cache changed (remote pull or local apply) —
+        /// re-read the snapshot.
+        case content
+        /// Only `Status` moved (syncing/live flags, timestamps, counts, error).
+        case status
+    }
+
     /// Fires after any content change (remote pull or local apply) and on
-    /// status transitions — the app re-reads the snapshot and re-renders.
-    private var onUpdate: (@Sendable () -> Void)?
+    /// status transitions, tagged with which of the two it was.
+    private var onUpdate: (@Sendable (Update) -> Void)?
 
     public init(client: any GitHubAPI, store: LocalStore, stateDirectory: URL) {
         self.client = client
@@ -94,7 +106,7 @@ public actor SyncEngine {
         self.status.failedCount = queue.failed.count
     }
 
-    public func setOnUpdate(_ callback: @escaping @Sendable () -> Void) {
+    public func setOnUpdate(_ callback: @escaping @Sendable (Update) -> Void) {
         onUpdate = callback
     }
 
@@ -104,15 +116,15 @@ public actor SyncEngine {
 
     public func currentStatus() -> Status { status }
 
-    private func notify() {
-        onUpdate?()
+    private func notify(_ update: Update) {
+        onUpdate?(update)
     }
 
     private func setStatus(_ mutate: (inout Status) -> Void) {
         mutate(&status)
         status.pendingCount = queue.pending.count
         status.failedCount = queue.failed.count
-        notify()
+        notify(.status)
     }
 
     // MARK: - Pull
@@ -122,13 +134,17 @@ public actor SyncEngine {
     /// finds a pull in flight awaits it, and a forced caller then runs its own
     /// pass — the conflict-recovery path must never no-op on a stale sha.
     public func pull(force: Bool = false) async {
+        await pull(force: force, overwritingPendingPaths: [])
+    }
+
+    private func pull(force: Bool, overwritingPendingPaths: Set<String>) async {
         if let inFlight = pullTask {
             await inFlight.value
             if !force { return }
         }
         pullGeneration += 1
         let generation = pullGeneration
-        let task = Task { await self.performPull(force: force) }
+        let task = Task { await self.performPull(force: force, overwritingPendingPaths: overwritingPendingPaths) }
         pullTask = task
         await task.value
         if pullGeneration == generation {
@@ -136,9 +152,14 @@ public actor SyncEngine {
         }
     }
 
-    private func performPull(force: Bool) async {
+    private func performPull(force: Bool, overwritingPendingPaths: Set<String>) async {
         setStatus { $0.isSyncing = true; $0.lastError = nil }
-        defer { setStatus { $0.isSyncing = false } }
+        defer {
+            setStatus { $0.isSyncing = false }
+            // An unchanged head still needs to retry edits queued offline.
+            // Retry once per sync pass, including 304 responses.
+            if !queue.pending.isEmpty { scheduleFlush() }
+        }
 
         do {
             let manifest = await store.currentManifest
@@ -176,20 +197,25 @@ public actor SyncEngine {
 
             var changed = false
             for (path, sha) in remote {
+                guard !preservesPendingFile(path, overwriting: overwritingPendingPaths) else { continue }
                 let cached = await store.blobSha(for: path)
                 guard cached != sha else { continue }
                 let data = try await client.blob(owner: manifest.owner, repo: manifest.repo, sha: sha)
                 let content = String(data: data, encoding: .utf8) ?? ""
+                // An edit can be queued while a blob request is in flight.
+                guard !preservesPendingFile(path, overwriting: overwritingPendingPaths) else { continue }
                 try await store.write(path, content: content, blobSha: sha)
                 changed = true
             }
             for path in await store.allPaths() {
                 guard remote[path] == nil, LocalStore.isSyncedPath(path) else { continue }
+                guard !preservesPendingFile(path, overwriting: overwritingPendingPaths) else { continue }
                 // A nil blob sha means the file was created locally and never
                 // synced (e.g. a new day's notes file from a queued op) —
                 // deleting it here would drop the user's change before the
                 // flush pushes it.
-                guard await store.blobSha(for: path) != nil else { continue }
+                let hasRemoteSha = await store.blobSha(for: path) != nil
+                guard hasRemoteSha || overwritingPendingPaths.contains(path) else { continue }
                 try await store.delete(path)
                 changed = true
             }
@@ -199,14 +225,17 @@ public actor SyncEngine {
                 m.lastSyncedAt = Date()
             }
             setStatus { $0.lastSyncedAt = Date() }
-            if changed { notify() }
+            if changed { notify(.content) }
         } catch {
             setStatus { $0.lastError = error.localizedDescription }
         }
+    }
 
-        if !queue.pending.isEmpty {
-            scheduleFlush()
-        }
+    /// Polls must keep queued edits and their original blob SHAs intact until
+    /// flush can check them. Only conflict recovery replaces pending files;
+    /// it immediately replays the queue against the downloaded version.
+    private func preservesPendingFile(_ path: String, overwriting paths: Set<String>) -> Bool {
+        !paths.contains(path) && queue.pending.contains { $0.editedPaths.contains(path) }
     }
 
     // MARK: - Cold tier
@@ -256,6 +285,7 @@ public actor SyncEngine {
         setStatus { $0.isLive = true }
         liveTask = Task { [weak self] in
             while let self, !Task.isCancelled {
+                PerformanceCounters.bump("poll.github")
                 await self.pull()
                 try? await Task.sleep(nanoseconds: UInt64(Self.livePollInterval * 1_000_000_000))
             }
@@ -281,6 +311,15 @@ public actor SyncEngine {
         storageIssues.append(issue)
     }
 
+    /// A local cache write that failed. The cache heals on the next pull, but
+    /// until then the phone shows stale files, so it is reported like a failed
+    /// queue save rather than dropped.
+    private func recordCacheFailure(_ document: String, location: String, error: Error) {
+        let issue = PersistedState.reportUnwritable(document: document, location: location, error: error)
+        storageIssues.removeAll { $0.kind == .unwritable && $0.document == document }
+        storageIssues.append(issue)
+    }
+
     /// Applies the op locally (instant UI), persists it, and schedules a flush.
     public func enqueue(_ op: PendingOp) async throws {
         // Writability first. `write` checks the same predicate at flush time,
@@ -296,14 +335,42 @@ public actor SyncEngine {
         }
         // Local apply next — a domain error (empty text, secret, ambiguous
         // match) surfaces to the user immediately and nothing is queued.
-        let applied = try await applyLocally(op)
         var queued = QueuedOp(op: op)
+        let applied = try await applyLocally(op, createdAt: queued.queuedAt)
         queued.paths = applied.paths
         queued.deletedShas = applied.deletedShas.isEmpty ? nil : applied.deletedShas
         queue.pending.append(queued)
+        enqueueGeneration += 1
         persistQueue()
         setStatus { _ in }
         scheduleFlush()
+    }
+
+    /// Moves a skill's instructions to another scope (`global` or a project in
+    /// this store), keeping its name and file shape. Composed from the existing
+    /// authored-file ops rather than a new persisted case, so older builds keep
+    /// reading the queue. Create runs before delete: a failure between the two
+    /// leaves a duplicate, never a lost skill. An explicit enabled/disabled
+    /// choice follows the skill to its new key; supporting files in a folder
+    /// skill are not synced and stay where they were.
+    public func moveSkill(_ skill: Skill, to scope: String) async throws {
+        guard scope != skill.scope.source else {
+            throw PhrenKitError.validation("The skill is already in \(scope).")
+        }
+        let destination = skill.format == .folder
+            ? "\(scope)/skills/\(skill.name)/SKILL.md"
+            : "\(scope)/skills/\(skill.name).md"
+        guard LocalStore.isSkillPath(destination) else {
+            throw PhrenKitError.validation("Invalid skill scope or name.")
+        }
+        let preferences = try SkillPreferences.parse(await store.read(SkillPreferences.path))
+        let enabled = preferences.explicitSetting(scope: skill.scope.source, name: skill.name)
+        try await enqueue(.saveAuthoredFile(path: destination, content: skill.content, expectedContent: nil))
+        try await enqueue(.deleteAuthoredFile(path: skill.path, expectedContent: skill.content))
+        if let enabled {
+            try await enqueue(.setSkillEnabled(scope: scope, name: skill.name, enabled: enabled,
+                                               expectedEnabled: preferences.explicitSetting(scope: scope, name: skill.name)))
+        }
     }
 
     /// Re-queues everything in "Needs attention". An op parked before its edit
@@ -312,12 +379,13 @@ public actor SyncEngine {
     /// as it stands, so without this the retry would commit nothing for it.
     /// Ops parked with their edit already in place are simply re-queued.
     public func retryFailed() async {
+        enqueueGeneration += 1
         let retrying = queue.failed
         queue.failed.removeAll()
         for var queued in retrying {
             if queued.paths?.isEmpty ?? false {
                 do {
-                    let applied = try await applyLocally(queued.op)
+                    let applied = try await applyLocally(queued.op, createdAt: queued.queuedAt)
                     queued.paths = applied.paths
                     queued.deletedShas = applied.deletedShas.isEmpty ? nil : applied.deletedShas
                 } catch {
@@ -352,17 +420,20 @@ public actor SyncEngine {
 
     private func scheduleFlush() {
         guard autoFlush, flushTask == nil else { return }
+        let generation = enqueueGeneration
         flushTask = Task { [weak self] in
             await self?.flush()
-            await self?.clearFlushTask()
+            await self?.clearFlushTask(generation: generation)
         }
     }
 
-    private func clearFlushTask() {
+    private func clearFlushTask(generation: Int) {
         flushTask = nil
         // An op enqueued in the window between `flush` returning and this
         // running would otherwise sit until the next poll.
-        if !queue.pending.isEmpty { scheduleFlush() }
+        // Old pending work may have just failed because we're offline. Only
+        // newly enqueued work warrants another immediate pass.
+        if enqueueGeneration != generation, !queue.pending.isEmpty { scheduleFlush() }
     }
 
     /// Runs a flush pass to completion, awaiting one already in flight.
@@ -428,7 +499,7 @@ public actor SyncEngine {
                         // the paths that did NOT land forget their sha; the
                         // ones that did are current and must stay cached.
                         await forgetCachedShas(plan.paths)
-                        await pull(force: true)
+                        await pull(force: true, overwritingPendingPaths: Set(plan.paths))
                         let retry = await reapply(plan.ops)
                         plan = retry.plan
                         parked.append(contentsOf: retry.parked)
@@ -501,8 +572,12 @@ public actor SyncEngine {
     /// and the pull's sha comparison alone would skip them — the re-apply
     /// would then replay ops onto content that already has them.
     private func forgetCachedShas(_ paths: [String]) async {
-        try? await store.updateManifest { manifest in
-            for path in paths { manifest.blobShas.removeValue(forKey: path) }
+        do {
+            try await store.updateManifest { manifest in
+                for path in paths { manifest.blobShas.removeValue(forKey: path) }
+            }
+        } catch {
+            recordCacheFailure("cached file versions", location: "manifest", error: error)
         }
     }
 
@@ -646,7 +721,7 @@ public actor SyncEngine {
 
         for queued in ops {
             do {
-                let edits = try await computeEdits(queued.op, overlay: overlay)
+                let edits = try await computeEdits(queued.op, createdAt: queued.queuedAt, overlay: overlay)
                 for edit in edits {
                     if overlay.updateValue(edit.content, forKey: edit.path) == nil {
                         order.append(edit.path)
@@ -672,14 +747,18 @@ public actor SyncEngine {
         var deleted: [String: String] = [:]
         for path in order {
             guard let content = overlay[path] else { continue }
-            if let content {
-                try? await store.write(path, content: content, blobSha: nil)
-            } else {
-                if let sha = await store.blobSha(for: path) { deleted[path] = sha }
-                try? await store.delete(path)
+            do {
+                if let content {
+                    try await store.write(path, content: content, blobSha: nil)
+                } else {
+                    if let sha = await store.blobSha(for: path) { deleted[path] = sha }
+                    try await store.delete(path)
+                }
+            } catch {
+                recordCacheFailure("local edits", location: path, error: error)
             }
         }
-        notify()
+        notify(.content)
 
         for index in applied.indices {
             let shas = applied[index].paths?.compactMap { path in
@@ -701,10 +780,10 @@ public actor SyncEngine {
     /// Applies the op to local cached content only (optimistic UI), reporting
     /// the files it touched so the flush knows exactly what to push.
     @discardableResult
-    private func applyLocally(_ op: PendingOp) async throws -> (paths: [String], deletedShas: [String: String]) {
+    private func applyLocally(_ op: PendingOp, createdAt: Date) async throws -> (paths: [String], deletedShas: [String: String]) {
         var paths: [String] = []
         var deletedShas: [String: String] = [:]
-        for edit in try await computeEdits(op) {
+        for edit in try await computeEdits(op, createdAt: createdAt) {
             paths.append(edit.path)
             if let content = edit.content {
                 try await store.write(edit.path, content: content, blobSha: nil)
@@ -714,7 +793,7 @@ public actor SyncEngine {
                 try await store.delete(edit.path)
             }
         }
-        notify()
+        notify(.content)
         return (paths, deletedShas)
     }
 
@@ -763,7 +842,7 @@ public actor SyncEngine {
 
     /// Maps a domain op to concrete file edits against current local content.
     /// Each case mirrors the CLI handler documented on the file types.
-    private func computeEdits(_ op: PendingOp, overlay: [String: String?] = [:]) async throws -> [FileEdit] {
+    private func computeEdits(_ op: PendingOp, createdAt: Date, overlay: [String: String?] = [:]) async throws -> [FileEdit] {
         let project = op.project
         switch op {
         case .addFinding(_, let text, let type):
@@ -878,7 +957,7 @@ public actor SyncEngine {
 
         case .addTask(_, let text):
             var file = TasksFile(project: project, content: await read("\(project)/tasks.md", overlay: overlay))
-            try file.add(text)
+            try file.add(text, createdAt: createdAt.ISO8601Format(.init(includingFractionalSeconds: true)))
             return [FileEdit(path: "\(project)/tasks.md", content: file.render())]
 
         case .completeTask(_, let match):
@@ -899,6 +978,84 @@ public actor SyncEngine {
                 section: section.flatMap(PhrenTask.Section.init(rawValue:))
             ))
             return [FileEdit(path: "\(project)/tasks.md", content: file.render())]
+
+        case .setSkillEnabled(let scope, let name, let enabled, let expected):
+            let content = try SkillPreferences.setting(await read(SkillPreferences.path, overlay: overlay),
+                                                       scope: scope, name: name, enabled: enabled, expected: expected)
+            return [FileEdit(path: SkillPreferences.path, content: content)]
+
+        case .saveAuthoredFile(let path, let content, let expected):
+            let current = await read(path, overlay: overlay)
+            try AuthoredFile.validate(path: path, current: current, expected: expected, content: content)
+            if expected == nil, LocalStore.isSkillPath(path) {
+                var paths = Set(await store.allPaths())
+                for (candidate, value) in overlay {
+                    if value == nil { paths.remove(candidate) } else { paths.insert(candidate) }
+                }
+                if let conflict = AuthoredFile.conflictingSkillPath(for: path, among: Array(paths)) {
+                    throw PhrenKitError.duplicate("A skill with that name already exists at \(conflict).")
+                }
+            }
+            return [FileEdit(path: path, content: content)]
+
+        case .deleteAuthoredFile(let path, let expected):
+            try AuthoredFile.validate(path: path, current: await read(path, overlay: overlay),
+                                      expected: expected, content: nil)
+            return [FileEdit(path: path, content: nil)]
+
+        case .updateSkill(let path, let content):
+            // A skill is authored prose, so the op already holds the finished
+            // bytes: there is nothing to re-derive from current content, which
+            // makes a replay trivially deterministic.
+            guard LocalStore.isSkillPath(path) else {
+                throw PhrenKitError.validation("\(path) is not a skill path.")
+            }
+            guard !content.isEmpty else {
+                throw PhrenKitError.validation("Refusing to save an empty skill.")
+            }
+            // The same gate the CLI applies to findings — a skill body is free
+            // prose and just as capable of carrying a pasted token.
+            if let secret = SecretScanner.scan(content) {
+                throw PhrenKitError.validation(secret)
+            }
+            return [FileEdit(path: path, content: content)]
+
+        case .deleteSkill(let path):
+            guard LocalStore.isSkillPath(path) else {
+                throw PhrenKitError.validation("\(path) is not a skill path.")
+            }
+            return [FileEdit(path: path, content: nil)]
+
+        case .setProjectKnobs(let project, let knobs, let expected):
+            let path = "\(project)/\(MachineRegistry.projectFile)"
+            guard LocalStore.isProjectConfigPath(path) else {
+                throw PhrenKitError.validation("\(path) cannot hold project settings.")
+            }
+            let current = await read(path, overlay: overlay)
+            let next = knobs.apply(to: current ?? "")
+            // Same conflict rule as `saveAuthoredFile`: the bytes the user read
+            // must still be the bytes on disk, unless the write already landed.
+            guard current == expected || current == next else {
+                throw PhrenKitError.validation(
+                    "\(path) changed since you opened it. Review the latest version before saving again."
+                )
+            }
+            // Every knob back to "inherit" with no file to edit is a no-op.
+            if current == nil && next.isEmpty { return [] }
+            return [FileEdit(path: path, content: next)]
+
+        case .saveSchedules(let project, let content, let expected):
+            let path = "\(project)/\(SchedulesFile.fileName)"
+            guard LocalStore.isSchedulesPath(path) else {
+                throw PhrenKitError.validation("\(path) cannot hold schedules.")
+            }
+            let current = await read(path, overlay: overlay)
+            guard current == expected || current == content else {
+                throw PhrenKitError.validation(
+                    "\(path) changed since you opened it. Review the latest version before saving again."
+                )
+            }
+            return [FileEdit(path: path, content: content)]
         }
     }
 }

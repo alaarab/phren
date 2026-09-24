@@ -163,20 +163,20 @@ struct TriageView: View {
                 await applyEdit(to: card, newText: text)
             }
         }
-        .confirmationDialog(
-            "Reject deletes this finding",
+        .phrenDialog(
             isPresented: $confirmingReject,
-            titleVisibility: .visible
-        ) {
-            Button("Reject", role: .destructive) {
-                rejectConfirmed = true
-                commitSwipe(-1)
-            }
-            Button("Keep it", role: .cancel) {}
-        } message: {
-            Text("Rejecting removes the finding from FINDINGS.md permanently. "
-                 + "You still get a few seconds to undo. Asked once per session.")
-        }
+            title: "Reject deletes this finding",
+            message: "Rejecting removes the finding from FINDINGS.md permanently. "
+                + "You still get a few seconds to undo. Asked once per session.",
+            actions: [
+                .init(id: "reject", title: "Reject", role: .destructive) {
+                    rejectConfirmed = true
+                    commitSwipe(-1)
+                },
+                .init(id: "keep", title: "Keep it", role: .cancel) {},
+            ],
+            identifier: "triage-reject-dialog"
+        )
     }
 
     // MARK: - Header

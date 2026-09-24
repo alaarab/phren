@@ -6,11 +6,17 @@ import * as path from "path";
 import * as crypto from "crypto";
 import { debugLog, installPreferencesFile } from "../phren-paths.js";
 import { errorMessage } from "../utils.js";
-import { withFileLock } from "../shared/governance.js";
+import { withFileLock } from "../governance/locks.js";
 import type { CustomHookEntry } from "../hooks.js";
 
 export interface InstallPreferences {
   mcpEnabled?: boolean;
+  /**
+   * Which MCP tool surface clients get. "core" (default) is ten tools with
+   * everything else behind phren_admin; "full" is every tool by name.
+   * PHREN_MCP_PROFILE overrides it. See mcp/profile.ts.
+   */
+  mcpProfile?: "core" | "full";
   hooksEnabled?: boolean;
   skillsScope?: "global" | "project";
   projectOwnershipDefault?: "phren-managed" | "detached" | "repo-managed";
@@ -48,6 +54,8 @@ export interface InstallPreferences {
   managedPrePromptSiblingCommands?: string[];
   /** Whether the user intended cross-machine sync ("sync") or local-only ("local"). */
   syncIntent?: "sync" | "local";
+  /** Seconds between MCP remote checks. 0 disables periodic pulls (the default). */
+  pullIntervalSeconds?: number;
 }
 
 function preferencesFile(phrenPath: string): string {

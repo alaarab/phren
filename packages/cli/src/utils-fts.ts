@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "js-yaml";
+import { loadYamlDocument } from "./phren-core.js";
 import { fileURLToPath } from "url";
 import { findPhrenPath } from "./phren-paths.js";
 import { isValidProjectName } from "./utils-paths.js";
@@ -55,6 +56,7 @@ export const STOP_WORDS = new Set([
   "other", "into", "over", "such", "only", "own", "same", "also", "back",
   "get", "got", "make", "made", "take", "like", "well", "here", "there",
   "use", "using", "used", "need", "want", "look", "help", "please",
+  "those", "these", "both",
 ]);
 
 // Extract meaningful keywords from a prompt, including bigrams (2-word noun phrases).
@@ -130,7 +132,7 @@ function mergeSynonymMaps(...maps: Array<Record<string, string[]>>): Record<stri
 function parseSynonymsYaml(filePath: string): Record<string, string[]> {
   if (!fs.existsSync(filePath)) return {};
   try {
-    const parsed = yaml.load(fs.readFileSync(filePath, "utf8"), { schema: yaml.CORE_SCHEMA });
+    const parsed = loadYamlDocument(fs.readFileSync(filePath, "utf8"), (text) => yaml.load(text, { schema: yaml.CORE_SCHEMA }));
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
 
     const loaded: Record<string, string[]> = {};

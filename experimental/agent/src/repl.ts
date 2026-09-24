@@ -1,12 +1,15 @@
 /** Interactive REPL for the phren agent with steering/queue input modes. */
 
+import { emitHerdrHook, setHerdrHookSession } from "./herdr-hooks.js";
 import * as readline from "node:readline/promises";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import { randomUUID } from "node:crypto";
+import { persistFork } from "./session/persist.js";
 import type { AgentConfig } from "./agent-loop.js";
 import { createSession, runTurn, type AgentSession } from "./agent-loop.js";
-import { handleCommand } from "./commands.js";
+import { handleCommand, resolveSkillGesture, resolveCustomCommand } from "./commands.js";
 import { resolveProvider } from "./providers/resolve.js";
 import { loadInputMode } from "./settings.js";
 
@@ -40,7 +43,8 @@ function saveHistory(lines: string[]): void {
 
 export async function startRepl(config: AgentConfig): Promise<AgentSession> {
   const contextLimit = config.provider.contextWindow ?? 200_000;
-  const session = createSession(contextLimit);
+  const session = createSession(contextLimit, { log: config.sessionLog });
+  const startTime = Date.now();
   const history = loadHistory();
   let inputMode = loadInputMode();
 
@@ -66,7 +70,24 @@ export async function startRepl(config: AgentConfig): Promise<AgentSession> {
     session,
     contextLimit,
     undoStack: [],
+    costTracker: config.costTracker,
     phrenCtx: config.phrenCtx,
+    sessionId: config.sessionId,
+    startTime,
+    phrenPath: config.phrenCtx?.phrenPath,
+    forkSession: () => {
+      if (!config.phrenCtx?.phrenPath || !config.sessionId) return { ok: false, message: "Fork needs a phren store." };
+      try {
+        const childId = randomUUID();
+        const child = persistFork(config.phrenCtx.phrenPath, session.log, childId);
+        session.log = child;
+        config.sessionId = childId;
+        setHerdrHookSession(childId);
+        return { ok: true, sessionId: childId, message: `Forked to ${childId.slice(0, 8)}` };
+      } catch (err) {
+        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+      }
+    },
     providerName: config.provider.name,
     currentModel: (config.provider as { model?: string }).model,
     currentReasoning: config.provider.reasoningEffort ?? null,
@@ -79,7 +100,7 @@ export async function startRepl(config: AgentConfig): Promise<AgentSession> {
   });
 
   for await (const line of rl) {
-    const trimmed = line.trim();
+    let trimmed = line.trim();
     if (!trimmed) {
       rl.prompt();
       continue;
@@ -87,8 +108,17 @@ export async function startRepl(config: AgentConfig): Promise<AgentSession> {
 
     allHistory.push(trimmed);
 
-    // Handle slash commands
-    if (handleCommand(trimmed, buildCommandContext())) {
+    // /skill-name gesture: rewrite into a run_skill task before command dispatch
+    const customTask = resolveCustomCommand(trimmed);
+    const skillTask = customTask ? null : resolveSkillGesture(trimmed, config.phrenCtx);
+    if (customTask) {
+      process.stderr.write(`${DIM}↳ running custom command ${trimmed.split(/\s+/)[0]}${RESET}\n`);
+      trimmed = customTask;
+    } else if (skillTask) {
+      process.stderr.write(`${DIM}↳ running skill via ${trimmed.split(/\s+/)[0]}${RESET}\n`);
+      trimmed = skillTask;
+    } else if (handleCommand(trimmed, buildCommandContext())) {
+      // Handle slash commands
       rl.prompt();
       continue;
     }
@@ -106,11 +136,14 @@ export async function startRepl(config: AgentConfig): Promise<AgentSession> {
 
     agentRunning = true;
 
+    emitHerdrHook("UserPromptSubmit");
     try {
       await runTurn(trimmed, session, config);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       process.stderr.write(`${RED}Error: ${msg}${RESET}\n`);
+    } finally {
+      emitHerdrHook("Stop");
     }
 
     agentRunning = false;
@@ -127,6 +160,7 @@ export async function startRepl(config: AgentConfig): Promise<AgentSession> {
       }
 
       agentRunning = true;
+      emitHerdrHook("UserPromptSubmit");
       try {
         if (inputMode === "steering") {
           // Steering: inject as a correction/redirect
@@ -136,6 +170,8 @@ export async function startRepl(config: AgentConfig): Promise<AgentSession> {
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         process.stderr.write(`${RED}Error: ${msg}${RESET}\n`);
+      } finally {
+        emitHerdrHook("Stop");
       }
       agentRunning = false;
     }

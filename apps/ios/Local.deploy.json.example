@@ -1,0 +1,6 @@
+{
+  "device": "YOUR-PAIRED-DEVICE-IDENTIFIER",
+  "team": "YOURTEAMID",
+  "signing_helper": "~/.local/share/apple-signing/signing-helper",
+  "signing_lock_directory": "~/.local/share/apple-signing/build-lock"
+}

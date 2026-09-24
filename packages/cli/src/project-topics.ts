@@ -2,11 +2,11 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import { debugLog } from "./shared.js";
-import { withFileLock } from "./shared/governance.js";
+import { withFileLock } from "./governance/locks.js";
 import { STOP_WORDS, errorMessage, extractKeywords, isValidProjectName } from "./utils.js";
 import { storeAwareProjectPath } from "./store-routing.js";
 import { walkDirectory } from "./shared/data-utils.js";
-import { FINDINGS_FILENAME } from "./data/access.js";
+import { FINDINGS_FILENAME } from "./filenames.js";
 
 export interface ProjectTopic {
   slug: string;
@@ -514,7 +514,7 @@ function countByTerm(terms: string[]): Map<string, number> {
 
 function readTopicInputContent(phrenPath: string, project: string): string[] {
   const parts: string[] = [];
-  for (const file of ["CLAUDE.md", FINDINGS_FILENAME]) {
+  for (const file of ["AGENTS.md", FINDINGS_FILENAME]) {
     const filePath = storeAwareProjectPath(phrenPath, project, file);
     if (!filePath || !fs.existsSync(filePath)) continue;
     const content = fs.readFileSync(filePath, "utf8").trim();
@@ -995,7 +995,7 @@ function tokenizeSuggestionTerms(text: string): string[] {
 
 function collectSuggestionCorpus(phrenPath: string, project: string): string {
   const parts: string[] = [];
-  for (const file of ["CLAUDE.md", "summary.md", FINDINGS_FILENAME]) {
+  for (const file of ["AGENTS.md", "summary.md", FINDINGS_FILENAME]) {
     const filePath = storeAwareProjectPath(phrenPath, project, file);
     if (!filePath || !fs.existsSync(filePath)) continue;
     const content = fs.readFileSync(filePath, "utf8");

@@ -1,3 +1,4 @@
+import { moduleEnabled } from "../modules/runtime.js";
 import * as fs from "fs";
 import * as path from "path";
 import {
@@ -29,6 +30,7 @@ import {
   type SubsectionsCache,
   type ViewContext,
 } from "./view.js";
+import { renderWidth } from "./render.js";
 import {
   executePalette,
   completeInput as completeInputFn,
@@ -38,6 +40,32 @@ import {
   type NavigationHost,
 } from "./input.js";
 import { errorMessage } from "../utils.js";
+import type { ShellStartup } from "./startup.js";
+import { GraphController } from "./graph/controller.js";
+import { applyEditorKey, createEditorState, editorText, type EditorState } from "../editor/buffer.js";
+import { saveEditedFile, type EditKind } from "../editor/save.js";
+import { renderEditor } from "./editor-view.js";
+import { syncSkillLinksForScope } from "../skill/files.js";
+
+/** How far the help should scroll for a key, or 0 when it should close instead. */
+function helpScrollDelta(key: string): number {
+  switch (key) {
+    case "\x1b[B": case "j": return 1;
+    case "\x1b[A": case "k": return -1;
+    case "\x1b[6~": return 10;
+    case "\x1b[5~": return -10;
+    default: return 0;
+  }
+}
+
+/** Remove the final character, keeping surrogate pairs and combining marks intact. */
+function dropLastCharacter(s: string): string {
+  if (!s) return s;
+  const chars = [...s];
+  chars.pop();
+  while (chars.length && /\p{M}/u.test(chars[chars.length - 1]!)) chars.pop();
+  return chars.join("");
+}
 
 // ── Shell class ──────────────────────────────────────────────────────────────
 
@@ -50,16 +78,24 @@ export class PhrenShell {
   private pendingConfirm?: { label: string; action: () => void };
   private undoStack: UndoEntry[] = [];
 
-  private navMode: "navigate" | "input" = "navigate";
+  private navMode: "navigate" | "input" | "editor" = "navigate";
+  private editor?: { state: EditorState; kind: EditKind; scope?: string };
   private inputBuf = "";
   private inputCtx = "";
   inputMqId = "";
   private cursorMap: Partial<Record<string, number>> = {};
   private viewScrollMap: Partial<Record<string, number>> = {};
   private healthLineCount = 0;
+  private helpScroll = 0;
   private _subsectionsCache: SubsectionsCache | null = null;
+  private _graph?: GraphController;
+  private repaintHandler: (() => void) | null = null;
+  private suspendHandler: ((run: () => Promise<void> | void) => Promise<void>) | null = null;
+  /** `--live` / `--no-live`; undefined leaves watch mode at its default. */
+  private graphLive?: boolean;
 
-  get mode(): "navigate" | "input" { return this.navMode; }
+  get mode(): "navigate" | "input" | "editor" { return this.navMode; }
+  get editorState(): EditorState | undefined { return this.editor?.state; }
   get inputBuffer(): string { return this.inputBuf; }
   get filter(): string | undefined { return this.state.filter; }
 
@@ -72,16 +108,77 @@ export class PhrenShell {
       runHooks: defaultRunHooks,
       runUpdate: defaultRunUpdate,
     },
+    startup: ShellStartup = {},
   ) {
     this.state = loadShellState(phrenPath);
-    this.state.view = "Projects";
-    this.message = this.state.project
+    // A deep link (`phren shell --view tasks --here`) wins over the view the
+    // last session happened to leave behind; without one we always land home.
+    if (startup.project) this.state.project = startup.project;
+    this.graphLive = startup.live;
+    this.state.view = startup.view === "Tasks" && !moduleEnabled(phrenPath, "tasks", profile) ? "Findings" : startup.view ?? "Projects";
+    this.message = startup.notice
+      ? `  ${style.yellow("⚠")}  ${startup.notice}`
+      : this.state.view === "Graph"
+      ? ""
+      : this.state.project
       ? `  Dashboard ready — active context ${style.boldCyan(this.state.project)}`
       : `  Dashboard ready — choose a project with ${style.boldCyan("↵")} or stay global`;
   }
 
-  close(): void { saveShellState(this.phrenPath, this.state); }
+  close(): void { this._graph?.dispose(); saveShellState(this.phrenPath, this.state); }
   setMessage(msg: string): void { this.message = msg; }
+
+  /**
+   * Let the host (entry.ts) hand over a way to repaint on the shell's own
+   * initiative — the graph view uses it to animate its layout settling and
+   * to show a build that finished while nothing was typed.
+   */
+  setRepaintHandler(handler: (() => void) | null): void {
+    this.repaintHandler = handler;
+    this._graph?.setRepaintHook(handler);
+  }
+
+  /**
+   * Let the host lend the terminal to a child process. Without one — a non-TTY
+   * host, or an embedder — callers fall back to telling the user the path.
+   */
+  /**
+   * The Graph view wants the mouse (drag to orbit, wheel to zoom, click to
+   * select); every other view wants the terminal's own text selection. The
+   * entry point supplies what turning it on and off means for this terminal.
+   */
+  setMouseHandler(handler: ((on: boolean) => void) | null): void {
+    this.mouseHandler = handler;
+  }
+  private mouseHandler: ((on: boolean) => void) | null = null;
+
+  /** Apply the mouse state for the current view (after grabbing the terminal). */
+  syncMouse(): void {
+    this.mouseHandler?.(this.state.view === "Graph");
+  }
+
+  setSuspendHandler(handler: ((run: () => Promise<void> | void) => Promise<void>) | null): void {
+    this.suspendHandler = handler;
+  }
+
+  get canSuspend(): boolean {
+    return this.suspendHandler !== null;
+  }
+
+  /** Run `fn` with the terminal released. Resolves false when that is impossible. */
+  async suspend(fn: () => Promise<void> | void): Promise<boolean> {
+    if (!this.suspendHandler) return false;
+    await this.suspendHandler(fn);
+    return true;
+  }
+
+  graph(): GraphController {
+    if (!this._graph) {
+      this._graph = new GraphController(this.phrenPath, this.profile, { watchEnabled: this.graphLive });
+      this._graph.setRepaintHook(this.repaintHandler);
+    }
+    return this._graph;
+  }
 
   confirmThen(label: string, action: () => void): void {
     this.pendingConfirm = { label, action };
@@ -89,7 +186,11 @@ export class PhrenShell {
   }
 
   setView(view: ShellView): void {
+    if (view === "Tasks" && !moduleEnabled(this.phrenPath, "tasks", this.profile)) view = "Findings";
+    if (this.state.view === "Graph" && view !== "Graph") this._graph?.stopAnimation();
+    const hadMouse = this.state.view === "Graph";
     this.state.view = view;
+    if (hadMouse !== (view === "Graph")) this.mouseHandler?.(view === "Graph");
     this.viewScrollMap[view] = 0;
     saveShellState(this.phrenPath, this.state);
   }
@@ -140,7 +241,7 @@ export class PhrenShell {
   private currentScroll(): number { return this.viewScrollMap[this.state.view] ?? 0; }
   private setScroll(n: number): void { this.viewScrollMap[this.state.view] = Math.max(0, n); }
 
-  getListItems(): { id?: string; name?: string; text?: string; line?: string }[] {
+  getListItems(): { id?: string; name?: string; text?: string; line?: string; path?: string; scopeType?: string; storePath?: string }[] {
     return getListItems(this.phrenPath, this.profile, this.state, this.healthLineCount);
   }
 
@@ -151,9 +252,16 @@ export class PhrenShell {
     const buf = this.inputBuf;
     const ctx = this.inputCtx;
     this.navMode = "navigate"; this.inputBuf = ""; this.inputCtx = "";
-    if (!buf.trim() && ctx !== "command") { this.setMessage("  Nothing entered."); return; }
+    if (!buf.trim() && ctx !== "command" && ctx !== "graph-search") { this.setMessage("  Nothing entered."); return; }
     switch (ctx) {
       case "filter": this.setFilter(buf); break;
+      case "graph-search": {
+        const graph = this.graph();
+        const best = graph.applySearch(buf);
+        if (best) this.setMessage(`  ${style.yellow(`1/${graph.search.results.length}`)}  ${graph.describe(best).trimStart()}`);
+        else this.setMessage(buf.trim() ? `  ${style.dim("no matches for")} ${style.yellow(buf.trim())}` : `  ${style.dim("search cleared")}`);
+        break;
+      }
       case "command": await this.runPalette(buf.startsWith(":") ? buf.slice(1) : buf); break;
       case "add": { const p = this.ensureProjectSelected(); if (!p) return; this.setMessage(`  ${resultMsg(addTask(this.phrenPath, p, buf))}`); break; }
       case "learn-add": { const p = this.ensureProjectSelected(); if (!p) return; this.setMessage(`  ${resultMsg(addFinding(this.phrenPath, p, buf))}`); break; }
@@ -174,6 +282,67 @@ export class PhrenShell {
     }
   }
 
+  // ── Modal editor ───────────────────────────────────────────────────────
+
+  /** Open a file in the built-in editor. Returns false if it cannot be read. */
+  openEditor(filePath: string, label: string, kind: EditKind, scope?: string): boolean {
+    let content = "";
+    try {
+      content = fs.existsSync(filePath) ? fs.readFileSync(filePath, "utf8") : "";
+    } catch (err: unknown) {
+      this.setMessage(`  Could not open ${label}: ${errorMessage(err)}`);
+      return false;
+    }
+    this.editor = { state: createEditorState(filePath, label, content), kind, scope };
+    this.navMode = "editor";
+    return true;
+  }
+
+  private closeEditor(message: string): void {
+    this.editor = undefined;
+    this.navMode = "navigate";
+    this.invalidateSubsectionsCache();
+    this.setMessage(message);
+  }
+
+  private saveEditor(): boolean {
+    const open = this.editor;
+    if (!open) return false;
+    // The same undo stack :undo uses, so a bad save is recoverable.
+    this.snapshotForUndo(`edit ${open.state.label}`, open.state.path);
+    const result = saveEditedFile(open.state.path, editorText(open.state), open.kind);
+    if (!result.ok) {
+      open.state = { ...open.state, message: result.error ?? "could not save" };
+      return false;
+    }
+    // Only a frontmatter change moves what the manifests contain.
+    if (result.frontmatterChanged && open.scope) {
+      try { syncSkillLinksForScope(this.phrenPath, open.scope); }
+      catch (err: unknown) { logger.debug("shell", `skill re-sync: ${errorMessage(err)}`); }
+    }
+    open.state = { ...open.state, dirty: false, message: `written  ${open.state.label}` };
+    return true;
+  }
+
+  private async handleEditorKey(key: string): Promise<boolean> {
+    const open = this.editor;
+    if (!open) { this.navMode = "navigate"; return true; }
+    open.state = applyEditorKey(open.state, key);
+
+    if (open.state.wantSave) {
+      open.state = { ...open.state, wantSave: false };
+      const saved = this.saveEditor();
+      // A failed save cancels a :wq — you do not want to lose the buffer.
+      if (!saved && this.editor) this.editor.state = { ...this.editor.state, wantClose: false };
+    }
+    if (this.editor?.state.wantClose) {
+      const label = this.editor.state.label;
+      const wasDirty = this.editor.state.dirty;
+      this.closeEditor(wasDirty ? `  Closed ${label} without saving` : `  ${style.green("✓")} ${label}`);
+    }
+    return true;
+  }
+
   // ── Raw key handling ───────────────────────────────────────────────────
 
   async handleRawKey(key: string): Promise<boolean> {
@@ -184,10 +353,16 @@ export class PhrenShell {
       return true;
     }
     if (this.showHelp) {
+      // Scroll rather than dismiss, so the half of the help that does not fit
+      // on a small terminal is reachable at all.
+      const scroll = helpScrollDelta(key);
+      if (scroll !== 0) { this.helpScroll = Math.max(0, this.helpScroll + scroll); return true; }
       this.showHelp = false;
+      this.helpScroll = 0;
       this.setMessage(`  ${style.boldCyan("←→")} ${style.dim("tabs")}  ${style.boldCyan("↑↓")} ${style.dim("move")}  ${style.boldCyan("↵")} ${style.dim("activate")}  ${style.boldCyan("?")} ${style.dim("help")}`);
       return true;
     }
+    if (this.navMode === "editor") return this.handleEditorKey(key);
     return this.navMode === "input" ? this.handleInputKey(key) : handleNavigateKey(this.asNavigationHost(), key);
   }
 
@@ -195,9 +370,12 @@ export class PhrenShell {
     if (key === "\x03") return false;
     if (key === "\x1b") { this.cancelInput(); return true; }
     if (key === "\r" || key === "\n") { await this.submitInput(); return true; }
-    if (key === "\x7f" || key === "\x08") { this.inputBuf = this.inputBuf.slice(0, -1); return true; }
-    if (key.startsWith("\x1b[")) return true;
-    if (key.length === 1 && key.charCodeAt(0) >= 32) { this.inputBuf += key; return true; }
+    if (key === "\x7f" || key === "\x08") { this.inputBuf = dropLastCharacter(this.inputBuf); return true; }
+    if (key.startsWith("\x1b")) return true;
+    // Accept any printable key. Astral characters (emoji, and anything else the
+    // user pastes) span two UTF-16 units, so this cannot test key.length === 1.
+    const cp = key.codePointAt(0);
+    if (cp !== undefined && cp >= 32 && cp !== 0x7f) { this.inputBuf += key; return true; }
     return true;
   }
 
@@ -213,12 +391,21 @@ export class PhrenShell {
   // ── Render (delegates to shell-view.ts) ────────────────────────────────
 
   async render(): Promise<string> {
+    // The editor takes the whole frame: it is a mode, not a view.
+    if (this.navMode === "editor" && this.editor) {
+      const rows = Math.max(4, process.stdout.rows || 24);
+      const lines = renderEditor(this.editor.state, renderWidth(), rows);
+      return lines.map((line) => `${line}\x1b[K`).join("\n");
+    }
     const ctx: ViewContext = {
       phrenPath: this.phrenPath, profile: this.profile, state: this.state,
       currentCursor: () => this.currentCursor(), currentScroll: () => this.currentScroll(),
       setScroll: (n) => this.setScroll(n),
+      graph: () => this.graph(),
     };
-    return renderShell(ctx, this.navMode, this.inputCtx, this.inputBuf, this.showHelp, this.message,
+    // The editor path returned above, so this is only ever navigate or input.
+    const viewMode = this.navMode === "input" ? "input" : "navigate";
+    return renderShell(ctx, viewMode, this.inputCtx, this.inputBuf, this.showHelp, this.helpScroll, this.message,
       () => this.doctorSnapshot(), this._subsectionsCache,
       (n) => { this.healthLineCount = n; }, (c) => { this._subsectionsCache = c; });
   }
@@ -246,6 +433,9 @@ export class PhrenShell {
       moveCursor: (delta) => this.moveCursor(delta),
       getListItems: () => this.getListItems(),
       startInput: (ctx, initial) => this.startInput(ctx, initial),
+      graph: () => this.graph(),
+      suspend: (fn) => this.suspend(fn),
+      openEditor: (filePath, label, kind, scope) => this.openEditor(filePath, label, kind, scope),
     };
   }
 
@@ -264,6 +454,7 @@ export class PhrenShell {
     }
     if (this.showHelp) {
       this.showHelp = false;
+      this.helpScroll = 0;
       this.setMessage(`  ${style.boldCyan("←→")} ${style.dim("tabs")}  ${style.boldCyan("↑↓")} ${style.dim("move")}  ${style.boldCyan("↵")} ${style.dim("activate")}  ${style.boldCyan("?")} ${style.dim("help")}`);
       if (!input) return true;
     }
@@ -282,3 +473,4 @@ export class PhrenShell {
 }
 
 export { startShell } from "./entry.js";
+export type { ShellStartup } from "./startup.js";

@@ -240,14 +240,31 @@ public struct Project: Codable, Equatable, Identifiable, Sendable {
     public var taskCount: Int
     public var noteCount: Int
     public var reviewCount: Int
+    /// Findings the CLI archived into topic files, as summary.md reports them.
+    public var archivedCount: Int
     public var id: String { name }
+    /// Everything the project knows: live findings plus the archive.
+    public var totalFindingCount: Int { findingCount + archivedCount }
 
-    public init(name: String, findingCount: Int = 0, taskCount: Int = 0, noteCount: Int = 0, reviewCount: Int = 0) {
+    public init(name: String, findingCount: Int = 0, taskCount: Int = 0, noteCount: Int = 0, reviewCount: Int = 0, archivedCount: Int = 0) {
         self.name = name
         self.findingCount = findingCount
         self.taskCount = taskCount
         self.noteCount = noteCount
         self.reviewCount = reviewCount
+        self.archivedCount = archivedCount
+    }
+
+    private enum CodingKeys: String, CodingKey { case name, findingCount, taskCount, noteCount, reviewCount, archivedCount }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decode(String.self, forKey: .name)
+        findingCount = try c.decode(Int.self, forKey: .findingCount)
+        taskCount = try c.decode(Int.self, forKey: .taskCount)
+        noteCount = try c.decode(Int.self, forKey: .noteCount)
+        reviewCount = try c.decode(Int.self, forKey: .reviewCount)
+        // Snapshots cached by older builds have no archive count.
+        archivedCount = try c.decodeIfPresent(Int.self, forKey: .archivedCount) ?? 0
     }
 }
 
@@ -267,5 +284,78 @@ public enum PhrenKitError: Error, LocalizedError, Equatable {
              .duplicate(let m):
             return m
         }
+    }
+}
+/// A skill file surfaced in the app. Mirrors `SkillEntry`
+/// (packages/cli/src/skill/registry.ts:8), minus the fields that only mean
+/// something to the local resolver (`enabled`, `aliases`, `command`) — those
+/// come from `.config/` and profile state the app does not sync.
+public struct Skill: Identifiable, Equatable, Sendable {
+    public enum Scope: Equatable, Sendable {
+        case global
+        case project(String)
+
+        /// `SkillEntry.source` — "global" or the project name.
+        public var source: String {
+            switch self {
+            case .global: return "global"
+            case .project(let name): return name
+            }
+        }
+    }
+
+    /// `SkillEntry.format` — a flat `<name>.md` or a folder `<name>/SKILL.md`.
+    public enum Format: String, Equatable, Sendable {
+        case flat, folder
+    }
+
+    /// Repo-relative path, which is also the identity.
+    public var path: String
+    public var name: String
+    public var scope: Scope
+    public var format: Format
+    public var title: String?
+    public var summary: String?
+    public var content: String
+
+    public var id: String { path }
+
+    public init(path: String, name: String, scope: Scope, format: Format,
+                title: String? = nil, summary: String? = nil, content: String) {
+        self.path = path
+        self.name = name
+        self.scope = scope
+        self.format = format
+        self.title = title
+        self.summary = summary
+        self.content = content
+    }
+
+    /// Parses a synced file into a skill, deriving name/format from the path
+    /// exactly as `collectSkills` derives them from the directory entry.
+    public static func parse(path: String, content: String) -> Skill? {
+        let parts = path.split(separator: "/").map(String.init)
+        // <scope>/skills/<name>.md  or  <scope>/skills/<name>/SKILL.md
+        guard parts.count >= 3, parts[1] == "skills" else { return nil }
+        let scope: Scope = parts[0] == "global" ? .global : .project(parts[0])
+
+        let name: String
+        let format: Format
+        if parts.count == 3, parts[2].hasSuffix(".md") {
+            name = String(parts[2].dropLast(3))
+            format = .flat
+        } else if parts.count == 4, parts[3] == "SKILL.md" {
+            name = parts[2]
+            format = .folder
+        } else {
+            return nil
+        }
+
+        let (frontmatter, _) = SkillFile.parseFrontmatter(content)
+        return Skill(
+            path: path, name: name, scope: scope, format: format,
+            title: frontmatter?["name"], summary: frontmatter?["description"],
+            content: content
+        )
     }
 }

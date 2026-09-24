@@ -64,7 +64,7 @@ describe("runPhrenUpdate", () => {
     expect(result.message).toContain("Rebuilt and verified CLI health.");
     expect(mockExecFileSync).toHaveBeenCalledWith(
       "git",
-      ["pull", "--rebase", "--autostash"],
+      ["pull", "--ff-only", "--autostash"],
       expect.objectContaining({ encoding: "utf8" })
     );
     expect(mockExecFileSync).toHaveBeenCalledWith(

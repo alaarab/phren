@@ -1,0 +1,4 @@
+// Public OAuth client ID; no client secret belongs in this app.
+PHREN_GITHUB_CLIENT_ID =
+// Optional machine-specific signing and OAuth settings, never committed.
+#include? "Local.xcconfig"

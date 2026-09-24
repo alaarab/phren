@@ -15,6 +15,8 @@ struct SettingsView: View {
     /// `nil` = "Always ask". Mirrors `QuickCaptureDefault`, held in state so
     /// the picker has something to bind to.
     @State private var captureDefaultId: String?
+    @State private var showingCaptureDefault = false
+    @State private var addingComputer = false
     @State private var captureLog: [CaptureLogEntry] = []
     @State private var captureQueue = CaptureQueueState()
     /// Drives the health cards' relative "synced Xm ago" text and staleness
@@ -23,14 +25,60 @@ struct SettingsView: View {
     @State private var now = Date()
     private let healthTicker = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
 
+    /// One settings row the way the grouped lists draw them: an icon, the
+    /// title, and the current value in the trailing slot.
+    private func settingsRow(_ title: String, _ symbol: String, value: String? = nil) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: symbol).foregroundStyle(PhrenTheme.accent).frame(width: 22)
+            Text(title)
+            Spacer()
+            if let value { Text(value).foregroundStyle(PhrenTheme.textMuted).lineLimit(1) }
+        }
+    }
+
     private static let needsAttentionAnchor = "needs-attention"
 
+    private var removeStoreActions: [PhrenDialog.Action] {
+        guard let store = removingStore else {
+            return [.init(id: "cancel", title: "Cancel", role: .cancel) {}]
+        }
+        return [
+            .init(id: "remove", title: "Remove store", role: .destructive) { Task { await model.removeStore(id: store.id) } },
+            .init(id: "cancel", title: "Cancel", role: .cancel) {},
+        ]
+    }
+
     var body: some View {
-        NavigationStack {
+        PhrenNavigationStack {
             VStack(spacing: 0) {
                 ActionErrorBanner()
                 ScrollViewReader { proxy in
-                Form {
+                PhrenForm {
+                Section("Terminal") {
+                    NavigationLink { AppearanceSettingsView() } label: {
+                        settingsRow("Theme", "paintpalette", value: PhrenAppearance.shared.name)
+                    }.accessibilityIdentifier("settings-theme")
+                    NavigationLink { TerminalFontSettingsView() } label: {
+                        settingsRow("Fonts & Size", "textformat", value: TerminalFonts.shared.selectedName)
+                    }.accessibilityIdentifier("settings-fonts")
+                    NavigationLink { ChatSettingsView() } label: { settingsRow("Chat", "bubble.left.and.text.bubble.right") }
+                        .accessibilityIdentifier("settings-chat")
+                    NavigationLink { TerminalAdvancedSettingsView() } label: { settingsRow("Advanced", "slider.horizontal.3") }
+                        .accessibilityIdentifier("settings-terminal-advanced")
+                }
+                Section("Input") {
+                    NavigationLink { TerminalToolbarSettingsView() } label: { settingsRow("Toolbar", "keyboard") }
+                        .accessibilityIdentifier("settings-terminal-toolbar")
+                    NavigationLink { TerminalShortcutSettingsView() } label: { settingsRow("Shortcuts", "rectangle.grid.2x2") }
+                        .accessibilityIdentifier("settings-terminal-shortcuts")
+                    NavigationLink { KeyboardSettingsView() } label: { settingsRow("Keyboard", "keyboard.badge.ellipsis") }
+                        .accessibilityIdentifier("settings-keyboard")
+                    NavigationLink { TerminalGesturesSettingsView() } label: { settingsRow("Gestures", "hand.draw") }
+                        .accessibilityIdentifier("settings-gestures")
+                    NavigationLink { SpeechSettingsView() } label: { settingsRow("Voice", "mic") }
+                        .accessibilityIdentifier("settings-speech")
+                }
+                if model.phase == .ready {
                 Section {
                     ForEach(model.storeContexts) { context in
                         StoreHealthCard(
@@ -56,13 +104,56 @@ struct SettingsView: View {
                 } header: {
                     Text("Store health")
                 } footer: {
-                    Text("A store card turns amber when a sync has failed or gone quiet for more than 10 minutes while the app is open.")
+                    Text("Amber indicates a failed or delayed sync.")
                 }
 
                 quickCaptureSection
                 recentCapturesSection
 
-                Section("Account") {
+                Section("Memory") {
+                    NavigationLink {
+                        MemoryMaintenanceView()
+                    } label: {
+                        Label("Memory maintenance", systemImage: "wrench.and.screwdriver")
+                    }
+                }
+                }
+
+                Section("Agents") {
+                    NavigationLink { LiveSessionsView() } label: { settingsRow("Computers", "desktopcomputer") }
+                    Button { addingComputer = true } label: { settingsRow("Add computer", "plus") }
+                        .accessibilityIdentifier("settings-add-computer")
+                    NavigationLink { SkillsView() } label: { settingsRow("Skills", "wand.and.stars") }
+                        .accessibilityIdentifier("settings-skills")
+                    NavigationLink { AgentsView() } label: { settingsRow("Agent instructions", "person.text.rectangle") }
+                        .accessibilityIdentifier("settings-agent-instructions")
+                }
+
+                Section("Integrations") {
+                    NavigationLink { PhrenHookSettingsView() } label: { settingsRow("Phren Hook", "point.3.connected.trianglepath.dotted") }
+                        .accessibilityIdentifier("settings-hook")
+                    NavigationLink { NotificationSettingsView() } label: { settingsRow("Notifications", "bell") }
+                        .accessibilityIdentifier("settings-notifications")
+                    NavigationLink { ShowOnAgentsSettingsView() } label: { settingsRow("Show on Agents", "square.grid.2x2") }
+                        .accessibilityIdentifier("settings-show-on-agents")
+                    NavigationLink { ConductorSiriSettingsView() } label: { settingsRow("Siri and the Action button", "wand.and.rays") }
+                        .accessibilityIdentifier("settings-conductor")
+                    NavigationLink { HookHealthView() } label: { settingsRow("Health", "stethoscope") }
+                        .accessibilityIdentifier("settings-health")
+                    NavigationLink { AccountUsageView() } label: { settingsRow("Account usage", "chart.bar") }
+                        .accessibilityIdentifier("settings-account-usage")
+                    Text("Chat, terminals, and project memory stay together in Phren. Connect the agents already running on your computers.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+
+                Section("GitHub memory") {
+                    if model.phase == .signedOut || model.phase == .loading {
+                        Button("Connect memory", systemImage: "arrow.triangle.2.circlepath") {
+                            model.showingMemoryConnection = true
+                        }.accessibilityIdentifier("settings-connect-memory")
+                        Text("GitHub is used for memory sync. Agent connections use your computers' SSH keys.")
+                            .font(.caption).foregroundStyle(PhrenTheme.textMuted)
+                    } else {
                     if let user = model.user {
                         LabeledContent("GitHub", value: "@\(user.login)")
                         if let name = user.name {
@@ -72,8 +163,10 @@ struct SettingsView: View {
                     Button("Sign out", role: .destructive) {
                         confirmSignOut = true
                     }
+                    }
                 }
 
+                if model.phase == .ready {
                 Section {
                     ForEach(model.storeContexts) { context in
                         StoreRow(context: context)
@@ -114,12 +207,27 @@ struct SettingsView: View {
                         }
                     }
                 }
+                }
 
                 if !failedOps.isEmpty {
                     Section {
                         ForEach(failedOps) { failed in
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(failed.op.op.label).font(.callout)
+                                if case .saveAuthoredFile(_, let content, _) = failed.op.op {
+                                    NavigationLink("Review saved draft") {
+                                        PhrenList {
+                                            Section("Your draft") { DocumentPreview(content: content) }
+                                            Section {
+                                                ShareLink(item: content) {
+                                                    Label("Share draft", systemImage: "square.and.arrow.up")
+                                                }
+                                                Text("Copy the text you want to keep, then open the latest instructions or skill to apply it.")
+                                                    .font(.caption).foregroundStyle(.secondary)
+                                            }
+                                        }.navigationTitle("Saved draft")
+                                    }
+                                }
                                 HStack(spacing: 6) {
                                     if model.hasMultipleStores {
                                         TagChip(text: failed.storeName, role: .store)
@@ -156,11 +264,23 @@ struct SettingsView: View {
 
                 Section("About") {
                     LabeledContent("App", value: "phren for iOS")
+                    LabeledContent("Version", value: "\(ReleaseNotesStore.version) (\(ReleaseNotesStore.build))")
+                    NavigationLink("What's new") { ChangelogView() }.accessibilityIdentifier("settings-whats-new")
                     Link("phren on GitHub", destination: URL(string: "https://github.com/alaarab/phren")!)
+                    NavigationLink("Open-source notices") {
+                        ScrollView {
+                            Text(Bundle.main.url(forResource: "ThirdPartyNotices", withExtension: "txt")
+                                .flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? "Notices unavailable.")
+                                .font(.caption).textSelection(.enabled).padding()
+                        }
+                        .navigationTitle("Open-source notices")
+                        .phrenScreen()
+                    }
                 }
             }
             .phrenScreen()
             .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.inline)
             .task {
                 failedOps = await model.failedOps()
                 await reloadCaptureState()
@@ -194,30 +314,27 @@ struct SettingsView: View {
                     }
                 }
             }
-            .confirmationDialog(
-                "Remove \(removingStore?.id ?? "this store") from this device? The GitHub repository is not affected.",
-                isPresented: Binding(
-                    get: { removingStore != nil },
-                    set: { if !$0 { removingStore = nil } }
-                ),
-                titleVisibility: .visible
-            ) {
-                Button("Remove store", role: .destructive) {
-                    if let store = removingStore {
-                        Task { await model.removeStore(id: store.id) }
-                    }
-                    removingStore = nil
-                }
-            }
-            .confirmationDialog(
-                "Sign out and remove the local copies of all stores from this device?",
+            .phrenDialog(
+                isPresented: $removingStore.isPresent(),
+                title: "Remove \(removingStore?.id ?? "this store") from this device?",
+                message: "The GitHub repository is not affected.",
+                actions: removeStoreActions,
+                identifier: "settings-remove-store-dialog"
+            )
+            .phrenDialog(
                 isPresented: $confirmSignOut,
-                titleVisibility: .visible
-            ) {
-                Button("Sign out", role: .destructive) {
-                    Task { await model.signOut() }
-                }
-            }
+                title: "Sign out of GitHub?",
+                message: "Local memory stores are removed from this device. Your agent connections and chat drafts stay.",
+                actions: [
+                    .init(id: "sign-out", title: "Sign out", role: .destructive) { Task { await model.signOut() } },
+                    .init(id: "cancel", title: "Cancel", role: .cancel) {},
+                ],
+                identifier: "settings-sign-out-dialog"
+            )
+            .sheet(isPresented: $addingComputer) { NavigationStack { LiveHostEditor() } }
+            .phrenSingleSelectSheet(isPresented: $showingCaptureDefault, title: "Default project",
+                                    options: captureDefaultOptions, selection: captureDefaultBinding,
+                                    rowPrefix: "settings-capture-default")
             }
             }
         }
@@ -232,18 +349,10 @@ struct SettingsView: View {
     @ViewBuilder
     private var quickCaptureSection: some View {
         Section {
-            Picker("Default project", selection: captureDefaultBinding) {
-                Text("Always ask").tag(String?.none)
-                // Keeps a broken default visible (and selected) instead of
-                // rendering an empty row that looks like "Always ask".
-                if let unavailable = unavailableDefault {
-                    Text("\(unavailable.label) — unavailable").tag(String?.some(unavailable.id))
-                }
-                ForEach(captureTargets, id: \.entityId) { target in
-                    Text(target.displayName).tag(String?.some(target.entityId))
-                }
-            }
-            .disabled(captureTargets.isEmpty && unavailableDefault == nil)
+            PhrenSingleSelect(options: captureDefaultOptions, selection: captureDefaultBinding,
+                              placeholder: "Always ask", identifier: "settings-capture-default",
+                              isPresented: $showingCaptureDefault)
+                .disabled(captureTargets.isEmpty && unavailableDefault == nil)
         } header: {
             Text("Quick capture")
         } footer: {
@@ -252,9 +361,23 @@ struct SettingsView: View {
                     Text("'\(unavailable.label)' isn't in an attached, writable store any more — captures ask where to go until you pick a new default.")
                         .foregroundStyle(PhrenTheme.warning)
                 }
-                Text("Where a capture goes when you don't name a project: 'Hey Siri, add a task to phren', a Shortcuts tile, or the mic button. With 'Always ask', Siri and Shortcuts ask every time — nothing is ever filed somewhere you didn't choose.")
+                Text("Choose where Siri, Shortcuts, and voice captures are saved. With Always ask, you choose a project each time.")
             }
         }
+    }
+
+    /// "Always ask" first; a broken default stays visible (and selected)
+    /// instead of rendering as if it were "Always ask".
+    private var captureDefaultOptions: [PhrenOption<String?>] {
+        var options = [PhrenOption(id: "always-ask", value: String?.none, title: "Always ask")]
+        if let unavailable = unavailableDefault {
+            options.append(PhrenOption(id: unavailable.id, value: String?.some(unavailable.id),
+                                       title: "\(unavailable.label) — unavailable"))
+        }
+        options.append(contentsOf: captureTargets.map {
+            PhrenOption(id: $0.entityId, value: String?.some($0.entityId), title: $0.displayName)
+        })
+        return options
     }
 
     /// Writes straight through to `QuickCaptureDefault` so the setting is
@@ -400,9 +523,7 @@ private struct CaptureLogRow: View {
     }
 
     private var relativeTime: String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: entry.at, relativeTo: now)
+        PhrenDateFormats.relative(entry.at, to: now)
     }
 
     private var stateColor: Color {
@@ -487,9 +608,7 @@ private struct StoreHealthCard: View {
 
     private var lastSyncText: String {
         guard let last = context.status.lastSyncedAt else { return "not synced yet" }
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return "synced \(formatter.localizedString(for: last, relativeTo: now))"
+        return "synced \(PhrenDateFormats.relative(last, to: now))"
     }
 
     var body: some View {

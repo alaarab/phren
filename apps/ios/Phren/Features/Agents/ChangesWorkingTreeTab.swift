@@ -1,0 +1,409 @@
+import PhrenKit
+import PhrenLive
+import SwiftUI
+
+struct ChangesWorkingTreeTab: View {
+    let session: LiveAgentSession
+    let target: AgentChatTarget
+    let child: String?
+    var worktree: String? = nil
+    var codeOrigin: SessionCodeContext? = nil
+    @Environment(ChangesModel.self) private var model
+    /// Git-ignored folders and files, dimmed, for the build output or media
+    /// folder a search of the working tree would otherwise never find.
+    @AppStorage("changes.tree.showIgnored") private var showIgnored = false
+    @State private var dossier: CodeDossierTarget?
+    private var tree: GitWorkingTree? {
+        get { model.workingTree.tree }
+        nonmutating set { model.workingTree.tree = newValue }
+    }
+    private var children: [String: GitWorkingTree] {
+        get { model.workingTree.children }
+        nonmutating set { model.workingTree.children = newValue }
+    }
+    private var expanded: Set<String> {
+        get { model.workingTree.expanded }
+        nonmutating set { model.workingTree.expanded = newValue }
+    }
+    @State private var loading: Set<String> = []
+    @State private var error: String?
+    @State private var opened: FileViewerItem?
+    @State private var openedSource: CodeFileLocation?
+    @State private var openedDiff: DiffTarget?
+    @State private var openTask: Task<Void, Never>?
+    @State private var loadTask: Task<Void, Never>?
+    @State private var childTasks: [String: Task<Void, Never>] = [:]
+
+    init(session: LiveAgentSession, target: AgentChatTarget, child: String?, worktree: String? = nil, codeOrigin: SessionCodeContext? = nil) {
+        self.session = session
+        self.target = target
+        self.child = child
+        self.worktree = worktree
+        self.codeOrigin = codeOrigin
+    }
+
+    private struct DiffTarget: Identifiable, Hashable {
+        let file: AgentRepositoryDiff.File
+        let section: AgentRepositoryDiff.Section
+        var id: String { section.id }
+        static func == (lhs: DiffTarget, rhs: DiffTarget) -> Bool { lhs.id == rhs.id }
+        func hash(into hasher: inout Hasher) { hasher.combine(id) }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                if let tree {
+                    if tree.entries.isEmpty {
+                        message("No files here", detail: nil)
+                    } else {
+                        ForEach(tree.entries) { entry in
+                            WorkingTreeRow(entry: entry, level: 0, expanded: expanded, children: children,
+                                           loading: loading, summaries: codeOrigin == nil ? [:] : model.workingTree.summaries, onSymbol: { dossier = CodeDossierTarget(name: $0) },
+                                           onToggle: toggle, onOpen: openEntry)
+                        }
+                    }
+                }
+                if let error {
+                    message("The working tree is unavailable", detail: error)
+                } else if tree == nil {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text("Loading the working tree…").foregroundStyle(PhrenTheme.textMuted)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 24)
+                    .listRowBackground(Color.clear)
+                }
+            }
+            }
+            .refreshable { await model.load(); await loadRoot() }
+        }
+        // A marker, not the container's identifier, which would replace the
+        // Show ignored switch's own.
+        .overlay(alignment: .topLeading) {
+            Color.clear.frame(width: 1, height: 1).accessibilityElement().accessibilityIdentifier("changes-tree")
+                .allowsHitTesting(false)
+        }
+        .fullScreenCover(item: $opened) { FileViewer(item: $0) }
+        .navigationDestination(item: $openedDiff) { FileDiffView(file: $0.file, section: $0.section) }
+        .navigationDestination(item: $openedSource) { CodeFileView(context: codeContext, path: $0.path, line: $0.line) }
+        .sheet(item: $dossier) { symbol in
+            if let origin = codeOrigin {
+                CodeSymbolDossier(storeId: origin.storeID, project: origin.project, symbol: symbol.name,
+                                  hosts: [origin.host], origin: origin) { file, line in
+                    dossier = nil
+                    openedSource = CodeFileLocation(path: file, line: line)
+                }
+            }
+        }
+        .task(id: codeOrigin?.id) {
+            if let tree { await enrich(tree) }
+            for level in children.values { await enrich(level) }
+        }
+        .onChange(of: model.revision) { _, _ in reload() }
+        // A new listing either way: drop loaded levels so expanded folders
+        // reload with (or without) their ignored entries.
+        .onChange(of: showIgnored) { _, _ in tree = nil; children = [:]; reload() }
+        .onAppear { if tree == nil { reload() } }
+        .onDisappear {
+            loadTask?.cancel(); openTask?.cancel()
+            for task in childTasks.values { task.cancel() }
+            childTasks = [:]; loading = []
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "arrow.triangle.branch").font(PhrenTheme.Font.caption).foregroundStyle(PhrenTheme.chatNeutral)
+            Text("Working tree").font(PhrenTheme.Font.monoSubheadline.weight(.semibold)).foregroundStyle(PhrenTheme.text)
+            Spacer(minLength: 8)
+            PhrenSwitch(isOn: $showIgnored) {
+                Text("Show ignored").font(PhrenTheme.Font.caption).foregroundStyle(PhrenTheme.textMuted)
+            }
+            .fixedSize()
+            .accessibilityIdentifier("changes-tree-switch:ignored")
+        }
+        .padding(.leading, 16).padding(.trailing, 8)
+        .background(PhrenTheme.surface)
+        .overlay(alignment: .bottom) { Rectangle().fill(PhrenTheme.border).frame(height: 1) }
+        .overlay(alignment: .topLeading) {
+            Color.clear.frame(width: 1, height: 1).accessibilityElement().accessibilityIdentifier("changes-tree-header")
+                .allowsHitTesting(false)
+        }
+    }
+
+    @MainActor
+    private func reload() {
+        loadTask?.cancel()
+        loadTask = Task { await loadRoot() }
+    }
+
+    @MainActor
+    private func loadRoot() async {
+        for task in childTasks.values { task.cancel() }
+        childTasks = [:]; loading = []
+        do {
+            let result: GitWorkingTree
+            #if DEBUG && targetEnvironment(simulator)
+            if AgentChatFixture.enabled {
+                result = try AgentChatFixture.tree(path: "", ignored: showIgnored)
+            } else {
+                result = try await PhrenConnection.gitTree(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, child: child, worktree: worktree, path: "", ignored: showIgnored)
+            }
+            #else
+            result = try await PhrenConnection.gitTree(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, child: child, worktree: worktree, path: "", ignored: showIgnored)
+            #endif
+            try Task.checkCancellation()
+            let changed = tree?.version == nil || tree?.version != result.version
+            tree = result; error = nil
+            await enrich(result)
+            if !changed {
+                // An index can change while Git still reports the same modified
+                // paths. Refresh visible symbol counts independently of tree identity.
+                for path in expanded.sorted() {
+                    if let level = children[path] { await enrich(level) }
+                }
+            }
+            if changed {
+                // Keep visible branches while fresh children arrive. Prune a removed
+                // subtree only after its parent's new listing confirms its removal.
+                var parents = [""]
+                while !parents.isEmpty {
+                    let parent = parents.removeFirst()
+                    let listing = parent.isEmpty ? result : children[parent]
+                    guard let listing else { continue }
+                    let dirs = Set(listing.entries.filter(\.isDirectory).map(\.path))
+                    for cached in children.keys where (cached as NSString).deletingLastPathComponent == parent && !dirs.contains(cached) {
+                        for removed in children.keys where removed == cached || removed.hasPrefix(cached + "/") {
+                            children[removed] = nil; expanded.remove(removed)
+                        }
+                    }
+                    for directory in dirs where expanded.contains(directory) {
+                        await loadLevel(directory)
+                        parents.append(directory)
+                    }
+                }
+            }
+        } catch {
+            if !Task.isCancelled { self.error = error.localizedDescription }
+        }
+    }
+
+    private func loadChildren(_ path: String) {
+        guard !loading.contains(path) else { return }
+        loading.insert(path)
+        childTasks[path] = Task { await loadLevel(path) }
+    }
+
+    @MainActor
+    private func loadLevel(_ path: String) async {
+        defer { childTasks[path] = nil; loading.remove(path) }
+        do {
+            let result: GitWorkingTree
+            #if DEBUG && targetEnvironment(simulator)
+            if AgentChatFixture.enabled {
+                result = try AgentChatFixture.tree(path: path, ignored: showIgnored)
+            } else {
+                result = try await PhrenConnection.gitTree(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, child: child, worktree: worktree, path: path, ignored: showIgnored)
+            }
+            #else
+            result = try await PhrenConnection.gitTree(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, child: child, worktree: worktree, path: path, ignored: showIgnored)
+            #endif
+            try Task.checkCancellation()
+            let priorVersion = children[path]?.version
+            children[path] = result; loading.remove(path); error = nil
+            await enrich(result)
+            if priorVersion != result.version {
+                for entry in result.entries where entry.isDirectory && expanded.contains(entry.path) {
+                    if children[entry.path]?.version != result.version { await loadLevel(entry.path) }
+                }
+            }
+        } catch {
+            if !Task.isCancelled { loading.remove(path); self.error = error.localizedDescription }
+        }
+    }
+
+    private func enrich(_ tree: GitWorkingTree) async {
+        guard let origin = codeOrigin, !tree.entries.isEmpty else { return }
+        #if DEBUG && targetEnvironment(simulator)
+        if CodeFixture.enabled {
+            for entry in tree.entries {
+                let object: [String: Any] = ["path": entry.path, "symbols": entry.isDirectory ? 7 : 3,
+                    "kinds": [["kind": "function", "count": 3]], "symbol": entry.isDirectory ? NSNull() : "Point"]
+                if let data = try? JSONSerialization.data(withJSONObject: object),
+                   let summary = try? JSONDecoder().decode(CodeOutlineSummary.self, from: data) {
+                    model.workingTree.summaries[entry.path] = summary
+                }
+            }
+            return
+        }
+        #endif
+        do {
+            let paths = tree.entries.map(\.path)
+            for start in stride(from: 0, to: paths.count, by: 200) {
+                let summaries = try await PhrenConnection.codeOutlineSummary(host: origin.host,
+                    privateKey: DeviceSSHKey.load(origin.host.id), project: origin.project,
+                    paths: Array(paths[start..<min(paths.count, start + 200)]), storeID: origin.storeID)
+                try Task.checkCancellation()
+                for summary in summaries { model.workingTree.summaries[summary.path] = summary }
+            }
+        } catch { /* The ordinary tree remains usable when the optional index is unavailable. */ }
+    }
+
+    private func toggle(_ entry: GitWorkingTree.Entry) {
+        guard entry.isDirectory else { return }
+        if expanded.contains(entry.path) {
+            expanded.remove(entry.path)
+        } else {
+            expanded.insert(entry.path)
+            if children[entry.path] == nil || children[entry.path]?.version != tree?.version { loadChildren(entry.path) }
+        }
+    }
+
+    /// A changed file opens its diff, as in any source control view; every
+    /// other file, unchanged or ignored, opens its contents.
+    private func openEntry(_ entry: GitWorkingTree.Entry) {
+        guard !entry.isDirectory else { return }
+        if !entry.isIgnored, let status = entry.status, status != .unknown, status != .changed {
+            openTask?.cancel()
+            openTask = Task { await openDiff(entry) }
+        } else if CodeBrowserContext.opensAsSource(entry.path) {
+            openedSource = CodeFileLocation(path: entry.path)
+        } else {
+            opened = FileViewerItem(host: session.host, file: RemoteFile(path: entry.path, target: target, child: child, worktree: worktree))
+        }
+    }
+
+    /// The code viewer reads this pane's repository; the index resolves names
+    /// when the session's computer has one.
+    private var codeContext: CodeBrowserContext {
+        CodeBrowserContext(storeId: codeOrigin?.storeID ?? "", project: codeOrigin?.project ?? "", host: session.host,
+                           origin: codeOrigin, session: (target, child, worktree), indexed: codeOrigin != nil)
+    }
+
+    private func openDiff(_ entry: GitWorkingTree.Entry) async {
+        do {
+            let result: AgentRepositoryDiff
+            #if DEBUG && targetEnvironment(simulator)
+            if AgentChatFixture.enabled {
+                result = try AgentChatFixture.gitDiff()
+            } else {
+                result = try await PhrenConnection.repositoryDiff(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, paths: [entry.path], child: child, worktree: worktree)
+            }
+            #else
+            result = try await PhrenConnection.repositoryDiff(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, paths: [entry.path], child: child, worktree: worktree)
+            #endif
+            try Task.checkCancellation()
+            let files = result.files + (result.related?.flatMap(\.files) ?? [])
+            guard let file = files.first(where: { $0.path == entry.path }) else { return }
+            let section = file.sections.first(where: { $0.kind == "unstaged" }) ?? file.sections.first
+                ?? (file.status.trimmingCharacters(in: .whitespaces) == "??" ? AgentRepositoryDiff.Section(id: "untracked:\(file.path)", kind: "unstaged") : nil)
+            guard let section else { return }
+            openedDiff = DiffTarget(file: file, section: section)
+        } catch {
+            if !Task.isCancelled { self.error = error.localizedDescription }
+        }
+    }
+
+    private func message(_ title: String, detail: String?) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(PhrenTheme.Font.subheadline.weight(.medium)).foregroundStyle(PhrenTheme.text)
+            if let detail { Text(detail).font(PhrenTheme.Font.footnote).foregroundStyle(PhrenTheme.textMuted) }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 12)
+        .listRowBackground(Color.clear)
+    }
+}
+
+private struct WorkingTreeRow: View {
+    let entry: GitWorkingTree.Entry
+    let level: Int
+    let expanded: Set<String>
+    let children: [String: GitWorkingTree]
+    let loading: Set<String>
+    let summaries: [String: CodeOutlineSummary]
+    let onSymbol: (String) -> Void
+    let onToggle: (GitWorkingTree.Entry) -> Void
+    let onOpen: (GitWorkingTree.Entry) -> Void
+
+    private var isExpanded: Bool { expanded.contains(entry.path) }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Button {
+                if entry.isDirectory { onToggle(entry) } else { onOpen(entry) }
+            } label: { row.opacity(entry.isIgnored ? 0.5 : 1) }
+                .buttonStyle(.plain)
+                .accessibilityValue(entry.isIgnored ? "Ignored" : "")
+                .accessibilityIdentifier("changes-tree-entry:\(entry.path)")
+            if let summary = summaries[entry.path], summary.symbols > 0 {
+                if let symbol = summary.symbol, !entry.isDirectory {
+                    Button { onSymbol(symbol) } label: {
+                        PhrenChip(text: summary.label).frame(minWidth: 44, minHeight: PhrenDensity.treeRowHeight)
+                            .contentShape(Rectangle().inset(by: -6))
+                    }.buttonStyle(.plain)
+                        .accessibilityLabel("\(summary.symbols) symbols, \(summary.kinds.map(\.kind).joined(separator: ", "))")
+                        .accessibilityIdentifier("changes-tree-symbols:\(entry.path)")
+                } else {
+                    PhrenChip(text: "\(summary.symbols) symbols")
+                }
+            }
+        }
+        .padding(.leading, 12 + CGFloat(level) * PhrenDensity.treeIndent).padding(.trailing, 12)
+        .overlay(alignment: .leading) {
+            Color.clear.frame(width: 1, height: PhrenDensity.treeRowHeight).accessibilityElement()
+                .accessibilityIdentifier("changes-tree-row:\(entry.path)").allowsHitTesting(false)
+        }
+        if entry.isDirectory, isExpanded, let child = children[entry.path] {
+            ForEach(child.entries) { sub in
+                WorkingTreeRow(entry: sub, level: level + 1, expanded: expanded, children: children,
+                               loading: loading, summaries: summaries, onSymbol: onSymbol, onToggle: onToggle, onOpen: onOpen)
+            }
+        }
+    }
+
+    private var row: some View {
+        HStack(spacing: 8) {
+            if entry.isDirectory {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(PhrenTheme.textMuted)
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    .frame(width: 14)
+            } else {
+                Color.clear.frame(width: 14)
+            }
+            icon
+            Text(entry.name).font(PhrenTypography.monoFootnote).foregroundStyle(PhrenTheme.text)
+                .lineLimit(1).truncationMode(.middle)
+            if entry.isDirectory, loading.contains(entry.path) {
+                ProgressView().controlSize(.mini)
+            }
+            if !entry.isDirectory, let status = entry.status {
+                ChangesStatusDot(status: status.rawValue)
+            }
+            Spacer(minLength: 0)
+            if entry.isDirectory, let count = entry.fileCount {
+                Text("\(count)").font(PhrenTypography.monoCaption).foregroundStyle(PhrenTheme.textMuted)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: PhrenDensity.treeRowHeight, alignment: .leading)
+        .contentShape(Rectangle().inset(by: -6))
+    }
+
+    private var icon: some View {
+        ZStack(alignment: .bottomTrailing) {
+            PhrenFileTypeIcon(path: entry.name, folder: entry.isDirectory, size: 14)
+            if entry.isDirectory, entry.status == .changed {
+                Circle().fill(PhrenTheme.danger).frame(width: 7, height: 7)
+                    .overlay(Circle().strokeBorder(PhrenTheme.surface, lineWidth: 1))
+                    .offset(x: 2, y: 2)
+            }
+        }
+    }
+
+}

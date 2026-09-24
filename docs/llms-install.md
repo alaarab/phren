@@ -1,6 +1,6 @@
 # phren: LLM Installation Guide
 
-phren keeps project memory portable across sessions and machines. It runs as an MCP server and a set of lifecycle hooks.
+phren keeps project memory portable across sessions and machines. It runs as an MCP server and a set of lifecycle hooks. The server's default `core` profile exposes ten tools; the tables below list every tool by its full-profile name, and in `core` the folded ones are reached as `revise_finding` / `manage_task` / `session` / `phren_admin` with an `action` parameter (see `api-reference.md`).
 
 ## Quick Start
 
@@ -70,7 +70,7 @@ Team stores sync independently via git. Findings, notes, and tasks in a team sto
 
 Destructive maintenance commands (`prune` and `consolidate`) should be run with `--dry-run` first. On write paths that rewrite `FINDINGS.md`, phren creates/updates `FINDINGS.md.bak` and reports changed backup paths (for example, `Updated backups (1): <project>/FINDINGS.md.bak`). `--dry-run` previews changes without creating backups.
 
-## MCP Tools (59)
+## MCP Tools (70)
 
 ### Search and Browse
 
@@ -78,7 +78,7 @@ Destructive maintenance commands (`prune` and `consolidate`) should be run with 
 |------|-----------|-------------|
 | `search_knowledge` | `query`, `type?`, `limit?`, `project?`, `tag?`, `since?`, `status?`, `include_history?`, `synthesize?` | FTS5 full-text search across your project store. Supports AND, OR, NOT, phrase matching. Filter by tag, date, or lifecycle status. |
 | `get_memory_detail` | `id` | Fetch full content of a memory by id (e.g. `mem:project/filename`). |
-| `get_project_summary` | `name` | Returns a project's summary card, CLAUDE.md path, and list of indexed files. |
+| `get_project_summary` | `name` | Returns a project's summary card, AGENTS.md path, and list of indexed files. |
 | `list_projects` | `page?`, `page_size?` | Lists all projects in the active profile with pagination. |
 | `get_findings` | `project`, `limit?`, `include_superseded?`, `include_history?`, `status?` | Read recent findings, filterable by lifecycle status. |
 
@@ -117,7 +117,7 @@ Notes are explicitly searchable but excluded from automatic hook context, findin
 | `get_contradictions` | `project?`, `finding_text?` | List unresolved contradicted findings across one project or all projects, optionally filtered by selector. |
 | `edit_finding` | `project`, `old_text`, `new_text` | Edit a finding in place while preserving inline metadata such as `fid` and citations. |
 | `remove_finding` | `project`, `finding: string \| string[]` | Remove one or more findings by text match. Pass a string or array. |
-| `push_changes` | `message?` | Commit and push all phren changes. Retries with rebase on push conflicts. |
+| `push_changes` | `message?` | Commit and push all phren changes. Fetches and merges on push conflicts. |
 | `auto_extract_findings` | `project`, `text`, `model?`, `dryRun?` | Extract findings from text (max 10000 chars). |
 
 ### Memory Quality
@@ -200,6 +200,25 @@ Skill system behavior:
 
 Maintenance tools are CLI-only. Use `phren config` and `phren maintain` commands.
 
+### Code Index, Conductor and Stores
+
+Parameters for these are in [api-reference.md](api-reference.md).
+
+| Tool | Parameters | Description |
+|------|-----------|-------------|
+| `code_search` | see api-reference.md | Search a project's code index for symbols by name, signature or doc text. Use this instead of grep when you want a symbol (a function, class, method, type) rather than raw text: results are ranked exact name, then prefix, then full-text relevance, then usage count, and each hit carries its kind, signature, doc and path:line. Pass `kind` to narrow to function, method, class, struct, enum, interface, type or variable. |
+| `code_outline` | see api-reference.md | List a file's symbols in source order, nested under their parent class or container. Use this before reading a large file: it is far cheaper than opening the source and it shows the structure (classes and their methods, top-level functions and types) with each symbol's line, signature and doc. The path is the project-relative path the index uses. |
+| `code_definition` | see api-reference.md | Go to a symbol's definition in a project's code index. Use this instead of grep to find where a function, class or method is declared: it accepts `Foo`, `Foo.bar` and `bar()` forms and returns the file and lines, signature, doc comment, the last change (a blame hash and date, never a name) and a short source snippet. When a common name matches several symbols it prefers an exported, non-variable declaration and reports how many candidates there were. |
+| `code_references` | see api-reference.md | Find every resolved reference to a symbol in a project's code index, grouped by file. Use this instead of grep to answer who calls or uses a function, class or method: it accepts `Foo`, `Foo.bar` and `bar()` forms and counts only references the index could resolve to exactly one definition. Common-name ambiguity is reported as a candidate count. |
+| `code_usage` | see api-reference.md | Show a project's hottest and coldest symbols by resolved-reference count. Use this instead of grep to see what code is central and what is barely used: it returns the top and bottom N so cold code is visible too. Local variables are excluded from the hot list so a busy one-function local or a one-letter loop name cannot dominate it. |
+| `dispatch` | see api-reference.md | Send a worker brief to an enrolled computer through the local Phren Hook. Returns a launch receipt and remote target. The worker's finish, question or exit comes back later through dispatch_returns. Never automatically retry an uncertain delivery. |
+| `dispatch_returns` | see api-reference.md | List unread returns from dispatched workers and mark them read: the worker finished (done, with its final reply), finished by asking the owner something (needs-you, with the question), is blocked on terminal input, or its pane is gone. Each row has the dispatch id, computer, project, label and the worker's target for hand_off. |
+| `hand_off` | see api-reference.md | Deliver a prompt to an existing local or enrolled-computer agent session through Phren Hook. Prefer a session that already owns the project and is idle or doing related work. |
+| `live_sessions` | see api-reference.md | List the live agent sessions on this computer and every enrolled computer: computer, project, harness, status, idleFor (seconds since the tab last changed), role and the target hand_off takes. Computers that could not be reached are listed separately, and computers registered in the store but not linked in hooks.yaml come back in notLinked: their sessions are unknown, not absent. |
+| `get_topic_summaries` | see api-reference.md | What each topic archive of a project amounts to: every reference/topics file with its bullet count, its current '## Now' text and whether that text is structural or prose. Pass `topic` to also get that topic's newest bullets, the raw material for writing its paragraph yourself (see /phren-summarize). |
+| `set_topic_summary` | see api-reference.md | Store the paragraph you wrote for a topic archive as its '## Now' block, and refresh the project's 'What phren knows' block. Refused if the paragraph names anything the topic's bullets do not (the invented names are returned): fix the paragraph rather than the check. |
+| `store_list` | see api-reference.md | List all registered phren stores and their sync status. Shows the primary store plus any team or readonly stores from the store registry. |
+
 ## Lifecycle Hooks and Integrations
 
 Claude receives full native lifecycle hooks in `~/.claude/settings.json`.
@@ -207,11 +226,11 @@ Copilot CLI, Cursor, and Codex receive generated hook config files plus session 
 
 | Hook | Event | What it does |
 |------|-------|-------------|
-| `hook-session-start` | SessionStart | Pulls latest phren changes (`git pull --rebase`), runs doctor self-heal, schedules daily maintenance. |
+| `hook-session-start` | SessionStart | Fetches and merges latest phren changes, runs doctor self-heal, schedules daily maintenance. |
 | `hook-prompt` | UserPromptSubmit | Extracts keywords from the user's prompt, searches phren, injects relevant context snippets. Checks consolidation thresholds and fires a one-time notice per session. |
 | `hook-tool` | PostToolUse | Watches Claude tool results and queues compact review candidates from interesting file/command activity. |
 | `hook-stop` | Stop | Auto-commits and pushes `~/.phren` changes after every agent response. |
-| `hook-context` | SessionStart | Detects the current project from cwd and injects its CLAUDE.md and summary. |
+| `hook-context` | SessionStart | Detects the current project from cwd and injects its AGENTS.md and summary. |
 
 Tool integration summary:
 - Claude: full lifecycle hooks (`SessionStart`, `UserPromptSubmit`, `Stop`, `PostToolUse`) + MCP

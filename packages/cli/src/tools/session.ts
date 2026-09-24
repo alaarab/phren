@@ -1,3 +1,5 @@
+import { nonInteractiveGitEnv } from "../utils-helpers.js";
+import { moduleEnabled } from "../modules/runtime.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type McpContext, mcpResponse, resolveStoreForProject } from "./types.js";
 import { z } from "zod";
@@ -17,12 +19,12 @@ import { getActiveTaskForSession } from "../task/lifecycle.js";
 import { listTaskCheckpoints, writeTaskCheckpoint } from "../session/checkpoints.js";
 import {
   findMostRecentSummaryWithProject as findMostRecentSummaryRecord,
-  writeLastSummary as writeLastSummaryRecord,
+  writeLastSummary,
 } from "../session/artifacts.js";
 import { markImpactEntriesCompletedForSession } from "../finding/impact.js";
 import {
   debugError, scanSessionFiles,
-  type SessionState, sessionsDir, sessionFileForId,
+  type SessionState, runtimeSessionsDir, sessionFileForId,
   readSessionStateFile, writeSessionStateFile,
 } from "../session/utils.js";
 import { getRuntimeHealth } from "../governance/policy.js";
@@ -32,7 +34,7 @@ const STALE_SESSION_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 function collectGitStatusSnapshot(cwd: string): { gitStatus: string; editedFiles: string[] } {
   try {
-    const output = execFileSync("git", ["status", "--short"], { cwd, encoding: "utf8" }).trim();
+    const output = execFileSync("git", ["status", "--short"], { env: nonInteractiveGitEnv(), cwd, encoding: "utf8" }).trim();
     if (!output) return { gitStatus: "", editedFiles: [] };
     const lines = output.split("\n").map((line) => line.trim()).filter(Boolean);
     const editedFiles = lines.map((line) => line.replace(/^[ MADRCU?!]{1,2}\s+/, "").trim()).filter(Boolean);
@@ -116,7 +118,7 @@ const _sessionMap = new Map<string, string>();
 
 /** Find the most recent *active* (not ended) session file by mtime. */
 function findMostRecentSession(phrenPath: string): { file: string; state: SessionState } | null {
-  const dir = sessionsDir(phrenPath);
+  const dir = runtimeSessionsDir(phrenPath);
   const results = scanSessionFiles<SessionState>(
     dir,
     readSessionStateFile,
@@ -134,7 +136,7 @@ export function resolveActiveSessionScope(phrenPath: string, project?: string): 
   const envScope = normalizeMemoryScope(process.env.PHREN_SCOPE);
   if (envScope) return envScope;
 
-  const dir = sessionsDir(phrenPath);
+  const dir = runtimeSessionsDir(phrenPath);
   const results = scanSessionFiles<SessionState>(
     dir,
     readSessionStateFile,
@@ -157,11 +159,6 @@ export function resolveActiveSessionScope(phrenPath: string, project?: string): 
     }
   }
   return normalizeMemoryScope(bestState?.agentScope);
-}
-
-/** Write the last summary for fast retrieval by next session_start. */
-function writeLastSummary(phrenPath: string, summary: string, sessionId: string, project?: string): void {
-  writeLastSummaryRecord(phrenPath, { summary, sessionId, project, endedAt: new Date().toISOString() });
 }
 
 /** Find the most recent session with a summary (including ended sessions).
@@ -196,7 +193,7 @@ function resolveSessionFile(phrenPath: string, sessionId?: string, connectionId?
 
 /** Remove session files older than 24 hours. */
 function cleanupStaleSessions(phrenPath: string): number {
-  const dir = sessionsDir(phrenPath);
+  const dir = runtimeSessionsDir(phrenPath);
   // Scan all session files (keep all, we'll filter and unlink manually)
   const results = scanSessionFiles<SessionState | null>(
     dir,
@@ -288,7 +285,7 @@ interface SessionHistoryEntry {
 
 /** List all sessions (both active and ended) from the sessions directory, sorted newest first. */
 export function listAllSessions(phrenPath: string, limit = 50): SessionHistoryEntry[] {
-  const dir = sessionsDir(phrenPath);
+  const dir = runtimeSessionsDir(phrenPath);
   // scanSessionFiles returns results sorted by mtime (newest first)
   const results = scanSessionFiles<SessionState>(
     dir,
@@ -449,6 +446,7 @@ function computeSessionDiff(phrenPath: string, project: string, lastSessionEnd: 
 
 export function register(server: McpServer, ctx: McpContext): void {
   const { phrenPath } = ctx;
+  const tasksEnabled = moduleEnabled(phrenPath, "tasks", ctx.profile);
 
   server.registerTool("session_start", {
     title: "◆ phren · session start",
@@ -655,7 +653,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     // session_start can restore project context even after a normal session_end.
     const effectiveSummary = endedState.summary;
     if (effectiveSummary) {
-      writeLastSummary(phrenPath, effectiveSummary, state.sessionId, endedState.project);
+      writeLastSummary(phrenPath, { summary: effectiveSummary, sessionId: state.sessionId, project: endedState.project });
     }
 
     if (endedState.project && isValidProjectName(endedState.project)) {
@@ -664,7 +662,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         try { return resolveStoreForProject(ctx, endedState.project, "read").phrenPath; } catch { return phrenPath; }
       })();
       try {
-        const trackedActiveTask = getActiveTaskForSession(projectStorePath, state.sessionId, endedState.project);
+        const trackedActiveTask = moduleEnabled(projectStorePath, "tasks", ctx.profile) ? getActiveTaskForSession(projectStorePath, state.sessionId, endedState.project) : null;
         const activeTask = trackedActiveTask ?? (() => {
           const tasks = readTasks(projectStorePath, endedState.project!);
           if (!tasks.ok) return null;
@@ -676,7 +674,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           const snapshotRoot =
             getProjectSourcePath(projectStorePath, endedState.project, projectConfig) ||
             path.join(projectStorePath, endedState.project);
-          const { gitStatus, editedFiles } = collectGitStatusSnapshot(snapshotRoot);
+          const { gitStatus, editedFiles } = moduleEnabled(projectStorePath, "git", ctx.profile) ? collectGitStatusSnapshot(snapshotRoot) : { gitStatus: "", editedFiles: [] };
           const resumptionHint = extractResumptionHint(
             effectiveSummary,
             activeTask.line,
@@ -716,18 +714,18 @@ export function register(server: McpServer, ctx: McpContext): void {
       PHREN_SESSION_ID: state.sessionId,
       PHREN_DURATION_MINS: String(durationMins),
       PHREN_FINDINGS_ADDED: String(endedState.findingsAdded),
-      PHREN_TASKS_COMPLETED: String(Number.isFinite(endedState.tasksCompleted) ? endedState.tasksCompleted : 0),
+      ...(tasksEnabled ? { PHREN_TASKS_COMPLETED: String(Number.isFinite(endedState.tasksCompleted) ? endedState.tasksCompleted : 0) } : {}),
       ...(endedState.project ? { PHREN_PROJECT: endedState.project } : {}),
     });
 
     return mcpResponse({
       ok: true,
-      message: `Session ended. Duration: ~${durationMins} min. ${endedState.findingsAdded} finding(s) added, ${Number.isFinite(endedState.tasksCompleted) ? endedState.tasksCompleted : 0} task(s) completed.${summary ? " Summary saved for next session." : ""}`,
+      message: `Session ended. Duration: ~${durationMins} min. ${endedState.findingsAdded} finding(s) added${tasksEnabled ? `, ${Number.isFinite(endedState.tasksCompleted) ? endedState.tasksCompleted : 0} task(s) completed` : ""}.${summary ? " Summary saved for next session." : ""}`,
       data: {
         sessionId: state.sessionId,
         durationMins,
         findingsAdded: endedState.findingsAdded,
-        tasksCompleted: Number.isFinite(endedState.tasksCompleted) ? endedState.tasksCompleted : 0,
+        ...(tasksEnabled ? { tasksCompleted: Number.isFinite(endedState.tasksCompleted) ? endedState.tasksCompleted : 0 } : {}),
       },
     });
   });
@@ -757,7 +755,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       `Started: ${state.startedAt}`,
       `Duration: ~${durationMins} min`,
       `Findings added: ${state.findingsAdded}`,
-      `Tasks completed: ${Number.isFinite(state.tasksCompleted) ? state.tasksCompleted : 0}`,
+      ...(tasksEnabled ? [`Tasks completed: ${Number.isFinite(state.tasksCompleted) ? state.tasksCompleted : 0}`] : []),
     ];
     if (state.summary) parts.push(`Prior summary: ${state.summary}`);
 
@@ -766,10 +764,10 @@ export function register(server: McpServer, ctx: McpContext): void {
 
   server.registerTool("session_history", {
     title: "◆ phren · session history",
-    description: "List past sessions with their duration, findings count, and summary. Optionally drill into a specific session to see all findings and tasks created during it.",
+    description: "List past sessions with their duration, findings count, and summary. Optionally drill into a specific session to see all artifacts created during it.",
     inputSchema: z.object({
       limit: z.number().optional().describe("Max sessions to return (default 20)."),
-      sessionId: z.string().optional().describe("If provided, return full artifacts (findings + tasks) for this session instead of listing all sessions."),
+      sessionId: z.string().optional().describe("If provided, return full session artifacts for this session instead of listing all sessions."),
       project: z.string().optional().describe("Filter sessions and artifacts by project."),
     }),
   }, async ({ limit, sessionId: targetSessionId, project }) => {
@@ -787,7 +785,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         `Status: ${session.status}`,
         `Duration: ~${session.durationMins ?? 0} min`,
         `Findings: ${artifacts.findings.length}`,
-        `Tasks: ${artifacts.tasks.length}`,
+        ...(tasksEnabled ? [`Tasks: ${artifacts.tasks.length}`] : []),
       ];
       if (session.summary) parts.push(`\nSummary: ${session.summary}`);
       if (artifacts.findings.length > 0) {
@@ -816,7 +814,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       const dur = s.durationMins != null ? `${s.durationMins}m` : "?";
       const status = s.status === "active" ? " ●" : "";
       const findings = s.findingsAdded > 0 ? ` ${s.findingsAdded}f` : "";
-      const tasks = s.tasksCompleted > 0 ? ` ${s.tasksCompleted}t` : "";
+      const tasks = tasksEnabled && s.tasksCompleted > 0 ? ` ${s.tasksCompleted}t` : "";
       const date = s.startedAt.slice(0, 16).replace("T", " ");
       return `${id}${status}  ${date}  ${dur}${findings}${tasks}  ${proj}${s.summary ? "  " + s.summary.slice(0, 60) : ""}`;
     });

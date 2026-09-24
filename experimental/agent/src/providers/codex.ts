@@ -3,14 +3,17 @@
  * Calls chatgpt.com/backend-api/codex/responses (Responses API format).
  */
 import type { LlmProvider, LlmMessage, AgentToolDef, LlmResponse, ContentBlock, StreamDelta } from "./types.js";
+import { toolResultText } from "./types.js";
 import { getAccessToken } from "./codex-auth.js";
+import { stripForeignReasoning, IMAGE_OMITTED_MARKER } from "./history.js";
 import type { ReasoningEffort } from "../models.js";
-import { lookupMaxOutputTokens } from "../models.js";
+import { lookupContextWindow, lookupMaxOutputTokens, modelSupportsVision } from "../models.js";
 
 const CODEX_API = "https://chatgpt.com/backend-api/codex/responses";
+const PROVIDER_NAME = "openai-codex";
 
-/** Convert our tool defs to Responses API tool format. */
-function toResponsesTools(tools: AgentToolDef[]) {
+/** Convert our tool defs to Responses API tool format. Exported for tests. */
+export function toResponsesTools(tools: AgentToolDef[]) {
   return tools.map((t) => ({
     type: "function" as const,
     name: t.name,
@@ -19,11 +22,11 @@ function toResponsesTools(tools: AgentToolDef[]) {
   }));
 }
 
-/** Convert our messages to Responses API input format. */
-function toResponsesInput(messages: LlmMessage[]) {
+/** Convert our messages to Responses API input format. Exported for tests. */
+export function toResponsesInput(messages: LlmMessage[], vision = false) {
   const input: Record<string, unknown>[] = [];
 
-  for (const msg of messages) {
+  for (const msg of stripForeignReasoning(messages, PROVIDER_NAME)) {
     if (msg.role === "user") {
       if (typeof msg.content === "string") {
         input.push({
@@ -38,7 +41,33 @@ function toResponsesInput(messages: LlmMessage[]) {
             input.push({
               type: "function_call_output",
               call_id: block.tool_use_id,
-              output: block.content,
+              output: toolResultText(block),
+            });
+            // Images cannot ride a function_call_output; they follow as a
+            // user message with input_image parts. Text-only models get a
+            // marker so durable history never produces an unsendable request.
+            if (Array.isArray(block.content)) {
+              const imageParts = block.content.filter((c) => c.type === "image");
+              if (imageParts.length > 0) {
+                input.push({
+                  type: "message",
+                  role: "user",
+                  content: vision
+                    ? imageParts.map((c) => (c.type === "image" ? {
+                        type: "input_image",
+                        image_url: `data:${c.source.media_type};base64,${c.source.data}`,
+                      } : { type: "input_text", text: "" }))
+                    : [{ type: "input_text", text: IMAGE_OMITTED_MARKER }],
+                });
+              }
+            }
+          } else if (block.type === "image") {
+            input.push({
+              type: "message",
+              role: "user",
+              content: vision
+                ? [{ type: "input_image", image_url: `data:${block.source.media_type};base64,${block.source.data}` }]
+                : [{ type: "input_text", text: IMAGE_OMITTED_MARKER }],
             });
           } else if (block.type === "text") {
             input.push({
@@ -58,7 +87,20 @@ function toResponsesInput(messages: LlmMessage[]) {
         });
       } else {
         for (const block of msg.content) {
-          if (block.type === "text") {
+          if (block.type === "reasoning") {
+            // Round-trip: with store:false the encrypted payload is the only
+            // way the model recovers its prior chain of thought. Content
+            // order already places reasoning before its sibling
+            // function_call, which the API requires.
+            if (block.id && block.encrypted_content) {
+              input.push({
+                type: "reasoning",
+                id: block.id,
+                encrypted_content: block.encrypted_content,
+                summary: [],
+              });
+            }
+          } else if (block.type === "text") {
             input.push({
               type: "message",
               role: "assistant",
@@ -86,8 +128,18 @@ function debugLog(label: string, data: unknown): void {
   process.stderr.write(`[codex:debug] ${label}: ${JSON.stringify(data, null, 2)}\n`);
 }
 
-/** Parse non-streaming Responses API output into our ContentBlock format. */
-function parseResponsesOutput(data: Record<string, unknown>): LlmResponse {
+/** Join a Responses reasoning item's summary parts into display text. */
+function reasoningSummaryText(item: Record<string, unknown>): string {
+  const summary = item.summary;
+  if (!Array.isArray(summary)) return "";
+  return (summary as Array<{ type?: string; text?: string }>)
+    .map((part) => part?.text ?? "")
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** Parse non-streaming Responses API output into our ContentBlock format. Exported for tests. */
+export function parseResponsesOutput(data: Record<string, unknown>): LlmResponse {
   debugLog("parseResponsesOutput input", data);
 
   // The Responses API may return output at top-level or nested under a "response" key.
@@ -127,8 +179,16 @@ function parseResponsesOutput(data: Record<string, unknown>): LlmResponse {
           input,
         });
       } else if (item.type === "reasoning") {
-        // Reasoning items are informational — skip them, they don't map to content blocks
-        debugLog("skipping reasoning item", { id: item.id });
+        // Keep reasoning: the id + encrypted_content pair must be re-sent on
+        // the next request or the model loses its chain of thought mid-task.
+        const encrypted = item.encrypted_content as string | undefined;
+        content.push({
+          type: "reasoning",
+          text: reasoningSummaryText(item),
+          provider: PROVIDER_NAME,
+          ...(typeof item.id === "string" ? { id: item.id } : {}),
+          ...(typeof encrypted === "string" ? { encrypted_content: encrypted } : {}),
+        });
       }
     }
   } else {
@@ -153,7 +213,7 @@ function parseResponsesOutput(data: Record<string, unknown>): LlmResponse {
 
 export class CodexProvider implements LlmProvider {
   name = "openai-codex";
-  contextWindow = 1_050_000;
+  contextWindow: number;
   maxOutputTokens: number;
   model: string;
   reasoningEffort?: ReasoningEffort;
@@ -162,17 +222,21 @@ export class CodexProvider implements LlmProvider {
     this.model = model ?? "gpt-5.4";
     this.maxOutputTokens = maxOutputTokens ?? lookupMaxOutputTokens(this.model, this.name);
     this.reasoningEffort = reasoningEffort;
+    this.contextWindow = lookupContextWindow(this.model, this.name);
   }
 
-  async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[]): Promise<LlmResponse> {
+  async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[], signal?: AbortSignal): Promise<LlmResponse> {
     const { accessToken } = await getAccessToken();
 
     const body: Record<string, unknown> = {
       model: this.model,
       instructions: system,
-      input: toResponsesInput(messages),
+      input: toResponsesInput(messages, modelSupportsVision(this.name, this.model)),
       store: false,
       stream: true,
+      // Without this the API omits the encrypted payload and reasoning
+      // cannot round-trip (chatStream already requested it; chat() didn't).
+      include: ["reasoning.encrypted_content"],
     };
     if (this.reasoningEffort) {
       body.reasoning = { effort: this.reasoningEffort };
@@ -181,16 +245,16 @@ export class CodexProvider implements LlmProvider {
       body.tools = toResponsesTools(tools);
       body.tool_choice = "auto";
     }
-    return parseResponsesOutput(await this.requestResponse(accessToken, body));
+    return parseResponsesOutput(await this.requestResponse(accessToken, body, signal));
   }
 
-  async *chatStream(system: string, messages: LlmMessage[], tools: AgentToolDef[]): AsyncIterable<StreamDelta> {
+  async *chatStream(system: string, messages: LlmMessage[], tools: AgentToolDef[], signal?: AbortSignal): AsyncIterable<StreamDelta> {
     const { accessToken } = await getAccessToken();
 
     const body: Record<string, unknown> = {
       model: this.model,
       instructions: system,
-      input: toResponsesInput(messages),
+      input: toResponsesInput(messages, modelSupportsVision(this.name, this.model)),
       store: false,
       stream: true,
       include: ["reasoning.encrypted_content"],
@@ -206,12 +270,21 @@ export class CodexProvider implements LlmProvider {
     // OpenClaw treats transport as auto: try WebSocket first, then fall back to the
     // HTTP responses stream if the WS path is unavailable.
     try {
-      yield* this.chatStreamWs(accessToken, body);
+      yield* this.chatStreamWs(accessToken, body, signal);
     } catch {
-      const response = await this.requestResponse(accessToken, body);
+      const response = await this.requestResponse(accessToken, body, signal);
       const parsed = parseResponsesOutput(response);
       for (const block of parsed.content) {
-        if (block.type === "text") {
+        if (block.type === "reasoning") {
+          if (block.text) yield { type: "reasoning_delta", text: block.text };
+          yield {
+            type: "reasoning_end",
+            ...(block.id !== undefined ? { id: block.id } : {}),
+            ...(block.encrypted_content !== undefined
+              ? { encrypted_content: block.encrypted_content }
+              : {}),
+          };
+        } else if (block.type === "text") {
           yield { type: "text_delta", text: block.text };
         } else if (block.type === "tool_use") {
           yield { type: "tool_use_start", id: block.id, name: block.name };
@@ -223,7 +296,7 @@ export class CodexProvider implements LlmProvider {
     }
   }
 
-  private async requestResponse(accessToken: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+  private async requestResponse(accessToken: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<Record<string, unknown>> {
     const res = await fetch(CODEX_API, {
       method: "POST",
       headers: {
@@ -231,6 +304,7 @@ export class CodexProvider implements LlmProvider {
         Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify(body),
+      signal,
     });
 
     if (!res.ok) {
@@ -288,7 +362,7 @@ export class CodexProvider implements LlmProvider {
   }
 
   /** WebSocket streaming — sends request, yields deltas as they arrive. */
-  private async *chatStreamWs(accessToken: string, body: Record<string, unknown>): AsyncIterable<StreamDelta> {
+  private async *chatStreamWs(accessToken: string, body: Record<string, unknown>, signal?: AbortSignal): AsyncIterable<StreamDelta> {
     const wsUrl = CODEX_API.replace(/^https:/, "wss:").replace(/^http:/, "ws:");
 
     // Queue for events received from the WebSocket before the consumer pulls them
@@ -339,6 +413,21 @@ export class CodexProvider implements LlmProvider {
       if (type === "response.output_text.delta") {
         const delta = event.delta as string;
         if (delta) push({ type: "text_delta", text: delta });
+      } else if (type === "response.reasoning_summary_text.delta") {
+        const delta = event.delta as string;
+        if (delta) push({ type: "reasoning_delta", text: delta });
+      } else if (type === "response.output_item.done") {
+        // The completed reasoning item carries the encrypted payload we must
+        // re-send on the next request.
+        const item = event.item as Record<string, unknown> | undefined;
+        if (item?.type === "reasoning") {
+          const encrypted = item.encrypted_content as string | undefined;
+          push({
+            type: "reasoning_end",
+            ...(typeof item.id === "string" ? { id: item.id } : {}),
+            ...(typeof encrypted === "string" ? { encrypted_content: encrypted } : {}),
+          });
+        }
       } else if (type === "response.output_item.added") {
         if ((event.item as Record<string, unknown>)?.type === "function_call") {
           const item = event.item as Record<string, unknown>;
@@ -378,6 +467,14 @@ export class CodexProvider implements LlmProvider {
       }
     });
 
+    const onAbort = () => {
+      done = true;
+      try { ws.close(); } catch { /* ignore */ }
+      if (resolve) { resolve(); resolve = null; }
+    };
+    signal?.addEventListener("abort", onAbort);
+    if (signal?.aborted) onAbort();
+
     // Async iteration: drain the queue, wait for new events
     try {
       while (true) {
@@ -391,6 +488,7 @@ export class CodexProvider implements LlmProvider {
         await new Promise<void>((r) => { resolve = r; });
       }
     } finally {
+      signal?.removeEventListener("abort", onAbort);
       if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
         try { ws.close(); } catch { /* ignore */ }
       }

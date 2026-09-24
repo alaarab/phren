@@ -33,13 +33,16 @@ export function loadProjectContext(ctx: PhrenContext): string {
 }
 
 /**
- * Run a lightweight LLM reflection at session end and append to agent-context.md.
- * Summarizes key learnings from the conversation.
+ * Run a lightweight LLM reflection at session end: one call, two outputs.
+ * Key-learning bullets append to agent-context.md (warm start), and candidate
+ * knowledge items route through the same graduated confidence pipeline as
+ * compaction (≥0.8 finding, 0.5–0.8 review queue, below dropped).
  */
 export async function evolveProjectContext(
   ctx: PhrenContext,
   provider: LlmProvider,
   sessionMessages: LlmMessage[],
+  opts?: { sessionId?: string | null },
 ): Promise<void> {
   const file = contextPath(ctx);
   if (!file) return;
@@ -64,7 +67,9 @@ export async function evolveProjectContext(
   const reflectionPrompt =
     "Based on this conversation excerpt, extract 2-4 key learnings about this project " +
     "(patterns, pitfalls, architecture decisions, important paths/configs). " +
-    "Be extremely concise — one line per point. Output only the bullet points, nothing else.\n\n" +
+    "Be extremely concise — one line per point. Output only the bullet points, then a final section:\n\n" +
+    '## Knowledge\nA fenced json block: {"items":[{"text":"...","confidence":0.9,"kind":"finding|gotcha|decision"}]}\n' +
+    'Only durable, non-obvious knowledge worth remembering across sessions. Confidence is YOUR certainty, 0 to 1. Use {"items":[]} if nothing qualifies.\n\n' +
     condensed;
 
   try {
@@ -74,11 +79,28 @@ export async function evolveProjectContext(
       [],
     );
 
-    const reflection = response.content
+    const fullText = response.content
       .filter((b) => b.type === "text")
       .map((b) => (b as { text: string }).text)
       .join("\n")
       .trim();
+
+    // Split off the knowledge section; the bullets before it feed warm start.
+    const reflection = fullText.split(/^##\s*Knowledge\b/im)[0].trim();
+
+    // Route extracted knowledge through the graduated pipeline (best effort).
+    try {
+      const { extractKnowledgeItems, routeKnowledgeItems, resolveCompactionConfig } =
+        await import("../context/compactor.js");
+      const items = extractKnowledgeItems(fullText);
+      if (items.length > 0) {
+        await routeKnowledgeItems(items, {
+          phrenCtx: ctx,
+          sessionId: opts?.sessionId,
+          config: resolveCompactionConfig(),
+        });
+      }
+    } catch { /* best effort */ }
 
     if (!reflection || reflection.length < 10) return;
 

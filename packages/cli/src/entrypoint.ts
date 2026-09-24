@@ -1,9 +1,12 @@
+import { activateModules, moduleSnapshot, type ModuleSnapshot } from "./modules/runtime.js";
+import { disabledCommand } from "./cli-registry.js";
 import * as fs from "fs";
 import * as path from "path";
 import { errorMessage } from "./utils.js";
 import { logger } from "./logger.js";
 import {
   defaultPhrenPath,
+  findPhrenPath,
   ensureFtsCacheRootPrivate,
   expandHomePath,
   getPhrenPath,
@@ -55,7 +58,8 @@ export function resolveTopLevelInvocation(argv: string[]): TopLevelInvocation {
   }
 
   if (argvCommand === "--help" || argvCommand === "-h") {
-    return { kind: "help" };
+    // `phren --help all` reads like `phren help all`, so it does the same.
+    return argv.length > 1 ? { kind: "manage", argv } : { kind: "help" };
   }
 
   if (argvCommand === "--version" || argvCommand === "-v" || argvCommand === "version") {
@@ -78,7 +82,7 @@ export function resolveTopLevelInvocation(argv: string[]): TopLevelInvocation {
 }
 
 export function printIntegratedHelp(): void {
-  console.log(formatCheatSheet());
+  console.log(formatCheatSheet(helpSnapshot()));
 }
 
 export function printIntegratedVersion(): void {
@@ -105,16 +109,22 @@ function buildCliContext(): CliContext {
   };
 }
 
+function helpSnapshot(): ModuleSnapshot | undefined {
+  try { return moduleSnapshot(findPhrenPath() ?? defaultPhrenPath()); }
+  catch { return undefined; }
+}
+
 async function runHelp(args: string[]): Promise<true> {
+  const snapshot = helpSnapshot();
   const target = args[0]?.toLowerCase();
 
   if (!target) {
-    console.log(formatCheatSheet());
+    console.log(formatCheatSheet(helpSnapshot()));
     return finish();
   }
 
   if (target === "all") {
-    console.log(formatFullHelp());
+    console.log(formatFullHelp(snapshot));
     return finish();
   }
 
@@ -122,11 +132,13 @@ async function runHelp(args: string[]): Promise<true> {
   // "skills") shows the topic view, which lists every command in that group.
   // Matches the legacy HELP_TOPICS behavior.
   if ((TOPIC_ORDER as readonly string[]).includes(target)) {
-    console.log(formatTopic(target as Topic));
+    console.log(formatTopic(target as Topic, snapshot));
     return finish();
   }
 
-  const cmdHelp = formatCommand(target);
+  const unavailable = snapshot && disabledCommand([target, ...args.slice(1)].join(" "), snapshot);
+  if (unavailable) { console.log(unavailable); return finish(); }
+  const cmdHelp = formatCommand(target, snapshot);
   if (cmdHelp !== null) {
     console.log(cmdHelp);
     return finish();
@@ -163,7 +175,7 @@ export async function runTopLevelCommand(
   if (!argvCommand) {
     if (process.stdin.isTTY && process.stdout.isTTY) {
       if (opts.allowDefaultShell === false) {
-        console.log(formatCheatSheet());
+        console.log(formatCheatSheet(helpSnapshot()));
         return finish();
       }
       const shellCmd = lookupCommand("shell");
@@ -175,6 +187,19 @@ export async function runTopLevelCommand(
 
   const cmd = lookupCommand(argvCommand);
   if (!cmd) return false;
+  let snapshot: ModuleSnapshot | undefined;
+  try {
+    const store = findPhrenPath() ?? defaultPhrenPath();
+    snapshot = ["modules", "init", "quickstart", "verify", "uninstall", "doctor"].includes(cmd.name) || argv.includes("--help") || argv.includes("-h")
+      ? moduleSnapshot(store) : activateModules(store);
+    const unavailable = disabledCommand([cmd.name, ...argv.slice(1)].join(" "), snapshot);
+    if (unavailable) { console.error(unavailable); return finish(1); }
+  } catch (error) {
+    if (!["init", "modules", "doctor", "verify", "uninstall", "link"].includes(cmd.name)) {
+      console.error(errorMessage(error)); return finish(1);
+    }
+  }
+
 
   // Any command can end up building or reading the FTS snapshot cache, which
   // is a SQLite export of the whole store landing in os.tmpdir() — /tmp (1777)
@@ -183,8 +208,8 @@ export async function runTopLevelCommand(
 
   // Intercept before any handler runs - in particular before namespace
   // handlers that used to print their own per-subcommand help text.
-  if (argv.includes("--help") || argv.includes("-h")) {
-    const out = formatCommand(cmd.name);
+  if (argv.includes("--help") || argv.includes("-h") || (argv.length === 1 && ["maintain", "config", "bridge"].includes(cmd.name))) {
+    const out = formatCommand(cmd.name, snapshot);
     if (out) console.log(out);
     return finish();
   }

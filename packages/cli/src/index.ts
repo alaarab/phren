@@ -11,6 +11,7 @@ import {
 import { log as structuredLog, logger } from "./logger.js";
 import type { McpContext } from "./tools/types.js";
 import { errorMessage } from "./utils.js";
+import { nonInteractiveGitEnv } from "./utils-helpers.js";
 import {
   printIntegratedHelp,
   printIntegratedVersion,
@@ -23,6 +24,8 @@ import {
 // --version, --help — which never reach main() do not pay its ~1.8s cold-start cost.
 // This matters most for the PostToolUse `hook-tool`, which spawns per tool call.
 
+// Covers inherited Git subprocesses, including commands launched by plugins.
+Object.assign(process.env, nonInteractiveGitEnv());
 const invocation = resolveTopLevelInvocation(process.argv.slice(2));
 
 if (invocation.kind === "help") {
@@ -58,6 +61,11 @@ function cleanStaleLocks(phrenPath: string): void {
       try {
         const stat = fs.statSync(lockPath);
         if (Date.now() - stat.mtimeMs > STALE_LOCK_MS) {
+          const pid = Number.parseInt(fs.readFileSync(lockPath, "utf8").split("\n")[0], 10);
+          if (pid > 0) {
+            try { process.kill(pid, 0); continue; }
+            catch (err: unknown) { if ((err as NodeJS.ErrnoException).code !== "ESRCH") continue; }
+          }
           fs.unlinkSync(lockPath);
           debugLog(`Cleaned stale lock: ${entry}`);
         }
@@ -95,6 +103,14 @@ async function main() {
   ]);
 
   const profile = resolveRuntimeProfile(phrenPath);
+  const { activateModules: moduleSnapshot } = await import("./modules/runtime.js");
+  const { BUILTIN_MODULES, toolOwner, disabledHint } = await import("./modules/registry.js");
+  const { resolveAllStores } = await import("./store-registry.js");
+  const { resolveStoreForProject } = await import("./tools/types.js");
+  const snapshots = new Map(resolveAllStores(phrenPath).filter(store => store.available !== false)
+    .map(store => [store.path, moduleSnapshot(store.path, profile)]));
+  const enabledModules = BUILTIN_MODULES.filter(module => [...snapshots.values()].some(snapshot => snapshot.has(module.name)));
+  const hasModule = (name: string) => enabledModules.some(module => module.name === name);
   cleanStaleLocks(phrenPath);
   // Before buildIndex() writes the first snapshot: the FTS cache is a full
   // SQLite export of the store, and on Linux it lands in a world-readable
@@ -121,14 +137,16 @@ async function main() {
   let writeQueueDepth = 0;
   const MAX_QUEUE_DEPTH = 50;
   const WRITE_TIMEOUT_MS = 30_000;
-  async function rebuildIndex() {
+  async function rebuildIndex(force = false) {
     runCustomHooks(phrenPath, "pre-index");
     const oldDb = db;
     try {
       indexReady = false;
-      db = await buildIndex(phrenPath, profile);
+      db = await buildIndex(phrenPath, profile, { force });
       indexReady = true;
-      try { oldDb?.close(); } catch (err: unknown) {
+      // buildIndex() hands back its cached handle inside the debounce
+      // window, so oldDb can be the very database we just installed.
+      try { if (oldDb && oldDb !== db) oldDb.close(); } catch (err: unknown) {
         logger.warn("rebuildIndex", `dbClose: ${errorMessage(err)}`);
       }
     } catch (err) {
@@ -182,46 +200,25 @@ async function main() {
 
   // Track MCP tool calls for telemetry (opt-in only, best-effort)
   const { trackToolCall } = await import("./telemetry.js");
+  const { createToolGate, resolveMcpProfile } = await import("./mcp/profile.js");
   const origRegisterTool = server.registerTool.bind(server);
-  type RegisterToolFn = typeof server.registerTool;
-  type RegisterToolArgs = Parameters<RegisterToolFn>;
-  type RegisterToolName = RegisterToolArgs[0];
-  type RegisterToolConfig = RegisterToolArgs[1];
-  type RegisterToolHandler = (...args: unknown[]) => unknown;
+  type RegisterToolArgs = Parameters<typeof server.registerTool>;
 
-  // Tools Claude reaches for during normal work. Marked with anthropic/alwaysLoad
-  // so Claude Code keeps their schemas resident instead of deferring them behind
-  // ToolSearch — otherwise the first call in a fresh session fails with
-  // InputValidationError until the schema is fetched.
-  const ALWAYS_LOAD_TOOLS = new Set([
-    "add_finding",
-    "add_note",
-    "add_task",
-    "complete_task",
-    "search_knowledge",
-    "session_start",
-    "session_end",
-    "get_findings",
-    "get_tasks",
-  ]);
+  // Tools Claude reaches for during normal work in the full profile. Marked
+  // anthropic/alwaysLoad so Claude Code keeps their schemas resident instead of
+  // deferring them behind ToolSearch. The core profile marks all of its tools.
+  const ALWAYS_LOAD_TOOLS = ["add_note", "complete_task", "session_start", "session_end", "get_findings"];
 
-  const registeredToolNames = new Set<string>();
-
-  server.registerTool = function (name: RegisterToolName, config: RegisterToolConfig, handler: RegisterToolHandler) {
-    const registeredName = name;
-    // Registration runs before server.connect, so throwing here fails fast at
-    // startup instead of letting a later module silently shadow an earlier tool.
-    if (registeredToolNames.has(registeredName as string)) {
-      throw new Error(`Duplicate MCP tool registration: "${String(registeredName)}"`);
-    }
-    registeredToolNames.add(registeredName as string);
-    let finalConfig = config;
-    if (ALWAYS_LOAD_TOOLS.has(registeredName as string)) {
-      const cfgObj = config as Record<string, unknown>;
-      const existingMeta = (cfgObj?._meta as Record<string, unknown> | undefined) ?? {};
-      finalConfig = { ...cfgObj, _meta: { ...existingMeta, "anthropic/alwaysLoad": true } } as RegisterToolConfig;
-    }
-    const wrapped = async (...args: unknown[]) => {
+  // Every module registers its tools as before; the gate decides what the
+  // client sees. `core` (the default) exposes ten tools and folds the rest
+  // behind phren_admin; `full` is the whole surface. See mcp/profile.ts.
+  const mcpProfile = resolveMcpProfile(phrenPath);
+  const gate = createToolGate({
+    profile: mcpProfile,
+    modules: enabledModules,
+    alwaysLoad: ALWAYS_LOAD_TOOLS,
+    register: (name, config, handler) => origRegisterTool(name as RegisterToolArgs[0], config as RegisterToolArgs[1], handler as unknown as RegisterToolArgs[2]),
+    wrap: (registeredName, handler) => async (...args: unknown[]) => {
       if (shuttingDown) {
         return {
           content: [{
@@ -244,13 +241,19 @@ async function main() {
           }],
         };
       }
+      const owner = toolOwner(registeredName);
+      if (owner && owner.name !== "memory") {
+        const input = args[0] as Record<string, unknown>;
+        const store = typeof input?.project === "string" ? resolveStoreForProject(ctx, input.project).phrenPath : phrenPath;
+        if (!snapshots.get(store)?.has(owner.name)) return mcpResponse({ ok: false, error: disabledHint(owner.name), errorCode: "UNAVAILABLE" });
+      }
       try { trackToolCall(phrenPath, registeredName); } catch (err: unknown) {
         logger.warn("trackToolCall", errorMessage(err));
       }
-      return handler(...args);
-    };
-    return origRegisterTool(registeredName, finalConfig, wrapped as RegisterToolArgs[2]);
-  } as typeof server.registerTool;
+      return (handler as (...a: unknown[]) => unknown)(...args);
+    },
+  });
+  server.registerTool = gate.registerTool as unknown as typeof server.registerTool;
 
   // Register all tool handlers from domain modules
   const ctx: McpContext = {
@@ -270,9 +273,10 @@ async function main() {
 
   // Lazy-imported tool registries — only the MCP server needs them. Registration
   // order is irrelevant (each module registers a disjoint set of tools).
+  const codeAvailable = hasModule("code") && !!(await (await import("./modules/code-package.js")).loadCodePackage(phrenPath));
   const toolModules = await Promise.all([
     import("./tools/search.js"),
-    import("./tools/tasks.js"),
+    ...(hasModule("tasks") ? [import("./tools/tasks.js")] : []),
     import("./tools/finding.js"),
     import("./tools/memory.js"),
     import("./tools/data.js"),
@@ -281,20 +285,45 @@ async function main() {
     import("./tools/ops.js"),
     import("./tools/skills.js"),
     import("./tools/hooks.js"),
-    import("./tools/extract.js"),
+    ...(hasModule("git") ? [import("./tools/extract.js")] : []),
     import("./tools/config.js"),
     import("./tools/notes.js"),
+    import("./tools/summaries.js"),
+    ...(codeAvailable ? [import("./tools/code.js")] : []),
+    ...(hasModule("conductor") ? [import("./tools/dispatch.js")] : []),
   ]);
   for (const mod of toolModules) mod.register(server, ctx);
+  gate.finish();
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error(`phren-mcp running (${phrenPath})`);
+  console.error(`phren-mcp running (${phrenPath}) · profile ${mcpProfile} · ${gate.exposed.size} tools`);
+
+  const { startPullPolling } = await import("./sync/pull.js");
+  const { refreshLinkedContext } = await import("./link/refresh.js");
+  const polling = startPullPolling(phrenPath, {
+    onChange: async () => {
+      // Index refresh still succeeds if an external mirror is temporarily unwritable.
+      try { refreshLinkedContext(phrenPath, profile); }
+      catch (err: unknown) { logger.warn("periodic-pull", `context refresh: ${errorMessage(err)}`); }
+      await rebuildIndex(true);
+    },
+    runExclusive: (fn) => {
+      // Network calls have their own timeouts. Do not release the queue while
+      // an underlying Git operation is still running, as Promise.race would.
+      const run = writeQueue.then(fn);
+      writeQueue = run.catch((err: unknown) => { logger.warn("periodic-pull", errorMessage(err)); });
+      return run;
+    },
+  });
+  server.server.onclose = () => { void shutdown("transport closed"); };
 
   // Graceful shutdown: drain write queue and close DB before exit
   async function shutdown(signal: string): Promise<void> {
+    if (shuttingDown) return;
     shuttingDown = true;
     structuredLog("info", "shutdown", `Received ${signal}, draining write queue...`);
+    await polling.stop();
     try {
       await writeQueue;
     } catch {

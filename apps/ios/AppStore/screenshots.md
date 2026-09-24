@@ -1,7 +1,7 @@
 # Screenshot plan
 
-Screenshots decide what the app *is* before anyone reads a word. The whole
-job here is to not look like a to-do app. Lead with the review queue.
+Screenshots should show how the phone helps while agents work: explore memory,
+check sessions, and add direction. Lead with the memory graph.
 
 ## What Apple requires
 
@@ -18,15 +18,13 @@ job here is to not look like a to-do app. Lead with the review queue.
 
 ## The set, in order
 
-Order is the message. Findings and review first, capture later, tasks last
-or not at all.
+Show memory and agents first, capture and optional maintenance later.
 
-**1 — Triage mode, mid-swipe.** A finding card tilted right with the green
-APPROVE stamp visible, progress reading something like "12 of 87". This is
-the app's thesis in one image: a developer judging what their agent
-learned. It must be screenshot one.
+**1 — Memory graph.** A project's connected findings, with a selected node
+and its neighborhood visible. Use readable technical knowledge from the demo
+store and keep enough surrounding nodes visible to explain the connections.
 
-Caption: *Approve or discard what your agents learned.*
+Caption: *Explore what your agents know.*
 
 **2 — A project's findings.** Real technical content — the collapsed
 5-line cards with a `[pattern]` or `[architecture]` tag chip visible. The
@@ -36,9 +34,9 @@ instantly as developer tooling.
 
 Caption: *Your agents' knowledge, in a repo you own.*
 
-**3 — Projects list.** Multiple projects with their findings / tasks /
-notes / review counts, and the live sync indicator. Shows scale and that
-this sits on top of real work.
+**3 — Projects list or Agents tab.** Multiple projects with their findings,
+tasks and notes counts, or a connected demo computer's live sessions. Session
+states must come from a real connection or a clearly identified demo fixture.
 
 Caption: *Every project your agents work on.*
 
@@ -53,9 +51,10 @@ warnings. Signals seriousness and that it handles multi-repo setups.
 
 Caption: *Know exactly what synced, and what didn't.*
 
-**6 (optional) — Search.** On-device search results across projects.
+**6 (optional) — Search or memory maintenance.** On-device results across
+projects, or the optional maintenance overview grouped by project and store.
 
-Caption: *Search everything, offline.*
+Caption: *Search everything, offline.* or *Handle maintenance project by project.*
 
 ## Rules for the content on screen
 
@@ -86,10 +85,7 @@ xcrun simctl status_bar "iPhone 16 Pro Max" override \
 xcrun simctl io "iPhone 16 Pro Max" screenshot ~/Desktop/phren-01.png
 ```
 
-Triage mid-swipe can't be captured by holding a gesture in the simulator
-easily — either capture it on device (volume-up + side button while
-dragging), or temporarily seed the drag offset in a debug build to freeze
-the card mid-tilt.
+Wait for the graph to load before selecting a node and capturing its neighborhood.
 
 Save the final set to `apps/ios/AppStore/screenshots/` (gitignored if they
 get large; otherwise commit them — they're small PNGs and worth versioning
@@ -97,6 +93,5 @@ alongside the copy).
 
 ## App preview video (optional, skip for v1)
 
-A 15–30s video of a triage session would be the single most persuasive
-asset — and the best answer to a 4.3 "this is a to-do app" rejection. Worth
-adding for 1.1 once the app has settled.
+A 15–30s video can follow a connected finding through the graph, open its
+project instructions, and check an agent session. Use demo data throughout.

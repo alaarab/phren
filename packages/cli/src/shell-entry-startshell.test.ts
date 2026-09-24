@@ -10,6 +10,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./shell/shell.js", () => {
   class MockPhrenShell {
+    setRepaintHandler = vi.fn();
+    setSuspendHandler = vi.fn();
+    setMouseHandler = vi.fn();
+    syncMouse = vi.fn();
     render = vi.fn().mockResolvedValue("mocked-render");
     handleRawKey = vi.fn().mockResolvedValue(true);
     handleInput = vi.fn().mockResolvedValue(true);
@@ -30,7 +34,12 @@ vi.mock("./shell/render.js", () => ({
   },
   clearScreen: vi.fn(),
   clearToEnd: vi.fn(),
+  paintFrame: vi.fn(),
+  enterFullscreen: vi.fn(() => { process.stdout.write("\x1b[?1049h"); }),
+  exitFullscreen: vi.fn(() => { process.stdout.write("\x1b[?1049l"); }),
   shellStartupFrames: vi.fn().mockReturnValue(["frame1"]),
+  composeStartupFrame: vi.fn().mockReturnValue(["frame1"]),
+  fitFrame: (lines: string[]) => lines.join("\n"),
   gradient: (s: string) => s,
   badge: (s: string) => s,
   stripAnsi: (s: string) => s,

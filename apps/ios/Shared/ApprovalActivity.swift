@@ -1,0 +1,61 @@
+import ActivityKit
+import AppIntents
+import Foundation
+
+/// The extension receives display text and an opaque local identifier only.
+/// SSH destinations, exact conversation routes and credentials stay in the app.
+struct ApprovalActivityAttributes: ActivityAttributes {
+    struct ContentState: Codable, Hashable {
+        let provider: String
+        let project: String
+        let host: String
+        let explanation: String
+        let expiresAt: Date
+        /// Claude Code's AskUserQuestion: the activity offers Open, never a
+        /// blind Approve — the answer is chosen in the app.
+        var question = false
+
+        /// ActivityKit may retain a stale activity after its request expires.
+        /// It must no longer advertise a permission that needs an answer.
+        func symbol(isStale: Bool, now: Date = .now) -> String {
+            guard !isStale, expiresAt > now else { return "clock" }
+            return question ? "questionmark.bubble.fill" : "hand.raised.fill"
+        }
+    }
+    let requestID: String
+
+    /// Opens the app on this request's conversation (`PhrenApp.onOpenURL`).
+    var openURL: URL? {
+        var components = URLComponents()
+        components.scheme = "phren"; components.host = "approval"
+        components.queryItems = [URLQueryItem(name: "request", value: requestID)]
+        return components.url
+    }
+}
+
+struct AnswerApprovalIntent: LiveActivityIntent {
+    static var title: LocalizedStringResource = "Answer agent permission"
+    static var isDiscoverable: Bool = false
+    static var authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication
+    static var openAppWhenRun: Bool = true
+
+    @Parameter(title: "Request") var requestID: String
+    @Parameter(title: "Approve") var approve: Bool
+
+    init() {}
+    init(requestID: String, approve: Bool) { self.requestID = requestID; self.approve = approve }
+
+    func perform() async throws -> some IntentResult {
+        #if PHREN_APP
+        await ApprovalActivityController.shared.answer(requestID: requestID, approve: approve)
+        #else
+        // LiveActivityIntent runs in the containing app. Never claim success if
+        // a future system dispatches this extension-only implementation instead.
+        try unavailable()
+        #endif
+        return .result()
+    }
+    private func unavailable() throws {
+        throw NSError(domain: "PhrenApproval", code: 1, userInfo: [NSLocalizedDescriptionKey: "Open Phren to answer this request."])
+    }
+}

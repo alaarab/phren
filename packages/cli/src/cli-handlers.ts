@@ -14,9 +14,9 @@ import {
   defaultPhrenPath,
   findPhrenPath,
   isInstallMode,
-  parseProactivityLevel,
   type InstallMode,
 } from "./shared.js";
+import { parseProactivityLevel } from "./proactivity.js";
 import { errorMessage, getOptionValue, getPositionalArgs } from "./utils.js";
 import { addProjectFromPath } from "./core/project.js";
 import {
@@ -256,7 +256,10 @@ export async function runSnippetCommand(_args: string[]): Promise<number> {
   }
 }
 
-export async function runLinkRemovedNotice(_args: string[]): Promise<number> {
-  console.error("`phren link` has been removed. Use `phren init` instead.");
-  return 1;
+export async function runLinkRemovedNotice(args: string[]): Promise<number> {
+  if (args.length) {
+    console.error("The old `phren link` option interface has been removed. Use `phren init` instead.");
+    return 1;
+  }
+  return runInitCommand(args);
 }

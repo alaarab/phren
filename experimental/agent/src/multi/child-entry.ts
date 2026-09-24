@@ -10,27 +10,35 @@
  */
 
 import type { SpawnPayload, ChildMessage, ParentMessage } from "./types.js";
-import type { TurnHooks, AgentSession } from "../agent-loop.js";
+import { MAX_SPAWN_DEPTH } from "./types.js";
+import type { TurnHooks, } from "../agent-loop.js";
 import { resolveProvider } from "../providers/resolve.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { readFileTool } from "../tools/read-file.js";
 import { writeFileTool } from "../tools/write-file.js";
 import { editFileTool } from "../tools/edit-file.js";
-import { shellTool, taskOutputTool, taskStopTool } from "../tools/shell.js";
+import { createShellTool, taskOutputTool, taskStopTool } from "../tools/shell.js";
 import { globTool } from "../tools/glob.js";
 import { grepTool } from "../tools/grep.js";
+import { createReadImageTool } from "../tools/read-image.js";
+import { modelSupportsVision } from "../models.js";
+import { createWebFetchTool } from "../tools/web-fetch.js";
+import { createWebSearchTool } from "../tools/web-search.js";
+import { updatePlanTool } from "../tools/update-plan.js";
+import { listMcpResourcesTool, readMcpResourceTool } from "../tools/mcp-resources.js";
 import { createPhrenSearchTool } from "../tools/phren-search.js";
 import { createPhrenFindingTool } from "../tools/phren-finding.js";
 import { createPhrenGetTasksTool, createPhrenCompleteTaskTool } from "../tools/phren-tasks.js";
+import { createPhrenAddTaskTool } from "../tools/phren-add-task.js";
 import { createSkillTool } from "../tools/skill.js";
 import { gitStatusTool, gitDiffTool, gitCommitTool } from "../tools/git.js";
-import { buildPhrenContext, buildContextSnippet } from "../memory/context.js";
-import { startSession, endSession, getPriorSummary } from "../memory/session.js";
-import { loadProjectContext } from "../memory/project-context.js";
-import { buildSystemPrompt } from "../system-prompt.js";
-import { runAgent, createSession } from "../agent-loop.js";
+import { buildPhrenContext, } from "../memory/context.js";
+import { startSession, endSession, } from "../memory/session.js";
+import { runAgent, } from "../agent-loop.js";
 import { createCostTracker } from "../cost.js";
 import { getAgentType, applyAgentType } from "./agent-types.js";
+import { AgentSpawner } from "./spawner.js";
+import { createSpawnAgentTool, createSendMessageTool, createListAgentsTool } from "../tools/spawn-agent.js";
 import type { LlmProvider } from "../providers/types.js";
 import type { PhrenContext } from "../memory/context.js";
 import type { CostTracker } from "../cost.js";
@@ -80,6 +88,7 @@ interface AgentState {
   verbose: boolean;
   plan: boolean;
   hooks: TurnHooks;
+  spawner: AgentSpawner | null;
   /** Accumulated DM summaries while running, flushed on idle. */
   pendingDms: Array<{ from: string; content: string; timestamp: string }>;
   /** Track whether we've completed at least one task. */
@@ -120,29 +129,63 @@ async function initAgentState(payload: SpawnPayload): Promise<AgentState> {
   const registry = new ToolRegistry();
   registry.setPermissions({
     mode: permissions,
-    allowedPaths: [],
+    allowedPaths: payload.allowedPaths ?? [],
     projectRoot: payload.worktreePath ?? cwd,
+    sandboxMode: payload.sandboxMode,
   });
+  // Headless child: an "ask" verdict has no human to answer it, and the
+  // default readline prompt would hang forever on a closed stdin. Deny with
+  // a clear message instead (children normally run auto-confirm, so this
+  // only fires for the ask-category edge cases).
+  if (!process.stdin.isTTY) {
+    registry.askUser = async (toolName, _input, reason) => {
+      process.stderr.write(`[child] denied ${toolName} (needs approval, no interactive user): ${reason}\n`);
+      return false;
+    };
+  }
   registry.register(readFileTool);
   registry.register(writeFileTool);
   registry.register(editFileTool);
-  registry.register(shellTool);
+  // Children inherit the kernel write fence via the live registry config
+  registry.register(createShellTool(() => registry.permissionConfig));
   registry.register(taskOutputTool);
   registry.register(taskStopTool);
   registry.register(globTool);
   registry.register(grepTool);
+  if (modelSupportsVision(provider.name, provider.model ?? "")) {
+    registry.register(createReadImageTool(provider));
+  }
+  registry.register(createWebFetchTool());
+  registry.register(createWebSearchTool());
+  registry.register(updatePlanTool);
+  registry.register(listMcpResourcesTool);
+  registry.register(readMcpResourceTool);
 
   if (phrenCtx) {
     registry.register(createPhrenSearchTool(phrenCtx));
     registry.register(createPhrenFindingTool(phrenCtx, sessionId));
     registry.register(createPhrenGetTasksTool(phrenCtx));
     registry.register(createPhrenCompleteTaskTool(phrenCtx, sessionId));
+    registry.register(createPhrenAddTaskTool(phrenCtx, sessionId));
     registry.register(createSkillTool(phrenCtx));
   }
 
   registry.register(gitStatusTool);
   registry.register(gitDiffTool);
   registry.register(gitCommitTool);
+
+  // Cost tracker
+  const modelName = (provider as { model?: string }).model ?? model ?? provider.name;
+  const costTracker = createCostTracker(modelName, budget, provider.name);
+
+  let spawner: AgentSpawner | null = null;
+  const depth = payload.depth ?? 0;
+  if (depth < MAX_SPAWN_DEPTH) {
+    spawner = new AgentSpawner({ costTracker, depth, getPermissionDefaults: () => registry.permissionConfig });
+    registry.register(createSpawnAgentTool(spawner, () => registry.permissionConfig));
+    registry.register(createSendMessageTool(spawner));
+    registry.register(createListAgentsTool(spawner));
+  }
 
   // Apply agent type restrictions (tool allow/disallow lists, prompt prefix)
   if (payload.agentType) {
@@ -151,10 +194,6 @@ async function initAgentState(payload: SpawnPayload): Promise<AgentState> {
       applyAgentType(registry, typeDef);
     }
   }
-
-  // Cost tracker
-  const modelName = (provider as { model?: string }).model ?? model ?? provider.name;
-  const costTracker = createCostTracker(modelName, budget, provider.name);
 
   return {
     agentId,
@@ -168,13 +207,18 @@ async function initAgentState(payload: SpawnPayload): Promise<AgentState> {
     verbose,
     plan,
     hooks: createIpcHooks(agentId),
+    spawner,
     pendingDms: [],
     taskCount: 0,
   };
 }
 
 /** Run a single task. Returns the result. */
-async function runTask(state: AgentState, task: string): Promise<{ finalText: string; turns: number; toolCalls: number; totalCost?: string }> {
+async function runTask(state: AgentState, task: string): Promise<{ finalText: string; turns: number; toolCalls: number; totalCost?: string; inputTokens: number; outputTokens: number; costUsd: number }> {
+  const beforeInput = state.costTracker.totalInputTokens;
+  const beforeOutput = state.costTracker.totalOutputTokens;
+  const beforeCost = state.costTracker.totalCost;
+
   const config = {
     provider: state.provider,
     registry: state.registry,
@@ -195,6 +239,9 @@ async function runTask(state: AgentState, task: string): Promise<{ finalText: st
     turns: result.turns,
     toolCalls: result.toolCalls,
     totalCost: result.totalCost,
+    inputTokens: state.costTracker.totalInputTokens - beforeInput,
+    outputTokens: state.costTracker.totalOutputTokens - beforeOutput,
+    costUsd: state.costTracker.totalCost - beforeCost,
   };
 }
 
@@ -218,6 +265,9 @@ function shutdown(state: AgentState): void {
   if (state.phrenCtx && state.sessionId) {
     endSession(state.phrenCtx, state.sessionId, `Agent shut down after ${state.taskCount} tasks`);
   }
+
+  const spawner = state.spawner;
+  if (spawner) void spawner.shutdown().catch(() => {});
 
   send({ type: "shutdown_approved", agentId: state.agentId });
   process.exit(0);
@@ -392,6 +442,10 @@ process.on("message", (msg: ParentMessage) => {
     const agentId = agentState?.agentId ?? "unknown";
     send({ type: "error", agentId, error: err instanceof Error ? err.message : String(err) });
   });
+});
+
+process.on("disconnect", () => {
+  process.exit(0);
 });
 
 // If no IPC channel (run directly), exit with error

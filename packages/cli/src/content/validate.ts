@@ -1,3 +1,4 @@
+import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
@@ -5,10 +6,10 @@ import { execFileSync } from "child_process";
 import { debugLog, EXEC_TIMEOUT_MS, getProjectDirs } from "../shared.js";
 import { errorMessage } from "../utils.js";
 import { countActiveFindings } from "./archive.js";
-import { isTaskFileName } from "../data/tasks.js";
+import { isTaskFileName } from "../filenames.js";
 import { METADATA_REGEX } from "./metadata.js";
 import { getNonPrimaryStores, getStoreProjectDirs } from "../store-registry.js";
-import { FINDINGS_FILENAME } from "../data/access.js";
+import { FINDINGS_FILENAME } from "../filenames.js";
 
 /** Maximum allowed length for a single finding entry (token budget protection). */
 export const MAX_FINDING_LENGTH = 2000;
@@ -375,8 +376,13 @@ interface TaskRecord {
   continuations: string[];
 }
 
-/** Pattern for stable bid comment embedded in task lines. */
-const MERGE_BID_PATTERN = /<!--\s*bid:([a-z0-9]{8})\s*-->/;
+/**
+ * Pattern for the stable bid comment embedded in task lines. The comment carries
+ * more than the bid in real files (`<!-- bid:HASH rank:N created:... -->`), so the
+ * pattern must accept any trailing fields up to the closing `-->` — matching only
+ * `<!-- bid:HASH -->` silently disabled stable-ID dedup in the union merge.
+ */
+const MERGE_BID_PATTERN = /<!--\s*bid:([a-z0-9]{8})\b[^>]*-->/;
 
 /** Render a TaskRecord back to its original lines. */
 function renderTaskRecord(record: TaskRecord): string[] {
@@ -415,7 +421,10 @@ function parseTaskSections(content: string): Map<string, TaskRecord[]> {
         bullet: line,
         continuations: [],
       };
-    } else if (currentRecord && line.trim().startsWith("Context:")) {
+    } else if (currentRecord && line.startsWith("  ") && line.trim()) {
+      // Any indented, non-empty line belongs to the preceding task: Context:,
+      // GitHub:, sub-bullets. Keeping only Context: dropped GitHub links (and any
+      // future continuation field) from the merged file.
       currentRecord.continuations.push(line);
     } else {
       flush();
@@ -475,14 +484,24 @@ export function mergeTask(ours: string, theirs: string): string {
   return lines.join("\n");
 }
 
+/** The store paths whose record-oriented markdown can safely use union merge. */
+export function isAutoMergeableStorePath(relFile: string): boolean {
+  const normalized = relFile.replace(/\\/g, "/");
+  const filename = path.posix.basename(normalized).toLowerCase();
+  return filename === "findings.md"
+    || isTaskFileName(filename)
+    || /^\.config\/task-archive\/[^/]+\.md$/i.test(normalized);
+}
+
 /**
- * Attempt to auto-resolve git conflicts in FINDINGS.md and tasks.md files.
+ * Attempt to auto-resolve git conflicts in union-safe store markdown files.
  * Returns true if all conflicts were resolved, false if any remain.
  */
 export function autoMergeConflicts(phrenPath: string): boolean {
   let conflictedFiles: string[];
   try {
     const out = execFileSync("git", ["diff", "--name-only", "--diff-filter=U"], {
+      env: nonInteractiveGitEnv(),
       cwd: phrenPath,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
@@ -502,7 +521,7 @@ export function autoMergeConflicts(phrenPath: string): boolean {
     const fullPath = path.join(phrenPath, relFile);
     const filename = path.basename(relFile).toLowerCase();
 
-    const canAutoMerge = filename === "findings.md" || isTaskFileName(filename);
+    const canAutoMerge = isAutoMergeableStorePath(relFile);
     if (!canAutoMerge) {
       debugLog(`Cannot auto-merge: ${relFile} (not a known mergeable file)`);
       allResolved = false;
@@ -521,7 +540,7 @@ export function autoMergeConflicts(phrenPath: string): boolean {
       const tmpMergePath = fullPath + `.tmp-${crypto.randomUUID()}`;
       fs.writeFileSync(tmpMergePath, merged);
       fs.renameSync(tmpMergePath, fullPath);
-      execFileSync("git", ["add", "--", relFile], { cwd: phrenPath, stdio: ["ignore", "ignore", "ignore"], timeout: EXEC_TIMEOUT_MS });
+      execFileSync("git", ["add", "--", relFile], { env: nonInteractiveGitEnv(), cwd: phrenPath, stdio: ["ignore", "ignore", "ignore"], timeout: EXEC_TIMEOUT_MS });
       debugLog(`Auto-merged: ${relFile}`);
     } catch (err: unknown) {
       debugLog(`Failed to auto-merge ${relFile}: ${errorMessage(err)}`);

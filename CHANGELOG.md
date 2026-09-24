@@ -5,6 +5,1204 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+
+- iOS: Memory no longer drops to Connect project memory after the phone restarts. Before the first unlock after a restart the Keychain refuses every read, and iOS can launch phren in the background then (background refresh, a notification action, a Live Activity); the app read that refusal as "no token" and stayed signed out until it was quit. It now waits for the unlock and reads the token again. The token was never deleted.
+- Stores: joining a team store attaches it on this machine only. Team and readonly stores are listed in `.runtime/attached-stores.yaml`, which never syncs; the synced `stores.yaml` keeps only the primary store's entry. Before, `phren team join` wrote the team store into the synced `stores.yaml`, so every machine on the same personal store inherited it and `phren doctor` failed there forever ("declared but not attached", "needs credentials"). On first run a machine moves the synced team entries whose folder exists there into its own file and ignores the rest; the synced file is left for machines on older versions, and doctor names the entries it ignores. `phren team join` and `team init` say the store is attached on this machine only.
+- Doctor: the phren, Cursor, Codex and Copilot wrapper checks no longer report an installed wrapper as missing when doctor runs without the user's shell setup (over SSH, from a hook or a LaunchAgent) and `~/.local/bin` is added only by `.zshrc`. Such a wrapper is reported as installed but unconfirmed. Doctor fails only when the wrapper file is missing, or when another binary runs before it on a PATH that includes `~/.local/bin`, and then names that binary.
+
+- Hook: `POST /v1/speech` voices a sentence for the phone's talk mode with ElevenLabs (`eleven_flash_v2_5`, the River voice unless `PHREN_SPEECH_VOICE` names another) and streams it back as 24 kHz 16-bit mono PCM. The key comes from `elevenlabs_api_key` in `~/.config/mina-trailer.json`, is used only toward ElevenLabs and never returned; failures answer fixed messages with a `code` (`speech-unconfigured`, `speech-rejected`, `speech-quota`, `speech-busy` and others). Advertised as the `speech` capability.
+- Hook: `GET /v1/code/file-references?project=&path=` lists every resolved use made from one file, in line order, with the declaration each names as a file-qualified symbol (`file::Container.name`), its file and line, at most 5000 rows. `@phren/code` exports it as `fileReferences`; a Hook with an older `@phren/code` answers 503 with the update hint. The phone's code viewer uses it to make names tappable.
+- Conductor: dispatch returns. The dispatching Hook follows each dispatched worker's pane and records when it is done (with its final reply from the transcript, capped at 4000 bytes), needs you (its reply ends with a question), is blocked on terminal input, or is gone. The new `dispatch_returns` MCP tool and `phren dispatch returns` list unread returns and mark them read. When the agent that dispatched is idle, the Hook types one line into it ("Return: Linuxbox parser checks done, tests passed (dispatch <id>). Call dispatch_returns."), at most once every two minutes per pane and never into a working agent. The receiving Hook answers `POST /v1/dispatch/workers` from its shared Herdr snapshot; the dispatching Hook asks each computer once per 15 s for all of its open dispatches. The conductor brief now uses returns instead of promising manual supervision. The tested but unwired headless receiver, report outbox, report streams and question relay (about 1,320 lines) are removed.
+
+- Hook: a finished session can be committed, pushed and opened as a pull request from the phone. `POST /v1/git/commit` takes a required `message` and commits only what is staged (never `-a`, never `--no-verify`); a hook's refusal comes back as `{ ok: false, output }` with the hook's own output, interleaved as printed. `POST /v1/git/push` pushes the current branch to its upstream, or to `origin` with the upstream set, never forced; pushing the default branch (the remote's `HEAD`, else `main` or `master`) is refused with 409 unless the phone sends `confirmDefault: true`, and a rejected push returns Git's output. `POST /v1/git/pr` runs `gh pr create --fill` (optionally `draft`) and returns the URL, `existing: true` when the branch already has one, or `reason: "missing"` / `"auth"` when gh is not installed or not signed in. All three take `child` or `worktree` exactly like the other `/v1/git/*` routes. `/v1/git/pulls` adds `branch` and `current`, the checked-out branch's pull request in any state with its checks rolled up to `passing`, `failing` or `pending`, and `/v1/git/status` adds `defaultBranch`.
+- Hook: `WS /v1/overview` pushes the phone's overview instead of the phone polling `/v1/workspaces`. It sends the overview when its rows change, rebuilt from the shared Herdr snapshot (at most one 5 s tick old, so a connected phone adds no snapshots) when that snapshot changed or every 10 s, and a heartbeat every 20 s otherwise; `watchApprovals=1` renews the approval lease each tick. Advertised as `capabilities.overviewStream`. `GET /v1/workspaces` and the stream share one reader (`workspacesReader` in `server-routes.ts`); the stream is `server-overview.ts`.
+- iOS: phone performance work, measured in `docs/performance.md`. Every view reads live preferences through one store decoded once per change (preference reads in an idle heavy chat: 67.5 to 0 a second). One shared clock drives only elapsed-time labels; card, computer, details and project-session timelines are gone and freshness flips when an answer lands or ages out. The phone follows each computer's overview stream and polls only while it is down; the remaining periodic reads (usage, web servers, simulator screens, sub-agent trees, worker messages, reminders) share one timer. The chat screen reads no model fields in its body: header, transcript and composer each observe their own, and far rows fold without per-frame scroll work (hitch time during six heavy swipes: 860 to 208 ms). The code viewer colors only the lines it shows, once (2,000-line file: 49 lines on first render instead of 2,000 per render).
+- Hook: the Claude spinner line is read whole ("✻ Whirlpooling… (34s · ↓ 3.1k tokens · thinking)") and sent beside transcript frames as `activity: { verb, elapsed, tokens: { count, direction }, thinking, thoughtFor }`; `activityVerb` stays for older phones. A change of verb, tokens or thinking state sends a frame of its own (at most twice a second); the clock alone does not. The live reply preview also skips a spinner line drawn with `*` or `✦`.
+- Hook: Copilot transcript rows keep `phase` (Copilot 1.0.87 marks its final answer with `phase: "final_answer"` and writes no `session.idle`) and a tool run's `success`. A sanitized real 1.0.87 session is in `bridge/fixtures/copilot/1.0.87/`, and the backlog frame the Hook makes from it is the phone's `copilot-1.0.87-backlog.json` fixture (`PHREN_UPDATE_FIXTURES=1` rewrites it).
+- Hook: approval push is honest about its setup. `approvalPush: "direct-apns"` is advertised only while the Hook has loaded `apns.json` and its `.p8` key; phones may still register, and `POST /v1/push/register` answers `configured: false` until a key loads. `phren bridge doctor` reports `approvalPush` under checks and, when it is not configured, prints the exact setup steps as a warning. `docs/phren-hook.md` documents `apns.json` (`keyId`, `teamId`, `topic` `com.phren.ios`, `privateKeyPath`).
+- Hook: the live preview stops reading the pane as soon as the transcript ends the turn (a Claude reply with `stop_reason: "end_turn"` or a `turn_duration` record), even while the shared snapshot, up to 2.5 s old, still says working, and resumes on the next prompt. Codex stops its delta reads at `task_complete` until the next `task_started`. On a chat stream benchmarked against the previous build side by side, `agent.read` fell from 100.6 to 14 and from 99.2 to 37 a minute in two five-minute runs (`docs/performance.md`). `scripts/bench-hook.mjs --target` also takes commas, since Herdr tab and pane ids contain a colon.
+- Sync: a store merge that conflicts in `tasks.md` resolves it per task id against the merge base instead of leaving the store diverged. The side that changed a task wins; when both changed it, a completed side wins, then an edit over a removal, then the incoming side. Tasks added on either side stay in their section, and a task removed on one side and unchanged on the other is removed. The generated `## Now` block in `reference/topics/*.md` and the `What phren knows` block in `summary.md` take the incoming side while the rest of the file still merges line by line; `FINDINGS.md` and `.config/task-archive/*.md` keep both sides. Any other conflicted file aborts the merge, and `background-sync.log` names every such file.
+- Hook: `POST /v1/git/worktrees` lists the pane repository's other worktrees, where workers (sub-agents, fan-out jobs) keep their edits: branch, HEAD, commits ahead of and behind the pane's HEAD, uncommitted file count, and the worker when it can be named (a fan-out manifest whose `worktree` is it, or a Claude sub-agent from its `.meta.json` or sidechain `cwd`). Each row has an opaque `id` that the other `/v1/git/*` routes, `/v1/diff` and `/v1/files/range` accept as `worktree`, resolved only against `git worktree list`, never a phone-supplied path. A Claude sub-agent's relation now carries its own worktree, so its Changes shows that checkout instead of the parent's. `POST /v1/git/tree` takes `ignored: true` to add git-ignored folders and files, marked `ignored`.
+- Hook: a model switch sets Claude's effort too. With `effort` the Hook confirms `/model <id>`, then sends `/effort <level>` (Claude Code 2.1.280 takes low, medium, high, xhigh or max, as the model allows) and waits for "Set effort level to" below that model line. A cap's lower level is reported as the effort set; an override by `CLAUDE_CODE_EFFORT_LEVEL`, a refusal or no reply fails the switch. A level the catalogue does not list for the model is refused before anything is typed. Codex's effort is still chosen in its `/model` menu's reasoning step. Claude's `/model` and `/effort` save the choice as the default for new sessions, as they do when typed.
+- Hook: Claude's model confirmation also matches a line drawn with Claude's `⎿` result marker.
+- Hook: Claude Code's `/btw` side questions work from the phone, including while Claude is working. Claude 2.1.280 writes nothing of a side question to its session file, so the Hook reads the answer panel from the pane, scrolls a long answer to its end, closes the panel with Escape (only while it is drawn) and streams `{type: "side-answer", id, question, state, answer}` on the conversation's transcript socket when the phone opens it with `sideAnswers=1`. Other slash commands are still refused while a pane works, and every other input waits while a side question is open. `POST /v1/side-question/dismiss` cancels or forgets one. The recorded panel is in `bridge/fixtures/claude/2.1.280/`.
+- Hook: the Claude live preview also stops at a narrow pane's titled rule (a single dash above the input prompt) and skips running tool lines that carry a suffix ("Calling phren… (ctrl+o to expand)").
+- `live_sessions` recognizes this computer by its hostname, the hostname's first label and its Bonjour name, and a peer by its hooks.yaml name or address, so only computers that really have no link show as `notLinked`.
+- Hook: `POST /v1/workspaces/launch` takes `worktree: { branch }` for an agent launch. It runs `git worktree add -b <branch> <repo>/.claude/worktrees/<name>` from the project's current HEAD and starts the agent in that worktree (in the project's own subfolder when the project is part of a larger repository), and the reply names `worktree: { path, branch }`. A folder that is not a Git repository, a repository with no commits, a branch or worktree folder that already exists and an invalid branch name are refused before Herdr creates anything; a conductor never starts in a worktree. `/v1/git/worktrees` names a worktree's worker from the Herdr agent running in it too, and a worker inside a nested `.claude/worktrees/*` checkout no longer labels the primary checkout around it.
+- `live_sessions` and `phren dispatch sessions` compare a registered computer by its first DNS label, ignoring case, so `Desk.local` or a DHCP name such as `Desk.example.net` counts as this computer or as a linked peer (its name, address or the aliases its Hook reports). Registered names that share a first label are one `notLinked` entry, `{ name, aliases }`, instead of one per name.
+- Hook: less polling of Herdr, git and the disk, measured with `scripts/bench-hook.mjs` against the 2026-09-22 baseline. Open chat and status streams share one `session.snapshot` per Herdr server per 2.5 s (`PHREN_SNAPSHOT_SHARE_MS`) instead of taking one each every 500 ms: 131.6 to 20 a minute with one chat open, and more chats add none; a pane that disappears or changes conversation still closes the stream within that window. The overview skips `pane.process_info` for panes whose agent reports its session id (60 to 0 a minute), the activity timer reuses the Herdr server list for 30 s (`ping` 60 to 10 a minute), and a pane's branch is kept while its HEAD file is unchanged (git spawns during overview 15 to 0.6 a minute). All Herdr calls: idle 72 to 22, one chat 277 to 129, overview polling 152 to 30 a minute. The opencode approval sweep reads request files asynchronously and its backup poll skips when no opencode pane is running; the MCP server's periodic pull reads HEAD once per tick instead of twice. Details in `docs/performance.md`.
+
+- Internal: the Hook's largest files are split along their seams, with no behavior change and the original modules re-exporting what callers import. `server.ts` keeps startup wiring and timers; the HTTP routes live in `server-routes.ts` and `server-pane-routes.ts`, the WebSocket stream in `server-stream.ts` and workspace launches in `server-launch.ts`. `agent-hooks.ts` keeps the `AgentHooks` class, with terminal-choice parsing in `terminal-choice.ts`, opencode approval files in `opencode-approvals.ts` and the binding and push stores in `agent-hook-stores.ts` (which also removes the `agent-hooks`/`herdr` import cycle). `schedules.ts` keeps the `Scheduler`, with `schedule-format.ts`, `schedule-launch.ts` and `schedule-watch.ts` beside it, and `transcripts.ts` dispatches to one reader per harness (`transcript-claude.ts`, `transcript-codex.ts`, `transcript-opencode.ts`, `transcript-copilot.ts`).
+- Hook: `GET /v1/metrics` returns in-memory counters since start (Herdr RPCs by method, identity probes, git child processes by caller, timer ticks by name) with totals and per-minute rates. `scripts/bench-hook.mjs` samples it with the Hook's CPU and RSS while idle, with one chat stream open and with overview polling, read-only; an opt-in iOS UI test (`PHREN_RUN_PERF=1`) times opening and swiping the heavy chat and opening Agents. Baselines are in `docs/performance.md`.
+- Internal: one implementation per helper. `stripTerminal` removes CSI, OSC and carriage returns for the shell, the scheduler, the live preview, OpenCode usage and the model switch; `home-paths.ts` resolves the home, Claude config and Codex home directories; the bridge's temp-and-rename writes go through `atomic`; `findPane` and `readPaneText` are the only Herdr pane lookup and pane-text reader; the three tokenizers are named for what they do.
+- Hook: a scheduled run whose agent finishes its turn is recorded as finished again. Herdr reports a finished turn as `done` until someone looks at the pane, and the watcher counted that as the agent stopping early ("The scheduled agent stopped before the prompt finished."). When the finished turn's last reply asks the owner something (a closing question, or numbered options introduced as a choice), the run is recorded as `needs-you` with the question's first line as its reason; `/v1/schedules/history` returns it and the finish notification says "needs you".
+- Conductor: `live_sessions` and `phren dispatch sessions` return `notLinked`, the computers in the store's `machines.yaml` with no `hooks.yaml` link, so an unlinked computer reads as not checked rather than idle, and each session's `idleFor` (seconds since its tab last changed). The conductor brief starts by checking `phren --version` and `command -v phren` and says so when the install is stale.
+- CLI: `phren --help all` (and `-h <topic>`) prints the same help as `phren help all`. `update_task` / `manage_task` with `item` placed inside `updates` says that `item` is a top-level parameter instead of "item is required".
+- Fan-out: `phren bridge fanouts archive` takes `--parent <session-id>` and `--older-than <minutes>`, and `POST /v1/subagents/archive-finished` archives one live parent's finished workers now, both under the sweep's checks (exit stamp, no message lock, no queued messages).
+- Hook: the Claude live preview also skips a running tool group ("⏺ Running 2 agents…") and its sub-agent tree.
+- Hook: failures say their real cause. A broken `hooks.yaml` no longer hides remote agents silently: `/v1/subagents` and `live_sessions` keep working with local agents and return `peerError`. `anywhere` dispatch lists peers that could not report capacity, with the reason, in the receipt's `skipped` (and in the error when none is left). A transcript stream closes with "The conversation changed" only on a real target change; I/O, parse and git errors close with their own bounded message. Herdr socket errors name the errno (ENOENT: not running, ECONNREFUSED: stale socket, EACCES: permissions); an offline peer keeps ssh's first stderr line and exit code; a scheduled run's watch failure reports its actual error instead of "Herdr disconnected"; OpenCode usage says whether it is not installed, not signed in or failing. Optional pane reads, the dispatch ledger listing and Codex folder trust log their failure reason instead of dropping it.
+- Sync: every background sync, periodic pull and session-start pull writes its outcome to `background-sync.log` (ok or failed, the error's first line, and ahead/behind from `git rev-list --left-right --count HEAD...@{u}`), and runtime health keeps `ahead`/`behind` per store. `phren doctor`'s `runtime-auto-save` check and `phren status` now say, for example, "sync failed: merge conflict in phren/tasks.md (ahead 23, behind 140)". A corrupt `pull-poll.json` is logged and moved aside instead of silently resetting.
+- Tests: the Hook's fake Herdr now answers in shapes recorded from Herdr 0.9.1 (agent names in the snapshot's `agents` list, `pane.read`, string error codes, schema-checked requests) and draws Codex 0.155.1's recorded `/permissions` screens. `PHREN_IDENTITY_CACHE_MS` and `PHREN_DIALOG_THROTTLE_MS` let tests shorten the 2 s and 3 s windows instead of sleeping through them, and the suite no longer writes into the developer's real `~/.phren/.runtime/debug.log`. A launch's shortest agent start timeout is now 3001 ms, since Herdr 0.9.1 refuses 3000. iOS UI tests run serially, and the store and trailer tours run only with `PHREN_RUN_TOURS=1`.
+- Hook: `GET /v1/health/details` reports tool versions, store sync (ahead/behind without fetching, last sync failure), the last scheduled run, each peer's reachability and whether it lists this computer back, approval push and the last canary. `phren status` prints the same data under Health.
+- Hook: `phren canary` and `POST /v1/canary` launch and close a Claude conductor in a temporary folder, check schedules parse and the scheduler ticks, read one idle transcript and list live sessions everywhere, saving each step's outcome to `canary.json`. Daily when `PHREN_CANARY_DAILY=1` or `phren canary --daily on`.
+- Conductor: new `live_sessions` MCP tool and `phren dispatch sessions` list live agents on this and every enrolled computer, with the target `hand_off` takes. The conductor brief now names the whole store as its scope and lists its tools, so it stops probing the CLI. A conductor labeled "Conductor" is named `conductor` in Herdr, not `conductor-conductor`.
+- Hook: a conductor is recognized by the name Herdr keeps in its `agents` list as well as on the pane, so it pins to the top of Agents again and a second conductor is refused.
+- Hook: a Claude conductor reads its brief with `--append-system-prompt-file` (Herdr refuses a multi-line argument for zsh); the Claude live preview also skips collapsed tool groups (a `⏺` line followed by `⎿`) and stops at the input box's titled rule.
+- Hook: the Claude live preview skips tool-call lines and reads Claude's spinner verb, sent beside transcript frames as `activityVerb` (older phones ignore it).
+- Hook: a launch whose label matches a live agent gets its own Herdr name (`sr-requests-2`) instead of colliding; a scheduled run waits for the agent to finish starting before it sends the prompt; Herdr's own error text reaches the phone.
+- Hook: an agent that Herdr reports as held at a first-run screen (Claude's folder trust, for one) counts as launched, so its pane comes back to the phone to answer instead of failing and stranding the workspace.
+- Hook: agent launches take `effort` too (`--effort`, `model_reasoning_effort` or `--variant`), with minimal, xhigh and max accepted; `/v1/models` gives Claude models their `--effort` levels and default from Claude Code's catalogue.
+- Hook: `/v1/workspaces/launch` with `role: "conductor"` and no `cwd` or `project` starts the conductor in this computer's phren store.
+- Git tree routes share a bounded repository snapshot keyed by HEAD and a status hash, return one directory with descendant file counts, and avoid full diff statistics on folder opens. Status refresh and mutations invalidate the cache; external edits expire after two seconds.
+- iOS: a finished chat turn that changed files ends with a "N files changed +A −B" row that opens the turn's combined diff, one card per file, each opening its own full diff. The change set is read from the transcript (edit tool patches and the Hook's `phren_changes` under shell calls), not from git, so another agent editing the same checkout is not counted. No new Hook route.
+- Tasks: the prompt hook no longer files or touches tasks from prompts nobody typed. Sub-agent hand-backs (`<agent-message>`), `[SYSTEM NOTIFICATION]` lines, `<task-notification>` and `<system-reminder>` frames are skipped anywhere in the prompt. The Stop hook no longer marks the session's auto-captured task Done after each saved turn, which had closed real work as soon as the next prompt arrived; the task stays open until it is completed explicitly.
+- Tasks: text inside `<pasted_content>` wrappers (a paste, a phone message, a message relayed into the pane) and messages relayed from another agent ("From the conductor, a correction: ...", "From tidy-phren: ...") no longer file a task; only what was typed outside a paste counts. A prompt that matches an existing task, including the session's tracked one, moves it to Active but no longer rewrites its Context or GitHub link (a relayed message had replaced an Active task's Context three times).
+- Store: every commit Phren makes in the store (session auto-save, sync pulls, `push_changes`, team sync, the web UI's sync, projects added from the phone) ends with the machine's name in brackets, as in `phren: demo(findings) [Desk]`, so `git log` on a synced store shows which computer wrote each change.
+- MCP: composite tools (`manage_task`, `revise_finding`, `session`, `phren_admin`) keep array and object arguments intact, and decode the JSON strings a host sends for arguments the composite leaves untyped, so `manage_task` completes every item of `item: ["bid:a", "bid:b"]` and takes `updates: {section: "Queue"}`. A stringified number or boolean is decoded where the target field needs one.
+- Hook: `phren bridge install` over SSH on a Mac with no one logged in at the screen loads the LaunchAgent into `user/<uid>` (there is no `gui/<uid>` domain then) and says to run it again after a screen login; with a screen session it still uses `gui/<uid>`. It kickstarts the job after bootstrap, boots out both domains before an update, and when launchd refuses or the Hook does not become ready the error prints the `launchctl bootout`, `bootstrap` and `kickstart -k` lines for that domain.
+
+### Added
+
+- Child worker messages use `POST /v1/subagents/resume`, validated against the live parent and the Hook's own store. Finished Codex and OpenCode workers resume their saved sessions in the original worktree as another round of the same job. Running workers keep durable queued messages, exposed by `GET /v1/subagents/messages`.
+- `GET /v1/files/range` reads up to 4 MiB from verified project checkouts, pane repositories or bridge uploads, including git-ignored output. Zero-length reads check existence; total size, content type and version tokens support resumable phone downloads. Traversal and symlink escapes are rejected.
+
+- Code home opens on indexed files with directory counts, languages, index time and reindex. New Hook routes provide tree summaries, paged usage across every symbol and recent symbol changes; search accepts a directory scope and a type family. Symbol fingerprints retain change times across unchanged scans.
+
+- Live reply previews on the transcript socket: Claude pane text and Codex/OpenCode delta text update at most twice a second, stay out of history, and give way to the completed entry.
+
+- `GET /v1/code/outline-summary?project=&paths=` batches symbol totals and leading kinds for files and directories. Code reads and notes accept a registered store selector; file-qualified symbol queries keep a tree dossier on the selected file, and notes retain their explicit session recipient.
+
+- Code dossier notes save symbol-cited findings and optionally hand off to a live session or dispatch a worker through `POST /v1/code/note`.
+
+- Finished fan-out jobs archive after 24 hours when an exit code and terminal
+  state are present. The archive keeps 500 folders; missing manifests gain a
+  failure record. Run `phren bridge fanouts archive [--dry-run]` manually.
+  See `docs/fanout.md`.
+- The `code` module provides a per-project SQLite symbol and reference index
+  for TypeScript, TSX, JavaScript, Swift, Python, Rust, Go, Ruby and Bash, with
+  a line-based fallback for other files. `phren code index|status` maintains
+  it; five MCP tools and `search|def|refs|outline|usage` commands query it.
+  Six `/v1/code/*` Hook routes expose it to clients. File changes trigger a
+  500 ms debounced reindex and HEAD changes trigger a full scan.
+  See `docs/code-index.md`.
+- Finished fan-out jobs archive themselves. The Hook sweeps the store's
+  `.runtime/agent-fanouts` at start and then hourly, moving a folder whose
+  manifest status is completed, failed or cancelled and whose `finishedAt`
+  (or `exit.txt` mtime when there is none) is more than 24 hours old into
+  `.runtime/agent-fanouts-archive/<job id>`. A folder with no manifest goes
+  there too once its `exit.txt` is that old, gaining a synthesized manifest
+  `{ "status": "failed", "reason": "no manifest" }`. A folder without
+  `exit.txt` is still running and is never touched. The archive keeps at most
+  500 folders, deleting the oldest beyond that, and one log line records each
+  sweep that moved anything. Run the sweep by hand with
+  `phren bridge fanouts archive [--dry-run]`. See `docs/fanout.md`.
+- The `code` module now serves its symbol index to the phone. Phren Hook adds
+  `GET /v1/code/status`, `/v1/code/search`, `/v1/code/outline`,
+  `/v1/code/definition`, `/v1/code/references` and `/v1/code/usage`, gated by the
+  module like the other routes and advertised as the `code` capability. The Hook
+  re-indexes a project after the git module records a file change, debounced 500
+  ms, and runs a full re-index when the repository's HEAD moves. The iPhone adds
+  a Code cell to the project page, symbol search and a symbol dossier. See
+  `docs/code-index.md`.
+
+### Changed
+
+- The graph dossier's Edit and Delete are icon buttons in its header beside
+  Close (pencil; trash in the danger tint) instead of text buttons in the
+  actions row, and Previous and Next chevrons in the same header walk the
+  current ranked list: the project's findings newest date first, then its
+  tasks, the order the list mode shows, wrapping at both ends. `←`/`→` on the
+  keyboard do the same walk while a node dossier is open. Every target stays
+  44px; the buttons are labelled `Edit`, `Delete`, `Previous node` and
+  `Next node`.
+
+- Phren Hook's Claude model catalogue is Claude Code's own `/model` menu, kept
+  as a maintained table in the Hook: Fable 5.1 (the default), Opus 5, Sonnet 5,
+  Haiku 4.5 and Fable 5.1 (1M context), each with the exact display name and id
+  the terminal shows, instead of ids scanned from local transcripts plus family
+  aliases. Codex and OpenCode keep their live catalogues in the same shape.
+
+### Fixed
+
+- Memory viewer: the camera stays on the node it was sent to when the graph is laid out again. The layout depends on which nodes are shown, so a Focus neighbourhood, a refresh, a filter or a delete moved every node while the camera kept its old pose: after Focus the focused node was left off screen. A selected node is recentred in the free space above the dossier and a revealed node is flown to again, until the user pans, orbits or pinches.
+- Memory viewer: a tap selects the node under the finger. force-graph resolved a click to the object it last hovered, which it updates on a throttled render tick and which a touch never moves before it lands, so a tap selected the node under the previous tap, or nothing. The viewer now picks at the tap's own position, and of overlapping dots it takes the one whose centre is closest.
+- Project counts mean the same thing on every surface: everything a project
+  holds (live findings, team journal findings and the whole archive) and every
+  open task, from one shared count (`projectMemoryCounts`). The web UI graph,
+  its project list, VS Code's graph (through a new `counts` field on
+  `get_project_summary`), the shell's graph and projects dashboard all showed
+  only the findings they happened to draw, so most projects read 20. The
+  `summary.md` archived count now includes the older halves of split topic
+  files (`<topic>.older.md`), which it skipped.
+- Claude's narration now reaches the phone. Opus 5.5 writes its short progress
+  notes (the lines Claude Code's terminal shows between tool calls) as thinking
+  blocks marked as narration, and the Hook dropped every thinking block, so
+  those lines were missing from the chat. Narration now passes through as text;
+  private reasoning, which Claude Code stores without text and marks as
+  thinking, stays redacted.
+- Model switches use a verified `/v1/model` route. Codex walks its model and reasoning menus and checks the status line, Claude keeps its alias command, and unsupported OpenCode selection is refused. Working panes reject slash commands before typing them.
+- Store sync remembers authentication failures locally, backs off retries from one hour to one day, and reports "needs credentials" with the exact remote in status and doctor. All phren Git commands disable terminal and askpass prompts. `phren doctor --fix` asks before unregistering a non-primary store whose authentication has failed for more than a week; local files are kept.
+
+- The phone's Claude model picker reads Claude Code's own cached `/model`
+  catalogue (`~/.claude/cache/model-catalog/*-cc.json`), so a new model such as
+  Opus 5.5 appears as soon as the terminal knows it, with the terminal's names,
+  order and default, a 1M row for the default, and nothing the installed client
+  is too old for. The built-in table is only the fallback when no catalogue is
+  cached on that computer.
+- Codex terminal menus without shortcut keys use Up or Down from the live highlighted row, verify the target before Enter, and retry movement once. Unreadable selections offer Open terminal; failed verification reports an error without confirming a different option.
+
+- The Hook separates numbered terminal option labels from descriptions, including structured option descriptions. Held Codex MCP approvals keep arguments in details, resolve matching terminal choices and keys, and flag unresolved prompts for terminal access.
+- Worker rows include finish timestamps and a failure flag so phone lists can age out failures without changing the Hook's 24-hour archive policy.
+
+- The SSH gateway no longer forwards the client's EOF as a half-close: node's
+  HTTP server aborts a half-closed connection whose reply has not started, so a
+  large upload whose sender closed its write side right after the body came
+  back empty. The gateway now waits for the Hook to close the socket after its
+  answer. Covered by a gateway test that uploads 400 KB with and without EOF.
+- A Codex prompt drawn in the pane, such as "Would you like to run the
+  following command?", reaches the phone as a choice card again: the Hook reads
+  Codex's own numbered rows (including the `>` cursor marker), keeps the key in
+  trailing parentheses (`y`, `p`, `n`, `esc`, a digit) as the option's key and
+  the row number otherwise, and joins every non-empty line above the first row
+  (the `$ command` line included) as the title. Answering sends that key through
+  `/v1/keys` and clears the card, which also clears when the pane leaves waiting.
+  The status frame flags `passwordPrompt` only when the pane's last non-empty
+  line is a password read (`Password:` or `[sudo] password for`), so the phone
+  stops offering its secret sheet for a prompt that never asked for one.
+- A store pull's union merge of `tasks.md` recognized the stable ID only in the
+  short `<!-- bid:HASH -->` comment, so real lines carrying `rank:`, `created:`
+  and the rest were keyed by their whole bullet: the same task came back twice
+  when the two sides differed, and the `GitHub:` continuation line was dropped
+  from the merged file. The merge now reads the full metadata comment for the
+  stable ID and preserves every indented continuation line, so a task keeps its
+  identity, its context and its issue link across a pull.
+- A blocked fan-out worker's `blocked:` reason now reaches the phone in the
+  `/v1/subagents` projection, so a refused permission draws as failed with the
+  type and pattern rather than as a completed worker.
+- The optional `@phren/code` loader now works from the Hook bundle, which runs
+  with no node_modules: it resolves `PHREN_CODE_PACKAGE`, the bridge's own
+  node_modules, `<store>/.runtime/packages/node_modules/@phren/code`, a plain
+  import, then `npm root -g` searched with the mise and Homebrew shims, and
+  reports the path that worked in `/v1/health` as `codePackage`. `phren modules
+  enable code` links a workspace checkout at `packages/code` or installs into
+  the store's `.runtime/packages`, so enabling no longer depends on a global
+  install a service-manager PATH can hide.
+- The phone reaches a loaded computer in milliseconds: the SSH forced command
+  is a small POSIX shell gateway that forwards the phone's byte pipe straight to
+  the Hook socket through `socat` or `nc -U` when the installer finds one, and
+  only falls back to the node gateway otherwise. The installer records and
+  prints the choice in `installed.json`. The launchd plist and systemd unit now
+  run the Hook at `Nice -5` so the daemon wins the CPU against its workers.
+  `GET /v1/health` reports the 1-minute load average and CPU count (`load`) and
+  the node gateway's own startup cost (`gatewayMs`), and the iPhone shows such a
+  computer as "Slow to answer" instead of unreachable, keeping the last
+  snapshot visible.
+- Codex 0.155 code-mode tool calls (one generic JS source that invokes
+  `tools.apply_patch`, `tools.shell` or `tools.read`) no longer draw as an opaque
+  Tools pill with `+0 -0`. The Hook resolves each invocation into an ordinary
+  `apply_patch`, `shell` or `read` call, unescaping the JS string and keeping the
+  original source under `input.source`; several calls in one source emit several
+  in order, and the result stays with the first.
+- Claude Code's AskUserQuestion that falls back to the terminal is now asked on
+  the phone as its own question card instead of raw JSON: the Hook remembers the
+  normalized questions and answers each one with the option's digit, advancing
+  with Tab and submitting the last with Enter. The transcript's AskUserQuestion
+  tool row is no longer drawn beside the card.
+- Codex 0.155's own subagents (a Codex thread spawning Codex threads) are back in
+  the agent tree, the worker counts and hand-off targets: the thread-store
+  materializer now carries the subagent activity rows and each child's parent link.
+- A `.config/modules.yaml` key for a module this Hook build does not know (a
+  newer CLI enabled it) no longer makes `phren-hook ssh` and `serve` exit with
+  `Unknown module`, which showed every phone Offline on every computer. The
+  unknown key is ignored with one warning line on stderr naming the key and the
+  Hook version, and every known module keeps its value. `phren modules enable
+  <name>` now also warns, without refusing, when the installed Hook recorded in
+  `<bridge>/installed.json` is older than the module's version in the manifest.
+
+- The chat /model picker no longer flashes a built-in list (or another harness's)
+  before the computer answers: it holds a "Loading models from <computer>" row
+  until `/v1/models` replies, then shows that catalogue with the models this
+  phone used for the harness recently first (a remembered id the catalogue
+  dropped still leads as its own row) and the default marked with its chip.
+  The row checked is the session's exact model id, so the 1M context variant
+  is never mistaken for the plain one. The per-harness built-in list appears
+  only when the route fails or answers empty, each row marked "built-in"
+  beside its default chip.
+- An opencode permission ask reaches the phone as a push. The Hook watches the
+  approvals directory, maps a new request to its pane through the recorded
+  session binding (or Herdr's opencode session id), sends the same kind of
+  binding-backed alert a held Claude request sends, and writes the plugin's
+  answer file when the phone approves or denies it. The alert carries the ask's
+  title and message, so an external_directory ask reads
+  `external_directory: <pattern>`.
+- A fan-out worker whose permission the plugin refused no longer looks
+  finished. The plugin writes `blocked.json` when it denies under
+  `PHREN_FANOUT_JOB`, and the Hook reports the child as failed with the reason
+  `blocked: <type> <pattern>` even when `exit.txt` says 0, carries the reason on
+  the child row, and pushes a notification naming the blocked worker.
+- The phone's agent tree lists the newest fan-out workers first, so a computer with more
+  than 128 finished jobs on disk no longer hides the ones running now.
+- A Codex approval or terminal dialog whose command and options the Hook could
+  read is published to the phone as a structured question instead of a bare
+  approval, so the chat can ask it with its real choices and answer by the
+  option's own key (`y`, `p`, `Esc`); the `p` answer is accepted by `/v1/keys`.
+- A dispatch whose remote agent had not written its session yet when the launch
+  returned reported an uncertain delivery without sending the brief; the dispatch now
+  waits up to fifteen seconds for the pane's session before sending.
+- Launching an agent from the phone or a dispatch with a label Herdr cannot use as an
+  agent name (spaces, capitals, more than 32 characters) failed with "Herdr reported an
+  error"; the Hook now derives a valid agent name from the label.
+- Git run by phren never prompts for credentials. A store with an HTTPS remote and
+  no credential helper used to make the session-start sync ask for a GitHub username
+  in the agent's pane, so Codex and OpenCode never reached their first prompt on that
+  computer and every launch from the phone or a dispatch reported a failure.
+- Account usage no longer breaks a phone that predates OpenCode Go: the phone names the
+  sources it understands and an older one keeps getting the original four.
+- A Claude subagent the orchestrator stopped leaves the phone's running count; its
+  "killed" notification now counts as finished like a completed one.
+- A store that was never set up stays that way: the modules migration no longer creates
+  `.config` on it, so `phren add` still says to run `phren init`, and module gating
+  falls back to the unscoped view while `phren init` is creating the profiles.
+- Store sync now merges divergent commits with union handling for findings and
+  tasks, aborts unresolved merges cleanly, and leaves existing Git operations
+  untouched. Module migration backups now stay under `.runtime/`.
+- The Hook's OpenCode plugin updates with the Hook. The plugin now rides inside the
+  Hook bundle, carries an "Installed by Phren Hook" first line, and an installed copy
+  with that line is replaced on update while a copy you wrote yourself is left alone.
+- OpenCode fan-out workers no longer stall on permission prompts. A headless worker's
+  edits, commands and fetches in its own worktree are granted by the Hook's OpenCode
+  plugin and anything else is refused at once instead of timing out after 50 seconds.
+- The Claude model list the phone shows matches Claude Code's own /model menu:
+  exact models, default first, an alias only for a family with no exact id.
+- The menu window the Hook opens after a bare slash command stays open through
+  Enter, so a choice that opens a second confirmation (Codex full access) can
+  still be answered from the phone; Escape closes it.
+- The periodic store pull commits uncommitted writes (a task from `add_task`,
+  a new finding) before it fetches or merges, so a managed sync can no longer
+  discard or block on a write that arrived moments earlier; a divergent remote
+  is merged instead of deferred, and conflicting `tasks.md` and `FINDINGS.md`
+  keep both sides' bullets. Each pull records what it did in
+  `background-sync.log`.
+- `phren code index` no longer fails with "repository path does not exist" on a
+  computer whose checkout sits at a different path than the store records. The
+  indexer, the Hook's re-indexer and the CLI resolve the repository the way the
+  Hook locates a project's checkout: this machine's registered path first, then
+  the store's sourcePath, with `--repo` still overriding, and the index records
+  the checkout it used in `repo_root` when it differs.
+
+### Added
+
+- Conductor sessions can be launched from the phone with a chosen Claude,
+  Codex or OpenCode harness and effort, are marked in workspace overviews, and
+  are limited to one running conductor per store. The new `hand_off` MCP tool,
+  `phren_admin` action and `phren hand-off` command send work to an existing
+  local or enrolled-computer session.
+- Code findings can carry `symbol:` citations. An unambiguous symbol name
+  attaches automatically; explicit unresolved citations remain marked for
+  review. Definitions list citing findings and memory tools return citations.
+- Schedule notifications: a schedule's optional `notify` list (`start`, `finish`,
+  `failure`; finish and failure when absent) makes the Hook push each run's
+  start, finish or failure to registered phones through the approvals' APNs
+  configuration, one collapse id per run and notification kind. A run records `notified` and, when
+  nothing was sent, `notifyReason`; a missing push configuration is logged and
+  never interrupts the scheduled agent.
+- Modules: phren's features are switchable per store and profile. Memory and
+  tasks stay on; conductor, schedules and the rest can be turned off, the MCP
+  and CLI surfaces shrink to match, the Hook reports its capabilities so the
+  phone hides what a computer does not run, and `phren modules list` shows
+  what is on and why. Existing installs migrate once.
+- Internal conductor adapters cover headless workers, question relay and a
+  durable report outbox. They are not connected to dispatch placement yet;
+  see `docs/conductor.md` for the current integration boundary.
+- The workspace overview reports each pane's running fan-out workers and
+  their providers, so the phone can count them.
+- Phren Hook records OpenCode Go spend per model over 5 hours, 7 days and
+  30 days, with limits when the plan reports them.
+- Conductor dispatch receipts can retain a validated local conversation parent
+  and durable remote computer identity, while `/v1/subagents` projects remote
+  leads and their bounded local fan-out trees without exporting checkout paths.
+- Computer enrollment for Phren Hook with reusable private ed25519 keys and
+  restricted public-key acceptance, pinned peers in `hooks.yaml`, and remote
+  placement through `/v1/dispatch`, `phren dispatch` and the `dispatch` MCP
+  tool. Placement resolves projects on the receiving computer and keeps
+  uncertain deliveries in `phren dispatch status` without retrying.
+- Scheduled prompts: project `schedules.yaml` files, local-time interval,
+  daily, weekly, once and cron evaluation, Herdr or headless execution, Hook
+  list/run/history routes, and `phren schedule` management commands.
+- Phren Hook reports a Codex thread whose history stopped persisting.
+- Phren Hook accepts answer keys for a prompt it remembered (a permission
+  request it could not hold) even while Herdr still reads the pane as working;
+  the phone no longer gets 'This agent is not waiting for an answer'.
+- Phren Hook serves git status, log, branches, pull requests, a working tree
+  listing and stage, unstage and discard for the phone's Changes screen,
+  bound to the pane's repository.
+- Phren Hook reports each agent pane's model in the workspace overview and
+  keeps temp paths and shell variable prefixes out of the lock screen step.
+- OpenCode worker transcripts keep MCP tool inputs and show changed-file
+  diffs under edit, write and patch calls.
+- The Hook model catalogue lists OpenCode Go models first and marks the
+  configured default for OpenCode sessions.
+- Phren Hook reports a compacting Claude Code conversation to the phone and
+  exports compaction as a marker row instead of the full summary.
+- Phren Hook follows a spawned agent's transcript live: `WS /v1/transcripts`
+  and `GET /v1/transcripts/history` take `child=<id>` from `/v1/subagents`,
+  bound to the parent conversation. Child rows are served as that
+  conversation's own turns, so a completed Claude Code subagent's transcript
+  no longer arrives as sidechain rows the phone hides; a launch whose file
+  has not been written yet is rechecked instead of cached as missing.
+- Direct APNs delivery for agent permission requests while the iPhone app is
+  suspended. Phones register over the authenticated SSH gateway; notification
+  actions use one-time expiring bindings and never expose commands or provider
+  action identities to APNs.
+- opencode joins Codex, Claude Code, and Copilot as a supported agent. Phren
+  Hook can launch it, and `phren bridge install` writes an opencode plugin that
+  mirrors sessions into the store's `.runtime/sessions` so the iOS app can read
+  them. Identity needs `herdr integration install opencode` on the computer.
+- Codex CLI fan-outs now appear as child agents beside OpenCode ones: a
+  `provider: "codex"` manifest with a `codex exec --json` event log is read as
+  a child transcript.
+- `/v1/diff` takes `child=<id>` from `/v1/subagents` to return that spawned
+  agent's whole repository diff: its own worktree for a fan-out, the parent's
+  checkout otherwise.
+
+### Changed
+
+- The phone Hook bundle carries only what the Hook runs: `phren init`, the agent hooks
+  installer, governance policy, the doctor and the FTS indexer left it (86 source files
+  and the glob package), 1.5 MB down to 1.25 MB. One definition each for the git, path,
+  atomic-write and task-text helpers that had two or three copies.
+- Codex fan-out child transcripts export the shell command, a bounded output
+  tail, and the changed paths, and `/v1/subagents` reports a fan-out's model
+  when its manifest names one.
+- Fan-out children returned by `/v1/subagents` report their worktree folder
+  name and attached branch without exposing the filesystem path.
+- `phren config proactivity <level> --scope findings|tasks` sets the
+  findings-only or task-only auto-capture level; `proactivity.findings` and
+  `proactivity.tasks` now appear in `phren config --help` and the command
+  registry. `set_config` domain `proactivity` already took `scope`.
+- Tasks the prompt hook picks up on its own go to Queue, not Active, with a
+  `Queued task` notice. A prompt that asks to be tracked ("add this to
+  task"), or one matching a task already in Active, still goes to Active.
+- iOS CI runs only by manual dispatch; the full native UI suite requires an
+  additional opt-in. Bound job/test runtime, cancel superseded runs, and retain
+  native UI artifacts for three days. Regular CI jobs have 10-minute limits.
+
+### Fixed
+
+- Incremental code indexing retains references from unchanged callers when
+  definitions move, become ambiguous or disappear. Prepared inserts run in
+  one transaction; concurrent writers cannot overwrite another index.
+  Qualified lookups reject other containers and `$` identifiers are searchable.
+- Hook approval and fan-out notification sweeps no longer overlap. Approval
+  records are bounded and validated; simultaneous grant writes are serialized
+  and stale grant revocations fail instead of deleting another row.
+- Concurrent Codex history reads share one materialization. Scheduled-run
+  completion errors and closed child input streams are handled, long run IDs
+  preserve notification-kind collapse keys, and `bridge doctor` stops after
+  printing its result.
+- Claude Code's own terminal dialogs no longer show up on the phone as a bare
+  "Waiting for your answer" key strip. When a claude or opencode pane waits
+  with no held approval, no model question, and no remembered prompt, the Hook
+  reads the pane's last lines (at most once per three seconds per pane, ANSI
+  stripped) and publishes a numbered dialog as `terminalPrompt.choice`: the
+  question above the first `1.` row as the title, each `> 1. Yes` style row as
+  an option keyed by its digit with its text cut at the first ` · `, plus
+  `Cancel`/`Escape` when a line offers "Esc to cancel". The choice clears when
+  the pane leaves waiting or the dialog lines vanish, and answering a dialog
+  digit from the phone now sends Enter after it so the selection submits.
+- Fan-out permission refusals from the plugin (`blocked.json`) or OpenCode
+  itself (`stderr.log`) retain a blocked failure reason even with exit code 0.
+  The Hook pushes the reason and inspects only the final 16 KiB of stderr.
+- Choosing Full Access under Codex's `/permissions` no longer leaves the
+  terminal sitting on "Enable full access?". The Hook's menu walk reads the
+  pane's terminal lines for that second confirmation, answers it with `1` then
+  Enter, and only then reports the menu closed; if the confirmation never
+  appears within three seconds the step is reported as still waiting with the
+  visible prompt as the phone's terminal choice card.
+- Claude's account usage numbers each name one source. The Hook now reports
+  which Claude feed produced the account (`origin`: the status-line
+  `rate_limits` payload or the OAuth usage endpoint), and a per-model weekly
+  window such as `seven_day_fable` keeps its own reset time and its own `asOf`
+  from Claude Code's usage snapshot. That window is its own allowance with its
+  own denominator, so it can show a higher percentage than `seven_day` without
+  contradicting the all-models window. `/v1/usage` documents the source of
+  every number; see `docs/api-reference.md`.
+- A transcript resume whose cursor sits past a replaced (shortened) file is a
+  full snapshot flagged `reset: true` instead of an empty delta that left the
+  phone on the old conversation; an in-range resume is a delta and reports
+  `reset: false`, so only a real replacement is ever treated as one. The phone
+  merges reconnect backlogs by line and keeps the newest rows, and replaces the
+  conversation only on that explicit reset.
+- A Codex 0.155 queued follow-up question (the terminal's "Queued follow-up
+  inputs / 1 question / alt+up to answer") reaches the phone as a real question
+  card instead of a bare waiting line and key strip. The Hook reads the pending
+  `question` / `requestUserInput` thread item's text and options from
+  `thread_history_1.sqlite`, publishes them as the same choice shape a terminal
+  dialog uses, and answering sends alt+up (to open Codex's queue) followed by
+  the option's number key through `/v1/keys`. The materializer also shows the
+  asking sentence in the transcript. When no question text can be read, the
+  key row remains the fallback.
+- A `.config/modules.yaml` key for a module this Hook build does not know (a
+  newer CLI enabled it) no longer makes `phren-hook ssh` and `serve` exit with
+  `Unknown module`, which showed every phone Offline on every computer. The
+  unknown key is ignored with one warning line on stderr naming the key and the
+  Hook version, and every known module keeps its value. `phren modules enable
+  <name>` now also warns, without refusing, when the installed Hook recorded in
+  `<bridge>/installed.json` is older than the module's version in the manifest.
+- A scheduled run no longer dies on an agent's own startup prompt with nothing recorded. Headless launches pass the prompt-skipping flags each harness has: Claude runs from the project directory with `--settings` pre-answers for project MCP servers (Claude has no settings key for the external CLAUDE.md import dialog; headless `-p` drops those imports instead of blocking), Codex runs with `--skip-git-repo-check` and a quoted trusted-project entry written to its config (dotted project paths included), and OpenCode needs none. When a Herdr run's first 90 seconds (open for classification until 95) show no transcript activity, where a transcript first seen after 30 seconds counts as activity, and the pane is `blocked` or `waiting` on input, the Hook reads the pane's last rows at most three times, records the run as `blocked` with the visible prompt text, and pushes a `scheduleBlocked` notification carrying `Blocked at startup: <prompt>`. Each schedule notification has its own APNs collapse id and a delivered blocked alert suppresses the later finished/failed alert, so the blocked alert is not replaced. The phone decodes the `blocked` state and `blockedStartupPrompt`, opens the session as waiting rather than idle, and shows blocked runs on the schedules list and history. Run history rows and `/v1/schedules/history` carry the state and text.
+- Finding and task labels no longer draw over project group labels on the
+  Memory map (phone, web UI, VS Code) at the default zoom. The shared 3D
+  renderer resolves label rectangles every frame: group labels always win,
+  leaves rank by focus then stickiness then node degree (including
+  `refCount`) then recency, hysteresis stops labels from flickering as the
+  camera moves, and the per-frame draw cap (groups included, floor 40)
+  scales with viewport area. See `docs/graph-viewer.md`.
+- An opencode permission ask reaches the phone as a push. The Hook watches the
+  approvals directory, maps a new request to its pane through the recorded
+  session binding (or Herdr's opencode session id), sends the same kind of
+  binding-backed alert a held Claude request sends, and writes the plugin's
+  answer file when the phone approves or denies it. The alert carries the ask's
+  title and message, so an external_directory ask reads
+  `external_directory: <pattern>`.
+- The phone's agent tree lists the newest fan-out workers first, so a computer with more
+  than 128 finished jobs on disk no longer hides the ones running now.
+- A Codex approval or terminal dialog whose command and options the Hook could
+  read is published to the phone as a structured question instead of a bare
+  approval, so the chat can ask it with its real choices and answer by the
+  option's own key (`y`, `p`, `Esc`); the `p` answer is accepted by `/v1/keys`.
+- A dispatch whose remote agent had not written its session yet when the launch
+  returned reported an uncertain delivery without sending the brief; the dispatch now
+  waits up to fifteen seconds for the pane's session before sending.
+- Launching an agent from the phone or a dispatch with a label Herdr cannot use as an
+  agent name (spaces, capitals, more than 32 characters) failed with "Herdr reported an
+  error"; the Hook now derives a valid agent name from the label.
+- Git run by phren never prompts for credentials. A store with an HTTPS remote and
+  no credential helper used to make the session-start sync ask for a GitHub username
+  in the agent's pane, so Codex and OpenCode never reached their first prompt on that
+  computer and every launch from the phone or a dispatch reported a failure.
+- `/v1/usage` filters sources to those a client understands, preserving the
+  original four sources for clients that do not send a source list.
+- A Claude subagent the orchestrator stopped leaves the phone's running count; its
+  "killed" notification now counts as finished like a completed one.
+- A store that was never set up stays that way: the modules migration no longer creates
+  `.config` on it, so `phren add` still says to run `phren init`, and module gating
+  falls back to the unscoped view while `phren init` is creating the profiles.
+- Store sync now merges divergent commits with union handling for findings and
+  tasks, aborts unresolved merges cleanly, and leaves existing Git operations
+  untouched. Module migration backups now stay under `.runtime/`.
+- The Hook's OpenCode plugin updates with the Hook. The plugin now rides inside the
+  Hook bundle, carries an "Installed by Phren Hook" first line, and an installed copy
+  with that line is replaced on update while a copy you wrote yourself is left alone.
+- OpenCode fan-out workers no longer stall on permission prompts. A headless worker's
+  edits, commands and fetches in its own worktree are granted by the Hook's OpenCode
+  plugin and anything else is refused at once instead of timing out after 50 seconds.
+- The Claude model list the phone shows matches Claude Code's own /model menu:
+  exact models, default first, an alias only for a family with no exact id.
+- The periodic store pull commits uncommitted writes (a task from `add_task`,
+  a new finding) before it fetches or merges, so a managed sync can no longer
+  discard or block on a write that arrived moments earlier; a divergent remote
+  is merged instead of deferred, and conflicting `tasks.md` and `FINDINGS.md`
+  keep both sides' bullets. Each pull records what it did in
+  `background-sync.log`.
+- `phren code index` no longer fails with "repository path does not exist" on a
+  computer whose checkout sits at a different path than the store records. The
+  indexer, the Hook's re-indexer and the CLI resolve the repository the way the
+  Hook locates a project's checkout: this machine's registered path first, then
+  the store's sourcePath, with `--repo` still overriding, and the index records
+  the checkout it used in `repo_root` when it differs.
+- Composite MCP tools (`manage_task`, `revise_finding`, `session`,
+  `phren_admin`) accept a nested object argument that the host passed through
+  as a JSON string. Claude Code did this for `manage_task action=update`
+  (`updates`) and `phren_admin action=set_config` (`settings`), which then
+  failed with "expected object, received string". The decode also unwraps a
+  string wrapped twice, and a decoded value that misses its own schema now
+  fails at the inner field (for example `updates.priority: invalid option`)
+  instead of the misleading object-type error.
+- The prompt hook no longer files conversation as tasks: replies ("Yep
+  /herdr the phren agent is there"), questions, and frames from another
+  agent or the harness (`<cross-session-message>`, delivery notices,
+  `<task-notification>`, `<system-reminder>`) are skipped, and the
+  `<pasted_content>` wrapper Claude Code puts around pasted or phone input is
+  read through instead of landing verbatim in the task.
+
+## [0.2.15] - 2026-09-24
+
+Released from `release/0.2.15`: 0.2.14 plus this fix only.
+
+### Fixed
+
+- `phren init`: the setup walkthrough works with Inquirer 13 and later. It asked for the `list` prompt type, which Inquirer 13 removed (now `select`), so `phren init` on a fresh install failed at its first choice with `Prompt type "list" is not registered`.
+
+## [0.2.14] - 2026-09-10
+
+### Added
+
+- Compact iPhone task controls: status menu, optional search, creation-age and
+  priority filters, project/store filters, and saved date/priority/task-order sorting.
+- Direct Start/Backlog/Done task actions and bulk selection across stores. Tasks
+  remembers the last workload view and begins on Backlog for first use.
+- A single compact Herdr terminal header combines back, computer/status, and
+  reconnect, removing the separate title and computer strip.
+- Photos, Camera, and Files in the Herdr Ctrl-hold Uploads panel. Attachments
+  open as a draft in the currently focused agent, verified through Phren Hook;
+  older Hooks offer an explicit session picker. Nothing sends automatically.
+- Creation dates in task rows and details. Older tasks without a recorded date
+  are labeled Date unknown and sort after dated tasks.
+
+### Fixed
+
+- Conversation opening shows a centered loading circle above the composer.
+- Single and bulk task creation now record timestamps by default. iPhone tasks
+  preserve their original creation time through offline retries and sync conflicts.
+- iPhone chat gives each tool call its own expandable row, pairs parallel
+  results by provider call ID, and limits output to a six-line preview with
+  a separate full-output viewer. Tool patches start with eight lines.
+- Upgrade js-yaml 4 to 4.3.2 in the VS Code packaging dependency chain.
+  The full workspace dependency audit now reports zero vulnerabilities.
+
+## [0.2.13] - 2026-09-10
+
+### Added
+
+- Agents and terminals work without a GitHub sign-in. New users start on
+  Agents; GitHub setup and account recovery are scoped to project memory.
+- iPhone appearance settings with Charcoal, Amethyst, Graphite, and Slate
+  presets and named custom themes. Edit background, text, panel, accent, and
+  link colors with swatches or hex values; preview, save, duplicate, and delete
+  themes. The default Charcoal palette uses white text and dark neutral panels.
+- Agent switching beside the chat Terminal control, including conversations
+  on other computers and agents within the current tab, with separate drafts.
+
+### Changed
+
+- Smaller chat tool boxes and a smaller combined Send/Stop control. An empty
+  composer shows Stop during a running turn; a new draft brings Send back.
+- Phren purple actions on the default charcoal theme. Tool details unwrap
+  known result envelopes; patches share a compact, numbered diff renderer with
+  repository changes, with semantic addition/deletion colors and folding.
+- Token details distinguish cached and uncached input and identify their scope
+  as the latest reported model response, with included reasoning output.
+
+### Fixed
+
+- Removed accumulated space below the last chat message and blank transcript
+  lines around tool activity. Keyboard dismissal and upward history loading
+  retain the compact conversation layout.
+- Sparse transcript indexing, direct older-history reads, and queued requests
+  during polling make long conversations faster to open and page backward.
+- Completion/abort compatibility and current activity precedence prevent old
+  working events from keeping Stop visible after an agent finishes.
+- Ordered background draft writes avoid UI-thread file work; theme decoding
+  preserves unreadable original data for recovery.
+- Web preview relays require a fresh per-preview credential and restrict
+  forwarding to the selected service. Assets, uploads, and WebSockets retain
+  their shared origin.
+- Upgrade transitive Hono to 4.13.5; production dependency audit is clean.
+
+## [0.2.12] - 2026-09-10
+
+### Fixed
+
+- Phren Hook image uploads now include the success flag expected by the iPhone
+  app. New app builds also accept the original protocol-v1 path response, so
+  images work with computers still running 0.2.11.
+
+### Changed
+
+- Removed the status/token row above the iPhone chat composer. Activity stays
+  in the existing header; token details and reconnect live in its options menu.
+
+## [0.2.11] - 2026-09-10
+
+### Added
+
+- **Phren Hook**: an independent computer helper for the iPhone app. Install,
+  update, diagnose, roll back, and uninstall with `phren bridge`. It runs as a
+  user service on macOS/Linux and serves a private socket through pinned SSH.
+- Native Herdr terminals now use SSH PTYs with receive backpressure. Chat,
+  images, history, real token counters, diffs, and local web-server discovery
+  use Phren's versioned protocol. Codex, Claude Code, and Copilot share exact
+  computer/server/workspace/tab/pane/conversation targeting.
+- Agent lifecycle callbacks and explicit Codex/Claude approval responses;
+  a bounded local activity journal records project status changes.
+
+### Changed
+
+- Chat loads earlier messages automatically as you scroll upward, retaining the current reading position.
+- Removed “Open in Moshi” actions and the external-chat preference. Project
+  actions open Phren chat or its native Herdr terminal.
+- The installer preserves existing device keys, project mappings, and drafts.
+  Recognized Phren SSH keys are migrated with a backup; other keys and other
+  applications' hooks remain intact.
+
+
+## [0.2.10] - 2026-09-06
+
+### Security
+
+- `qs` is pinned to **>= 6.16.0**, closing two advisories. The previous floor of
+  `>= 6.15.2` resolved to 6.15.3 — still inside the vulnerable range, which is why
+  the alerts persisted behind an override that looked like it covered them.
+- Transitive dependency pins moved to `pnpm-workspace.yaml`. They had been sitting in
+  `package.json`'s `pnpm.overrides`, which pnpm 10 no longer reads, beside an
+  npm-style top-level `overrides` block that pnpm never read at all. The pins applied
+  only because they were already resolved into the lockfile; the next resolve would
+  have silently dropped every one.
+
+### Added
+
+- **phren for iOS can edit skills and browse the memory graph.** Skills sync and edit
+  in both shapes the CLI recognises (`<scope>/skills/<name>.md` and
+  `<scope>/skills/<name>/SKILL.md`), under `global/` as well as per project. The graph
+  runs the same renderer as the web memory UI and the VS Code webview, with the
+  payload built on-device since the app is serverless; edits made in it become
+  ordinary pending ops.
+
+### Fixed
+
+- The browser e2e suite no longer rots by wall clock. Its fixtures dated findings to
+  fixed days, so once those aged past the retention TTL the trust filter stripped the
+  bullet bodies and two specs began failing on a calendar date rather than a code
+  change. Also fixed two races against deferred renderer work and two assertions that
+  turned on fixture arithmetic instead of behaviour.
+
+
+## [0.2.9] - 2026-09-05
+
+### Added
+
+- A **release workflow for the VS Code extension** (`Release VS Code
+  extension`), matching the CLI's: dispatch with the version you expect, it
+  verifies `packages/vscode/package.json` and `packages/vscode/CHANGELOG.md`,
+  builds, lints and tests the workspace, packages the `.vsix`, attaches it to
+  the run, publishes to the Marketplace, and tags `vscode-vX.Y.Z`. Publishing
+  needs a `VSCE_PAT` repository secret; without it the run fails after
+  attaching the `.vsix`, so a missing token costs a manual upload rather than
+  a rebuild.
+- A test that **fails when the CLI stops registering a tool the VS Code
+  extension calls**. The extension names 45 tools as strings from a package
+  with no dependency on this one; 0.2.0's core profile hid them and every
+  sidebar action broke, which nothing caught. The failure now names the tool
+  and the file that calls it.
+
+
+## [0.2.8] - 2026-09-05
+
+### Added
+
+- **Summaries written by the agent you already have.** Two admin tools,
+  `get_topic_summaries` and `set_topic_summary`, hand the agent a topic
+  archive's newest bullets and store the paragraph it writes back as the
+  topic's `## Now` block, refreshing the project's `What phren knows`. The
+  same identifier check applies: a paragraph naming anything the bullets do
+  not is refused with the names. The `/phren-summarize` skill walks a project
+  or the whole profile with them. No API key, no local model: the model
+  running the session does the writing. `phren maintain summarize --llm`
+  remains for machines with a local model.
+
+
+## [0.2.7] - 2026-09-05
+
+### Fixed
+
+- **A model's summary paragraph is kept only if it invents nothing.** Every
+  identifier the paragraph names must appear in the findings it summarises;
+  a local 8B model described a TypeScript project as "built on argparse", so
+  any paragraph naming things the findings do not is dropped for the
+  structural one. The prompt also now forbids naming languages, libraries or
+  components the findings do not name.
+- **Hand-written documents under `reference/topics/` get no `## Now` block.**
+  The summarizer stamped every markdown file there, including reference docs
+  with no archived bullets, with "Nothing archived under this topic yet"; those
+  are skipped now, and a block left on one before is removed.
+
+
+## [0.2.6] - 2026-09-05
+
+### Fixed
+
+- `phren maintain summarize --llm` loads the store's `.env` before asking the
+  model, so `PHREN_LLM_ENDPOINT` and `PHREN_LLM_MODEL` set there are honoured
+  from the CLI, not only from hook paths that had already touched a feature
+  flag. Without it, `--llm` silently produced the structural text.
+
+
+## [0.2.5] - 2026-09-05
+
+### Fixed
+
+- **Summaries from a local model no longer time out.** Every LLM call shared a
+  ten-second budget sized for YES/NO dedup checks against a hosted model; a
+  paragraph from an 8B model on a laptop CPU takes longer, so `--llm`
+  summaries silently fell back to the structural text. Callers with real
+  output to wait for now pass their own budget (summaries wait up to two
+  minutes), and `PHREN_LLM_TIMEOUT_MS` raises the floor for everything.
+
+
+## [0.2.4] - 2026-09-05
+
+### Added
+
+- **The graph shows what phren knows about a project.** Select a project and
+  the pane lists, under its counts, the first lines of its `What phren knows`
+  block; `space` opens the whole block in the bubble. The Omarchy panel shows
+  the same first line under each project. Both read the block that
+  `phren maintain summarize` writes; a project without one shows nothing extra.
+
+
+## [0.2.3] - 2026-09-05
+
+### Fixed
+
+- Topic summaries decide "unchanged, leave it" from a fingerprint of the file's
+  bullets carried in the block marker, not from the file's mtime against the
+  clock, which re-summarised on some machines and skipped on others.
+- **VS Code extension 0.6.3**: the extension calls MCP tools by their full
+  names, which the server's default `core` profile (0.2.0) no longer exposes,
+  so every action from the sidebar failed against a 0.2.x phren. The extension
+  now starts its server with `PHREN_MCP_PROFILE=full`. Needs a Marketplace
+  publish (`pnpm --filter @phren/vscode publish:extension`).
+
+
+## [0.2.2] - 2026-09-05
+
+### Fixed
+
+- **A project whose recorded source path differs from the real directory only
+  in case is found again.** A `sourcePath` written on macOS
+  (`/home/me/projects/x`) and synced to Linux (`/home/me/Projects/x`) made the
+  project invisible to the prompt hook on that machine, with nothing to say
+  why: no project context, no summary, no project-scoped findings. Detection
+  now falls back to a case-insensitive match after the exact one.
+- Topic summaries pluralise tags like a person would: "2 architecture notes",
+  not "2 architectures"; "1 code-quality note", not "1 code-qualitys".
+
+
+## [0.2.1] - 2026-09-05
+
+### Added
+
+- **The archive has a shape.** `phren maintain summarize [project] [--llm]
+  [--force]` writes a `## Now` block at the top of every
+  `reference/topics/<topic>.md` — how many findings, which tags, what keeps
+  being mentioned, the newest headlines; a prose paragraph when a model is
+  configured and `--llm` is passed — and a `What phren knows` block at the end
+  of `summary.md`. The prompt hook injects that block once per session for the
+  project at hand, before any individual bullets, so an agent gets what a
+  project's archive amounts to rather than bullet 312. Blocks sit between
+  markers and are replaced, never accumulated; the bullets themselves are not
+  touched. A topic file past 400 bullets is split, oldest sections first, into
+  `<topic>.older.md`, still indexed. Background maintenance refreshes the
+  structural summaries for files that changed.
+- **`phren status` shows the store's weight** — words in findings, the archive,
+  tasks and skills, and the global AGENTS.md — and **`phren doctor` has a
+  `context-cost` check** that warns when the global AGENTS.md passes 600 words,
+  the MCP profile is `full`, or the median hook injection passes 1,500 tokens.
+  None of the tidying stays done unless it is visible.
+
+### Changed
+
+- **Tasks are a backlog, not memory.** The prompt hook injects task items only
+  when the prompt is about building or asks about the work (`backlog`, `what's
+  left`, `priorities`, …). A to-do list in a debugging question was costing
+  findings their budget. Background maintenance also moves done items past
+  thirty into `.config/task-archive/<project>.md`, so `tasks.md` holds open
+  work.
+
+
+## [0.2.0] - 2026-09-05
+
+### Changed
+
+- **The MCP server has two tool profiles, and `core` is the default.** The
+  server used to hand every client 59 tools — about 53k characters of schema,
+  roughly 13k tokens, before a session said a word, and 59 similar verbs to
+  pick the wrong one from. `core` exposes ten: `search_knowledge`,
+  `get_memory_detail`, `get_project_summary`, `add_finding`, `revise_finding`,
+  `get_tasks`, `add_task`, `manage_task`, `session`, and `phren_admin`, which
+  reaches everything else by name (`phren_admin(action: "list_actions")` lists
+  them with parameters). About 17k characters. `full` keeps every tool under
+  its own name, plus the composites. Switch with `phren config mcp-profile
+  core|full` or `PHREN_MCP_PROFILE`, then restart the client.
+
+  Migration for anything scripted against the old names:
+
+  | Old tool | Now |
+  |----------|-----|
+  | `add_note` | `add_finding(kind: "note", …)` |
+  | `supersede_finding`, `retract_finding`, `edit_finding`, `remove_finding`, `link_findings`, `resolve_contradiction`, `pin_memory`, `memory_feedback` | `revise_finding(action: supersede \| retract \| edit \| remove \| link \| resolve_contradiction \| pin \| feedback, …)` |
+  | `complete_task`, `update_task`, `remove_task`, `pin_task`, `tidy_done_tasks` | `manage_task(action: complete \| update \| remove \| pin \| tidy, …)` |
+  | `session_start`, `session_end`, `session_context`, `session_history` | `session(action: start \| end \| context \| history, …)` |
+  | every other tool | `phren_admin(action: "<old name>", …)`, or `phren config mcp-profile full` |
+
+  A composite validates against the target tool's own schema and returns the
+  parameter list on a miss, so the old parameters are unchanged.
+
+- **Skills are no longer indexed as memory.** The default index policy excludes
+  `**/skills/**` and `.claude/skills/**`. Skills are instructions you invoke by
+  name; indexed, they were crowding findings out of the prompt's context budget
+  (nine of twelve injections in one session were skill files). They stay
+  reachable through `list_skills` and the global AGENTS.md. Existing stores
+  keep their own `index-policy.json`; `phren config index` shows it.
+- **Claude's own memory directory is indexed only when asked.**
+  `PHREN_FEATURE_NATIVE_MEMORY=1` turns it back on; by default phren indexes
+  phren.
+- **The shipped `global/AGENTS.md` is written to the agent, not to a new
+  user.** Under 400 words: how to recall, what to save and what not to, tasks,
+  sessions, where things are. The template comments that every session was
+  reading are gone.
+- **`/phren-sync` and `/phren-profiles` are thin wrappers around the CLI**
+  (`phren profile switch`, `phren init`, `phren add`, `phren skills sync`)
+  instead of walking the agent through hand-made symlinks, which is how an
+  agent ended up fighting `phren init`.
+
+### Removed
+
+- `packages/cli/skills/`, the older un-prefixed copies of the store skills that
+  nothing read. The maintainer-only `docs` skill moved to the repo's own
+  `.claude/skills/docs/`.
+
+
+## [0.1.53] - 2026-09-04
+
+### Fixed
+
+- **What a prompt pulls in now counts as a recall.** The prompt hook, by far
+  the most common way memory gets read, never wrote to the live lookup log:
+  only `phren search` and the MCP search tool did. So the terminal graph's
+  watch mode, and anything else tailing that log, lit up for searches and sat
+  dark while an agent actually worked. Every snippet the hook injects is
+  recorded now, with the prompt as the query and `source: "hook"`, resolved to
+  its graph node when it is a finding.
+
+### Added
+
+- **phren for Omarchy** (`integrations/omarchy/`). A bar widget for Omarchy's
+  shell: the icon lights while phren is recalling, the panel lists every
+  project with its counts and the last recalls as they land, and three buttons
+  (or `s` `g` `w`) open the shell, the terminal graph, or the 3D web viewer,
+  starting phren's server the first time. The installer also registers `phren`
+  and `phren graph` in the app launcher. Follows Omarchy's `manifest.json`
+  plugin contract and validates with `omarchy plugin validate`.
+
+
+## [0.1.52] - 2026-09-04
+
+### Fixed
+
+- **`npx @phren/cli init` no longer wires Claude's MCP server to the npx
+  cache.** Init wrote the path of its own `dist/index.js` into the MCP
+  server entry, and under `npx` that file lives in `~/.npm/_npx/…`, which npm
+  evicts. The server then stops starting with no error anyone sees, which is
+  how an init that "worked" ends up not working a week later. An npx install
+  now routes the MCP server through the `~/.local/bin/phren` wrapper init
+  already writes, which knows how to find or fetch phren; a real install still
+  points at its own entry script.
+- The no-entry-script fallback named a package that does not exist on npm
+  (`phren@…` instead of `@phren/cli@…`). It uses the real package spec now.
+
+
+## [0.1.51] - 2026-09-03
+
+### Added
+
+- **The terminal graph in 3D.** `v` lifts the same graph into a sphere:
+  projects on it in a stable order, clusters keeping their shape and gaining
+  depth, shared fragments in the middle, the far side fading and shrinking.
+  It turns slowly on its own when left alone, because depth only reads in
+  motion. Drag to turn, wheel to zoom, click to select; `HJKL` and `+`/`-`
+  without a mouse. Selection, search, the neighbour numbers, the bubble,
+  watch mode and phren all keep working, and selecting a node turns the
+  sphere to face it. The flat map stays the default.
+- **The mouse works in the Graph view.** Drag pans the map or turns the
+  sphere, the wheel zooms, a click selects the node under it. Mouse reporting
+  is on only while the Graph view is showing, so every other view keeps the
+  terminal's own text selection.
+
+
+## [0.1.50] - 2026-09-03
+
+### Fixed
+
+- **Small projects no longer sit alone at the edge of the terminal graph.**
+  The project ring gave every project an equal slice regardless of size, so a
+  one-finding project got the same forty degrees as a fifty-finding one and sat
+  by itself in empty space at full ring distance, while the heavy clusters ran
+  together in the middle — "most of it in the centre, a few way out", with the
+  camera fitted to the few, so everything looked small. Each project's slice is
+  now proportional to its cluster, and small clusters sit a little inside the
+  ring so their outer edge lines up with their neighbours'. Same store, same
+  deterministic map; it just fills the screen evenly now.
+
+
+## [0.1.49] - 2026-09-03
+
+### Added
+
+- **Read a whole finding from the graph.** `space` on a selected node opens its
+  full text in a bubble on the canvas, wrapped wide enough to read, with the
+  project, topic and date underneath. It sits beside the node, or above or
+  below when there is no room to the side, and never covers it. `space` or
+  `esc` closes it. Works on narrow terminals too, where the strip under the
+  graph only had room for two lines.
+- **Recalls appear where they live.** In watch mode, a lookup that just landed
+  gets a small bubble at its node for a few seconds — the snippet, titled by
+  what caused it, threaded to the node, fading as it ages. The feed in the
+  pane keeps the history; the bubble points at the one happening now.
+
+### Changed
+
+- The graph's side pane takes a share of a wide terminal (36%, between 34 and
+  58 columns) instead of a fixed 34, and the selected node's text gets a share
+  of the pane's height instead of four lines. On a 124-column terminal a
+  300-character finding now fits in the pane; before, you saw the first third
+  and an ellipsis. When it still does not fit, the pane says `␣ read all of it`.
+
+
+## [0.1.48] - 2026-09-03
+
+### Added
+
+- **phren walks the terminal graph.** The web viewer has always had him; now the
+  little purple `◕` walks to whatever the store just touched, perching beside
+  the node with a cyan sparkle as he lands, and wandering off on his own after a
+  quiet spell. Watch mode had been showing you pulses; now it has a face.
+
+### Fixed
+
+- **Focusing a project no longer bounces on arrival.** `[` and `]` warm-started
+  a force simulation, framed the half-settled positions, then let the physics
+  play out under a fixed camera, so the whole cluster jiggled for a second every
+  time and could end up off-centre. The layout now settles before it is drawn
+  and the focus is a clean cut; only camera flights animate. Settling is under
+  10 ms for a couple of hundred nodes.
+- **Selecting a project no longer turns its whole cluster yellow.** Every edge
+  touching the selection was painted solid amber, so the more a node connected,
+  the less the highlight said — a project with thirty findings became a solid
+  yellow fan. Edges keep their own colour now, lifted toward amber, and a hub is
+  lifted least.
+- The agents overlay ships off, and nothing ever mentioned it, so agents running
+  on the machine went unseen. Opening the graph now offers it once when there is
+  actually something to show.
+
+
+## [0.1.47] - 2026-09-03
+
+### Added
+
+- **Edit skills and project instructions from the shell.** `e` in the Skills or
+  Projects view opens the file in `$EDITOR` — your own editor, your config —
+  with the shell releasing the terminal and taking it back when you quit. `E`
+  opens phren's own modal editor instead, with a deliberate subset of vim:
+  `hjkl`, `w b`, `0 $`, `gg G`, `i a I A`, `o O`, `x`, `dd`, `yy`, `p P`, `u`,
+  `/` with `n`/`N`, and `:w :q :wq :q!`. In Skills it edits the skill's
+  markdown; in Projects it edits that project's `AGENTS.md`, which the store
+  owns and symlinks into the repo, so one edit reaches every linked checkout.
+  Saving refuses a skill whose frontmatter no longer parses, refuses to write
+  through a symlink, lands atomically, and rebuilds the skill manifests when the
+  frontmatter changed.
+
+### Fixed
+
+- **`$EDITOR` values carrying arguments no longer fail.** The editor helper
+  passed `$EDITOR` straight to `execFileSync`, which takes a binary rather than
+  a command line, so anything like `code --wait` or
+  `omarchy-launch-editor --inline` failed with ENOENT. It is now parsed the way
+  git parses `core.editor`, splitting rather than going through a shell.
+- **The Skills view could not find its own files.** The list packed each skill's
+  path into a display string and recovered it by splitting on `·`, which broke on
+  any path containing that character and pointed at the wrong store for team
+  skills. Rows carry the real path now.
+- **Toggling a global skill did nothing.** Its enabled flag was written under the
+  project's scope while the reader looked under `global`.
+- **The help overlay silently hid more than half of itself.** At 37 lines it
+  needs a 50-row terminal; on 24 rows twenty lines were simply dropped. It now
+  scrolls with the arrows and says where you are in it.
+
+### Changed
+
+- The docs site's VS Code tab showed the old extension's own graph. VS Code now
+  hosts the same viewer as the web UI, so it shows that, which also drops an
+  8.5 MB animation from the site. Unused screenshots removed, and the README
+  trimmed to one.
+
+
+## [0.1.46] - 2026-09-03
+
+### Added
+
+- **Watch mode in the terminal graph.** The Graph view now tails
+  `.runtime/lookup-events.jsonl`, so a graph open in one terminal lights up as an
+  agent works in another: the node a search lands on pulses cyan with a ring, the
+  camera flies to it, the finding's full text fills the details pane, and the
+  event joins an activity feed with its age, source and snippet. Writes appear in
+  green alongside reads. The camera yields while you navigate and resumes a few
+  seconds after your last keypress. On by default; `w` toggles it and
+  `--live` / `--no-live` set it at launch.
+- `phren search` and `add_finding` now record the same lookup events the MCP
+  `search_knowledge` tool already did, so CLI searches and finding writes are
+  visible to a watching graph (previously only agent searches were).
+
+
+- **Running coding agents on the knowledge graph** (`PHREN_FEATURE_AGENTS=1`, off
+  by default). phren asks whatever is already running your agents — a Herdr
+  workspace, `phren-agent --multi` — and joins each one onto a project by the
+  directory it is working in, using the same detection the hooks use. Each
+  project with an agent gets a marker coloured by status, the details pane lists
+  them, `a` toggles the overlay, `Tab` cycles and flies to them, and `↵` brings
+  one to the front through its own host. The provider contract is a small JSON
+  record, so a tmux or Zellij user needs a few lines of shell rather than a
+  change to phren. With no provider available the overlay never appears.
+
+- **phren installs as a Claude Code plugin again.** The manifests in
+  `.claude-plugin/` predated the monorepo layout and pointed at directories that
+  no longer existed, so `/plugin install phren@phren` produced an empty plugin.
+  They now point at the real skills, an `.mcp.json` for the MCP server and a
+  `hooks.json` for the session hook, with the version kept in step with the
+  package. See `docs/claude-code-plugin.md`.
+- `phren-agent --multi` publishes its running agents to `.runtime/agents/`, so
+  phren's agents overlay sees agents phren itself spawned alongside any other
+  host's.
+
+### Fixed
+
+- **Labels stopped overwriting each other on a busy graph.** Glyphs and labels
+  were drawn per node in one pass, so a later node's glyph landed inside an
+  earlier node's label: at twelve projects the canvas read `sear◉hweb` and
+  `◉ime◉◉a◉◉edge`. Glyphs now go down in their own pass, labels route around
+  them and keep a clear cell either side, and only as many projects are named as
+  the canvas can carry rather than all of them.
+- **The graph stopped stranding its clusters.** Projects were laid out on a ring
+  sized only by how many there were, never by how big their clusters actually
+  are, so the same gap sat between every pair at every scale and the graph never
+  covered more than about a seventh of its own bounds. Dense stores hid it by
+  growing into the gap; sparse ones looked marooned. The ring is now packed to
+  carry roughly one cluster per project, and a radial spring holds it there —
+  seeding alone was not enough, since forty projects pushing on each other
+  expanded it to nearly twice its seeded size.
+- **The node cap no longer misrepresents the store.** It took the globally
+  highest-ranked nodes, so on a forty-project store two projects took the whole
+  budget and thirty-eight showed as bare dots. Every project now gets a share,
+  with unused share redistributed, and within a project the budget is spent
+  across kinds in turn — which is what stops tasks disappearing entirely, as
+  they did at twelve projects.
+
+### Changed
+
+- **The graph legend is gone and the header carries what mattered.** A row of
+  kind counts told you nothing the colours on screen already did. The header now
+  shows `350 of 9,687 nodes` so a sampled view is never mistaken for the whole
+  store, and the Graph view no longer spends a row repeating the key hints.
+- **The shell frame gives its rows back to the content.** The header, the view
+  label and the tab strip were three separate rows; they are now one line plus a
+  rule, with the tab strip collapsing to icons before it ever takes a second row.
+  The hint bar is a single row of the few keys you reach for, with the full map
+  behind `?` (which now documents the Graph view). An empty message line no
+  longer holds a row open. On an 80x24 terminal that is three rows back, about an
+  eighth of the screen.
+- **The graph fills the terminal.** The force layout is shaped to the canvas
+  aspect instead of settling into a circle, and the camera scales each axis
+  independently up to a bounded stretch, so a wide terminal no longer strands
+  most of its width. The legend drops whole entries rather than truncating a
+  count mid-word, and the hint bar drops optional keys before `? keys` and
+  `q quit`.
+- The splash mascot no longer bobs or leans. It sits still beside the wordmark
+  and only blinks, which reads far better than shifting the whole character grid
+  by a cell.
+
+### Internal
+
+- The lookup-log tailing used by the web UI's activity stream is extracted to
+  `src/shared/lookup-tail.ts` and shared with the shell's watch mode.
+
+## [0.1.45] - 2026-09-01
+
+### Added
+
+- **A knowledge-graph view in the shell.** `phren shell --view graph` (or `g`, or
+  `:graph`) draws the same graph as the web UI and VS Code viewer in the terminal:
+  a deterministic force layout on a braille canvas, coloured by topic and kind,
+  with a details pane beside it (a strip below it under 100 columns). Walk it with
+  the arrows, `1`–`9` to jump to a neighbour, `/` to search and fly to the best
+  hit, `f` to cycle filter presets, `[`/`]` to focus a project, `+`/`-`/`0` to
+  zoom and fit, `r` to re-lay out. The layout settles with an animation on open,
+  fly-to moves are eased, and the view rebuilds in the background when the store
+  changes, warm-starting from the previous positions. `PHREN_ICONS=nerd` swaps the
+  node glyphs for Nerd Font icons.
+- **Richer edges for the graph.** `buildGraph()` can now emit fragment↔fragment
+  co-mention edges and finding→finding `supersedes` / `contradicts` edges
+  (`includeFragmentEdges`, `includeLifecycleEdges`). Both are opt-in; the web
+  payload is unchanged.
+- **A shared graph model.** `src/graph-core/` holds the host-agnostic model logic
+  (payload types, palette, kind/health derivation, filters, ranking, search) that
+  the browser viewer, the VS Code webview and the terminal view now share.
+- **Splash text effects.** The shell wordmark is revealed with a decrypt scramble
+  that settles into the exact block letters, and a light beam shimmers across it
+  while the splash holds. The splash is exported as `@phren/cli/shell/intro`
+  (`playSplash`); `phren-agent -i` plays it before its TUI starts
+  (`PHREN_INTRO=off` skips it).
+- **Herdr plugin** in `integrations/herdr/`: a keybinding that opens
+  `phren shell --here` in a pane, plus `--view` / `--project` / `--here` deep
+  links on `phren shell`.
+
+### Changed
+
+- The shell's `/` key searches the graph while the Graph view is active and
+  filters lists everywhere else; the bottom bar now advertises `g graph`.
+
+## [0.1.44] - 2026-08-24
+
+### Fixed
+
+- **The interactive shell dropped input and tore its frames.** The shell compared an
+  entire stdin chunk against a single key, but Node delivers whatever bytes arrived in
+  one read, not one keypress: arrow autorepeat arrives as `\x1b[B\x1b[B\x1b[B`, fast
+  typing as `ub`, paste as the whole string — none matched a branch, so they repainted
+  with no state change. Three coalesced downs moved the cursor one row; typing "hub"
+  into the filter left "h". Chunks are now decoded into discrete keys (CSI, SS3, bare
+  ESC, grapheme-safe) and drained through one pump, repaints from the three independent
+  sources are single-flight, and each frame is emitted in one synchronized-update write
+  with the cursor hidden and autowrap off.
+- **The startup splash drew over itself.** The intro painted a frame taller than the
+  terminal — a blank line, twelve rows of character art, the hint block, a trailing
+  blank and a trailing newline. Everything past the last row scrolls the alternate
+  buffer, and once it has scrolled every cursor-home repaint lands on shifted rows, so
+  each animation frame drew over the last: ghost logo rows, a doubled tagline, a
+  doubled "Loading shell…", at any height of 17 rows or less. `paintFrame` now clips a
+  frame to the terminal's rows, which covers the dashboard too — it was overflowing by
+  a line at ten rows. The intro also carried its own copy of the side-by-side layout
+  and ignored terminal width entirely, so below about 72 columns the tagline was
+  chopped mid-word; and it aligned its two columns with `String.padEnd` on art lines
+  full of truecolor escapes, which counts escape bytes as width and therefore padded
+  nothing. Both paths now share one layout that measures display cells and steps down
+  through smaller arrangements — art beside logo, art alone, logo alone, wordmark —
+  according to the space actually available. Verified against the real CLI through a
+  pty from 36x20 to 200x60: no scroll at any size.
+- **Team-store projects were invisible in the shell.** `listProjectCards` walked the
+  team stores and then filtered what it found through the active profile's project
+  list. A profile only ever names projects in the primary store, so nothing from a team
+  store could pass and every shared project was missing — on a two-team-store machine
+  the Projects view showed 2 entries instead of 24. Team stores already carry their own
+  subscription list in `StoreEntry.projects`, so the profile filter was redundant as
+  well as fatal. Project rows now also show which store they came from, and `global` is
+  no longer listed twice when the active profile names it.
+- **The Windows test suite passes again.** CI had been red on `windows-latest`
+  for every run since 0.1.43 — 9 failures across 5 files, four distinct causes.
+  The TypeScript and Swift suites read one committed fixture corpus and compare
+  it byte for byte, which is the whole proof that both implementations agree on
+  the store format; with no `.gitattributes`, git's autocrlf rewrote those bytes
+  on a Windows checkout, so findings dates parsed as `unknown` and a rendered
+  `tasks.md` was compared LF against a CRLF fixture. `fragment-graph` built the
+  `AGENTS.md` path by concatenating with `/`, which Node accepts on Windows but
+  which yields a mixed-separator string no other path in the process matches. A
+  read-counting test mock derived a basename with `lastIndexOf("/")`, which
+  returns -1 on Windows. And the extract-proactivity tests pointed the store at
+  a filesystem-root path that is unwritable on Unix — so state that was supposed
+  to persist failed silently and each test started clean by accident, while on
+  Windows the same path is a writable drive root and the state leaked between
+  tests (and onto the developer's drive).
+
 ## [0.1.43] - 2026-08-02
 
 ### Removed
@@ -20,7 +1218,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 - **`phren init` promised slash-commands in a directory it created empty.** `setup.ts`
   provisions skills from `starter/global/skills/`, which shipped containing only
-  `CLAUDE.md` — so every install created `~/.phren/global/skills`, left it empty, and then
+  `AGENTS.md` — so every install created `~/.phren/global/skills`, left it empty, and then
   printed `ln -s ~/.phren/global/skills/phren-sync ~/.claude/skills/phren-sync`, a symlink
   to nothing. The five `phren-*` skills (sync, init, discover, consolidate, profiles) now
   ship there. Verified end to end from a packed tarball installed to a clean prefix:
@@ -577,7 +1775,7 @@ Auto-extract noise sweep — seven targeted bugs that filled review queues and t
 - Stop-hook `git add -A` failed in sparse-checkout stores when untracked paths fell outside the sparse patterns, which silently stalled commit+push across all managed stores. All three call sites now pass `--sparse` so git skips non-sparse paths instead of erroring: `cli-hooks-stop.ts`, `cli/session-stop.ts`, `tools/finding.ts`.
 
 ### Changed
-- Team-store sync pathspec now also stages `*/reference/**`, `*/skills/**`, `*/CLAUDE.md`, `*/review.md`, `*/summary.md`, `*/topic-config.json`, `*/phren.project.yaml`, `*/FINDINGS.md.bak` in both `cli-hooks-stop.ts` team-store loop and `tools/finding.ts` `push_changes` tool. Previously topic-reference edits and skill files silently never committed.
+- Team-store sync pathspec now also stages `*/reference/**`, `*/skills/**`, `*/AGENTS.md`, `*/review.md`, `*/summary.md`, `*/topic-config.json`, `*/phren.project.yaml`, `*/FINDINGS.md.bak` in both `cli-hooks-stop.ts` team-store loop and `tools/finding.ts` `push_changes` tool. Previously topic-reference edits and skill files silently never committed.
 
 ## [0.1.19] - 2026-04-19
 
@@ -694,7 +1892,7 @@ Bug fix release: federated search, team store, upstream tracking, CI stabilizati
 Feature release: memory override, pin_task tool, plan mode, graph UX, and path fixes.
 
 ### Added
-- **Memory override in CLAUDE.md** — memory instructions can be overridden per-project via CLAUDE.md
+- **Memory override in AGENTS.md** — memory instructions can be overridden per-project vian AGENTS.md
 - **`pin_task` MCP tool** — new tool to pin important tasks for persistent visibility
 - **Plan mode + graph UX** — plan mode for task planning and improved graph visualization
 
@@ -754,7 +1952,7 @@ Major TUI overhaul based on Claude Code architecture study. 43 files changed, +1
 ### Removed
 - 6 dead components (AgentMessage, UserMessage, ChatMessage, StreamingText, Separator, CodeBlock)
 - 2 unused npm dependencies (ink-spinner, ink-text-input)
-- Fake `/kill` and `/broadcast` slash commands from CLAUDE.md (were never implemented)
+- Fake `/kill` and `/broadcast` slash commands from AGENTS.md (were never implemented)
 
 ### Closed
 - 20+ stale tasks verified and completed (TUI features, agent bugs, CLI items that were already done)
@@ -895,7 +2093,7 @@ Major TUI overhaul based on Claude Code architecture study. 43 files changed, +1
 ## [0.0.43] - 2026-03-25
 
 ### Fixed
-- **Temp-root project detection**: init/onboarding no longer treats the shared OS temp root as a tracked project just because a stray `CLAUDE.md` exists under `os.tmpdir()`. Temp repos and first-run onboarding now behave correctly.
+- **Temp-root project detection**: init/onboarding no longer treats the shared OS temp root as a tracked project just because a stray `AGENTS.md` exists under `os.tmpdir()`. Temp repos and first-run onboarding now behave correctly.
 - **Session expiry correctness**: stale session cleanup now expires ended sessions from `endedAt` instead of `startedAt`, so long-running sessions do not disappear immediately after they finish.
 - **Session provenance isolation**: finding/session attribution no longer falls back to an unrelated active session from another project.
 - **VS Code GitHub issue creation**: the extension's "Create GitHub Issue" flow now maps to a supported `update_task({ create_issue: true })` path and links the created issue back onto the task.
@@ -981,7 +2179,7 @@ Major TUI overhaul based on Claude Code architecture study. 43 files changed, +1
 - Removed unwired RBAC checkPermission scaffolding
 
 ### Docs
-- Fix 4 stale file paths in CLAUDE.md
+- Fix 4 stale file paths in AGENTS.md
 - Add re-init reminder to `phren update` command
 
 ### TODO (review before release)
@@ -1472,7 +2670,7 @@ Major TUI overhaul based on Claude Code architecture study. 43 files changed, +1
 ### Docs
 - README: documented all 46 MCP tools across 10 categories (was missing skills, hooks, and operations sections)
 - README: `get_tasks` entry updated with summary, pagination, and ID lookup features
-- global/CLAUDE.md: added task triage guidance (work_next, pin, tidy)
+- global/AGENTS.md: added task triage guidance (work_next, pin, tidy)
 - Architecture diagram updated with skills, hooks, and operations tool categories
 
 ## [1.15.5] - 2026-03-08
@@ -1540,7 +2738,7 @@ Major TUI overhaul based on Claude Code architecture study. 43 files changed, +1
 - Whitepaper: tool count updated from 19 to 29 in all three references
 - `docs/architecture.md`: MCP diagram updated to show all 7 tool categories including fragment graph and session management
 - `docs/llms-full.txt`: tool count 28 -> 29, added `cross_project_entities`, fixed tag parameter reference
-- `CLAUDE.md`: updated tool count in Key Files table
+- `AGENTS.md`: updated tool count in Key Files table
 
 ## [1.13.6] - 2026-03-07
 
@@ -1612,8 +2810,8 @@ Major TUI overhaul based on Claude Code architecture study. 43 files changed, +1
 ## [1.11.0] - 2026-03-06
 
 ### Added
-- Project templates for `init`: four built-in templates (python-project, monorepo, library, frontend), each with CLAUDE.md, LEARNINGS.md, summary.md, and tasks.md. Use `--template <name>` during init.
-- `--from-existing <path>` flag on init: bootstrap a phren project from an existing directory that already has a CLAUDE.md.
+- Project templates for `init`: four built-in templates (python-project, monorepo, library, frontend), each with AGENTS.md, LEARNINGS.md, summary.md, and tasks.md. Use `--template <name>` during init.
+- `--from-existing <path>` flag on init: bootstrap a phren project from an existing directory that already has an AGENTS.md.
 - `@import` syntax in indexed documents: `@import shared/file.md` resolves relative to the phren global directory, with cycle detection and depth cap.
 - `knowledge/` directory support: files in a project's `knowledge/` subdirectory are classified as `knowledge` type in the FTS index.
 - Task done-section stripping: completed task items (under `## Done`) are excluded from the FTS index to reduce noise.
@@ -1830,7 +3028,7 @@ Major TUI overhaul based on Claude Code architecture study. 43 files changed, +1
 ## [1.7.1] - 2026-03-04
 
 ### Removed
-- `/phren-update` and `/phren-learn` skills: redundant now that hooks auto-commit and CLAUDE.md instructions tell Claude to call `add_learning()` during sessions
+- `/phren-update` and `/phren-learn` skills: redundant now that hooks auto-commit and AGENTS.md instructions tell Claude to call `add_learning()` during sessions
 
 ### Changed
 - Skills count: 5 to 4 (sync, init, discover, consolidate)
@@ -1858,11 +3056,11 @@ Major TUI overhaul based on Claude Code architecture study. 43 files changed, +1
 - `add_learning(project, insight)` MCP tool: record a learning to LEARNINGS.md the moment you discover it, grouped by date
 - `remove_learning(project, text)` MCP tool: remove a learning that turned out to be wrong or outdated
 - `save_learnings(message?)` MCP tool: commit and push all phren changes (git add, commit, push)
-- Global CLAUDE.md now instructs Claude to use learning tools proactively during the session, not just at the end
+- Global AGENTS.md now instructs Claude to use learning tools proactively during the session, not just at the end
 
 ### Changed
 - MCP tool count: 7 -> 10 (added add_learning, remove_learning, save_learnings)
-- Global CLAUDE.md: split MCP instructions into Reading and Writing sections with clear triggers for each
+- Global AGENTS.md: split MCP instructions into Reading and Writing sections with clear triggers for each
 
 ## [1.6.3] - 2026-03-04
 
@@ -1870,7 +3068,7 @@ Major TUI overhaul based on Claude Code architecture study. 43 files changed, +1
 - README: removed duplicate JSON config blocks, fixed skill count (5 not 6), updated `/phren:learn` references to `/phren-update`
 - README: added `update_task` tool and `search_phren` type filter to MCP docs
 - README: replaced outdated `cd mcp && npm run build` instructions with `npx phren init`
-- Site: fixed `MEMORY.md` reference to `CLAUDE.md` in bento card, `/phren-learn` to `/phren-update`
+- Site: fixed `MEMORY.md` reference to `AGENTS.md` in bento card, `/phren-learn` to `/phren-update`
 - Site: updated "Clones the starter" to "Creates" (bundled since v1.6.0)
 - llms-install.md: fixed tool parameter signatures to match actual MCP server, added `-y` to npx commands
 
@@ -1894,7 +3092,7 @@ Major TUI overhaul based on Claude Code architecture study. 43 files changed, +1
 ### Changed
 - Starter is now bundled in the npm package (no more git clone from phren-starter repo)
 - Init copies from bundled starter directory, works offline and without git
-- Synced all starter templates to match 1.5.0 conventions (bold labels, project skills, key patterns, full global CLAUDE.md)
+- Synced all starter templates to match 1.5.0 conventions (bold labels, project skills, key patterns, full global AGENTS.md)
 - Init output says "Created phren v1.6.0" instead of "Cloned phren-starter"
 
 ### Removed
@@ -1904,7 +3102,7 @@ Major TUI overhaul based on Claude Code architecture study. 43 files changed, +1
 
 ### Fixed
 - FTS5 query sanitizer no longer strips URLs (only targets actual column prefixes)
-- Broken CLAUDE.md and LEARNINGS.md symlinks replaced with real files
+- Broken AGENTS.md and LEARNINGS.md symlinks replaced with real files
 - Init fallback no longer overwrites existing user files
 - Atomic writes for machines.yaml registration (no more race conditions)
 - Context file overwrites now preserve user content outside managed markers
@@ -1927,7 +3125,7 @@ Major TUI overhaul based on Claude Code architecture study. 43 files changed, +1
 - Merged `/phren-learn` into `/phren-update`: one skill for saving session learnings, works standalone or with full phren setup
 - Simplified from 6 skills to 5: update, sync, init, discover, consolidate
 - MCP tool descriptions now tell Claude when to call them proactively
-- global CLAUDE.md instructs Claude to use MCP tools and task without being asked
+- global AGENTS.md instructs Claude to use MCP tools and task without being asked
 - Landing page: replaced misleading token savings card with honest "search not load" framing
 - Skill names consistent everywhere with dashes (not colons)
 - Framework boilerplate no longer lists personal workflow skills
@@ -1940,7 +3138,7 @@ Major TUI overhaul based on Claude Code architecture study. 43 files changed, +1
 
 ### Added
 - `npx phren init`: one-command setup that clones phren-starter to `~/.phren`, sets hostname in `machines.yaml`, and configures Claude Code + VS Code MCP automatically
-- link.sh symlinks `CLAUDE-*.md` split files alongside `CLAUDE.md` for `@import` support
+- link.sh symlinks `CLAUDE-*.md` split files alongside `AGENTS.md` for `@import` support
 
 ## [1.1.4] - 2026-03-04
 

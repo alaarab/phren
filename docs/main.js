@@ -436,3 +436,40 @@ document.querySelectorAll('.copy-btn').forEach(btn => {
   }, { threshold: 0.4 });
   obs.observe(section);
 })();
+
+
+// --- Surfaces explorer tabs ---
+(function() {
+  const root = document.querySelector('.surfaces');
+  if (!root) return;
+  const tabs = Array.from(root.querySelectorAll('.surface-tab'));
+  const panels = Array.from(root.querySelectorAll('.surface-panel'));
+  const byHash = {};
+  tabs.forEach(t => { byHash[t.dataset.hash] = t.dataset.surface; });
+
+  function activate(surface, updateHash) {
+    tabs.forEach(t => {
+      const on = t.dataset.surface === surface;
+      t.classList.toggle('active', on);
+      t.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    panels.forEach(p => p.classList.toggle('active', p.dataset.surface === surface));
+    if (updateHash) {
+      const tab = tabs.find(t => t.dataset.surface === surface);
+      if (tab && history.replaceState) history.replaceState(null, '', '#' + tab.dataset.hash);
+    }
+  }
+
+  tabs.forEach(t => t.addEventListener('click', () => activate(t.dataset.surface, true)));
+
+  function fromHash() {
+    const hash = location.hash.replace('#', '');
+    const surface = byHash[hash];
+    if (!surface) return;
+    activate(surface, false);
+    const section = document.getElementById('surfaces');
+    if (section) section.scrollIntoView({ block: 'start' });
+  }
+  window.addEventListener('hashchange', fromHash);
+  fromHash();
+})();

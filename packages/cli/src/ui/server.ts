@@ -1,3 +1,6 @@
+import { nonInteractiveGitEnv } from "../utils-helpers.js";
+import { moduleSnapshot } from "../modules/runtime.js";
+import { disabledHint } from "../modules/registry.js";
 import * as http from "http";
 import * as crypto from "crypto";
 import { timingSafeEqual } from "crypto";
@@ -43,6 +46,7 @@ import {
   recentUsage,
 } from "./data.js";
 import { lookupEventsLogFile } from "../shared.js";
+import { LookupTail } from "../shared/lookup-tail.js";
 import { CONSOLIDATION_ENTRY_THRESHOLD } from "../content/validate.js";
 import {
   ensureTopicReferenceDoc,
@@ -67,6 +71,7 @@ import { logger } from "../logger.js";
 import { addNote, editNote, listNotes, removeNote } from "../data/notes.js";
 import { promoteNote } from "../core/note.js";
 import { FINDING_TYPES, type FindingType } from "../shared.js";
+import { storeCommitMessage } from "../machine-identity.js";
 
 export interface WebUiOptions {
   authToken?: string;
@@ -396,6 +401,20 @@ function jsonErr(res: Res, error: string, status = 200): void {
   res.end(JSON.stringify({ ok: false, error }));
 }
 
+function handleRequestError(res: Res, err: unknown): void {
+  if (res.destroyed || res.writableEnded) return;
+  if (res.headersSent) {
+    res.destroy();
+    return;
+  }
+  if (err instanceof URIError) {
+    jsonErr(res, "Invalid URL encoding", 400);
+  } else {
+    logger.debug("web-ui", `request failed: ${errorMessage(err)}`);
+    jsonErr(res, "Internal server error", 500);
+  }
+}
+
 function withPostBody(
   req: Req, res: Res, url: string, ctx: RouteCtx,
   handler: (parsed: querystring.ParsedUrlQuery) => void,
@@ -405,7 +424,7 @@ function withPostBody(
     if (!requirePostAuth(req, res, url, parsed, ctx.authToken, true)) return;
     if (!requireCsrf(res, parsed, ctx.csrfTokens, true)) return;
     handler(parsed);
-  });
+  }).catch((err: unknown) => handleRequestError(res, err));
 }
 
 // ── GET handlers ──────────────────────────────────────────────────────────────
@@ -493,47 +512,11 @@ function handleLookupStream(req: Req, res: Res, ctx: RouteCtx): void {
   });
   res.write("retry: 3000\n\n");
 
-  const logPath = lookupEventsLogFile(ctx.phrenPath);
-  // Start from the current end of the file so we only stream events that happen
-  // after the client connects (the initial snapshot comes from /api/lookups).
-  let offset = 0;
-  try {
-    offset = fs.existsSync(logPath) ? fs.statSync(logPath).size : 0;
-  } catch { offset = 0; }
-
-  let carry = "";
+  // Only stream events appended after the client connects; the initial
+  // snapshot comes from /api/lookups.
+  const tail = new LookupTail(lookupEventsLogFile(ctx.phrenPath));
   const flushNew = (): void => {
-    let size: number;
-    try {
-      if (!fs.existsSync(logPath)) return;
-      size = fs.statSync(logPath).size;
-    } catch { return; }
-    if (size < offset) { offset = 0; carry = ""; } // file rotated/truncated
-    if (size <= offset) return;
-    let chunk = "";
-    try {
-      const fd = fs.openSync(logPath, "r");
-      try {
-        const buf = Buffer.alloc(size - offset);
-        fs.readSync(fd, buf, 0, buf.length, offset);
-        chunk = buf.toString("utf8");
-      } finally {
-        fs.closeSync(fd);
-      }
-    } catch { return; }
-    offset = size;
-    const lines = (carry + chunk).split("\n");
-    carry = lines.pop() ?? "";
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      try {
-        JSON.parse(trimmed); // validate before forwarding
-        res.write(`data: ${trimmed}\n\n`);
-      } catch {
-        // skip malformed lines
-      }
-    }
+    for (const line of tail.pollLines()) res.write(`data: ${line}\n\n`);
   };
 
   const pollTimer = setInterval(flushNew, 1000);
@@ -555,7 +538,7 @@ function handleGetProjectContent(res: Res, url: string, ctx: RouteCtx): void {
   const project = String(qs.project || "");
   const file = String(qs.file || "");
   if (!project || !isValidProjectName(project) || !file) return jsonErr(res, "Invalid project or file", 400);
-  const allowedFiles = [FINDINGS_FILENAME, TASKS_FILENAME, "CLAUDE.md", "summary.md"];
+  const allowedFiles = [FINDINGS_FILENAME, TASKS_FILENAME, "AGENTS.md", "summary.md"];
   if (!allowedFiles.includes(file)) return jsonErr(res, `File not allowed: ${file}`, 400);
   const basePath = resolveProjectBasePath(ctx.phrenPath, project);
   const filePath = safeProjectPath(basePath, project, file);
@@ -702,7 +685,7 @@ function handleGetSettings(res: Res, url: string, ctx: RouteCtx): void {
         diskPath: projConfig.sourcePath || projectDir, ownership: projConfig.ownership || "default",
         configFile, configExists: fs.existsSync(configFile), hasFindings: fs.existsSync(findingsPath),
         hasTasks: fs.existsSync(taskPath), hasSummary: fs.existsSync(path.join(projectDir, "summary.md")),
-        hasClaudeMd: fs.existsSync(path.join(projectDir, "CLAUDE.md")), findingCount, taskCount,
+        hasClaudeMd: fs.existsSync(path.join(projectDir, "AGENTS.md")), findingCount, taskCount,
       };
     }
     const indexPolicy = getIndexPolicy(ctx.phrenPath);
@@ -786,13 +769,13 @@ function handlePostSync(req: Req, res: Res, url: string, ctx: RouteCtx): void {
     try {
       const EXEC_TIMEOUT = 15_000;
       const runGit = (args: string[]) =>
-        execFileSync("git", args, { cwd: ctx.phrenPath, encoding: "utf8", timeout: EXEC_TIMEOUT }).trim();
+        execFileSync("git", args, { env: nonInteractiveGitEnv(), cwd: ctx.phrenPath, encoding: "utf8", timeout: EXEC_TIMEOUT }).trim();
       const status = runGit(["status", "--porcelain"]);
       if (!status) return jsonOk(res, { ok: true, message: "Nothing to sync — working tree clean." });
       runGit(["add", "--", "*.md", "*.json", "*.yaml", "*.yml", "*.jsonl", "*.txt"]);
       const stagedFiles = runGit(["diff", "--cached", "--name-only"]);
       if (!stagedFiles) return jsonOk(res, { ok: true, message: "Nothing to sync — no matching files to commit." });
-      runGit(["commit", "-m", message, "--only", "--", ...stagedFiles.split("\n").filter(Boolean)]);
+      runGit(["commit", "-m", storeCommitMessage(message), "--only", "--", ...stagedFiles.split("\n").filter(Boolean)]);
       let pushed = false;
       try { if (runGit(["remote"])) { runGit(["push"]); pushed = true; } } catch { /* no remote or push failed */ }
       const changedFiles = status.split("\n").filter(Boolean).length;
@@ -873,7 +856,7 @@ function handlePostSkillToggle(req: Req, res: Res, url: string, ctx: RouteCtx): 
     if (!project || !name || (project.toLowerCase() !== "global" && !isValidProjectName(project))) return jsonErr(res, "Invalid skill toggle request");
     const skill = findSkill(ctx.phrenPath, ctx.profile || "", project, name);
     if (!skill || "error" in skill) return jsonErr(res, skill && "error" in skill ? skill.error : "Skill not found");
-    setSkillEnabledAndSync(ctx.phrenPath, project, skill.name, enabled);
+    setSkillEnabledAndSync(ctx.phrenPath, skill.source, skill.name, enabled);
     jsonOk(res, { ok: true, enabled });
   });
 }
@@ -1345,11 +1328,12 @@ export function createWebUiHttpServer(
     logger.debug("web-ui", `web-ui repair: ${errorMessage(err)}`);
   }
 
+  const modules = moduleSnapshot(phrenPath, profile);
   const ctx: RouteCtx = {
     phrenPath, profile, authToken: opts?.authToken, csrfTokens: opts?.csrfTokens, renderPage,
   };
 
-  return http.createServer(async (req, res) => {
+  const handleRequest = async (req: Req, res: Res): Promise<void> => {
     const url = req.url || "/";
     const pathname = url.includes("?") ? url.slice(0, url.indexOf("?")) : url;
 
@@ -1365,6 +1349,10 @@ export function createWebUiHttpServer(
 
     // Auth gate for all GET /api/* routes
     if (pathname.startsWith("/api/") && req.method === "GET" && !requireGetAuth(req, res, url, ctx.authToken)) return;
+
+    if (!modules.has("tasks") && (pathname === "/api/tasks" || pathname.startsWith("/api/tasks/") || pathname === "/api/settings/task-mode")) {
+      return jsonErr(res, disabledHint("tasks"), 404);
+    }
 
     // ── GET routes ──
     if (req.method === "GET") {
@@ -1436,6 +1424,12 @@ export function createWebUiHttpServer(
 
     res.writeHead(404, { "content-type": "text/plain" });
     res.end("Not found");
+  };
+
+  return http.createServer((req, res) => {
+    // Node does not handle rejected promises from request listeners. Contain
+    // malformed URI components and unexpected route failures to this request.
+    void handleRequest(req, res).catch((err: unknown) => handleRequestError(res, err));
   });
 }
 

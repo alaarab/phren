@@ -13,7 +13,7 @@ struct PhrenGlanceWidget: Widget {
             PhrenWidgetView(entry: entry)
         }
         .configurationDisplayName("phren")
-        .description("Your review queue count and top active task, at a glance.")
+        .description("Your project memory and top active task, at a glance.")
         .supportedFamilies([.systemSmall, .systemMedium, .accessoryCircular, .accessoryRectangular])
     }
 }

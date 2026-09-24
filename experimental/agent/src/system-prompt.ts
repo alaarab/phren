@@ -1,4 +1,20 @@
-export function buildSystemPrompt(phrenContext: string, priorSummary: string | null, providerInfo?: { name: string; model?: string }): string {
+export interface PriorSummaryInfo {
+  summary: string;
+  project?: string;
+  endedAt?: string;
+}
+
+export interface CustomCommandHint {
+  name: string;
+  description?: string;
+}
+
+export function buildSystemPrompt(
+  phrenContext: string,
+  priorSummary: PriorSummaryInfo | string | null,
+  providerInfo?: { name: string; model?: string },
+  customCommands?: CustomCommandHint[],
+): string {
   const modelNote = providerInfo ? ` You are running on ${providerInfo.name}${providerInfo.model ? ` (model: ${providerInfo.model})` : ""}.` : "";
   const parts = [
     `You are phren-agent, an autonomous coding agent with persistent memory.${modelNote}`,
@@ -22,6 +38,7 @@ export function buildSystemPrompt(phrenContext: string, priorSummary: string | n
     "- System: `shell` (run commands, cd, build, test)",
     "- Git: `git_status`, `git_diff`, `git_commit`",
     "- Memory: `phren_search`, `phren_add_finding`, `phren_get_tasks`, `phren_complete_task`, `phren_add_task`",
+    "- Planning: `update_plan` — keep a short visible todo list for multi-step work",
     "",
     "## Important",
     "- Be direct and concise. Lead with the answer, not the reasoning.",
@@ -33,11 +50,26 @@ export function buildSystemPrompt(phrenContext: string, priorSummary: string | n
   ];
 
   if (priorSummary) {
-    parts.push("", `## Last session\n${priorSummary}`);
+    if (typeof priorSummary === "string") {
+      parts.push("", `## Last session\n${priorSummary}`);
+    } else {
+      const meta: string[] = [];
+      if (priorSummary.project) meta.push(`project: ${priorSummary.project}`);
+      if (priorSummary.endedAt) meta.push(`ended: ${priorSummary.endedAt.slice(0, 16).replace("T", " ")}`);
+      const header = meta.length > 0 ? `## Last session (${meta.join(", ")})` : "## Last session";
+      parts.push("", `${header}\n${priorSummary.summary}`);
+    }
   }
 
   if (phrenContext) {
     parts.push("", phrenContext);
+  }
+
+  if (customCommands && customCommands.length > 0) {
+    const lines = customCommands.map((command) =>
+      command.description ? `- /${command.name} — ${command.description}` : `- /${command.name}`,
+    );
+    parts.push("", `## Custom commands\nThe user has defined these slash commands; they expand to instructions you should follow:\n${lines.join("\n")}`);
   }
 
   return parts.join("\n");

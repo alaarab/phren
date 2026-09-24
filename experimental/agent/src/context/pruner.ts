@@ -1,4 +1,5 @@
 import type { LlmMessage, ContentBlock, ToolUseBlock, ToolResultBlock } from "../providers/types.js";
+import { toolResultText } from "../providers/types.js";
 import { estimateTokens, estimateMessageTokens } from "./token-counter.js";
 
 export interface PruneConfig {
@@ -92,7 +93,7 @@ function extractFromToolUse(
 }
 
 function extractError(block: ToolResultBlock, errorsSet: Set<string>): void {
-  const firstLine = block.content.split("\n")[0].trim();
+  const firstLine = toolResultText(block).split("\n")[0].trim();
   if (firstLine) {
     // Cap length to keep summary concise
     errorsSet.add(firstLine.length > 120 ? firstLine.slice(0, 120) + "..." : firstLine);
@@ -143,20 +144,29 @@ function formatFactSummary(middle: LlmMessage[], toolsUsed: Set<string>): string
 
 // ── Pruner ──────────────────────────────────────────────────────────────────
 
-/** Prune messages, keeping the first (original task) and last N turn pairs. */
-export function pruneMessages(
-  messages: LlmMessage[],
-  config?: Partial<PruneConfig>,
-): LlmMessage[] {
+/** A planned prune: replace messages[startIndex..endIndex] with the summary. */
+export interface PrunePlan {
+  /** First message index to replace (inclusive). */
+  startIndex: number;
+  /** Last message index to replace (inclusive). */
+  endIndex: number;
+  summaryMessage: LlmMessage;
+}
+
+/**
+ * Plan a prune, keeping the first message (original task) and the last N turn
+ * pairs. Returns null when there is nothing worth pruning. The caller applies
+ * the plan — the session log records it as a durable replace, so the pruned
+ * range survives in the log even though the model no longer sees it.
+ */
+export function planPrune(messages: LlmMessage[], config?: Partial<PruneConfig>): PrunePlan | null {
   const keepRecent = config?.keepRecentTurns ?? DEFAULT_CONFIG.keepRecentTurns;
   const keepRecentMessages = keepRecent * 2; // each turn = user + assistant
 
   // Not enough messages to prune
   if (messages.length <= keepRecentMessages + 1) {
-    return messages;
+    return null;
   }
-
-  const first = messages[0]; // original task
 
   // Walk backwards from split point to ensure tail starts with a user text message,
   // not a tool_result-only message (which would be orphaned without its tool_use).
@@ -171,9 +181,9 @@ export function pruneMessages(
     }
     splitIdx--;
   }
+  if (splitIdx <= 1) return null;
 
   const middle = messages.slice(1, splitIdx);
-  const tail = messages.slice(splitIdx);
 
   // Collect tool names used in the pruned middle section
   const toolsUsed = new Set<string>();
@@ -187,10 +197,23 @@ export function pruneMessages(
     }
   }
 
-  const summaryMessage: LlmMessage = {
-    role: "user",
-    content: formatFactSummary(middle, toolsUsed),
+  return {
+    startIndex: 1,
+    endIndex: splitIdx - 1,
+    summaryMessage: { role: "user", content: formatFactSummary(middle, toolsUsed) },
   };
+}
 
-  return [first, summaryMessage, ...tail];
+/** Prune messages, keeping the first (original task) and last N turn pairs. */
+export function pruneMessages(
+  messages: LlmMessage[],
+  config?: Partial<PruneConfig>,
+): LlmMessage[] {
+  const plan = planPrune(messages, config);
+  if (!plan) return messages;
+  return [
+    ...messages.slice(0, plan.startIndex),
+    plan.summaryMessage,
+    ...messages.slice(plan.endIndex + 1),
+  ];
 }

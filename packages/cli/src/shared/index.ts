@@ -1,3 +1,5 @@
+import { moduleSnapshot } from "../modules/runtime.js";
+import { skillEnabled } from "../modules/provision.js";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -8,6 +10,7 @@ import {
   appendIndexEvent,
   getProjectDirs,
   collectNativeMemoryFiles,
+  nativeMemoryEnabled,
   runtimeFile,
   homeDir,
   readRootManifest,
@@ -194,6 +197,7 @@ async function _drainEmbQueue(): Promise<void> {
 }
 
 const FILE_TYPE_MAP: Record<string, string> = {
+  "agents.md": "claude",
   "claude.md": "claude",
   "summary.md": "summary",
   "findings.md": "findings",
@@ -354,7 +358,7 @@ function computePhrenHash(phrenPath: string, profile?: string, preGlobbed?: stri
           for (const f of mdFiles) matched.add(f);
         }
         for (const f of matched) {
-          if (ownership === "repo-managed" && path.basename(f).toLowerCase() === "claude.md") continue;
+          if (ownership === "repo-managed" && path.basename(f).toLowerCase() === "agents.md") continue;
           files.push(path.join(dir, f));
         }
         if (ownership === "repo-managed") {
@@ -385,7 +389,7 @@ function computePhrenHash(phrenPath: string, profile?: string, preGlobbed?: stri
     }
   }
 
-  for (const mem of collectNativeMemoryFiles()) {
+  for (const mem of nativeMemoryEnabled() ? collectNativeMemoryFiles() : []) {
     try {
       const stat = fs.statSync(mem.fullPath);
       hash.update(`native:${mem.fullPath}:${stat.mtimeMs}:${stat.size}`);
@@ -585,7 +589,7 @@ function getEntrySourceDocKey(entry: FileEntry, phrenPath: string): string {
 function getRepoManagedInstructionEntries(phrenPath: string, project: string): FileEntry[] {
   const repoDir = getProjectSourcePath(phrenPath, project);
   if (!repoDir) return [];
-  const candidates = ["CLAUDE.md", path.join(".claude", "CLAUDE.md")];
+  const candidates = ["AGENTS.md", "CLAUDE.md", path.join(".claude", "CLAUDE.md")];
   const entries: FileEntry[] = [];
   for (const relFile of candidates) {
     const fullPath = path.join(repoDir, relFile);
@@ -611,6 +615,7 @@ function globAllFiles(phrenPath: string, profile?: string): { filePaths: string[
   for (const dir of projectDirs) {
     const projectName = path.basename(dir);
     const storePath = path.dirname(dir);
+    const modules = moduleSnapshot(storePath, profile);
     const config = readProjectConfig(storePath, projectName);
     const ownership = getProjectOwnershipMode(storePath, projectName, config);
     const mdFilesSet = new Set<string>();
@@ -627,9 +632,11 @@ function globAllFiles(phrenPath: string, profile?: string): { filePaths: string[
     const relFiles = [...mdFilesSet].sort();
     for (const relFile of relFiles) {
       const filename = path.basename(relFile);
-      if (ownership === "repo-managed" && filename.toLowerCase() === "claude.md") continue;
+      if (ownership === "repo-managed" && ["agents.md", "claude.md"].includes(filename.toLowerCase())) continue;
       const fullPath = path.join(dir, relFile);
       const type = classifyFile(filename, relFile);
+      if (type === "task" && !modules.has("tasks")) continue;
+      if (relFile.startsWith("skills/") && !skillEnabled(storePath, relFile.split("/")[1], profile)) continue;
       entries.push({ fullPath, project: projectName, filename, type, relFile });
       allAbsolutePaths.push(fullPath);
     }
@@ -646,6 +653,7 @@ function globAllFiles(phrenPath: string, profile?: string): { filePaths: string[
   if (fs.existsSync(globalSkillsDir)) {
     const skillFiles = globSync("**/*.md", { cwd: globalSkillsDir, nodir: true });
     for (const relFile of skillFiles) {
+      if (!skillEnabled(phrenPath, relFile.split("/")[0], profile)) continue;
       const fullPath = path.join(globalSkillsDir, relFile);
       const filename = path.basename(relFile);
       entries.push({ fullPath, project: "global", filename, type: "skill", relFile: `skills/${relFile}` });
@@ -653,7 +661,7 @@ function globAllFiles(phrenPath: string, profile?: string): { filePaths: string[
     }
   }
 
-  for (const mem of collectNativeMemoryFiles()) {
+  for (const mem of nativeMemoryEnabled() ? collectNativeMemoryFiles() : []) {
     entries.push({ fullPath: mem.fullPath, project: mem.project, filename: mem.file, type: "findings" });
     allAbsolutePaths.push(mem.fullPath);
   }
@@ -729,7 +737,7 @@ function extractLegacyTopicSlug(entry: FileEntry): string | null {
  * Build-scoped memo for `readProjectTopics()`.
  *
  * `readProjectTopics` derives adaptive topics by reading and tokenising the
- * *whole* project corpus — CLAUDE.md, FINDINGS.md and every reference/*.md —
+ * *whole* project corpus — AGENTS.md, FINDINGS.md and every reference/*.md —
  * on each call (see `buildTopicContentSignal` in project-topics.ts). It is
  * called once per reference document, so a project with R reference docs read
  * and tokenised its own corpus R times per rebuild. Measured on a 1892-file
@@ -756,7 +764,7 @@ function endTopicBuildCache(): void {
 
 function readProjectTopicsForBuild(phrenPath: string, project: string): ReturnType<typeof readProjectTopics> {
   if (!_buildTopicCacheActive) return readProjectTopics(phrenPath, project);
-  const key = `${phrenPath} ${project}`;
+  const key = `${phrenPath}\u0000${project}`;
   const hit = _buildTopicCache.get(key);
   if (hit) return hit;
   const resolved = readProjectTopics(phrenPath, project);
@@ -854,6 +862,9 @@ export function updateFileInIndex(db: SqlJsDatabase, filePath: string, phrenPath
     const project = rel.split(path.sep)[0];
     const relFile = rel.split(path.sep).slice(1).join(path.sep);
     const type = classifyFile(filename, relFile);
+    const modules = moduleSnapshot(phrenPath);
+    if (type === "task" && !modules.has("tasks")) return;
+    if (relFile.startsWith("skills/") && !skillEnabled(phrenPath, relFile.split("/")[1])) return;
     const entry: FileEntry = { fullPath: resolvedPath, project, filename, type, relFile };
     // Single read feeds the insert, fragment extraction and the content hash.
     const raw = readFileOrNull(resolvedPath);
@@ -994,16 +1005,19 @@ function collectContentDirs(phrenPath: string, projectDirs: string[]): string[] 
     walk(dir);
   }
   walk(path.join(phrenPath, "global", "skills"));
-  // Native agent memory (~/.claude/projects/*/memory) is indexed too, but the
-  // surrounding project dirs are huge — watch only the two levels that matter.
-  const nativeRoot = path.join(homeDir(), ".claude", "projects");
-  out.add(nativeRoot);
-  try {
-    for (const entry of fs.readdirSync(nativeRoot, { withFileTypes: true })) {
-      if (entry.isDirectory()) out.add(path.join(nativeRoot, entry.name, "memory"));
+  // Native agent memory (~/.claude/projects/*/memory) is indexed only when
+  // PHREN_FEATURE_NATIVE_MEMORY is on; then the surrounding project dirs are
+  // huge, so watch only the two levels that matter.
+  if (nativeMemoryEnabled()) {
+    const nativeRoot = path.join(homeDir(), ".claude", "projects");
+    out.add(nativeRoot);
+    try {
+      for (const entry of fs.readdirSync(nativeRoot, { withFileTypes: true })) {
+        if (entry.isDirectory()) out.add(path.join(nativeRoot, entry.name, "memory"));
+      }
+    } catch {
+      // no native memory dirs — the nativeRoot entry above still catches creation
     }
-  } catch {
-    // no native memory dirs — the nativeRoot entry above still catches creation
   }
   return [...out];
 }
@@ -1776,10 +1790,11 @@ function isDbOpen(db: SqlJsDatabase): boolean {
   }
 }
 
-export async function buildIndex(phrenPath: string, profile?: string): Promise<SqlJsDatabase> {
+export async function buildIndex(phrenPath: string, profile?: string, options: { force?: boolean } = {}): Promise<SqlJsDatabase> {
   const debounceMs = getIndexDebounceMs();
-  const buildKey = `${phrenPath}|${profile ?? ""}`;
+  const buildKey = storeCacheKey(phrenPath, profile);
   if (
+    !options.force &&
     debounceMs > 0 &&
     _lastBuiltDb !== null &&
     _lastBuildKey === buildKey &&
@@ -1819,8 +1834,10 @@ function ftsCacheRoot(): string {
  * Identity therefore has to live in the path.
  */
 function storeCacheKey(phrenPath: string, profile?: string): string {
+  const generations = [...new Set([phrenPath, ...getAllStoreProjectDirs(phrenPath, profile).map(dir => path.dirname(dir))])]
+    .sort().map(store => moduleSnapshot(store, profile).generation).join("|");
   return crypto.createHash("sha1")
-    .update(`${path.resolve(phrenPath)}|${profile ?? ""}`)
+    .update(`${path.resolve(phrenPath)}|${profile ?? ""}|${generations}`)
     .digest("hex")
     .slice(0, 16);
 }
@@ -2054,7 +2071,14 @@ export function detectProject(phrenPath: string, cwd: string, profile?: string):
     const sourcePath = getProjectSourcePath(storePhrenPath, projectName)
       || getProjectSourcePath(phrenPath, projectName);
     if (!sourcePath) continue;
-    const matches = resolvedCwd === sourcePath || resolvedCwd.startsWith(sourcePath + path.sep);
+    // Exact first. Then case-insensitive: a sourcePath written on a
+    // case-insensitive filesystem (macOS) and synced here can differ from the
+    // real directory only in case — "/home/me/projects/x" against
+    // "/home/me/Projects/x" — and without this the project is invisible to the
+    // hook on that machine, with nothing to say why.
+    const matches = resolvedCwd === sourcePath || resolvedCwd.startsWith(sourcePath + path.sep)
+      || resolvedCwd.toLowerCase() === sourcePath.toLowerCase()
+      || resolvedCwd.toLowerCase().startsWith(sourcePath.toLowerCase() + path.sep);
     if (!matches) continue;
     if (!bestMatch || sourcePath.length > bestMatch.length) {
       bestMatch = { project: projectName, length: sourcePath.length };

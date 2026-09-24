@@ -399,11 +399,7 @@ public struct FindingsFile: Sendable {
 
     static func isoTimestamp(_ date: Date) -> String {
         // new Date().toISOString(): yyyy-MM-dd'T'HH:mm:ss.SSS'Z'
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(identifier: "UTC")
-        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
-        return formatter.string(from: date)
+        PhrenDateFormats.utc("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'").string(from: date)
     }
 }
 

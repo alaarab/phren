@@ -1,3 +1,8 @@
+import { nonInteractiveGitEnv } from "../utils-helpers.js";
+import { migrateInstalledModules, moduleEnabled } from "../modules/runtime.js";
+import { initializeModules } from "../modules/config.js";
+import { skillEnabled } from "../modules/provision.js";
+import { reconcileModuleHooks } from "../bridge/install.js";
 /**
  * CLI orchestrator for phren init, mcp-mode, hooks-mode, and uninstall.
  * Delegates to focused helpers in init-config, init-setup, init-preferences,
@@ -375,6 +380,7 @@ export async function runInit(opts: InitOptions = {}) {
     log(`\nCloning existing phren from ${opts._walkthroughCloneUrl}...`);
     try {
       execFileSync("git", ["clone", opts._walkthroughCloneUrl, phrenPath], {
+        env: nonInteractiveGitEnv(),
         stdio: ["ignore", "pipe", "pipe"],
         timeout: 60_000,
       });
@@ -495,7 +501,7 @@ export async function runInit(opts: InitOptions = {}) {
         log(`  Would offer to add current project directory (${pendingBootstrap.path})`);
       }
       if (opts.applyStarterUpdate) {
-        log(`  Apply starter template updates to global/CLAUDE.md and global skills`);
+        log(`  Apply starter template updates to global/AGENTS.md and global skills`);
       }
       log(`  Run post-init verification checks`);
       log(`\nDry run complete.\n`);
@@ -531,6 +537,12 @@ export async function runInit(opts: InitOptions = {}) {
     }
   }
 
+  if (hasExistingInstall) migrateInstalledModules(phrenPath);
+  else {
+    initializeModules(phrenPath);
+    log("Memory only. Enable what you need with phren modules enable <name>.");
+  }
+
   if (hasExistingInstall) {
       writeRootManifest(phrenPath, {
         version: 1,
@@ -550,18 +562,19 @@ export async function runInit(opts: InitOptions = {}) {
       log(`  MCP mode: ${mcpLabel}`);
       log(`  Hooks mode: ${hooksLabel}`);
       log(`  Default project ownership: ${ownershipDefault}`);
-      log(`  Task mode: ${getWorkflowPolicy(phrenPath).taskMode}`);
+      if (moduleEnabled(phrenPath, "tasks")) log(`  Task mode: ${getWorkflowPolicy(phrenPath).taskMode}`);
       log(`  Git repo: ${existingGitRepo.detail}`);
 
       // Always reconfigure MCP and hooks (picks up new features on upgrade)
       configureMcpTargets(phrenPath, { mcpEnabled, hooksEnabled, caps: managementCaps }, "Updated");
       configureHooksIfEnabled(phrenPath, hooksEnabled, "Updated", managementCaps);
+      await reconcileModuleHooks(phrenPath);
 
       const prefs = readInstallPreferences(phrenPath);
       const previousVersion = prefs.installedVersion;
       if (isVersionNewer(VERSION, previousVersion)) {
         log(`\n  Starter template update available: v${previousVersion} -> v${VERSION}`);
-        log(`  Run \`phren init --apply-starter-update\` to refresh global/CLAUDE.md and global skills.`);
+        log(`  Run \`phren init --apply-starter-update\` to refresh global/AGENTS.md and global skills.`);
       }
       if (opts.applyStarterUpdate) {
         const updated = applyStarterTemplateUpdates(phrenPath);
@@ -657,6 +670,8 @@ export async function runInit(opts: InitOptions = {}) {
   function copyDir(src: string, dest: string) {
     fs.mkdirSync(dest, { recursive: true });
     for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+      if (entry.name === "tasks.md" && !moduleEnabled(phrenPath, "tasks")) continue;
+      if (path.basename(src) === "skills" && !skillEnabled(phrenPath, entry.name)) continue;
       const srcPath = path.join(src, entry.name);
       const destPath = path.join(dest, entry.name);
       if (entry.isDirectory()) {
@@ -705,7 +720,7 @@ export async function runInit(opts: InitOptions = {}) {
     fs.mkdirSync(path.join(phrenPath, "global", "skills"), { recursive: true });
     fs.mkdirSync(path.join(phrenPath, "profiles"), { recursive: true });
     atomicWriteText(
-      path.join(phrenPath, "global", "CLAUDE.md"),
+      path.join(phrenPath, "global", "AGENTS.md"),
       `# Global Context\n\nThis file is loaded in every project.\n\n## General preferences\n\n<!-- Your coding style, preferred tools, things Claude should always know -->\n`
     );
     if (useTemplateProject) {
@@ -754,7 +769,7 @@ export async function runInit(opts: InitOptions = {}) {
   log(`  MCP mode: ${mcpLabel}`);
   log(`  Hooks mode: ${hooksLabel}`);
   log(`  Default project ownership: ${ownershipDefault}`);
-  log(`  Task mode: ${getWorkflowPolicy(phrenPath).taskMode}`);
+  if (moduleEnabled(phrenPath, "tasks")) log(`  Task mode: ${getWorkflowPolicy(phrenPath).taskMode}`);
   log(`  Git repo: ${localGitRepo.detail}`);
   if (repaired.removedLegacyProjects > 0) {
     log(`  Removed ${repaired.removedLegacyProjects} legacy starter project entr${repaired.removedLegacyProjects === 1 ? "y" : "ies"} from profiles.`);
@@ -767,6 +782,7 @@ export async function runInit(opts: InitOptions = {}) {
   // Configure MCP for all detected AI coding tools and hooks
   configureMcpTargets(phrenPath, { mcpEnabled, hooksEnabled, caps: managementCaps }, "Configured");
   configureHooksIfEnabled(phrenPath, hooksEnabled, "Configured", managementCaps);
+  await reconcileModuleHooks(phrenPath);
 
   writeInstallPreferences(phrenPath, { mcpEnabled, hooksEnabled, skillsScope, installedVersion: VERSION, syncIntent });
 
@@ -778,7 +794,7 @@ export async function runInit(opts: InitOptions = {}) {
   }
 
   log(`\nWhat was created:`);
-  log(`  ${phrenPath}/global/CLAUDE.md    Global instructions loaded in every session`);
+  log(`  ${phrenPath}/global/AGENTS.md    Global instructions loaded in every session`);
   log(`  ${phrenPath}/global/skills/      Phren slash commands`);
   log(`  ${phrenPath}/profiles/           Machine-to-project mappings`);
   log(`  ${phrenPath}/.config/        Memory quality settings and config`);

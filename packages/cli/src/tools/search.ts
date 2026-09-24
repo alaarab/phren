@@ -1,3 +1,6 @@
+import { nonInteractiveGitEnv } from "../utils-helpers.js";
+import { projectMemoryCounts } from "../content/summarize.js";
+import { moduleEnabled } from "../modules/runtime.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type McpContext, mcpResponse, resolveStoreForProject } from "./types.js";
 import { z } from "zod";
@@ -36,7 +39,7 @@ import { entryScoreKey, getQualityMultiplier, getRetentionPolicy, recordLookupEv
 import { bestFindingNodeId } from "../finding-graph-id.js";
 import { callLlm } from "../content/dedup.js";
 import { rankResults, searchKnowledgeRows, applyTrustFilter, searchFederatedStores, type FederatedDocRow } from "../shared/retrieval.js";
-import { formatActorAttribution, parseScopeComment, parseSourceComment } from "../content/citation.js";
+import { formatActorAttribution, parseScopeComment, parseSourceComment, collectSymbolCitations } from "../content/citation.js";
 import { resolveActiveSessionScope } from "./session.js";
 import { logger } from "../logger.js";
 
@@ -423,6 +426,7 @@ async function handleSearchKnowledge(
       const snippet = extractSnippet(row.content, query);
       const lifecycle = row.type === "findings" ? lifecycleByRowKey.get(findingRowKey(row)) : undefined;
       const federationSource = "federationSource" in row ? (row as FederatedDocRow).federationSource : undefined;
+      const symbols = row.type === "findings" ? collectSymbolCitations(row.content) : [];
       return {
         project: row.project,
         filename: row.filename,
@@ -431,6 +435,7 @@ async function handleSearchKnowledge(
         path: row.path,
         status: lifecycle?.primaryStatus,
         statuses: lifecycle?.statuses,
+        ...(symbols.length > 0 ? { symbol: symbols[0], symbols } : {}),
         ...(federationSource ? { federation_source: federationSource } : {}),
       };
     });
@@ -550,7 +555,8 @@ async function handleGetProjectSummary(ctx: McpContext, { name }: { name: string
     if (store && fs.existsSync(path.join(store.path, lookupName))) {
       const projDir = path.join(store.path, lookupName);
       const fsDocs: Array<{ project: string; filename: string; type: string; content: string; path: string }> = [];
-      for (const [file, type] of [["summary.md", "summary"], ["CLAUDE.md", "claude"], [FINDINGS_FILENAME, "findings"], ["tasks.md", "task"], ["truths.md", "canonical"]] as const) {
+      for (const [file, type] of [["summary.md", "summary"], ["AGENTS.md", "claude"], [FINDINGS_FILENAME, "findings"], ["tasks.md", "task"], ["truths.md", "canonical"]] as const) {
+        if (type === "task" && !moduleEnabled(store.path, "tasks", ctx.profile)) continue;
         const filePath = path.join(projDir, file);
         if (fs.existsSync(filePath)) {
           fsDocs.push({ project: lookupName, filename: file, type, content: fs.readFileSync(filePath, "utf8").slice(0, 8000), path: filePath });
@@ -578,7 +584,7 @@ async function handleGetProjectSummary(ctx: McpContext, { name }: { name: string
     parts.push("\n*No summary.md found for this project.*");
   }
   if (claudeDoc) {
-    parts.push(`\n## CLAUDE.md path\n\`${claudeDoc.path}\``);
+    parts.push(`\n## AGENTS.md path\n\`${claudeDoc.path}\``);
   }
   // Show truths if they exist
   if (canonicalDoc) {
@@ -596,6 +602,9 @@ async function handleGetProjectSummary(ctx: McpContext, { name }: { name: string
     data: {
       name,
       summary: summaryDoc?.content ?? null,
+      // What the project holds, counted the way every graph counts it.
+      counts: projectMemoryCounts(storeName ? (resolveAllStores(ctx.phrenPath).find((s) => s.name === storeName)?.path ?? ctx.phrenPath) : ctx.phrenPath, lookupName),
+      agentsMdPath: claudeDoc?.path ?? null,
       claudeMdPath: claudeDoc?.path ?? null,
       truthsPath: canonicalDoc?.path ?? null,
       files: indexedFiles,
@@ -650,7 +659,7 @@ async function handleListProjects(ctx: McpContext, { page, page_size }: { page?:
   }
 
   const badgeTypes = ["claude", "findings", "summary", "task"] as const;
-  const badgeLabels: Record<string, string> = { claude: "CLAUDE.md", findings: "FINDINGS", summary: "summary", task: "task" };
+  const badgeLabels: Record<string, string> = { claude: "AGENTS.md", findings: "FINDINGS", summary: "summary", task: "task" };
 
   const projectList = pageProjects.map((entry) => {
     // Primary store projects: query the DB for badge info
@@ -674,10 +683,10 @@ async function handleListProjects(ctx: McpContext, { page, page_size }: { page?:
     const projDir = store ? path.join(store.path, entry.name) : "";
     const badges: string[] = [];
     if (projDir) {
-      if (fs.existsSync(path.join(projDir, "CLAUDE.md"))) badges.push("CLAUDE.md");
+      if (fs.existsSync(path.join(projDir, "AGENTS.md"))) badges.push("AGENTS.md");
       if (fs.existsSync(path.join(projDir, FINDINGS_FILENAME))) badges.push("FINDINGS");
       if (fs.existsSync(path.join(projDir, "summary.md"))) badges.push("summary");
-      if (fs.existsSync(path.join(projDir, "tasks.md"))) badges.push("task");
+      if (store && moduleEnabled(store.path, "tasks", ctx.profile) && fs.existsSync(path.join(projDir, "tasks.md"))) badges.push("task");
     }
     return { name: entry.name, store: entry.store, brief: "", badges, fileCount: badges.length };
   });
@@ -739,6 +748,7 @@ async function handleGetFindings(
   }
   const capped = filteredItems.slice(0, limit ?? 50).map(entry => ({
     ...entry,
+    symbol: entry.citationData?.symbol,
     lifecycle: {
       status: entry.status,
       status_updated: entry.status_updated,
@@ -751,6 +761,7 @@ async function handleGetFindings(
     metadata.push(`status=${entry.status}`);
     if (entry.taskItem) metadata.push(`task=${entry.taskItem}`);
     if (entry.scope) metadata.push(`scope=${entry.scope}`);
+    if (entry.symbol) metadata.push(`symbol=${entry.symbol}`);
     if (entry.supersedes) metadata.push(`supersedes="${entry.supersedes.slice(0, 30)}"`);
     if (entry.supersededBy) metadata.push(`superseded_by="${entry.supersededBy.slice(0, 30)}"`);
     if (entry.contradicts?.length) metadata.push(`contradicts=${entry.contradicts.length}`);
@@ -778,7 +789,7 @@ async function handleStoreList(ctx: McpContext) {
     try {
       const result = execFileSync(
         "git", ["log", "-1", "--format=%ci"],
-        { cwd: store.path, encoding: "utf8", timeout: 3000 }
+        { env: nonInteractiveGitEnv(), cwd: store.path, encoding: "utf8", timeout: 3000 }
       ).trim();
       lastSync = result || null;
     } catch { /* non-critical */ }

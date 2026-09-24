@@ -14,22 +14,22 @@ struct PhrenWidgetView: View {
             // Whole-widget fallback tap target (used by systemSmall and both
             // Lock Screen families outright, and by systemMedium whenever a
             // host surface doesn't honor the per-region `Link`s below).
-            .widgetURL(URL(string: "phren://review"))
+            .widgetURL(URL(string: "phren://projects"))
     }
 
     @ViewBuilder
     private var content: some View {
         switch family {
         case .systemSmall:
-            SmallReviewView(snapshot: entry.snapshot)
+            SmallMemoryView(snapshot: entry.snapshot)
         case .systemMedium:
-            MediumReviewView(snapshot: entry.snapshot)
+            MediumMemoryView(snapshot: entry.snapshot)
         case .accessoryCircular:
-            CircularReviewView(snapshot: entry.snapshot)
+            CircularMemoryView(snapshot: entry.snapshot)
         case .accessoryRectangular:
-            RectangularReviewView(snapshot: entry.snapshot)
+            RectangularMemoryView(snapshot: entry.snapshot)
         default:
-            SmallReviewView(snapshot: entry.snapshot)
+            SmallMemoryView(snapshot: entry.snapshot)
         }
     }
 
@@ -49,7 +49,7 @@ struct PhrenWidgetView: View {
 
 // MARK: - systemSmall
 
-struct SmallReviewView: View {
+struct SmallMemoryView: View {
     @Environment(\.widgetRenderingMode) private var renderingMode
     let snapshot: WidgetSnapshot?
 
@@ -63,13 +63,13 @@ struct SmallReviewView: View {
                     .tracking(1.2)
                     .foregroundStyle(isFullColor ? WidgetTheme.accent : .secondary)
                 Spacer(minLength: 2)
-                Text("\(snapshot.totalReviewCount)")
+                Text(snapshot.memoryCount.map(String.init) ?? "—")
                     .font(.system(size: 40, weight: .bold, design: .rounded))
                     .foregroundStyle(isFullColor ? WidgetTheme.text : .primary)
                     .minimumScaleFactor(0.5)
                     .lineLimit(1)
                     .widgetAccentable()
-                Text("to review")
+                Text("memories")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(isFullColor ? WidgetTheme.textMuted : .secondary)
             }
@@ -82,7 +82,7 @@ struct SmallReviewView: View {
 
 // MARK: - systemMedium
 
-struct MediumReviewView: View {
+struct MediumMemoryView: View {
     @Environment(\.widgetRenderingMode) private var renderingMode
     let snapshot: WidgetSnapshot?
 
@@ -91,8 +91,8 @@ struct MediumReviewView: View {
     var body: some View {
         if let snapshot {
             HStack(alignment: .top, spacing: 12) {
-                Link(destination: URL(string: "phren://review")!) {
-                    reviewColumn(snapshot)
+                Link(destination: URL(string: "phren://projects")!) {
+                    memoryColumn(snapshot)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
                 }
@@ -115,23 +115,23 @@ struct MediumReviewView: View {
     }
 
     @ViewBuilder
-    private func reviewColumn(_ snapshot: WidgetSnapshot) -> some View {
+    private func memoryColumn(_ snapshot: WidgetSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("PHREN")
                 .font(.system(size: 9, weight: .bold, design: .monospaced))
                 .tracking(1.2)
                 .foregroundStyle(isFullColor ? WidgetTheme.accent : .secondary)
-            Text("\(snapshot.totalReviewCount)")
+            Text(snapshot.memoryCount.map(String.init) ?? "—")
                 .font(.system(size: 32, weight: .bold, design: .rounded))
                 .foregroundStyle(isFullColor ? WidgetTheme.text : .primary)
                 .minimumScaleFactor(0.5)
                 .lineLimit(1)
                 .widgetAccentable()
-            Text("to review")
+            Text("memories")
                 .font(.caption2)
                 .foregroundStyle(isFullColor ? WidgetTheme.textMuted : .secondary)
-            if snapshot.storeBreakdown.count > 1 {
-                Text(breakdownText(snapshot.storeBreakdown))
+            if let projects = snapshot.projectCount {
+                Text("\(projects) projects")
                     .font(.caption2)
                     .foregroundStyle(isFullColor ? WidgetTheme.textMuted : .secondary)
                     .lineLimit(1)
@@ -147,11 +147,11 @@ struct MediumReviewView: View {
                 .tracking(1.0)
                 .foregroundStyle(isFullColor ? WidgetTheme.cyan : .secondary)
             if let topTask = snapshot.topTask {
-                Text(topTask.text)
+                Text(topTask.text).privacySensitive()
                     .font(.caption.weight(.medium))
                     .foregroundStyle(isFullColor ? WidgetTheme.text : .primary)
                     .lineLimit(2)
-                Text(topTask.project)
+                Text(topTask.project).privacySensitive()
                     .font(.caption2)
                     .foregroundStyle(isFullColor ? WidgetTheme.textMuted : .secondary)
                     .lineLimit(1)
@@ -169,15 +169,11 @@ struct MediumReviewView: View {
             }
         }
     }
-
-    private func breakdownText(_ breakdown: [WidgetSnapshot.StoreCount]) -> String {
-        breakdown.map { "\($0.storeName) \($0.count)" }.joined(separator: " \u{00B7} ")
-    }
 }
 
 // MARK: - accessoryCircular (Lock Screen)
 
-struct CircularReviewView: View {
+struct CircularMemoryView: View {
     let snapshot: WidgetSnapshot?
 
     var body: some View {
@@ -185,12 +181,12 @@ struct CircularReviewView: View {
             AccessoryWidgetBackground()
             if let snapshot {
                 VStack(spacing: 0) {
-                    Text("\(snapshot.totalReviewCount)")
+                    Text(snapshot.memoryCount.map(String.init) ?? "—")
                         .font(.system(.title2, design: .rounded).weight(.bold))
                         .minimumScaleFactor(0.5)
                         .lineLimit(1)
                         .widgetAccentable()
-                    Text("review")
+                    Text("memory")
                         .font(.system(size: 9))
                 }
             } else {
@@ -204,17 +200,17 @@ struct CircularReviewView: View {
 
 // MARK: - accessoryRectangular (Lock Screen)
 
-struct RectangularReviewView: View {
+struct RectangularMemoryView: View {
     let snapshot: WidgetSnapshot?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             if let snapshot {
-                Text("Review \(snapshot.totalReviewCount)")
+                Text("\(snapshot.memoryCount.map(String.init) ?? "—") memories")
                     .font(.headline)
                     .widgetAccentable()
                     .lineLimit(1)
-                Text(snapshot.topTask?.text ?? "Nothing active")
+                Text(snapshot.topTask?.text ?? "Nothing active").privacySensitive()
                     .font(.caption)
                     .lineLimit(1)
             } else {
@@ -253,7 +249,7 @@ struct OpenPhrenEmptyView: View {
             Text("Open phren")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(isFullColor ? WidgetTheme.text : .primary)
-            Text("Sign in to see your review queue")
+            Text("Sign in to explore your memory")
                 .font(.caption2)
                 .foregroundStyle(isFullColor ? WidgetTheme.textMuted : .secondary)
                 .lineLimit(2)

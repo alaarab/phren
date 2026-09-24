@@ -48,6 +48,7 @@ import {
   checkConsolidationNeeded,
   mergeFindings,
   mergeTask,
+  isAutoMergeableStorePath,
   autoMergeConflicts,
   filterTrustedFindingsDetailed,
   upsertCanonical,
@@ -58,7 +59,7 @@ import {
   extractConflictVersions,
 } from "./shared/content.js";
 import { isValidProjectName } from "./utils.js";
-import { grantAdmin, initTestPhrenRoot, makeTempDir, suppressOutput } from "./test-helpers.js";
+import { grantAdmin, initTestPhrenRoot, makeTempDir, resetTestPhrenPath, suppressOutput } from "./test-helpers.js";
 import * as path from "path";
 import * as fs from "fs";
 import * as yaml from "js-yaml";
@@ -89,11 +90,11 @@ function readVersionedEntries<T>(filePath: string): Record<string, T> {
 }
 
 beforeEach(() => {
-  delete process.env.PHREN_PATH;
+  resetTestPhrenPath();
 });
 
 afterEach(() => {
-  delete process.env.PHREN_PATH;
+  resetTestPhrenPath();
   delete process.env.PHREN_ACTOR;
   if (tmpCleanup) {
     tmpCleanup();
@@ -154,6 +155,8 @@ describe("findPhrenPath", () => {
     const tmp = makeTempDir("fakehome-");
     const origHome = process.env.HOME;
     const origCwd = process.cwd();
+    // Resolved without PHREN_PATH, from a temp cwd.
+    delete process.env.PHREN_PATH;
     process.env.HOME = tmp.path;
     process.chdir(tmp.path);
     try {
@@ -172,6 +175,8 @@ describe("findPhrenPath", () => {
     initTestPhrenRoot(dotPhren);
     const origHome = process.env.HOME;
     const origCwd = process.cwd();
+    // Resolved without PHREN_PATH, from a temp cwd.
+    delete process.env.PHREN_PATH;
     process.env.HOME = tmp.path;
     process.chdir(tmp.path);
     try {
@@ -194,6 +199,8 @@ describe("findPhrenPath", () => {
 
     const origCwd = process.cwd();
     const origHome = process.env.HOME;
+    // Resolved without PHREN_PATH, from a temp cwd.
+    delete process.env.PHREN_PATH;
     process.env.HOME = path.join(tmp.path, "home");
     fs.mkdirSync(process.env.HOME, { recursive: true });
     process.chdir(nestedDir);
@@ -212,6 +219,8 @@ describe("ensurePhrenPath", () => {
     const tmp = makeTempDir("fakehome-");
     const origHome = process.env.HOME;
     const origCwd = process.cwd();
+    // Resolved without PHREN_PATH, from a temp cwd.
+    delete process.env.PHREN_PATH;
     process.env.HOME = tmp.path;
     process.chdir(tmp.path);
     try {
@@ -1116,6 +1125,14 @@ describe("autoMergeConflicts", () => {
     if (gitCleanup) gitCleanup();
   });
 
+  it("limits union merges to findings, tasks, and root task archives", () => {
+    expect(isAutoMergeableStorePath("demo/FINDINGS.md")).toBe(true);
+    expect(isAutoMergeableStorePath("demo/tasks.md")).toBe(true);
+    expect(isAutoMergeableStorePath(".config/task-archive/demo.md")).toBe(true);
+    expect(isAutoMergeableStorePath("demo/archive.md")).toBe(false);
+    expect(isAutoMergeableStorePath("demo/.config/task-archive/other.md")).toBe(false);
+  });
+
   it("returns true when there are no conflicted files", () => {
     // Just an empty repo with one commit
     commitFile(gitDir, "README.md", "hello", "init");
@@ -1956,6 +1973,8 @@ describe("findPhrenPathWithArg", () => {
     const tmp = makeTempDir("fakehome-no-phren-");
     const origHome = process.env.HOME;
     const origCwd = process.cwd();
+    // Resolved without PHREN_PATH, from a temp cwd.
+    delete process.env.PHREN_PATH;
     process.env.HOME = tmp.path;
     process.chdir(tmp.path);
     try {
@@ -2288,5 +2307,15 @@ describe("PhrenError new codes", () => {
     const actualKeys = Object.keys(PhrenError);
     expect(actualKeys).toEqual(expect.arrayContaining(expectedKeys));
     expect(actualKeys.length).toBe(expectedKeys.length);
+  });
+});
+
+describe("nativeMemoryEnabled", () => {
+  it("is off unless PHREN_FEATURE_NATIVE_MEMORY asks for it", async () => {
+    const { nativeMemoryEnabled } = await import("./phren-paths.js");
+    expect(nativeMemoryEnabled({})).toBe(false);
+    expect(nativeMemoryEnabled({ PHREN_FEATURE_NATIVE_MEMORY: "0" })).toBe(false);
+    expect(nativeMemoryEnabled({ PHREN_FEATURE_NATIVE_MEMORY: "1" })).toBe(true);
+    expect(nativeMemoryEnabled({ PHREN_FEATURE_NATIVE_MEMORY: "true" })).toBe(true);
   });
 });

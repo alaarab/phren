@@ -4,6 +4,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "js-yaml";
+import { loadYamlDocument } from "../phren-core.js";
 import {
   appendAuditLog,
   phrenErr,
@@ -90,7 +91,8 @@ export {
 } from "../shell/state-store.js";
 export { getRuntimeHealth as readRuntimeHealth } from "../shared/governance.js";
 
-export const FINDINGS_FILENAME = "FINDINGS.md";
+import { FINDINGS_FILENAME } from "../filenames.js";
+export { FINDINGS_FILENAME } from "../filenames.js";
 
 export interface FindingItem {
   id: string;
@@ -262,7 +264,7 @@ function validateAggregateQueueProfile(phrenPath: string, profile?: string): Phr
 
   let data: unknown;
   try {
-    data = yaml.load(fs.readFileSync(profilePath, "utf-8"), { schema: yaml.CORE_SCHEMA });
+    data = loadYamlDocument(fs.readFileSync(profilePath, "utf-8"), (text) => yaml.load(text, { schema: yaml.CORE_SCHEMA }));
   } catch {
     return phrenErr(`Malformed profile YAML: ${profilePath}`, PhrenError.MALFORMED_YAML);
   }
@@ -283,7 +285,16 @@ export function readFindings(phrenPath: string, project: string, opts: ReadFindi
   const file = findingsPath;
   if (!fs.existsSync(file)) return phrenOk([]);
 
-  const lines = fs.readFileSync(file, "utf8").split("\n");
+  return phrenOk(parseFindingsContent(fs.readFileSync(file, "utf8"), opts));
+}
+
+/**
+ * Parse FINDINGS.md-shaped content into findings. Shared by `readFindings`
+ * (the project's FINDINGS.md) and the memory link's scan of archived topic
+ * files under `reference/topics/`, which use the same bullet + citation shape.
+ */
+export function parseFindingsContent(content: string, opts: ReadFindingsOptions = {}): FindingItem[] {
+  const lines = content.split("\n");
   const items: FindingItem[] = [];
   let date = "unknown";
   let index = 1;
@@ -394,7 +405,7 @@ export function readFindings(phrenPath: string, project: string, opts: ReadFindi
     index++;
   }
 
-  return phrenOk(items);
+  return items;
 }
 
 export function readFindingHistory(phrenPath: string, project: string, findingId?: string): PhrenResult<FindingHistoryEntry[]> {
@@ -897,6 +908,7 @@ export function approveQueueItemDetailed(
       ...(parsed.citation.file ? { file: parsed.citation.file } : {}),
       ...(parsed.citation.line !== undefined ? { line: parsed.citation.line } : {}),
       ...(parsed.citation.commit ? { commit: parsed.citation.commit } : {}),
+      ...(parsed.citation.symbol ? { symbol: parsed.citation.symbol } : {}),
     }
     : undefined;
   // The queue entry's own date is the day the observation was captured; the finding is

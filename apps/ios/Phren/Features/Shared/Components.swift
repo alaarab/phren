@@ -1,34 +1,62 @@
 import SwiftUI
 import PhrenKit
 
+extension Binding {
+    /// Present while an optional value exists, then clear that value on
+    /// dismissal. Setting true cannot invent the content of an alert/dialog.
+    func isPresent<Wrapped>() -> Binding<Bool> where Value == Wrapped? {
+        Binding<Bool>(
+            get: { wrappedValue != nil },
+            set: { if !$0 { wrappedValue = nil } }
+        )
+    }
+}
+
+extension View {
+    /// A thumb drag dismisses the keyboard without consuming taps or horizontal
+    /// text/toolbar gestures. Global coordinates stay stable as the keyboard moves.
+    func dismissKeyboardOnDownwardDrag(_ dismiss: @escaping () -> Void) -> some View {
+        // The icon row sits against the keyboard: recognize within its lower
+        // half, before the finger crosses into the keyboard's separate window.
+        simultaneousGesture(DragGesture(minimumDistance: 8, coordinateSpace: .global).onChanged { value in
+            let drag = value.translation
+            if drag.height > 12 && drag.height > abs(drag.width) * 1.3 { dismiss() }
+        })
+    }
+}
+
 /// "live · updated 3s ago" freshness indicator shown on every list screen —
 /// the visible promise that what you see is what's on GitHub right now.
 struct LiveStatusBar: View {
+    /// A single caption line, for a navigation bar subtitle, instead of the
+    /// full-width bar under the top bar.
+    var compact = false
     @Environment(AppModel.self) private var model
-    @State private var now = Date()
-
-    private let ticker = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
         HStack(spacing: 6) {
             Circle()
                 .fill(indicatorColor)
-                .frame(width: 8, height: 8)
-                .shadow(color: indicatorColor.opacity(0.7), radius: model.syncStatus.isLive ? 3 : 0)
-            Text(statusText)
-                .font(.caption.monospaced())
-                .foregroundStyle(PhrenTheme.textMuted)
-            Spacer()
-            if model.syncStatus.pendingCount > 0 {
-                Label("\(model.syncStatus.pendingCount)", systemImage: "arrow.up.circle")
-                    .font(.caption.monospaced())
-                    .foregroundStyle(PhrenTheme.amber)
+                .frame(width: 5, height: 5)
+            // Only the "updated 3s ago" text reads the shared clock.
+            ClockText { now in
+                Text(statusText(at: now))
+                    .font(compact ? PhrenTypography.caption2 : PhrenTypography.caption)
+                    .foregroundStyle(PhrenTheme.textMuted)
+                    .lineLimit(1)
+            }
+            if !compact {
+                Spacer()
+                if model.syncStatus.pendingCount > 0 {
+                    Label("\(model.syncStatus.pendingCount)", systemImage: "arrow.up.circle")
+                        .font(.caption)
+                        .foregroundStyle(PhrenTheme.amber)
+                }
             }
         }
-        .padding(.horizontal)
-        .padding(.vertical, 4)
-        .background(PhrenTheme.bg)
-        .onReceive(ticker) { now = $0 }
+        .padding(.horizontal, compact ? 0 : 24)
+        .padding(.vertical, compact ? 0 : 8)
+        .background(compact ? Color.clear : PhrenTheme.bg)
     }
 
     private var indicatorColor: Color {
@@ -36,7 +64,7 @@ struct LiveStatusBar: View {
         return model.syncStatus.isLive ? PhrenTheme.cyan : PhrenTheme.textDim
     }
 
-    private var statusText: String {
+    private func statusText(at now: Date) -> String {
         if let error = model.syncStatus.lastError {
             return "sync error — \(error)"
         }
@@ -126,14 +154,11 @@ struct TagChip: View {
     }
 
     var body: some View {
-        // The site's chips are monospace, squared-off, and bordered rather
-        // than pill-shaped (docs/index.html .mini-tag / card styling).
         Text(text)
-            .font(.caption2.monospaced().weight(.semibold))
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(color.opacity(0.14), in: RoundedRectangle(cornerRadius: 4))
-            .overlay(RoundedRectangle(cornerRadius: 4).stroke(color.opacity(0.45), lineWidth: 1))
+            .font(.caption2.weight(.medium))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(color.opacity(0.10), in: Capsule())
             .foregroundStyle(color)
     }
 }
@@ -149,6 +174,7 @@ struct TextEntrySheet: View {
     @Environment(\.dismiss) private var dismiss
     @State var text: String
     @State var selectedType: FindingType?
+    @State private var showingType = false
 
     init(title: String, initialText: String = "", initialType: FindingType? = nil,
          showsTypePicker: Bool = false, confirmLabel: String = "Save",
@@ -163,18 +189,15 @@ struct TextEntrySheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            PhrenForm {
                 Section {
-                    TextField("Text", text: $text, axis: .vertical)
+                    PhrenTextField("Text", text: $text, axis: .vertical, surface: .bare)
                         .lineLimit(3...12)
                 }
                 if showsTypePicker {
-                    Picker("Type", selection: $selectedType) {
-                        Text("none").tag(FindingType?.none)
-                        ForEach(FindingType.allCases, id: \.self) { type in
-                            Text(type.rawValue).tag(FindingType?.some(type))
-                        }
-                    }
+                    PhrenSingleSelect(options: typeOptions, selection: $selectedType,
+                                      placeholder: "Type", identifier: "finding-type",
+                                      isPresented: $showingType)
                 }
             }
             .navigationTitle(title)
@@ -196,5 +219,14 @@ struct TextEntrySheet: View {
                 }
             }
         }
+        .phrenSingleSelectSheet(isPresented: $showingType, title: "Type", options: typeOptions,
+                                selection: $selectedType, rowPrefix: "finding-type")
+    }
+
+    private var typeOptions: [PhrenOption<FindingType?>] {
+        [PhrenOption(id: "none", value: FindingType?.none, title: "none")]
+            + FindingType.allCases.map {
+                PhrenOption(id: $0.rawValue, value: FindingType?.some($0), title: $0.rawValue)
+            }
     }
 }

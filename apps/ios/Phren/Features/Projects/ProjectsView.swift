@@ -1,129 +1,204 @@
 import SwiftUI
 import PhrenKit
+import PhrenLive
 
 struct ProjectsView: View {
     @Environment(AppModel.self) private var model
-    @State private var filter = ""
+    @State private var projectsModel = ProjectsModel()
+    @State private var showSearch = false
+
+    @State private var showStores = false
+
+    @State private var agentChoice: ProjectAgentChoice?
+    @State private var navigationPath = NavigationPath()
     @State private var showVoiceCapture = false
+    @State private var showAddProject = false
+    @State private var connectingComputer = false
+    @Environment(\.liveSessionPreferences) private var preferencesStore
+    private var hasComputer: Bool { !(preferencesStore.preferences?.hosts.isEmpty ?? true) }
 
-    private var projects: [StoreProject] {
-        guard !filter.isEmpty else { return model.mergedProjects }
-        return model.mergedProjects.filter { $0.project.name.localizedCaseInsensitiveContains(filter) }
-    }
-
-    /// Every writable (store, project) pair — the global quick-capture mic
-    /// is hidden entirely when none exist, same reasoning as TasksView's
-    /// addTargets-gated + button.
-    private var voiceCaptureTargets: [VoiceCaptureTarget] {
-        model.writableProjects
-            .map { VoiceCaptureTarget(storeId: $0.storeId, storeName: $0.storeName, project: $0.project.name) }
+    /// The derived list's inputs, one value so the filter, a store revision
+    /// or a permission change recomputes it once and nothing else does.
+    private var projectsKey: ProjectsModel.Key {
+        ProjectsModel.Key(stores: model.storeContexts.map {
+            ProjectsModel.StoreRevision(id: $0.id, revision: $0.snapshot.revision, name: $0.descriptor.displayName)
+        }, storeFilter: model.storeFilter, filter: projectsModel.filter,
+           writable: model.writableProjects.map(\.id))
     }
 
     var body: some View {
         @Bindable var model = model
-        NavigationStack {
+        @Bindable var projectsModel = projectsModel
+        PhrenNavigationStack(path: $navigationPath) {
             VStack(spacing: 0) {
                 LiveStatusBar()
                 ActionErrorBanner()
-                List(projects) { item in
-                    NavigationLink(value: item) {
-                        VStack(alignment: .leading, spacing: 3) {
-                            HStack(spacing: 6) {
-                                Text(item.project.name).font(.headline)
-                                if model.hasMultipleStores {
-                                    TagChip(text: item.storeName, role: .store)
+                PhrenScrollScreen {
+                    if projectsModel.ready && projectsModel.projects.isEmpty && !projectsModel.storeIsEmpty {
+                        Text("No matching projects.").font(.footnote).foregroundStyle(PhrenTheme.textMuted)
+                    }
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 10)], spacing: 10) {
+                        ForEach(projectsModel.projects) { item in
+                            NavigationLink(value: item) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    HStack(spacing: 6) {
+                                        // The project's own name color, or the theme's project color.
+                                        Text(item.project.name).font(.headline)
+                                            .foregroundStyle(PhrenTheme.projectColor(storeId: item.storeId, project: item.project.name))
+                                        if model.hasMultipleStores {
+                                            TagChip(text: item.storeName, role: .store)
+                                        }
+                                        // `global` is the store's cross-project tier:
+                                        // visible, searchable, never editable here.
+                                        if LocalStore.isReadOnlyProject(item.project.name) {
+                                            TagChip(text: "read-only", role: .status)
+                                        }
+                                        if let claimant = model.claimingStoreName(for: item) {
+                                            ClaimBadge(storeName: claimant)
+                                        }
+                                    }
+                                    HStack(spacing: 10) {
+                                        Label("\(item.project.totalFindingCount)", systemImage: "lightbulb")
+                                        Label("\(item.project.taskCount)", systemImage: "checklist")
+                                        Label("\(item.project.noteCount)", systemImage: "note.text")
+                                    }
+                                    .font(.caption)
+                                    .labelStyle(PhrenMetadataLabelStyle())
+                                    .foregroundStyle(.secondary)
                                 }
-                                // `global` is the store's cross-project tier:
-                                // visible, searchable, never editable here.
-                                if LocalStore.isReadOnlyProject(item.project.name) {
-                                    TagChip(text: "read-only", role: .status)
-                                }
-                                if let claimant = model.claimingStoreName(for: item) {
-                                    ClaimBadge(storeName: claimant)
-                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, PhrenTheme.Space.medium)
+                                .padding(.vertical, PhrenTheme.Space.small)
+                                .background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium))
                             }
-                            HStack(spacing: 10) {
-                                Label("\(item.project.findingCount)", systemImage: "lightbulb")
-                                Label("\(item.project.taskCount)", systemImage: "checklist")
-                                Label("\(item.project.noteCount)", systemImage: "note.text")
-                                if item.project.reviewCount > 0 {
-                                    Label("\(item.project.reviewCount)", systemImage: "checkmark.seal")
-                                        .foregroundStyle(.orange)
-                                }
-                            }
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .buttonStyle(.plain)
+                            .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
+                            .accessibilityIdentifier("project:\(item.storeId):\(item.project.name)")
+                            .openAgentHold { agentChoice = .project(storeID: item.storeId, name: item.project.name) }
                         }
-                        .padding(.vertical, 2)
                     }
                 }
                 .overlay {
-                    if model.mergedProjects.isEmpty {
-                        PhrenEmptyState(title: "No projects yet", message: "Projects appear here once your phren store has content.")
+                    // First run: the store is connected but empty, or not
+                    // connected at all. Either way the next step is a computer
+                    // with a repository on it, so say so and offer it.
+                    if projectsModel.ready && projectsModel.storeIsEmpty {
+                        PhrenEmptyState(title: "Add your first project",
+                                        message: hasComputer
+                                            ? "Pick a repository on your computer, or clone one from GitHub. Phren adds it and your agents start remembering."
+                                            : "Connect a computer running Phren Hook, then add a repository from it. Your agents start remembering from there.") {
+                            if !hasComputer {
+                                Button { connectingComputer = true } label: { Label("Connect a computer", systemImage: "desktopcomputer.and.arrow.down") }
+                                    .buttonStyle(.bordered).tint(PhrenTheme.cyan)
+                                    .accessibilityIdentifier("projects-connect-computer")
+                            }
+                            Button { showAddProject = true } label: { Label("Add a project", systemImage: "plus") }
+                                .buttonStyle(.borderedProminent).tint(PhrenTheme.cyan).foregroundStyle(PhrenTheme.chatPanel)
+                                .accessibilityIdentifier("projects-add-first")
+                        }
                     }
                 }
-                .searchable(text: $filter, prompt: "Filter projects")
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    if model.hasMultipleStores || showSearch {
+                        VStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
+                            if model.hasMultipleStores {
+                                PhrenSingleSelect(options: storeOptions, selection: $model.storeFilter,
+                                                  placeholder: "Filter stores", identifier: "projects-stores",
+                                                  isPresented: $showStores)
+                                    .fixedSize(horizontal: true, vertical: false)
+                            }
+                            if showSearch {
+                                PhrenSearchField(text: $projectsModel.filter, placeholder: "Filter projects", identifier: "projects-search")
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, PhrenTheme.Space.large)
+                        .padding(.bottom, PhrenTheme.Space.small)
+                    }
+                }
+                .onChange(of: projectsKey, initial: true) { _, key in
+                    projectsModel.update(key: key, merged: model.mergedProjects, writable: model.writableProjects)
+                }
                 .refreshable { await model.pullToRefresh() }
-        .phrenScreen()
+                .phrenScreen()
             }
             .navigationTitle("Projects")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                if model.hasMultipleStores {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Menu {
-                            Picker("Store", selection: $model.storeFilter) {
-                                Text("All stores").tag(String?.none)
-                                ForEach(model.storeDescriptors) { store in
-                                    Text(store.displayName).tag(String?.some(store.id))
-                                }
-                            }
-                        } label: {
-                            Image(systemName: model.storeFilter == nil
-                                  ? "line.3.horizontal.decrease.circle"
-                                  : "line.3.horizontal.decrease.circle.fill")
-                        }
-                    }
+                ToolbarItem(placement: .primaryAction) {
+                    PhrenIconButton(icon: "plus", label: "Add project") { showAddProject = true }
+                        .accessibilityIdentifier("projects-add")
                 }
-                // Global quick capture: dictate a note or a task without
-                // opening a project first. Hidden (not just disabled) when no
-                // store is writable — mirrors TasksView's addTargets-gated
-                // + button.
-                if !voiceCaptureTargets.isEmpty {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            showVoiceCapture = true
-                        } label: {
-                            Image(systemName: "mic.fill")
-                        }
-                        // The sheet captures either kind, and asks where it
-                        // goes — the label has to say so, since VoiceOver
-                        // users get no other preview of what the button does.
-                        .accessibilityLabel("Dictate a note or task")
+                ToolbarItem(placement: .primaryAction) {
+                    PhrenIconButton(icon: "magnifyingglass", label: "Filter projects") { showSearch.toggle() }
+                        .accessibilityIdentifier("projects-search-toggle")
+                }
+                if !projectsModel.voiceCaptureTargets.isEmpty {
+                    ToolbarItem(placement: .primaryAction) {
+                        PhrenIconButton(icon: "mic", label: "Capture by voice") { showVoiceCapture = true }
+                            .accessibilityIdentifier("projects-mic")
                     }
                 }
             }
             .navigationDestination(for: StoreProject.self) { item in
                 ProjectDetailView(storeId: item.storeId, project: item.project.name)
             }
-            // Archive destinations are registered here, at the stack root,
-            // rather than on the pushed views that link to them — a
-            // .navigationDestination declared on an already-pushed view
-            // resolves a tap twice and stacks duplicates behind you.
-            .navigationDestination(for: ArchiveRoute.self) { route in
-                ArchiveBrowserView(storeId: route.storeId, project: route.project)
+            .navigationDestination(for: AgentLaunch.PendingProject.self) { target in
+                ProjectDetailView(storeId: target.storeID, project: target.project)
             }
-            .navigationDestination(for: ArchiveTopicRoute.self) { route in
-                ArchiveTopicView(storeId: route.storeId, topic: route.topic)
+            .onChange(of: model.showingMemoryMaintenance, initial: true) { _, showing in
+                guard showing else { return }
+                // Existing review widget links select Projects first. Memory
+                // owns and consumes the request when its tab appears.
+                model.selectedTab = .memory
+            }
+            .onChange(of: model.pendingProjectVersion, initial: true) { _, _ in
+                guard let target = AgentLaunch.takePendingProject() else { return }
+                guard model.storeContexts.contains(where: { context in
+                    context.id == target.storeID && context.snapshot.projects.contains { $0.name == target.project }
+                }) else {
+                    model.lastActionError = "That project is no longer available on this iPhone."
+                    return
+                }
+                navigationPath = NavigationPath()
+                navigationPath.append(target)
             }
             .sheet(isPresented: $showVoiceCapture) {
-                VoiceCaptureView(targets: voiceCaptureTargets)
+                VoiceCaptureView(targets: projectsModel.voiceCaptureTargets)
             }
+            .sheet(isPresented: $showAddProject) {
+                AddProjectView { project in
+                    // Straight into the new project; "Open on a computer" is
+                    // one tap from there.
+                    guard let item = model.mergedProjects.first(where: { $0.project.name == project }) else { return }
+                    navigationPath = NavigationPath()
+                    navigationPath.append(item)
+                }
+            }
+            .sheet(isPresented: $connectingComputer) { NavigationStack { LiveHostEditor() } }
+        }
+        .phrenActionSheet(isPresented: $showStores, title: "Store", actions: storeActions, identifier: "projects-store-sheet")
+        .projectAgentSheet(choice: $agentChoice)
+    }
+
+    private var storeOptions: [PhrenOption<String?>] {
+        [.init(id: "all", value: nil, title: "All stores")]
+        + model.storeDescriptors.map { store in
+            .init(id: store.id, value: store.id, title: store.displayName)
         }
     }
+
+    private var storeActions: [PhrenControlAction] {
+        [.init(id: "all", title: "All stores", isSelected: model.storeFilter == nil) { model.storeFilter = nil }]
+        + model.storeDescriptors.map { store in
+            .init(id: store.id, title: store.displayName, isSelected: model.storeFilter == store.id) { model.storeFilter = store.id }
+        }
+    }
+
 }
 
 /// Warns that `stores.yaml` claims this project for a different, non-primary
-/// store than the one it's physically sitting in — e.g. an employer's
+/// store than the one it's physically sitting in, for example an employer's
 /// projects that leaked into a personal repo (see AppModel.claimingStoreName).
 /// A local view rather than an addition to Components.swift's `TagChip`:
 /// this branch owns ProjectsView.swift's row content only, not the shared
@@ -147,7 +222,13 @@ struct ProjectDetailView: View {
     let project: String
 
     @Environment(AppModel.self) private var model
+    @Environment(\.liveSessionPreferences) private var preferencesStore
     @State private var tab: Tab = .findings
+    @State private var showingSkills = false
+    @State private var skillsPresentationID = UUID()
+    @State private var showingKnobs = false
+    @State private var codeSymbols: Int?
+    @State private var agentChoice: ProjectAgentChoice?
 
     enum Tab: String, CaseIterable {
         case findings = "Findings"
@@ -156,17 +237,16 @@ struct ProjectDetailView: View {
         case summary = "Summary"
     }
 
+    private var displayTitle: String {
+        model.hasMultipleStores ? "\(project) · \(model.storeName(for: storeId))" : project
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            LiveStatusBar()
             ActionErrorBanner()
-            Picker("Section", selection: $tab) {
-                ForEach(Tab.allCases, id: \.self) { Text($0.rawValue) }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal)
-            .padding(.bottom, 4)
-
+            ProjectComputerRows(storeID: storeId, project: project, choice: $agentChoice)
+            controlBand.fixedSize(horizontal: false, vertical: true)
+            sectionChips
             switch tab {
             case .findings: FindingsTab(storeId: storeId, project: project)
             case .notes: NotesTab(storeId: storeId, project: project)
@@ -174,8 +254,157 @@ struct ProjectDetailView: View {
             case .summary: SummaryTab(storeId: storeId, project: project)
             }
         }
-        .navigationTitle(model.hasMultipleStores ? "\(project) · \(model.storeName(for: storeId))" : project)
+        .background(PhrenTheme.bg)
+        // An identifier on the stack itself would be stamped onto every
+        // child (hiding "project-skills" and the rest); a zero-size marker
+        // names the page instead.
+        .overlay(alignment: .topLeading) {
+            Color.clear.frame(width: 1, height: 1)
+                .accessibilityElement().accessibilityLabel("Project page")
+                .accessibilityIdentifier("project-detail:\(storeId):\(project)")
+        }
+        .navigationTitle(displayTitle)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            // The project name and its live freshness share the top bar, so
+            // the controls and the content start right under it.
+            ToolbarItem(placement: .principal) {
+                VStack(spacing: 0) {
+                    Text(displayTitle)
+                        .font(PhrenTheme.Font.subheadline.weight(.semibold))
+                        .foregroundStyle(PhrenTheme.text).lineLimit(1)
+                    LiveStatusBar(compact: true)
+                }
+            }
+        }
+        .navigationDestination(isPresented: $showingSkills) {
+            SkillsView(project: project, storeId: storeId, returnToProject: { showingSkills = false })
+            .id(skillsPresentationID)
+        }
+        .sheet(isPresented: $showingKnobs) {
+            ProjectKnobsView(storeId: storeId, project: project)
+        }
+        .task(id: project) { await loadCodeSymbols() }
+        .projectAgentSheet(choice: $agentChoice)
+    }
+
+    /// Equal columns keep four destinations readable on a narrow phone.
+    private var controlBand: some View {
+        ProjectControlLayout {
+            Button { skillsPresentationID = UUID(); showingSkills = true } label: {
+                controlCell(icon: "wand.and.stars", title: "Skills", value: "Both")
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Project skills")
+            .accessibilityIdentifier("project-skills")
+            Button { showingKnobs = true } label: {
+                controlCell(icon: "slider.horizontal.3", title: "Knobs", value: knobsSummary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Project knobs")
+            .accessibilityIdentifier("project-knobs-row")
+            if SessionOverviewMonitor.shared.allowsSchedules() {
+                NavigationLink { SchedulesView(storeId: storeId, project: project) } label: {
+                    controlCell(icon: "clock.badge.checkmark", title: "Schedules", value: schedulesSummary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Project schedules")
+                .accessibilityIdentifier("project-schedules-row")
+            }
+            if showsCode {
+                NavigationLink { CodeView(storeId: storeId, project: project) } label: {
+                    controlCell(icon: "curlybraces", title: "Code", value: codeSummary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Project code")
+                .accessibilityIdentifier("project-code-row")
+            }
+        }
+        .frame(height: 52)
+        .background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            GeometryReader { geometry in
+                let count = 2 + (SessionOverviewMonitor.shared.allowsSchedules() ? 1 : 0)
+                    + (showsCode ? 1 : 0)
+                ForEach(1..<count, id: \.self) { index in
+                    controlDivider.position(x: geometry.size.width * CGFloat(index) / CGFloat(count), y: 26)
+                }
+            }.allowsHitTesting(false)
+        }
+        .overlay {
+            Color.clear.accessibilityElement().accessibilityIdentifier("project-control-band")
+                .allowsHitTesting(false)
+        }
+        .padding(.horizontal, 16).padding(.top, 8)
+    }
+
+    private func controlCell(icon: String, title: String, value: String) -> some View {
+        VStack(spacing: 3) {
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(PhrenTheme.textSecondary)
+                .accessibilityHidden(true)
+            Text(title).font(PhrenTheme.Font.caption.weight(.semibold)).foregroundStyle(PhrenTheme.text)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, minHeight: 52)
+        .contentShape(Rectangle())
+        .accessibilityValue(value)
+    }
+
+    private var controlDivider: some View {
+        Rectangle().fill(PhrenTheme.border).frame(width: 1, height: 28).accessibilityHidden(true)
+    }
+
+    private var sectionChips: some View {
+        PhrenChipRow(
+            items: Tab.allCases.map { PhrenOption(id: $0.rawValue, value: $0, title: $0.rawValue) },
+            selection: $tab,
+            identifier: "project-section"
+        )
+        .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 4)
+    }
+
+    /// "2 set" when the project overrides anything, "Global" when it inherits
+    /// everything.
+    private var knobsSummary: String {
+        let count = model.snapshot(for: storeId).projectKnobs[project]?.setCount ?? 0
+        return count == 0 ? "Global" : "\(count) set"
+    }
+
+    private var schedulesSummary: String {
+        let schedules = model.snapshot(for: storeId).schedules[project] ?? []
+        guard !schedules.isEmpty else { return "None" }
+        let next = schedules
+            .filter(\.enabled)
+            .compactMap { ScheduleWords.nextRun($0, after: .now, calendar: .current) }
+            .min()
+        let state = next.map { ScheduleWords.relative($0, now: .now) }
+            ?? (schedules.contains(where: \.enabled) ? "done" : "paused")
+        return "\(schedules.count) · \(state)"
+    }
+
+    /// The project's symbol count from the first computer that serves the code
+    /// index; "Index" until it answers, and nothing when no computer can.
+    /// The project's one code browser: symbols where a computer keeps the
+    /// code index, and the checkout's files on any saved computer.
+    private var showsCode: Bool {
+        SessionOverviewMonitor.shared.allowsCode() || !(preferencesStore.preferences?.hosts.isEmpty ?? true)
+    }
+
+    private var codeSummary: String {
+        guard let codeSymbols else { return SessionOverviewMonitor.shared.allowsCode() ? "Index" : "Files" }
+        return "\(codeSymbols) symbols"
+    }
+
+    private func loadCodeSymbols() async {
+        guard SessionOverviewMonitor.shared.allowsCode() else { return }
+        #if DEBUG && targetEnvironment(simulator)
+        if CodeFixture.enabled { codeSymbols = CodeFixture.status.symbols; return }
+        #endif
+        let hosts = (preferencesStore.preferences?.hosts ?? []).filter { SessionOverviewMonitor.shared.allows(.code, on: $0) }
+        guard let host = hosts.first else { return }
+        codeSymbols = (try? await PhrenConnection.codeStatus(host: host, privateKey: DeviceSSHKey.load(host.id), project: project))?.symbols
     }
 }
 
@@ -220,26 +449,34 @@ struct FindingsTab: View {
     }
 
     var body: some View {
-        List {
+        PhrenList(plain: true) {
             // Pinned first, because that is what pinning means: the CLI
             // injects these into every session regardless of what else it
             // retrieves (shared/retrieval.ts, "always-inject").
             if !truths.isEmpty {
-                Section {
-                    ForEach(truths) { truth in
-                        TruthRow(truth: truth)
-                    }
-                } header: {
-                    Label("Pinned truths", systemImage: "pin.fill")
-                } footer: {
-                    Text("Always injected, never decayed. Pin one from your computer: phren pin \(project) \"…\"")
+                Text("Pinned truths").plainListSectionLabel()
+                ForEach(truths) { truth in
+                    TruthRow(truth: truth)
+                        .padding(.horizontal, 12).padding(.vertical, 8)
+                        .sessionCard()
+                        .overlay(alignment: .leading) { PhrenRail(color: PhrenTheme.cyan).padding(.vertical, 10) }
+                        .separatedSessionRow()
                 }
+                Text("Always injected, never decayed. Pin one from your computer: phren pin \(project) \"…\"")
+                    .font(.caption2).foregroundStyle(PhrenTheme.textMuted)
+                    .padding(.horizontal, 16).padding(.bottom, 6)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 4, trailing: 0))
+                    .listRowSeparator(.hidden, edges: .all)
+                    .listRowBackground(Color.clear)
             }
             ForEach(groupedByDate, id: \.date) { group in
-                Section(group.date) {
-                    ForEach(group.items) { finding in
-                        ExpandableFindingRow(finding: finding, expandedIds: $expandedFindingIds)
-                            .swipeActions(edge: .trailing) {
+                Text(group.date).plainListSectionLabel()
+                ForEach(group.items) { finding in
+                    ExpandableFindingRow(finding: finding, expandedIds: $expandedFindingIds)
+                        .padding(.horizontal, 12).padding(.vertical, 8)
+                        .sessionCard()
+                        .separatedSessionRow()
+                        .swipeActions(edge: .trailing) {
                                 // A journal entry has no edit or delete: the
                                 // CLI's `edit_finding`/`remove_finding` splice
                                 // FINDINGS.md in every store, team or not
@@ -261,7 +498,6 @@ struct FindingsTab: View {
                                 }
                             }
                     }
-                }
             }
             ArchiveFooter(storeId: storeId, project: project)
             if isJournalled {
@@ -446,7 +682,6 @@ struct NotesTab: View {
     @State private var showAdd = false
     @State private var editing: Note?
     @State private var promoting: Note?
-    @State private var showVoiceCapture = false
     /// Same collapsed-by-default treatment as findings (Task: findings
     /// unscannable when one entry fills the screen) — notes use the same
     /// plain VStack(text + metadata) row shape, so the fix is mechanical.
@@ -461,13 +696,6 @@ struct NotesTab: View {
     /// Same rule as `FindingsTab`: a read-only tier shows no way to write.
     private var isReadOnly: Bool { LocalStore.isReadOnlyProject(project) }
 
-    /// This tab's project, pre-selected — the mic button next to + only
-    /// appears when this specific (store, project) pair is writable.
-    private var voiceCaptureTarget: VoiceCaptureTarget? {
-        guard model.canWrite(storeId: storeId, project: project) else { return nil }
-        return VoiceCaptureTarget(storeId: storeId, storeName: model.storeName(for: storeId), project: project)
-    }
-
     private var groupedByDay: [(date: String, items: [Note])] {
         let groups = Dictionary(grouping: notes, by: \.date)
         return groups.keys.sorted(by: >).map { date in
@@ -476,10 +704,10 @@ struct NotesTab: View {
     }
 
     var body: some View {
-        List {
+        PhrenList(plain: true) {
             ForEach(groupedByDay, id: \.date) { group in
-                Section(group.date) {
-                    ForEach(group.items) { note in
+                Text(group.date).plainListSectionLabel()
+                ForEach(group.items) { note in
                         VStack(alignment: .leading, spacing: 4) {
                             Text(note.text)
                                 .font(.callout)
@@ -498,6 +726,9 @@ struct NotesTab: View {
                                 }
                             }
                         }
+                        .padding(.horizontal, 12).padding(.vertical, 8)
+                        .sessionCard()
+                        .separatedSessionRow()
                         .contentShape(Rectangle())
                         .onTapGesture {
                             withAnimation(.easeInOut(duration: 0.2)) {
@@ -534,7 +765,6 @@ struct NotesTab: View {
                             }
                         }
                     }
-                }
             }
         }
         .overlay {
@@ -545,16 +775,6 @@ struct NotesTab: View {
         .refreshable { await model.pullToRefresh() }
         .phrenScreen()
         .toolbar {
-            if voiceCaptureTarget != nil {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        showVoiceCapture = true
-                    } label: {
-                        Image(systemName: "mic.fill")
-                    }
-                    .accessibilityLabel("Dictate a note or task")
-                }
-            }
             if !isReadOnly {
                 ToolbarItem(placement: .primaryAction) {
                     Button { showAdd = true } label: { Image(systemName: "plus") }
@@ -565,11 +785,6 @@ struct NotesTab: View {
             TextEntrySheet(title: "Add note", confirmLabel: "Add") { text, _ in
                 let now = AppModel.nowNoteTimestamp()
                 await model.perform(.addNote(project: project, date: now.date, time: now.time, text: text), in: storeId)
-            }
-        }
-        .sheet(isPresented: $showVoiceCapture) {
-            if let voiceCaptureTarget {
-                VoiceCaptureView(targets: [voiceCaptureTarget], preselected: voiceCaptureTarget)
             }
         }
         .sheet(item: $editing) { note in
@@ -620,5 +835,19 @@ struct SummaryTab: View {
         }
         .refreshable { await model.pullToRefresh() }
         .phrenScreen()
+    }
+}
+
+
+private struct ProjectControlLayout: Layout {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        CGSize(width: proposal.width ?? 320, height: 52)
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let width = bounds.width / CGFloat(max(1, subviews.count))
+        for (index, subview) in subviews.enumerated() {
+            subview.place(at: CGPoint(x: bounds.minX + CGFloat(index) * width, y: bounds.minY),
+                          proposal: ProposedViewSize(width: width, height: bounds.height))
+        }
     }
 }

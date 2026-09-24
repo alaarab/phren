@@ -9,6 +9,7 @@ final class StubURLProtocol: URLProtocol {
         let status: Int
         let headers: [String: String]
         let body: String
+        var redirect: Bool = false
     }
 
     private static let lock = NSLock()
@@ -22,9 +23,9 @@ final class StubURLProtocol: URLProtocol {
     }
 
     static func stub(_ urlContains: String, status: Int,
-                     headers: [String: String] = [:], body: String = "{}") {
+                     headers: [String: String] = [:], body: String = "{}", redirect: Bool = false) {
         lock.lock(); defer { lock.unlock() }
-        routes[urlContains, default: []].append(Stubbed(status: status, headers: headers, body: body))
+        routes[urlContains, default: []].append(Stubbed(status: status, headers: headers, body: body, redirect: redirect))
     }
 
     static var requests: [(method: String, url: String)] {
@@ -67,6 +68,11 @@ final class StubURLProtocol: URLProtocol {
                                              httpVersion: "HTTP/1.1", headerFields: stubbed.headers) else {
             client?.urlProtocol(self, didFailWithError: URLError(.badURL))
             return
+        }
+        if stubbed.redirect, let location = stubbed.headers["Location"], let target = URL(string: location) {
+            var next = request
+            next.url = target
+            client?.urlProtocol(self, wasRedirectedTo: next, redirectResponse: response)
         }
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(stubbed.body.utf8))
@@ -142,6 +148,75 @@ final class GitHubClientTests: XCTestCase {
     override func tearDown() {
         StubURLProtocol.reset()
         super.tearDown()
+    }
+
+    func testBranchNamesKeepLiteralFragmentsAndPercentEscapes() async throws {
+        StubURLProtocol.stub("git/ref/heads/", status: 200,
+                             body: #"{"object":{"sha":"branch-sha","type":"commit"}}"#)
+        for branch in ["release#preview", "release%2Fpreview", "feature/mobile#preview"] {
+            let sha = try await makeClient().headSha(owner: "octo", repo: "store", branch: branch)
+            XCTAssertEqual(sha, "branch-sha")
+            let url = try XCTUnwrap(StubURLProtocol.requests.last.flatMap { URL(string: $0.url) })
+            let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+            XCTAssertNil(components.fragment, "A branch name must never become a URL fragment")
+            XCTAssertNil(components.query)
+            XCTAssertEqual(components.percentEncodedPath.removingPercentEncoding,
+                           "/repos/octo/store/git/ref/heads/" + branch)
+        }
+    }
+
+    func testContentsRequestsKeepReservedCharactersInTheFileName() async throws {
+        StubURLProtocol.stub("contents/", status: 200)
+        let path = "project/notes/plan#1%2Fpart?.md"
+        try await makeClient().deleteFile(owner: "octo", repo: "store", path: path,
+                                          branch: "main", message: "test", sha: "blob-sha")
+        let url = try XCTUnwrap(StubURLProtocol.requests.last.flatMap { URL(string: $0.url) })
+        let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        XCTAssertNil(components.fragment)
+        XCTAssertNil(components.query)
+        XCTAssertEqual(components.percentEncodedPath.removingPercentEncoding,
+                       "/repos/octo/store/contents/" + path)
+    }
+
+    func testInvalidPathSegmentsAreRejectedBeforeSendingRequests() async {
+        for path in ["../other/tasks.md", "/project/tasks.md", "project//tasks.md", "project/../tasks.md", "project\\tasks.md"] {
+            do {
+                try await makeClient().deleteFile(owner: "octo", repo: "store", path: path,
+                                                  branch: "main", message: "test", sha: "blob-sha")
+                XCTFail("Invalid contents path was accepted: \(path)")
+            } catch {
+                guard case GitHubError.invalidResponse = error else { return XCTFail("Unexpected error: \(error)") }
+            }
+        }
+        XCTAssertTrue(StubURLProtocol.requests.isEmpty)
+    }
+
+    func testGitHubRedirectsStayOnTheAuthenticatedOrigin() async throws {
+        StubURLProtocol.stub("api.github.com/user", status: 307,
+                             headers: ["Location": "https://api.github.com/renamed-user"], redirect: true)
+        StubURLProtocol.stub("api.github.com/renamed-user", status: 200,
+                             body: #"{"login":"octo","id":1}"#)
+        let user = try await makeClient().currentUser()
+        XCTAssertEqual(user.login, "octo")
+        XCTAssertEqual(StubURLProtocol.requests.map(\.url), ["https://api.github.com/user", "https://api.github.com/renamed-user"])
+    }
+
+    func testOffOriginRedirectsNeverSendTheContentsWrite() async {
+        for target in ["https://outside.example/upload", "http://api.github.com/upload",
+                       "https://api.github.com:8443/upload", "https://api.github.com.outside.example/upload",
+                       "https://api.github.com@outside.example/upload"] {
+            StubURLProtocol.reset()
+            StubURLProtocol.stub("contents/", status: 307, headers: ["Location": target], redirect: true)
+            do {
+                try await makeClient().deleteFile(owner: "octo", repo: "store", path: "project/tasks.md",
+                                                  branch: "main", message: "private change", sha: "blob-sha")
+                XCTFail("An off-origin redirect was accepted: \(target)")
+            } catch let error as GitHubError {
+                guard case .http(let status, _, _, _) = error else { return XCTFail("Expected blocked redirect, got \(error)") }
+                XCTAssertEqual(status, 307)
+            } catch { XCTFail("Unexpected error: \(error)") }
+            XCTAssertEqual(StubURLProtocol.requests.count, 1, "A refused redirect must not start a second request")
+        }
     }
 
     // MARK: - Rate limits

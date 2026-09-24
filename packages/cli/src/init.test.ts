@@ -98,21 +98,21 @@ describe.sequential("mcp mode configuration", () => {
     delete process.env.PHREN_PATH;
   });
 
-  it("stages starter updates for modified global CLAUDE.md instead of overwriting it", () => {
-    const targetClaude = path.join(phrenPath, "global", "CLAUDE.md");
+  it("stages starter updates for modified global AGENTS.md instead of overwriting it", () => {
+    const targetClaude = path.join(phrenPath, "global", "AGENTS.md");
     fs.mkdirSync(path.dirname(targetClaude), { recursive: true });
     fs.writeFileSync(targetClaude, "# custom user CLAUDE\n");
 
     const updates = applyStarterTemplateUpdates(phrenPath);
-    const stagedClaude = path.join(phrenPath, ".runtime", "starter-updates", "global", "CLAUDE.md.new");
-    const currentClaude = path.join(phrenPath, ".runtime", "starter-updates", "global", "CLAUDE.md.current");
+    const stagedClaude = path.join(phrenPath, ".runtime", "starter-updates", "global", "AGENTS.md.new");
+    const currentClaude = path.join(phrenPath, ".runtime", "starter-updates", "global", "AGENTS.md.current");
 
     expect(fs.readFileSync(targetClaude, "utf8")).toBe("# custom user CLAUDE\n");
     expect(fs.existsSync(`${targetClaude}.bak`)).toBe(false);
     expect(fs.existsSync(`${targetClaude}.new`)).toBe(false);
     expect(fs.existsSync(stagedClaude)).toBe(true);
     expect(fs.existsSync(currentClaude)).toBe(true);
-    expect(updates).toContain(path.join(".runtime", "starter-updates", "global", "CLAUDE.md.new"));
+    expect(updates).toContain(path.join(".runtime", "starter-updates", "global", "AGENTS.md.new"));
   });
 
   it("ships starter gitignore entries for local governance runtime state", () => {
@@ -629,7 +629,7 @@ describe("runInit walkthrough integration", () => {
     expect(fs.existsSync(path.join(phrenPath, ".config"))).toBe(true);
     expect(fs.existsSync(path.join(phrenPath, ".sessions"))).toBe(true);
     // canonical-locks.json removed (canonical locks feature was stripped)
-    expect(fs.existsSync(path.join(phrenPath, "global", "CLAUDE.md"))).toBe(true);
+    expect(fs.existsSync(path.join(phrenPath, "global", "AGENTS.md"))).toBe(true);
     expect(fs.existsSync(path.join(phrenPath, "global", "skills"))).toBe(true);
     expect(fs.existsSync(path.join(phrenPath, "phren.SKILL.md"))).toBe(true);
     expect(fs.readFileSync(path.join(phrenPath, ".env"), "utf8")).toContain("PHREN_FEATURE_AUTO_CAPTURE=1");
@@ -726,7 +726,7 @@ describe("runInit walkthrough integration", () => {
     await suppressOutput(() => runInit(opts));
 
     expect(fs.existsSync(phrenPath)).toBe(true);
-    expect(fs.existsSync(path.join(phrenPath, "my-app", "CLAUDE.md"))).toBe(true);
+    expect(fs.existsSync(path.join(phrenPath, "my-app", "AGENTS.md"))).toBe(true);
     expect(fs.existsSync(path.join(phrenPath, "my-first-project"))).toBe(false);
   });
 
@@ -943,7 +943,7 @@ describe("runPostInitVerify", () => {
       fs.mkdirSync(path.join(phren, ".config"), { recursive: true });
       fs.mkdirSync(path.join(phren, ".runtime"), { recursive: true });
       fs.writeFileSync(path.join(home, ".claude", "settings.json"), JSON.stringify({ hooks: {} }, null, 2));
-      fs.writeFileSync(path.join(phren, "global", "CLAUDE.md"), "# Global\n");
+      fs.writeFileSync(path.join(phren, "global", "AGENTS.md"), "# Global\n");
 
       const result = runPostInitVerify(phren);
       const names = result.checks.map((check) => check.name);
@@ -987,7 +987,7 @@ describe("runPostInitVerify", () => {
       fs.mkdirSync(path.join(phren, ".config"), { recursive: true });
       fs.mkdirSync(path.join(phren, ".runtime"), { recursive: true });
       fs.writeFileSync(path.join(home, ".claude", "settings.json"), JSON.stringify({ hooks: {} }, null, 2));
-      fs.writeFileSync(path.join(phren, "global", "CLAUDE.md"), "# Global\n");
+      fs.writeFileSync(path.join(phren, "global", "AGENTS.md"), "# Global\n");
       fs.writeFileSync(
         path.join(phren, ".runtime", "install-preferences.json"),
         JSON.stringify({ installedVersion: "0.0.0-fake" }, null, 2)
@@ -1027,7 +1027,7 @@ describe("runPostInitVerify", () => {
           },
         }, null, 2)
       );
-      fs.writeFileSync(path.join(phren, "global", "CLAUDE.md"), "# Global\n");
+      fs.writeFileSync(path.join(phren, "global", "AGENTS.md"), "# Global\n");
       fs.writeFileSync(
         path.join(phren, ".runtime", "install-preferences.json"),
         JSON.stringify({ mcpEnabled: false, hooksEnabled: true, installedVersion: VERSION }, null, 2)
@@ -1068,7 +1068,7 @@ describe("project templates", () => {
     try {
       await suppressOutput(() => runInit({ yes: true, template: "python-project" }));
       const phrenDir = path.join(tmpDir, "phren");
-      const claudeMd = fs.readFileSync(path.join(phrenDir, "my-first-project", "CLAUDE.md"), "utf8");
+      const claudeMd = fs.readFileSync(path.join(phrenDir, "my-first-project", "AGENTS.md"), "utf8");
       const profile = fs.readFileSync(path.join(phrenDir, "profiles", "default.yaml"), "utf8");
       expect(claudeMd).toContain("Python project");
       expect(claudeMd).toContain("pytest");
@@ -1132,6 +1132,15 @@ describe("init edge cases", () => {
     expect(output).toContain("hooks-mode on");
   });
 
+  it("never lets an npx copy repoint a wrapper that runs a lasting install", async () => {
+    const { keepsWrapperEntry } = await import("./hooks.js");
+    const wrapper = "# PHREN_CLI_WRAPPER\nif [ -f '/home/sam/phren/packages/cli/dist/index.js' ]; then\n  exec node '/home/sam/phren/packages/cli/dist/index.js' \"$@\"\nfi\n";
+    const npx = "/home/sam/.npm/_npx/abc/node_modules/@phren/cli/dist/index.js";
+    expect(keepsWrapperEntry(wrapper, npx, () => true)).toBe(false);
+    expect(keepsWrapperEntry(wrapper, npx, () => false), "a checkout that is gone can be replaced").toBe(true);
+    expect(keepsWrapperEntry(wrapper, "/usr/local/lib/node_modules/@phren/cli/dist/index.js", () => true)).toBe(true);
+  });
+
   it("configureHooksIfEnabled logs wrapper note when installPhrenCliWrapper returns false", () => {
     // With a tmpdir phrenPath that has no entry script, wrapper install will return false
     const chunks: string[] = [];
@@ -1148,7 +1157,7 @@ describe("init edge cases", () => {
 
   it("getPendingBootstrapTarget returns null when no project is detected", () => {
     const origCwd = process.cwd();
-    // Use a directory that has no .git or CLAUDE.md markers
+    // Use a directory that has no .git or AGENTS.md markers
     const emptyDir = path.join(tmpRoot, "empty-dir");
     fs.mkdirSync(emptyDir, { recursive: true });
     process.chdir(emptyDir);
@@ -1167,7 +1176,7 @@ describe("init edge cases", () => {
     // Create the project directory inside phrenPath so isProjectTracked returns true
     const projectName = "tracked-project";
     fs.mkdirSync(path.join(phrenPath, projectName), { recursive: true });
-    fs.writeFileSync(path.join(phrenPath, projectName, "CLAUDE.md"), "# tracked\n");
+    fs.writeFileSync(path.join(phrenPath, projectName, "AGENTS.md"), "# tracked\n");
     // Need profiles for isProjectTracked
     fs.mkdirSync(path.join(phrenPath, "profiles"), { recursive: true });
     fs.writeFileSync(

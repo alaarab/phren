@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 import * as yaml from "js-yaml";
+import { loadYamlDocument } from "./phren-core.js";
 import {
   phrenErr,
   PhrenError,
@@ -13,8 +14,7 @@ import {
 } from "./shared.js";
 import { defaultMachineName, getMachineName } from "./machine-identity.js";
 import { errorMessage, isValidProjectName } from "./utils.js";
-import { TASK_FILE_ALIASES } from "./data/tasks.js";
-import { FINDINGS_FILENAME } from "./data/access.js";
+import { FINDINGS_FILENAME, TASK_FILE_ALIASES } from "./filenames.js";
 import { withSafeLock } from "./shared/data-utils.js";
 import { logger } from "./logger.js";
 import type { RetentionPolicyPatch } from "./governance/policy.js";
@@ -23,7 +23,7 @@ import {
   VALID_PROACTIVITY_LEVELS,
   VALID_TASK_MODES,
   VALID_RISKY_SECTIONS,
-} from "./governance/policy.js";
+} from "./governance/policy-constants.js";
 import { getNonPrimaryStores, getStoreProjectDirs } from "./store-registry.js";
 
 export interface ProfilePolicyDefaults {
@@ -51,6 +51,8 @@ export interface ProjectCard {
   name: string;
   summary: string;
   docs: string[];
+  /** Name of the non-primary store this project lives in, if any. */
+  store?: string;
 }
 
 export function resolveActiveProfile(phrenPath: string, requestedProfile?: string): PhrenResult<string | undefined> {
@@ -94,7 +96,7 @@ export function listMachines(phrenPath: string): PhrenResult<Record<string, stri
   if (!fs.existsSync(machinesPath)) return phrenErr(`machines.yaml not found. Run 'phren init' to set up your phren.`, PhrenError.FILE_NOT_FOUND);
   try {
     const raw = fs.readFileSync(machinesPath, "utf8");
-    const parsed = yaml.load(raw, { schema: yaml.CORE_SCHEMA });
+    const parsed = loadYamlDocument(raw, (text) => yaml.load(text, { schema: yaml.CORE_SCHEMA }));
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return phrenErr(`machines.yaml is empty or not valid YAML. Check the file format or run 'phren doctor --fix'.`, PhrenError.MALFORMED_YAML);
 
     const cleaned: Record<string, string> = {};
@@ -242,7 +244,7 @@ export function listProfiles(phrenPath: string): PhrenResult<ProfileInfo[]> {
     const full = path.join(profilesDir, file);
     try {
       const raw = fs.readFileSync(full, "utf8");
-      const parsed = yaml.load(raw, { schema: yaml.CORE_SCHEMA });
+      const parsed = loadYamlDocument(raw, (text) => yaml.load(text, { schema: yaml.CORE_SCHEMA }));
       const data = parsed && typeof parsed === "object" && !Array.isArray(parsed)
         ? (parsed as Record<string, unknown>)
         : null;
@@ -314,7 +316,7 @@ export function removeProjectFromProfile(phrenPath: string, profile: string, pro
 function buildProjectCard(dir: string): ProjectCard {
   const name = path.basename(dir);
   const summaryFile = path.join(dir, "summary.md");
-  const claudeFile = path.join(dir, "CLAUDE.md");
+  const claudeFile = path.join(dir, "AGENTS.md");
   const summarySource = fs.existsSync(summaryFile)
     ? fs.readFileSync(summaryFile, "utf8")
     : fs.existsSync(claudeFile)
@@ -324,7 +326,7 @@ function buildProjectCard(dir: string): ProjectCard {
     .split("\n")
     .map((line) => line.trim())
     .find((line) => line && !line.startsWith("#")) || "";
-  const docs = ["CLAUDE.md", FINDINGS_FILENAME, "summary.md", "review.md"]
+  const docs = ["AGENTS.md", FINDINGS_FILENAME, "summary.md", "review.md"]
     .filter((file) => fs.existsSync(path.join(dir, file)));
   const taskFile = TASK_FILE_ALIASES.find((file) => fs.existsSync(path.join(dir, file)));
   if (taskFile) docs.push(taskFile);
@@ -332,42 +334,38 @@ function buildProjectCard(dir: string): ProjectCard {
 }
 
 export function listProjectCards(phrenPath: string, profile?: string): ProjectCard[] {
-  const dirs = getProjectDirs(phrenPath, profile).sort((a, b) => path.basename(a).localeCompare(path.basename(b)));
+  const dirs = getProjectDirs(phrenPath, profile);
   const cards: ProjectCard[] = dirs.map(buildProjectCard);
 
   const seen = new Set(dirs.map((d) => path.basename(d)));
 
-  // Include projects from team stores, filtered by active profile
+  // Team stores carry their own subscription list (StoreEntry.projects, applied
+  // by getStoreProjectDirs). The profile's project list scopes the *primary*
+  // store, so filtering team projects through it hid every one of them — a
+  // profile never names projects that live in someone else's store.
   try {
-    // Resolve the profile's project allow-list (if any)
-    let profileProjectNames: Set<string> | undefined;
-    if (profile) {
-      const profiles = listProfiles(phrenPath);
-      if (profiles.ok) {
-        const active = profiles.data.find((p) => p.name === profile);
-        if (active && active.projects.length > 0) {
-          profileProjectNames = new Set(active.projects);
-        }
-      }
-    }
-
     for (const store of getNonPrimaryStores(phrenPath)) {
       if (!fs.existsSync(store.path)) continue;
       for (const dir of getStoreProjectDirs(store)) {
         const name = path.basename(dir);
         if (seen.has(name) || name === "global") continue;
-        if (profileProjectNames && !profileProjectNames.has(name)) continue;
         seen.add(name);
-        cards.push(buildProjectCard(dir));
+        cards.push({ ...buildProjectCard(dir), store: store.name });
       }
     }
   } catch {
     // store-registry not available or error loading, continue with primary only
   }
 
-  // Prepend global as a pinned entry so it's always accessible from the shell
+  cards.sort((a, b) => a.name.localeCompare(b.name));
+
+  // Prepend global as a pinned entry so it's always accessible from the shell.
+  // getProjectDirs already returns it whenever the profile names it, so drop
+  // that copy rather than listing global twice.
   const globalDir = path.join(phrenPath, "global");
   if (fs.existsSync(globalDir)) {
+    const listed = cards.findIndex((card) => card.name === "global");
+    if (listed >= 0) cards.splice(listed, 1);
     cards.unshift(buildProjectCard(globalDir));
   }
 

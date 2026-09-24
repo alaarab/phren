@@ -53,10 +53,13 @@ public actor LocalStore {
     }
 
     /// Only these paths are ever written back to GitHub. Everything else in
-    /// the store — `.config/`, `phren.root.yaml`, `stores.yaml`,
-    /// `.phren-team.yaml`, `CLAUDE.md`, `summary.md`, `truths.md`,
-    /// `reference/`, and everything under a reserved directory (`global/`
-    /// above all) — is read-only.
+    /// the store — `.config/` (except skill preferences), `phren.root.yaml`, `stores.yaml`,
+    /// `.phren-team.yaml`, `summary.md`, `truths.md`, and `reference/` — is
+    /// read-only. Authored skills and canonical AGENTS.md instructions are
+    /// explicitly writable in project directories and global/. A project's
+    /// `phren.project.yaml` and `schedules.yaml` are writable through their
+    /// dedicated operations alone, so generic authored-file edits cannot
+    /// rewrite store metadata.
     ///
     /// `journal/YYYY-MM-DD-<actor>.md` is writable *and* gated on exactly the
     /// same ``isProjectDirName`` predicate as `FINDINGS.md`, which is what
@@ -64,6 +67,13 @@ public actor LocalStore {
     /// read-only tier: `global/journal/…` is refused for the same reason
     /// `global/FINDINGS.md` is.
     public static func isWritablePath(_ path: String) -> Bool {
+        if path == SkillPreferences.path { return true }
+        // These store files are admitted for their dedicated ops; the raw file
+        // editor still refuses them because it could drop sibling metadata.
+        if isProjectConfigPath(path) { return true }
+        if isSchedulesPath(path) { return true }
+        // Authored content is separate from global's read-only findings tier.
+        if isSkillPath(path) || AgentInstructions.isPath(path) { return true }
         let parts = path.split(separator: "/").map(String.init)
         guard parts.count >= 2, isProjectDirName(parts[0]) else { return false }
         if parts.count == 2 {
@@ -79,34 +89,40 @@ public actor LocalStore {
     }
 
     /// Paths the sync engine mirrors locally — the **hot tier**. Skips
-    /// `.config/` and `reference/`; `reference/topics/` instead
+    /// `.config/` except skill preferences, and `reference/`; `reference/topics/` instead
     /// gets a lazily hydrated cold tier (``ColdStore``), and the rest is
     /// deliberately untouched.
     ///
-    /// `global/` is hot but read-only: `global/FINDINGS.md` is the
+    /// `global/FINDINGS.md` is hot but read-only: it is the
     /// consolidate skill's cross-project output — typically the largest
     /// findings file in a store — and hiding it was hiding the store's
     /// highest-value content. It is admitted here *without* being admitted to
     /// ``isProjectDirName``, because ``isWritablePath`` delegates to that
     /// predicate and would otherwise make the phone able to rewrite it.
     public static func isSyncedPath(_ path: String) -> Bool {
-        if path == "phren.root.yaml" || path == "stores.yaml" { return true }
+        if path == SkillPreferences.path { return true }
+        if path == "phren.root.yaml" || path == "stores.yaml" || path == MachineRegistry.machinesFile { return true }
+        // Which computer carries which project: `machines.yaml` names the
+        // profile, `profiles/<name>.yaml` lists its projects, and a project's
+        // `phren.project.yaml` remembers the folder it was added from.
+        if MachineRegistry.isProfilePath(path) { return true }
         // A team store repo describes itself: `.phren-team.yaml` is what the
         // CLI reads to decide the role it registers a joined store under
         // (cli/namespaces-store.ts:147), so it is also how the phone knows
         // whether this repo's finding-adds belong in the journal.
         if path == TeamBootstrap.fileName { return true }
+        if isSkillPath(path) { return true }
         let parts = path.split(separator: "/").map(String.init)
         guard parts.count >= 2 else { return false }
         if parts[0] == globalDirName {
             // Findings plus the instructions that frame them. Nothing else
             // under `global/` is hot — its notes/tasks/review are CLI-side
             // machinery with no phone surface.
-            return parts.count == 2 && ["FINDINGS.md", "CLAUDE.md"].contains(parts[1])
+            return parts.count == 2 && ["FINDINGS.md", AgentInstructions.fileName, AgentInstructions.legacyFileName].contains(parts[1])
         }
         guard isProjectDirName(parts[0]) else { return false }
         if parts.count == 2 {
-            return ["FINDINGS.md", "tasks.md", "review.md", "summary.md", "CLAUDE.md", "truths.md"].contains(parts[1])
+            return ["FINDINGS.md", "tasks.md", "review.md", "summary.md", AgentInstructions.fileName, AgentInstructions.legacyFileName, "truths.md", MachineRegistry.projectFile, SchedulesFile.fileName].contains(parts[1])
         }
         if parts.count == 3, parts[1] == "notes" {
             return JSRegex(#"^\d{4}-\d{2}-\d{2}\.md$"#).test(parts[2])
@@ -122,6 +138,48 @@ public actor LocalStore {
             return JournalFile.parseFileName(parts[2]) != nil
         }
         return false
+    }
+
+    /// The two skill file shapes `collectSkills` recognizes
+    /// (packages/cli/src/skill/registry.ts:97-102), under either
+    /// `global/skills/` or `<project>/skills/`: a flat `<name>.md`, or a folder
+    /// `<name>/SKILL.md`. Nothing else in a skill folder is synced —
+    /// supporting files would need a whole-directory model the app lacks.
+    public static func isSkillPath(_ path: String) -> Bool {
+        let parts = path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        guard parts.count >= 3, parts[1] == "skills" else { return false }
+        guard parts[0] == globalDirName || isProjectDirName(parts[0]) else { return false }
+        if parts.count == 3 {
+            return parts[2].hasSuffix(".md") && isSkillNameSegment(String(parts[2].dropLast(3)))
+        }
+        if parts.count == 4 {
+            return parts[3] == "SKILL.md" && isSkillNameSegment(parts[2])
+        }
+        return false
+    }
+
+    /// Guards the segments the app will mint or write. Deliberately stricter
+    /// than the CLI's on-disk reader: it rejects dot-segments and separators,
+    /// so a name typed in the editor can never escape `skills/`.
+    static func isSkillNameSegment(_ name: String) -> Bool {
+        JSRegex(#"^[A-Za-z0-9][A-Za-z0-9._-]*$"#).test(name) && !name.contains("..")
+    }
+
+    /// `<project>/phren.project.yaml` — a registry file the phone reads as a
+    /// whole and edits only through ``PendingOp/setProjectKnobs``. Kept apart
+    /// from ``isSkillPath`` and ``AgentInstructions/isPath`` so the generic
+    /// whole-file editor cannot be pointed at it.
+    public static func isProjectConfigPath(_ path: String) -> Bool {
+        let parts = path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        return parts.count == 2 && isProjectDirName(parts[0])
+            && parts[1] == MachineRegistry.projectFile
+    }
+
+    /// `<project>/schedules.yaml`, admitted only for ``PendingOp/saveSchedules``.
+    public static func isSchedulesPath(_ path: String) -> Bool {
+        let parts = path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        return parts.count == 2 && isProjectDirName(parts[0])
+            && parts[1] == SchedulesFile.fileName
     }
 
     /// The cross-project tier: consolidated findings that apply everywhere,
@@ -170,6 +228,13 @@ public actor LocalStore {
 
     private let root: URL
     private var manifest: Manifest
+    private struct FileState: Equatable {
+        let path: String
+        let identity: String
+        let modified: Date
+        let size: Int
+    }
+    private var cachedSnapshot: (files: [FileState], value: Snapshot)?
     /// Persistence problems hit while opening this store. Kept for per-store
     /// attribution; the app surfaces them through `StorageIssueLog`, which
     /// already has them.
@@ -233,6 +298,7 @@ public actor LocalStore {
     }
 
     public func write(_ path: String, content: String, blobSha: String?) throws {
+        cachedSnapshot = nil
         let url = fileURL(path)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
                                                 withIntermediateDirectories: true)
@@ -245,6 +311,7 @@ public actor LocalStore {
     }
 
     public func delete(_ path: String) throws {
+        cachedSnapshot = nil
         try? FileManager.default.removeItem(at: fileURL(path))
         try updateManifest { $0.blobShas.removeValue(forKey: path) }
     }
@@ -254,30 +321,67 @@ public actor LocalStore {
     }
 
     public func allPaths() -> [String] {
-        // Resolve symlinks on both sides before prefix-stripping: enumerated
-        // URLs come back resolved (/private/var/…) while the stored root may
-        // be the unresolved alias (/var/…), and a naive substring replace
-        // mangles the relative path.
-        let filesRoot = root.appendingPathComponent("files").resolvingSymlinksInPath()
-        let rootPrefix = filesRoot.path.hasSuffix("/") ? filesRoot.path : filesRoot.path + "/"
-        guard let enumerator = FileManager.default.enumerator(at: filesRoot, includingPropertiesForKeys: [.isRegularFileKey]) else {
-            return []
-        }
-        var paths: [String] = []
-        for case let url as URL in enumerator {
-            guard (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true else { continue }
-            let filePath = url.resolvingSymlinksInPath().path
-            guard filePath.hasPrefix(rootPrefix) else { continue }
-            paths.append(String(filePath.dropFirst(rootPrefix.count)))
-        }
-        return paths.sorted()
+        scanFiles().paths
     }
 
+    /// One walk of `files/`: every regular file's relative path, plus the
+    /// metadata the snapshot cache compares — fetched in the same
+    /// `resourceValues` call as the regular-file check, so a cache probe costs
+    /// one stat per file rather than two. `states` is nil when any file's
+    /// metadata couldn't be read; the snapshot then reparses rather than trust
+    /// stale data.
+    private func scanFiles() -> (paths: [String], states: [FileState]?) {
+        // Resolve the root once before prefix-stripping: enumerated URLs can
+        // come back resolved (/private/var/…) while the stored root is the
+        // unresolved alias (/var/…), and a naive substring replace mangles
+        // the relative path. Each child is only resolved when its path does
+        // not already carry the resolved prefix — a realpath per file was the
+        // most expensive part of this walk.
+        let filesRoot = root.appendingPathComponent("files").resolvingSymlinksInPath()
+        let rootPrefix = filesRoot.path.hasSuffix("/") ? filesRoot.path : filesRoot.path + "/"
+        let keys: Set<URLResourceKey> = [
+            .isRegularFileKey, .fileResourceIdentifierKey, .contentModificationDateKey, .fileSizeKey,
+        ]
+        guard let enumerator = FileManager.default.enumerator(at: filesRoot, includingPropertiesForKeys: Array(keys)) else {
+            return ([], nil)
+        }
+        var files: [FileState] = []
+        var complete = true
+        for case let url as URL in enumerator {
+            guard let values = try? url.resourceValues(forKeys: keys), values.isRegularFile == true else { continue }
+            var filePath = url.path
+            if !filePath.hasPrefix(rootPrefix) { filePath = url.resolvingSymlinksInPath().path }
+            guard filePath.hasPrefix(rootPrefix) else { continue }
+            let path = String(filePath.dropFirst(rootPrefix.count))
+            if let identity = values.fileResourceIdentifier, let modified = values.contentModificationDate,
+               let size = values.fileSize {
+                files.append(FileState(path: path, identity: String(describing: identity), modified: modified, size: size))
+            } else {
+                complete = false
+                files.append(FileState(path: path, identity: "", modified: .distantPast, size: -1))
+            }
+        }
+        files.sort { $0.path < $1.path }
+        return (files.map(\.path), complete ? files : nil)
+    }
+
+    /// Deletes the local copy. A copy that could not be deleted is still
+    /// reset in memory, and the failure is thrown so the caller can say the
+    /// files remain on the device.
     public func wipe() throws {
-        try? FileManager.default.removeItem(at: root)
+        cachedSnapshot = nil
+        var removal: Error?
+        do {
+            try FileManager.default.removeItem(at: root)
+        } catch CocoaError.fileNoSuchFile {
+            // Nothing was cached yet.
+        } catch {
+            removal = error
+        }
         try FileManager.default.createDirectory(at: root.appendingPathComponent("files"),
                                                 withIntermediateDirectories: true)
         manifest = Manifest(owner: manifest.owner, repo: manifest.repo, branch: manifest.branch)
+        if let removal { throw removal }
         // The quarantined copies went with the directory, so stop telling the
         // user they're still recoverable in the app's data folder.
         storageIssues = []
@@ -286,6 +390,8 @@ public actor LocalStore {
     // MARK: - Snapshot (parsed view for the UI)
 
     public struct Snapshot: Sendable {
+        /// Stable while the cached files are unchanged; not persisted or synced.
+        public let revision = UUID()
         public var projects: [Project]
         public var findings: [String: [Finding]]
         public var tasks: [String: TaskDoc]
@@ -300,13 +406,42 @@ public actor LocalStore {
         /// findings have been moved to the cold tier; absent means the project
         /// has never been consolidated and nothing of it is hidden.
         public var consolidated: [String: String] = [:]
+        /// Every synced skill, global and project-scoped, sorted by scope then
+        /// name. Flat rather than keyed by project because `global` is not a
+        /// project and the Skills UI lists both together.
+        public var skills: [Skill] = []
+        /// Canonical agent instructions, keyed by global/project scope.
+        public var instructions: [String: String] = [:]
+        /// Backing path for each instruction value. Legacy stores may still
+        /// expose CLAUDE.md until a desktop migration copies it to AGENTS.md.
+        public var instructionPaths: [String: String] = [:]
+        /// Raw so malformed or newer settings cannot be mistaken for defaults.
+        public var skillPreferencesContent: String? = nil
+        /// Which computers carry which projects, and where.
+        public var machines: MachineRegistry = .empty
+        /// project → the knobs set in its `phren.project.yaml`. Absent means
+        /// the file carries none, i.e. every knob inherits the global setting.
+        public var projectKnobs: [String: ProjectKnobs] = [:]
+        /// project → the raw `phren.project.yaml` bytes, so a knob write can
+        /// carry the exact content it read as its conflict check.
+        public var projectConfigs: [String: String] = [:]
+        /// project → scheduled prompts parsed from `schedules.yaml`.
+        public var schedules: [String: [Schedule]] = [:]
+        /// Raw bytes used to preserve unknown top-level keys and detect edits
+        /// made elsewhere while the schedule editor was open.
+        public var schedulesContent: [String: String] = [:]
 
         public static let empty = Snapshot(projects: [], findings: [:], tasks: [:], notes: [:], reviewQueue: [], summaries: [:])
     }
 
-    /// Parses every cached file into the UI model. Sorting of the cross-project
-    /// review queue mirrors `readReviewQueueAcrossProjects` (access.ts:797).
+    /// Reparse only after a cached file changes. Status/manifest timestamps alone
+    /// do not invalidate content. Failed metadata reads never reuse stale data.
+    /// Atomic writes from another LocalStore (for example an App Intent) change
+    /// file identity even if byte count and modification date happen to match,
+    /// which is why identity is part of the comparison.
     public func snapshot() -> Snapshot {
+        let (paths, files) = scanFiles()
+        if let files, let cachedSnapshot, files == cachedSnapshot.files { return cachedSnapshot.value }
         var findings: [String: [Finding]] = [:]
         var tasks: [String: TaskDoc] = [:]
         var notes: [String: [Note]] = [:]
@@ -316,9 +451,42 @@ public actor LocalStore {
         var queue: [ProjectQueueItem] = []
         var projectNames = Set<String>()
         var journals: [String: [JournalFile]] = [:]
+        var skills: [Skill] = []
+        var instructions: [String: String] = [:]
+        var instructionPaths: [String: String] = [:]
+        var machines = MachineRegistry()
+        var projectKnobs: [String: ProjectKnobs] = [:]
+        var projectConfigs: [String: String] = [:]
+        var schedules: [String: [Schedule]] = [:]
+        var schedulesContent: [String: String] = [:]
 
-        for path in allPaths() {
+        for path in paths {
             let parts = path.split(separator: "/").map(String.init)
+
+            if path == MachineRegistry.machinesFile {
+                if let content = read(path) { machines.machines = MachineRegistry.parseMachines(content) }
+                continue
+            }
+            if MachineRegistry.isProfilePath(path) {
+                if let content = read(path) {
+                    let profile = MachineRegistry.parseProfile(content)
+                    let name = profile.name ?? String(parts[1].dropLast(".yaml".count))
+                    machines.profiles[name] = profile.projects
+                }
+                continue
+            }
+
+            // Skills come first: they are the only synced content that can sit
+            // outside a project directory (`global/skills/…`), so the project
+            // guard below would drop them.
+            if Self.isSkillPath(path) {
+                if let content = read(path), let skill = Skill.parse(path: path, content: content) {
+                    skills.append(skill)
+                    if case .project(let name) = skill.scope { projectNames.insert(name) }
+                }
+                continue
+            }
+
             guard parts.count >= 2, Self.isReadableProjectDirName(parts[0]) else { continue }
             let project = parts[0]
             projectNames.insert(project)
@@ -341,8 +509,25 @@ public actor LocalStore {
                     }
                 case "summary.md":
                     summaries[project] = content
+                case AgentInstructions.fileName:
+                    instructions[project] = content
+                    instructionPaths[project] = path
+                case AgentInstructions.legacyFileName:
+                    // Older stores remain readable. AGENTS.md is canonical and
+                    // replaces this fallback regardless of listing order.
+                    if instructions[project] == nil {
+                        instructions[project] = content
+                        instructionPaths[project] = path
+                    }
                 case "truths.md":
                     truths[project] = TruthsFile(content: content).truths
+                case MachineRegistry.projectFile:
+                    projectConfigs[project] = content
+                    projectKnobs[project] = ProjectKnobs.parse(content)
+                    if let sourcePath = MachineRegistry.parseSourcePath(content) { machines.sourcePaths[project] = sourcePath }
+                case SchedulesFile.fileName:
+                    schedulesContent[project] = content
+                    schedules[project] = SchedulesFile.parse(content)
                 default:
                     break
                 }
@@ -378,21 +563,86 @@ public actor LocalStore {
 
         queue.sort(by: Self.reviewQueueOrder)
 
+        let reviewCounts = Dictionary(grouping: queue, by: \.project).mapValues(\.count)
         let projects = projectNames.sorted().map { name in
             Project(
                 name: name,
                 findingCount: findings[name]?.count ?? 0,
                 taskCount: tasks[name].map { $0.active.count + $0.queue.count } ?? 0,
                 noteCount: notes[name]?.count ?? 0,
-                reviewCount: queue.filter { $0.project == name }.count
+                reviewCount: reviewCounts[name] ?? 0,
+                archivedCount: summaries[name].flatMap(Self.archivedFindingCount) ?? 0
             )
         }
 
-        return Snapshot(
+        // Global first, then projects alphabetically, then skill name — the
+        // grouping order the Skills list renders in.
+        skills.sort { left, right in
+            if left.scope != right.scope {
+                if case .global = left.scope { return true }
+                if case .global = right.scope { return false }
+                return left.scope.source < right.scope.source
+            }
+            return left.name.localizedStandardCompare(right.name) == .orderedAscending
+        }
+
+        let result = Snapshot(
             projects: projects, findings: findings, tasks: tasks,
             notes: notes, reviewQueue: queue, summaries: summaries,
-            truths: truths, consolidated: consolidated
+            truths: truths, consolidated: consolidated, skills: skills, instructions: instructions,
+            instructionPaths: instructionPaths,
+            skillPreferencesContent: read(SkillPreferences.path), machines: machines,
+            projectKnobs: projectKnobs, projectConfigs: projectConfigs,
+            schedules: schedules, schedulesContent: schedulesContent
         )
+        cachedSnapshot = files.map { ($0, result) }
+        return result
+    }
+
+    /// Raw material for the on-device graph. The payload builder works from the
+    /// *unparsed* FINDINGS.md text because score keys are minted per bullet
+    /// line, tag prefix included — reconstructing those lines from parsed
+    /// `Finding` values would risk drifting from the CLI's keys.
+    public func graphInput(storeName: String) -> GraphBuilder.Input {
+        let snapshot = snapshot()
+        var findingsMarkdown: [String: String] = [:]
+        for (project, findings) in snapshot.findings {
+            // Parsed findings retain their original bullet, including identity
+            // tags. Journals travel separately so each source appears once.
+            findingsMarkdown[project] = findings.filter { !$0.archived && !$0.isJournalEntry }
+                .map { "## \($0.date)\n\($0.rawLine)" }.joined(separator: "\n")
+        }
+
+        // The CLI's summary.md says how many findings it archived ("20 active
+        // findings, 925 archived across 17 topics"); the archive itself is
+        // never downloaded, so this line is how its size reaches the phone.
+        var findingTotals: [String: Int] = [:]
+        for project in snapshot.projects.map(\.name) {
+            let live = (snapshot.findings[project] ?? []).filter { !$0.archived }.count
+            findingTotals[project] = live + (snapshot.summaries[project].flatMap(Self.archivedFindingCount) ?? 0)
+        }
+        return GraphBuilder.Input(
+            findingsMarkdown: findingsMarkdown, tasks: snapshot.tasks,
+            projects: snapshot.projects.map(\.name).sorted(), storeName: storeName,
+            journalFindings: snapshot.findings.mapValues { $0.filter(\.isJournalEntry) },
+            findingTotals: findingTotals
+        )
+    }
+
+    /// "…, 925 archived across 17 topics…" in a project's summary.md → 925.
+    public static func archivedFindingCount(_ summary: String) -> Int? {
+        guard let match = summary.range(of: #"([0-9][0-9,]*) archived across"#, options: .regularExpression) else { return nil }
+        let digits = summary[match].prefix { $0.isNumber || $0 == "," }.filter(\.isNumber)
+        return Int(digits)
+    }
+
+    /// Resolves a graph node's score key to the FINDINGS.md bullet it was
+    /// minted from. nil when the key no longer matches any line — the finding
+    /// moved or was edited elsewhere — and the caller falls back to the node's
+    /// displayed text.
+    public func findingBulletText(project: String, scoreKey: String) -> String? {
+        guard let markdown = read("\(project)/FINDINGS.md") else { return nil }
+        return GraphBuilder.findBulletText(project: project, scoreKey: scoreKey, findingsMarkdown: markdown)
     }
 
     /// access.ts:797 — section order, then date desc, then project, then id.

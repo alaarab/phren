@@ -20,7 +20,7 @@ describe("task lifecycle", () => {
       taskMode: "manual",
     }, null, 2) + "\n");
     writeFile(path.join(tmp.path, project, "tasks.md"), `# ${project} tasks\n\n## Active\n\n## Queue\n\n## Done\n`);
-    writeFile(path.join(tmp.path, project, "CLAUDE.md"), "Repo: https://github.com/alaarab/phren\n");
+    writeFile(path.join(tmp.path, project, "AGENTS.md"), "Repo: https://github.com/alaarab/phren\n");
   });
 
   afterEach(() => {
@@ -53,7 +53,7 @@ describe("task lifecycle", () => {
     expect(after).toBe(before);
   });
 
-  it("auto mode creates an active task and links an explicit GitHub issue URL", () => {
+  it("auto mode queues a task and links an explicit GitHub issue URL", () => {
     writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({
       schemaVersion: 1,
 
@@ -71,15 +71,16 @@ describe("task lifecycle", () => {
     });
 
     expect(result.mode).toBe("auto");
-    expect(result.noticeLines.join("\n")).toContain("Active task");
+    expect(result.noticeLines.join("\n")).toContain("Queued task");
 
     const task = readTasks(tmp.path, project);
     expect(task.ok).toBe(true);
     if (!task.ok) return;
-    expect(task.data.items.Active).toHaveLength(1);
-    expect(task.data.items.Active[0].context).toContain("Implement automatic task management for hooks");
-    expect(task.data.items.Active[0].githubIssue).toBe(14);
-    expect(task.data.items.Active[0].githubUrl).toBe("https://github.com/alaarab/phren/issues/14");
+    expect(task.data.items.Active).toHaveLength(0);
+    expect(task.data.items.Queue).toHaveLength(1);
+    expect(task.data.items.Queue[0].context).toContain("Implement automatic task management for hooks");
+    expect(task.data.items.Queue[0].githubIssue).toBe(14);
+    expect(task.data.items.Queue[0].githubUrl).toBe("https://github.com/alaarab/phren/issues/14");
   });
 
   it("auto mode suggests instead of writing when discovery intent detected", () => {
@@ -125,12 +126,12 @@ describe("task lifecycle", () => {
     });
 
     expect(result.mode).toBe("auto");
-    expect(result.noticeLines.join("\n")).toContain("Active task");
+    expect(result.noticeLines.join("\n")).toContain("Queued task");
 
     const task = readTasks(tmp.path, project);
     expect(task.ok).toBe(true);
     if (!task.ok) return;
-    expect(task.data.items.Active).toHaveLength(1);
+    expect(task.data.items.Queue).toHaveLength(1);
   });
 
   it("auto mode writes task when both execution and discovery signals present", () => {
@@ -151,7 +152,7 @@ describe("task lifecycle", () => {
     });
 
     expect(result.mode).toBe("auto");
-    expect(result.noticeLines.join("\n")).toContain("Active task");
+    expect(result.noticeLines.join("\n")).toContain("Queued task");
   });
 
   it("auto mode writes task when no discovery signal present (default behavior)", () => {
@@ -172,7 +173,7 @@ describe("task lifecycle", () => {
     });
 
     expect(result.mode).toBe("auto");
-    expect(result.noticeLines.join("\n")).toContain("Active task");
+    expect(result.noticeLines.join("\n")).toContain("Queued task");
   });
 
   it("auto mode does not poison the tracked task on transient git failure", () => {
@@ -246,7 +247,7 @@ describe("task lifecycle", () => {
     expect(blocked).toBeDefined();
   });
 
-  it("auto mode completes the tracked task after a successful stop", () => {
+  it("auto mode never completes the tracked task after a successful stop", () => {
     writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({
       schemaVersion: 1,
 
@@ -257,7 +258,7 @@ describe("task lifecycle", () => {
 
     handleTaskPromptLifecycle({
       phrenPath: tmp.path,
-      prompt: "Fix narrow terminal task rendering",
+      prompt: "Add this to the task list: fix narrow terminal task rendering",
       project,
       sessionId: "session-complete",
       intent: "debug",
@@ -270,11 +271,80 @@ describe("task lifecycle", () => {
       detail: "commit saved; background sync scheduled",
     });
 
+    // The next turn's prompt arrives; the earlier task must still be open.
+    handleTaskPromptLifecycle({
+      phrenPath: tmp.path,
+      prompt: "Now update the release notes for the sync worker",
+      project,
+      sessionId: "session-complete",
+      intent: "build",
+    });
+    finalizeTaskSession({
+      phrenPath: tmp.path,
+      sessionId: "session-complete",
+      status: "saved-pushed",
+      detail: "pushed",
+    });
+
     const task = readTasks(tmp.path, project);
     expect(task.ok).toBe(true);
     if (!task.ok) return;
-    expect(task.data.items.Active).toHaveLength(0);
-    expect(task.data.items.Done[0].line).toContain("Fix narrow terminal task rendering");
+    expect(task.data.items.Done).toHaveLength(0);
+    const active = task.data.items.Active.find((i) => i.line.includes("narrow terminal task rendering"));
+    expect(active).toBeDefined();
+    // Detached at the turn boundary: the unrelated next prompt did not rewrite it.
+    expect(active?.context ?? "").not.toMatch(/release notes/i);
+  });
+
+  describe("machine-originated prompts", () => {
+    const framed: Array<[string, string]> = [
+      ["a sub-agent hand-back", '<agent-message from="worker-1">\nImplemented the fix for the sync worker retry and updated the tests in packages/cli/src/sync.ts\n</agent-message>'],
+      ["a system notification", "[SYSTEM NOTIFICATION] Background command finished: fix the build pipeline and deploy the release"],
+      ["a task notification", "<task-notification>\n<task-id>abc123</task-id>\n<status>completed</status>\n<summary>Implement the retry queue for sync</summary>\n</task-notification>"],
+      ["a system reminder", "<system-reminder>\nFix the failing tests in packages/cli before continuing\n</system-reminder>"],
+      ["a hand-back with leading whitespace", "  \n<agent-message>Update the docs and fix the lint errors in src/index.ts</agent-message>"],
+      ["a notification inside pasted content", '<pasted_content id="1">\n[SYSTEM NOTIFICATION] Implement the retry queue for sync\n</pasted_content id="1">'],
+    ];
+
+    function autoPolicy(): void {
+      writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({
+        schemaVersion: 1,
+        lowConfidenceThreshold: 0.7,
+        riskySections: ["Stale", "Conflicts"],
+        taskMode: "auto",
+      }, null, 2) + "\n");
+    }
+
+    for (const [label, prompt] of framed) {
+      it(`never creates a task from ${label}`, () => {
+        autoPolicy();
+        const before = fs.readFileSync(path.join(tmp.path, project, "tasks.md"), "utf8");
+        const result = handleTaskPromptLifecycle({ phrenPath: tmp.path, prompt, project, sessionId: "session-frame", intent: "build" });
+        expect(result.noticeLines).toEqual([]);
+        expect(fs.readFileSync(path.join(tmp.path, project, "tasks.md"), "utf8")).toBe(before);
+      });
+    }
+
+    it("never completes or moves a tracked task when hand-backs arrive", () => {
+      autoPolicy();
+      handleTaskPromptLifecycle({
+        phrenPath: tmp.path,
+        prompt: "Add this to the task list: fix narrow terminal task rendering",
+        project,
+        sessionId: "session-handback",
+        intent: "build",
+      });
+      const before = fs.readFileSync(path.join(tmp.path, project, "tasks.md"), "utf8");
+      for (const [, prompt] of framed) {
+        handleTaskPromptLifecycle({ phrenPath: tmp.path, prompt, project, sessionId: "session-handback", intent: "build" });
+      }
+      expect(fs.readFileSync(path.join(tmp.path, project, "tasks.md"), "utf8")).toBe(before);
+      const task = readTasks(tmp.path, project);
+      expect(task.ok).toBe(true);
+      if (!task.ok) return;
+      expect(task.data.items.Done).toHaveLength(0);
+      expect(task.data.items.Active.some((i) => i.line.includes("narrow terminal task rendering"))).toBe(true);
+    });
   });
 });
 
@@ -334,9 +404,73 @@ describe("task auto-capture prompt gate", () => {
     });
   }
 
-  it("still captures a real request", () => {
+  it("still captures a real request, into Queue", () => {
     const result = capture("Fix the retry backoff in the sync worker", "session-real");
-    expect(result.noticeLines.join("\n")).toContain("Active task");
+    expect(result.noticeLines.join("\n")).toContain("Queued task");
+    expect(taskCount()).toBe(1);
+    const tasks = readTasks(tmp.path, project);
+    expect(tasks.ok && tasks.data.items.Queue).toHaveLength(1);
+  });
+
+  // What the dispatcher session filed on 2026-09-19: replies from the phone
+  // (wrapped by the terminal), a message from another agent, questions.
+  const conversational: Array<[string, string]> = [
+    ["a wrapped reply", '<pasted_content id="92a5">\nYep /herdr the phren agent is there\n</pasted_content id="92a5">'],
+    ["a wrapped musing", '<pasted_content id="1b2c">\ncurious, I want you to look at /home/me/Projects/phren and tell me what changed\n</pasted_content id="1b2c">'],
+    ["a cross-session message", '<cross-session-message from="uds:/run/user/1000/cc-socks/1.sock" from-name="c2">\nFix the sync worker retry and update the docs\n</cross-session-message>'],
+    ["a delivery notice", "[Cross-session delivery notice] fix the sync worker: held for approval"],
+    ["a question", "Should I fix the retry backoff in the sync worker or update the docs first?"],
+    ["a bare acknowledgement of a path", "ok /home/me/Projects/phren is the one"],
+  ];
+  for (const [label, prompt] of conversational) {
+    it(`does not create a task from ${label}`, () => {
+      const result = capture(prompt, `session-${label.replace(/\s+/g, "-")}`);
+      expect(result.noticeLines).toEqual([]);
+      expect(taskCount()).toBe(0);
+    });
+  }
+
+  // Seen 2026-09-24: relayed messages pasted into a worker's pane rewrote an Active task's Context.
+  const relayed: Array<[string, string]> = [
+    ["pasted content", '<pasted_content id="7f01">\nFix the retry backoff in the sync worker\n</pasted_content id="7f01">'],
+    ["a relayed conductor message", "From the conductor, a correction: the owner wants test runs in parallel, fix the runner"],
+    ["a relayed agent message", "From tidy-phren: update the docs and fix the lint errors in src/index.ts"],
+    ["a pasted relay", '<pasted_content id="a1">\nFrom the conductor: fix the retry backoff in the sync worker\n</pasted_content id="a1">'],
+  ];
+  for (const [label, prompt] of relayed) {
+    it(`does not create a task from ${label}`, () => {
+      const result = capture(prompt, `session-${label.replace(/\s+/g, "-")}`);
+      expect(result.noticeLines).toEqual([]);
+      expect(taskCount()).toBe(0);
+    });
+  }
+
+  it("reads what was typed outside a paste, and a request that starts with 'From now on'", () => {
+    const typed = capture('Fix the retry backoff in the sync worker <pasted_content id="7f01">\nstack trace here\n</pasted_content id="7f01">', "session-typed");
+    expect(typed.noticeLines.join("\n")).toContain("Queued task (demo): Fix the retry backoff in the sync worker");
+    const tasks = readTasks(tmp.path, project);
+    expect((tasks.ok && tasks.data.items.Queue[0].context) || "").not.toContain("stack trace");
+    expect(capture("From now on, fix lint errors in src/index.ts before each commit", "session-from-now").noticeLines.join("\n")).toContain("Queued task");
+  });
+
+  it("never rewrites the Context of the session's tracked task or a matched task", () => {
+    capture("Add this to task: fix the retry backoff in the sync worker", "session-keep");
+    const context = () => { const tasks = readTasks(tmp.path, project); return tasks.ok ? tasks.data.items.Active[0].context : undefined; };
+    const before = context();
+    expect(before).toBe("Fix the retry backoff in the sync worker");
+    capture("Now update the docs for the release checklist in docs/release.md", "session-keep");
+    capture("Fix the retry backoff in the sync worker again after the rebase", "session-other");
+    expect(context()).toBe(before);
+    expect(taskCount()).toBe(1);
+  });
+
+  it("puts a request the person asked to track in Active, and a matched Active task stays there", () => {
+    const explicit = capture("Add this to task: fix the retry backoff in the sync worker", "session-explicit");
+    expect(explicit.noticeLines.join("\n")).toContain("Active task");
+    const tasks = readTasks(tmp.path, project);
+    expect(tasks.ok && tasks.data.items.Active.map((t) => t.line)).toEqual(["Fix the retry backoff in the sync worker"]);
+    const again = capture("Fix the retry backoff in the sync worker properly", "session-again");
+    expect(again.noticeLines.join("\n")).toContain("Active task");
     expect(taskCount()).toBe(1);
   });
 });

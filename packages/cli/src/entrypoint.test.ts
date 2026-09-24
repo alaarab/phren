@@ -65,4 +65,10 @@ describe("resolveTopLevelInvocation", () => {
     expect(resolveTopLevelInvocation(["--help"])).toEqual({ kind: "help" });
     expect(resolveTopLevelInvocation(["--version"])).toEqual({ kind: "version" });
   });
+
+  it("routes --help with a topic the same way as help with a topic", () => {
+    expect(resolveTopLevelInvocation(["--help", "all"])).toEqual({ kind: "manage", argv: ["--help", "all"] });
+    expect(resolveTopLevelInvocation(["-h", "all"])).toEqual({ kind: "manage", argv: ["-h", "all"] });
+    expect(resolveTopLevelInvocation(["help", "all"])).toEqual({ kind: "manage", argv: ["help", "all"] });
+  });
 });

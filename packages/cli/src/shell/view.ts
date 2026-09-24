@@ -1,8 +1,10 @@
+import { moduleEnabled } from "../modules/runtime.js";
 /**
  * View rendering functions for the phren interactive shell.
  * Extracted from shell.ts to keep the orchestrator under 300 lines.
  */
 
+import { projectMemoryCounts } from "../content/summarize.js";
 import * as fs from "fs";
 import * as path from "path";
 import {
@@ -15,13 +17,13 @@ import {
   resolveTaskFilePath,
   ShellState,
 } from "../data/access.js";
-import { getNonPrimaryStores } from "../store-registry.js";
 import {
   style,
   badge,
   separator,
   stripAnsi,
   truncateLine,
+  displayWidth,
   renderWidth,
   wrapSegments,
   lineViewport,
@@ -34,6 +36,7 @@ import {
 } from "./view-list.js";
 import {
   SUB_VIEWS,
+  enabledSubViews,
   TAB_ICONS,
   type DoctorResultLike,
 } from "./types.js";
@@ -49,7 +52,10 @@ import { readInstallPreferences } from "../init/preferences.js";
 import { PROJECT_HOOK_EVENTS, isProjectHookEnabled, readProjectConfig } from "../project-config.js";
 import { getScopedSkills } from "../skill/registry.js";
 import { errorMessage } from "../utils.js";
+import { resolveProjectStorePath } from "../cli/namespaces-utils.js";
 import { logger } from "../logger.js";
+import type { GraphController } from "./graph/controller.js";
+import { renderGraphView, graphSummary } from "./graph/graph-view.js";
 
 /** Shared rendering state passed from the orchestrator */
 export interface ViewContext {
@@ -59,53 +65,42 @@ export interface ViewContext {
   currentCursor: () => number;
   currentScroll: () => number;
   setScroll: (n: number) => void;
-}
-
-/** Resolve which store (primary or team) contains a project */
-function resolveProjectStorePath(phrenPath: string, project: string): string {
-  if (fs.existsSync(path.join(phrenPath, project))) return phrenPath;
-  try {
-    for (const store of getNonPrimaryStores(phrenPath)) {
-      if (fs.existsSync(path.join(store.path, project))) return store.path;
-    }
-  } catch { /* fall through */ }
-  return phrenPath;
+  /** The knowledge-graph view's controller (created on first use). Absent in hosts that only render menus. */
+  graph?: () => GraphController;
 }
 
 // ── Tab bar ────────────────────────────────────────────────────────────────
 
-function renderTabBar(state: ShellState): string {
+/**
+ * The whole top of the frame in as few rows as possible: brand, current view,
+ * project and filter on one line, then a rule. On a 24-row terminal the old
+ * three-row header cost more than a tenth of the screen.
+ */
+function renderTopBar(state: ShellState, summary = "", views: readonly typeof SUB_VIEWS[number][] = SUB_VIEWS): string {
   const cols = renderWidth();
+  const brand = gradient("◆ phren");
+  const dot = style.dim("·");
+  const project = state.project ? `${dot} ${style.cyan(state.project)}` : "";
+  const filter = state.filter ? `${dot} ${style.yellow("/" + state.filter)}` : "";
+  const isSub = (SUB_VIEWS as readonly string[]).includes(state.view);
 
-  if (state.view === "Health") {
-    const label = `${TAB_ICONS.Health} Health`;
-    return `  ${style.boldMagenta(label)}\n${separator(cols)}`;
+  if (!isSub) {
+    const label = style.boldMagenta(`${TAB_ICONS[state.view] ?? "◆"} ${state.view}`);
+    const line = ["  " + brand, label, project, filter, summary ? `${dot} ${summary}` : ""].filter(Boolean).join("  ");
+    return `${truncateLine(line, cols)}\n${separator(cols)}`;
   }
 
-  if (state.view === "Projects") {
-    const label = `${TAB_ICONS.Projects} Projects`;
-    const tabLine = ` ${style.boldMagenta(label)} `;
-    return `${tabLine}\n${separator(cols)}`;
+  // Sub-views carry a tab strip. Try full labels, then icons for the inactive
+  // tabs, before giving up and taking a second row.
+  const head = `  ${brand}${project ? `  ${project}` : ""}${filter ? `  ${filter}` : ""}`;
+  const full = views.map((v) => (v === state.view ? style.boldMagenta(`${TAB_ICONS[v]} ${v}`) : style.dim(`${TAB_ICONS[v]} ${v}`)));
+  const terse = views.map((v) => (v === state.view ? style.boldMagenta(`${TAB_ICONS[v]} ${v}`) : style.dim(TAB_ICONS[v] ?? "")));
+  for (const tabs of [full, terse]) {
+    const merged = `${head}  ${style.dim("│")} ${tabs.join(style.dim(" │ "))}`;
+    if (displayWidth(merged) <= cols) return `${merged}\n${separator(cols)}`;
   }
-
-  const projectTag = state.project
-    ? `${style.cyan(state.project)} ${style.dim("›")}`
-    : "";
-  const tabs = SUB_VIEWS.map((v) => {
-    const icon = TAB_ICONS[v] || "";
-    const label = `${icon} ${v}`;
-    return v === state.view
-      ? ` ${style.boldMagenta(label)} `
-      : ` ${style.dim(label)} `;
-  });
-
-  const segments = projectTag ? [projectTag, ...tabs] : tabs;
-  const tabLine = wrapSegments(segments, cols, {
-    indent: "  ",
-    maxLines: 2,
-    separator: style.dim("│"),
-  });
-  return `${tabLine}\n${separator(cols)}`;
+  const tabLine = wrapSegments(full, cols, { indent: "  ", maxLines: 2, separator: style.dim("│") });
+  return `${head}\n${tabLine}\n${separator(cols)}`;
 }
 
 // ── Bottom bar ─────────────────────────────────────────────────────────────
@@ -124,36 +119,35 @@ function renderBottomBar(state: ShellState, navMode: "navigate" | "input", input
       add: "add task",
       "learn-add": "add finding",
       "skill-add": "new skill name",
+      "graph-search": "search graph",
     };
     const label = labels[inputCtx] || inputCtx;
     return `${sep}\n  ${style.boldCyan(label + " ›")} ${inputBuf}${style.cyan("█")}`;
   }
 
-  const viewHints: Record<string, string[]> = {
-    Projects: [`${k("↵")} ${d("open project")}`, `${k("i")} ${d("intro mode")}`],
-    Tasks: [`${k("a")} ${d("add")}`, `${k("↵")} ${d("mark done")}`, `${k("d")} ${d("toggle active")}`],
-    Findings: [`${k("a")} ${d("add")}`, `${k("d")} ${d("remove")}`],
-    "Review Queue": [`${k("↵")} ${d("inspect")}`],
-    Skills: [`${k("a")} ${d("add")}`, `${k("t")} ${d("toggle")}`, `${k("d")} ${d("remove")}`],
-    Hooks: [`${k("a")} ${d("enable")}`, `${k("d")} ${d("disable")}`],
-    Health: [`${k("↑↓")} ${d("scroll")}`, `${k("esc")} ${d("back")}`],
+  // Only what you reach for constantly. Everything else is one `?` away, so
+  // the bar never costs more than a single row.
+  const essentials: Record<string, string[]> = {
+    Projects: [`${k("↑↓")} ${d("move")}`, `${k("↵")} ${d("open")}`, `${k("e")} ${d("edit AGENTS.md")}`],
+    Tasks: [`${k("↑↓")} ${d("move")}`, `${k("a")} ${d("add")}`, `${k("↵")} ${d("done")}`],
+    Findings: [`${k("↑↓")} ${d("move")}`, `${k("a")} ${d("add")}`],
+    "Review Queue": [`${k("↑↓")} ${d("move")}`, `${k("↵")} ${d("inspect")}`],
+    Skills: [`${k("↑↓")} ${d("move")}`, `${k("e")} ${d("edit")}`, `${k("t")} ${d("toggle")}`],
+    Hooks: [`${k("↑↓")} ${d("move")}`, `${k("a")} ${d("enable")}`],
+    Health: [`${k("↑↓")} ${d("scroll")}`],
+    Graph: [`${k("↑↓←→")} ${d("walk")}`, `${k("↵")} ${d("select")}`, `${k("␣")} ${d("read")}`, `${k("v")} ${d("orbit")}`, `${k("w")} ${d("watch")}`, `${k("a")} ${d("agents")}`],
   };
-
-  const extra = viewHints[state.view] ?? [];
-  const isSubView = state.view !== "Projects" && state.view !== "Health";
-  const nav = isSubView
-    ? [`${k("←→")} ${d("tabs")}`, `${k("↑↓")} ${d("move")}`, `${k("esc")} ${d("back")}`]
-    : state.view === "Health"
-      ? []
-      : [`${k("↑↓")} ${d("move")}`];
-  const tail = [`${k("h")} ${d("health")}`, `${k("/")} ${d("filter")}`, `${k(":")} ${d("cmd")}`, `${k("?")} ${d("help")}`, `${k("q")} ${d("quit")}`];
-
-  const hints = [...nav, ...extra, ...tail];
-  return `${sep}\n${wrapSegments(hints, cols, {
-    indent: "  ",
-    maxLines: 3,
-    separator: dot,
-  })}`;
+  const search = state.view === "Graph" ? `${k("/")} ${d("search")}` : `${k("/")} ${d("filter")}`;
+  // `? keys` and `q quit` are the two you cannot afford to lose, so a narrow
+  // terminal drops view hints off the end instead of truncating those away.
+  const always = [`${k("?")} ${d("keys")}`, `${k("q")} ${d("quit")}`];
+  const optional = [...(essentials[state.view] ?? []), search];
+  let line = "";
+  for (let take = optional.length; take >= 0; take--) {
+    line = wrapSegments([...optional.slice(0, take), ...always], cols, { indent: "  ", maxLines: 1, separator: dot });
+    if (!stripAnsi(line).trimEnd().endsWith("…")) break;
+  }
+  return `${sep}\n${line}`;
 }
 
 // ── Content height ─────────────────────────────────────────────────────────
@@ -162,9 +156,9 @@ function countRenderedLines(block: string): number {
   return block.split("\n").length;
 }
 
-function contentHeight(tabBar: string, bottomBar: string): number {
+function contentHeight(topBar: string, bottomBar: string, hasMessage: boolean): number {
   const rows = process.stdout.rows || 24;
-  const reserved = 1 + countRenderedLines(tabBar) + 1 + countRenderedLines(bottomBar);
+  const reserved = countRenderedLines(topBar) + countRenderedLines(bottomBar) + (hasMessage ? 1 : 0);
   return Math.max(4, rows - reserved);
 }
 
@@ -174,6 +168,7 @@ interface ProjectDashboardEntry {
   name: string;
   summary: string;
   docs: string[];
+  store?: string;
   activeCount: number;
   queueCount: number;
   findingCount: number;
@@ -202,13 +197,15 @@ function collectProjectDashboardEntries(ctx: ViewContext): ProjectDashboardEntry
       ...card,
       activeCount: task.ok ? task.data.items.Active.length : 0,
       queueCount: task.ok ? task.data.items.Queue.length : 0,
-      findingCount: findings.ok ? findings.data.length : 0,
+      // Everything the project holds, archive included, as every graph shows it.
+      findingCount: findings.ok ? projectMemoryCounts(storePath, card.name).findings : 0,
       reviewCount: review.ok ? review.data.length : 0,
     };
   });
 }
 
 function renderProjectsDashboard(ctx: ViewContext, entries: ProjectDashboardEntry[], height: number): string[] {
+  const tasksEnabled = moduleEnabled(ctx.phrenPath, "tasks", ctx.profile);
   const runtime = readRuntimeHealth(ctx.phrenPath);
   const scoped = entries.filter((entry) => entry.name !== "global");
   const totals = scoped.reduce((acc, entry) => {
@@ -229,16 +226,16 @@ function renderProjectsDashboard(ctx: ViewContext, entries: ProjectDashboardEntr
     .map((entry) => `${style.bold(entry.name)} ${style.dim(`${entry.findingCount} findings`)}`);
 
   const lines = [
-    `  ${badge(ctx.profile || "default", style.boldBlue)}  ${style.bold(String(scoped.length))} projects  ${style.dim("·")}  ${style.boldGreen(String(totals.active))} active  ${style.dim("·")}  ${style.boldYellow(String(totals.queue))} queued  ${style.dim("·")}  ${style.boldCyan(String(totals.findings))} findings  ${style.dim("·")}  ${style.boldMagenta(String(totals.review))} review`,
+    `  ${badge(ctx.profile || "default", style.boldBlue)}  ${style.bold(String(scoped.length))} projects  ${style.dim("·")}  ${tasksEnabled ? `${style.boldGreen(String(totals.active))} active  ${style.dim("·")}  ${style.boldYellow(String(totals.queue))} queued  ${style.dim("·")}  ` : ""}${style.boldCyan(String(totals.findings))} findings  ${style.dim("·")}  ${style.boldMagenta(String(totals.review))} review`,
     ctx.state.project
-      ? `  ${style.green("●")} active context ${style.boldCyan(ctx.state.project)}  ${style.dim("· ↵ opens selected project tasks")}`
-      : `  ${style.dim("No project selected yet")}  ${style.dim("· ↵ sets context and opens tasks")}`,
+      ? `  ${style.green("●")} active context ${style.boldCyan(ctx.state.project)}  ${style.dim(tasksEnabled ? "· ↵ opens selected project tasks" : "· ↵ opens selected project findings")}`
+      : `  ${style.dim("No project selected yet")}  ${style.dim(tasksEnabled ? "· ↵ sets context and opens tasks" : "· ↵ sets context and opens findings")}`,
     `  ${style.dim("Sync")} ${style.dim(runtime.lastSync?.lastPushStatus || runtime.lastAutoSave?.status || "unknown")}  ${style.dim("·")}  ${style.dim("unsynced")} ${style.bold(String(runtime.lastSync?.unsyncedCommits ?? 0))}  ${style.dim("·")}  ${style.dim("intro")} ${style.cyan(ctx.state.introMode || "once-per-version")}`,
   ];
 
   if (height >= 12) {
     lines.push("");
-    lines.push(`  ${style.bold("Task pulse")}  ${activePreview.length ? activePreview.join(style.dim("  ·  ")) : style.dim("No active tasks across this profile.")}`);
+    if (tasksEnabled) lines.push(`  ${style.bold("Task pulse")}  ${activePreview.length ? activePreview.join(style.dim("  ·  ")) : style.dim("No active tasks across this profile.")}`);
     lines.push(`  ${style.bold("Recent fragments")}  ${findingsPreview.length ? findingsPreview.join(style.dim("  ·  ")) : style.dim("Nothing yet.")}`);
   }
 
@@ -276,9 +273,10 @@ function renderProjectsView(ctx: ViewContext, cursor: number, height: number): s
     const cursorChar = isSelected ? style.cyan("▶") : " ";
     const bullet = isActive ? style.green("●") : style.dim("○");
     const nameStr = isActive ? style.boldGreen(card.name) : style.bold(card.name);
-    const docsStr = style.dim(`[A${card.activeCount} · Q${card.queueCount} · F${card.findingCount} · R${card.reviewCount}]`);
+    const docsStr = style.dim(`[${moduleEnabled(ctx.phrenPath, "tasks", ctx.profile) ? `A${card.activeCount} · Q${card.queueCount} · ` : ""}F${card.findingCount} · R${card.reviewCount}]`);
+    const storeStr = card.store ? `  ${style.dim("·")} ${style.cyan(card.store)}` : "";
 
-    let nameRow = `  ${cursorChar} ${bullet} ${nameStr}  ${docsStr}`;
+    let nameRow = `  ${cursorChar} ${bullet} ${nameStr}  ${docsStr}${storeStr}`;
     let summaryRow = `        ${style.dim(card.summary || "No summary yet.")}`;
 
     if (isSelected) {
@@ -619,6 +617,10 @@ export interface SkillEntry {
   name: string;
   path: string;
   enabled: boolean;
+  /** "global" or "project" — the scope key enable/disable is recorded under. */
+  scopeType?: string;
+  /** The store this skill was read from, which may be a team store. */
+  storePath?: string;
 }
 
 export function getProjectSkills(phrenPath: string, project: string): SkillEntry[] {
@@ -627,6 +629,11 @@ export function getProjectSkills(phrenPath: string, project: string): SkillEntry
     name: skill.name,
     path: skill.path,
     enabled: skill.enabled,
+    // Carried so actions do not have to guess: a global skill toggled with the
+    // project as its scope writes a key nothing reads, and a path recovered by
+    // splitting a display string breaks on any path containing the separator.
+    scopeType: skill.scopeType,
+    storePath,
   }));
 }
 
@@ -881,27 +888,35 @@ export async function renderShell(
   inputCtx: string,
   inputBuf: string,
   showHelp: boolean,
+  helpScroll: number,
   message: string,
   doctorSnapshot: () => Promise<DoctorResultLike>,
   subsectionsCache: SubsectionsCache | null,
   setHealthLineCount: (n: number) => void,
   setSubsectionsCache: (c: SubsectionsCache | null) => void,
 ): Promise<string> {
-  const projectLabel = ctx.state.project
-    ? `  ${style.dim("·")}  ${style.cyan(ctx.state.project)}`
-    : "";
-  const filterLabel = ctx.state.filter
-    ? `  ${style.dim("·")}  ${style.yellow("/" + ctx.state.filter)}`
-    : "";
-  const header = `  ${gradient("◆ phren")}${projectLabel}${filterLabel}`;
-  const tabBar = renderTabBar(ctx.state);
+  const graphSummaryLine = ctx.state.view === "Graph" && ctx.graph ? graphSummary(ctx.graph()) : "";
+  const topBar = renderTopBar(ctx.state, graphSummaryLine, enabledSubViews(ctx.phrenPath, ctx.profile));
   const bottomBar = renderBottomBar(ctx.state, navMode, inputCtx, inputBuf);
   const cursor = ctx.currentCursor();
-  const height = contentHeight(tabBar, bottomBar);
+  // An empty message line used to hold a row open on every frame.
+  const hasMessage = Boolean(stripAnsi(message).trim());
+  const height = contentHeight(topBar, bottomBar, hasMessage);
 
   let contentLines: string[];
   if (showHelp) {
-    contentLines = shellHelpText().split("\n");
+    // The help is longer than a small terminal, and used to be clipped in
+    // silence — on 24 rows more than half of it simply was not there.
+    const all = shellHelpText().split("\n").filter(line => moduleEnabled(ctx.phrenPath, "tasks", ctx.profile) || !/task/i.test(stripAnsi(line)));
+    if (all.length <= height) {
+      contentLines = all;
+    } else {
+      const maxScroll = all.length - (height - 1);
+      const start = Math.max(0, Math.min(helpScroll, maxScroll));
+      contentLines = all.slice(start, start + height - 1);
+      const atEnd = start >= maxScroll;
+      contentLines.push(style.dim(`  ━━━ ${start + 1}-${start + height - 1} of ${all.length}   ${atEnd ? "↑ back" : "↑↓ scroll"}`));
+    }
   } else {
     switch (ctx.state.view) {
       case "Projects":
@@ -935,6 +950,17 @@ export async function renderShell(
         setHealthLineCount(result.lineCount);
         break;
       }
+      case "Graph": {
+        if (!ctx.graph) { contentLines = ["  The graph view needs the interactive shell — run `phren shell`."]; break; }
+        const controller = ctx.graph();
+        await controller.ensureData();
+        const offer = controller.agentHint();
+        if (offer) message = `  ${style.boldCyan("▲")} ${style.dim(`${offer} — press`)} ${style.boldCyan("a")} ${style.dim("to see them")}`;
+        contentLines = renderGraphView(controller, renderWidth(), height);
+        // Mouse reports are terminal coordinates; the canvas starts under the top bar.
+        controller.canvasOrigin = { col: 0, row: topBar.split("\n").length };
+        break;
+      }
       default:
         contentLines = ["  Unknown view."];
     }
@@ -943,10 +969,8 @@ export async function renderShell(
   const displayed = contentLines.slice(0, height);
   while (displayed.length < height) displayed.push("");
 
-  const msgLine = `  ${style.dimItalic(stripAnsi(message).trimStart() ? message : "")}`;
-
   const cols = renderWidth();
-  const parts = [header, tabBar, ...displayed, msgLine, bottomBar];
+  const parts = [topBar, ...displayed, ...(hasMessage ? [`  ${style.dimItalic(message.trimStart())}`] : []), bottomBar];
   return parts.map(line => {
     if (line.includes("\n")) {
       return line.split("\n").map(sub => truncateLine(sub, cols) + "\x1b[K").join("\n");

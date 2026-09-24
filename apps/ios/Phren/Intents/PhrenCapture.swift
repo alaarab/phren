@@ -278,7 +278,7 @@ enum PhrenCapture {
     /// directory would each hold their own copy of the manifest, and
     /// `LocalStore.write` rewrites the whole manifest from that copy — so the
     /// second one to write would drop the first one's blob SHAs.
-    private static func openStore(_ descriptor: StoreDescriptor) throws -> LocalStore {
+    static func openStore(_ descriptor: StoreDescriptor) throws -> LocalStore {
         if let cached = offlineStores[descriptor.id] { return cached }
         // Plain files under Application Support, so the default
         // NSFileProtectionCompleteUntilFirstUserAuthentication applies: a

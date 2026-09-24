@@ -16,6 +16,8 @@ export interface ModelCatalogEntry {
   reasoningRange: ReasoningEffort[];
   pricing?: ModelPricing;
   metered?: boolean;
+  /** Accepts image input. Absent means text-only (fail closed on images). */
+  vision?: boolean;
 }
 
 export const REASONING_LEVELS: ReasoningEffort[] = ["low", "medium", "high", "xhigh"];
@@ -23,39 +25,54 @@ export const REASONING_LEVELS: ReasoningEffort[] = ["low", "medium", "high", "xh
 const BUILTIN_MODELS: Record<ProviderId, ModelCatalogEntry[]> = {
   anthropic: [
     {
-      id: "claude-sonnet-4-20250514",
+      id: "claude-sonnet-5",
+      vision: true,
       provider: "anthropic",
-      label: "Sonnet 4",
-      contextWindow: 200_000,
-      maxOutputTokens: 16_384,
-      reasoningDefault: "medium",
-      reasoningRange: ["low", "medium", "high"],
-      pricing: { inputPer1M: 3, outputPer1M: 15 },
-    },
-    {
-      id: "claude-opus-4-20250514",
-      provider: "anthropic",
-      label: "Opus 4",
-      contextWindow: 200_000,
+      label: "Sonnet 5",
+      contextWindow: 1_000_000,
       maxOutputTokens: 32_768,
       reasoningDefault: "high",
       reasoningRange: ["low", "medium", "high", "xhigh"],
-      pricing: { inputPer1M: 15, outputPer1M: 75 },
+      pricing: { inputPer1M: 3, outputPer1M: 15 },
+    },
+    {
+      id: "claude-opus-5",
+      vision: true,
+      provider: "anthropic",
+      label: "Opus 5",
+      contextWindow: 1_000_000,
+      maxOutputTokens: 32_768,
+      reasoningDefault: "high",
+      reasoningRange: ["low", "medium", "high", "xhigh"],
+      pricing: { inputPer1M: 5, outputPer1M: 25 },
+    },
+    {
+      id: "claude-opus-4-8",
+      vision: true,
+      provider: "anthropic",
+      label: "Opus 4.8",
+      contextWindow: 1_000_000,
+      maxOutputTokens: 32_768,
+      reasoningDefault: "high",
+      reasoningRange: ["low", "medium", "high", "xhigh"],
+      pricing: { inputPer1M: 5, outputPer1M: 25 },
     },
     {
       id: "claude-haiku-4-5-20251001",
+      vision: true,
       provider: "anthropic",
       label: "Haiku 4.5",
       contextWindow: 200_000,
-      maxOutputTokens: 8_192,
+      maxOutputTokens: 16_384,
       reasoningDefault: null,
       reasoningRange: [],
-      pricing: { inputPer1M: 0.8, outputPer1M: 4 },
+      pricing: { inputPer1M: 1, outputPer1M: 5 },
     },
   ],
   openrouter: [
     {
       id: "anthropic/claude-sonnet-4-20250514",
+      vision: true,
       provider: "openrouter",
       label: "Sonnet 4",
       contextWindow: 200_000,
@@ -66,6 +83,7 @@ const BUILTIN_MODELS: Record<ProviderId, ModelCatalogEntry[]> = {
     },
     {
       id: "anthropic/claude-opus-4-20250514",
+      vision: true,
       provider: "openrouter",
       label: "Opus 4",
       contextWindow: 200_000,
@@ -76,6 +94,7 @@ const BUILTIN_MODELS: Record<ProviderId, ModelCatalogEntry[]> = {
     },
     {
       id: "openai/gpt-4o",
+      vision: true,
       provider: "openrouter",
       label: "GPT-4o",
       contextWindow: 128_000,
@@ -86,6 +105,7 @@ const BUILTIN_MODELS: Record<ProviderId, ModelCatalogEntry[]> = {
     },
     {
       id: "openai/o4-mini",
+      vision: true,
       provider: "openrouter",
       label: "o4-mini",
       contextWindow: 128_000,
@@ -96,6 +116,7 @@ const BUILTIN_MODELS: Record<ProviderId, ModelCatalogEntry[]> = {
     },
     {
       id: "google/gemini-2.5-pro",
+      vision: true,
       provider: "openrouter",
       label: "Gemini 2.5 Pro",
       contextWindow: 1_000_000,
@@ -106,6 +127,7 @@ const BUILTIN_MODELS: Record<ProviderId, ModelCatalogEntry[]> = {
     },
     {
       id: "google/gemini-2.5-flash",
+      vision: true,
       provider: "openrouter",
       label: "Gemini 2.5 Flash",
       contextWindow: 1_000_000,
@@ -113,6 +135,27 @@ const BUILTIN_MODELS: Record<ProviderId, ModelCatalogEntry[]> = {
       reasoningDefault: "medium",
       reasoningRange: ["low", "medium", "high"],
       pricing: { inputPer1M: 0.15, outputPer1M: 0.6 },
+    },
+    {
+      id: "deepseek/deepseek-v4.1-flash",
+      vision: true,
+      provider: "openrouter",
+      label: "DeepSeek V4.1 Flash",
+      contextWindow: 1_000_000,
+      maxOutputTokens: 65_536,
+      reasoningDefault: "medium",
+      reasoningRange: ["low", "medium", "high"],
+      pricing: { inputPer1M: 0.15, outputPer1M: 0.6 },
+    },
+    {
+      id: "deepseek/deepseek-v4-pro",
+      provider: "openrouter",
+      label: "DeepSeek V4 Pro",
+      contextWindow: 1_000_000,
+      maxOutputTokens: 65_536,
+      reasoningDefault: "medium",
+      reasoningRange: ["low", "medium", "high"],
+      pricing: { inputPer1M: 1.6, outputPer1M: 3.2 },
     },
     {
       id: "deepseek/deepseek-r1",
@@ -136,6 +179,7 @@ const BUILTIN_MODELS: Record<ProviderId, ModelCatalogEntry[]> = {
     },
     {
       id: "meta-llama/llama-4-maverick",
+      vision: true,
       provider: "openrouter",
       label: "Llama 4 Maverick",
       contextWindow: 128_000,
@@ -158,6 +202,7 @@ const BUILTIN_MODELS: Record<ProviderId, ModelCatalogEntry[]> = {
   openai: [
     {
       id: "gpt-5.4",
+      vision: true,
       provider: "openai",
       label: "GPT-5.4",
       contextWindow: 1_050_000,
@@ -168,6 +213,7 @@ const BUILTIN_MODELS: Record<ProviderId, ModelCatalogEntry[]> = {
     },
     {
       id: "gpt-4o",
+      vision: true,
       provider: "openai",
       label: "GPT-4o",
       contextWindow: 128_000,
@@ -178,6 +224,7 @@ const BUILTIN_MODELS: Record<ProviderId, ModelCatalogEntry[]> = {
     },
     {
       id: "o4-mini",
+      vision: true,
       provider: "openai",
       label: "o4-mini",
       contextWindow: 200_000,
@@ -188,6 +235,7 @@ const BUILTIN_MODELS: Record<ProviderId, ModelCatalogEntry[]> = {
     },
     {
       id: "o3",
+      vision: true,
       provider: "openai",
       label: "o3",
       contextWindow: 200_000,
@@ -200,6 +248,7 @@ const BUILTIN_MODELS: Record<ProviderId, ModelCatalogEntry[]> = {
   "openai-codex": [
     {
       id: "gpt-5.4",
+      vision: true,
       provider: "openai-codex",
       label: "GPT-5.4",
       contextWindow: 1_050_000,
@@ -210,6 +259,7 @@ const BUILTIN_MODELS: Record<ProviderId, ModelCatalogEntry[]> = {
     },
     {
       id: "gpt-4o",
+      vision: true,
       provider: "openai-codex",
       label: "GPT-4o",
       contextWindow: 128_000,
@@ -220,6 +270,7 @@ const BUILTIN_MODELS: Record<ProviderId, ModelCatalogEntry[]> = {
     },
     {
       id: "o4-mini",
+      vision: true,
       provider: "openai-codex",
       label: "o4-mini",
       contextWindow: 200_000,
@@ -230,6 +281,7 @@ const BUILTIN_MODELS: Record<ProviderId, ModelCatalogEntry[]> = {
     },
     {
       id: "o3",
+      vision: true,
       provider: "openai-codex",
       label: "o3",
       contextWindow: 200_000,
@@ -277,6 +329,9 @@ const BUILTIN_MODELS: Record<ProviderId, ModelCatalogEntry[]> = {
 };
 
 const LEGACY_OUTPUT_LIMITS: Array<[string, number]> = [
+  ["claude-fable-5", 32_768],
+  ["claude-opus-5", 32_768],
+  ["claude-sonnet-5", 32_768],
   ["claude-opus-4", 32_768],
   ["claude-sonnet-4", 16_384],
   ["claude-haiku-4", 8_192],
@@ -290,15 +345,44 @@ const LEGACY_OUTPUT_LIMITS: Array<[string, number]> = [
   ["o3", 100_000],
   ["o4-mini", 100_000],
   ["gemini-2.5", 8_192],
+  ["deepseek-v4", 65_536],
   ["deepseek", 8_192],
   ["llama-4", 8_192],
   ["qwen", 8_192],
 ];
 
+const LEGACY_CONTEXT_LIMITS: Array<[string, number]> = [
+  ["claude-fable-5", 1_000_000],
+  ["claude-opus-5", 1_000_000],
+  ["claude-sonnet-5", 1_000_000],
+  ["claude-opus-4", 200_000],
+  ["claude-sonnet-4", 200_000],
+  ["claude-haiku-4", 200_000],
+  ["claude-3", 200_000],
+  ["gpt-5", 400_000],
+  ["gpt-4.1", 1_000_000],
+  ["gpt-4o", 128_000],
+  ["gpt-4", 128_000],
+  ["o3", 200_000],
+  ["o4-mini", 200_000],
+  ["gemini", 1_000_000],
+  ["deepseek", 128_000],
+  ["llama", 128_000],
+  ["qwen", 128_000],
+  ["mistral", 32_000],
+];
+
 const LEGACY_PRICING: Array<[string, ModelPricing]> = [
+  ["claude-fable-5", { inputPer1M: 10, outputPer1M: 50 }],
+  ["claude-opus-5", { inputPer1M: 5, outputPer1M: 25 }],
+  ["claude-sonnet-5", { inputPer1M: 3, outputPer1M: 15 }],
+  ["claude-opus-4-8", { inputPer1M: 5, outputPer1M: 25 }],
+  ["claude-opus-4-7", { inputPer1M: 5, outputPer1M: 25 }],
+  ["claude-opus-4-6", { inputPer1M: 5, outputPer1M: 25 }],
+  ["claude-sonnet-4-6", { inputPer1M: 3, outputPer1M: 15 }],
   ["claude-opus-4", { inputPer1M: 15, outputPer1M: 75 }],
   ["claude-sonnet-4", { inputPer1M: 3, outputPer1M: 15 }],
-  ["claude-haiku-4", { inputPer1M: 0.8, outputPer1M: 4 }],
+  ["claude-haiku-4", { inputPer1M: 1, outputPer1M: 5 }],
   ["claude-3-5-sonnet", { inputPer1M: 3, outputPer1M: 15 }],
   ["claude-3-5-haiku", { inputPer1M: 0.8, outputPer1M: 4 }],
   ["claude-3-opus", { inputPer1M: 15, outputPer1M: 75 }],
@@ -315,6 +399,9 @@ const LEGACY_PRICING: Array<[string, ModelPricing]> = [
   ["openai/gpt-4o", { inputPer1M: 2.5, outputPer1M: 10 }],
   ["google/gemini-2.5-pro", { inputPer1M: 1.25, outputPer1M: 10 }],
   ["google/gemini-2.5-flash", { inputPer1M: 0.15, outputPer1M: 0.6 }],
+  ["deepseek/deepseek-v4.1-flash", { inputPer1M: 0.15, outputPer1M: 0.6 }],
+  ["deepseek/deepseek-v4-flash", { inputPer1M: 0.05, outputPer1M: 0.1 }],
+  ["deepseek/deepseek-v4-pro", { inputPer1M: 1.6, outputPer1M: 3.2 }],
   ["deepseek/deepseek-r1", { inputPer1M: 0.55, outputPer1M: 2.19 }],
   ["deepseek/deepseek-v3", { inputPer1M: 0.27, outputPer1M: 1.1 }],
   ["deepseek-r1", { inputPer1M: 0.55, outputPer1M: 2.19 }],
@@ -327,6 +414,7 @@ const LEGACY_PRICING: Array<[string, ModelPricing]> = [
 ];
 
 LEGACY_OUTPUT_LIMITS.sort((a, b) => b[0].length - a[0].length);
+LEGACY_CONTEXT_LIMITS.sort((a, b) => b[0].length - a[0].length);
 LEGACY_PRICING.sort((a, b) => b[0].length - a[0].length);
 
 export function normalizeProviderId(provider: string | undefined): ProviderId | undefined {
@@ -380,6 +468,11 @@ export function getModelMetadata(provider: string | undefined, model: string): M
   return undefined;
 }
 
+/** Whether a model accepts image input. Unknown models are text-only (fail closed). */
+export function modelSupportsVision(provider: string | undefined, model: string): boolean {
+  return getModelMetadata(provider, model)?.vision === true;
+}
+
 export function getDefaultReasoningEffort(provider: string | undefined, model: string): ReasoningEffort | undefined {
   return getModelMetadata(provider, model)?.reasoningDefault ?? undefined;
 }
@@ -397,6 +490,17 @@ export function lookupMaxOutputTokens(model: string, provider?: string): number 
     if (lower.startsWith(prefix)) return limit;
   }
   return 8_192;
+}
+
+export function lookupContextWindow(model: string, provider?: string): number {
+  const metadata = getModelMetadata(provider, model);
+  if (metadata) return metadata.contextWindow;
+
+  const lower = model.toLowerCase();
+  for (const [prefix, limit] of LEGACY_CONTEXT_LIMITS) {
+    if (lower.startsWith(prefix)) return limit;
+  }
+  return 200_000;
 }
 
 export function lookupPricing(model: string, provider?: string): { pricing: ModelPricing; metered: boolean } {

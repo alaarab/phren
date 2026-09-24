@@ -1,3 +1,5 @@
+import { commandOwner, disabledHint } from "./modules/registry.js";
+import type { ModuleSnapshot } from "./modules/runtime.js";
 /**
  * Command registry - single source of truth for help generation and dispatch.
  *
@@ -85,6 +87,7 @@ export const ENV_HELP = `Environment variables:
   PHREN_PATH                  Override phren directory (default: ~/.phren)
   PHREN_PROFILE               Active profile name
   PHREN_DEBUG                 Enable debug logging (set to 1)
+  PHREN_PULL_INTERVAL_SECONDS Remote check interval in seconds (default: off; 0 disables)
 
   Embeddings:
   PHREN_OLLAMA_URL            Ollama base URL (default: http://localhost:11434, 'off' to disable)
@@ -98,6 +101,7 @@ export const ENV_HELP = `Environment variables:
   PHREN_HOOK_TIMEOUT_MS       Hook subprocess timeout in ms (default: 14000)
 
   Feature flags:
+  PHREN_FEATURE_AGENTS=1             Show running coding agents on the graph
   PHREN_FEATURE_TOOL_HOOK=0          Skip the PostToolUse subprocess (perf)
   PHREN_FEATURE_AUTO_EXTRACT=0       Disable auto memory extraction
   PHREN_FEATURE_AUTO_CAPTURE=1       Extract insights from conversations
@@ -118,6 +122,16 @@ const PROJECTS_SUBCOMMANDS: Subcommand[] = [
   { name: "list", usage: "phren projects list", summary: "List all tracked projects" },
   { name: "configure", usage: "phren projects configure <name> [--ownership <mode>] [--hooks on|off]", summary: "Update per-project settings" },
   { name: "remove", usage: "phren projects remove <name>", summary: "Remove a project" },
+];
+
+const SCHEDULE_SUBCOMMANDS: Subcommand[] = [
+  { name: "list", usage: "phren schedule list [project]", summary: "List scheduled prompts" },
+  { name: "add", usage: "phren schedule add <project> --name <name> --harness <name> --computer <name> [--model <model>] --every <kind> [timing] (--prompt <text>|--prompt-file <path>)", summary: "Add a scheduled prompt" },
+  { name: "remove", usage: "phren schedule remove <project> <id>", summary: "Remove a scheduled prompt" },
+  { name: "enable", usage: "phren schedule enable <project> <id>", summary: "Resume a scheduled prompt" },
+  { name: "disable", usage: "phren schedule disable <project> <id>", summary: "Pause a scheduled prompt" },
+  { name: "run", usage: "phren schedule run <project> <id>", summary: "Run a schedule through the local Hook" },
+  { name: "history", usage: "phren schedule history [project] [--id <id>] [--limit <n>]", summary: "Show local schedule runs" },
 ];
 
 const SKILLS_SUBCOMMANDS: Subcommand[] = [
@@ -145,7 +159,9 @@ const CONFIG_SUBCOMMANDS: Subcommand[] = [
   { name: "show", usage: "phren config show [--project <name>]", summary: "Show current config" },
   { name: "policy", usage: "phren config policy [get|set ...]", summary: "Retention, TTL, confidence, decay" },
   { name: "workflow", usage: "phren config workflow [get|set ...]", summary: "Risky-memory thresholds" },
-  { name: "proactivity", usage: "phren config proactivity [level]", summary: "Set proactivity level" },
+  { name: "proactivity", usage: "phren config proactivity [level] [--scope base|findings|tasks]", summary: "Auto-capture level; --scope limits it to findings or tasks" },
+  { name: "proactivity.findings", usage: "phren config proactivity.findings [level]", summary: "Findings-only auto-capture level" },
+  { name: "proactivity.tasks", usage: "phren config proactivity.tasks [level]", summary: "Task-only auto-capture level" },
   { name: "task-mode", usage: "phren config task-mode [mode]", summary: "Set task automation mode" },
   { name: "finding-sensitivity", usage: "phren config finding-sensitivity [lvl]", summary: "Set finding capture sensitivity" },
   { name: "index", usage: "phren config index [get|set ...]", summary: "Indexer include/exclude globs" },
@@ -154,12 +170,15 @@ const CONFIG_SUBCOMMANDS: Subcommand[] = [
   { name: "machines", usage: "phren config machines", summary: "Registered machines" },
   { name: "profiles", usage: "phren config profiles", summary: "Profiles and projects" },
   { name: "telemetry", usage: "phren config telemetry [on|off]", summary: "Opt-in usage telemetry" },
+  { name: "mcp-profile", usage: "phren config mcp-profile [core|full]", summary: "MCP tool surface: 10 core tools or all of them" },
+  { name: "pull-interval", usage: "phren config pull-interval [seconds|off]", summary: "Periodic MCP remote checks (default: off; 0 disables)" },
 ];
 
 const MAINTAIN_SUBCOMMANDS: Subcommand[] = [
   { name: "govern", usage: "phren maintain govern [project]", summary: "Queue stale memories for review" },
   { name: "prune", usage: "phren maintain prune [project]", summary: "Delete expired entries" },
   { name: "consolidate", usage: "phren maintain consolidate [project]", summary: "Deduplicate findings" },
+  { name: "summarize", usage: "phren maintain summarize [project] [--llm] [--force]", summary: "Write what each topic archive amounts to, and what phren knows per project" },
   { name: "extract", usage: "phren maintain extract [project]", summary: "Mine git/GitHub signals" },
 ];
 
@@ -180,6 +199,45 @@ const TEAM_SUBCOMMANDS: Subcommand[] = [
 // ── Registry ─────────────────────────────────────────────────────────────────
 
 export const REGISTRY: Command[] = [
+  {
+    name: "bridge", topic: "setup", usage: "phren bridge <install|status|doctor|update|rollback|uninstall|enroll-computer|fanouts archive>",
+    summary: "Install Phren Hook and enroll phone or computer connections",
+    subcommands: [
+      { name: "enroll-computer", usage: "phren bridge enroll-computer <name> [--accept <public-key-file>]", summary: "Print or accept a restricted computer dispatch key" },
+      { name: "fanouts archive", usage: "phren bridge fanouts archive [--dry-run] [--parent <session-id>] [--older-than <minutes>]", summary: "Archive finished fan-out jobs older than 24 hours, or one parent chat's, or older than N minutes" },
+    ],
+    run: async args => {
+      const { runBridge } = await import("./bridge/command.js");
+      const { VERSION } = await import("./package-metadata.js");
+      return runBridge(args, VERSION);
+    },
+  },
+  {
+    name: "dispatch", topic: "core", usage: "phren dispatch <computer|anywhere> <project> --label <label> --prompt <brief> [--harness codex|claude|opencode] [--model <model>]",
+    summary: "Dispatch a worker brief through Phren Hook",
+    subcommands: [{ name: "status", usage: "phren dispatch status", summary: "List local dispatch receipts" },
+      { name: "returns", usage: "phren dispatch returns", summary: "List unread worker returns (done, needs you, blocked, gone) and mark them read" },
+      { name: "sessions", usage: "phren dispatch sessions", summary: "List live agent sessions on this and every enrolled computer" }],
+    run: async args => (await import("./bridge/dispatch-command.js")).runDispatch(args),
+  },
+  {
+    name: "hand-off", topic: "core", usage: "phren hand-off <computer|local> --session <id> --text <prompt>",
+    summary: "Send work to an existing agent session through Phren Hook",
+    run: async args => (await import("./bridge/dispatch-command.js")).runHandOff(args),
+  },
+  {
+    name: "canary", topic: "core", usage: "phren canary [--daily on|off]",
+    summary: "Exercise launch, schedules, transcripts and peers through Phren Hook; saves canary.json",
+    run: async args => (await import("./bridge/canary.js")).runCanaryCommand(args),
+  },
+  {
+    name: "conductor", topic: "core", usage: "phren conductor <subcommand>",
+    summary: "Manage conductor standing grants",
+    subcommands: [
+      { name: "grants", usage: "phren conductor grants [list|add|remove]", summary: "List, add, or remove conductor grants" },
+    ],
+    run: async args => (await import("./bridge/dispatch-command.js")).runConductor(args),
+  },
   // Setup (featured: init, quickstart)
   {
     name: "init",
@@ -220,6 +278,17 @@ export const REGISTRY: Command[] = [
     run: async (args, ctx) => {
       const { handleProjectsNamespace } = await import("./cli/namespaces.js");
       await handleProjectsNamespace(args, ctx.profile());
+    },
+  },
+  {
+    name: "schedule",
+    topic: "projects",
+    usage: "phren schedule <subcommand>",
+    summary: "Manage scheduled prompts",
+    subcommands: SCHEDULE_SUBCOMMANDS,
+    run: async (args, ctx) => {
+      const { handleScheduleCommand } = await import("./cli/schedules.js");
+      return handleScheduleCommand(args, ctx.phrenPath());
     },
   },
 
@@ -291,9 +360,25 @@ export const REGISTRY: Command[] = [
     },
   },
   {
+    name: "code",
+    topic: "core",
+    usage: "phren code <index|status|search|outline|refs|def|usage> [project]",
+    summary: "Index and query a project's code symbols and references",
+    subcommands: [
+      { name: "index", usage: "phren code index <project> [--full] [--repo <path>]", summary: "Build or refresh the code index" },
+      { name: "status", usage: "phren code status <project> [--top <n>]", summary: "Show index counts, languages and hot symbols" },
+      { name: "search", usage: "phren code search <project> <query> [--kind k] [--limit n]", summary: "Ranked symbol search" },
+      { name: "outline", usage: "phren code outline <project> <path>", summary: "A file's symbols in source order, nested" },
+      { name: "refs", usage: "phren code refs <project> <symbol>", summary: "References to a symbol, grouped by file" },
+      { name: "def", usage: "phren code def <project> <symbol>", summary: "A symbol's definition, doc, snippet and last change" },
+      { name: "usage", usage: "phren code usage <project> [--top n]", summary: "Hottest and coldest symbols by reference count" },
+    ],
+    run: async (args, ctx) => (await (await import("./modules/code-package.js")).requireCodePackage(ctx.phrenPath())).runCodeCommand(args, ctx),
+  },
+  {
     name: "shell",
     topic: "core",
-    usage: "phren shell",
+    usage: "phren shell [--view <view>] [--project <name>] [--here]",
     summary: "Interactive memory shell",
     featured: true,
     run: async (args, ctx) => {
@@ -470,6 +555,25 @@ export const REGISTRY: Command[] = [
   },
 
   // Config
+  {
+    name: "fanout",
+    topic: "config",
+    usage: "phren fanout run|usage|resume|review|list|archive",
+    summary: "Launch and manage usage-aware agent workers",
+    run: async (args, ctx) => (await import("./fanout/command.js")).runFanout(args, ctx),
+  },
+  {
+    name: "modules",
+    topic: "config",
+    usage: "phren modules <list|enable|disable> [name] [--profile <name>]",
+    summary: "List or configure enabled modules",
+    subcommands: [
+      { name: "list", usage: "phren modules list [--profile <name>]", summary: "Show effective enablement and source" },
+      { name: "enable", usage: "phren modules enable <name> [--profile <name>]", summary: "Enable a module" },
+      { name: "disable", usage: "phren modules disable <name> [--profile <name>]", summary: "Disable a module, preserving its data" },
+    ],
+    run: async (args, ctx) => (await import("./modules/command.js")).runModules(args, ctx),
+  },
   {
     name: "config",
     topic: "config",
@@ -813,7 +917,7 @@ export const REGISTRY: Command[] = [
     name: "link",
     topic: "setup",
     usage: "phren link",
-    summary: "Removed - use `phren init`",
+    summary: "Reconcile the existing installation",
     hidden: true,
     run: native("runLinkRemovedNotice"),
   },
@@ -821,8 +925,8 @@ export const REGISTRY: Command[] = [
 
 // ── Lookup ───────────────────────────────────────────────────────────────────
 
-export function lookupCommand(name: string): Command | undefined {
-  for (const cmd of REGISTRY) {
+export function lookupCommand(name: string, snapshot?: ModuleSnapshot): Command | undefined {
+  for (const cmd of commandsForModules(snapshot)) {
     if (cmd.name === name) return cmd;
     if (cmd.aliases?.includes(name)) return cmd;
   }
@@ -837,4 +941,27 @@ export function helpTopicNames(): string[] {
 /** Topic IDs that are command groups (excludes doc topics and `all`). */
 export function commandTopics(): readonly Topic[] {
   return TOPIC_ORDER;
+}
+
+export function disabledCommand(command: string, snapshot: ModuleSnapshot): string | undefined {
+  if (!snapshot.has("tasks") && /^config proactivity .*--scope(?:=|\s+)(?:tasks|task)(?:\s|$)/.test(command)) return disabledHint("tasks");
+  const owner = commandOwner(command);
+  return owner && !snapshot.has(owner.name) ? disabledHint(owner.name) : undefined;
+}
+
+export function commandsForModules(snapshot?: ModuleSnapshot): Command[] {
+  if (!snapshot) return REGISTRY;
+  return REGISTRY.filter(command => !disabledCommand(command.name, snapshot)).map(command => ({
+    ...command,
+    usage: command.usage.replace(/<([^<>]*\|[^<>]*)>/g, (_match, choices: string) =>
+      `<${choices.split("|").filter(choice => !disabledCommand(`${command.name} ${choice}`, snapshot)).join("|")}>`),
+    aliases: command.aliases?.filter(alias => !disabledCommand(alias, snapshot)),
+    subcommands: command.subcommands?.filter(sub => !disabledCommand(`${command.name} ${sub.name}`, snapshot))
+      .map(sub => snapshot.has("tasks") ? sub : { ...sub, usage: sub.usage.replace("base|findings|tasks", "base|findings"), summary: sub.summary?.replace("findings or tasks", "findings") }),
+    run: async (args, ctx) => {
+      const unavailable = disabledCommand([command.name, ...args].join(" "), snapshot);
+      if (unavailable) { console.error(unavailable); return 1; }
+      return command.run(args, ctx);
+    },
+  }));
 }

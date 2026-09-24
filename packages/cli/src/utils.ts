@@ -3,6 +3,7 @@
 // utils-fts.ts (FTS5 query building, synonym/keyword extraction).
 
 export {
+  nonInteractiveGitEnv,
   runGitOrThrow,
   runGit,
   normalizeExecCommand,
@@ -10,6 +11,7 @@ export {
   errorMessage,
   isFeatureEnabled,
   clampInt,
+  clampFloat,
   getOptionValue,
   getPositionalArgs,
 } from "./utils-helpers.js";

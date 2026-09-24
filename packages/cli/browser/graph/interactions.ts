@@ -1,10 +1,11 @@
 import * as THREE from "three";
-import type { FGNode, NodeDetail, RuntimeNode } from "./types.js";
-import { focusMode, nodeDetail, nodeRadius, scoreForNode, state } from "./state.js";
+import type { FGNode, NodeDetail } from "./types.js";
+import { focusMode, nodeDetail, nodeRadius, state } from "./state.js";
 import { applyHighlight, startIntroStagger } from "./nodes.js";
 import { mascotMoveTo, spawnLookupPulse } from "./mascot.js";
 import { syncProjectNavActive } from "./project-nav.js";
 import { refreshProjectPanel } from "./project-panel.js";
+import { anchorCamera, followLayout, frameSelection, moveCamera, restoreSelectionCamera } from "./selection-camera.js";
 
 let projectPaneTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -19,68 +20,11 @@ export function containerSize(): { w: number; h: number } {
   return { w: Math.max(1, w), h: Math.max(1, h) };
 }
 
-// ── Tooltip ─────────────────────────────────────────────────────────────
-
-export function hideTooltip(): void {
-  if (!state.tooltip) return;
-  state.tooltip.style.opacity = "0";
-  state.tooltip.classList.remove("visible");
-  state.tooltip.innerHTML = "";
-}
-
-function tooltipText(node: RuntimeNode): string {
-  if (node.kind === "finding") {
-    const text = node.fullLabel || node.label || "";
-    let preview = text.length > 100 ? text.slice(0, 97) + "..." : text;
-    const score = scoreForNode(node);
-    const rawDate = node.date && node.date !== "unknown" ? node.date : "";
-    const dateStr = rawDate || score?.lastUsedAt || "";
-    if (dateStr) {
-      const d = new Date(dateStr);
-      if (!isNaN(d.getTime())) {
-        const days = Math.floor((Date.now() - d.getTime()) / 86400000);
-        const rel = days < 1 ? "today" : days === 1 ? "yesterday" : days < 30 ? `${days}d ago` : days < 365 ? `${Math.floor(days / 30)}mo ago` : `${Math.floor(days / 365)}y ago`;
-        preview += `\n${node.date ? rel : "seen " + rel}`;
-      }
-    }
-    return preview;
-  }
-  if (node.kind === "task") {
-    const line = node.fullLabel || node.label || "";
-    const section = node.section ? `[${node.section}]` : "";
-    const priority = node.priority ? `${node.priority}◆` : "";
-    return `${line}\n${[section, priority].filter(Boolean).join(" ")}`;
-  }
-  if (node.kind === "entity") {
-    return `${node.label}\n${node.refCount || 0} refs • ${node.connectedProjects?.length || 0} projects`;
-  }
-  if (node.kind === "project") {
-    const findings = typeof node.findingCount === "number" ? node.findingCount : state.fullAdjacency.get(node.id)
-      ? [...state.fullAdjacency.get(node.id)!].filter((id) => state.nodeById.get(id)?.kind === "finding").length
-      : 0;
-    const tasks = typeof node.taskCount === "number" ? node.taskCount : state.fullAdjacency.get(node.id)
-      ? [...state.fullAdjacency.get(node.id)!].filter((id) => state.nodeById.get(id)?.kind === "task").length
-      : 0;
-    return `${node.label}\n${findings} findings • ${tasks} tasks`;
-  }
-  return node.label || node.id;
-}
+// ── Hover ───────────────────────────────────────────────────────────────
 
 export function onHover(fgNode: FGNode | null): void {
   state.hoveredNodeId = fgNode ? fgNode.id : null;
   if (state.container) state.container.style.cursor = fgNode ? "pointer" : "default";
-  if (fgNode && state.tooltip) {
-    const text = tooltipText(fgNode.raw);
-    if (text) {
-      state.tooltip.textContent = text;
-      state.tooltip.style.left = state.lastMouse.x + 14 + "px";
-      state.tooltip.style.top = state.lastMouse.y + 14 + "px";
-      state.tooltip.style.opacity = "1";
-      state.tooltip.classList.add("visible");
-    }
-  } else {
-    hideTooltip();
-  }
   applyHighlight();
 }
 
@@ -96,11 +40,19 @@ export function flyToNode(fgNode: FGNode, duration: number): void {
   if (dir.lengthSq() < 1) dir.set(0.4, 0.35, 1);
   dir.normalize().multiplyScalar(distance);
   const camPos = nodePos.clone().add(dir);
-  state.fg.cameraPosition(
-    { x: camPos.x, y: camPos.y, z: camPos.z },
-    { x: nodePos.x, y: nodePos.y, z: nodePos.z },
-    duration,
-  );
+  anchorCamera(fgNode.id);
+  moveCamera(camPos, nodePos, duration);
+}
+
+/**
+ * The layout was recomputed for a new node set (a Focus neighbourhood, a
+ * refresh, a filter or a delete), which moves nodes. Keep the camera on the
+ * node it was sent to rather than on the spot where that node used to be.
+ */
+export function followLayoutChange(): void {
+  const id = followLayout();
+  const fgNode = id ? state.fgNodeById.get(id) : null;
+  if (fgNode) flyToNode(fgNode, 500);
 }
 
 export function screenPosFor(nodeId: string): { x: number; y: number } | null {
@@ -124,11 +76,21 @@ export function notifySelection(nodeId: string): void {
 }
 
 export function notifyClear(): void {
+  restoreSelectionCamera();
   state.selectionClearCallbacks.forEach((callback) => callback());
 }
 
-export function onNodeClick(fgNode: FGNode): void {
-  selectNode(fgNode.id);
+/**
+ * A tap or click on the canvas. force-graph reports the object it last
+ * hovered, but it refreshes hover on a throttled render tick, and a touch
+ * moves no pointer before it lands, so a tap resolved to the node under the
+ * previous tap. Pick at the event's own position instead.
+ */
+export function onCanvasClick(event: MouseEvent | undefined, hovered: FGNode | null): void {
+  const rect = event && state.container?.getBoundingClientRect();
+  const id = rect ? getNodeAt(event.clientX - rect.left, event.clientY - rect.top)?.id ?? null : hovered?.id ?? null;
+  if (id && state.fgNodeById.has(id)) selectNode(id);
+  else if (state.selectedNodeId || state.focusedProjectId) clearSelection();
 }
 
 export function onNodeRightClick(fgNode: FGNode, event: MouseEvent): void {
@@ -147,7 +109,6 @@ export function clearSelection(): void {
   state.selectedNodeId = null;
   state.focusedProjectId = null;
   state.hoveredNodeId = null;
-  hideTooltip();
   applyHighlight();
   syncProjectNavActive();
   refreshProjectPanel();
@@ -175,7 +136,8 @@ export function selectNode(nodeId: string): boolean {
     // persisted collapsed state.
     cancelProjectPaneReveal();
     refreshProjectPanel({ transitioning: true });
-    flyToNode(fgNode, 900);
+    const framed = frameSelection(nodeId);
+    if (!framed) flyToNode(fgNode, 900);
     projectPaneTimer = setTimeout(() => {
       projectPaneTimer = null;
       if (state.focusedProjectId === nodeId) refreshProjectPanel({ forceOpen: true });
@@ -183,7 +145,10 @@ export function selectNode(nodeId: string): boolean {
     // Notify hosts right away — the docked dossier doesn't wait on the
     // camera, and delaying was a flake source under load. The short defer
     // just lets the fly-to start before the host re-renders.
-    setTimeout(() => notifySelection(nodeId), 120);
+    if (framed) notifySelection(nodeId);
+    else setTimeout(() => {
+      if (state.focusedProjectId === nodeId) notifySelection(nodeId);
+    }, 120);
     mascotMoveTo(nodeId, true);
     return true;
   }
@@ -192,10 +157,14 @@ export function selectNode(nodeId: string): boolean {
   cancelProjectPaneReveal();
   state.selectedNodeId = nodeId;
   state.hoveredNodeId = nodeId;
-  hideTooltip();
   applyHighlight();
   syncProjectNavActive();
   refreshProjectPanel();
+  if (frameSelection(nodeId)) {
+    notifySelection(nodeId);
+    mascotMoveTo(nodeId, true);
+    return true;
+  }
   flyToNode(fgNode, 800);
   // The node's screen position changes throughout the camera flight. Re-anchor
   // the contextual pane after the camera settles so it cannot end up covering
@@ -232,15 +201,24 @@ export function getNodeAt(x: number, y: number): NodeDetail | null {
   const raycaster = new THREE.Raycaster();
   raycaster.setFromCamera(ndc, state.fg.camera());
   const hits = raycaster.intersectObjects(state.fg.scene().children, true);
+  // Dot sprites are square quads larger than the glow they draw, so a nearer
+  // neighbour's quad can cover the dot under the finger. Of the nodes hit,
+  // take the one whose centre is closest to the point on screen.
+  let best: { id: string; distance: number } | null = null;
   for (const hit of hits) {
     let obj: THREE.Object3D | null = hit.object;
     while (obj) {
       const id = obj.userData?.phrenNodeId;
-      if (typeof id === "string") return nodeDetail(id);
+      if (typeof id === "string") {
+        const at = screenPosFor(id);
+        const distance = at ? Math.hypot(at.x - x, at.y - y) : Infinity;
+        if (!best || distance < best.distance) best = { id, distance };
+        break;
+      }
       obj = obj.parent;
     }
   }
-  return null;
+  return best ? nodeDetail(best.id) : null;
 }
 
 // ── Intro sequence ──────────────────────────────────────────────────────
@@ -290,16 +268,13 @@ const FIT_PADDING = 48;
 export function fitCameraToGraph(duration: number): void {
   const fg = state.fg;
   if (!fg) return;
+  anchorCamera(null);
   const fit = computeFitCamera();
   if (!fit) {
     fg.zoomToFit(duration, FIT_PADDING);
     return;
   }
-  fg.cameraPosition(
-    { x: fit.pos.x, y: fit.pos.y, z: fit.pos.z },
-    { x: fit.target.x, y: fit.target.y, z: fit.target.z },
-    duration,
-  );
+  moveCamera(fit.pos, fit.target, duration);
 }
 
 export function runIntro(): void {
@@ -329,8 +304,9 @@ export function runIntro(): void {
   // case node objects finished syncing after the first call.
   fitCameraToGraph(0);
   startIntroStagger();
+  const interactionAt = state.lastInteractionAt;
   requestAnimationFrame(() => {
-    fitCameraToGraph(1400);
+    if (!state.selectedNodeId && !state.focusedProjectId && state.lastInteractionAt === interactionAt) fitCameraToGraph(1400);
     cover.style.opacity = "0";
   });
   setTimeout(() => cover.remove(), 900);

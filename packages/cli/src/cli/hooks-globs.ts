@@ -14,7 +14,7 @@ export function clearProjectGlobCache(): void {
 
 function parseProjectGlobs(phrenPathLocal: string, project: string): string[] | null {
   if (projectGlobCache.has(project)) return projectGlobCache.get(project)!;
-  const claudeMdPath = path.join(phrenPathLocal, project, "CLAUDE.md");
+  const claudeMdPath = path.join(phrenPathLocal, project, "AGENTS.md");
   let globs: string[] | null = null;
   try {
     if (fs.existsSync(claudeMdPath)) {

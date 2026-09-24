@@ -4,9 +4,10 @@ import * as path from "path";
 import * as crypto from "crypto";
 import * as yaml from "js-yaml";
 import { bootstrapPhrenDotEnv } from "./phren-dotenv.js";
-import { PhrenError, isRecord, RESERVED_PROJECT_DIR_NAMES } from "./phren-core.js";
+import { homeDir } from "./home-paths.js";
+import { PhrenError, isRecord, loadYamlDocument, RESERVED_PROJECT_DIR_NAMES } from "./phren-core.js";
 import { errorMessage, isValidProjectName, safeProjectPath } from "./utils.js";
-import { FINDINGS_FILENAME } from "./data/access.js";
+import { FINDINGS_FILENAME } from "./filenames.js";
 
 bootstrapPhrenDotEnv();
 
@@ -29,9 +30,7 @@ export interface InstallContext extends PhrenRootManifest {
 
 export const ROOT_MANIFEST_FILENAME = "phren.root.yaml";
 
-export function homeDir(): string {
-  return process.env.HOME || process.env.USERPROFILE || os.homedir();
-}
+export { homeDir };
 
 export function homePath(...parts: string[]): string {
   return path.join(homeDir(), ...parts);
@@ -62,7 +61,7 @@ export interface AtomicWriteOptions {
   mode?: number;
 }
 
-export function atomicWriteText(filePath: string, content: string, opts: AtomicWriteOptions = {}): void {
+export function atomicWriteText(filePath: string, content: string | Uint8Array, opts: AtomicWriteOptions = {}): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const tmpPath = `${filePath}.tmp-${crypto.randomUUID()}`;
   fs.writeFileSync(tmpPath, content, opts.mode !== undefined ? { mode: opts.mode } : undefined);
@@ -154,7 +153,7 @@ export function readRootManifest(phrenPath: string): PhrenRootManifest | null {
   const manifestFile = rootManifestPath(phrenPath);
   if (!fs.existsSync(manifestFile)) return null;
   try {
-    const parsed = yaml.load(fs.readFileSync(manifestFile, "utf8"), { schema: yaml.CORE_SCHEMA });
+    const parsed = loadYamlDocument(fs.readFileSync(manifestFile, "utf8"), (text) => yaml.load(text, { schema: yaml.CORE_SCHEMA }));
     return normalizeManifest(parsed);
   } catch (err: unknown) {
     if ((process.env.PHREN_DEBUG)) stderrLog(`readRootManifest: ${errorMessage(err)}`);
@@ -207,7 +206,11 @@ export function findNearestPhrenPath(startDir: string = process.cwd()): string |
   let current = path.resolve(startDir);
   while (true) {
     const localCandidate = path.join(current, ".phren");
-    if (isPhrenRootCandidate(localCandidate)) return localCandidate;
+    // Only a manifest counts on the cwd walk. Loose install markers are
+    // enough for the user's own ~/.phren or an explicit PHREN_PATH, but a
+    // cloned repo could ship `.phren/global/` and become the store — with
+    // its `.env` loaded — just by being cd'd into.
+    if (hasRootManifest(localCandidate)) return localCandidate;
     const parent = path.dirname(current);
     if (parent === current) break;
     current = parent;
@@ -611,7 +614,7 @@ export function getProjectDirs(phrenPath: string, profile?: string): string[] {
       return [];
     }
     try {
-      const data = yaml.load(fs.readFileSync(profilePath, "utf-8"), { schema: yaml.CORE_SCHEMA });
+      const data = loadYamlDocument(fs.readFileSync(profilePath, "utf-8"), (text) => yaml.load(text, { schema: yaml.CORE_SCHEMA }));
       const projects = isRecord(data) ? data.projects : undefined;
       if (!Array.isArray(projects)) {
         errorLog("getProjectDirs", `${PhrenError.MALFORMED_YAML}: Profile YAML missing valid "projects" array: ${profilePath}`);
@@ -648,6 +651,12 @@ export function getProjectDirs(phrenPath: string, profile?: string): string[] {
     if ((process.env.PHREN_DEBUG)) stderrLog(`getProjectDirs: ${errorMessage(err)}`);
     return [];
   }
+}
+
+/** Claude's own memory directory is indexed only when asked: by default phren indexes phren. */
+export function nativeMemoryEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const raw = env.PHREN_FEATURE_NATIVE_MEMORY?.trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "on";
 }
 
 // Collect MEMORY*.md files from native agent memory locations (~/.claude/projects/*/memory/)
@@ -707,7 +716,7 @@ export function computePhrenLiveStateToken(phrenPath: string): string {
   for (const projectDir of projectDirs) {
     const project = path.basename(projectDir);
     parts.push(`project:${project}`);
-    for (const file of ["CLAUDE.md", "summary.md", FINDINGS_FILENAME, "tasks.md", "review.md", "truths.md", "topic-config.json", "phren.project.yaml"]) {
+    for (const file of ["AGENTS.md", "summary.md", FINDINGS_FILENAME, "tasks.md", "review.md", "truths.md", "topic-config.json", "phren.project.yaml"]) {
       pushFileToken(parts, path.join(projectDir, file));
     }
     pushDirTokens(parts, path.join(projectDir, "reference"));

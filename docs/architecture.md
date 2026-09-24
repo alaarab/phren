@@ -2,7 +2,7 @@
 
 How project memory flows through the system, from user prompt to repo-backed state and back into bounded retrieval.
 
-Current public surface: 59 MCP tools across 13 modules.
+Current public surface: 70 MCP tools across 16 modules, exposed through two profiles: `core` (10 tools, the default) and `full`; see `api-reference.md`.
 
 ## System Overview
 
@@ -27,7 +27,7 @@ Claude / Copilot / Cursor / Codex
                 v
 +---------------+---------------+
 | MCP Server (phren-mcp)       |
-| 59 tools across 13 modules    |
+| 70 tools · core profile: 10  |
 +---------------+---------------+
                 |
                 v
@@ -99,9 +99,11 @@ Copilot CLI, Cursor, and Codex use two layers:
 
 This gives Claude full native lifecycle parity while keeping other tools synchronized through wrappers + config.
 
+Running MCP servers can poll shared Git stores on a configurable interval (off by default; enable with `phren config pull-interval 60` for one minute). A per-store process lock and shared timestamp coordinate checks across clients. `git ls-remote` compares the upstream commit before fetching; a shared Git-operation lock protects clean fast-forward updates against session hooks and pushes. Polling defers dirty or diverged stores and backs off network failures. Each server watches local HEAD changes to refresh its index and existing managed skill/instruction mirrors, including updates pulled by a sibling client. This runs only during the MCP server's lifetime, respects lifecycle-automation presets, and excludes project-local/workspace-Git installs.
+
 ## MCP Server Modules
 
-Phren MCP is split into 13 modules:
+Phren MCP is split into 15 modules:
 
 1. Search and browse
 2. Task management
@@ -116,6 +118,8 @@ Phren MCP is split into 13 modules:
 11. Hooks management
 12. Extraction
 13. Configuration
+14. Topic summaries
+15. Dispatch
 
 Finding lifecycle and editing tools:
 
@@ -138,7 +142,7 @@ All state stays local as files (markdown/json), with git as transport in shared 
   machines.yaml
   profiles/*.yaml
   <project>/
-    CLAUDE.md
+    AGENTS.md
     summary.md
     FINDINGS.md
     notes/
@@ -149,7 +153,7 @@ All state stays local as files (markdown/json), with git as transport in shared 
     reference/
     skills/
   global/
-    CLAUDE.md
+    AGENTS.md
     FINDINGS.md
     skills/
 
@@ -205,8 +209,9 @@ Task checkpoints include task ID/text, edited files, failing tests, and resume h
 Skill resolution is deterministic and policy-aware:
 
 - precedence: project scope overrides global scope for same skill name
-- alias collisions: colliding commands/aliases are marked unregistered
+- alias collisions: aliases are deduplicated against their own primary command; commands/aliases shared by different skills are marked unregistered (case-insensitive)
 - visibility gating: disabled skills stay on disk but are hidden from active agent mirrors
+- preferences: each discovery or linking pass reads shared and legacy settings once, preserving shared-setting precedence and refreshing on the next pass; malformed shared settings keep skills disabled
 - generated artifacts:
   - `.claude/skill-manifest.json`
   - `.claude/skill-commands.json`
@@ -239,6 +244,8 @@ Web UI (`phren web-ui`) is hardened by default:
 - sets CSP and anti-framing headers (`Content-Security-Policy`, `X-Frame-Options`, `X-Content-Type-Options`)
 
 Mutating endpoints require both auth and CSRF.
+Malformed URI components return HTTP 400; unexpected route failures return a
+generic HTTP 500 without exposing internal details or stopping the server.
 
 ## Telemetry Model
 
@@ -273,7 +280,9 @@ Phren supports multiple knowledge stores with three roles:
 
 ### Store Registry
 
-All stores are registered in `~/.phren/stores.yaml`. Each store has an immutable UUID for provenance tracking and a mutable display name. The registry is the single source of truth for project-to-store routing.
+The primary store is listed in `~/.phren/stores.yaml`, which syncs with the store, so every machine on it agrees on its id. Team and readonly stores are attached per machine in `~/.phren/.runtime/attached-stores.yaml`, which never syncs: joining a team store on one machine never attaches it on another, and `phren doctor` checks only this machine's stores. Each store has an immutable UUID for provenance tracking and a mutable display name. Together the two files are the single source of truth for project-to-store routing on a machine.
+
+Older versions listed team stores in the synced `stores.yaml`. The first run of this version on a machine moves the ones whose folder exists there into `attached-stores.yaml`, ignores the rest, and leaves the synced file as it is for machines still on an older version.
 
 ### Multi-Store Data Flow
 
@@ -293,10 +302,45 @@ During Session
 
 Stop Hook
   ├─ primary: git add -A, commit, push
-  ├─ team: git add journal/, commit, pull --rebase, push
-  └─ readonly: git pull only
+  ├─ team: git add journal/, commit, fetch, merge, push
+  └─ readonly: fetch, then fast-forward or merge
 ```
 
 ### Write Routing
 
 Projects are claimed by stores in the registry. Bare project names resolve unambiguously when only one store contains the project; otherwise `store/project` syntax disambiguates. The `phren promote` command moves findings from personal to team stores explicitly — no silent routing.
+
+## Phren Hook and the iPhone
+
+`packages/cli/src/bridge/` implements the independent local agent helper. The
+build produces a self-contained `bridge-hook.mjs`. The iPhone's `PhrenLive`
+package opens a pinned SSH session and executes only `phren-hook v1 pipe`,
+`phren-hook v1 terminal <Herdr server>`, or `phren-hook v1 shell <folder> [agent]`.
+HTTP/WebSocket requests travel over a private Unix socket; terminals use an SSH
+PTY attached to the existing Herdr server, or, when Herdr is not running, a
+shell or agent started directly on the PTY in a validated project folder (no
+chat, transcripts, or persistence for that one). Herdr's public JSON socket supplies workspace and pane control. Every
+chat mutation revalidates server, workspace, tab, pane, provider, and conversation.
+An agent-only socket registers lifecycle callbacks and explicit permission
+requests; it is inaccessible through the phone dispatcher. No Moshi installation
+or service is required. See [the connection protocol](../apps/ios/AGENT_CONNECTIONS.md).
+
+## Scheduling
+
+A project's `schedules.yaml` names an assigned computer, a harness, and one of
+five timing forms. The assigned computer's Phren Hook evaluates them in its
+local time and launches the prompt through Herdr or a headless wrapper, keeping
+its own run ledger. `phren schedule` edits the store file directly and asks the
+Hook to run now or list local history. See [Scheduled prompts](schedules.md).
+
+## Conductor
+
+The conductor is the owner's single conversation that reads a project's tasks
+and sends independent worker briefs across enrolled computers. The first slice
+covers enrollment and placement: a reusable restricted dispatch key, pinned SSH
+peers in the Hook's private `hooks.yaml`, `POST /v1/dispatch` with named or
+`anywhere` placement, durable receipts, the `dispatch` MCP tool, and the
+`phren dispatch` command. The returns loop follows each dispatched worker to
+done, needs-you, blocked or gone, keeps its final reply in the receipt, serves
+unread returns through `dispatch_returns`, and tells an idle dispatching agent
+in one line. See [Conductor](conductor.md).

@@ -1,0 +1,277 @@
+{
+  "pane.read": {
+    "request": {
+      "method": "pane.read",
+      "params": {
+        "pane_id": "w1S:p1",
+        "source": "recent",
+        "lines": 40
+      }
+    },
+    "response": {
+      "id": "fixture-1",
+      "result": {
+        "type": "pane_read",
+        "read": {
+          "pane_id": "w1S:p1",
+          "workspace_id": "w1S",
+          "tab_id": "w1S:t1",
+          "source": "recent",
+          "format": "text",
+          "text": "sam@Desk ws % codex\n>─You are in /tmp/work────────╮\n\n  Do you trust the contents of this directory? Working\n  with untrusted contents comes with higher risk of\n  prompt injection. Trusting the directory allows\n  project-local config, hooks, and exec policies to load.\n\n› 1. Yes, continue\n  2. No, quit\n\n  Press enter to continue\n",
+          "revision": 0,
+          "truncated": true
+        }
+      }
+    }
+  },
+  "agent.read": {
+    "request": {
+      "method": "agent.read",
+      "params": {
+        "target": "worker",
+        "source": "visible",
+        "format": "text"
+      }
+    },
+    "response": {
+      "id": "fixture-1",
+      "result": {
+        "type": "pane_read",
+        "read": {
+          "pane_id": "w1S:p1",
+          "workspace_id": "w1S",
+          "tab_id": "w1S:t1",
+          "source": "visible",
+          "format": "text",
+          "text": ">─You are in /tmp/work────────╮\n\n  Do you trust the contents of this directory? Working\n  with untrusted contents comes with higher risk of\n  prompt injection. Trusting the directory allows\n  project-local config, hooks, and exec policies to load.\n\n› 1. Yes, continue\n  2. No, quit\n\n  Press enter to continue\n",
+          "revision": 0,
+          "truncated": false
+        }
+      }
+    }
+  },
+  "agent.get": {
+    "request": {
+      "method": "agent.get",
+      "params": {
+        "target": "worker"
+      }
+    },
+    "response": {
+      "id": "fixture-1",
+      "result": {
+        "type": "agent_info",
+        "agent": {
+          "terminal_id": "term_65c1aee16017b6",
+          "name": "worker",
+          "agent": "codex",
+          "agent_status": "idle",
+          "workspace_id": "w1S",
+          "tab_id": "w1S:t1",
+          "pane_id": "w1S:p1",
+          "focused": false,
+          "interactive_ready": true,
+          "state_change_seq": 579,
+          "cwd": "/tmp/work",
+          "foreground_cwd": "/tmp/work",
+          "revision": 0
+        }
+      }
+    }
+  },
+  "agent.prompt": {
+    "request": {
+      "method": "agent.prompt",
+      "params": {
+        "target": "worker",
+        "text": "hello"
+      }
+    },
+    "response": {
+      "id": "fixture-1",
+      "result": {
+        "type": "agent_prompted",
+        "agent": {
+          "terminal_id": "term_65c1aee16017b6",
+          "name": "worker",
+          "agent": "codex",
+          "agent_status": "idle",
+          "workspace_id": "w1S",
+          "tab_id": "w1S:t1",
+          "pane_id": "w1S:p1",
+          "focused": false,
+          "interactive_ready": true,
+          "state_change_seq": 579,
+          "cwd": "/tmp/work",
+          "foreground_cwd": "/tmp/work",
+          "revision": 0
+        }
+      }
+    }
+  },
+  "pane.process_info": {
+    "request": {
+      "method": "pane.process_info",
+      "params": {
+        "pane_id": "w1S:p1"
+      }
+    },
+    "response": {
+      "id": "fixture-1",
+      "result": {
+        "type": "pane_process_info",
+        "process_info": {
+          "pane_id": "w1S:p1",
+          "shell_pid": 94712,
+          "foreground_process_group_id": 94853,
+          "foreground_processes": [
+            {
+              "pid": 95207,
+              "name": "codex",
+              "argv0": "codex",
+              "argv": [
+                "/usr/local/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
+              ],
+              "cmdline": "/usr/local/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex",
+              "cwd": "/tmp/work"
+            },
+            {
+              "pid": 95202,
+              "name": "node",
+              "argv0": "node",
+              "argv": [
+                "node",
+                "/usr/local/bin/codex"
+              ],
+              "cmdline": "node /usr/local/bin/codex",
+              "cwd": "/tmp/work"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "agent.start": {
+    "request": {
+      "method": "agent.start",
+      "params": {
+        "name": "worker",
+        "kind": "codex",
+        "pane_id": "w1S:p1",
+        "timeout_ms": 20000
+      }
+    },
+    "response": {
+      "id": "fixture-1",
+      "result": {
+        "type": "agent_started",
+        "agent": {
+          "terminal_id": "term_65c1aee16017b6",
+          "name": "worker",
+          "agent_status": "unknown",
+          "workspace_id": "w1S",
+          "tab_id": "w1S:t1",
+          "pane_id": "w1S:p1",
+          "focused": false,
+          "launch_pending": true,
+          "state_change_seq": 0,
+          "cwd": "/tmp/work",
+          "foreground_cwd": "/tmp/work",
+          "revision": 0
+        },
+        "argv": [
+          "codex"
+        ]
+      }
+    }
+  },
+  "tab.create": {
+    "request": {
+      "method": "tab.create",
+      "params": {
+        "workspace_id": "w1T",
+        "label": "Worker",
+        "cwd": "/tmp/work",
+        "focus": false
+      }
+    },
+    "response": {
+      "id": "fixture-1",
+      "result": {
+        "type": "tab_created",
+        "tab": {
+          "tab_id": "w1T:t2",
+          "workspace_id": "w1T",
+          "number": 2,
+          "label": "Worker",
+          "focused": false,
+          "pane_count": 1,
+          "agent_status": "unknown"
+        },
+        "root_pane": {
+          "pane_id": "w1T:p2",
+          "terminal_id": "term_65c1af15518928",
+          "workspace_id": "w1T",
+          "tab_id": "w1T:t2",
+          "focused": false,
+          "cwd": "/tmp/work",
+          "foreground_cwd": "/tmp/work",
+          "agent_status": "unknown",
+          "scroll": {
+            "offset_from_bottom": 0,
+            "max_offset_from_bottom": 0,
+            "viewport_rows": 45
+          },
+          "revision": 0
+        }
+      }
+    }
+  },
+  "agent.send_keys": {
+    "request": {
+      "method": "agent.send_keys",
+      "params": {
+        "target": "pending-agent",
+        "keys": [
+          "down"
+        ]
+      }
+    },
+    "response": {
+      "id": "fixture-1",
+      "result": {
+        "type": "ok"
+      }
+    }
+  },
+  "session.snapshot (blocked agent)": {
+    "request": {
+      "method": "session.snapshot",
+      "params": {}
+    },
+    "response": {
+      "id": "fixture-1",
+      "result": {
+        "agents": [
+          {
+            "terminal_id": "term_65c1af1f532499",
+            "name": "blocked-agent",
+            "agent": "claude",
+            "agent_status": "blocked",
+            "workspace_id": "w1V",
+            "tab_id": "w1V:t1",
+            "pane_id": "w1V:p1",
+            "focused": false,
+            "launch_pending": true,
+            "state_change_seq": 584,
+            "cwd": "/tmp/work",
+            "foreground_cwd": "/tmp/work",
+            "revision": 0
+          }
+        ]
+      }
+    },
+    "note": "agents[] entry only"
+  }
+}

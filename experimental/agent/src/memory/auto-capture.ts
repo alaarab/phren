@@ -4,7 +4,8 @@
  */
 import * as crypto from "crypto";
 import type { PhrenContext } from "./context.js";
-import { addFinding } from "@phren/cli/core/finding";
+import { addFindingToFile } from "@phren/cli/shared/content";
+import { agentProvenance } from "./provenance.js";
 
 const SESSION_CAP = 10;
 const COOLDOWN_MS = 30_000;
@@ -49,6 +50,7 @@ export async function analyzeAndCapture(
   ctx: PhrenContext,
   errorOutput: string,
   state: CaptureState,
+  sessionId?: string | null,
 ): Promise<number> {
   if (!ctx.project) return 0;
   if (state.captured >= SESSION_CAP) return 0;
@@ -73,7 +75,10 @@ export async function analyzeAndCapture(
     if (state.hashes.has(hash)) continue;
 
     try {
-      await addFinding(ctx.phrenPath, ctx.project, finding);
+      addFindingToFile(ctx.phrenPath, ctx.project, finding, undefined, {
+        provenance: agentProvenance(sessionId),
+        ...(sessionId ? { sessionId } : {}),
+      });
       state.hashes.add(hash);
       captured++;
     } catch {

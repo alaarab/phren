@@ -8,9 +8,10 @@ page that 404s is a rejection; a page with a real answer or two is fine.
 
 ## Getting started
 
-phren for iOS is a companion to **phren**, an open-source knowledge layer
-for AI coding agents. The app needs an existing phren store — a GitHub
-repository containing a `phren.root.yaml` file.
+phren for iOS connects to your coding agents and project memory. Agents and
+terminals use SSH and Phren Hook on your computers; they work without a GitHub
+sign-in. To sync memory, connect a phren store — a GitHub repository containing
+a `phren.root.yaml` file.
 
 If you don't have one yet, install the CLI and create one:
 
@@ -21,7 +22,10 @@ phren init
 
 Then push that store to a GitHub repository and connect the app to it.
 
-## Connecting the app
+## Connecting memory
+
+Open Projects or Settings → Connect memory. GitHub is needed only for syncing
+your memory repositories; you can dismiss setup and continue using Agents.
 
 1. Create a fine-grained personal access token at
    **github.com/settings/personal-access-tokens/new**
@@ -35,6 +39,25 @@ Your token is stored only in your device's Keychain and is sent only to
 GitHub.
 
 ## Common problems
+
+**Agent chat or terminals cannot connect.**
+Keep Tailscale connected on the phone and computer. Install Phren Hook on each
+computer with `npx --yes @phren/cli@0.2.14 bridge install`, then run
+`npx --yes @phren/cli@0.2.14 bridge doctor`. Add the computer in Agents and
+authorize its device SSH key. Moshi is not required. See the
+[Phren Hook guide](https://alaarab.github.io/phren/phren-hook.html).
+
+**A web preview has no styles or scripts.**
+Check that the development server serves its CSS and JavaScript URLs without
+errors. Restart or redeploy its HTML and asset manifest together after an app
+build. Relative assets and WebSockets work over Phren's SSH preview; an app
+that hardcodes another origin may need its public/base URL configured.
+
+**The input token count is much larger than the message I typed.**
+The latest response can include conversation context, instructions, and tools.
+The usage details distinguish reused cached input from uncached input. They
+show the latest model response, not an account quota or the text length of your
+latest message.
 
 **"Only public repositories are listed" / my store isn't in the picker.**
 Your token doesn't have access to the repository. GitHub deliberately

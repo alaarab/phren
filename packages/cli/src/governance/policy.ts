@@ -15,6 +15,12 @@ import {
   isArchiveEnd as isArchiveEndMeta,
   stripLifecycleMetadata as stripLifecycleMetadataMeta,
 } from "../content/metadata.js";
+import {
+  VALID_FINDING_SENSITIVITY,
+  VALID_PROACTIVITY_LEVELS,
+  VALID_TASK_MODES,
+  VALID_RISKY_SECTIONS,
+} from "./policy-constants.js";
 
 /** @internal Exported for tests. */
 export const MAX_QUEUE_ENTRY_LENGTH = 500;
@@ -56,7 +62,7 @@ export interface IndexPolicy {
  * could go two months without syncing while every Stop hook looked healthy.
  * Failures now get their own values:
  *
- * - `pull-failed`          — the pull/rebase leg failed, so push never ran
+ * - `pull-failed`          - the fetch/merge leg failed, so push never ran
  * - `push-failed`          — push was attempted and rejected
  * - `unrelated-histories`  — local and remote share no merge base; no amount of
  *                            retrying will fix it, so it is called out by name
@@ -123,6 +129,9 @@ export interface RuntimeHealth {
     consecutiveFailures?: number;
     /** Last time a push actually reached the remote. */
     lastSuccessfulPushAt?: string;
+    /** Commits ahead of and behind the upstream tracking ref at the last sync outcome. */
+    ahead?: number;
+    behind?: number;
   };
 }
 
@@ -240,8 +249,12 @@ export const DEFAULT_WORKFLOW_POLICY: WorkflowPolicy = {
 /** Default index policy. Exported so {@link config/schema} can render one source of truth. */
 export const DEFAULT_INDEX_POLICY: IndexPolicy = {
   schemaVersion: GOVERNANCE_SCHEMA_VERSION,
-  includeGlobs: ["**/*.md", "**/skills/**/*.md", ".claude/skills/**/*.md"],
-  excludeGlobs: ["**/.git/**", "**/node_modules/**", "**/dist/**", "**/build/**"],
+  // Skills are instructions you invoke by name, not knowledge to retrieve:
+  // indexed, they crowd the findings out of a prompt's context budget (nine of
+  // twelve injections in one session were skill files). They stay reachable
+  // through list_skills and the global AGENTS.md.
+  includeGlobs: ["**/*.md"],
+  excludeGlobs: ["**/.git/**", "**/node_modules/**", "**/dist/**", "**/build/**", "**/skills/**", "**/.claude/skills/**"],
   includeHidden: false,
 };
 
@@ -389,6 +402,8 @@ function normalizeRuntimeHealth(data: Record<string, unknown>): RuntimeHealth {
     if (isFiniteNumber(data.lastSync.unsyncedCommits)) normalized.lastSync.unsyncedCommits = data.lastSync.unsyncedCommits;
     if (isFiniteNumber(data.lastSync.consecutiveFailures)) normalized.lastSync.consecutiveFailures = data.lastSync.consecutiveFailures;
     if (typeof data.lastSync.lastSuccessfulPushAt === "string") normalized.lastSync.lastSuccessfulPushAt = data.lastSync.lastSuccessfulPushAt;
+    if (isFiniteNumber(data.lastSync.ahead)) normalized.lastSync.ahead = data.lastSync.ahead;
+    if (isFiniteNumber(data.lastSync.behind)) normalized.lastSync.behind = data.lastSync.behind;
   }
   return normalized;
 }
@@ -453,12 +468,14 @@ export interface ResolvedConfig {
   workflowPolicy: WorkflowPolicy;
 }
 
-export const VALID_PROACTIVITY_LEVELS = ["high", "medium", "low"] as const;
-export const VALID_TASK_MODES = ["off", "manual", "suggest", "auto"] as const;
-export type TaskMode = typeof VALID_TASK_MODES[number];
-export const VALID_FINDING_SENSITIVITY = ["minimal", "conservative", "balanced", "aggressive"] as const;
-export type FindingSensitivityLevel = typeof VALID_FINDING_SENSITIVITY[number];
-export const VALID_RISKY_SECTIONS = ["Review", "Stale", "Conflicts"] as const;
+export {
+  VALID_PROACTIVITY_LEVELS,
+  VALID_TASK_MODES,
+  type TaskMode,
+  VALID_FINDING_SENSITIVITY,
+  type FindingSensitivityLevel,
+  VALID_RISKY_SECTIONS,
+} from "./policy-constants.js";
 
 function pickEnum<T extends string>(value: unknown, allowed: readonly T[]): T | undefined {
   return typeof value === "string" && allowed.includes(value as T) ? value as T : undefined;

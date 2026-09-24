@@ -1,3 +1,4 @@
+import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type McpContext, mcpResponse, resolveStoreForProject } from "./types.js";
 import { z } from "zod";
@@ -179,6 +180,7 @@ async function handleHealthCheck(
   try {
     const { execFileSync } = await import("child_process");
     const remote = execFileSync("git", ["-C", phrenPath, "remote", "get-url", "origin"], {
+      env: nonInteractiveGitEnv(),
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: 5_000,
@@ -186,6 +188,7 @@ async function handleHealthCheck(
     if (remote) {
       try {
         execFileSync("git", ["-C", phrenPath, "ls-remote", "--exit-code", "origin"], {
+          env: nonInteractiveGitEnv(),
           stdio: ["ignore", "ignore", "ignore"],
           timeout: 10_000,
         });
@@ -510,14 +513,14 @@ export function register(server: McpServer, ctx: McpContext): void {
       title: "◆ phren · add project",
       description:
         "Bootstrap a project into phren from a repo or working directory. " +
-        "Copies or creates CLAUDE.md/summary/tasks/findings under ~/.phren/<project> and adds the project to the active profile.",
+        "Copies or creates AGENTS.md/summary/tasks/findings under ~/.phren/<project> and adds the project to the active profile.",
       inputSchema: z.object({
         path: z.string().describe("Project path to import. Pass the current repo path explicitly."),
         profile: z.string().optional().describe("Profile to update. Defaults to the active profile."),
         ownership: z.enum(PROJECT_OWNERSHIP_MODES).optional()
           .describe("How Phren should treat repo-facing instruction files: phren-managed, detached, or repo-managed."),
         store: z.string().optional()
-          .describe("Target store name (from stores.yaml). If omitted, auto-routes to the store that claims this project, or falls back to the primary store."),
+          .describe("Target store name (one attached on this machine). If omitted, auto-routes to the store that claims this project, or falls back to the primary store."),
       }),
     },
     (params) => handleAddProject(ctx, params),

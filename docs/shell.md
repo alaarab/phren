@@ -6,6 +6,32 @@ The phren shell is a terminal UI for browsing and managing your project store. I
 phren shell
 ```
 
+## Opening on a specific view
+
+An outside launcher — a keybinding, a Herdr plugin pane, an editor task — can
+deep link into the shell instead of dropping the user on the landing screen:
+
+```bash
+phren shell --view tasks --here            # this directory's project, task list
+phren shell --view "review queue" --project hub
+phren shell --project hub                  # project context, landing screen
+```
+
+| Flag | Description |
+|------|-------------|
+| `--view <view>` | Open on a view. Case-insensitive, and accepts what you'd type: `tasks`, `findings`, `review`, `review-queue`, `skills`, `hooks`, `health`, `profiles`, `graph` (also `map`, `network`). |
+| `--live` / `--no-live` | Force the Graph view's watch mode on or off. Default is on. |
+| `--project <name>` | Set the active project context for this session. |
+| `--here` | Resolve the project from the current directory using the same detection phren's hooks use — a git worktree resolves to the repository it came from. Ignored when `--project` is given. |
+
+Both `--flag value` and `--flag=value` work. A link that can't be resolved
+degrades rather than failing: an unknown view, or a per-project view with no
+project to show, opens the project list with a note on the message line, so the
+user always lands somewhere they can work from.
+
+The Herdr plugin in [`integrations/herdr/`](../integrations/herdr) is built on
+these flags.
+
 ## Views
 
 The shell has eight views. Switch between them with single-key shortcuts or palette commands.
@@ -68,6 +94,107 @@ Runs doctor checks and shows results alongside runtime health data: last hook ru
 
 Health data also reflects RBAC identity context (`PHREN_ACTOR` and local/shared access-control files), review queue pressure, and whether telemetry is enabled.
 
+### Graph (`g`)
+
+The knowledge graph — the same picture the 3D memory viewer draws (`phren web-ui`, the VS Code panel) — rendered in the terminal. Projects, findings, tasks, fragments and reference docs are laid out with a force simulation and drawn on a braille canvas, coloured by topic and kind. A details pane sits to the right (or a strip below it on terminals narrower than 100 columns). The layout is deterministic: the same store draws the same map every time.
+
+```bash
+phren shell --view graph          # straight into the graph
+phren shell --view graph --project hub
+```
+
+| Key | Action |
+|-----|--------|
+| `↑` `↓` `←` `→` | Walk the graph: move to the connected node in that direction (or the nearest node that way when nothing is linked) |
+| `↵` | Select the node nearest the centre; on a project, focus it (press again to release) |
+| `1`–`9` | Jump to the selected node's n-th neighbour (numbered on the canvas and in the pane) |
+| `/` | Search. Matches light up, everything else dims, and the camera flies to the best hit |
+| `n` / `N` | Next / previous search hit |
+| `f` / `F` | Cycle the filter preset: all → findings → tasks → fragments → aging |
+| `[` / `]` | Cycle project focus (all → each project → all) |
+| `+` / `-` / `0` | Zoom in / out / fit everything |
+| `⇧` + arrows, `H J K L` | Pan |
+| `w` | Toggle watch mode (see below) |
+| `a` | Toggle the agents overlay (see below) |
+| `Tab` | Cycle the highlighted agent, when the overlay is on |
+| `r` | Re-lay out (or retry a failed build) |
+| `o` | Where to open the 3D viewer |
+| `esc` | Clear search, then selection, then project focus, then leave the view |
+
+The graph draws the star everyone knows (project → its findings, tasks, fragments, references) plus two edge kinds the web viewer does not show: fragments that are mentioned by the same documents (cyan), and findings linked by `supersedes` (grey) or `contradicts` (dotted red) lifecycle annotations. The selected node's edges turn amber.
+
+### Editing skills and project instructions
+
+Two keys, in both the Skills and Projects views:
+
+| Key | |
+|-----|---|
+| `e` | Open the file in `$EDITOR` — your own vim, your config, your plugins |
+| `E` | Open it in phren's own modal editor, without leaving the dashboard |
+
+In the Skills view they edit the selected skill's markdown. In the Projects view they edit that project's `AGENTS.md`, which the store owns and symlinks into the repo and into `.github/copilot-instructions.md` — so one edit reaches every linked checkout.
+
+`$EDITOR` is treated as a command line, not a binary, so values carrying arguments work (`code --wait`, `nvim -u NONE`). The shell releases the terminal while your editor runs and takes it back when you quit.
+
+#### The built-in editor
+
+Deliberately a subset of vim: what you reach for without thinking, and nothing else. An unrecognised key does nothing rather than guessing. For real work, press `e`.
+
+| | |
+|---|---|
+| Motion | `h j k l`, `w b`, `0 $`, `gg G`, arrows |
+| Insert | `i a I A`, `o O`, `esc` to leave |
+| Edit | `x`, `dd`, `yy`, `p P`, `u` to undo |
+| Search | `/`, then `n` and `N` |
+| Commands | `:w`, `:q`, `:wq`, `:q!` |
+
+Saving is careful, because the store is git-backed and other tools read it. A skill whose frontmatter no longer parses is refused with the reason rather than written, since a skill missing its `name` or `description` loads as neither. Writes land atomically, go through the same undo stack `:undo` uses, and refuse to write through a symlink — the mirrors in `~/.claude/skills` point back at the store, and replacing one with a regular file would silently detach it. Changing a skill's frontmatter also rebuilds the skill manifests, since the name and command are baked into them.
+
+#### Orbit: the graph in 3D
+
+`v` lifts the same graph into a sphere. Projects sit on it in a stable order, each cluster keeps the shape the flat layout gave it and gains depth, fragments shared between projects fall to the middle, and the far side fades and shrinks. That fading is the depth cue, and it only really reads in motion, so the sphere turns slowly on its own whenever you leave it alone for a few seconds.
+
+The mouse works here: drag to turn, wheel to zoom, click a node to select it. Without a mouse, `HJKL` (or shift-arrows) turn it and `+`/`-` zoom. Everything else is unchanged: the arrows still walk neighbours, `1-9` still jump, `/` still lights matches, `space` still opens the bubble, and watch mode still pulses and walks phren to whatever was recalled. Selecting a node turns the sphere so it faces you. `v` again goes back to the map, which stays the default because labels and the neighbour numbers are easier to use when nothing is moving.
+
+Mouse reporting is switched on only while the Graph view is showing, so in every other view the terminal keeps its own click-and-drag text selection. On the flat map the mouse works too: drag pans, wheel zooms, click selects.
+
+#### What phren knows about a project
+
+Select a project and the pane shows, under its counts, the first lines of the project's `What phren knows` block: how much is active and archived, how many tasks are open, and what each topic archive amounts to. `space` opens the whole block in the bubble. The block is written by `phren maintain summarize` and refreshed by background maintenance; a project without one shows nothing extra.
+
+#### Reading a node
+
+The pane beside the graph takes a share of a wide terminal rather than a fixed width, so a finding wraps into fewer lines than it used to, and the text gets a share of the pane's height rather than four lines. When it still does not fit, the pane says so, and `space` opens the whole thing in a bubble on the canvas, wrapped wide enough to read, with the project, topic and date underneath. The bubble sits beside its node, or above or below it when there is no room to the side, and never on top of it. `space` or `esc` closes it; selecting another node closes it too. It works on narrow terminals as well, where the strip under the graph only has room for two lines.
+
+#### Watch mode
+
+The graph follows what phren is doing, **including in other terminals on the same machine**. Every memory a search lands on, every memory a hook injects before a prompt, and every finding written is appended to `.runtime/lookup-events.jsonl`; the graph tails that file.
+
+Put the graph in one terminal and an agent in another. As the agent searches, the node it hit pulses cyan with a ring, the camera flies to it, the finding's full text fills the details pane, and the event joins the activity feed with its age, source and snippet. Writes show up the same way, in green, so you watch knowledge being saved as well as read.
+
+The camera yields to you: while you are navigating, incoming events still pulse and feed but do not move the view. It resumes following a few seconds after your last keypress.
+
+And the recall itself appears where it lives: for a few seconds after a lookup lands, a small bubble opens at that node with the snippet, titled by what caused it (`search · api-service`), threaded to the node, fading as it ages. The feed in the pane keeps the history; the bubble is the one worth pointing at right now.
+
+And phren goes with it. The little purple `◕` walks to whatever the store just touched, perching beside it with a cyan sparkle as he lands, the same way he does in the web viewer. When nothing has happened for a while he wanders off to another node on his own. He is what you are watching when you are watching.
+
+Watch mode is on by default in the Graph view. Press `w` to toggle it, or launch with `--no-live` to start with it off (`--live` forces it on).
+
+#### Agents
+
+With `PHREN_FEATURE_AGENTS=1`, the graph also shows the coding agents running on this machine. phren does not run them; it asks whatever does — a Herdr workspace, `phren-agent --multi` — and joins each agent onto a project by the directory it is working in.
+
+Each project with an agent in it gets a marker: green while working, grey when done, red on error, with a count when more than one. The details pane lists them with their status and project. `a` toggles the overlay, `Tab` cycles agents and flies to the one you land on, and `↵` brings that agent to the front in its own host. `esc` releases the highlight before it touches your selection.
+
+Watch mode tells you what your memory is doing; this tells you who is doing it. See [feature-flags.md](feature-flags.md#phren_feature_agents) for providers and how to add your own.
+
+```bash
+phren shell --view graph            # watching by default
+phren shell --view graph --no-live  # static graph
+```
+
+The view rebuilds when the store changes (the shell's 2-second live poll), keeping the previous layout as a warm start so the map shifts rather than scrambling. Colours use truecolor when `COLORTERM` advertises it, 256-colour otherwise. Set `PHREN_ICONS=nerd` to draw node glyphs with Nerd Font icons if your terminal font is a patched one.
+
 ## Navigation
 
 | Key | Action |
@@ -79,6 +206,7 @@ Health data also reflects RBAC identity context (`PHREN_ACTOR` and local/shared 
 | `s` | Switch to Skills view |
 | `k` | Switch to Hooks view |
 | `h` | Switch to Health view |
+| `g` | Switch to Graph view |
 | `q` | Quit the shell |
 | `i` | Cycle intro mode on the Projects dashboard |
 | `t` | Toggle enabled/disabled state in Skills view |
@@ -143,9 +271,15 @@ The shell exposes the review queue for inspection only. Queue mutation commands 
 | `:per-page <n>` | Set rows per page (1 to 200) |
 | `:help` | Show the full keyboard map and command list |
 
+## Splash
+
+Launching the shell plays a short splash: the phren mascot beside the block-letter wordmark. On the first launch of a new version the wordmark is revealed with a "decrypt" text effect (scrambled block glyphs settle left to right into the letters) and the splash waits for a key; later launches open on the finished wordmark for half a second. A light beam shimmers across the letters while the splash is up. Press `i` on the Projects dashboard to cycle the intro mode between once-per-version, always, and off.
+
+The same splash is exported for other hosts as `@phren/cli/shell/intro` (`playSplash`); `phren-agent -i` uses it before its TUI starts, and `PHREN_INTRO=off` skips it there.
+
 ## State Persistence
 
-The shell saves its state (selected project, filter, page, rows per page, intro mode, and last-seen intro version) to `.runtime/shell-state.json`. This means your context and intro preference are preserved between shell sessions. Use `:reset` to clear saved state.
+The shell saves its state (selected project, filter, page, rows per page, intro mode, and last-seen intro version) to `.runtime/shell-state.json`. This means your context and intro preference are preserved between shell sessions. Use `:reset` to clear saved state. A `--view`/`--project` deep link overrides the saved view and project for that launch.
 
 ## Filtering
 

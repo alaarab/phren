@@ -20,8 +20,11 @@ import type {
   AgentStatus,
   DoneEvent,
 } from "./types.js";
-import type { PermissionMode } from "../permissions/types.js";
-import { createWorktree, hasWorktreeChanges, removeWorktree, type WorktreeInfo } from "./worktree.js";
+import { MAX_SPAWN_DEPTH } from "./types.js";
+import type { PermissionConfig, PermissionMode } from "../permissions/types.js";
+import type { SandboxMode } from "../permissions/kernel-sandbox.js";
+import type { CostTracker } from "../cost.js";
+import { createWorktree, hasWorktreeChanges, removeWorktree, } from "./worktree.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -49,6 +52,15 @@ export interface SpawnOptions {
   agentType?: string;
   /** Isolate the agent in a git worktree so it doesn't touch the main working tree. */
   isolation?: "worktree";
+  sandboxMode?: SandboxMode;
+  allowedPaths?: string[];
+}
+
+export interface AgentSpawnerOptions {
+  costTracker?: CostTracker | null;
+  depth?: number;
+  maxDepth?: number;
+  getPermissionDefaults?: () => PermissionConfig | undefined;
 }
 
 export interface AgentSpawnerEvents {
@@ -76,6 +88,7 @@ const ENV_FORWARD_KEYS = [
   "PHREN_PATH",
   "PHREN_PROFILE",
   "PHREN_DEBUG",
+  "PHREN_AGENT_MACOS_SANDBOX",
   "HOME",
   "USERPROFILE",
   "PATH",
@@ -86,10 +99,34 @@ export class AgentSpawner extends EventEmitter {
   private agents = new Map<string, AgentEntry>();
   private processes = new Map<string, ChildProcess>();
   private nextId = 1;
+  private costTracker: CostTracker | null;
+  private depth: number;
+  private maxDepth: number;
+  private getPermissionDefaults?: () => PermissionConfig | undefined;
+
+  constructor(opts: AgentSpawnerOptions = {}) {
+    super();
+    this.costTracker = opts.costTracker ?? null;
+    this.depth = opts.depth ?? 0;
+    this.maxDepth = opts.maxDepth ?? MAX_SPAWN_DEPTH;
+    this.getPermissionDefaults = opts.getPermissionDefaults;
+  }
+
+  canSpawn(): boolean {
+    return this.depth < this.maxDepth;
+  }
+
+  setCostTracker(tracker: CostTracker | null): void {
+    this.costTracker = tracker;
+  }
 
   /** Spawn a new child agent. Returns the agent ID. */
   spawn(opts: SpawnOptions): string {
+    if (!this.canSpawn()) {
+      throw new Error(`Maximum subagent depth (${this.maxDepth}) reached`);
+    }
     const agentId = `agent-${this.nextId++}`;
+    const defaults = this.getPermissionDefaults?.();
 
     // Build forwarded env
     const childEnv: Record<string, string> = {};
@@ -102,22 +139,26 @@ export class AgentSpawner extends EventEmitter {
       type: "spawn",
       agentId,
       task: opts.task,
-      cwd: opts.cwd ?? process.cwd(),
+      cwd: opts.cwd ?? defaults?.projectRoot ?? process.cwd(),
       provider: opts.provider,
       model: opts.model,
       project: opts.project,
-      permissions: opts.permissions ?? "auto-confirm",
+      permissions: opts.permissions ?? defaults?.mode ?? "auto-confirm",
       maxTurns: opts.maxTurns ?? 50,
       budget: opts.budget ?? null,
       plan: opts.plan ?? false,
       verbose: opts.verbose ?? false,
       env: childEnv,
       agentType: opts.agentType,
+      depth: this.depth + 1,
+      sandboxMode: opts.sandboxMode ?? defaults?.sandboxMode,
+      allowedPaths: opts.allowedPaths ?? defaults?.allowedPaths ?? [],
     };
 
     const entry: AgentEntry = {
       id: agentId,
       task: opts.task,
+      cwd: payload.cwd,
       displayName: opts.displayName,
       status: "starting",
       startedAt: Date.now(),
@@ -128,7 +169,7 @@ export class AgentSpawner extends EventEmitter {
     const child = fork(CHILD_ENTRY, [], {
       stdio: ["pipe", "pipe", "pipe", "ipc"],
       env: { ...childEnv, FORCE_COLOR: "0" },
-      cwd: opts.cwd ?? process.cwd(),
+      cwd: payload.cwd,
     });
 
     this.processes.set(agentId, child);
@@ -220,6 +261,7 @@ export class AgentSpawner extends EventEmitter {
           // Don't mark as "done" status — child stays alive and will go idle
           agent.result = msg.result;
         }
+        this.aggregateChildCost(msg.result);
         this.emit("done", msg.agentId, msg.result);
         break;
       case "error":
@@ -242,6 +284,18 @@ export class AgentSpawner extends EventEmitter {
         this.emit("shutdown_approved", msg.agentId);
         break;
     }
+  }
+
+  private aggregateChildCost(result: DoneEvent["result"]): void {
+    const tracker = this.costTracker;
+    if (!tracker) return;
+    const inputTokens = result.inputTokens ?? 0;
+    const outputTokens = result.outputTokens ?? 0;
+    const costUsd = result.costUsd ?? 0;
+    if (inputTokens === 0 && outputTokens === 0 && costUsd === 0) return;
+    tracker.totalInputTokens += inputTokens;
+    tracker.totalOutputTokens += outputTokens;
+    tracker.totalCost += costUsd;
   }
 
   /** Route a direct message from one agent to another. */

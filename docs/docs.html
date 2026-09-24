@@ -526,8 +526,7 @@
       <a href="index.html#how" class="nav-link">How it works</a>
       <a href="index.html#hooks" class="nav-link">Hooks</a>
       <a href="index.html#why" class="nav-link">Why</a>
-      <a href="index.html#demo" class="nav-link">Shell</a>
-      <a href="index.html#web-ui" class="nav-link">Graph</a>
+      <a href="index.html#surfaces" class="nav-link">Surfaces</a>
       <a href="docs.html" class="nav-link active">Docs</a>
       <a href="https://github.com/alaarab/phren" class="nav-cta" target="_blank" rel="noopener">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
@@ -740,7 +739,7 @@
             FAQ
           </a>
           <div class="sidebar-group-items" data-group="faq">
-            <a href="#vs-claude-md" class="sidebar-link sub">vs CLAUDE.md</a>
+            <a href="#vs-claude-md" class="sidebar-link sub">vs AGENTS.md</a>
             <a href="#performance" class="sidebar-link sub">Performance</a>
             <a href="#trust-decay" class="sidebar-link sub">Trust Decay</a>
             <a href="#multi-agent" class="sidebar-link sub">Multiple Agents</a>
@@ -878,7 +877,7 @@ phren add
 phren add ~/my-project</code></pre>
             <p>This creates <code>~/.phren/my-project/</code> with:</p>
             <ul>
-              <li><code>CLAUDE.md</code> &mdash; project-specific agent instructions</li>
+              <li><code>AGENTS.md</code> &mdash; project-specific agent instructions</li>
               <li><code>FINDINGS.md</code> &mdash; captured insights and patterns</li>
               <li><code>tasks.md</code> &mdash; task queue (active, queued, done)</li>
               <li><code>summary.md</code> &mdash; project summary for context injection</li>
@@ -998,7 +997,7 @@ phren push_changes "sync from laptop"
 
 # On a new machine
 phren init  # pulls from remote</code></pre>
-        <p>The <code>SessionStart</code> hook automatically runs <code>git pull</code> at the start of every session.</p>
+        <p>The <code>SessionStart</code> hook automatically runs <code>git pull</code> at the start of every session. Periodic checks are off by default; enable checks every minute with <code>phren config pull-interval 60</code> while an MCP server is running.</p>
 
         <h2 id="gs-agents">Agent Setup <a href="#gs-agents" class="anchor-link">#</a></h2>
         <p><code>phren init</code> auto-configures all detected agents:</p>
@@ -1247,6 +1246,7 @@ sequenceDiagram
           <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
           <tbody>
             <tr><td><code>PHREN_CONTEXT_TOKEN_BUDGET</code></td><td>550</td><td>Max tokens injected per hook-prompt call (180--10000)</td></tr>
+            <tr><td><code>PHREN_PULL_INTERVAL_SECONDS</code></td><td>0 (off)</td><td>Overrides the machine-local interval for periodic MCP remote checks. Whole seconds from 30 to 86400; 0 or off disables.</td></tr>
             <tr><td><code>PHREN_CONTEXT_SNIPPET_LINES</code></td><td>6</td><td>Max lines per snippet (2--100)</td></tr>
             <tr><td><code>PHREN_CONTEXT_SNIPPET_CHARS</code></td><td>520</td><td>Max characters per snippet (120--10000)</td></tr>
             <tr><td><code>PHREN_MAX_INJECT_TOKENS</code></td><td>2000</td><td>Hard cap on total injected tokens (200--20000)</td></tr>
@@ -2034,8 +2034,8 @@ sequenceDiagram
           <thead><tr><th>Path</th><th>Contents</th></tr></thead>
           <tbody>
             <tr><td><code>~/.phren/</code></td><td>Root store (git repo)</td></tr>
-            <tr><td><code>~/.phren/global/</code></td><td>Global skills, CLAUDE.md, FINDINGS.md</td></tr>
-            <tr><td><code>~/.phren/&lt;project&gt;/</code></td><td>Per-project CLAUDE.md, FINDINGS.md, tasks.md, summary.md, skills/</td></tr>
+            <tr><td><code>~/.phren/global/</code></td><td>Global skills, AGENTS.md, FINDINGS.md</td></tr>
+            <tr><td><code>~/.phren/&lt;project&gt;/</code></td><td>Per-project AGENTS.md, FINDINGS.md, tasks.md, summary.md, skills/</td></tr>
             <tr><td><code>~/.phren/profiles/</code></td><td>YAML files mapping project sets to profiles</td></tr>
             <tr><td><code>~/.phren/machines.yaml</code></td><td>Machine-to-profile mapping</td></tr>
             <tr><td><code>~/.phren/.config/</code></td><td>Retention/workflow/index policy JSON, access-control.json</td></tr>
@@ -2118,7 +2118,7 @@ npx vitest --watch                    # watch mode</code></pre>
         <p>Test files live as <code>*.test.ts</code> in <code>mcp/src/</code>. When adding a new feature, add tests in the same directory as the source file.</p>
 
         <h2 id="code-style">Code Style <a href="#code-style" class="anchor-link">#</a></h2>
-        <p>Read <code>CLAUDE.md</code> for the full set of conventions. The highlights:</p>
+        <p>Read <code>AGENTS.md</code> for the full set of conventions. The highlights:</p>
         <div class="style-grid">
           <div class="style-card style-card-dont">
             <div class="style-card-label">Don't</div>
@@ -2366,10 +2366,10 @@ refactor: extract keyword logic from hook-prompt</code></pre>
         <h1>Frequently Asked Questions</h1>
         <p class="docs-subtitle">Common questions about phren, answered.</p>
 
-        <h2 id="vs-claude-md">How is this different from just using CLAUDE.md? <a href="#vs-claude-md" class="anchor-link">#</a></h2>
-        <p><code>CLAUDE.md</code> loads the entire file on every prompt. If your file is 2,000 tokens, you pay 2,000 tokens every single time, whether the content is relevant or not. With five agents running in parallel, that is 10,000 tokens of context before anyone types a word.</p>
+        <h2 id="vs-claude-md">How is this different from just using AGENTS.md? <a href="#vs-claude-md" class="anchor-link">#</a></h2>
+        <p><code>AGENTS.md</code> loads the entire file on every prompt. If your file is 2,000 tokens, you pay 2,000 tokens every single time, whether the content is relevant or not. With five agents running in parallel, that is 10,000 tokens of context before anyone types a word.</p>
         <p>Phren searches what you wrote and injects only what matches the current prompt. By default it targets roughly 550 tokens with <code>PHREN_CONTEXT_TOKEN_BUDGET</code>, regardless of how large your knowledge base grows.</p>
-        <p><code>CLAUDE.md</code> is also static. Phren learns as you work. Every bug traced, every decision made, every pattern discovered gets saved automatically. The next session starts with that knowledge already in context.</p>
+        <p><code>AGENTS.md</code> is also static. Phren learns as you work. Every bug traced, every decision made, every pattern discovered gets saved automatically. The next session starts with that knowledge already in context.</p>
 
         <h2 id="performance">Does this slow down my prompts? <a href="#performance" class="anchor-link">#</a></h2>
         <p>Usually not on a warm local repo. The hook runs locally: keyword extraction, FTS5 search, and context injection all happen against a local SQLite index with no network calls in the default path.</p>
@@ -2475,6 +2475,12 @@ ci-server: minimal</code></pre>
           <li>The <strong>Stop</strong> hook auto-commits and pushes <code>~/.phren</code> changes after every response</li>
         </ul>
         <p>Findings, tasks, and skills sync automatically as you work. Use profiles plus <code>machines.yaml</code> to scope which projects are active on each machine, then run <code>phren init</code> after profile changes to refresh local config.</p>
+        <p>Periodic remote checks are off by default. Set an interval to enable checks of shared Git stores while an MCP server is running. Clients sharing a store coordinate one check per interval. Each check reads the upstream commit with <code>git ls-remote</code>; only changed refs trigger a fetch, followed by a fast-forward update. Uncommitted edits, diverged history, and in-progress Git operations defer the update and record a reason in runtime sync status. Failed remote checks back off, up to 30 minutes or the configured interval if longer.</p>
+        <pre><code>phren config pull-interval       # show this machine's effective setting
+phren config pull-interval 60    # enable checks every minute
+phren config pull-interval 600   # every ten minutes
+phren config pull-interval off   # disable periodic checks (default)</code></pre>
+        <p>The setting is machine-local, accepts whole seconds from 30 to 86400 (or 0/off), and is reloaded by running servers. <code>PHREN_PULL_INTERVAL_SECONDS</code> overrides it. Pulled changes refresh each client's memory index and existing managed skill/instruction mirrors; agents consume instructions at their normal reload boundaries. No service is installed: periodic checks stop when the MCP server closes. The manual preset and project-local/workspace-Git installs do not poll by default. SessionStart and Stop hooks are configured separately.</p>
 
         <h3 id="linking">Machine Setup</h3>
         <p><code>phren init</code> wires everything together on a machine. It detects the current install mode, configures MCP settings for supported agents, registers lifecycle hooks, applies machine/profile defaults, and refreshes generated assets.</p>
@@ -2605,8 +2611,8 @@ phren team join git@github.com:qualus/phren-arc.git
         <table class="docs-table">
           <thead><tr><th>Mode</th><th>Behavior</th></tr></thead>
           <tbody>
-            <tr><td><code>phren-managed</code></td><td>Default. phren symlinks <code>CLAUDE.md</code>, <code>FINDINGS.md</code>, skills into the project directory.</td></tr>
-            <tr><td><code>repo-owned</code></td><td>The project's repo owns its own <code>CLAUDE.md</code>. phren stores findings and tasks but does not symlink.</td></tr>
+            <tr><td><code>phren-managed</code></td><td>Default. phren symlinks <code>AGENTS.md</code>, <code>FINDINGS.md</code>, skills into the project directory.</td></tr>
+            <tr><td><code>repo-owned</code></td><td>The project's repo owns its own <code>AGENTS.md</code>. phren stores findings and tasks but does not symlink.</td></tr>
             <tr><td><code>read-only</code></td><td>phren indexes and searches the project but does not write to it.</td></tr>
           </tbody>
         </table>

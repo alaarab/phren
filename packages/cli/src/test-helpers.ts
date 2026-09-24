@@ -4,6 +4,19 @@ import * as path from "path";
 import { execFileSync, spawnSync, spawn } from "child_process";
 import { PhrenResult, writeRootManifest } from "./shared.js";
 
+/** The run's sandbox store path, set by test-global-setup. */
+const SANDBOX_PHREN_PATH = process.env.PHREN_PATH;
+
+/**
+ * Put PHREN_PATH back to the run's sandbox store. Use this rather than
+ * deleting PHREN_PATH: with it unset, findPhrenPath walks up from the checkout
+ * and can reach the developer's real ~/.phren, where the logger then writes.
+ */
+export function resetTestPhrenPath(): void {
+  if (SANDBOX_PHREN_PATH === undefined) delete process.env.PHREN_PATH;
+  else process.env.PHREN_PATH = SANDBOX_PHREN_PATH;
+}
+
 export function initTestPhrenRoot(
   phrenDir: string,
   options: {
@@ -13,6 +26,13 @@ export function initTestPhrenRoot(
     primaryProject?: string;
   } = {},
 ): void {
+  // Most legacy integration fixtures exercise both memory and tasks. Fresh
+  // installation tests call initializeModules directly and keep memory only.
+  const modulesFile = path.join(phrenDir, ".config", "modules.yaml");
+  if (!fs.existsSync(modulesFile)) {
+    fs.mkdirSync(path.dirname(modulesFile), { recursive: true });
+    fs.writeFileSync(modulesFile, "version: 1\nenabled:\n  tasks: true\n");
+  }
   writeRootManifest(phrenDir, {
     version: 1,
     installMode: options.installMode ?? "shared",

@@ -1,3 +1,4 @@
+import OSLog
 import SwiftUI
 import PhrenKit
 
@@ -42,6 +43,19 @@ final class StoreContext: Identifiable {
 /// A (store, project) pair — the app's addressing unit. Unlike the CLI's
 /// name-keyed primary-wins merge (which silently shadows a project that exists
 /// in two stores), the app shows both, disambiguated by store.
+/// A skill plus the store it came from — skills exist in `global/` as well as
+/// in projects, so they are addressed by store rather than by (store, project).
+struct StoreSkill: Identifiable, Hashable {
+    let storeId: String
+    let storeName: String
+    let skill: Skill
+
+    var id: String { "\(storeId)/\(skill.path)" }
+
+    static func == (lhs: StoreSkill, rhs: StoreSkill) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+}
+
 struct StoreProject: Identifiable, Hashable {
     let storeId: String
     let storeName: String
@@ -53,12 +67,14 @@ struct StoreProject: Identifiable, Hashable {
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
-struct StoreQueueEntry: Identifiable {
+struct StoreQueueEntry: Identifiable, Hashable {
     let storeId: String
     let storeName: String
     let entry: ProjectQueueItem
 
     var id: String { "\(storeId)/\(entry.id)" }
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
 struct FailedOpEntry: Identifiable {
@@ -73,7 +89,7 @@ struct FailedOpEntry: Identifiable {
 /// target (rather than the TabView's default no-selection mode) so a widget
 /// deep link's `onOpenURL` handler can jump the user straight to a tab.
 enum AppTab: Hashable {
-    case projects, review, tasks, search, settings
+    case projects, agents, tasks, memory, settings
 }
 
 /// Why a mutation couldn't be routed to a store. Surfaced as
@@ -115,9 +131,63 @@ final class AppModel {
     /// needs to take its own offline route (see `PhrenCapture`).
     private(set) static weak var current: AppModel?
 
-    init() {
+    struct Credentials {
+        var load: () async -> KeychainStore.StoredToken?
+        var save: (KeychainStore.StoredToken) throws -> Void
+        var delete: () -> Void
+        static let keychain = Self(load: {
+            while true {
+                let result = await Task.detached(priority: .userInitiated) {
+                    let started = CFAbsoluteTimeGetCurrent()
+                    let value = KeychainStore.read()
+                    #if DEBUG
+                    if ProcessInfo.processInfo.environment["PHREN_PERFORMANCE_LOG"] == "1" {
+                        print("[PhrenPerformance] startup keychain off-main=\(!ChatRenderCacheMetrics.isMainThread): \(String(format: "%.3f", (CFAbsoluteTimeGetCurrent() - started) * 1_000)) ms")
+                    }
+                    #endif
+                    return value
+                }.value
+                switch result {
+                case .found(let stored): return stored
+                case .missing: return nil
+                // Launched in the background before the first unlock after a
+                // restart: the token is there but unreadable. Reading it as
+                // "signed out" left Memory on Connect until the app was quit.
+                case .locked: await protectedDataAvailable()
+                }
+            }
+        }, save: KeychainStore.save, delete: KeychainStore.delete)
+
+        /// Returns once the device is unlocked, checking again every 30 s in
+        /// case the notification came between the check and the wait.
+        @MainActor private static func protectedDataAvailable() async {
+            let unlocked = NotificationCenter.default.notifications(named: UIApplication.protectedDataDidBecomeAvailableNotification)
+            if UIApplication.shared.isProtectedDataAvailable { return }
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask { for await _ in unlocked { return } }
+                group.addTask { try? await Task.sleep(for: .seconds(30)) }
+                await group.next()
+                group.cancelAll()
+            }
+        }
+    }
+
+    init(client: GitHubClient = GitHubClient(), credentials: Credentials = .keychain,
+         storageDefaults: UserDefaults = .standard, storeDirectory: URL? = nil) {
+        self.client = client
+        self.credentials = credentials
+        self.storageDefaults = storageDefaults
+        self.storeDirectory = storeDirectory
         Self.current = self
     }
+
+    private let credentials: Credentials
+    private let storageDefaults: UserDefaults
+    private let storeDirectory: URL?
+    private var authenticationGeneration = UUID()
+    private(set) var authenticationMessage: String?
+
+    static var isUITesting: Bool { AppRuntime.isUITesting }
 
     enum Phase {
         case loading
@@ -131,6 +201,12 @@ final class AppModel {
     private(set) var user: GitHubUser?
     private(set) var storeContexts: [StoreContext] = []
     private(set) var searchIndex = SearchIndex()
+    private(set) var searchRevision = UUID()
+    @ObservationIgnored private var indexedSnapshots: [String: UUID] = [:]
+    @ObservationIgnored private var refreshTask: Task<Void, Never>?
+    @ObservationIgnored private var refreshRequested = false
+    @ObservationIgnored private var foreground = true
+    @ObservationIgnored private var liveGeneration = UUID()
     private(set) var syncStatus = SyncEngine.Status()
     /// Global store filter (store id) applied by list screens when set.
     var storeFilter: String?
@@ -146,6 +222,22 @@ final class AppModel {
     /// Bound to `MainTabView`'s `TabView` selection — set from a widget deep
     /// link (`phren://review`, `phren://tasks`) via `PhrenApp.onOpenURL`.
     var selectedTab: AppTab = .projects
+    /// Bumped by an intent that left a chat to open under `AgentLaunch.takePending()`.
+    var pendingChatVersion = 0
+    var pendingProjectVersion = 0
+    struct PendingSchedule: Equatable { let project: String; let scheduleID: String }
+    private(set) var pendingSchedule: PendingSchedule?
+    var pendingScheduleVersion = 0
+    var showingMemoryMaintenance = false
+    var showingMemoryConnection = false
+
+    func openScheduleHistory(project: String, scheduleID: String) {
+        pendingSchedule = .init(project: project, scheduleID: scheduleID)
+        pendingScheduleVersion += 1
+        selectedTab = .agents
+    }
+
+    func clearPendingSchedule() { pendingSchedule = nil }
 
     /// Parsed `stores.yaml`, from whichever attached store actually carries
     /// the registry (see `refreshStoreRegistry`). Powers the claim-awareness
@@ -169,8 +261,9 @@ final class AppModel {
     /// so a ~7s refresh doesn't re-send an unchanged one.
     private var appliedJournalRouting: [String: Bool] = [:]
 
-    let client = GitHubClient()
+    let client: GitHubClient
 
+    private static let authLog = Logger(subsystem: "com.phren.ios", category: "Auth")
     private static let storesDefaultsKey = "phren.stores"
     private static let legacyRepoDefaultsKey = "phren.selected-repo"
     /// The registry's on-disk shape. Version 1 is a bare `[StoreDescriptor]`
@@ -187,7 +280,7 @@ final class AppModel {
     }
 
     func canPush(storeId: String) -> Bool {
-        storeContexts.first { $0.id == storeId }?.descriptor.canPush ?? true
+        storeContexts.first { $0.id == storeId }?.descriptor.canPush ?? false
     }
 
     /// Whether this (store, project) pair can take a write at all. Two
@@ -284,8 +377,10 @@ final class AppModel {
         snapshot(for: storeId).consolidated[project]
     }
 
-    var totalReviewCount: Int {
-        storeContexts.reduce(0) { $0 + $1.snapshot.reviewQueue.count }
+    /// The store's own map of computers to projects (machines.yaml +
+    /// profiles) and each project's recorded folder.
+    func machineRegistry(storeId: String) -> MachineRegistry {
+        snapshot(for: storeId).machines
     }
 
     // MARK: - Cold tier (archived findings)
@@ -445,46 +540,73 @@ final class AppModel {
 
     func bootstrap() async {
         guard phase == .loading else { return }
-        guard let stored = KeychainStore.load() else {
+        #if DEBUG && targetEnvironment(simulator)
+        if Self.isUITesting {
+            do {
+                switch try await UITestFixtures.bootstrap() {
+                case .agentsOnly:
+                    phase = .signedOut
+                    selectedTab = .agents
+                case .memory(let contexts):
+                    storeContexts = contexts
+                    // The product video's store polls; its status reaches
+                    // the status bar the way a real store's does.
+                    if ProcessInfo.processInfo.arguments.contains("--trailer-fixture") {
+                        for context in contexts {
+                            await context.engine.setOnUpdate { [weak self] update in
+                                Task { @MainActor [weak self] in
+                                    switch update {
+                                    case .content: await self?.refresh()
+                                    case .status: await self?.refreshStatus()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    await refresh()
+                    phase = .ready
+                }
+            } catch { lastActionError = error.localizedDescription }
+            return
+        }
+        #endif
+        let generation = authenticationGeneration
+        let stored = await credentials.load()
+        guard generation == authenticationGeneration else { return }
+        guard let stored else {
+            selectedTab = .agents
             phase = .signedOut
             return
         }
         await client.setToken(stored.token)
-        do {
-            user = try await client.currentUser()
-        } catch {
-            KeychainStore.delete()
-            phase = .signedOut
-            return
-        }
+        user = stored.user
 
-        let descriptors = loadDescriptors()
-        guard !descriptors.isEmpty else {
-            phase = .pickingRepo
-            return
-        }
-        for descriptor in descriptors {
+        await openSavedStores()
+        // Local data and navigation are available even while /user is stalled.
+        guard await refreshAccount() else { return }
+        await refreshStorePermissions()
+        await pullAllAndGoLive()
+    }
+
+    private func openSavedStores() async {
+        for descriptor in loadDescriptors() where !storeContexts.contains(where: { $0.id == descriptor.id }) {
             await openContext(descriptor)
         }
         // openContext can fail (LocalStore init) for every descriptor — never
         // strand the user in an empty tab view with no way back. Mirrors the
         // same guard in addStore().
-        phase = storeContexts.isEmpty ? .pickingRepo : .ready
-        // Render the cached copy instantly; the pull refreshes it right after.
         await refresh()
-        await refreshStorePermissions()
-        await pullAllAndGoLive()
+        phase = storeContexts.isEmpty ? .pickingRepo : .ready
     }
 
-    private func loadDescriptors() -> [StoreDescriptor] { Self.storedDescriptors() }
+    private func loadDescriptors() -> [StoreDescriptor] { Self.storedDescriptors(defaults: storageDefaults) }
 
-    private func persistDescriptors(_ descriptors: [StoreDescriptor]) { Self.persist(descriptors) }
+    private func persistDescriptors(_ descriptors: [StoreDescriptor]) { Self.persist(descriptors, defaults: storageDefaults) }
 
     /// The attached-store registry, readable without a bootstrapped model —
     /// an App Intent cold-launched in the background has no `storeContexts`
     /// yet but still needs to know which stores exist and which are writable.
-    static func storedDescriptors() -> [StoreDescriptor] {
-        let defaults = UserDefaults.standard
+    static func storedDescriptors(defaults: UserDefaults = .standard) -> [StoreDescriptor] {
         // A registry that can't be decoded is set aside rather than replaced,
         // so a user thrown back to the repo picker at least hears why.
         if let list = PersistedState.load(StoreRegistry.self, fromDefaults: defaults,
@@ -497,35 +619,43 @@ final class AppModel {
         if let legacy = PersistedState.load(StoreDescriptor.self, fromDefaults: defaults,
                                             key: legacyRepoDefaultsKey,
                                             document: storeRegistryDocumentName).value {
-            persist([legacy])
+            persist([legacy], defaults: defaults)
             defaults.removeObject(forKey: legacyRepoDefaultsKey)
             return [legacy]
         }
         return []
     }
 
-    private static func persist(_ descriptors: [StoreDescriptor]) {
-        PersistedState.save(StoreRegistry(items: descriptors), toDefaults: .standard,
+    private static func persist(_ descriptors: [StoreDescriptor], defaults: UserDefaults = .standard) {
+        PersistedState.save(StoreRegistry(items: descriptors), toDefaults: defaults,
                             key: storesDefaultsKey, document: storeRegistryDocumentName)
     }
 
     func enterForeground() async {
+        foreground = true
         guard phase == .ready else { return }
         await startLiveAll()
+        await refreshAccount()
     }
 
     func enterBackground() async {
+        foreground = false
+        liveGeneration = UUID()
         for context in storeContexts {
             await context.engine.stopLive()
         }
     }
 
     private func startLiveAll() async {
+        guard !Self.isUITesting, foreground else { return }
+        let generation = liveGeneration
         // Stagger starts so N stores don't wake the radio simultaneously.
         for (i, context) in storeContexts.enumerated() {
             if i > 0 {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                do { try await Task.sleep(nanoseconds: 1_000_000_000) } catch { return }
             }
+            guard foreground, liveGeneration == generation, !Task.isCancelled else { return }
+            guard storeContexts.contains(where: { $0 === context }) else { continue }
             await context.engine.startLive()
         }
     }
@@ -549,25 +679,72 @@ final class AppModel {
 
     // MARK: - Auth
 
+    /// Only an explicit credential rejection invalidates a saved sign-in.
+    /// Offline, timeout, cancellation, throttling and server errors leave it
+    /// intact; the existing sync loop retries when connectivity returns.
+    @discardableResult
+    private func refreshAccount() async -> Bool {
+        let generation = authenticationGeneration
+        guard let stored = await credentials.load(), generation == authenticationGeneration else { return false }
+        do {
+            let verified = try await client.currentUser()
+            guard generation == authenticationGeneration else { return false }
+            user = verified
+            // Metadata caching is best effort. A failed save retains the old token, and the log says why.
+            do {
+                try credentials.save(.init(token: stored.token, kind: stored.kind, user: verified))
+            } catch {
+                Self.authLog.error("Refreshed account details were not saved: \(error.localizedDescription, privacy: .public)")
+            }
+            appliedJournalRouting.removeAll()
+            await applyWriteContexts()
+        } catch GitHubError.http(status: 401, message: _, method: _, path: _) {
+            guard generation == authenticationGeneration else { return false }
+            let invalidation = UUID()
+            authenticationGeneration = invalidation
+            credentials.delete()
+            await client.setToken(nil)
+            await enterBackground()
+            guard invalidation == authenticationGeneration else { return false }
+            authenticationMessage = "GitHub no longer accepts your sign-in. Sign in again to reconnect. Your saved projects and pending changes are still here."
+            phase = .signedOut
+            return false
+        } catch {
+            // A failed request says nothing about whether the token is valid.
+        }
+        return generation == authenticationGeneration
+    }
+
     func signIn(token: String, kind: KeychainStore.TokenKind) async throws {
+        let generation = UUID()
+        authenticationGeneration = generation
         let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
         await client.setToken(trimmed)
         let user = try await client.currentUser()
-        try KeychainStore.save(.init(token: trimmed, kind: kind))
+        guard generation == authenticationGeneration else { throw CancellationError() }
+        try credentials.save(.init(token: trimmed, kind: kind, user: user))
         self.user = user
-        phase = .pickingRepo
+        authenticationMessage = nil
+        appliedJournalRouting.removeAll()
+        await openSavedStores()
+        await pullAllAndGoLive()
     }
 
     func signOut() async {
+        authenticationGeneration = UUID()
+        liveGeneration = UUID()
+        await ApprovalActivityController.shared.clear()
+        var wipeFailures: [String] = []
         for context in storeContexts {
             await context.engine.stopLive()
-            try? await context.store.wipe()
+            do { try await context.store.wipe() } catch { wipeFailures.append("\(context.descriptor.displayName): \(error.localizedDescription)") }
         }
-        KeychainStore.delete()
-        UserDefaults.standard.removeObject(forKey: Self.storesDefaultsKey)
-        UserDefaults.standard.removeObject(forKey: Self.legacyRepoDefaultsKey)
+        credentials.delete()
+        storageDefaults.removeObject(forKey: Self.storesDefaultsKey)
+        storageDefaults.removeObject(forKey: Self.legacyRepoDefaultsKey)
         await client.setToken(nil)
         user = nil
+        authenticationMessage = nil
         storeContexts = []
         storeFilter = nil
         storesManifest = StoresManifest()
@@ -575,12 +752,19 @@ final class AppModel {
         appliedJournalRouting = [:]
         lastRegistryRaw = [:]
         searchIndex = SearchIndex()
+        indexedSnapshots = [:]
+        searchRevision = UUID()
         syncStatus = SyncEngine.Status()
         // Sign-out deleted the local copies, quarantined ones included, so
         // stop promising the user they're still recoverable on the device.
         StorageIssueLog.shared.removeAll()
         storageIssues = []
         lastSurfacedIssueId = nil
+        if !wipeFailures.isEmpty {
+            // The sign-in screen is what shows next; say the copies are still here.
+            authenticationMessage = "Signed out, but this device's copy couldn't be deleted (\(wipeFailures.joined(separator: "; "))). Its files are still in the app's data folder."
+        }
+        SpotlightIndex.shared.refreshProjects(from: self)
         phase = .signedOut
     }
 
@@ -619,7 +803,11 @@ final class AppModel {
         guard let index = storeContexts.firstIndex(where: { $0.id == id }) else { return }
         let context = storeContexts[index]
         await context.engine.stopLive()
-        try? await context.store.wipe()
+        do {
+            try await context.store.wipe()
+        } catch {
+            lastActionError = "Removed \(context.descriptor.displayName), but its copy on this device couldn't be deleted: \(error.localizedDescription)"
+        }
         storeContexts.remove(at: index)
         if storeFilter == id { storeFilter = nil }
         storeRoles.removeValue(forKey: id)
@@ -634,7 +822,8 @@ final class AppModel {
 
     private func openContext(_ descriptor: StoreDescriptor) async {
         do {
-            let directory = LocalStore.defaultDirectory(owner: descriptor.owner, repo: descriptor.name)
+            let directory = storeDirectory?.appendingPathComponent(descriptor.id, isDirectory: true)
+                ?? LocalStore.defaultDirectory(owner: descriptor.owner, repo: descriptor.name)
             let store = try LocalStore(rootDirectory: directory, owner: descriptor.owner,
                                        repo: descriptor.name, branch: descriptor.branch)
             let engine = SyncEngine(client: client, store: store, stateDirectory: directory)
@@ -647,9 +836,12 @@ final class AppModel {
             // before anything can be enqueued, on every path that opens a
             // store.
             appliedJournalRouting.removeValue(forKey: descriptor.id)
-            await engine.setOnUpdate { [weak self] in
+            await engine.setOnUpdate { [weak self] update in
                 Task { @MainActor [weak self] in
-                    await self?.refresh()
+                    switch update {
+                    case .content: await self?.refresh()
+                    case .status: await self?.refreshStatus()
+                    }
                 }
             }
         } catch {
@@ -668,17 +860,46 @@ final class AppModel {
     // MARK: - Data refresh
 
     func refresh() async {
+        refreshRequested = true
+        if let refreshTask { await refreshTask.value; return }
+        let task = Task { [self] in
+            defer { refreshTask = nil }
+            while refreshRequested {
+                refreshRequested = false
+                await refreshOnce()
+            }
+        }
+        refreshTask = task
+        await task.value
+    }
+
+    private func refreshOnce() async {
+        let generation = authenticationGeneration
         for context in storeContexts {
-            context.snapshot = await context.store.snapshot()
-            context.status = await context.engine.currentStatus()
-            context.coldSummaries = await context.engine.coldStore.projectSummaries()
+            let snapshot = await context.store.snapshot()
+            guard generation == authenticationGeneration else { return }
+            if context.snapshot.revision != snapshot.revision { context.snapshot = snapshot }
+            let status = await context.engine.currentStatus()
+            if context.status != status { context.status = status }
+            let coldSummaries = await context.engine.coldStore.projectSummaries()
+            if context.coldSummaries != coldSummaries { context.coldSummaries = coldSummaries }
         }
         // Key by store id (owner/name) — display names alone collide when two
         // owners have same-named repos. The UI translates via storeName(for:).
-        searchIndex = SearchIndex(snapshots: storeContexts.map {
-            (store: $0.id, snapshot: $0.snapshot)
-        })
-        syncStatus = aggregateStatus()
+        guard generation == authenticationGeneration else { return }
+        let snapshots = storeContexts.map { (store: $0.id, snapshot: $0.snapshot) }
+        let revisions = Dictionary(uniqueKeysWithValues: snapshots.map { ($0.store, $0.snapshot.revision) })
+        if revisions != indexedSnapshots {
+            let index = await Task.detached(priority: .userInitiated) { SearchIndex(snapshots: snapshots) }.value
+            guard generation == authenticationGeneration,
+                  revisions == Dictionary(uniqueKeysWithValues: storeContexts.map { ($0.id, $0.snapshot.revision) }) else { return }
+            searchIndex = index
+            indexedSnapshots = revisions
+            SpeechSettings.rememberProjects(snapshots.flatMap { $0.snapshot.projects.map(\.name) })
+            searchRevision = UUID()
+        }
+        let status = aggregateStatus()
+        if syncStatus != status { syncStatus = status }
         collectStorageIssues()
         await refreshStoreRegistry()
         await applyWriteContexts()
@@ -686,10 +907,32 @@ final class AppModel {
         // needs both settle right here — the same generation, every ~7s
         // live-poll cycle. WidgetBridge itself gates the widget-visible
         // reload on content actually changing.
-        WidgetBridge.publish(from: self)
+        await WidgetBridge.publish(from: self)
         // Likewise for the project names Siri can resolve by voice — gated
         // on the project set changing, not on every poll.
         PhrenAppShortcuts.donateProjects(from: self)
+        SpotlightIndex.shared.refreshProjects(from: self)
+        await LocalNotificationMonitor.shared.updateCatalog(self)
+    }
+
+    /// The status-only counterpart of `refreshOnce`, for a `SyncEngine.Update`
+    /// of `.status`. A pull flips `isSyncing` on, stamps `lastSyncedAt`, and
+    /// flips `isSyncing` off — three status notifications per poll per store,
+    /// each of which used to run the full refresh and so re-stat every file in
+    /// every store. Nothing in the local cache moved, so this reads the
+    /// engines' status and stops there; the snapshot, search index, registry
+    /// and Siri donations wait for a `.content` update.
+    private func refreshStatus() async {
+        let generation = authenticationGeneration
+        for context in storeContexts {
+            let status = await context.engine.currentStatus()
+            guard generation == authenticationGeneration else { return }
+            if context.status != status { context.status = status }
+        }
+        let status = aggregateStatus()
+        if syncStatus != status { syncStatus = status }
+        collectStorageIssues()
+        await WidgetBridge.publish(from: self)
     }
 
     /// Drains the process-wide persistence log into the model.
@@ -722,6 +965,7 @@ final class AppModel {
     }
 
     func pullToRefresh() async {
+        guard await refreshAccount() else { return }
         await pullAll()
         await refreshStorePermissions()
         await refresh()
@@ -749,6 +993,80 @@ final class AppModel {
 
     // MARK: - Mutations
 
+    // MARK: - Skills
+
+    /// Every synced skill across the open (and filtered) stores.
+    var mergedSkills: [StoreSkill] {
+        filteredContexts.flatMap { context in
+            context.snapshot.skills.map {
+                StoreSkill(storeId: context.id, storeName: context.descriptor.displayName, skill: $0)
+            }
+        }
+    }
+
+    func saveDocument(path: String, content: String, expectedContent: String?, in storeId: String) async throws {
+        try await enqueue(.saveAuthoredFile(path: path, content: content, expectedContent: expectedContent), in: storeId)
+        await refresh()
+    }
+
+    func deleteSkill(_ entry: StoreSkill) async throws {
+        try await enqueue(.deleteAuthoredFile(path: entry.skill.path, expectedContent: entry.skill.content), in: entry.storeId)
+        await refresh()
+    }
+
+    /// Moves a skill to `global` or another project within its own store.
+    func moveSkill(_ entry: StoreSkill, to scope: String) async throws {
+        guard let context = storeContexts.first(where: { $0.id == entry.storeId }) else {
+            throw StoreWriteError.storeNotOpen(entry.storeId)
+        }
+        guard context.descriptor.canPush else {
+            throw StoreWriteError.readOnly(context.descriptor.displayName)
+        }
+        try await context.engine.moveSkill(entry.skill, to: scope)
+        await refresh()
+    }
+
+    func instructions(scope: String, in storeId: String) -> String? {
+        storeContexts.first { $0.id == storeId }?.snapshot.instructions[scope]
+    }
+
+    func instructionsPath(scope: String, in storeId: String) -> String {
+        storeContexts.first { $0.id == storeId }?.snapshot.instructionPaths[scope]
+            ?? "\(scope)/\(AgentInstructions.fileName)"
+    }
+
+    func skills(in storeId: String) -> [Skill] {
+        storeContexts.first { $0.id == storeId }?.snapshot.skills ?? []
+    }
+
+    func skillPreferences(in storeId: String) throws -> SkillPreferences {
+        try SkillPreferences.parse(snapshot(for: storeId).skillPreferencesContent)
+    }
+
+    func setSkillEnabled(_ entry: StoreSkill, enabled: Bool) async throws {
+        let current = try skillPreferences(in: entry.storeId)
+        try await enqueue(.setSkillEnabled(scope: entry.skill.scope.source, name: entry.skill.name,
+                                          enabled: enabled,
+                                          expectedEnabled: current.explicitSetting(scope: entry.skill.scope.source, name: entry.skill.name)),
+                          in: entry.storeId)
+        await refresh()
+    }
+
+    // MARK: - Graph
+
+    /// The phone explores one store at a time. Project/node identities remain
+    /// CLI-compatible without collisions between same-named projects in stores.
+    func graphPayload(storeId: String, focusProject: String?) async throws -> GraphPayload {
+        guard let context = storeContexts.first(where: { $0.id == storeId }) else {
+            throw StoreWriteError.storeNotOpen(storeId)
+        }
+        let input = await context.store.graphInput(storeName: context.id)
+        if let focusProject, !input.projects.contains(focusProject) {
+            return GraphPayload(nodes: [], links: [], topics: [], total: 0)
+        }
+        return await Task.detached(priority: .userInitiated) { GraphBuilder.build(input, focusProject: focusProject) }.value
+    }
+
     func perform(_ op: PendingOp, in storeId: String) async {
         do {
             try await enqueue(op, in: storeId)
@@ -774,6 +1092,9 @@ final class AppModel {
             throw StoreWriteError.readOnly(context.descriptor.displayName)
         }
         try await context.engine.enqueue(op)
+        if case .saveSchedules(let project, let content, _) = op {
+            await LocalNotificationMonitor.shared.scheduleEdited(project: project, schedules: SchedulesFile.parse(content))
+        }
     }
 
     func retryFailedOps() async {
@@ -817,11 +1138,7 @@ final class AppModel {
     /// the App Intents capture path, which may have no model at all, stamps
     /// notes exactly the way the capture sheet does.
     static func nowNoteTimestamp() -> (date: String, time: String) {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(identifier: "UTC")
-        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
-        let iso = formatter.string(from: Date())
+        let iso = PhrenDateFormats.utc("yyyy-MM-dd'T'HH:mm:ss").string(from: Date())
         return (String(iso.prefix(10)), String(iso.suffix(8)))
     }
 }

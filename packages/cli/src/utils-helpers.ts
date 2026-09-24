@@ -4,12 +4,30 @@ import { bootstrapPhrenDotEnv } from "./phren-dotenv.js";
 
 // ── Shared Git helper ────────────────────────────────────────────────────────
 
+/**
+ * Git run by phren never asks a human anything. Without this, a store or
+ * project with an HTTPS remote and no credential helper makes git read
+ * "Username for 'https://github.com':" from the controlling terminal, which
+ * inside an agent's pane stalls the agent before its first prompt.
+ */
+export const nonInteractiveGitEnv = (env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv => ({
+  ...env,
+  GIT_TERMINAL_PROMPT: "0",
+  GCM_INTERACTIVE: "never",
+  // A nonempty command overrides core.askPass and inherited GUI helpers.
+  // Git for Windows also executes askpass commands through its bundled sh.
+  GIT_ASKPASS: "false",
+  SSH_ASKPASS: "false",
+  SSH_ASKPASS_REQUIRE: "force",
+});
+
 export function runGitOrThrow(cwd: string, args: string[], timeoutMs: number): string {
   const result = spawnSync("git", args, {
     cwd,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
     timeout: timeoutMs,
+    env: nonInteractiveGitEnv(),
   });
   if (result.error) throw result.error;
   if (result.status !== 0) {
@@ -89,6 +107,12 @@ export function isFeatureEnabled(envName: string, defaultValue: boolean = true):
 
 export function clampInt(raw: string | undefined, fallback: number, min: number, max: number): number {
   const parsed = Number.parseInt(raw || "", 10);
+  if (Number.isNaN(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
+}
+
+export function clampFloat(raw: string | undefined, fallback: number, min: number, max: number): number {
+  const parsed = Number.parseFloat(raw || "");
   if (Number.isNaN(parsed)) return fallback;
   return Math.min(max, Math.max(min, parsed));
 }

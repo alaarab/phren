@@ -76,7 +76,17 @@ export async function createWalkthroughStyle(): Promise<WalkthroughStyle> {
 
 export async function createWalkthroughPrompts(): Promise<WalkthroughPromptUi> {
   try {
-    const inquirerModule = await import(String("inquirer"));
+    const ui = walkthroughPromptsFrom(await import(String("inquirer")));
+    if (ui) return ui;
+  } catch {
+    // fallback below
+  }
+  return readlineWalkthroughPrompts();
+}
+
+/** Adapts an Inquirer module, or returns null when it offers neither API. */
+export function walkthroughPromptsFrom(inquirerModule: unknown): WalkthroughPromptUi | null {
+  {
     const maybeFns = inquirerModule as {
       input?: (options: { message: string; default?: string }) => Promise<string>;
       confirm?: (options: { message: string; default?: boolean }) => Promise<boolean>;
@@ -127,7 +137,7 @@ export async function createWalkthroughPrompts(): Promise<WalkthroughPromptUi> {
           defaultValue?: T
         ): Promise<T> => {
           const answer = await prompt([{
-            type: "list",
+            type: "select",
             name: "value",
             message,
             choices: choices.map((choice) => ({ value: choice.value, name: choice.name })),
@@ -137,10 +147,11 @@ export async function createWalkthroughPrompts(): Promise<WalkthroughPromptUi> {
         },
       };
     }
-  } catch {
-    // fallback below
   }
+  return null;
+}
 
+async function readlineWalkthroughPrompts(): Promise<WalkthroughPromptUi> {
   const readline = await import("readline");
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const ask = (message: string): Promise<string> => new Promise((resolve) => rl.question(message, resolve));
@@ -414,7 +425,7 @@ export async function runWalkthrough(phrenPath: string, options?: WalkthroughOpt
     log(`Using detached ownership — the ${managementPreset} preset never writes into your repos.`);
   } else {
     log("Choose who owns repo-facing instruction files for projects you add.");
-    log("  phren-managed: Phren may mirror CLAUDE.md / AGENTS.md into the repo");
+    log("  phren-managed: Phren may mirror AGENTS.md plus vendor compatibility files into the repo");
     log("  detached: Phren keeps its own docs but does not write into the repo");
     log("  repo-managed: keep the repo's existing CLAUDE/AGENTS files as canonical");
     log("  Change later: phren config project-ownership <mode>");

@@ -60,6 +60,9 @@ describe("toOpenAiMessages", () => {
     const result = toOpenAiMessages("sys", msgs);
     expect(result[1]).toEqual({
       role: "assistant",
+      // Always a string, never absent/null: some gateways 400 on null-content
+      // assistant messages, and durable history would repeat the failure.
+      content: "",
       tool_calls: [
         { id: "call_1", type: "function", function: { name: "read_file", arguments: '{"path":"/tmp/x"}' } },
       ],

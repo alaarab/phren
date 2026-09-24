@@ -25,24 +25,18 @@ describe("checkPermission", () => {
     }
   });
 
-  // ── File tools (read_file, glob, grep) need path checks ────────────
+  // ── Read-only file tools are always safe in-sandbox ────────────────
 
-  describe("file tools require permission checks", () => {
+  describe("read-only file tools", () => {
     const fileReadTools = ["read_file", "glob", "grep"];
 
     for (const tool of fileReadTools) {
-      it(`asks for ${tool} in suggest mode (even with in-sandbox path)`, () => {
-        expect(checkPermission(makeConfig("suggest"), tool, { path: "/tmp/project/foo.ts" }).verdict).toBe("ask");
+      it(`allows ${tool} in suggest mode with an in-sandbox path`, () => {
+        expect(checkPermission(makeConfig("suggest"), tool, { path: "/tmp/project/foo.ts" }).verdict).toBe("allow");
       });
 
-      it(`allows ${tool} in auto-confirm mode with in-sandbox path`, () => {
-        // read_file/glob/grep are FILE_TOOLS; with an in-sandbox path they pass path checks,
-        // then fall through to mode logic. In auto-confirm they're not in AUTO_CONFIRM_TOOLS,
-        // so they get "ask" -- unless they don't have a path, in which case path check is skipped.
-        // With a path inside sandbox, the path check passes, then mode logic applies.
-        const result = checkPermission(makeConfig("auto-confirm"), tool, { path: "/tmp/project/foo.ts" });
-        // These are not in AUTO_CONFIRM_TOOLS, so auto-confirm asks
-        expect(result.verdict).toBe("ask");
+      it(`allows ${tool} in auto-confirm mode with an in-sandbox path`, () => {
+        expect(checkPermission(makeConfig("auto-confirm"), tool, { path: "/tmp/project/foo.ts" }).verdict).toBe("allow");
       });
 
       it(`allows ${tool} in full-auto mode with in-sandbox path`, () => {
@@ -170,5 +164,24 @@ describe("checkPermission", () => {
       });
       expect(result.verdict).toBe("deny");
     });
+  });
+});
+
+describe("subagent tool permissions", () => {
+  const base = { projectRoot: "/tmp", allowedPaths: [] };
+
+  it("asks before spawning in suggest mode (spawning forks an auto-confirm child)", () => {
+    const rule = checkPermission({ ...base, mode: "suggest" }, "spawn_agent", { task: "x" });
+    expect(rule.verdict).toBe("ask");
+  });
+
+  it("allows spawning in auto-confirm and full-auto modes", () => {
+    expect(checkPermission({ ...base, mode: "auto-confirm" }, "spawn_agent", {}).verdict).toBe("allow");
+    expect(checkPermission({ ...base, mode: "full-auto" }, "spawn_agent", {}).verdict).toBe("allow");
+    expect(checkPermission({ ...base, mode: "auto-confirm" }, "send_message_to_agent", {}).verdict).toBe("allow");
+  });
+
+  it("list_agents stays read-only safe in all modes", () => {
+    expect(checkPermission({ ...base, mode: "suggest" }, "list_agents", {}).verdict).toBe("allow");
   });
 });

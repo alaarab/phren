@@ -1,12 +1,17 @@
+import { createHash } from "node:crypto";
+import { atomicWriteText } from "../phren-paths.js";
+import { moduleSnapshot } from "../modules/runtime.js";
+import { getRegisteredTools } from "../tool-registry.js";
 import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "js-yaml";
+import { loadYamlDocument } from "../phren-core.js";
 import { debugLog } from "../shared.js";
 import { errorMessage } from "../utils.js";
 import { buildSharedLifecycleCommands } from "../hooks.js";
 import { VERSION } from "../package-metadata.js";
 import { getToolCount, renderToolCatalogMarkdown } from "../tool-registry.js";
-import { isSkillEnabled } from "../skill/state.js";
+import { readSkillEnabledState } from "../skill/state.js";
 import { logger } from "../logger.js";
 
 // ── Skill frontmatter parsing and validation ────────────────────────────────
@@ -42,7 +47,7 @@ export function parseSkillFrontmatter(rawContent: string): { frontmatter: Record
   const match = content.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
   if (!match) return { frontmatter: null, body: content };
   try {
-    const parsed = yaml.load(match[1]) as Record<string, unknown>;
+    const parsed = loadYamlDocument<Record<string, unknown>>(match[1], (text) => yaml.load(text));
     return { frontmatter: parsed && typeof parsed === "object" ? parsed : null, body: match[2] };
   } catch (err: unknown) {
     debugLog(`parseSkillFrontmatter: malformed YAML frontmatter: ${errorMessage(err)}`);
@@ -244,12 +249,13 @@ export function linkSkillsDir(
   fs.mkdirSync(destDir, { recursive: true });
   const expectedNames = new Set<string>();
   const collisions: SkillCollision[] = [];
+  const isEnabled = opts?.phrenPath && opts.scope ? readSkillEnabledState(opts.phrenPath) : undefined;
 
   for (const entry of fs.readdirSync(srcDir)) {
     const srcPath = path.join(srcDir, entry);
     const stat = fs.statSync(srcPath);
     const skillName = stat.isDirectory() ? entry : entry.replace(/\.md$/, "");
-    if (opts?.phrenPath && opts.scope && !isSkillEnabled(opts.phrenPath, opts.scope, skillName)) {
+    if (isEnabled && opts?.scope && !isEnabled(opts.scope, skillName)) {
       continue;
     }
 
@@ -299,8 +305,10 @@ export function writeSkillMd(phrenPath: string) {
   const promptCmd = lifecycle.userPromptSubmit.replace(/"/g, '\\"');
   const stopCmd = lifecycle.stop.replace(/"/g, '\\"');
   const version = VERSION;
-  const toolCount = getToolCount();
-  const toolCatalog = renderToolCatalogMarkdown();
+  const allowed = new Set(moduleSnapshot(phrenPath).modules.flatMap(module => module.tools.map(tool => tool.name)));
+  const excluded = getRegisteredTools().filter(tool => !allowed.has(tool.name));
+  const toolCount = getToolCount() - excluded.length;
+  const toolCatalog = excluded.length ? renderToolCatalogMarkdown(allowed) : renderToolCatalogMarkdown();
 
   const content = `---
 name: phren
@@ -342,5 +350,17 @@ ${toolCatalog}
 `;
 
   const dest = path.join(phrenPath, "phren.SKILL.md");
-  fs.writeFileSync(dest, content);
+  const ledger = path.join(phrenPath, ".runtime", "module-skill.sha256");
+  const digest = (text: string) => createHash("sha256").update(text).digest("hex");
+  const stat = fs.lstatSync(dest, { throwIfNoEntry: false });
+  if (stat) {
+    if (!stat.isFile() || stat.isSymbolicLink()) return;
+    const existing = fs.readFileSync(dest, "utf8");
+    const previous = fs.existsSync(ledger) ? fs.readFileSync(ledger, "utf8").trim() : "";
+    const legacy = content.replace(`## MCP tools (${toolCount})\n\n${toolCatalog}`, `## MCP tools (${getToolCount()})\n\n${renderToolCatalogMarkdown()}`);
+    if (existing !== content && existing !== legacy && digest(existing) !== previous) return;
+  }
+  atomicWriteText(dest, content);
+  fs.mkdirSync(path.dirname(ledger), { recursive: true });
+  atomicWriteText(ledger, digest(content) + "\n");
 }

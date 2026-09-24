@@ -23,6 +23,11 @@ actor FakeGitHubClient: GitHubAPI {
     private var revision = 0
     private var conflictOnce: Set<String> = []
     private var conflictAlways: Set<String> = []
+    private var writesOffline = false
+    private var notModified = false
+
+    func setWritesOffline(_ value: Bool) { writesOffline = value }
+    func setNotModified(_ value: Bool) { notModified = value }
 
     init(remote: [String: String] = [:]) {
         for path in remote.keys.sorted() {
@@ -62,7 +67,7 @@ actor FakeGitHubClient: GitHubAPI {
 
     // MARK: - GitHubAPI
 
-    func headSha(owner: String, repo: String, branch: String) async throws -> String? { head }
+    func headSha(owner: String, repo: String, branch: String) async throws -> String? { notModified ? nil : head }
 
     func tree(owner: String, repo: String, sha: String) async throws -> GitTree {
         // Real trees carry `size` on every blob; the cold tier's catalogue is
@@ -83,6 +88,7 @@ actor FakeGitHubClient: GitHubAPI {
                  content: Data, message: String, sha: String?) async throws -> ContentsPutResponse {
         let text = String(decoding: content, as: UTF8.self)
         writes.append(Write(path: path, message: message, content: text, deleted: false))
+        if writesOffline { throw URLError(.notConnectedToInternet) }
         if conflictAlways.contains(path) { throw GitHubError.shaConflict(path: path) }
         if conflictOnce.remove(path) != nil { throw GitHubError.shaConflict(path: path) }
         setRemote(path, text)

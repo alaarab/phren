@@ -64,20 +64,17 @@ struct VoiceCaptureView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
 
-    @State private var transcriber = SpeechTranscriber()
+    @State private var transcriber = DictationSession(recognizer: SpeechTranscriber(), transform: SpeechSettings.apply)
     @State private var text = ""
-    @State private var recordingBaseText = ""
     @State private var selectedTarget: VoiceCaptureTarget?
     @State private var permission: SpeechTranscriber.PermissionState = .notDetermined
     @State private var recognizerUnavailable = false
     @State private var recordingStartedAt: Date?
-    @State private var now = Date()
     @State private var pulse = false
     @State private var confirmDiscard = false
     @State private var saving = false
     @State private var kind: CaptureKind = .note
-
-    private let ticker = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    @State private var showingTarget = false
 
     init(targets: [VoiceCaptureTarget], preselected: VoiceCaptureTarget? = nil) {
         self.targets = targets
@@ -94,10 +91,9 @@ struct VoiceCaptureView: View {
                     )
                 } else {
                     VStack(spacing: 20) {
-                        Picker("Save as", selection: $kind) {
-                            ForEach(CaptureKind.allCases, id: \.self) { Text($0.rawValue) }
-                        }
-                        .pickerStyle(.segmented)
+                        PhrenTextSegment(items: CaptureKind.allCases.map {
+                            PhrenOption(id: $0.rawValue, value: $0, title: $0.rawValue)
+                        }, selection: $kind, identifier: "voice-capture-kind")
                         micArea
                         editorSection
                         destinationFooter
@@ -130,26 +126,25 @@ struct VoiceCaptureView: View {
         }
         .background(DismissAttemptDetector { confirmDiscard = true })
         .interactiveDismissDisabled(hasUnsavedText)
-        .confirmationDialog(
-            kind == .note ? "Discard this note?" : "Discard this task?",
+        .phrenDialog(
             isPresented: $confirmDiscard,
-            titleVisibility: .visible
-        ) {
-            Button("Discard", role: .destructive) { dismiss() }
-            Button("Keep editing", role: .cancel) {}
-        }
+            title: kind == .note ? "Discard this note?" : "Discard this task?",
+            message: "The text you dictated will be lost.",
+            actions: [
+                .init(id: "discard", title: "Discard", role: .destructive) { dismiss() },
+                .init(id: "keep", title: "Keep editing", role: .cancel) {},
+            ],
+            identifier: "voice-capture-discard-dialog"
+        )
+        .phrenSingleSelectSheet(isPresented: $showingTarget, title: "Project", options: targetOptions,
+                                selection: $selectedTarget, rowPrefix: "voice-capture-project")
         .task {
             selectedTarget = preselected ?? Self.defaultTarget(in: targets)
             await preparePermissions()
         }
-        .onChange(of: transcriber.transcript) { _, newValue in
-            guard transcriber.isRecording else { return }
-            text = Self.join(recordingBaseText, newValue)
-        }
-        .onReceive(ticker) { now = $0 }
         .onChange(of: scenePhase) { _, phase in
             switch phase {
-            case .background:
+            case .background, .inactive:
                 // Never leave the mic listening once we're not visible.
                 transcriber.stop()
             case .active:
@@ -210,10 +205,18 @@ struct VoiceCaptureView: View {
             .onAppear { pulse = true }
 
             if transcriber.isRecording {
-                Text(elapsedText)
-                    .font(.title3.monospacedDigit())
-                    .foregroundStyle(PhrenTheme.textMuted)
-                    .accessibilityLabel("Recording, \(elapsedText) elapsed")
+                // The recording's duration is the only thing that ticks.
+                ClockText { now in
+                    Text(elapsedText(at: now))
+                        .font(PhrenTypography.title3.monospacedDigit())
+                        .foregroundStyle(PhrenTheme.textMuted)
+                        .accessibilityLabel("Recording, \(elapsedText(at: now)) elapsed")
+                }
+            } else if let reason = transcriber.failureReason {
+                Text(reason)
+                    .font(.footnote)
+                    .foregroundStyle(PhrenTheme.warning)
+                    .multilineTextAlignment(.center)
             } else if recognizerUnavailable {
                 Text("Dictation isn't available in this language on this device. You can still type below.")
                     .font(.footnote)
@@ -250,7 +253,7 @@ struct VoiceCaptureView: View {
             } label: {
                 Label("Open Settings", systemImage: "gearshape")
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.borderedProminent).tint(PhrenTheme.accentSolid)
         }
         .padding(.vertical, 8)
     }
@@ -283,16 +286,9 @@ struct VoiceCaptureView: View {
     private var destinationFooter: some View {
         if targets.count > 1 {
             VStack(alignment: .leading, spacing: 4) {
-                Picker("Project", selection: $selectedTarget) {
-                    // A real, visible "nothing picked yet" row: with several
-                    // projects, a preselected one the user didn't choose is
-                    // how a capture lands somewhere nobody can name later.
-                    Text("Choose a project…").tag(VoiceCaptureTarget?.none)
-                    ForEach(targets) { target in
-                        Text(targetLabel(target)).tag(Optional(target))
-                    }
-                }
-                .pickerStyle(.menu)
+                PhrenSingleSelect(options: targetOptions, selection: $selectedTarget,
+                                  placeholder: "Choose a project…", identifier: "voice-capture-project",
+                                  isPresented: $showingTarget)
 
                 if selectedTarget == nil {
                     Text("Pick where this goes — phren won't choose for you. Set a default in Settings → Quick capture.")
@@ -312,21 +308,25 @@ struct VoiceCaptureView: View {
         model.hasMultipleStores ? "\(target.project) · \(target.storeName)" : target.project
     }
 
+    /// A real, visible "nothing picked yet" row: with several projects, a
+    /// preselected one the user didn't choose is how a capture lands
+    /// somewhere nobody can name later.
+    private var targetOptions: [PhrenOption<VoiceCaptureTarget?>] {
+        [PhrenOption(id: "none", value: VoiceCaptureTarget?.none, title: "Choose a project…")]
+            + targets.map { PhrenOption(id: $0.id, value: VoiceCaptureTarget?.some($0), title: targetLabel($0)) }
+    }
+
     // MARK: - Recording
 
     private func toggleRecording() {
         if transcriber.isRecording {
             transcriber.stop()
-            recordingStartedAt = nil
         } else {
-            recordingBaseText = text
-            do {
-                try transcriber.start()
-                recordingStartedAt = Date()
-                now = Date()
-            } catch {
-                recognizerUnavailable = true
-            }
+            let draft = $text
+            transcriber.readDraft = { draft.wrappedValue }
+            transcriber.onDraftChange = { draft.wrappedValue = $0 }
+            transcriber.start(draft: text)
+            recordingStartedAt = .now
         }
     }
 
@@ -336,18 +336,10 @@ struct VoiceCaptureView: View {
         recognizerUnavailable = !transcriber.isRecognizerAvailable
     }
 
-    private var elapsedText: String {
+    private func elapsedText(at now: Date) -> String {
         guard let start = recordingStartedAt else { return "0:00" }
         let seconds = max(0, Int(now.timeIntervalSince(start)))
         return String(format: "%d:%02d", seconds / 60, seconds % 60)
-    }
-
-    /// Appends a newly-recognized segment onto whatever text is already
-    /// there (which may have been hand-edited since the last take).
-    private static func join(_ base: String, _ addition: String) -> String {
-        guard !addition.isEmpty else { return base }
-        guard !base.isEmpty else { return addition }
-        return (base.hasSuffix(" ") || base.hasSuffix("\n")) ? base + addition : base + " " + addition
     }
 
     /// Same precedence the App Intents path uses, plus the one tier a visible

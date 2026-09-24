@@ -1,7 +1,10 @@
+import { nonInteractiveGitEnv } from "../utils-helpers.js";
+import { reconcileModuleHooks } from "../bridge/install.js";
 import * as fs from "fs";
 import * as path from "path";
 import * as readline from "readline";
 import * as yaml from "js-yaml";
+import { loadYamlDocument } from "../phren-core.js";
 import { execFileSync } from "child_process";
 import { ROOT } from "../package-metadata.js";
 import {
@@ -39,7 +42,6 @@ import {
 import { writeSkillMd, isManagedSymlink } from "./skills.js";
 import { resolveManagementCapabilities, type ManagementCapabilities } from "../init/management-preset.js";
 import { syncScopeSkillsToDir } from "../skill/files.js";
-import { renderSkillInstructionsSection } from "../skill/registry.js";
 import { findProjectDir } from "../project-locator.js";
 import {
   getProjectOwnershipMode,
@@ -116,14 +118,14 @@ export function findProfileFile(phrenPath: string, profileName: string): string 
   if (!fs.existsSync(profilesDir)) return null;
   for (const f of fs.readdirSync(profilesDir)) {
     if (!f.endsWith(".yaml")) continue;
-    const data = yaml.load(fs.readFileSync(path.join(profilesDir, f), "utf8"), { schema: yaml.CORE_SCHEMA }) as ProfileData | undefined;
+    const data = loadYamlDocument<ProfileData>(fs.readFileSync(path.join(profilesDir, f), "utf8"), (text) => yaml.load(text, { schema: yaml.CORE_SCHEMA }));
     if (data?.name === profileName) return path.join(profilesDir, f);
   }
   return null;
 }
 
 export function getProfileProjects(profileFile: string): string[] {
-  const data = yaml.load(fs.readFileSync(profileFile, "utf8"), { schema: yaml.CORE_SCHEMA }) as ProfileData | undefined;
+  const data = loadYamlDocument<ProfileData>(fs.readFileSync(profileFile, "utf8"), (text) => yaml.load(text, { schema: yaml.CORE_SCHEMA }));
   return Array.isArray(data?.projects) ? data.projects : [];
 }
 
@@ -147,7 +149,7 @@ function maybeOfferStarterTemplateUpdate(phrenPath: string) {
     const prefs = JSON.parse(fs.readFileSync(prefsPath, "utf8")) as { installedVersion?: string };
     if (isVersionNewer(current, prefs.installedVersion)) {
       log(`  Starter template update available: v${prefs.installedVersion} -> v${current}`);
-      log(`  Run \`phren init --apply-starter-update\` to refresh global/CLAUDE.md and global skills.`);
+      log(`  Run \`phren init --apply-starter-update\` to refresh global/AGENTS.md and global skills.`);
     }
   } catch (err: unknown) {
     debugLog(`checkStarterVersionUpdate: failed to read preferences: ${errorMessage(err)}`);
@@ -185,7 +187,7 @@ async function registerMachine(phrenPath: string): Promise<{ machine: string; pr
 
 function setupSparseCheckout(phrenPath: string, projects: string[]) {
   try {
-    execFileSync("git", ["rev-parse", "--git-dir"], { cwd: phrenPath, stdio: "ignore", timeout: EXEC_TIMEOUT_QUICK_MS });
+    execFileSync("git", ["rev-parse", "--git-dir"], { env: nonInteractiveGitEnv(), cwd: phrenPath, stdio: "ignore", timeout: EXEC_TIMEOUT_QUICK_MS });
   } catch (err: unknown) {
     logger.debug("link", `setupSparseCheckout notAGitRepo: ${errorMessage(err)}`);
     return;
@@ -208,8 +210,8 @@ function setupSparseCheckout(phrenPath: string, projects: string[]) {
   ];
   const paths = [...alwaysInclude, ...projects];
   try {
-    execFileSync("git", ["sparse-checkout", "set", ...paths], { cwd: phrenPath, stdio: "ignore", timeout: EXEC_TIMEOUT_MS });
-    execFileSync("git", ["pull", "--ff-only"], { cwd: phrenPath, stdio: "ignore", timeout: EXEC_TIMEOUT_MS });
+    execFileSync("git", ["sparse-checkout", "set", ...paths], { env: nonInteractiveGitEnv(), cwd: phrenPath, stdio: "ignore", timeout: EXEC_TIMEOUT_MS });
+    execFileSync("git", ["pull", "--ff-only"], { env: nonInteractiveGitEnv(), cwd: phrenPath, stdio: "ignore", timeout: EXEC_TIMEOUT_MS });
   } catch (err: unknown) {
     debugLog(`setupSparseCheckout: git sparse-checkout or pull failed: ${errorMessage(err)}`);
   }
@@ -224,10 +226,11 @@ function addGitExcludes(projectDir: string, entries: string[]): void {
   if (!fs.existsSync(gitDir)) return;
   try {
     // Filter out files already tracked by git — exclude only affects untracked files,
-    // and adding tracked files could confuse users who version-control their own CLAUDE.md
+    // and adding tracked files could confuse users who version-control their own AGENTS.md
     let tracked: Set<string>;
     try {
       const out = execFileSync("git", ["ls-files", "--", ...entries], {
+        env: nonInteractiveGitEnv(),
         cwd: projectDir,
         timeout: EXEC_TIMEOUT_QUICK_MS,
         encoding: "utf8",
@@ -268,7 +271,10 @@ function symlinkFile(src: string, dest: string, managedRoot: string): boolean {
       fs.unlinkSync(dest);
     } else {
       try {
-        if (stat.isFile() && fs.readFileSync(dest, "utf8") === fs.readFileSync(src, "utf8")) {
+        const existing = stat.isFile() ? fs.readFileSync(dest, "utf8") : "";
+        const isOldGeneratedAgents = path.basename(dest) === "AGENTS.md"
+          && existing.includes("<!-- phren:generated-agents -->");
+        if (stat.isFile() && (existing === fs.readFileSync(src, "utf8") || isOldGeneratedAgents)) {
           fs.unlinkSync(dest);
         } else {
           const kind = stat.isDirectory() ? "directory" : "file";
@@ -296,39 +302,6 @@ function addTokenAnnotation(filePath: string) {
   atomicWriteText(filePath, `<!-- tokens: ~${rounded} -->\n${content}`);
 }
 
-const GENERATED_AGENTS_MARKER = "<!-- phren:generated-agents -->";
-
-function writeManagedAgentsFile(src: string, dest: string, content: string, managedRoot: string): boolean {
-  try {
-    const stat = fs.lstatSync(dest);
-    if (stat.isDirectory()) {
-      log(`  preserve existing directory: ${dest}`);
-      return false;
-    }
-    if (stat.isSymbolicLink()) {
-      const currentTarget = fs.readlinkSync(dest);
-      const resolvedTarget = path.resolve(path.dirname(dest), currentTarget);
-      if (resolvedTarget === path.resolve(src) || isManagedSymlink(dest, managedRoot)) {
-        fs.unlinkSync(dest);
-      } else {
-        log(`  preserve existing file: ${dest}`);
-        return false;
-      }
-    } else {
-      const existing = fs.readFileSync(dest, "utf8");
-      if (!existing.includes(GENERATED_AGENTS_MARKER)) {
-        log(`  preserve existing file: ${dest}`);
-        return false;
-      }
-      fs.unlinkSync(dest);
-    }
-  } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
-  }
-  atomicWriteText(dest, `${content.trimEnd()}\n`);
-  return true;
-}
-
 // ── Linking operations ──────────────────────────────────────────────────────
 
 function linkGlobal(phrenPath: string, tools: Set<string>, caps: ManagementCapabilities) {
@@ -349,7 +322,7 @@ function linkGlobal(phrenPath: string, tools: Set<string>, caps: ManagementCapab
   }
 
   if (caps.linkGlobalClaudeMd) {
-    const globalClaude = path.join(phrenPath, "global", "CLAUDE.md");
+    const globalClaude = path.join(phrenPath, "global", "AGENTS.md");
     if (fs.existsSync(globalClaude)) {
       symlinkFile(globalClaude, homePath(".claude", "CLAUDE.md"), phrenPath);
       if (tools.has("copilot")) {
@@ -409,11 +382,18 @@ function linkProject(phrenPath: string, project: string, tools: Set<string>, cap
 
   const excludeEntries: string[] = [];
 
-  for (const f of ["CLAUDE.md", "REFERENCE.md", FINDINGS_FILENAME]) {
+  for (const f of ["AGENTS.md", "REFERENCE.md", FINDINGS_FILENAME]) {
     const src = path.join(phrenPath, project, f);
     if (fs.existsSync(src)) {
       if (symlinkFile(src, path.join(target, f), phrenPath)) excludeEntries.push(f);
-      if (f === "CLAUDE.md") {
+      if (f === "AGENTS.md") {
+        if (tools.has("claude")) {
+          try {
+            if (symlinkFile(src, path.join(target, "CLAUDE.md"), phrenPath)) excludeEntries.push("CLAUDE.md");
+          } catch (err: unknown) {
+            logger.debug("link", `linkProject claudeInstructions: ${errorMessage(err)}`);
+          }
+        }
         if (tools.has("copilot")) {
           try {
             const copilotDir = path.join(target, ".github");
@@ -437,8 +417,8 @@ function linkProject(phrenPath: string, project: string, tools: Set<string>, cap
     }
   }
 
-  // Token annotation on CLAUDE.md
-  const claudeFile = path.join(phrenPath, project, "CLAUDE.md");
+  // Token annotation on AGENTS.md
+  const claudeFile = path.join(phrenPath, project, "AGENTS.md");
   if (fs.existsSync(claudeFile)) {
     try { addTokenAnnotation(claudeFile); } catch (err: unknown) {
       logger.debug("link", `linkProject tokenAnnotation: ${errorMessage(err)}`);
@@ -447,19 +427,7 @@ function linkProject(phrenPath: string, project: string, tools: Set<string>, cap
 
   // Project-level skills
   const targetSkills = path.join(target, ".claude", "skills");
-  const skillManifest = config.skills !== false
-    ? syncScopeSkillsToDir(phrenPath, project, targetSkills)
-    : undefined;
-
-  if (tools.has("codex") && fs.existsSync(claudeFile)) {
-    try {
-      const manifest = skillManifest || syncScopeSkillsToDir(phrenPath, project, targetSkills);
-      const agentsContent = `${fs.readFileSync(claudeFile, "utf8").trimEnd()}\n\n${GENERATED_AGENTS_MARKER}\n${renderSkillInstructionsSection(manifest)}\n`;
-      if (writeManagedAgentsFile(claudeFile, path.join(target, "AGENTS.md"), agentsContent, phrenPath)) excludeEntries.push("AGENTS.md");
-    } catch (err: unknown) {
-      logger.debug("link", `linkProject agentsMd: ${errorMessage(err)}`);
-    }
-  }
+  if (config.skills !== false) syncScopeSkillsToDir(phrenPath, project, targetSkills);
 
   // Auto-exclude phren-managed files from git status
   if (excludeEntries.length > 0) addGitExcludes(target, excludeEntries);
@@ -602,6 +570,8 @@ export async function runLink(phrenPath: string, opts: LinkOptions = {}) {
   } else {
     log(`  Hooks registration skipped (hooks-mode is off)`);
   }
+
+  await reconcileModuleHooks(phrenPath, profile);
 
   // Write phren.SKILL.md
   try {

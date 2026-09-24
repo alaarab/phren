@@ -1,0 +1,66 @@
+<!doctype html>
+<!-- Source of truth for App Store review: apps/ios/AppStore/privacy-policy.md. Keep both in step. -->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Phren for iPhone — Privacy Policy</title><style>
+:root{color-scheme:dark}body{margin:40px auto;padding:0 22px;max-width:760px;background:#1e1e1e;color:#fff;font:17px/1.65 system-ui,sans-serif}a{color:#c2aaff}h1,h2{line-height:1.2;margin-top:1.6em}h3{margin-top:1.4em;font-size:18px}pre,code{background:#121416;border-radius:6px}pre{padding:16px;overflow:auto}code{padding:2px 4px}nav{display:flex;gap:24px;font-size:15px;flex-wrap:wrap}footer{margin:44px 0;color:#a4a9b1}table{border-collapse:collapse;width:100%;font-size:15px}td,th{text-align:left;vertical-align:top;padding:8px 10px 8px 0;border-bottom:1px solid #2c2e33}th{color:#a4a9b1;font-weight:500}
+</style></head><body><nav><a href="./">Phren</a><a href="ios.html">iPhone app</a><a href="privacy.html">Privacy</a><a href="support.html">Support</a></nav><main>
+<h1>Privacy Policy — Phren for iPhone</h1>
+<p><strong>Effective 12 September 2026.</strong> Replaces the 10 September 2026 version; the changes are listed at the end.</p>
+<p>Phren for iPhone ("the app") is a client for two things you own: a knowledge store kept in a Git repository on GitHub, and coding-agent sessions running on your own computers. This policy says, item by item, what the app keeps on your phone, what leaves it and to whom, and how to remove it. Everything here is checked against the app's source, which is public.</p>
+
+<h2>The short version</h2>
+<ul>
+<li>There is no Phren account and no Phren server. The developer operates no backend and <strong>receives no data from the app</strong> — no analytics, no crash reports, no telemetry, no advertising identifiers.</li>
+<li>Store data goes between your phone and <strong>GitHub</strong>, using your own token.</li>
+<li>Session data goes between your phone and <strong>your own computers</strong>, over SSH, using a key the phone generated.</li>
+<li>Signing out or forgetting a computer removes what the app kept for it.</li>
+</ul>
+
+<h2>What the app keeps on your phone</h2>
+<table>
+<tr><th>Item</th><th>Where</th><th>Why, and how it is protected</th></tr>
+<tr><td>Your GitHub access token</td><td>iOS Keychain, this device only, available after first unlock</td><td>Sent only as an authorization header to <code>api.github.com</code>. Not synced to iCloud Keychain, not in backups.</td></tr>
+<tr><td>A local copy of your store's markdown and YAML files</td><td>The app's private container</td><td>So the app works offline and searches locally. Includes findings, notes, tasks, truths, review queue, summaries, skills, agent instructions, and the store's own registry files (<code>stores.yaml</code>, <code>machines.yaml</code>, <code>profiles/</code>, each project's <code>phren.project.yaml</code>) so the app knows which of your computers carries which project.</td></tr>
+<tr><td>Changes not yet pushed</td><td>The app's private container</td><td>A queue of edits you made offline, replayed to GitHub when you are back online.</td></tr>
+<tr><td>One SSH private key per added computer</td><td>iOS Keychain, this device only, available only while unlocked</td><td>Identifies this phone to that computer. The private key never leaves the device; only its public half is shown for you to authorize.</td></tr>
+<tr><td>Computer connections</td><td>Device preferences</td><td>Addresses, usernames, the SSH host-key fingerprint you trusted, pinned sessions, and which folder on that computer belongs to which project.</td></tr>
+<tr><td>Chat drafts and attached images</td><td>The app's private container</td><td>So an unsent message survives a relaunch. Messages you queue while an agent is busy are kept in memory only and are gone when the app quits.</td></tr>
+<tr><td>Preferences</td><td>Device preferences</td><td>Theme and custom themes, terminal toolbar and shortcut layouts, task view choices, the default project for quick capture, and a short log of recent captures.</td></tr>
+<tr><td>Widget snapshot</td><td>The app group shared with the widget</td><td>Memory and project counts, your top active task, and the last sync time — nothing else — so the Home Screen widget can draw without the app.</td></tr>
+</table>
+<p>Deleting the app removes its private container and preferences. Keychain items can outlive deletion: <strong>Sign out</strong> deletes the GitHub token and wipes every local store copy; <strong>Forget computer</strong> deletes that computer's SSH key. Remove the matching <code>phren-iphone</code> line from the computer's <code>~/.ssh/authorized_keys</code> to revoke the phone there.</p>
+
+<h2>What leaves your phone, and to whom</h2>
+<h3>GitHub</h3>
+<p>To sign in and sync, the app talks directly to <code>github.com</code> (optional device sign-in) and <code>api.github.com</code> (repository contents). It reads the repositories you attach and writes your edits back as commits authored by your GitHub account. GitHub's handling of that traffic is governed by <a href="https://docs.github.com/site-policy/privacy-policies">GitHub's privacy policies</a>.</p>
+<h3>Your own computers</h3>
+<p>When you open a computer you added, the app connects over SSH to the address you gave, verifies the host key against the fingerprint you trusted, and talks to Phren Hook — a helper you installed and run there. Over that connection the app:</p>
+<ul>
+<li>reads session metadata (workspaces, tabs, agent state, working folders, the git branch of a pane's folder, the computer's own hostname), transcripts of the agent conversations you open, repository diffs you ask for, running web servers, and the account-usage figures your agents report;</li>
+<li>sends the messages, images, approvals and terminal keystrokes you submit, to the computer and agent you chose. The agent may forward that content to its AI provider under that provider's privacy policy — the app has no part in that;</li>
+<li>can create a workspace and start an agent in a project folder when you ask it to.</li>
+</ul>
+<p>Images you upload are kept on that computer for up to 14 days. GitHub credentials are never sent over this connection. Web previews tunnel a development server on the computer into an isolated in-app browser; pages can reach whatever external resources they include.</p>
+<h3>Apple</h3>
+<p>Voice capture uses Apple's Speech framework and requests on-device recognition wherever the device supports it; otherwise iOS may send the audio to Apple under Apple's privacy policy. Audio is not stored; only the text you save becomes a note or task. Siri shortcuts ("add a task to phren") are handled by Siri under Apple's policy and pass the text to the app. Approval requests can be shown as a Live Activity; the activity carries display text and an opaque local identifier only.</p>
+<h3>Nobody else</h3>
+<p>The app contains no analytics, crash-reporting or advertising SDKs. Its networking libraries (SwiftNIO SSH, Swift Crypto) carry no telemetry. The phren command-line tool has an <strong>opt-in</strong> usage counter (<code>phren config telemetry on</code>); when enabled it keeps counts of tool calls and commands in a local file in your store's runtime folder and <strong>does not transmit them anywhere</strong>. The app does not use it.</p>
+
+<h2>Permissions the app may ask for</h2>
+<ul>
+<li><strong>Microphone and speech recognition</strong> — only while you dictate. Decline them and everything else still works, including the keyboard's own dictation.</li>
+<li><strong>Camera and photos</strong> — only when you attach an image to an agent message.</li>
+<li><strong>Local network</strong> — to reach computers you add over SSH.</li>
+</ul>
+
+<h2>Children</h2>
+<p>The app is not directed at children under 13 and collects no data from anyone.</p>
+
+<h2>Changes to this policy</h2>
+<p>Material changes are published at this address with a new effective date and noted in the app's release notes.</p>
+<p><strong>12 September 2026:</strong> the app now also mirrors the store's <code>machines.yaml</code>, <code>profiles/</code> and per-project <code>phren.project.yaml</code>; reads a computer's hostname and a pane's git branch from Phren Hook; can start an agent in a project folder on request; and keeps queued chat messages in memory only. The developer-receives-nothing statement is unchanged.</p>
+
+<h2>Contact</h2>
+<p>Questions about this policy: <strong>ala@alaarab.com</strong></p>
+<p>Source code: <a href="https://github.com/alaarab/phren">github.com/alaarab/phren</a></p>
+</main><footer>Phren for iPhone · Your computers, your memory. · <a href="ios.html">About the app</a> · <a href="support.html">Support</a></footer></body></html>

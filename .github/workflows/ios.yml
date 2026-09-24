@@ -1,62 +1,102 @@
 name: iOS
 
-# PhrenKit's markdown parsers are line-by-line transcriptions of the CLI's
-# TypeScript, verified against fixtures the CLI generates (see
-# apps/ios/README.md "The format contract"). A change to either side of that
-# contract must run this suite — otherwise a TS format change silently
-# desyncs the Swift port and nothing fails until a user's file is mangled.
+# Run these checks deliberately from Actions or locally. Cold simulator builds
+# and the full UI suite must not start automatically on pushes or pull requests.
 on:
-  push:
-    branches: [main, "claude/**"]
-    paths:
-      - "apps/ios/**"
-      - ".github/workflows/ios.yml"
-      - "packages/cli/src/content/**"
-      - "packages/cli/src/data/**"
-      - "packages/cli/src/finding/**"
-      - "packages/cli/src/governance/policy.ts"
-      - "packages/cli/src/core/**"
-      - "packages/cli/src/task/**"
-  pull_request:
-    paths:
-      - "apps/ios/**"
-      - ".github/workflows/ios.yml"
-      - "packages/cli/src/content/**"
-      - "packages/cli/src/data/**"
-      - "packages/cli/src/finding/**"
-      - "packages/cli/src/governance/policy.ts"
-      - "packages/cli/src/core/**"
-      - "packages/cli/src/task/**"
   workflow_dispatch:
+    inputs:
+      ui_tests:
+        description: Also run the full native UI suite (10-minute limit; use targeted local tests for longer work)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   phrenkit-tests:
     name: PhrenKit tests (macOS)
     runs-on: macos-15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      # Use the runner image's default Xcode — pinning an older version
-      # conflicts with the project format Homebrew's current XcodeGen emits.
+      # SwiftNIO's current dependency graph requires Swift 6.2. macos-15
+      # still defaults to Xcode 16.4; select the installed compatible toolchain.
+      - name: Select Xcode 26.3
+        run: sudo xcode-select -s /Applications/Xcode_26.3.app
       - name: swift test
         working-directory: apps/ios/PhrenKit
+        run: swift test
+      - name: SSH connection tests
+        working-directory: apps/ios/PhrenLive
         run: swift test
 
   app-build:
     name: App smoke build (iOS Simulator)
     runs-on: macos-15
+    timeout-minutes: 20
     needs: phrenkit-tests
     steps:
       - uses: actions/checkout@v4
+      - name: Select Xcode 26.3
+        run: sudo xcode-select -s /Applications/Xcode_26.3.app
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install graph renderer dependencies
+        run: pnpm install --frozen-lockfile
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Generate project
         working-directory: apps/ios
         run: xcodegen generate
       - name: Build
+        # SwiftTerm 1.20.0 is pinned in project.yml. Its reviewed build plugin
+        # generates version metadata; fresh CI runners cannot show Xcode's
+        # approval dialog. Match the signed-device build's invocation.
         working-directory: apps/ios
         run: |
           xcodebuild build \
+            -skipPackagePluginValidation \
             -project Phren.xcodeproj \
             -scheme Phren \
             -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO
+      - name: Install graph test browser
+        run: pnpm exec playwright install chromium
+      - name: Test phone graph renderer
+        run: node --test apps/ios/scripts/test-graph.mjs
+      - name: Test full native UI suite (explicit opt-in)
+        if: ${{ inputs.ui_tests }}
+        timeout-minutes: 10
+        # Ad hoc simulator signing supplies Keychain entitlements without a
+        # developer certificate; PHRENTEST01 is a synthetic test team prefix.
+        # Apple's iOS 18.5 simulator lacks libswiftWebKit at its normal path.
+        # Use their deployment-target workaround for this test invocation;
+        # the smoke build and shipping app retain the project's iOS 17 minimum.
+        # https://developer.apple.com/forums/thread/785964
+        working-directory: apps/ios
+        run: |
+          xcrun simctl list devices available --json > "$RUNNER_TEMP/phren-devices.json"
+          PHREN_TEST_DEVICE_ID=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next(v["udid"] for devices in d["devices"].values() for v in devices if v["name"].startswith("iPhone")))' "$RUNNER_TEMP/phren-devices.json")
+          xcodebuild test -project Phren.xcodeproj -scheme Phren \
+            -skipPackagePluginValidation \
+            -test-timeouts-enabled YES -maximum-test-execution-time-allowance 180 \
+            -destination "platform=iOS Simulator,id=$PHREN_TEST_DEVICE_ID" \
+            -resultBundlePath "$RUNNER_TEMP/PhrenUITests.xcresult" \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM=PHRENTEST01 \
+            IPHONEOS_DEPLOYMENT_TARGET=18.4
+      - name: Save native test results
+        if: ${{ always() && inputs.ui_tests }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: PhrenUITests
+          path: ${{ runner.temp }}/PhrenUITests.xcresult
+          if-no-files-found: ignore
+          retention-days: 3

@@ -313,8 +313,9 @@ describe("index policy", () => {
   it("returns defaults when file is missing", () => {
     const policy = getIndexPolicy(phrenDir);
     expect(policy.includeGlobs).toContain("**/*.md");
-    expect(policy.includeGlobs).toContain("**/skills/**/*.md");
-    expect(policy.includeGlobs).toContain(".claude/skills/**/*.md");
+    // Skills are invoked, not retrieved: out of the index by default.
+    expect(policy.excludeGlobs).toContain("**/skills/**");
+    expect(policy.excludeGlobs).toContain("**/.claude/skills/**");
     expect(policy.excludeGlobs).toContain("**/node_modules/**");
     expect(policy.includeHidden).toBe(false);
   });

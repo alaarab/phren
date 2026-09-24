@@ -142,7 +142,7 @@ export function removeGitExcludes(projectDir: string, entries: string[]): void {
 }
 
 /**
- * Remove per-project repo mirror symlinks (CLAUDE.md, REFERENCE.md, findings,
+ * Remove per-project repo mirror symlinks (AGENTS.md, REFERENCE.md, findings,
  * AGENTS.md, CLAUDE-*.md, .github/copilot-instructions.md, .claude/skills/*) that
  * phren created in phren-managed repos, and strip the matching exclude lines.
  * Only removes symlinks that resolve back into the phren store.
@@ -201,7 +201,7 @@ export function sweepProjectMirrors(phrenPath: string): void {
     };
 
     // Fixed mirror files.
-    for (const f of ["CLAUDE.md", "REFERENCE.md", FINDINGS_FILENAME, "AGENTS.md", path.join(".github", "copilot-instructions.md")]) {
+    for (const f of ["AGENTS.md", "CLAUDE.md", "REFERENCE.md", FINDINGS_FILENAME, path.join(".github", "copilot-instructions.md")]) {
       removeMirror(f);
     }
     // CLAUDE-*.md split files.

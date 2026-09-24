@@ -1,0 +1,991 @@
+import PhrenKit
+import PhrenLive
+import SwiftUI
+
+struct ChatAttachmentDraft: Identifiable, Equatable {
+    let attachment: AgentAttachment
+    var path: String?
+    var id: UUID { attachment.id }
+}
+
+/// An unsent message blocked by connection or input readiness, or a receipt
+/// awaiting its transcript acknowledgement. Submitted receipts never replay.
+struct QueuedMessage: Identifiable, Equatable {
+    let id = UUID()
+    var text: String
+    var attachments: [ChatAttachmentDraft]
+    var submittedAfterLine: Int? = nil
+    var submittedText: String? = nil
+    /// When the Hook took it; a receipt the transcript never shows goes stale.
+    var submittedAt: Date? = nil
+}
+
+/// Queues survive switching agents within a chat, like drafts do.
+@MainActor enum AgentChatQueues {
+    static var items: [String: [QueuedMessage]] = [:]
+    static var reconciledRows: [String: Set<String>] = [:]
+}
+
+/// Recently opened conversations keep their model, so reopening one shows
+/// its prepared transcript at once and resumes the stream after its last
+/// line, the way a reconnect does. A few at most; the oldest is dropped.
+/// A chat opened on one pane of a tab (a sub-agent's own session) keeps a
+/// model apart from the tab's, so the two never show each other's rows.
+@MainActor enum AgentChatModels {
+    private struct Key: Hashable { let session: LiveAgentSession.ID; let pane: String? }
+    private static var models: [Key: AgentChatModel] = [:]
+    private static var order: [Key] = []
+    static let limit = 6
+    static func model(for session: LiveAgentSession.ID, pane: String? = nil) -> AgentChatModel {
+        let id = Key(session: session, pane: pane)
+        #if DEBUG
+        // The open journey's baseline: every open builds its model afresh.
+        if ProcessInfo.processInfo.arguments.contains("--chat-fresh-models") { return AgentChatModel() }
+        #endif
+        if let found = models[id] {
+            if order.last != id { order.removeAll { $0 == id }; order.append(id) }
+            return found
+        }
+        let model = AgentChatModel()
+        models[id] = model; order.append(id)
+        while order.count > limit { models.removeValue(forKey: order.removeFirst()) }
+        return model
+    }
+}
+
+/// Warms the conversations a person is likeliest to open next: the first
+/// few reachable sessions as Agents lists them (working and waiting sort
+/// first), when Agents or a chat's drawer opens. Low Power Mode skips it.
+@MainActor enum AgentChatPrefetch {
+    static let count = 3
+    static func warm(_ screen: SessionOverviewMonitor.Screen, excluding current: LiveAgentSession.ID? = nil) {
+        guard !ProcessInfo.processInfo.isLowPowerModeEnabled else { return }
+        #if DEBUG && targetEnvironment(simulator)
+        // Fixture reads are counted by other tests; only the journey measures this.
+        if AgentChatFixture.enabled && !ProcessInfo.processInfo.arguments.contains("--chat-prefetch") { return }
+        #endif
+        let sessions = screen.groups.filter(\.fresh).flatMap(\.sessions)
+            .filter { $0.id != current && ($0.tab.agent != nil || ($0.tab.agentPaneCount ?? 0) > 0) }
+        for session in sessions.prefix(count) {
+            let model = AgentChatModels.model(for: session.id)
+            Task { await model.prefetch(session) }
+        }
+    }
+}
+
+@MainActor enum AgentChatDrafts {
+    static var text: [String: String] = [:]
+    static var attachments: [String: [ChatAttachmentDraft]] = [:]
+    static var revision: UInt64 = 0
+    static var pending: [String: UInt64] = [:]
+    private static var saved: [String: UInt64] = [:]
+    private static var readers: [String: Int] = [:]
+
+    static func beginRead(_ target: String) { readers[target, default: 0] += 1 }
+    static func endRead(_ target: String) {
+        let count = (readers[target] ?? 1) - 1
+        readers[target] = count > 0 ? count : nil
+        releaseSaved(target)
+    }
+    static func didSave(_ target: String, revision: UInt64) {
+        guard pending[target] == revision else { return }
+        saved[target] = revision
+        releaseSaved(target)
+    }
+    private static func releaseSaved(_ target: String) {
+        // A loader may already hold an older disk snapshot. Keep the newest
+        // in-memory draft until every such reader has consumed it. Failed or
+        // superseded saves must never evict unsaved text or attachments.
+        guard readers[target] == nil, let version = pending[target], saved[target] == version else { return }
+        text.removeValue(forKey: target); attachments.removeValue(forKey: target)
+        pending.removeValue(forKey: target); saved.removeValue(forKey: target)
+    }
+    static let store: AgentDraftRepository? = {
+        #if DEBUG && targetEnvironment(simulator)
+        if AppModel.isUITesting && !ProcessInfo.processInfo.arguments.contains("--chat-persistent-draft") { return nil }
+        #endif
+        let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(AppModel.isUITesting ? "AgentDraftTests" : "AgentDrafts", isDirectory: true)
+        #if DEBUG && targetEnvironment(simulator)
+        if AppModel.isUITesting && ProcessInfo.processInfo.arguments.contains("--chat-clear-drafts") { try? FileManager.default.removeItem(at: root) }
+        #endif
+        return AgentDraftRepository(root: root)
+    }()
+}
+
+@Observable @MainActor
+final class AgentChatModel {
+    /// The transcript stream and the approval and status channel.
+    let connection = AgentChatConnection()
+    /// Held and handed-off messages.
+    let outbox = AgentChatOutbox()
+    /// The prepared transcript rows; only the transcript pane observes it.
+    let timelineState = AgentChatTimelineState()
+    /// The draft and its delivery; only the composer observes it.
+    let composer = AgentChatComposerState()
+    /// Where the transcript's rows were last measured; see `AgentChatModels`.
+    let rowLayout = ChatRowLayout()
+
+    init() {
+        outbox.onChange = { [weak self] items in
+            guard let self else { return }
+            // A receipt shows as a muted bubble until its transcript row lands.
+            if Self.pendingEchoes(items) != preparedEchoes { prepareTranscript() }
+            guard let target = self.target, !self.restoringDraft else { return }
+            AgentChatQueues.items[target.id] = items
+        }
+    }
+
+    var interactionConnected: Bool { get { connection.interactionConnected } set { connection.interactionConnected = newValue } }
+    /// Why the approval and status channel dropped, until it reconnects.
+    var statusError: String? { get { connection.statusError } set { connection.statusError = newValue } }
+    var capabilities: LiveCapabilities? { get { connection.capabilities } set { connection.capabilities = newValue } }
+    var questionsSupported: Bool { get { connection.questionsSupported } set { connection.questionsSupported = newValue } }
+    var asyncQuestionsSupported: Bool { get { connection.asyncQuestionsSupported } set { connection.asyncQuestionsSupported = newValue } }
+    var historyStalled: Bool { get { connection.historyStalled } set { connection.historyStalled = newValue } }
+    var historyStalledSince: Date? { get { connection.historyStalledSince } set { connection.historyStalledSince = newValue } }
+    var receivedAt: Date? { get { connection.receivedAt } set { connection.receivedAt = newValue } }
+    /// Counts reconnect backlogs; the view pins to the end on each when following.
+    var reconnectRevision: Int { get { connection.reconnectRevision } set { connection.reconnectRevision = newValue } }
+    /// Only readiness blockers hold messages locally. Submitted entries are receipts.
+    var queue: [QueuedMessage] { get { outbox.items } set { outbox.items = newValue } }
+
+    var panes: [AgentChatPanes.Pane] = []
+    var target: AgentChatTarget?
+    var history = AgentChatHistory() {
+        didSet {
+            if history.messages != oldValue.messages { prepareTranscript() }
+            // Set only on a real change, so the pane hears nothing else.
+            let state = timelineState
+            if state.historyStartLine != history.startLine { state.historyStartLine = history.startLine }
+            if state.hasMore != history.hasMore { state.hasMore = history.hasMore }
+            if state.hasNewer != history.hasNewer { state.hasNewer = history.hasNewer }
+            if state.hasMessages == history.messages.isEmpty { state.hasMessages = !history.messages.isEmpty }
+        }
+    }
+    private(set) var timeline: [ChatTimelineEntry] {
+        get { timelineState.entries } set { timelineState.entries = newValue }
+    }
+    private(set) var timelineRevision: Int {
+        get { timelineState.revision } set { timelineState.revision = newValue }
+    }
+    private(set) var replyPreview: AgentChatPreview? {
+        get { timelineState.replyPreview } set { if timelineState.replyPreview != newValue { timelineState.replyPreview = newValue } }
+    }
+    /// The harness's own word for the running turn (Claude's spinner verb).
+    private var harnessVerb: String? { didSet { if harnessVerb == nil { turnControl.spinner = nil } } }
+    /// The last harness verb each turn showed, by its start: the finished
+    /// line says it in the past tense ("Brewed for 18m 18s").
+    @ObservationIgnored private var turnVerbs: [Date: String] = [:]
+    /// Claude's live spinner fields and the activity line's stop ring. Only
+    /// the activity row observes it, so token updates redraw that row alone.
+    let turnControl = ChatTurnControl()
+    @ObservationIgnored private var pendingPreview: AgentChatPreview?
+    @ObservationIgnored private var quietFirstFrame = false
+    private(set) var backgroundJobs: [ChatBackgroundJob] {
+        get { timelineState.backgroundJobs } set { if timelineState.backgroundJobs != newValue { timelineState.backgroundJobs = newValue } }
+    }
+    private(set) var currentToolName: String? {
+        get { timelineState.currentToolName } set { if timelineState.currentToolName != newValue { timelineState.currentToolName = newValue } }
+    }
+    private(set) var currentToolDetail: String? {
+        get { timelineState.currentToolDetail } set { if timelineState.currentToolDetail != newValue { timelineState.currentToolDetail = newValue } }
+    }
+    private(set) var imagesByMessage: [String: [ChatAttachmentDraft]] {
+        get { timelineState.imagesByMessage } set { if timelineState.imagesByMessage != newValue { timelineState.imagesByMessage = newValue } }
+    }
+    @ObservationIgnored private var preparation = ChatTranscriptPreparation()
+    @ObservationIgnored private var preparationTask: Task<Void, Never>?
+    @ObservationIgnored private var preparationID = UUID()
+
+    private func prepareTranscript() {
+        preparationTask?.cancel()
+        let id = UUID(); preparationID = id
+        let messages = history.messages
+        let preview = pendingPreview
+        if let verb = harnessVerb, let turn = progress.turns.last, turn.phase == .working, let start = turn.startedAt {
+            turnVerbs[start] = verb
+        }
+        let activity = ChatActivityContext(turns: progress.turns, harnessVerb: harnessVerb, turnVerbs: turnVerbs,
+            submittedAt: sentAt ?? preview?.turnStartedAt,
+            submittedAfterLine: submittedAfterLine, busy: isBusy || preview != nil,
+            waiting: needsAnswer || approval != nil || question != nil || terminalPrompt != nil || passwordPrompt
+                || ["waiting", "blocked"].contains(liveActivity ?? ""),
+            workingDirectory: panes.first { $0.id == target?.paneID }?.cwd,
+            pendingEchoes: Self.pendingEchoes(queue))
+        preparedEchoes = activity.pendingEchoes
+        let previous = preparation
+        preparationTask = Task {
+            let value = await Task.detached(priority: .userInitiated) {
+                var value = previous; value.update(messages, activity: activity); return value
+            }.value
+            guard !Task.isCancelled, preparationID == id else { return }
+            // Publish the prepared real row and retire its preview together.
+            replyPreview = pendingPreview
+            guard value.revision != preparation.revision else { return }
+            preparation = value; timeline = value.entries; backgroundJobs = value.jobs
+            currentToolName = value.currentToolName; currentToolDetail = value.currentToolDetail; timelineRevision += 1
+            matchSentImages()
+        }
+    }
+    @ObservationIgnored private var preparedEchoes: [ChatPendingEcho] = []
+    private static func pendingEchoes(_ items: [QueuedMessage]) -> [ChatPendingEcho] {
+        items.filter { $0.submittedAfterLine != nil }
+            .map { ChatPendingEcho(id: $0.id, text: $0.text, images: $0.attachments.filter(\.attachment.isImage), submittedAt: $0.submittedAt) }
+    }
+    private func matchSentImages() {
+        var matches: [String: [ChatAttachmentDraft]] = [:]
+        if !sentImages.isEmpty {
+            for message in messages where message.role == .user {
+                let images = sentImages.filter { item in item.path.map { message.text.contains($0) } == true }
+                if !images.isEmpty { matches[message.id] = images }
+            }
+        }
+        imagesByMessage = matches
+    }
+    var progress = AgentChatProgress() { didSet { if progress.turns != oldValue.turns { prepareTranscript() } } }
+    let reveal = ChatTextReveal()
+    var animateReplies = true
+    private var hasTranscript = false
+    var awaitingReply = false { didSet { if awaitingReply != oldValue { prepareTranscript() } } }
+    private(set) var sentAt: Date? { didSet { if sentAt != oldValue { prepareTranscript() } } }
+    private var submittedAfterLine = -1
+    var liveActivity: String? { didSet { if liveActivity != oldValue { prepareTranscript() } } }
+    /// The agent is summarizing the conversation to reclaim context; the
+    /// header says so and the turn stays busy until it finishes.
+    var isCompacting = false { didSet { if isCompacting != oldValue { prepareTranscript() } } }
+    private var preferProgressActivity = false { didSet { if preferProgressActivity != oldValue { prepareTranscript() } } }
+    var activityPhase: AgentChatProgress.Phase? {
+        if preferProgressActivity { return progress.phase }
+        switch liveActivity {
+        case "working": return .working
+        case "done": return .finished
+        case "idle": return progress.phase == .stopped ? .stopped : nil
+        case "blocked", "waiting", "unknown": return nil
+        default: return progress.phase
+        }
+    }
+    func acceptActivity(_ activity: String?) {
+        guard let activity else { return }
+        if ["idle", "done", "waiting", "blocked"].contains(activity) {
+            pendingPreview = nil; replyPreview = nil
+            if harnessVerb != nil { harnessVerb = nil }
+        }
+        // A repeated terminal snapshot must not overwrite a newer transcript
+        // completion. Only an actual status transition changes precedence.
+        if liveActivity != activity {
+            preferProgressActivity = false
+            if ["working", "idle", "done", "waiting", "blocked"].contains(activity) { awaitingReply = false }
+        }
+        let changed = liveActivity != activity
+        if changed { liveActivity = activity; startDeferredModelSwitch() }
+        scheduleDrain()
+    }
+    var modelName: String?
+    var modelSwitchNotice: String?
+    private var modelBeforeSwitch: String?
+    private(set) var switchingModel = false
+    /// The effort this phone last set with a model switch; nil when unknown.
+    private(set) var modelEffort: String?
+    private(set) var deferredModel: (target: AgentChatTarget, argument: String, name: String, effort: String?)?
+    private var deferredModelSession: LiveAgentSession?
+
+    func switchModel(_ session: LiveAgentSession, argument: String, effort: String? = nil) async throws {
+        guard let expected = target, !expected.isStarting, !switchingModel else {
+            throw PhrenKitError.validation("Wait for the current model switch or session startup to finish.")
+        }
+        switchingModel = true
+        defer { switchingModel = false }
+        let receipt: AgentModelSwitch
+        #if DEBUG && targetEnvironment(simulator)
+        if AgentChatFixture.enabled {
+            receipt = try await AgentChatFixture.switchModel(expected, model: argument, effort: effort)
+        } else {
+            receipt = try await PhrenConnection.switchModel(host: session.host, privateKey: try DeviceSSHKey.load(session.host.id), target: expected, model: argument, effort: effort)
+        }
+        #else
+        receipt = try await PhrenConnection.switchModel(host: session.host, privateKey: try DeviceSSHKey.load(session.host.id), target: expected, model: argument, effort: effort)
+        #endif
+        guard target == expected else { return }
+        modelBeforeSwitch = transcriptContext.modelName
+        modelName = receipt.model; modelEffort = receipt.effort
+        modelSwitchNotice = "Switched to \(receipt.name)"
+        deferredModel = nil; deferredModelSession = nil
+    }
+
+    func deferModelSwitch(_ session: LiveAgentSession, argument: String, effort: String? = nil) {
+        guard let target else { return }
+        let name = AgentModelChoice.choices(source: target.source).first { $0.argument == argument }?.name ?? argument
+        deferredModel = (target, argument, name, effort)
+        deferredModelSession = session
+        startDeferredModelSwitch()
+    }
+
+    func cancelModelSwitch() {
+        guard !switchingModel else { return }
+        deferredModel = nil; deferredModelSession = nil
+    }
+
+    private func startDeferredModelSwitch() {
+        guard let pending = deferredModel, let session = deferredModelSession, pending.target == target,
+              ["idle", "done"].contains(liveActivity ?? ""), !switchingModel else { return }
+        Task {
+            guard deferredModel?.argument == pending.argument, target == pending.target, !switchingModel else { return }
+            do { try await switchModel(session, argument: pending.argument, effort: pending.effort) }
+            catch AgentModelSwitchError.working {
+                // A new turn won the race. Only a fresh idle transition retries.
+                if target == pending.target { liveActivity = "working" }
+            } catch {
+                guard target == pending.target else { return }
+                deferredModel = nil; deferredModelSession = nil
+                modelSwitchNotice = "Model switch not confirmed: " + error.localizedDescription
+            }
+        }
+    }
+
+    func acceptReportedModel(_ name: String?) {
+        guard let name, name != modelBeforeSwitch else { return }
+        modelBeforeSwitch = nil
+        if modelName != name { modelName = name }
+    }
+
+    /// The model and branch the transcript names, kept across status ticks;
+    /// the live branch from Phren Hook wins over the transcript's stamp
+    /// because it is read from git now rather than when the row was written.
+    private var transcriptContext = AgentSessionContext()
+    var statusBranch: String?
+    var branch: String? { statusBranch ?? transcriptContext.branch }
+    var canAnswerQuestion: Bool { question?.isAsync == true ? asyncQuestionsSupported : questionsSupported }
+    var progressUnavailable = false
+    var messages: [AgentChatMessage] { history.messages }
+    var hasMore: Bool { history.hasMore }
+    var error: String?
+    var deliveryError: String? { get { composer.deliveryError } set { composer.deliveryError = newValue } }
+    var loading = true
+    var connected = false
+    var sending: Bool { get { composer.sending } set { composer.sending = newValue } }
+    var loadingHistory = false
+    var stopping = false
+    var needsAnswer = false { didSet { if needsAnswer != oldValue { prepareTranscript() } } }
+    var approval: AgentApproval? { didSet { if approval != oldValue { prepareTranscript() } } }
+    var questionState = AgentQuestionState() { didSet { if questionState.pending != oldValue.pending { prepareTranscript() } } }
+    var question: AgentQuestionPrompt? { questionState.pending.first }
+    var pendingQuestionCount: Int { questionState.pending.count }
+    var answering = false
+    /// What the agent is asking in its terminal, when the Hook saw the request go by.
+    var terminalPrompt: AgentTerminalPrompt? { didSet { if terminalPrompt != oldValue { prepareTranscript() } } }
+    /// True while the pane's own terminal is reading a password.
+    var passwordPrompt = false { didSet { if passwordPrompt != oldValue { prepareTranscript() } } }
+    var deliveryStatus: String? { get { composer.deliveryStatus } set { composer.deliveryStatus = newValue } }
+    var draftStorageError: String? { get { composer.draftStorageError } set { composer.draftStorageError = newValue } }
+    private(set) var restoringDraft = false
+    private var draftSaveTask: Task<Void, Never>?
+    private var draftSaveImmediate = false
+    private var draftLoadTask: Task<Void, Never>?
+    private var draftGeneration = UUID()
+    private var draftRevision: UInt64 = 0
+    var draft: String {
+        get { composer.draft }
+        set {
+            composer.draft = newValue
+            if !restoringDraft, let target { AgentChatDrafts.text[target.id] = newValue; persistDraft() }
+        }
+    }
+    var attachments: [ChatAttachmentDraft] {
+        get { composer.attachments }
+        set {
+            composer.attachments = newValue
+            if !restoringDraft, let target { AgentChatDrafts.attachments[target.id] = newValue; persistDraft() }
+        }
+    }
+    var sentImages: [ChatAttachmentDraft] = [] { didSet { matchSentImages() } }
+    /// Claude's `/btw` answer for the open conversation (AgentChatModel+SideAnswer).
+    var sideAnswer: ChatSideAnswerState?
+    var dismissedSideAnswers: Set<String> = []
+    /// Working activity drives Stop and the timer, never prompt delivery.
+    var isBusy: Bool { !needsAnswer && approval == nil && (awaitingReply || isCompacting || (target?.isStarting != true && activityPhase == .working)) }
+    var pendingReason: String? {
+        if switchingModel { return "Switching model" }
+        if !connected || liveActivity == "unknown" { return "Disconnected" }
+        let heldQuestion = question.map { $0.isAsync != true } ?? false
+        let heldTerminalPrompt = terminalPrompt.map { !$0.queued || liveActivity != "working" } ?? false
+        if approval != nil || heldQuestion || heldTerminalPrompt || passwordPrompt { return "Holding a prompt" }
+        // A verified starting pane can receive its first prompt. Further input
+        // waits for that prompt to create the real conversation binding.
+        if target?.isStarting == true && queue.contains(where: { $0.submittedAfterLine != nil }) { return "Starting" }
+        return nil
+    }
+    var localPendingMessages: [QueuedMessage] { outbox.localPending }
+    func pendingLabel(_ item: QueuedMessage) -> String {
+        pendingReason ?? (item.id == outbox.failedItem ? "Not sent. Retry or edit." : "Sending…")
+    }
+    var automaticReconnectSuspended: Bool { target != nil && connection.rejectedStreamTarget == target }
+
+    func choose(_ pane: AgentChatPanes.Pane, session: LiveAgentSession) {
+        do {
+            let chosen = try pane.target(hostID: session.host.id, workspaceID: session.workspaceID, tabID: session.tab.id, muxID: session.host.muxID)
+            select(chosen)
+        } catch { self.error = error.localizedDescription }
+    }
+
+    func choose(_ chosen: AgentChatTarget, session: LiveAgentSession) {
+        guard chosen.hostID == session.host.id, chosen.muxID == session.host.muxID,
+              chosen.workspaceID == session.workspaceID, chosen.tabID == session.tab.id else {
+            error = "The remote conversation belongs to another computer or workspace."
+            return
+        }
+        select(chosen)
+    }
+
+    private func select(_ chosen: AgentChatTarget) {
+        persistDraft(immediately: true)
+        draftLoadTask?.cancel()
+        let draftRun = UUID(); draftGeneration = draftRun
+        deferredModel = nil; deferredModelSession = nil; modelSwitchNotice = nil; modelBeforeSwitch = nil
+        target = chosen
+        connection.rejectedStreamTarget = nil
+        restoringDraft = true
+        draft = ""; attachments = []
+        draftStorageError = nil
+        AgentChatDrafts.beginRead(chosen.id)
+        draftLoadTask = Task {
+            defer { AgentChatDrafts.endRead(chosen.id) }
+            let saved: AgentDraftStore.Draft
+            do { saved = try await AgentChatDrafts.store?.load(target: chosen.id) ?? .init() }
+            catch {
+                guard !Task.isCancelled, draftGeneration == draftRun else { return }
+                draftStorageError = error.localizedDescription; saved = .init()
+            }
+            guard !Task.isCancelled, draftGeneration == draftRun else { return }
+            draft = AgentChatDrafts.text[chosen.id] ?? saved.text
+            attachments = AgentChatDrafts.attachments[chosen.id] ?? saved.attachments.map { .init(attachment: $0) }
+            restoringDraft = false
+        }
+        pendingPreview = nil; replyPreview = nil; harnessVerb = nil
+        history = .init(); progress = .init(); reveal.finish(); hasTranscript = false
+        awaitingReply = false; sentAt = nil; liveActivity = nil; isCompacting = false; historyStalled = false; historyStalledSince = nil
+        modelName = nil; modelEffort = nil; preferProgressActivity = false
+        transcriptContext = .init(); statusBranch = nil; turnVerbs = [:]
+        connected = false; error = nil; deliveryError = nil
+        sentImages = []; needsAnswer = false; approval = nil; questionState = AgentQuestionState()
+        terminalPrompt = nil; passwordPrompt = false
+        outbox.reconciledRows = AgentChatQueues.reconciledRows[chosen.id] ?? []
+        queue = AgentChatQueues.items[chosen.id] ?? []
+        connection.wakePanes()
+    }
+    private func persistDraft(immediately: Bool = false) {
+        guard !restoringDraft, let target else { return }
+        if !draftSaveImmediate { draftSaveTask?.cancel() }
+        draftSaveImmediate = immediately
+        AgentChatDrafts.revision += 1
+        let revision = AgentChatDrafts.revision; draftRevision = revision
+        AgentChatDrafts.pending[target.id] = revision
+        let saved = AgentDraftStore.Draft(text: draft, attachments: attachments.map(\.attachment))
+        draftSaveTask = Task {
+            do {
+                // Coalesce edits from this UI update, then persist promptly.
+                // A wall-clock debounce can lose the final edit on quick exit.
+                if !immediately { await Task.yield() }
+                try Task.checkCancellation()
+                if let store = AgentChatDrafts.store {
+                    try await store.save(saved, target: target.id, revision: revision)
+                    AgentChatDrafts.didSave(target.id, revision: revision)
+                }
+                if self.target == target, draftRevision == revision { draftStorageError = nil }
+            } catch is CancellationError { }
+            catch { if self.target == target, draftRevision == revision { draftStorageError = error.localizedDescription } }
+        }
+    }
+    func flushDrafts() {
+        persistDraft(immediately: true)
+        let save = draftSaveTask
+        let lease = UIApplication.shared.beginBackgroundTask(withName: "Save agent draft")
+        Task {
+            await save?.value
+            if lease != .invalid { UIApplication.shared.endBackgroundTask(lease) }
+        }
+    }
+    /// A slash command can replace the pane's conversation (/clear, /new):
+    /// read the pane again shortly instead of at the next quiet poll.
+    private func recheckPaneAfterCommand() {
+        Task { [connection] in
+            for delay in [1, 3] {
+                try? await Task.sleep(for: .seconds(delay == 1 ? 1 : 2))
+                connection.wakePanes()
+            }
+        }
+    }
+
+    func chooseAnother() {
+        deferredModel = nil; deferredModelSession = nil; modelSwitchNotice = nil; modelBeforeSwitch = nil
+        pendingPreview = nil; replyPreview = nil; harnessVerb = nil
+        persistDraft(immediately: true)
+        draftLoadTask?.cancel(); draftGeneration = UUID(); restoringDraft = false
+        connection.cancelLinks(); approval = nil
+        target = nil; history = .init(); connected = false; queue = []; outbox.drainTask?.cancel(); outbox.drainTask = nil
+        connection.rejectedStreamTarget = nil
+        progress = .init(); reveal.finish(); hasTranscript = false; awaitingReply = false; sentAt = nil; liveActivity = nil; isCompacting = false
+        historyStalled = false; historyStalledSince = nil; modelName = nil; modelEffort = nil
+        transcriptContext = .init(); statusBranch = nil; turnVerbs = [:]
+        draft = ""; attachments = []; sentImages = []; deliveryError = nil; needsAnswer = false
+        terminalPrompt = nil; passwordPrompt = false
+    }
+    func add(_ attachment: AgentAttachment) {
+        guard attachments.count < ChatAttachmentLimit.maximum else { deliveryError = "Attach up to \(ChatAttachmentLimit.maximum) files in one message."; return }
+        attachments.append(.init(attachment: attachment)); deliveryError = nil
+    }
+
+    func run(_ session: LiveAgentSession) async {
+        connection.lastSession = session
+        connection.rejectedStreamTarget = nil
+        // A reopened conversation keeps its rows; what arrived while it was
+        // closed lands without the word-by-word reveal, and a notice from
+        // the last visit is not current.
+        quietFirstFrame = hasTranscript
+        var reopened = target != nil
+        if error != nil { error = nil }
+        let run = UUID(); connection.generation = run; loading = true
+        // A new appearance can start before the cancelled run unwinds. Its
+        // streams carry the old generation and must not suppress new streams
+        // merely because their pane identity is still the same.
+        connection.cancelLinks(); approval = nil
+        defer {
+            if connection.generation == run {
+                connection.cancelLinks(); approval = nil
+                connected = false; loading = false
+                reveal.finish()
+            }
+        }
+        while !Task.isCancelled {
+            PerformanceCounters.bump("poll.chat-panes")
+            do {
+                let list = try await Self.fetchPanes(session)
+                try Task.checkCancellation()
+                guard connection.generation == run else { return }
+                // A poll that changed nothing must not redraw anything.
+                if panes != list.panes { panes = list.panes }
+                // The conversation may have been replaced in its pane, since
+                // the last visit or while this chat is open (/clear, /new, a
+                // restarted agent): follow the pane's current one at once,
+                // as reopening the chat does, instead of retrying the old.
+                if let kept = target, !kept.isStarting, (try? list.validate(kept)) == nil {
+                    if !reopened { deliveryError = nil }
+                    chooseAnother()
+                }
+                reopened = false
+                if target == nil {
+                    let supported = panes.filter { (try? $0.target(hostID: session.host.id, workspaceID: session.workspaceID, tabID: session.tab.id, muxID: session.host.muxID)) != nil }
+                    if supported.count == 1 { choose(supported[0], session: session) }
+                }
+                var newlyAttached: AgentChatTarget?
+                if let target, target.isStarting { newlyAttached = try list.attachedTarget(for: target) }
+                if let newlyAttached, !sending { attachStartingTarget(newlyAttached) }
+                if let target, newlyAttached == nil || !sending {
+                    let answer = try list.validate(target).needsAnswer || approval != nil
+                    if needsAnswer != answer { needsAnswer = answer }
+                    if !interactionConnected { acceptActivity(try list.validate(target).agentStatus) }
+                    if needsAnswer, awaitingReply { awaitingReply = false }
+                    if target.isStarting { if !connected { connected = true }; if error != nil { error = nil } }
+                    else if shouldBeginStream(target) { beginStream(session, target: target, run: run) }
+                }
+                if loading { loading = false }
+            } catch {
+                guard !Task.isCancelled, connection.generation == run else { return }
+                handleConnectionFailure(error)
+            }
+            // With the transcript and status streams both live, they carry
+            // activity, prompts and a closed pane; the pane list is read
+            // again only to notice added or removed panes. Until then, and
+            // while a session starts, it is what the chat has.
+            let settled = connected && interactionConnected && target?.isStarting == false
+            await connection.pausePanes(target?.isStarting == true ? .seconds(2) : settled ? .seconds(15) : .seconds(3))
+            if Task.isCancelled { return }
+        }
+    }
+
+    /// Loads a conversation's recent rows before it is opened: one pane
+    /// read and one snapshot, no stream. Opening it then resumes after the
+    /// snapshot's last line as a reopen does. Only a model never opened and
+    /// holding nothing is warmed; a failure is silent, the open reads again.
+    func prefetch(_ session: LiveAgentSession) async {
+        guard !prefetching, target == nil, !hasTranscript, connection.lastSession == nil else { return }
+        prefetching = true; defer { prefetching = false }
+        do {
+            let list = try await Self.fetchPanes(session)
+            guard target == nil, connection.lastSession == nil else { return }
+            panes = list.panes
+            let supported = panes.compactMap { try? $0.target(hostID: session.host.id, workspaceID: session.workspaceID, tabID: session.tab.id, muxID: session.host.muxID) }
+            guard supported.count == 1, let chosen = supported.first, !chosen.isStarting else { return }
+            select(chosen)
+            // A held message would be sent by the drain; that waits for the open.
+            guard queue.isEmpty else { return }
+            let frame = try await Self.snapshot(session, target: chosen)
+            guard target == chosen, connection.lastSession == nil, frame.kind == .backlog else { return }
+            accept(frame)
+            // Rows, not a connection: the open's run connects.
+            connected = false
+        } catch {}
+    }
+    @ObservationIgnored private var prefetching = false
+
+    /// Preserve the first optimistic bubble and current composer when the
+    /// transcript appears. `choose` would discard both and reload an empty draft.
+    func attachStartingTarget(_ attached: AgentChatTarget) {
+        guard let previous = target, previous.isStarting, !attached.isStarting,
+              previous.hostID == attached.hostID, previous.muxID == attached.muxID,
+              previous.workspaceID == attached.workspaceID, previous.tabID == attached.tabID,
+              previous.paneID == attached.paneID, previous.source == attached.source else { return }
+        persistDraft(immediately: true)
+        draftLoadTask?.cancel(); draftGeneration = UUID(); restoringDraft = false
+        target = attached
+        AgentChatQueues.items[previous.id] = nil
+        AgentChatQueues.items[attached.id] = queue
+        AgentChatDrafts.text[attached.id] = draft
+        AgentChatDrafts.attachments[attached.id] = attachments
+        persistDraft(immediately: true)
+        connected = false; error = nil
+    }
+
+    func shouldBeginStream(_ target: AgentChatTarget) -> Bool { connection.shouldBeginStream(target) }
+    func handleConnectionFailure(_ error: Error) {
+        pendingPreview = nil; replyPreview = nil; harnessVerb = nil
+        connection.cancelLinks(); approval = nil; isCompacting = false
+        historyStalled = false; historyStalledSince = nil
+        connected = false; loading = false
+        // Polling failures cannot remove a rejected-transcript latch and cause
+        // the same oversized backlog to be decoded again after the host recovers.
+        if !automaticReconnectSuspended { self.error = error.localizedDescription }
+    }
+    func handleStreamFailure(_ error: Error, target: AgentChatTarget) {
+        pendingPreview = nil; replyPreview = nil; harnessVerb = nil
+        connected = false
+        if error is AgentChatTranscript.LimitError {
+            connection.rejectedStreamTarget = target
+            self.error = error.localizedDescription
+        } else {
+            connection.streamTarget = nil; self.error = "Reconnecting… \(error.localizedDescription)"
+            // The pane loop reopens the stream; do not leave it asleep.
+            connection.wakePanes()
+        }
+    }
+
+    private func beginStream(_ session: LiveAgentSession, target: AgentChatTarget, run: UUID) {
+        connection.streamTask?.cancel(); connection.streamTarget = target
+        beginStatus(session, target: target, run: run)
+        beginProgress(session, target: target, run: run)
+        connection.streamTask = Task {
+            do {
+                #if DEBUG && targetEnvironment(simulator)
+                if AgentChatFixture.enabled {
+                    AgentChatFixture.beginStream(target)
+                    if AgentChatFixture.latency { try await Task.sleep(for: .milliseconds(300)) }
+                    while !Task.isCancelled {
+                        guard self.target == target, connection.generation == run else { return }
+                        let frame = try AgentChatFixture.transcript(target)
+                        if frame.kind != .append || !frame.messages.isEmpty || !frame.progressEvents.isEmpty || !frame.queueEvents.isEmpty { accept(frame) }
+                        if let side = try AgentChatFixture.sideAnswerFrame(target) { accept(side) }
+                        try await Task.sleep(for: .milliseconds(500))
+                    }
+                    return
+                }
+                #endif
+                // Raw line totals include private rows with no chat bubble,
+                // so they are the only lossless cursor for the Hook's index.
+                let afterLine = hasTranscript && history.totalLines > 0 ? history.totalLines - 1 : nil
+                let updates = PhrenConnection.chatUpdates(host: session.host, privateKey: try DeviceSSHKey.load(session.host.id), target: target, afterLine: afterLine)
+                for try await frame in updates {
+                    try Task.checkCancellation()
+                    guard self.target == target, connection.generation == run else { return }
+                    accept(frame)
+                }
+                throw LiveConnectionError.disconnected
+            } catch {
+                guard !Task.isCancelled, connection.generation == run, self.target == target else { return }
+                handleStreamFailure(error, target: target)
+            }
+        }
+    }
+    func accept(_ frame: AgentChatTranscript) {
+        if frame.kind == .sideAnswer { if let side = frame.sideAnswer { receiveSideAnswer(side) }; return }
+        let hadPreview = replyPreview != nil
+        let verbChanged = frame.activityVerb != nil && frame.activityVerb != harnessVerb
+        if let verb = frame.activityVerb { harnessVerb = verb }
+        if let spinner = frame.activity, spinner != turnControl.spinner { turnControl.spinner = spinner }
+        if frame.updatesPreview { pendingPreview = frame.preview }
+        else if frame.kind == .backlog || (frame.kind == .append && !frame.messages.isEmpty) { pendingPreview = nil }
+        if frame.kind == .preview {
+            let changedTurn = replyPreview?.turnStartedAt != pendingPreview?.turnStartedAt
+            replyPreview = pendingPreview
+            if changedTurn || verbChanged { prepareTranscript() }
+            return
+        }
+        let previousMessages = messages
+        // Older history must not resurrect a prompt whose answer fell outside
+        // that page. A full snapshot or replacement carries the current
+        // question lifecycle; a reconnect delta is partial and leaves it alone.
+        if frame.kind != .older { questionState.receive(frame.questionEvents, reset: frame.replacesConversation) }
+        reveal.receive(frame, previous: messages, animated: animateReplies && hasTranscript && !hadPreview && !quietFirstFrame)
+        quietFirstFrame = false
+        // phren's own hook output lands with the person's turn, not as the reply.
+        if awaitingReply, frame.messages.contains(where: { $0.line > submittedAfterLine && $0.role != .user && !$0.isHookContext }) { awaitingReply = false }
+        if !connection.progressConnected, !frame.progressEvents.isEmpty || frame.replacesConversation { acceptProgress(frame) }
+        acceptContext(frame)
+        // A backlog after the transcript was already showing is a reconnect
+        // (the phone slept, the link dropped). The rows are re-laid out from
+        // scratch, which leaves the scroll offset pointing somewhere earlier
+        // in the conversation; the view re-pins if it was following the end.
+        let reconnecting = frame.kind == .backlog && hasTranscript
+        if mergeHistory(frame), reconnecting { reconnectRevision &+= 1 }
+        hasTranscript = true; receivedAt = .now
+        // Every frame lands here; only a real change may redraw the chat.
+        if !connected { connected = true }
+        if error != nil { error = nil }
+        if loading { loading = false }
+        if messages == previousMessages { replyPreview = pendingPreview }
+        reconcileHandedOffQueue()
+        scheduleDrain()
+    }
+
+    /// A conversation-replacement snapshot replaces what the transcript said;
+    /// an append, an older page, or a reconnect delta only adds to it.
+    private func acceptContext(_ frame: AgentChatTranscript) {
+        if frame.replacesConversation { transcriptContext = frame.context } else { transcriptContext.merge(frame.context) }
+        acceptReportedModel(transcriptContext.modelName)
+    }
+
+    /// True when the frame changed the history.
+    @discardableResult private func mergeHistory(_ frame: AgentChatTranscript) -> Bool {
+        var updated = history
+        updated.receive(frame)
+        guard updated != history else { return false }
+        history = updated
+        return true
+    }
+
+    func acceptProgress(_ frame: AgentChatTranscript) {
+        let previous = progress.activityLine
+        progress.receive(frame)
+        if progress.activityLine != previous {
+            // Reopening may reveal a completion that arrived in the terminal.
+            // An old start, however, must not revive work after a current idle.
+            preferProgressActivity = frame.kind != .backlog || liveActivity == nil || progress.phase != .working
+        }
+        if frame.progressEvents.contains(where: { event in
+            guard event.line > submittedAfterLine else { return false }
+            switch event.value { case .started, .finished, .stopped: return true; default: return false }
+        }) { awaitingReply = false }
+    }
+
+    var historyError: String?
+
+    func showLatest() {
+        history = .init(); reveal.finish(); hasTranscript = false
+        connection.streamTask?.cancel(); connection.streamTask = nil; connection.streamTarget = nil
+        connected = false; loading = true; historyError = nil
+    }
+
+    func loadOlder(_ session: LiveAgentSession) async {
+        guard !loadingHistory, let target, let before = history.startLine, before > 0 else { return }
+        loadingHistory = true; historyError = nil
+        defer { loadingHistory = false }
+        do {
+            let page: AgentChatTranscript
+            #if DEBUG && targetEnvironment(simulator)
+            if AgentChatFixture.enabled { page = try AgentChatFixture.older(target, beforeLine: before) }
+            else { page = try await PhrenConnection.chatHistory(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, beforeLine: before) }
+            #else
+            page = try await PhrenConnection.chatHistory(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, beforeLine: before)
+            #endif
+            guard !Task.isCancelled, self.target == target else { return }
+            progress.receive(page)
+            mergeHistory(page)
+            await preparationTask?.value
+        } catch is CancellationError {
+        } catch {
+            guard !Task.isCancelled, self.target == target else { return }
+            historyError = "Couldn't load earlier messages. Scroll up to retry."
+        }
+    }
+
+    /// Uploads can be reused after failure; prompt delivery is never replayed.
+    func send(_ session: LiveAgentSession, consumeDraft: (() -> Void)? = nil) async {
+        guard !sending, target != nil,
+              !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty else { return }
+        guard !AgentSlashCommand.isCommand(draft) || attachments.isEmpty else {
+            deliveryError = "Remove attachments before running a slash command."; return
+        }
+        connection.lastSession = session
+        let submitted = draft, items = attachments
+        // All bridge harnesses accept working-turn input through agent.prompt.
+        // Hold only when the connection or a real input prompt prevents it.
+        if pendingReason != nil {
+            queue.append(QueuedMessage(text: submitted, attachments: items))
+            deliveryError = nil
+            if let consumeDraft { consumeDraft() } else { draft = "" }
+            attachments = []
+            persistDraft(immediately: true)
+            return
+        }
+        let optimistic = QueuedMessage(text: submitted, attachments: items)
+        let sendingTarget = target
+        var handedToBubble = false
+        let result = await deliver(submitted, attachments: items, session: session, consumeDraft: consumeDraft) { text in
+            guard self.target == sendingTarget, !AgentSlashCommand.isCommand(submitted) else { return }
+            var pending = optimistic
+            pending.submittedAfterLine = self.history.totalLines - 1
+            pending.submittedText = text
+            pending.submittedAt = .now
+            self.queue.append(pending)
+            // The muted bubble now carries the message; the composer does
+            // not show it twice. A failed delivery puts it back.
+            if consumeDraft == nil, self.draft == submitted {
+                handedToBubble = true
+                self.draft = ""
+                self.attachments.removeAll { item in items.contains { $0.id == item.id } }
+            }
+        }
+        guard target == sendingTarget else { return }
+        if result.rejected { queue.removeAll { $0.id == optimistic.id } }
+        else if let index = queue.firstIndex(where: { $0.id == optimistic.id }) { queue[index].attachments = result.attachments }
+        reconcileHandedOffQueue()
+        // A message the Hook typed into the terminal may have arrived: its
+        // pending bubble offers Retry. Only an untyped one comes back here.
+        let returnsToComposer = Self.returnsToComposer(delivered: result.delivered, typed: result.typed)
+        if handedToBubble, returnsToComposer {
+            attachments = result.attachments.filter { sent in !attachments.contains { $0.id == sent.id } } + attachments
+        }
+        for uploaded in result.attachments {
+            if let index = attachments.firstIndex(where: { $0.id == uploaded.id }) { attachments[index].path = uploaded.path }
+        }
+        guard result.delivered else {
+            // Putting a typed message back ahead of the next one sent it twice.
+            if returnsToComposer, consumeDraft != nil || handedToBubble { draft = DictationSession.join(submitted, draft) }
+            return
+        }
+        // A dictation send already cleared its draft before delivery. Even
+        // identical words spoken afterwards belong to the next message.
+        if consumeDraft == nil, draft == submitted { draft = "" }
+        attachments.removeAll { item in items.contains { $0.id == item.id } }
+        persistDraft(immediately: true)
+    }
+
+    /// Only a message that never reached the terminal goes back in the
+    /// composer; one the Hook typed may have arrived, and its bubble offers Retry.
+    static func returnsToComposer(delivered: Bool, typed: Bool) -> Bool { !delivered && !typed }
+
+    /// Uploads any attachments that still lack a path, then delivers the
+    /// prompt. Returns the attachments with the paths that did upload, so a
+    /// retry never re-uploads; prompt delivery itself is never replayed.
+    func deliver(_ submitted: String, attachments items: [ChatAttachmentDraft], session: LiveAgentSession,
+                         consumeDraft: (() -> Void)? = nil,
+                         submittedToAgent: (String) -> Void = { _ in }) async -> (delivered: Bool, attachments: [ChatAttachmentDraft], rejected: Bool, typed: Bool) {
+        guard let target else { return (false, items, true, false) }
+        var sent = items
+        sending = true; deliveryError = nil
+        consumeDraft?()
+        defer { sending = false; deliveryStatus = nil }
+        do {
+            for index in sent.indices where sent[index].path == nil {
+                deliveryStatus = "Uploading \(index + 1) of \(sent.count)…"
+                let path: String
+                #if DEBUG && targetEnvironment(simulator)
+                if AgentChatFixture.enabled { path = try AgentChatFixture.upload(sent[index].attachment) }
+                else { path = try await PhrenConnection.uploadChatAttachment(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, attachment: sent[index].attachment) }
+                #else
+                path = try await PhrenConnection.uploadChatAttachment(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, attachment: sent[index].attachment)
+                #endif
+                try Task.checkCancellation()
+                sent[index].path = path
+            }
+        } catch {
+            // Older Hooks may reject uploads while input is pending. That is
+            // a conversation conflict, not a failed file transfer.
+            if case LiveConnectionError.gatewayRejection(status: 409, reason: _) = error {
+                deliveryError = "Your message hasn't been sent. \(error.localizedDescription)"
+            } else if error is PhrenKitError {
+                deliveryError = "Your message hasn't been sent. \(error.localizedDescription)"
+            } else {
+                deliveryError = "Attachment upload didn't finish. Your message hasn't been sent. \(error.localizedDescription)"
+            }
+            return (false, sent, true, false)
+        }
+        let paths = sent.compactMap { $0.path }.joined(separator: "\n")
+        // The footer ends in a newline: Claude turns the paths into image
+        // references and joins queued sends, and without it the next message
+        // would run straight on from "computer:".
+        let text = paths.isEmpty ? submitted : submitted + "\n\nAttached files on this computer:\n" + paths + "\n"
+        deliveryStatus = "Sending…"
+        submittedAfterLine = max(0, history.totalLines) - 1
+        // The receipt first, so the person's bubble is never behind the live line.
+        submittedToAgent(text)
+        sentAt = .now; awaitingReply = true
+        do {
+            #if DEBUG && targetEnvironment(simulator)
+            if AgentChatFixture.enabled { try await AgentChatFixture.send(target, text: text) }
+            else { try await PhrenConnection.sendChat(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, text: text) }
+            #else
+            try await PhrenConnection.sendChat(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, text: text)
+            #endif
+            if AgentSlashCommand.isCommand(submitted) { awaitingReply = false; sentAt = nil; recheckPaneAfterCommand() }
+            // Keep small local previews, not full uploaded files, in the conversation.
+            let previews = await Task.detached(priority: .userInitiated) {
+                sent.filter { $0.attachment.isImage }.compactMap { item in
+                    ChatAttachmentPreparation.preview(item.attachment).map { ChatAttachmentDraft(attachment: $0, path: item.path) }
+                }
+            }.value
+            guard self.target == target else { return (true, sent, false, true) }
+            sentImages += previews
+            if sentImages.count > 16 { sentImages.removeFirst(sentImages.count - 16) }
+            return (true, sent, false, true)
+        } catch {
+            awaitingReply = false
+            // A slash command is never confirmed: the agent runs it without
+            // reporting a submitted prompt (/clear even replaces the
+            // conversation). Unconfirmed is the expected outcome there.
+            if AgentSlashCommand.isCommand(submitted), case LiveConnectionError.deliveryUnconfirmed = error {
+                sentAt = nil
+                recheckPaneAfterCommand()
+                return (true, sent, false, true)
+            }
+            let rejected: Bool
+            if case LiveConnectionError.gatewayRejection(let status, _) = error { rejected = (400..<500).contains(status) }
+            else { rejected = error is PhrenKitError }
+            deliveryError = AgentDeliveryMessage.sendFailure(error, rejected: rejected)
+            // The Hook answered after typing it; only whether the agent took it is unknown.
+            var typed = false
+            if case LiveConnectionError.deliveryUnconfirmed = error { typed = true }
+            return (false, sent, rejected, typed)
+        }
+    }
+    static func snapshot(_ session: LiveAgentSession, target: AgentChatTarget) async throws -> AgentChatTranscript {
+        #if DEBUG && targetEnvironment(simulator)
+        if AgentChatFixture.enabled {
+            if AgentChatFixture.latency { try await Task.sleep(for: .milliseconds(300)) }
+            return try AgentChatFixture.transcript(target)
+        }
+        #endif
+        return try await PhrenConnection.chatTranscript(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target)
+    }
+    static func fetchPanes(_ session: LiveAgentSession) async throws -> AgentChatPanes {
+        #if DEBUG && targetEnvironment(simulator)
+        if AgentChatFixture.enabled {
+            if ProcessInfo.processInfo.arguments.contains("--chat-opening-slow"), AgentChatFixture.reads == 0 {
+                try await Task.sleep(for: .seconds(6))
+            }
+            if AgentChatFixture.latency { try await Task.sleep(for: .milliseconds(300)) }
+            return try AgentChatFixture.panes(session)
+        }
+        #endif
+        return try await PhrenConnection.chatPanes(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), workspaceID: session.workspaceID, tabID: session.tab.id)
+    }
+}
+
+enum AgentDeliveryMessage {
+    static func sendFailure(_ error: Error, rejected: Bool) -> String {
+        if rejected { return "Your message hasn't been sent. \(error.localizedDescription)" }
+        if error is CancellationError || (error as NSError).code == NSURLErrorCancelled {
+            return "The connection closed before Phren received confirmation. Check the conversation before sending again. Phren did not retry."
+        }
+        return "Delivery wasn't confirmed. Check the conversation before sending again. Phren did not retry."
+    }
+}

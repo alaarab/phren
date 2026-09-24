@@ -128,12 +128,13 @@ afterEach(() => {
 describe("PhrenClient: process spawning", () => {
   it("spawns the MCP server with [mcpServerPath, storePath] and pipe stdio", () => {
     new PhrenClient({ mcpServerPath: "/mcp/server.js", storePath: "/store" });
-    expect(spawnMock).toHaveBeenCalledWith(process.execPath, ["/mcp/server.js", "/store"], { stdio: "pipe" });
+    // A first-party client that calls tools by their full names asks the server for the full profile.
+    expect(spawnMock).toHaveBeenCalledWith(process.execPath, ["/mcp/server.js", "/store"], expect.objectContaining({ stdio: "pipe", env: expect.objectContaining({ PHREN_MCP_PROFILE: "full" }) }));
   });
 
   it("uses the configured nodePath instead of the current process's executable when given", () => {
     new PhrenClient({ mcpServerPath: "/mcp/server.js", storePath: "/store", nodePath: "/custom/node" });
-    expect(spawnMock).toHaveBeenCalledWith("/custom/node", ["/mcp/server.js", "/store"], { stdio: "pipe" });
+    expect(spawnMock).toHaveBeenCalledWith("/custom/node", ["/mcp/server.js", "/store"], expect.objectContaining({ stdio: "pipe" }));
   });
 });
 

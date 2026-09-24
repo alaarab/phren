@@ -1,3 +1,4 @@
+import { moduleEnabled } from "./modules/runtime.js";
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
@@ -16,13 +17,16 @@ import { mergeConfig, getWorkflowPolicy } from "./shared/governance.js";
 import { getMcpEnabledPreference, getHooksEnabledPreference } from "./init/init.js";
 import { getManagementPreset, resolveManagementCapabilities } from "./init/management-preset.js";
 import { getTelemetrySummary } from "./telemetry.js";
-import { runGit as runGitShared, errorMessage } from "./utils.js";
+import { runGit, errorMessage } from "./utils.js";
 import { logger } from "./logger.js";
 import { readRuntimeHealth, resolveTaskFilePath, FINDINGS_FILENAME } from "./data/access.js";
 import { assessSyncOutage } from "./shared/governance.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
 import { renderPhrenArt } from "./phren-art.js";
 import { RESET, BOLD, DIM, GREEN, YELLOW, RED, CYAN } from "./shell/render.js";
+import { storeWeight } from "./store-weight.js";
+import { activeStoreAuthFailure, storeAuthDetail } from "./sync/auth.js";
+import { describeAutoSave } from "./sync/outcome.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -50,10 +54,6 @@ function countBullets(filePath: string): number {
 function countQueueItems(phrenPath: string, project: string): number {
   const queueFile = path.join(phrenPath, project, "review.md");
   return countBullets(queueFile);
-}
-
-function runGit(cwd: string, args: string[]): string | null {
-  return runGitShared(cwd, args, EXEC_TIMEOUT_QUICK_MS, debugLog);
 }
 
 function hasCommandHook(value: unknown): boolean {
@@ -95,12 +95,12 @@ export async function runStatus() {
         ? `${resolved.taskMode} ${DIM}(project override)${RESET}`
         : resolved.taskMode;
       console.log(`  ${DIM}sensitivity${RESET}  ${projectSensitivity}`);
-      console.log(`  ${DIM}task mode${RESET}    ${projectTaskMode}`);
+      if (moduleEnabled(phrenPath, "tasks", profile)) console.log(`  ${DIM}task mode${RESET}    ${projectTaskMode}`);
       if (resolved.proactivity.base || resolved.proactivity.findings || resolved.proactivity.tasks) {
         const parts: string[] = [];
         if (resolved.proactivity.base) parts.push(`base:${resolved.proactivity.base}`);
         if (resolved.proactivity.findings) parts.push(`findings:${resolved.proactivity.findings}`);
-        if (resolved.proactivity.tasks) parts.push(`tasks:${resolved.proactivity.tasks}`);
+        if (moduleEnabled(phrenPath, "tasks", profile) && resolved.proactivity.tasks) parts.push(`tasks:${resolved.proactivity.tasks}`);
         console.log(`  ${DIM}proactivity${RESET}  ${parts.join(" ")} ${DIM}(project override)${RESET}`);
       }
     } catch (err: unknown) {
@@ -111,6 +111,13 @@ export async function runStatus() {
   // Phren path and config
   console.log(`  ${DIM}path${RESET}     ${phrenPath}`);
   console.log(`  ${DIM}mode${RESET}     ${manifest?.installMode || "unknown"}`);
+  try {
+    const w = storeWeight(phrenPath, profile);
+    const k = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n));
+    console.log(`  ${DIM}weight${RESET}   ${k(w.findings)} words of findings · ${k(w.reference)} archived${moduleEnabled(phrenPath, "tasks", profile) ? ` · ${k(w.tasks)} in tasks` : ""} · ${k(w.skills)} in skills · AGENTS.md ${w.globalClaude} words`);
+  } catch (err: unknown) {
+    logger.debug("status", `weight: ${errorMessage(err)}`);
+  }
   if (manifest?.workspaceRoot) {
     console.log(`  ${DIM}workspace${RESET} ${manifest.workspaceRoot}`);
   }
@@ -314,10 +321,12 @@ export async function runStatus() {
       for (const store of stores) {
         const exists = store.available !== false;
         const existsLabel = exists ? `${GREEN}yes${RESET}` : `${RED}no${RESET}`;
-        console.log(`    ${store.name} ${DIM}(${store.role}, ${store.sync})${RESET} path=${existsLabel}${store.remote ? ` remote=${DIM}${store.remote}${RESET}` : ""}`);
+        const auth = exists ? activeStoreAuthFailure(store.path) : undefined;
+        const syncDetail = auth ? ` ${YELLOW}${storeAuthDetail(auth)}${RESET}` : store.remote ? ` remote=${DIM}${store.remote}${RESET}` : "";
+        console.log(`    ${store.name} ${DIM}(${store.role}, ${store.sync})${RESET} path=${existsLabel}${syncDetail}`);
       }
-      // A store declared in stores.yaml but absent here is not cosmetic: any
-      // project it claims cannot be written until it is attached.
+      // A store attached here whose folder is gone is not cosmetic: any
+      // project it claims cannot be written until the folder is back.
       const { describeUnavailableStore } = await import("./store-registry.js");
       for (const store of stores.filter((s) => s.available === false)) {
         console.log(`    ${YELLOW}! ${describeUnavailableStore(store)}${RESET}`);
@@ -339,16 +348,16 @@ export async function runStatus() {
   for (const dir of projectDirs) {
     const projName = path.basename(dir);
     totalFindings += countBullets(path.join(phrenPath, projName, FINDINGS_FILENAME));
-    const taskPath = resolveTaskFilePath(phrenPath, projName);
+    const taskPath = moduleEnabled(phrenPath, "tasks", profile) ? resolveTaskFilePath(phrenPath, projName) : null;
     if (taskPath) totalTask += countBullets(taskPath);
     totalQueue += countQueueItems(phrenPath, projName);
   }
 
-  console.log(`\n  ${DIM}phren holds${RESET}  ${projectDirs.length} projects, ${totalFindings} findings, ${totalTask} tasks, ${totalQueue} queued`);
+  console.log(`\n  ${DIM}phren holds${RESET}  ${projectDirs.length} projects, ${totalFindings} findings${moduleEnabled(phrenPath, "tasks", profile) ? `, ${totalTask} tasks` : ""}, ${totalQueue} queued`);
 
   const gitTarget = manifest?.installMode === "project-local" && manifest.workspaceRoot ? manifest.workspaceRoot : phrenPath;
-  const isGitRepo = runGit(gitTarget, ["rev-parse", "--is-inside-work-tree"]) === "true";
-  const hasOriginRemote = isGitRepo && Boolean(runGit(gitTarget, ["remote", "get-url", "origin"]));
+  const isGitRepo = runGit(gitTarget, ["rev-parse", "--is-inside-work-tree"], EXEC_TIMEOUT_QUICK_MS, debugLog) === "true";
+  const hasOriginRemote = isGitRepo && Boolean(runGit(gitTarget, ["remote", "get-url", "origin"], EXEC_TIMEOUT_QUICK_MS, debugLog));
   const runtime = readRuntimeHealth(phrenPath);
   if (manifest?.installMode === "project-local") {
     console.log(`\n  ${DIM}sync${RESET}     workspace-managed`);
@@ -359,13 +368,16 @@ export async function runStatus() {
     console.log(`           local commits ${runtime.lastSync?.unsyncedCommits ?? 0}`);
   } else {
     console.log(`\n  ${DIM}sync${RESET}     auto-save ${runtime.lastAutoSave?.status || "n/a"}`);
+    if (runtime.lastAutoSave?.status === "sync-failed" || runtime.lastAutoSave?.status === "error") {
+      console.log(`           ${RED}${describeAutoSave(runtime.lastAutoSave, runtime.lastSync)}${RESET}`);
+    }
     console.log(`           last pull ${runtime.lastSync?.lastPullStatus || "n/a"}${runtime.lastSync?.lastPullAt ? ` @ ${runtime.lastSync.lastPullAt}` : ""}`);
     console.log(`           last push ${runtime.lastSync?.lastPushStatus || "n/a"}${runtime.lastSync?.lastPushAt ? ` @ ${runtime.lastSync.lastPushAt}` : ""}`);
     console.log(`           unsynced commits ${runtime.lastSync?.unsyncedCommits ?? 0}`);
     if (runtime.lastSync?.lastSuccessfulPushAt) {
       console.log(`           last successful push ${runtime.lastSync.lastSuccessfulPushAt}`);
     }
-    if (runtime.lastSync?.lastPushDetail) {
+    if (runtime.lastSync?.lastPushDetail && !activeStoreAuthFailure(phrenPath)) {
       console.log(`           push detail ${runtime.lastSync.lastPushDetail}`);
     }
     const outage = assessSyncOutage(runtime.lastSync);
@@ -376,20 +388,34 @@ export async function runStatus() {
 
   // Recent changes (git log)
   if (isGitRepo) {
-    const log = runGit(gitTarget, ["log", "--oneline", "-5", "--no-decorate"]);
+    const log = runGit(gitTarget, ["log", "--oneline", "-5", "--no-decorate"], EXEC_TIMEOUT_QUICK_MS, debugLog);
     if (log) {
       console.log(`\n  ${DIM}recent${RESET}`);
       for (const line of log.split("\n")) {
         console.log(`    ${DIM}${line}${RESET}`);
       }
     }
-    const dirty = runGit(gitTarget, ["status", "--porcelain"]);
+    const dirty = runGit(gitTarget, ["status", "--porcelain"], EXEC_TIMEOUT_QUICK_MS, debugLog);
     if (dirty) {
       const count = dirty.split("\n").filter(Boolean).length;
       console.log(`    ${YELLOW}${count} uncommitted change(s)${RESET}`);
     }
   } else {
     console.log(`\n  ${DIM}${gitTarget} is not a git repo${RESET}`);
+  }
+
+  // Health: the same data Phren Hook serves at /v1/health/details.
+  if (moduleEnabled(phrenPath, "hook", profile)) {
+    try {
+      const { hookRequest } = await import("./bridge/client.js");
+      const { healthDetails, formatHealth } = await import("./bridge/health.js");
+      const hook = await hookRequest("/v1/health", undefined, undefined, 2_000).catch(() => undefined);
+      const health = await healthDetails({ store: phrenPath, hookVersion: typeof hook?.version === "string" ? hook.version : undefined });
+      console.log(`\n  ${BOLD}Health${RESET} ${DIM}(${health.computer.name})${RESET}`);
+      for (const line of formatHealth(health, { dim: DIM, reset: RESET, red: RED, yellow: YELLOW, green: GREEN })) console.log(line);
+    } catch (err: unknown) {
+      logger.debug("status", `health: ${errorMessage(err)}`);
+    }
   }
 
   // Telemetry

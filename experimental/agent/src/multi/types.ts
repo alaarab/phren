@@ -6,6 +6,9 @@
  */
 
 import type { PermissionMode } from "../permissions/types.js";
+import type { SandboxMode } from "../permissions/kernel-sandbox.js";
+
+export const MAX_SPAWN_DEPTH = 2;
 
 // ── Parent → Child ──────────────────────────────────────────────────────────
 
@@ -40,6 +43,9 @@ export interface SpawnPayload {
   agentType?: string;
   /** Path to a git worktree used for isolation. */
   worktreePath?: string;
+  depth?: number;
+  sandboxMode?: SandboxMode;
+  allowedPaths?: string[];
 }
 
 /** Parent can send a cancellation signal. */
@@ -126,6 +132,9 @@ export interface DoneEvent {
     turns: number;
     toolCalls: number;
     totalCost?: string;
+    inputTokens?: number;
+    outputTokens?: number;
+    costUsd?: number;
   };
 }
 
@@ -182,6 +191,8 @@ export type AgentStatus = "starting" | "running" | "idle" | "done" | "error" | "
 export interface AgentEntry {
   id: string;
   task: string;
+  /** Working directory, which is how phren joins this agent to a project. */
+  cwd?: string;
   /** Short display name for the agent tab (e.g. "fixer", "explorer"). */
   displayName?: string;
   status: AgentStatus;

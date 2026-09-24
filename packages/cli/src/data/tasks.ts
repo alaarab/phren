@@ -1,3 +1,5 @@
+import { moduleEnabled } from "../modules/runtime.js";
+import { disabledHint } from "../modules/registry.js";
 import * as fs from "fs";
 import * as path from "path";
 import { randomBytes, randomUUID } from "crypto";
@@ -14,14 +16,14 @@ import { validateTaskFormat } from "../shared/content.js";
 import { withSafeLock, ensureProject } from "../shared/data-utils.js";
 import { getNonPrimaryStores, getStoreProjectDirs } from "../store-registry.js";
 import { storeAwareProjectPath } from "../store-routing.js";
+import { TASKS_FILENAME } from "../filenames.js";
 
 const ACTIVE_HEADINGS = new Set(["active", "in progress", "in-progress", "current", "wip"]);
 const QUEUE_HEADINGS = new Set(["queue", "queued", "task", "todo", "upcoming", "next"]);
 const DONE_HEADINGS = new Set(["done", "completed", "finished", "archived"]);
 
 export type TaskSection = "Active" | "Queue" | "Done";
-export const TASKS_FILENAME = "tasks.md";
-export const TASK_FILE_ALIASES = [TASKS_FILENAME] as const;
+export { TASK_FILE_ALIASES, TASKS_FILENAME, isTaskFileName } from "../filenames.js";
 
 export interface TaskItem {
   /** Positional ID for display (e.g. "A1", "Q3"). Recomputed on every read — use stableId for persistent references. */
@@ -83,7 +85,7 @@ function stripPinnedTag(text: string): string {
   return text.replace(/\s*\[pinned\]/gi, "").trim();
 }
 
-function stripBulletPrefix(line: string): { checked: boolean; body: string } {
+export function stripBulletPrefix(line: string): { checked: boolean; body: string } {
   const checked = /^-\s*\[[xX]\]\s+/.test(line);
   const body = line
     .replace(/^-\s*\[[ xX]\]\s+/, "")
@@ -171,7 +173,7 @@ function newBid(): string {
 }
 
 /** Strip the metadata comment from a raw line, returning the clean text and any extracted fields. */
-function stripBid(text: string): { clean: string; bid?: string; rank?: number; lastActivity?: string; createdAt?: string; sessionId?: string; scope?: string; childFindings?: string[]; parentFinding?: string; speculative?: boolean } {
+export function stripBid(text: string): { clean: string; bid?: string; rank?: number; lastActivity?: string; createdAt?: string; sessionId?: string; scope?: string; childFindings?: string[]; parentFinding?: string; speculative?: boolean } {
   const m = text.match(METADATA_PATTERN);
   if (!m) return { clean: text };
   const rankNum = m[2] ? Number.parseInt(m[2], 10) : undefined;
@@ -227,10 +229,6 @@ export function canonicalTaskFilePath(phrenPath: string, project: string): strin
   // Store-aware: locks and writes must target the owning store's file, not a
   // phantom primary-store path.
   return storeAwareProjectPath(phrenPath, project, TASKS_FILENAME);
-}
-
-export function isTaskFileName(filename: string): boolean {
-  return filename.toLowerCase() === TASKS_FILENAME;
 }
 
 export function resolveTaskFilePath(phrenPath: string, project: string): string | null {
@@ -410,6 +408,7 @@ function taskArchivePath(phrenPath: string, project: string): string {
 }
 
 export function readTasks(phrenPath: string, project: string): PhrenResult<TaskDoc> {
+  if (!moduleEnabled(phrenPath, "tasks")) return phrenErr(disabledHint("tasks"), PhrenError.VALIDATION_ERROR);
   const ensured = ensureProject(phrenPath, project);
   if (!ensured.ok) return forwardErr(ensured);
 
@@ -502,7 +501,7 @@ export function addTask(phrenPath: string, project: string, item: string, opts?:
       line,
       checked: false,
       priority: normalizePriority(line),
-      createdAt: opts?.createdAt,
+      createdAt: opts?.createdAt ?? new Date().toISOString(),
       sessionId: opts?.sessionId,
       scope: opts?.scope,
       parentFinding: opts?.parentFinding,
@@ -540,6 +539,7 @@ export function addTasks(phrenPath: string, project: string, items: string[], op
         checked: false,
         priority: normalizePriority(line),
         scope: opts?.scope,
+        createdAt: new Date().toISOString(),
       });
       added.push(line);
     }

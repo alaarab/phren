@@ -1,31 +1,90 @@
 import SwiftUI
+import UIKit
 import PhrenKit
 
 @main
 struct PhrenApp: App {
+    @UIApplicationDelegateAdaptor(PhrenAppDelegate.self) private var appDelegate
     @State private var model = AppModel()
+    @State private var appearance = PhrenAppearance.shared
+    @State private var approvals = ApprovalActivityController.shared
     @Environment(\.scenePhase) private var scenePhase
+    @AppStorage("sessions.live.preferences.v1", store: AppRuntime.defaults) private var notificationHosts = Data()
+    private let launchedAt = CFAbsoluteTimeGetCurrent()
 
     init() {
         Self.applyPhrenChrome()
+        // UI tests wait on elements appearing; UIKit's own animations only add
+        // latency. SwiftUI animations are dropped by the root transaction below.
+        if AppRuntime.isUITesting { UIView.setAnimationsEnabled(false) }
     }
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environment(model)
-                .tint(PhrenTheme.accent)
-                // The phren identity is dark-only (docs/style.css).
+                .environment(\.liveSessionPreferences, LiveSessionPreferencesStore.shared)
+                .defaultAppStorage(AppRuntime.defaults)
+                .tint(PhrenTheme.navigation)
+                .foregroundStyle(PhrenTheme.text)
+                // All current palettes use dark system controls and keyboards.
                 .preferredColorScheme(.dark)
-                .task { await model.bootstrap() }
+                // UI tests run without animation, the same way the
+                // reduce-motion controls fixture does.
+                .transaction { transaction in
+                    if AppRuntime.isUITesting { transaction.animation = nil }
+                }
+                .onChange(of: appearance.palette) { _, _ in Self.applyPhrenChrome() }
+                .modifier(ExternalURLTestCapture())
+                .performanceCountersProbe()
+                .task {
+                    guard !AppRuntime.isControlsFixture else { return }
+                    // ActivityKit reconciliation can wait until SwiftUI has
+                    // produced the first scene.
+                    _ = SessionWorkingActivityController.shared
+                    #if DEBUG
+                    if ProcessInfo.processInfo.environment["PHREN_PERFORMANCE_LOG"] == "1" {
+                        print("[PhrenPerformance] first scene task: \(String(format: "%.3f", (CFAbsoluteTimeGetCurrent() - launchedAt) * 1_000)) ms")
+                    }
+                    #endif
+                    await approvals.retireExpired()
+                    await model.bootstrap()
+                    await ApprovalPushNotifications.registerSavedHosts()
+                    AgentLaunch.restorePendingNavigation()
+                    if scenePhase == .active { LocalNotificationMonitor.shared.enterForeground() }
+                }
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    if let message = approvals.message {
+                        PhrenNoticeBanner(
+                            title: "Permission request",
+                            message: message,
+                            icon: approvalNoticeFailed(message) ? "exclamationmark.triangle.fill" : "checkmark.circle.fill",
+                            tint: approvalNoticeFailed(message) ? PhrenTheme.danger : PhrenTheme.success,
+                            identifier: "approval-result-notice"
+                        ) { approvals.message = nil }
+                        .padding(.horizontal, PhrenTheme.Space.large)
+                        .padding(.vertical, PhrenTheme.Space.small)
+                    }
+                }
                 .onChange(of: scenePhase) { _, phase in
+                    guard !AppRuntime.isControlsFixture else { return }
                     // Live sync runs only while the app is visible; returning
                     // to the foreground triggers an immediate catch-up pull.
                     switch phase {
-                    case .active: Task { await model.enterForeground() }
+                    case .active: Task { await approvals.retireExpired(); await ApprovalPushNotifications.registerSavedHosts(); await model.enterForeground() }
                     case .background, .inactive: Task { await model.enterBackground() }
                     @unknown default: break
                     }
+                    // Returning to the foreground reaches every computer again
+                    // at once: the overview keeps its cached rows shown as
+                    // refreshing, never stale or disconnected, until a first
+                    // answer lands or the request fails outright.
+                    if phase == .active { SessionOverviewMonitor.shared.returnToForeground() }
+                    if phase == .active { LocalNotificationMonitor.shared.enterForeground() }
+                    if phase == .background { LocalNotificationMonitor.shared.enterBackground() }
+                }
+                .onChange(of: notificationHosts) { _, _ in
+                    Task { await LocalNotificationMonitor.shared.hostsChanged() }
                 }
                 // Widget taps (`widgetURL`/`Link` on `phren://…`) land here
                 // directly — no CFBundleURLTypes registration needed, that's
@@ -34,7 +93,19 @@ struct PhrenApp: App {
                 .onOpenURL { url in
                     guard url.scheme == "phren" else { return }
                     switch url.host {
-                    case "review": model.selectedTab = .review
+                    case "review":
+                        model.selectedTab = .projects
+                        model.showingMemoryMaintenance = true
+                    case "projects": model.selectedTab = .projects
+                    case "agents": model.selectedTab = .agents
+                    case "approval":
+                        guard let requestID = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                            .queryItems?.first(where: { $0.name == "request" })?.value else { return }
+                        approvals.open(requestID: requestID)
+                    case "session":
+                        guard let routeID = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                            .queryItems?.first(where: { $0.name == "route" })?.value else { return }
+                        try? SessionWorkingActivityController.shared.open(routeID: routeID)
                     case "tasks": model.selectedTab = .tasks
                     default: break
                     }
@@ -42,14 +113,19 @@ struct PhrenApp: App {
         }
     }
 
-    /// Navy navigation + tab chrome matching the site's --bg/--bg-1 surfaces.
+    private func approvalNoticeFailed(_ message: String) -> Bool {
+        message.contains("invalid") || message.contains("wasn't confirmed")
+    }
+
+    /// Neutral chrome keeps the content and small status accents in focus.
     private static func applyPhrenChrome() {
-        let navy = UIColor(PhrenTheme.bg)
+        let background = UIColor(PhrenTheme.bg)
         let text = UIColor(PhrenTheme.text)
 
         let nav = UINavigationBarAppearance()
         nav.configureWithOpaqueBackground()
-        nav.backgroundColor = navy
+        nav.backgroundColor = background
+        nav.shadowColor = .clear
         nav.titleTextAttributes = [.foregroundColor: text]
         nav.largeTitleTextAttributes = [.foregroundColor: text]
         UINavigationBar.appearance().standardAppearance = nav
@@ -58,51 +134,143 @@ struct PhrenApp: App {
 
         let tab = UITabBarAppearance()
         tab.configureWithOpaqueBackground()
-        tab.backgroundColor = navy
+        tab.backgroundColor = background
+        for item in [tab.stackedLayoutAppearance, tab.inlineLayoutAppearance, tab.compactInlineLayoutAppearance] {
+            item.normal.iconColor = UIColor(PhrenTheme.textMuted)
+            item.normal.titleTextAttributes = [.foregroundColor: UIColor(PhrenTheme.textMuted)]
+            item.selected.iconColor = text
+            item.selected.titleTextAttributes = [.foregroundColor: text]
+        }
+        UISwitch.appearance().onTintColor = UIColor(PhrenTheme.accentSolid)
         UITabBar.appearance().standardAppearance = tab
         UITabBar.appearance().scrollEdgeAppearance = tab
+
+        // UIAppearance covers new screens; update existing bars as well so a
+        // theme changes immediately without discarding navigation or drafts.
+        func update(_ view: UIView) {
+            if let bar = view as? UINavigationBar {
+                bar.standardAppearance = nav; bar.scrollEdgeAppearance = nav; bar.compactAppearance = nav
+            } else if let bar = view as? UITabBar {
+                bar.standardAppearance = tab; bar.scrollEdgeAppearance = tab
+            } else if let toggle = view as? UISwitch { toggle.onTintColor = UIColor(PhrenTheme.accentSolid) }
+            for child in view.subviews { update(child) }
+        }
+        for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+            for window in scene.windows { update(window) }
+        }
+    }
+}
+
+/// UI tests inspect the actual URL handed to iOS, rather than merely checking
+/// that a button attempted to launch an unavailable app in the simulator.
+private struct ExternalURLTestCapture: ViewModifier {
+    #if DEBUG && targetEnvironment(simulator)
+    @State private var captured = ""
+    #endif
+    func body(content: Content) -> some View {
+        #if DEBUG && targetEnvironment(simulator)
+        if AppModel.isUITesting && ProcessInfo.processInfo.arguments.contains("--capture-chat-links") {
+            content
+                .environment(\.openURL, OpenURLAction { url in
+                    guard url.host == "example.org" else { return .systemAction }
+                    captured = url.absoluteString
+                    return .handled
+                })
+                .overlay(alignment: .top) {
+                    Text(captured).font(.caption2)
+                        .accessibilityIdentifier("chat-opened-url")
+                        .allowsHitTesting(false)
+                }
+        } else { content }
+        #else
+        content
+        #endif
     }
 }
 
 struct RootView: View {
-    @Environment(AppModel.self) private var model
-
+    // GitHub is a memory connection, not the app's authentication boundary.
+    // Keep this hierarchy stable when that connection expires or signs out,
+    // so SSH navigation, terminals, and in-flight chat are not torn down.
     var body: some View {
-        switch model.phase {
-        case .loading:
-            ProgressView("Loading…")
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(PhrenTheme.bg)
-        case .signedOut, .pickingRepo, .initialSync:
-            OnboardingFlow()
-        case .ready:
+        #if DEBUG
+        if AppRuntime.isControlsFixture {
+            let reduceMotion = ProcessInfo.processInfo.arguments.contains("--controls-reduce-motion")
+            PhrenControlsFixture()
+                .dynamicTypeSize(ProcessInfo.processInfo.arguments.contains("--controls-accessibility") ? .accessibility5 : .large)
+                // The Reduce Motion environment value is read-only; the fixture drops animations the same way.
+                .transaction { transaction in if reduceMotion { transaction.animation = nil } }
+        } else {
             MainTabView()
         }
+        #else
+        MainTabView()
+        #endif
     }
 }
 
 struct MainTabView: View {
     @Environment(AppModel.self) private var model
+    @State private var showingWhatsNew = false
 
     var body: some View {
         @Bindable var model = model
         TabView(selection: $model.selectedTab) {
-            ProjectsView()
+            Group {
+                if model.phase == .ready { ProjectsView() }
+                else { OnboardingFlow() }
+            }
                 .tabItem { Label("Projects", systemImage: "square.grid.2x2") }
                 .tag(AppTab.projects)
-            ReviewView()
-                .tabItem { Label("Review", systemImage: "checkmark.seal") }
-                .badge(model.totalReviewCount)
-                .tag(AppTab.review)
-            TasksView()
+            PhrenNavigationStack { LiveSessionsView() }
+                .tabItem { Label("Agents", systemImage: "waveform.path") }
+                .tag(AppTab.agents)
+            Group {
+                if model.phase == .ready { TasksView() }
+                else { MemoryConnectionPrompt(title: "Tasks") }
+            }
                 .tabItem { Label("Tasks", systemImage: "checklist") }
                 .tag(AppTab.tasks)
-            SearchView()
-                .tabItem { Label("Search", systemImage: "magnifyingglass") }
-                .tag(AppTab.search)
+            Group {
+                if model.phase == .ready { MemoryView() }
+                else { MemoryConnectionPrompt(title: "Memory") }
+            }
+                .tabItem { Label("Memory", systemImage: "point.3.connected.trianglepath.dotted") }
+                .tag(AppTab.memory)
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape") }
                 .tag(AppTab.settings)
+        }
+        .sheet(isPresented: $showingWhatsNew) { WhatsNewSheet() }
+        // This version's notes, once — after the store is connected, so the
+        // sheet never lands on top of onboarding.
+        .onChange(of: model.phase, initial: true) { _, phase in
+            if phase == .ready, ReleaseNotesStore.shouldPresent() { showingWhatsNew = true }
+        }
+        .sheet(isPresented: $model.showingMemoryConnection) {
+            OnboardingFlow(isPresented: true)
+        }
+        .onChange(of: model.phase) { _, phase in
+            if phase == .ready { model.showingMemoryConnection = false }
+        }
+    }
+}
+
+struct MemoryConnectionPrompt: View {
+    let title: String
+    @Environment(AppModel.self) private var model
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 18) {
+                Image(systemName: "brain").font(.system(size: 42)).foregroundStyle(PhrenTheme.accent)
+                Text("Connect your project memory").font(.title2.weight(.semibold))
+                Text("Use GitHub to sync findings, skills, and tasks. Your agents and terminals connect directly to your computers.")
+                    .font(.callout).foregroundStyle(PhrenTheme.textMuted).multilineTextAlignment(.center)
+                Button("Connect memory") { model.showingMemoryConnection = true }
+                    .buttonStyle(.borderedProminent).tint(PhrenTheme.accentSolid)
+                    .accessibilityIdentifier("connect-memory")
+            }.padding(28).frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(PhrenTheme.bg).navigationTitle(title).navigationBarTitleDisplayMode(.inline)
         }
     }
 }

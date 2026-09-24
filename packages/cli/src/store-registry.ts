@@ -2,9 +2,9 @@ import * as fs from "fs";
 import * as crypto from "crypto";
 import * as path from "path";
 import * as yaml from "js-yaml";
-import { expandHomePath, atomicWriteText } from "./phren-paths.js";
+import { expandHomePath, atomicWriteText, runtimeDir } from "./phren-paths.js";
 import { withFileLock } from "./governance/locks.js";
-import { isRecord, PhrenError } from "./phren-core.js";
+import { isRecord, loadYamlDocument, PhrenError } from "./phren-core.js";
 import { getProjectDirs } from "./shared.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -49,7 +49,18 @@ export interface TeamBootstrap {
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
+/**
+ * The synced registry at the store root. It holds the primary store's entry
+ * only, so every machine on this personal store agrees on its id. Team and
+ * readonly stores used to live here too, which pushed one machine's `team
+ * join` onto every other machine and left doctor failing forever there.
+ */
 export const STORES_FILENAME = "stores.yaml";
+/**
+ * The stores attached on this machine, under `.runtime/` (never synced).
+ * Using the personal store must never connect a machine to a team store.
+ */
+export const ATTACHED_STORES_FILENAME = "attached-stores.yaml";
 const TEAM_BOOTSTRAP_FILENAME = ".phren-team.yaml";
 const VALID_ROLES: ReadonlySet<string> = new Set(["primary", "team", "readonly"]);
 const VALID_SYNC_MODES: ReadonlySet<string> = new Set(["managed-git", "pull-only"]);
@@ -58,6 +69,10 @@ const VALID_SYNC_MODES: ReadonlySet<string> = new Set(["managed-git", "pull-only
 
 export function storesFilePath(phrenPath: string): string {
   return path.join(phrenPath, STORES_FILENAME);
+}
+
+export function attachedStoresFilePath(phrenPath: string): string {
+  return path.join(runtimeDir(phrenPath), ATTACHED_STORES_FILENAME);
 }
 
 // ── ID generation ────────────────────────────────────────────────────────────
@@ -77,11 +92,13 @@ function deterministicIdFromPath(storePath: string): string {
 // ── Read / Write ─────────────────────────────────────────────────────────────
 
 /**
- * What a registry read actually found. `registry` is what could be honored;
- * `problems` says what couldn't; `lossy` means stores.yaml EXISTS but the
- * result does not fully represent it (unreadable, unparsable, entries
- * skipped, or validation failed). Mutators must refuse to write while a read
- * is lossy — writing back would silently destroy the entries we skipped.
+ * What a registry read actually found: the primary store from the synced
+ * stores.yaml plus the stores attached on this machine. `registry` is what
+ * could be honored; `problems` says what couldn't; `lossy` means one of the
+ * two files EXISTS but the result does not fully represent it (unreadable,
+ * unparsable, entries skipped, or validation failed). Mutators must refuse to
+ * write while a read is lossy — writing back would silently destroy the
+ * entries we skipped.
  */
 export interface RegistryReadResult {
   registry: StoreRegistry | null;
@@ -90,25 +107,31 @@ export interface RegistryReadResult {
 }
 
 export function readStoreRegistryDetailed(phrenPath: string): RegistryReadResult {
-  const filePath = storesFilePath(phrenPath);
-  if (!fs.existsSync(filePath)) return { registry: null, problems: [], lossy: false };
+  const synced = readSyncedRegistry(phrenPath);
+  const attached = readAttachedStores(phrenPath, synced.registry);
+  const problems = [...synced.problems, ...attached.problems];
+  const lossy = synced.lossy || attached.lossy;
+  if (!synced.registry && attached.stores.length === 0) return { registry: null, problems, lossy };
 
-  let raw: string;
-  try {
-    raw = fs.readFileSync(filePath, "utf8");
-  } catch (err) {
-    return { registry: null, problems: [`${STORES_FILENAME} is unreadable: ${String(err)}`], lossy: true };
+  const primary = synced.registry?.stores.find((s) => s.role === "primary") ?? implicitPrimaryStore(phrenPath);
+  const registry: StoreRegistry = { version: 1, stores: [primary, ...attached.stores] };
+  const err = validateRegistry(registry);
+  if (err) {
+    problems.push(`${ATTACHED_STORES_FILENAME} failed validation: ${err}`);
+    return { registry: synced.registry ? { version: 1, stores: [primary] } : null, problems, lossy: true };
   }
+  return { registry, problems, lossy };
+}
 
-  let parsed: unknown;
-  try {
-    parsed = yaml.load(raw, { schema: yaml.CORE_SCHEMA });
-  } catch (err) {
-    return { registry: null, problems: [`${STORES_FILENAME} is not valid YAML: ${String(err)}`], lossy: true };
+/** The synced stores.yaml as written, including entries this machine ignores. */
+function readSyncedRegistry(phrenPath: string): RegistryReadResult {
+  const parsed = readYamlFile(storesFilePath(phrenPath), STORES_FILENAME);
+  if (!parsed.exists || parsed.problems.length > 0) {
+    return { registry: null, problems: parsed.problems, lossy: parsed.exists };
   }
 
   const problems: string[] = [];
-  const { registry, skippedEntries } = normalizeRegistry(parsed, problems);
+  const { registry, skippedEntries } = normalizeRegistry(parsed.value, problems, STORES_FILENAME);
   if (!registry) {
     return { registry: null, problems, lossy: true };
   }
@@ -121,6 +144,61 @@ export function readStoreRegistryDetailed(phrenPath: string): RegistryReadResult
   }
 
   return { registry, problems, lossy: skippedEntries > 0 };
+}
+
+interface AttachedStoresRead {
+  stores: StoreEntry[];
+  problems: string[];
+  lossy: boolean;
+}
+
+function readAttachedStores(phrenPath: string, synced: StoreRegistry | null): AttachedStoresRead {
+  const parsed = readYamlFile(attachedStoresFilePath(phrenPath), ATTACHED_STORES_FILENAME);
+  if (!parsed.exists) return { stores: migrateSyncedAttachments(phrenPath, synced), problems: [], lossy: false };
+  if (parsed.problems.length > 0) return { stores: [], problems: parsed.problems, lossy: true };
+
+  const problems: string[] = [];
+  const { registry, skippedEntries } = normalizeRegistry(parsed.value, problems, ATTACHED_STORES_FILENAME, true);
+  if (!registry) return { stores: [], problems, lossy: true };
+  const stores = registry.stores.filter((s) => s.role !== "primary");
+  if (stores.length < registry.stores.length) {
+    problems.push(`${ATTACHED_STORES_FILENAME}: the primary store belongs in ${STORES_FILENAME} — entry skipped.`);
+  }
+  return { stores, problems, lossy: skippedEntries > 0 || stores.length < registry.stores.length };
+}
+
+/**
+ * One-time move from the old layout, where team stores were listed in the
+ * synced stores.yaml. Only stores whose folder exists here were ever attached
+ * on this machine; the rest came from another machine and are dropped. The
+ * synced file is left as it is: machines still on an older phren read it.
+ */
+function migrateSyncedAttachments(phrenPath: string, synced: StoreRegistry | null): StoreEntry[] {
+  const listed = synced?.stores.filter((s) => s.role !== "primary") ?? [];
+  if (listed.length === 0) return [];
+  const attached = listed.filter((s) => storePathExists(s.path));
+  try {
+    writeAttachedStores(phrenPath, attached);
+  } catch (err) {
+    // Still honor them for this read; the next read retries the move.
+    console.warn(`phren: could not write ${attachedStoresFilePath(phrenPath)}: ${String(err)}`);
+  }
+  return attached;
+}
+
+function readYamlFile(filePath: string, label: string): { exists: boolean; value?: unknown; problems: string[] } {
+  if (!fs.existsSync(filePath)) return { exists: false, problems: [] };
+  let raw: string;
+  try {
+    raw = fs.readFileSync(filePath, "utf8");
+  } catch (err) {
+    return { exists: true, problems: [`${label} is unreadable: ${String(err)}`] };
+  }
+  try {
+    return { exists: true, value: loadYamlDocument(raw, (text) => yaml.load(text, { schema: yaml.CORE_SCHEMA })), problems: [] };
+  } catch (err) {
+    return { exists: true, problems: [`${label} is not valid YAML: ${String(err)}`] };
+  }
 }
 
 /** Registry read problems already warned about, keyed by path + content. */
@@ -148,22 +226,47 @@ export function readStoreRegistry(phrenPath: string): StoreRegistry | null {
   return result.registry;
 }
 
+/**
+ * Writes this machine's view of the stores: the primary entry to the synced
+ * stores.yaml (only when it changed) and every other store to the machine's
+ * own attached-stores.yaml.
+ */
 export function writeStoreRegistry(phrenPath: string, registry: StoreRegistry): void {
   const err = validateRegistry(registry);
   if (err) throw new Error(`${PhrenError.VALIDATION_ERROR}: ${err}`);
 
-  // Collapse paths to ~ prefix for portability. `available` is machine-local
-  // state computed at resolve time — it must never be written to stores.yaml,
-  // which is shared across machines via git.
-  const portable: StoreRegistry = {
-    version: 1,
-    stores: registry.stores.map(({ available: _available, ...s }) => ({
-      ...s,
-      path: collapsePath(s.path),
-    })),
-  };
+  writeSyncedPrimary(phrenPath, registry.stores.find((s) => s.role === "primary")!);
+  writeAttachedStores(phrenPath, registry.stores.filter((s) => s.role !== "primary"));
+}
 
+function writeSyncedPrimary(phrenPath: string, primary: StoreEntry): void {
+  const current = readSyncedRegistry(phrenPath);
+  const existing = current.registry?.stores.find((s) => s.role === "primary");
+  if (existing && sameEntry(existing, primary)) return;
+  // Keep what older phren versions on other machines still list here.
+  const others = current.lossy ? [] : current.registry?.stores.filter((s) => s.role !== "primary") ?? [];
+  const portable: StoreRegistry = { version: 1, stores: [primary, ...others].map(portableEntry) };
   atomicWriteText(storesFilePath(phrenPath), yaml.dump(portable, { lineWidth: 200 }));
+}
+
+function writeAttachedStores(phrenPath: string, stores: StoreEntry[]): void {
+  fs.mkdirSync(runtimeDir(phrenPath), { recursive: true });
+  const portable = { version: 1, stores: stores.map(portableEntry) };
+  atomicWriteText(attachedStoresFilePath(phrenPath), yaml.dump(portable, { lineWidth: 200 }));
+}
+
+/**
+ * Collapse paths to a ~ prefix for portability. `available` is computed at
+ * resolve time and is never written.
+ */
+function portableEntry({ available: _available, ...s }: StoreEntry): StoreEntry {
+  return { ...s, path: collapsePath(s.path) };
+}
+
+function sameEntry(a: StoreEntry, b: StoreEntry): boolean {
+  return a.id === b.id && a.name === b.name && a.path === b.path && a.role === b.role
+    && a.sync === b.sync && a.remote === b.remote
+    && (a.projects ?? []).join("\n") === (b.projects ?? []).join("\n");
 }
 
 // ── Resolution ───────────────────────────────────────────────────────────────
@@ -178,16 +281,17 @@ export function storePathExists(storePath: string): boolean {
 }
 
 /**
- * Resolve the full list of stores. This is the **key backward-compat function**:
- * - If stores.yaml exists → parse and return entries
- * - If stores.yaml is missing → return a single implicit primary entry for phrenPath
- * - In both cases, append PHREN_FEDERATION_PATHS entries as readonly stores
+ * Resolve the full list of stores on this machine. This is the **key
+ * backward-compat function**:
+ * - The primary comes from the synced stores.yaml, or is implicit when the
+ *   file is missing
+ * - Then every store attached on this machine (.runtime/attached-stores.yaml)
+ * - Then PHREN_FEDERATION_PATHS entries as readonly stores
  *
  * Every returned entry carries `available`, recording whether its path exists
- * here. Declared-but-absent stores are deliberately **still returned**: callers
- * must be able to see that a store claims a project before deciding what to do,
- * otherwise a team store that simply isn't cloned yet would look like "no store
- * claims this project" and its writes would land in the primary store.
+ * here. Attached stores whose folder is gone are deliberately **still
+ * returned**: callers must be able to see that a store claims a project before
+ * deciding what to do, otherwise its writes would land in the primary store.
  */
 export function resolveAllStores(phrenPath: string): StoreEntry[] {
   const registry = readStoreRegistry(phrenPath);
@@ -211,23 +315,33 @@ export function resolveAllStores(phrenPath: string): StoreEntry[] {
   return stores.map((s) => ({ ...s, available: storePathExists(s.path) }));
 }
 
-/** Stores declared in stores.yaml whose directory is missing on this machine. */
+/**
+ * Non-primary entries in the synced stores.yaml that this machine does not use:
+ * joined on another machine with an older phren. Attached ones were moved into
+ * attached-stores.yaml; the rest mean nothing here.
+ */
+export function ignoredSyncedStores(phrenPath: string): StoreEntry[] {
+  readStoreRegistry(phrenPath); // runs the one-time move first
+  const synced = readSyncedRegistry(phrenPath).registry?.stores.filter((s) => s.role !== "primary") ?? [];
+  const attached = new Set(resolveAllStores(phrenPath).map((s) => s.id));
+  return synced.filter((s) => !attached.has(s.id));
+}
+
+/** Stores attached on this machine whose directory is missing. */
 export function getUnavailableStores(phrenPath: string): StoreEntry[] {
   return resolveAllStores(phrenPath).filter((s) => s.available === false);
 }
 
 /**
- * One actionable sentence about a store that is declared but not attached here.
- * Shared by write routing, `phren status`, and `phren doctor` so all three name
- * the same store, the same expected path, and the same remedy.
+ * One actionable sentence about a store attached on this machine whose folder
+ * is gone. Shared by write routing, `phren status`, and `phren doctor` so all
+ * three name the same store, the same expected path, and the same remedy.
  */
 export function describeUnavailableStore(store: StoreEntry): string {
-  const attach = store.remote
-    ? `git clone ${store.remote} "${store.path}"  (or: phren team join ${store.remote})`
-    : `phren team join <git-url> --name ${store.name}`;
+  const restore = store.remote ? `git clone ${store.remote} "${store.path}"` : `restore the folder`;
   return (
-    `Store "${store.name}" (role=${store.role}) is declared in ${STORES_FILENAME} but is not attached on this machine — ` +
-    `expected path: ${store.path}. Attach it with: ${attach}`
+    `Store "${store.name}" (role=${store.role}) is attached on this machine but its folder is missing — ` +
+    `expected path: ${store.path}. Either ${restore}, or detach it with: phren store remove ${store.name}`
   );
 }
 
@@ -268,7 +382,7 @@ export function readTeamBootstrap(storePath: string): TeamBootstrap | null {
 
   try {
     const raw = fs.readFileSync(filePath, "utf8");
-    const parsed = yaml.load(raw, { schema: yaml.CORE_SCHEMA });
+    const parsed = loadYamlDocument(raw, (text) => yaml.load(text, { schema: yaml.CORE_SCHEMA }));
     if (!isRecord(parsed) || typeof parsed.name !== "string") return null;
     return {
       name: parsed.name,
@@ -296,7 +410,7 @@ function readRegistryForMutation(phrenPath: string): StoreRegistry | null {
   const result = readStoreRegistryDetailed(phrenPath);
   if (result.lossy) {
     throw new Error(
-      `${PhrenError.VALIDATION_ERROR}: ${storesFilePath(phrenPath)} exists but could not be fully read — ` +
+      `${PhrenError.VALIDATION_ERROR}: the store registry (${storesFilePath(phrenPath)} or ${attachedStoresFilePath(phrenPath)}) exists but could not be fully read — ` +
         `refusing to rewrite it (that would drop the entries phren cannot parse). ` +
         `Fix the file by hand first. Problems: ${result.problems.join(" | ")}`
     );
@@ -304,9 +418,15 @@ function readRegistryForMutation(phrenPath: string): StoreRegistry | null {
   return result.registry;
 }
 
-/** Add a store entry to the registry. Creates stores.yaml if needed. Uses file locking. */
+/** Mutations change this machine's attachments, so they lock that file. */
+function registryLockPath(phrenPath: string): string {
+  fs.mkdirSync(runtimeDir(phrenPath), { recursive: true });
+  return attachedStoresFilePath(phrenPath);
+}
+
+/** Attach a store on this machine. Creates stores.yaml for the primary if needed. Uses file locking. */
 export function addStoreToRegistry(phrenPath: string, entry: StoreEntry): void {
-  withFileLock(storesFilePath(phrenPath), () => {
+  withFileLock(registryLockPath(phrenPath), () => {
     let registry = readRegistryForMutation(phrenPath);
     if (!registry) {
       // First time — also add the implicit primary store
@@ -323,7 +443,7 @@ export function addStoreToRegistry(phrenPath: string, entry: StoreEntry): void {
 
 /** Remove a store entry by name. Refuses to remove primary. Uses file locking. */
 export function removeStoreFromRegistry(phrenPath: string, name: string): StoreEntry {
-  return withFileLock(storesFilePath(phrenPath), () => {
+  return withFileLock(registryLockPath(phrenPath), () => {
     const registry = readRegistryForMutation(phrenPath);
     if (!registry) throw new Error(`${PhrenError.FILE_NOT_FOUND}: No stores.yaml found`);
 
@@ -341,7 +461,7 @@ export function removeStoreFromRegistry(phrenPath: string, name: string): StoreE
 
 /** Update the projects[] claim list for a store. Uses file locking. */
 export function updateStoreProjects(phrenPath: string, storeName: string, projects: string[]): void {
-  withFileLock(storesFilePath(phrenPath), () => {
+  withFileLock(registryLockPath(phrenPath), () => {
     const registry = readRegistryForMutation(phrenPath);
     if (!registry) throw new Error(`${PhrenError.FILE_NOT_FOUND}: No stores.yaml found`);
 
@@ -355,7 +475,7 @@ export function updateStoreProjects(phrenPath: string, storeName: string, projec
 
 /** Add projects to a store's subscription list. Deduplicates. Uses file locking. */
 export function subscribeStoreProjects(phrenPath: string, storeName: string, projects: string[]): void {
-  withFileLock(storesFilePath(phrenPath), () => {
+  withFileLock(registryLockPath(phrenPath), () => {
     const registry = readRegistryForMutation(phrenPath);
     if (!registry) throw new Error(`${PhrenError.FILE_NOT_FOUND}: No stores.yaml found`);
 
@@ -373,7 +493,7 @@ export function subscribeStoreProjects(phrenPath: string, storeName: string, pro
 
 /** Remove projects from a store's subscription list. Uses file locking. */
 export function unsubscribeStoreProjects(phrenPath: string, storeName: string, projects: string[]): void {
-  withFileLock(storesFilePath(phrenPath), () => {
+  withFileLock(registryLockPath(phrenPath), () => {
     const registry = readRegistryForMutation(phrenPath);
     if (!registry) throw new Error(`${PhrenError.FILE_NOT_FOUND}: No stores.yaml found`);
 
@@ -427,11 +547,13 @@ const ROLE_ALIASES: Readonly<Record<string, StoreRole>> = { secondary: "team" };
  */
 function normalizeRegistry(
   parsed: unknown,
-  problems: string[]
+  problems: string[],
+  label: string,
+  allowEmpty = false
 ): { registry: StoreRegistry | null; skippedEntries: number } {
   if (!isRecord(parsed) || parsed.version !== 1 || !Array.isArray(parsed.stores)) {
     problems.push(
-      `${STORES_FILENAME} has an unrecognized shape (expected \`version: 1\` and a \`stores:\` list).`
+      `${label} has an unrecognized shape (expected \`version: 1\` and a \`stores:\` list).`
     );
     return { registry: null, skippedEntries: 0 };
   }
@@ -439,9 +561,9 @@ function normalizeRegistry(
   const stores: StoreEntry[] = [];
   let skippedEntries = 0;
   for (const [index, raw] of parsed.stores.entries()) {
-    const skip = (label: string, reason: string): void => {
+    const skip = (entry: string, reason: string): void => {
       skippedEntries += 1;
-      problems.push(`${STORES_FILENAME}: store ${label} ${reason} — entry skipped.`);
+      problems.push(`${label}: store ${entry} ${reason} — entry skipped.`);
     };
 
     if (!isRecord(raw)) {
@@ -450,13 +572,13 @@ function normalizeRegistry(
     }
     const id = typeof raw.id === "string" ? raw.id : "";
     const name = typeof raw.name === "string" ? raw.name : "";
-    const label = name ? `"${name}"` : `#${index + 1}`;
+    const entryLabel = name ? `"${name}"` : `#${index + 1}`;
     const rawPath = typeof raw.path === "string" ? raw.path : "";
     const rawRole = typeof raw.role === "string" ? raw.role : "";
     const aliasedRole = ROLE_ALIASES[rawRole];
     if (aliasedRole) {
       problems.push(
-        `${STORES_FILENAME}: store ${label} has role "${rawRole}" — reading it as "${aliasedRole}" (valid roles: primary|team|readonly).`
+        `${label}: store ${entryLabel} has role "${rawRole}" — reading it as "${aliasedRole}" (valid roles: primary|team|readonly).`
       );
     }
     const roleValue = aliasedRole ?? rawRole;
@@ -474,7 +596,7 @@ function normalizeRegistry(
         !rawPath && "path",
         !role && `a valid role (got "${rawRole || "(none)"}")`,
       ].filter(Boolean);
-      skip(label, `is missing ${missing.join(", ")}`);
+      skip(entryLabel, `is missing ${missing.join(", ")}`);
       continue;
     }
 
@@ -489,8 +611,8 @@ function normalizeRegistry(
     });
   }
 
-  if (stores.length === 0) {
-    problems.push(`${STORES_FILENAME} contains no usable store entries.`);
+  if (stores.length === 0 && !allowEmpty) {
+    problems.push(`${label} contains no usable store entries.`);
     return { registry: null, skippedEntries };
   }
   return { registry: { version: 1, stores }, skippedEntries };

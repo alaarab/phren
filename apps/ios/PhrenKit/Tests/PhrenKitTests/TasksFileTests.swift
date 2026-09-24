@@ -55,9 +55,23 @@ final class TasksFileTests: XCTestCase {
         XCTAssertEqual(added.section, .queue)
         XCTAssertEqual(added.priority, .high)
         XCTAssertNotNil(added.stableId)
+        let created = try XCTUnwrap(added.createdAt)
+        let date = try Date(created, strategy: Date.ISO8601FormatStyle(includingFractionalSeconds: true))
+        XCTAssertLessThan(abs(date.timeIntervalSinceNow), 5)
 
         let reparsed = TasksFile(project: "myproj", content: file.render())
-        XCTAssertTrue(reparsed.doc.queue.contains { $0.stableId == added.stableId })
+        XCTAssertEqual(reparsed.doc.queue.first { $0.stableId == added.stableId }?.createdAt, created)
+    }
+
+    func testEditingAndCompletingPreserveCreationDatesWithoutDatingLegacyTasks() throws {
+        var file = TasksFile(project: "demo", content: "# Tasks\n\n## Queue\n- [ ] Old undated task <!-- bid:12345678 -->\n")
+        let added = try file.add("Dated task", createdAt: "2020-03-04T12:34:56.789Z")
+        try file.update(added.stableId!, updates: .init(text: "Renamed", section: .active))
+        try file.complete(added.stableId!)
+        try file.complete("12345678")
+        let done = TasksFile(project: "demo", content: file.render()).doc.done
+        XCTAssertEqual(done.first { $0.stableId == added.stableId }?.createdAt, "2020-03-04T12:34:56.789Z")
+        XCTAssertNil(done.first { $0.stableId == "12345678" }?.createdAt)
     }
 
     func testMatchByBidAndPositionalId() throws {

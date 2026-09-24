@@ -81,6 +81,14 @@ export const PHREN_ART_RIGHT: string[] = generateFlippedArt(PHREN_ART);
 
 // ── Animation engine ─────────────────────────────────────────────────────────
 
+/**
+ * The mascot holds still: it sits at a fixed position beside the wordmark and
+ * only its eyes and the sparkle above its head change. Whole-body motion (the
+ * vertical bob and the sideways lean) shifted the art by a full cell, which
+ * reads as blocky jitter at terminal resolution, so it is gone. Every frame has
+ * the same line count and the same display width as `PHREN_ART`.
+ */
+
 export interface PhrenAnimator {
   getFrame(): string[];
   start(): void;
@@ -88,11 +96,9 @@ export interface PhrenAnimator {
 }
 
 interface AnimatorState {
-  bobUp: boolean;
   isBlinking: boolean;
   sparkleFrame: number;
   sparkleActive: boolean;
-  leanOffset: number;
 }
 
 function randInt(min: number, max: number): number {
@@ -129,15 +135,6 @@ function applySparkleToLine(line: string, frame: number, active: boolean): strin
   );
 }
 
-function applyLean(line: string, offset: number): string {
-  if (offset === 0) return line;
-  if (offset > 0) {
-    return " ".repeat(offset) + line;
-  }
-  const trimCount = Math.min(-offset, line.match(/^( *)/)![1].length);
-  return line.slice(trimCount);
-}
-
 export function createPhrenAnimator(options?: {
   facing?: "left" | "right";
   size?: number;
@@ -146,11 +143,9 @@ export function createPhrenAnimator(options?: {
   const baseArt = facing === "right" ? PHREN_ART_RIGHT : PHREN_ART;
 
   const state: AnimatorState = {
-    bobUp: false,
     isBlinking: false,
     sparkleFrame: 0,
     sparkleActive: false,
-    leanOffset: 0,
   };
 
   const timers: ReturnType<typeof setTimeout>[] = [];
@@ -158,13 +153,6 @@ export function createPhrenAnimator(options?: {
   function scheduleTimer(fn: () => void, ms: number): void {
     const t = setTimeout(fn, ms);
     timers.push(t);
-  }
-
-  function scheduleBob(): void {
-    scheduleTimer(() => {
-      state.bobUp = !state.bobUp;
-      scheduleBob();
-    }, 500);
   }
 
   function scheduleBlink(): void {
@@ -209,43 +197,24 @@ export function createPhrenAnimator(options?: {
     }, 200);
   }
 
-  function scheduleLean(): void {
-    const interval = randInt(4000, 10000);
-    scheduleTimer(() => {
-      const direction = Math.random() < 0.5 ? -1 : 1;
-      state.leanOffset = direction;
-      const holdTime = randInt(1000, 2000);
-      scheduleTimer(() => {
-        state.leanOffset = 0;
-        scheduleLean();
-      }, holdTime);
-    }, interval);
-  }
-
   return {
     getFrame(): string[] {
-      let lines = baseArt.map((line, i) => {
-        let result = line;
+      // In-place substitutions only: the art grid is never shifted or padded,
+      // so the frame keeps its line count and its width.
+      return baseArt.map((line, i) => {
         if (state.isBlinking && i === EYE_ROW) {
-          result = applyBlinkToLine(result);
+          return applyBlinkToLine(line);
         }
         if (i === SPARKLE_ROW) {
-          result = applySparkleToLine(result, state.sparkleFrame, state.sparkleActive);
+          return applySparkleToLine(line, state.sparkleFrame, state.sparkleActive);
         }
-        result = applyLean(result, state.leanOffset);
-        return result;
+        return line;
       });
-      if (state.bobUp) {
-        lines = ["", ...lines.slice(0, -1)];
-      }
-      return lines;
     },
 
     start(): void {
-      scheduleBob();
       scheduleBlink();
       scheduleSparkle();
-      scheduleLean();
     },
 
     stop(): void {

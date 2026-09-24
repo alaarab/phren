@@ -1,6 +1,9 @@
 import { getPhrenPath, readRootManifest } from "../shared.js";
 import { listMachines as listMachinesStore, listProfiles as listProfilesStore } from "../data/access.js";
 import { setTelemetryEnabled, getTelemetrySummary, resetTelemetry } from "../telemetry.js";
+import { readInstallPreferences, updateInstallPreferences } from "../init/preferences.js";
+import { resolveMcpProfile } from "../mcp/profile.js";
+import { parsePullInterval, resolvePullInterval, periodicPullEnabled } from "../sync/pull.js";
 import * as path from "path";
 import { buildConfigView, type ConfigView } from "../config/resolve.js";
 import { CONFIG_DOMAINS } from "../config/schema.js";
@@ -126,6 +129,10 @@ export async function handleConfig(args: string[]) {
       return handleConfigProfiles();
     case "telemetry":
       return handleConfigTelemetry(rest);
+    case "mcp-profile":
+      return handleConfigMcpProfile(rest);
+    case "pull-interval":
+      return handleConfigPullInterval(rest);
     case "proactivity":
     case "proactivity.findings":
     case "proactivity.tasks":
@@ -152,11 +159,14 @@ Subcommands:
   phren config policy [get|set ...]     Memory retention, TTL, confidence, decay
   phren config workflow [get|set ...]   Risky-memory thresholds, task automation mode
   phren config index [get|set ...]      Indexer include/exclude globs
-  phren config proactivity [level]      Base auto-capture level (high|medium|low)
+  phren config proactivity [level] [--scope base|findings|tasks]
+                                        Auto-capture level (high|medium|low); --scope sets
+                                        the findings-only or task-only override instead
   phren config proactivity.findings [level]
                                         Findings-specific auto-capture level override
   phren config proactivity.tasks [level]
                                         Task-specific auto-capture level override
+                                        (all take --project <name> for one project)
   phren config task-mode [get|set <mode>]
                                         Task automation mode (off|manual|suggest|auto)
   phren config finding-sensitivity [get|set <level>]
@@ -171,6 +181,8 @@ Subcommands:
                                         Manage project learned synonyms
   phren config machines                 Registered machines and profiles
   phren config profiles                 All profiles and their projects
+  phren config pull-interval [seconds|off]
+                                        Periodic MCP remote checks (default: off)
   phren config telemetry [on|off|reset] Local usage stats (opt-in, no external reporting)`);
       if (sub) {
         console.error(`\nUnknown config subcommand: "${sub}"`);
@@ -180,6 +192,27 @@ Subcommands:
 }
 
 // ── Machines and profiles ────────────────────────────────────────────────────
+
+function handleConfigPullInterval(args: string[]) {
+  const phrenPath = getPhrenPath();
+  if (args.length > 0) {
+    const seconds = parsePullInterval(args[0]);
+    if (seconds === undefined || args.length !== 1) {
+      console.error("Use phren config pull-interval <seconds|off>: 0 disables polling; otherwise use a whole number from 30 to 86400.");
+      process.exitCode = 1;
+      return;
+    }
+    updateInstallPreferences(phrenPath, () => ({ pullIntervalSeconds: seconds }));
+    console.log(seconds === 0 ? "Periodic pulls disabled on this machine." : `Periodic remote checks set to every ${seconds} seconds on this machine.`);
+  }
+  const seconds = resolvePullInterval(phrenPath);
+  const source = process.env.PHREN_PULL_INTERVAL_SECONDS !== undefined
+    && parsePullInterval(process.env.PHREN_PULL_INTERVAL_SECONDS) !== undefined
+    ? "PHREN_PULL_INTERVAL_SECONDS" : readInstallPreferences(phrenPath).pullIntervalSeconds !== undefined ? "install preferences" : "default";
+  console.log(`Pull interval: ${seconds === 0 ? "off" : `${seconds} seconds`} (${source}).`);
+  if (!periodicPullEnabled(phrenPath)) console.log("Periodic pulls are inactive for this install mode or management preset.");
+  else console.log("Running MCP servers pick up changes automatically. Only changed remotes are fetched; updates are fast-forward only.");
+}
 
 function handleConfigMachines() {
   const manifest = readRootManifest(getPhrenPath());
@@ -212,6 +245,25 @@ function handleConfigProfiles() {
     for (const proj of p.projects) console.log(`  - ${proj}`);
     if (!p.projects.length) console.log("  (no projects)");
   }
+}
+
+function handleConfigMcpProfile(args: string[]) {
+  const phrenPath = getPhrenPath();
+  const want = args[0]?.trim().toLowerCase();
+  if (want === "core" || want === "full") {
+    updateInstallPreferences(phrenPath, () => ({ mcpProfile: want }));
+    console.log(`MCP profile set to ${want}. Restart your MCP clients (Claude Code, Cursor, …) to pick it up.`);
+    if (want === "core") console.log("Agents see 10 tools; everything else is reachable through phren_admin.");
+    else console.log("Agents see every tool by name, plus the revise_finding / manage_task / session composites.");
+    return;
+  }
+  if (want) { console.error(`Unknown profile "${args[0]}". Use core or full.`); process.exitCode = 1; return; }
+  const current = resolveMcpProfile(phrenPath);
+  const source = process.env.PHREN_MCP_PROFILE ? "PHREN_MCP_PROFILE" : (readInstallPreferences(phrenPath).mcpProfile ? "install preferences" : "default");
+  console.log(`MCP profile: ${current} (${source})`);
+  console.log(current === "core"
+    ? "10 tools: search_knowledge, get_memory_detail, get_project_summary, add_finding, revise_finding, get_tasks, add_task, manage_task, session, phren_admin."
+    : "Every tool by name. `phren config mcp-profile core` for the compact surface.");
 }
 
 function handleConfigTelemetry(args: string[]) {

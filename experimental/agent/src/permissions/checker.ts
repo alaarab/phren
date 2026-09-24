@@ -3,12 +3,19 @@ import { checkShellSafety } from "./shell-safety.js";
 import { validatePath, checkSensitivePath } from "./sandbox.js";
 import { isAllowed } from "./allowlist.js";
 
-/** Tools that are safe in all modes — read-only or agent management, no side effects. */
-const ALWAYS_SAFE_TOOLS = new Set([
+/** Tools that are safe in all modes — read-only, no side effects. */
+export const READ_ONLY_TOOLS = new Set([
+  "read_file",
+  "glob",
+  "grep",
+  "read_image",
+  "git_status",
+  "git_diff",
+  "task_output",
+  "list_mcp_resources",
+  "read_mcp_resource",
   "phren_search",
   "phren_get_tasks",
-  "spawn_agent",
-  "send_message_to_agent",
   "list_agents",
 ]);
 
@@ -26,6 +33,10 @@ const AUTO_CONFIRM_TOOLS = new Set([
   "edit_file",
   "phren_add_finding",
   "phren_complete_task",
+  // Spawning forks a child process running with auto-confirm permissions —
+  // suggest mode must ask first (these were unprompted in every mode before).
+  "spawn_agent",
+  "send_message_to_agent",
 ]);
 
 /** Tools that are always denied regardless of mode. */
@@ -90,7 +101,7 @@ export function checkPermission(
   }
 
   // Always-safe tools pass in all modes
-  if (ALWAYS_SAFE_TOOLS.has(toolName)) {
+  if (READ_ONLY_TOOLS.has(toolName)) {
     return { verdict: "allow", reason: "Read-only tool, always allowed." };
   }
 
@@ -125,8 +136,8 @@ export function checkPermission(
       return { verdict: "ask", reason: `Auto-confirm mode requires confirmation for "${toolName}".` };
 
     case "plan":
-      // Plan mode: require explicit approval for ALL tool calls so the user
-      // can review the full plan before anything executes.
+      // Plan mode: read-only tools are allowed; everything that mutates needs
+      // explicit approval so the user can review the plan before it executes.
       return { verdict: "ask", reason: `Plan mode requires approval for "${toolName}".` };
 
     case "full-auto":

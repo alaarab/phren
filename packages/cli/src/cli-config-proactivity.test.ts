@@ -133,6 +133,38 @@ describe("handleConfig proactivity", () => {
     expect(stored.proactivityTask).toBe("medium");
   });
 
+  it("--scope on the base command writes the findings or task override, not the base", async () => {
+    const { handleConfig } = await importCliConfig();
+    const output = captureConsole();
+
+    await handleConfig(["proactivity", "high"]);
+    await handleConfig(["proactivity", "medium", "--scope", "tasks"]);
+    await handleConfig(["proactivity", "--scope=findings", "low"]);
+
+    expect(output.logs).toHaveLength(3);
+    const data = JSON.parse(output.logs[2]);
+    expect(data.configured).toEqual({ proactivity: "high", proactivityFindings: "low", proactivityTask: "medium" });
+    expect(data.effective).toEqual({ proactivity: "high", proactivityFindings: "low", proactivityTask: "medium" });
+    const stored = JSON.parse(fs.readFileSync(governancePrefsPath(), "utf8"));
+    expect(stored).toMatchObject({ proactivity: "high", proactivityFindings: "low", proactivityTask: "medium" });
+  });
+
+  it("rejects an unknown --scope and a --scope on an already scoped subcommand", async () => {
+    const { handleConfig } = await importCliConfig();
+    const output = captureConsole();
+    const previousExitCode = process.exitCode;
+    try {
+      await handleConfig(["proactivity", "medium", "--scope", "notes"]);
+      expect(process.exitCode).toBe(1);
+      process.exitCode = previousExitCode;
+      await handleConfig(["proactivity.tasks", "medium", "--scope", "findings"]);
+      expect(process.exitCode).toBe(1);
+      expect(output.logs).toHaveLength(0);
+      expect(output.errors.join("\n")).toContain("--scope base|findings|tasks");
+      expect(fs.existsSync(governancePrefsPath())).toBe(false);
+    } finally { process.exitCode = previousExitCode; }
+  });
+
   it("rejects invalid proactivity values", async () => {
     const { handleConfig } = await importCliConfig();
     const output = captureConsole();
@@ -142,7 +174,7 @@ describe("handleConfig proactivity", () => {
       await handleConfig(["proactivity.findings", "urgent"]);
 
       expect(process.exitCode).toBe(1);
-      expect(output.errors).toContain("Usage: phren config proactivity.findings [high|medium|low]");
+      expect(output.errors).toContain("Usage: phren config proactivity.findings [high|medium|low] [--project <name>]");
       expect(fs.existsSync(governancePrefsPath())).toBe(false);
     } finally {
       process.exitCode = previousExitCode;

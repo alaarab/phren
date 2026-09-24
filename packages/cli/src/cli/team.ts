@@ -1,3 +1,4 @@
+import { nonInteractiveGitEnv } from "../utils-helpers.js";
 /**
  * Team store CLI commands: init, join, add-project.
  * Creates and manages shared phren stores for team collaboration.
@@ -6,6 +7,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { execFileSync } from "child_process";
 import { getPhrenPath } from "../shared.js";
+import { atomicWriteText } from "../phren-paths.js";
 import { FINDINGS_FILENAME } from "../data/access.js";
 import { TASKS_FILENAME } from "../data/tasks.js";
 import { isValidProjectName, getOptionValue, getPositionalArgs } from "../utils.js";
@@ -21,14 +23,6 @@ import {
 } from "../store-registry.js";
 
 const EXEC_TIMEOUT_MS = 30_000;
-
-function atomicWriteText(filePath: string, content: string): void {
-  const dir = path.dirname(filePath);
-  fs.mkdirSync(dir, { recursive: true });
-  const tmp = filePath + ".tmp." + process.pid;
-  fs.writeFileSync(tmp, content);
-  fs.renameSync(tmp, filePath);
-}
 
 // ── phren team init <name> [--remote <url>] [--description <desc>] ──────────
 
@@ -91,7 +85,7 @@ async function handleTeamInit(args: string[]): Promise<void> {
   const globalDir = path.join(storePath, "global");
   fs.mkdirSync(globalDir, { recursive: true });
   atomicWriteText(
-    path.join(globalDir, "CLAUDE.md"),
+    path.join(globalDir, "AGENTS.md"),
     `# ${name} Team Store\n\nShared knowledge for the ${name} team.\n`,
   );
   atomicWriteText(
@@ -101,14 +95,16 @@ async function handleTeamInit(args: string[]): Promise<void> {
 
   // Initialize git repo
   execFileSync("git", ["init"], {
+    env: nonInteractiveGitEnv(),
     cwd: storePath,
     stdio: "pipe",
     timeout: EXEC_TIMEOUT_MS,
   });
 
   // Initial commit
-  execFileSync("git", ["add", "-A"], { cwd: storePath, stdio: "pipe", timeout: EXEC_TIMEOUT_MS });
+  execFileSync("git", ["add", "-A"], { env: nonInteractiveGitEnv(), cwd: storePath, stdio: "pipe", timeout: EXEC_TIMEOUT_MS });
   execFileSync("git", ["commit", "-m", "phren: initialize team store"], {
+    env: nonInteractiveGitEnv(),
     cwd: storePath,
     stdio: "pipe",
     timeout: EXEC_TIMEOUT_MS,
@@ -117,12 +113,14 @@ async function handleTeamInit(args: string[]): Promise<void> {
   // Add remote if provided
   if (remote) {
     execFileSync("git", ["remote", "add", "origin", remote], {
+      env: nonInteractiveGitEnv(),
       cwd: storePath,
       stdio: "pipe",
       timeout: EXEC_TIMEOUT_MS,
     });
     try {
       execFileSync("git", ["push", "-u", "origin", "main"], {
+        env: nonInteractiveGitEnv(),
         cwd: storePath,
         stdio: "pipe",
         timeout: EXEC_TIMEOUT_MS,
@@ -132,6 +130,7 @@ async function handleTeamInit(args: string[]): Promise<void> {
       // Try HEAD branch name
       try {
         execFileSync("git", ["push", "-u", "origin", "HEAD"], {
+          env: nonInteractiveGitEnv(),
           cwd: storePath,
           stdio: "pipe",
           timeout: EXEC_TIMEOUT_MS,
@@ -143,7 +142,7 @@ async function handleTeamInit(args: string[]): Promise<void> {
     }
   }
 
-  // Register in primary store's stores.yaml
+  // Attach it on this machine only (.runtime/attached-stores.yaml)
   const entry: StoreEntry = {
     id: generateStoreId(),
     name,
@@ -158,6 +157,7 @@ async function handleTeamInit(args: string[]): Promise<void> {
   console.log(`  Path: ${storePath}`);
   console.log(`  Role: team`);
   console.log(`  ID: ${entry.id}`);
+  console.log(`  Attached on this machine only. Run phren team join on each other machine that should use it.`);
   if (!remote) {
     console.log(`\nNext: add a remote and push`);
     console.log(`  cd ${storePath}`);
@@ -209,6 +209,7 @@ async function handleTeamJoin(args: string[]): Promise<void> {
   console.log(`Cloning ${remote}...`);
   fs.mkdirSync(storesDir, { recursive: true });
   execFileSync("git", ["clone", "--", remote, storePath], {
+    env: nonInteractiveGitEnv(),
     stdio: "inherit",
     timeout: 60_000,
   });
@@ -232,6 +233,7 @@ async function handleTeamJoin(args: string[]): Promise<void> {
   console.log(`  Path: ${storePath}`);
   console.log(`  Role: ${finalRole}`);
   console.log(`  ID: ${entry.id}`);
+  console.log(`  Attached on this machine only. Run phren team join on each other machine that should use it.`);
   if (bootstrap?.description) {
     console.log(`  Description: ${bootstrap.description}`);
   }

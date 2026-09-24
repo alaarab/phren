@@ -1,4 +1,17 @@
+import * as os from "node:os";
+import * as path from "node:path";
 import type { PermissionMode } from "./permissions/types.js";
+import { loadPermissionMode } from "./settings.js";
+
+export const AGENT_CONFIG_DIR = ".phren-agent";
+
+export function agentConfigDir(base: string): string {
+  return path.join(base, AGENT_CONFIG_DIR);
+}
+
+export function agentUserDir(home: string = os.homedir()): string {
+  return path.join(home, AGENT_CONFIG_DIR);
+}
 
 export interface CliArgs {
   task: string;
@@ -7,6 +20,7 @@ export interface CliArgs {
   reasoning?: "low" | "medium" | "high" | "xhigh";
   project?: string;
   permissions: PermissionMode;
+  permissionsExplicit: boolean;
   maxTurns: number;
   maxOutput?: number;
   budget: number | null;
@@ -21,6 +35,12 @@ export interface CliArgs {
   mcpConfig?: string;
   team?: string;
   multi: boolean;
+  /** Disable subagent tools in one-shot mode (they are on by default). */
+  noSubagents: boolean;
+  /** Disable LLM compaction (falls back to regex prune summaries). */
+  noLlmCompact: boolean;
+  /** Kernel write-fence for shell commands: off | auto | require. */
+  sandbox: "off" | "auto" | "require";
   help: boolean;
   version: boolean;
 }
@@ -39,10 +59,13 @@ Options:
   --max-output <n>     Max output tokens per response (default: auto per model)
   --budget <dollars>   Max spend in USD (aborts when exceeded)
   --plan               Plan mode: show plan before executing tools
+  --no-subagents       Disable spawn_agent/send_message/list_agents in one-shot mode
+  --no-llm-compact     Use regex prune summaries instead of LLM compaction
+  --sandbox <mode>     Kernel write-fence for shell (bwrap): off, auto (default), require
   --permissions <mode> Permission mode: suggest (default), auto-confirm, full-auto
   --yolo               Full-auto permissions — no confirmations (alias for --permissions full-auto)
   --interactive, -i    Interactive REPL mode (multi-turn conversation)
-  --resume             Resume last session's conversation
+  --resume             Resume last session's conversation (task optional)
   --lint-cmd <cmd>     Override auto-detected lint command
   --test-cmd <cmd>     Override auto-detected test command
   --mcp <command>      Connect to an MCP server via stdio (repeatable)
@@ -80,6 +103,7 @@ export function parseArgs(argv: string[]): CliArgs {
   const args: CliArgs = {
     task: "",
     permissions: "suggest",
+    permissionsExplicit: false,
     maxTurns: 50,
     budget: null,
     plan: false,
@@ -87,6 +111,9 @@ export function parseArgs(argv: string[]): CliArgs {
     verbose: false,
     interactive: false,
     resume: false,
+    noSubagents: false,
+    noLlmCompact: false,
+    sandbox: "auto",
     mcp: [],
     multi: false,
     help: false,
@@ -102,6 +129,12 @@ export function parseArgs(argv: string[]): CliArgs {
     else if (arg === "--dry-run") { args.dryRun = true; }
     else if (arg === "--verbose") { args.verbose = true; }
     else if (arg === "--interactive" || arg === "-i") { args.interactive = true; }
+    else if (arg === "--no-subagents") { args.noSubagents = true; }
+    else if (arg === "--no-llm-compact") { args.noLlmCompact = true; }
+    else if (arg === "--sandbox" && argv[i + 1]) {
+      const mode = argv[++i];
+      if (mode === "off" || mode === "auto" || mode === "require") { args.sandbox = mode; }
+    }
     else if (arg === "--plan") { args.plan = true; }
     else if (arg === "--resume") { args.resume = true; }
     else if (arg === "--lint-cmd" && argv[i + 1]) { args.lintCmd = argv[++i]; }
@@ -122,11 +155,12 @@ export function parseArgs(argv: string[]): CliArgs {
     else if (arg === "--max-turns" && argv[i + 1]) { args.maxTurns = parseInt(argv[++i], 10) || 50; }
     else if (arg === "--max-output" && argv[i + 1]) { args.maxOutput = parseInt(argv[++i], 10) || undefined; }
     else if (arg === "--budget" && argv[i + 1]) { args.budget = parseFloat(argv[++i]) || null; }
-    else if (arg === "--yolo") { args.permissions = "full-auto"; }
+    else if (arg === "--yolo") { args.permissions = "full-auto"; args.permissionsExplicit = true; }
     else if (arg === "--permissions" && argv[i + 1]) {
       const mode = argv[++i];
       if (mode === "suggest" || mode === "auto-confirm" || mode === "full-auto") {
         args.permissions = mode;
+        args.permissionsExplicit = true;
       }
     }
     else if (!arg.startsWith("-")) { positional.push(arg); }
@@ -146,6 +180,12 @@ export function parseArgs(argv: string[]): CliArgs {
   }
 
   return args;
+}
+
+export function resolveStartupPermissions(args: CliArgs): void {
+  if (args.permissionsExplicit) return;
+  const saved = loadPermissionMode();
+  if (saved) args.permissions = saved;
 }
 
 export function printHelp(): void {

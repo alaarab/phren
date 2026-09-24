@@ -68,7 +68,7 @@ function runSyncCommand(command: string, args: string[]): SyncCommandResult {
   }
 }
 
-function shouldUninstallCurrentGlobalPackage(): boolean {
+export function shouldUninstallCurrentGlobalPackage(): boolean {
   // `npm uninstall -g` resolves against the machine's real npm prefix, which
   // no amount of PHREN_PATH/HOME redirection sandboxes. A test that spawns
   // `phren uninstall` against temp directories would therefore delete the
@@ -441,12 +441,12 @@ export async function runUninstall(opts: { yes?: boolean } = {}) {
     debugLog(`uninstall: cleanup failed for ${contextFile}: ${errorMessage(err)}`);
   }
 
-  // Remove global CLAUDE.md symlink (created by linkGlobal -> ~/.claude/CLAUDE.md)
+  // Remove global AGENTS.md symlink (created by linkGlobal -> ~/.claude/CLAUDE.md)
   const globalClaudeLink = homePath(".claude", "CLAUDE.md");
   try {
     if (fs.lstatSync(globalClaudeLink).isSymbolicLink()) {
       fs.unlinkSync(globalClaudeLink);
-      log(`  Removed global CLAUDE.md symlink (${globalClaudeLink})`);
+      log(`  Removed global AGENTS.md symlink (${globalClaudeLink})`);
     }
   } catch {
     // Does not exist or not a symlink — nothing to do

@@ -15,8 +15,8 @@ import { readCustomHooks } from "../hooks.js";
 import { hookConfigPaths, hookConfigRoots } from "../provider-adapters.js";
 import { readProjectConfig, isProjectHookEnabled, PROJECT_HOOK_EVENTS } from "../project-config.js";
 import { getAllSkills } from "../skill/registry.js";
-import { resolveTaskFilePath, readTasks, TASKS_FILENAME } from "../data/tasks.js";
-import { FINDINGS_FILENAME } from "../data/access.js";
+import { readTasks, TASKS_FILENAME } from "../data/tasks.js";
+import { FINDINGS_FILENAME, readFindings } from "../data/access.js";
 import { buildIndex, queryDocBySourceKey, queryRows } from "../shared/index.js";
 import type { SqlJsDatabase } from "../shared/index.js";
 import { readProjectTopics, classifyTopicForText } from "../project-topics.js";
@@ -24,8 +24,9 @@ import { entryScoreKey } from "../governance/scores.js";
 import { findingStableId } from "../finding-graph-id.js";
 import { readRecentLookups, type LookupEvent } from "../governance/activity.js";
 import { logger } from "../logger.js";
+import { projectMemoryCounts } from "../content/summarize.js";
 
-interface EntryScore {
+export interface EntryScore {
   impressions: number;
   helpful: number;
   repromptPenalty: number;
@@ -33,7 +34,7 @@ interface EntryScore {
   lastUsedAt: string;
 }
 
-interface GraphNode {
+export interface GraphNode {
   id: string;
   label: string;
   fullLabel: string;
@@ -57,20 +58,48 @@ interface GraphNode {
   taskCount?: number;
 }
 
-interface GraphDocRef {
+export interface GraphDocRef {
   doc: string;
   project: string;
   scoreKey?: string;
 }
 
-interface GraphTopicMeta {
+export interface GraphTopicMeta {
   slug: string;
   label: string;
 }
 
-interface GraphLink {
+export interface GraphLink {
   source: string;
   target: string;
+  /** Absent for the default project→leaf spoke; set for the opt-in enrichment edges. */
+  kind?: "fragment" | "supersedes" | "contradicts";
+}
+
+export interface BuildGraphOptions {
+  /** Fragment↔fragment edges for fragments co-mentioned in the same documents. */
+  includeFragmentEdges?: boolean;
+  /** Finding→finding edges from `supersedes` / `contradicts` lifecycle annotations. */
+  includeLifecycleEdges?: boolean;
+}
+
+/** `[tag] text` → `text`, lower-cased, for matching lifecycle snippets against node labels. */
+function lifecycleKey(text: string): string {
+  return text.replace(/^\[[a-z_-]+\]\s+/i, "").trim().toLowerCase();
+}
+
+/**
+ * Resolve a 60-char lifecycle snippet to a finding node of the same project.
+ * Either side may be the prefix of the other: the snippet is truncated, and
+ * the node label may itself be shorter than 60 chars.
+ */
+function resolveLifecycleRef(snippet: string, candidates: Array<{ key: string; nodeId: string }>): string | undefined {
+  const key = lifecycleKey(snippet);
+  if (!key) return undefined;
+  for (const candidate of candidates) {
+    if (candidate.key.startsWith(key) || key.startsWith(candidate.key)) return candidate.nodeId;
+  }
+  return undefined;
 }
 
 interface ProjectInfo {
@@ -248,7 +277,7 @@ export function getHooksData(phrenPath: string, profile?: string) {
   return { globalEnabled, tools, customHooks: readCustomHooks(phrenPath), projectOverrides };
 }
 
-export async function buildGraph(phrenPath: string, profile?: string, focusProject?: string, existingDb?: SqlJsDatabase | null): Promise<{ nodes: GraphNode[]; links: GraphLink[]; total: number; scores: Record<string, EntryScore>; topics: GraphTopicMeta[] }> {
+export async function buildGraph(phrenPath: string, profile?: string, focusProject?: string, existingDb?: SqlJsDatabase | null, opts: BuildGraphOptions = {}): Promise<{ nodes: GraphNode[]; links: GraphLink[]; total: number; scores: Record<string, EntryScore>; topics: GraphTopicMeta[] }> {
   // Collect projects from primary store and all readable non-primary stores
   const storeProjects: Array<{ storePath: string; project: string }> = [];
   const primaryProjects = getProjectDirs(phrenPath, profile)
@@ -292,6 +321,14 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
     const seen = usedFindingIds.get(id) || 0;
     usedFindingIds.set(id, seen + 1);
     return seen === 0 ? id : `${id}-${seen + 1}`;
+  };
+  // Finding text → node id per project, for resolving lifecycle snippets.
+  const findingKeysByProject = new Map<string, Array<{ key: string; nodeId: string }>>();
+  const rememberFinding = (project: string, text: string, nodeId: string): void => {
+    if (!opts.includeLifecycleEdges) return;
+    const list = findingKeysByProject.get(project) ?? [];
+    list.push({ key: lifecycleKey(text), nodeId });
+    findingKeysByProject.set(project, list);
   };
 
   for (const { storePath, project } of storeProjects) {
@@ -410,6 +447,7 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
             date: currentDate,
           });
           links.push({ source: project, target: nodeId });
+          rememberFinding(project, text, nodeId);
           for (const other of exactProjectMentions(text, projectSet, project)) {
             links.push({ source: project, target: other });
           }
@@ -446,6 +484,7 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
           date: currentDate,
         });
         links.push({ source: project, target: nodeId });
+        rememberFinding(project, text, nodeId);
         for (const other of exactProjectMentions(text, projectSet, project)) {
           links.push({ source: project, target: other });
         }
@@ -480,11 +519,35 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
         date: currentDate,
       });
       links.push({ source: project, target: nodeId });
+      rememberFinding(project, text, nodeId);
     }
 
     const projectNode = projectNodeByName.get(project);
     if (projectNode) {
       projectNode.findingCount = (projectNode.findingCount || 0) + taggedCount + untaggedAdded;
+    }
+  }
+
+  // ── Lifecycle edges (opt-in) ─────────────────────────────────────────
+  if (opts.includeLifecycleEdges) {
+    for (const { storePath, project } of storeProjects) {
+      const candidates = findingKeysByProject.get(project);
+      if (!candidates?.length) continue;
+      const result = readFindings(storePath, project);
+      if (!result.ok) continue;
+      for (const item of result.data) {
+        if (!item.supersedes && !item.supersededBy && !item.contradicts?.length) continue;
+        const self = resolveLifecycleRef(item.text, candidates);
+        if (!self) continue;
+        const edge = (snippet: string, kind: "supersedes" | "contradicts", newerFirst: boolean): void => {
+          const other = resolveLifecycleRef(snippet, candidates);
+          if (!other || other === self) return;
+          links.push(newerFirst ? { source: self, target: other, kind } : { source: other, target: self, kind });
+        };
+        if (item.supersedes) edge(item.supersedes, "supersedes", true);
+        if (item.supersededBy) edge(item.supersededBy, "supersedes", false);
+        for (const snippet of item.contradicts ?? []) edge(snippet, "contradicts", true);
+      }
     }
   }
 
@@ -573,6 +636,7 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
         refsByEntity.set(entityId, refs);
       }
     }
+    const entityNodeIds = new Map<number, string>();
     if (rows) {
       for (const row of rows) {
         const entityId = typeof row[0] === "number" ? row[0] : -1;
@@ -609,7 +673,43 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
         for (const proj of linkedProjects) {
           links.push({ source: nodeId, target: proj });
         }
+        entityNodeIds.set(entityId, nodeId);
       }
+    }
+
+    // ── Fragment co-occurrence edges (opt-in) ──────────────────────────
+    // Two fragments mentioned by the same document are related; the more
+    // documents they share, the stronger the tie. Derived from refsByEntity,
+    // so no extra SQL.
+    if (opts.includeFragmentEdges && entityNodeIds.size > 1) {
+      const MAX_ENTITIES_PER_DOC = 40;
+      const MAX_FRAGMENT_EDGES = 400;
+      const entitiesByDoc = new Map<string, string[]>();
+      for (const [entityId, nodeId] of entityNodeIds) {
+        for (const ref of refsByEntity.get(entityId) ?? []) {
+          const list = entitiesByDoc.get(ref.doc) ?? [];
+          if (list.length < MAX_ENTITIES_PER_DOC && !list.includes(nodeId)) list.push(nodeId);
+          entitiesByDoc.set(ref.doc, list);
+        }
+      }
+      const pairCounts = new Map<string, { a: string; b: string; count: number }>();
+      for (const members of entitiesByDoc.values()) {
+        const sorted = members.slice().sort();
+        for (let i = 0; i < sorted.length; i++) {
+          for (let j = i + 1; j < sorted.length; j++) {
+            const key = `${sorted[i]}||${sorted[j]}`;
+            const entry = pairCounts.get(key) ?? { a: sorted[i], b: sorted[j], count: 0 };
+            entry.count++;
+            pairCounts.set(key, entry);
+          }
+        }
+      }
+      const ranked = Array.from(pairCounts.values()).sort((x, y) => y.count - x.count || x.a.localeCompare(y.a) || x.b.localeCompare(y.b));
+      // Prefer pairs that co-occur in several docs; on a small store fall back
+      // to single co-mentions so the fragment layer still has structure.
+      const strong = ranked.filter((pair) => pair.count >= 2);
+      const chosen = (strong.length >= 20 ? strong : ranked).slice(0, MAX_FRAGMENT_EDGES);
+      for (const pair of chosen) links.push({ source: pair.a, target: pair.b, kind: "fragment" });
     }
   } catch {
     // fragment loading failed — continue with other data sources
@@ -668,7 +768,7 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
 
   const seen = new Set<string>();
   const dedupedLinks = links.filter((link) => {
-    const key = [link.source, link.target].sort().join("||");
+    const key = `${[link.source, link.target].sort().join("||")}::${link.kind ?? ""}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -681,6 +781,14 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
     connectedIds.add(link.target);
   }
   const filteredNodes = nodes.filter((n) => n.group !== "project" || connectedIds.has(n.id));
+
+  // The counts beside a project are what it holds, not the slice drawn here:
+  // live findings, journal findings, the whole archive, and every open task.
+  for (const [project, projectNode] of projectNodeByName) {
+    const counts = projectMemoryCounts(phrenPath, project);
+    projectNode.findingCount = counts.findings;
+    projectNode.taskCount = counts.openTasks;
+  }
 
   const total = filteredNodes.length;
   const topics = Array.from(topicMetaMap.values());
@@ -708,16 +816,12 @@ export function recentAccepted(phrenPath: string): string[] {
 function buildProjectInfo(basePath: string, project: string, store?: string): ProjectInfo {
   const dir = path.join(basePath, project);
   const findingsPath = path.join(dir, FINDINGS_FILENAME);
-  const taskPath = resolveTaskFilePath(basePath, project);
-  const claudeMdPath = path.join(dir, "CLAUDE.md");
+  const claudeMdPath = path.join(dir, "AGENTS.md");
   const summaryPath = path.join(dir, "summary.md");
   const refPath = path.join(dir, "reference");
 
-  let findingCount = 0;
-  if (fs.existsSync(findingsPath)) {
-    const content = fs.readFileSync(findingsPath, "utf8");
-    findingCount = (content.match(/^- /gm) || []).length;
-  }
+  const counts = projectMemoryCounts(basePath, project);
+  const findingCount = counts.findings;
 
   const sparkline: number[] = new Array(8).fill(0);
   if (fs.existsSync(findingsPath)) {
@@ -733,12 +837,8 @@ function buildProjectInfo(basePath: string, project: string, store?: string): Pr
     }
   }
 
-  let taskCount = 0;
-  if (taskPath && fs.existsSync(taskPath)) {
-    const content = fs.readFileSync(taskPath, "utf8");
-    const queueMatch = content.match(/## Queue[\s\S]*?(?=## |$)/);
-    if (queueMatch) taskCount = (queueMatch[0].match(/^- /gm) || []).length;
-  }
+  // Every open task (Active and Queue), the same number the graph shows.
+  const taskCount = counts.openTasks;
 
   let summaryText = "";
   if (fs.existsSync(summaryPath)) {

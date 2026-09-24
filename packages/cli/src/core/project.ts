@@ -1,10 +1,9 @@
 import * as path from "path";
 import { phrenErr, phrenOk, readRootManifest, type PhrenResult } from "../shared.js";
-import { bootstrapFromExisting } from "../init/setup.js";
+import { bootstrapFromExisting } from "./project-registry.js";
 import { resolveActiveProfile } from "../profile-store.js";
 import type { ProjectOwnershipMode } from "../project-config.js";
-import { TASKS_FILENAME } from "../data/tasks.js";
-import { FINDINGS_FILENAME } from "../data/access.js";
+import { FINDINGS_FILENAME, TASKS_FILENAME } from "../filenames.js";
 
 interface AddedProjectData {
   project: string;

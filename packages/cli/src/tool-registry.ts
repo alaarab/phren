@@ -14,6 +14,7 @@ const CATEGORY_BY_MODULE: Record<string, string> = {
   "search": "Search and browse",
   "tasks": "Task management",
   "finding": "Finding capture",
+  "notes": "Notes",
   "memory": "Memory quality",
   "data": "Data management",
   "graph": "Fragments and graph",
@@ -121,8 +122,10 @@ export function getToolsByCategory(): Array<{ category: string; tools: ToolMetad
     .filter((entry) => entry.tools.length > 0);
 }
 
-export function renderToolCatalogMarkdown(): string {
+export function renderToolCatalogMarkdown(allowed?: ReadonlySet<string>): string {
   return getToolsByCategory()
+    .map(entry => ({ ...entry, tools: entry.tools.filter(tool => !allowed || allowed.has(tool.name)) }))
+    .filter(entry => entry.tools.length > 0)
     .map(({ category, tools }) => {
       const lines = tools.map((tool) => `- \`${tool.name}\`: ${tool.description}`);
       return `**${category}:**\n${lines.join("\n")}`;

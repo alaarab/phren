@@ -10,7 +10,8 @@
         "line": "Investigate flaky sync test on CI [medium]",
         "checked": false,
         "priority": "medium",
-        "rank": 3
+        "rank": 3,
+        "createdAt": "2026-07-22T10:00:00.000Z"
       }
     ],
     "Queue": [
@@ -32,7 +33,8 @@
         "section": "Done",
         "line": "Write fixture generator",
         "checked": true,
-        "rank": 2
+        "rank": 2,
+        "createdAt": "2026-07-21T10:00:00.000Z"
       }
     ]
   },

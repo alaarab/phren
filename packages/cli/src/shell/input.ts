@@ -1,3 +1,4 @@
+import { nonInteractiveGitEnv } from "../utils-helpers.js";
 /**
  * Command palette and input handling for the phren interactive shell.
  * Extracted from shell.ts to keep the orchestrator under 300 lines.
@@ -37,13 +38,15 @@ import { handleGovernMemories } from "../cli/govern.js";
 import { runSearch } from "../cli/search.js";
 import { consolidateProjectFindings } from "../governance/policy.js";
 import { style } from "./render.js";
-import { SUB_VIEWS, TAB_ICONS, type DoctorResultLike, type ShellDeps, type ShellView } from "./types.js";
+import { SUB_VIEWS, enabledSubViews, TAB_ICONS, type DoctorResultLike, type ShellDeps, type ShellView } from "./types.js";
 import { getProjectSkills, getHookEntries, writeInstallPreferences } from "./view.js";
+import { resolveProjectStorePath } from "../cli/namespaces-utils.js";
+import { openInEditor } from "../editor/launch.js";
 import { removeSkillPath, setSkillEnabledAndSync } from "../skill/files.js";
 import {
   resultMsg,
   editDistance,
-  tokenize,
+  splitCommandLine,
   expandIds,
   normalizeSection,
   tasksByFilter,
@@ -51,6 +54,7 @@ import {
 } from "./palette.js";
 import { errorMessage } from "../utils.js";
 import { logger } from "../logger.js";
+import type { GraphController } from "./graph/controller.js";
 
 /** Interface for the shell methods that executePalette needs */
 interface PaletteHost {
@@ -74,12 +78,40 @@ export interface NavigationHost extends PaletteHost {
   currentCursor(): number;
   setCursor(n: number): void;
   moveCursor(delta: number): void;
-  getListItems(): { id?: string; name?: string; text?: string; line?: string }[];
+  getListItems(): { id?: string; name?: string; text?: string; line?: string; path?: string; scopeType?: string; storePath?: string }[];
   startInput(ctx: string, initial: string): void;
   inputMqId: string;
   prevHealthView: ShellView | undefined;
   filter: string | undefined;
   setFilter(value: string): void;
+  /** The knowledge-graph view's controller (created on first use). */
+  graph(): GraphController;
+  /** Run something with the terminal released; false when the host cannot. */
+  suspend(fn: () => Promise<void> | void): Promise<boolean>;
+  /** Open a file in the shell's own modal editor. */
+  openEditor(filePath: string, label: string, kind: "skill" | "claude", scope?: string): boolean;
+}
+
+/**
+ * The file `e` and `E` edit for the current view. Skills edit their own
+ * markdown; a project edits the AGENTS.md the store owns and symlinks into the
+ * repo, so editing here reaches every linked checkout.
+ */
+export function editTargetFor(
+  host: NavigationHost,
+  item: { name?: string; path?: string; storePath?: string } | undefined,
+): { path: string; label: string; kind: "skill" | "claude" } | null {
+  if (host.state.view === "Skills") {
+    if (!item?.path) return null;
+    return { path: item.path, label: item.name ?? path.basename(item.path), kind: "skill" };
+  }
+  if (host.state.view === "Projects") {
+    const project = item?.name ?? host.state.project;
+    if (!project) return null;
+    const store = resolveProjectStorePath(host.phrenPath, project);
+    return { path: path.join(store, project, "AGENTS.md"), label: `${project}/AGENTS.md`, kind: "claude" };
+  }
+  return null;
 }
 
 function taskFileForProject(phrenPath: string, project: string): string {
@@ -91,12 +123,12 @@ function taskFileForProject(phrenPath: string, project: string): string {
 export async function executePalette(host: PaletteHost, input: string): Promise<void> {
   const trimmed = input.trim();
   if (!trimmed) return;
-  const parts = tokenize(trimmed);
+  const parts = splitCommandLine(trimmed);
   const command = (parts[0] || "").toLowerCase();
 
   if (command === "help") {
     host.showHelp = true;
-    host.setMessage("  Showing help — press any key to dismiss");
+    host.setMessage("  Showing help — ↑↓ to scroll, any other key to dismiss");
     return;
   }
 
@@ -111,6 +143,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
     host.setMessage(`  ${TAB_ICONS.Health} Health`);
     return;
   }
+  if (command === "graph" || command === "map") { host.setView("Graph"); host.setMessage(`  ${TAB_ICONS.Graph} Graph`); return; }
 
   if (command === "open") {
     const project = parts[1];
@@ -375,6 +408,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
       const lines: string[] = [];
       try {
         const conflicted = execFileSync("git", ["diff", "--name-only", "--diff-filter=U"], {
+          env: nonInteractiveGitEnv(),
           cwd: host.phrenPath, encoding: "utf8", timeout: 10_000,
           stdio: ["ignore", "pipe", "ignore"],
         }).trim();
@@ -430,11 +464,13 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
     try {
       const projectDir = path.join(host.phrenPath, project);
       const diff = execFileSync("git", ["diff", "--no-color", "--", projectDir], {
+        env: nonInteractiveGitEnv(),
         cwd: host.phrenPath, encoding: "utf8", timeout: 10_000,
         stdio: ["ignore", "pipe", "ignore"],
       }).trim();
       if (!diff) {
         const staged = execFileSync("git", ["diff", "--cached", "--no-color", "--", projectDir], {
+          env: nonInteractiveGitEnv(),
           cwd: host.phrenPath, encoding: "utf8", timeout: 10_000,
           stdio: ["ignore", "pipe", "ignore"],
         }).trim();
@@ -469,7 +505,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
 
 function suggestCommand(input: string): string | undefined {
   const known = [
-    "help", "projects", "tasks", "task", "findings", "review queue", "machines", "health",
+    "help", "projects", "tasks", "task", "findings", "review queue", "machines", "health", "graph",
     "open", "search", "add", "complete", "move", "reprioritize", "pin", "unpin", "context",
     "work next", "tidy", "find add", "find remove", "machine map", "profile add-project", "profile remove-project",
     "run fix", "relink", "rerun hooks", "update", "govern", "consolidate",
@@ -486,7 +522,7 @@ function suggestCommand(input: string): string | undefined {
 
 export function completeInput(line: string, phrenPath: string, profile: string, state: ShellState): string[] {
   const commands = [
-    ":projects", ":tasks", ":task", ":findings", ":review queue", ":machines", ":health",
+    ":projects", ":tasks", ":task", ":findings", ":review queue", ":machines", ":health", ":graph",
     ":open", ":search", ":add", ":complete", ":move", ":reprioritize", ":pin",
     ":unpin", ":context", ":work next", ":tidy", ":find add", ":find remove",
     ":machine map",
@@ -498,7 +534,7 @@ export function completeInput(line: string, phrenPath: string, profile: string, 
   const trimmed = line.trimStart();
   if (!trimmed.startsWith(":")) return [];
   const after = trimmed.slice(1);
-  const parts = tokenize(after);
+  const parts = splitCommandLine(after);
   const endsWithSpace = /\s$/.test(trimmed);
 
   if (parts.length === 0) return commands;
@@ -539,7 +575,7 @@ export function completeInput(line: string, phrenPath: string, profile: string, 
 
 export function getListItems(
   phrenPath: string, profile: string, state: ShellState, healthLineCount: number,
-): { id?: string; name?: string; text?: string; line?: string }[] {
+): { id?: string; name?: string; text?: string; line?: string; path?: string; scopeType?: string; storePath?: string }[] {
   switch (state.view) {
     case "Projects": {
       const cards = listProjectCards(phrenPath, profile);
@@ -571,7 +607,13 @@ export function getListItems(
     }
     case "Skills": {
       if (!state.project) return [];
-      const allSkills = getProjectSkills(phrenPath, state.project).map((s) => ({ name: s.name, text: `${s.enabled ? "enabled" : "disabled"} · ${s.path}` }));
+      const allSkills = getProjectSkills(phrenPath, state.project).map((s) => ({
+        name: s.name,
+        text: `${s.enabled ? "enabled" : "disabled"} · ${s.path}`,
+        path: s.path,
+        scopeType: s.scopeType,
+        storePath: s.storePath,
+      }));
       return state.filter
         ? allSkills.filter((s) => `${s.name} ${s.text}`.toLowerCase().includes(state.filter!.toLowerCase()))
         : allSkills;
@@ -581,6 +623,9 @@ export function getListItems(
     }
     case "Health":
       return Array.from({ length: Math.max(1, healthLineCount) }, (_, i) => ({ id: String(i) }));
+    case "Graph":
+      // The graph manages its own selection; the list cursor has nothing to walk.
+      return [];
     default:
       return [];
   }
@@ -633,6 +678,21 @@ async function doViewAction(host: NavigationHost, key: string): Promise<void> {
   const cursor = host.currentCursor();
   const items = host.getListItems();
   const item = items[cursor];
+
+  // `e` hands the file to the user's own editor, whatever that is.
+  if (key === "e") {
+    const target = editTargetFor(host, item);
+    if (!target) { host.setMessage(`  ${style.dim("nothing to edit here")}`); return; }
+    const handed = await host.suspend(() => {
+      const result = openInEditor(target.path);
+      host.setMessage(result.ok
+        ? `  ${style.green("✓")} ${target.label}`
+        : `  Editor "${result.command}" failed — ${result.error ?? "could not start"}. Set $EDITOR.`);
+    });
+    if (!handed) host.setMessage(`  ${style.dim("edit it at")} ${target.path}`);
+    host.invalidateSubsectionsCache();
+    return;
+  }
   const project = host.state.project;
 
   switch (host.state.view) {
@@ -669,10 +729,11 @@ async function doViewAction(host: NavigationHost, key: string): Promise<void> {
     case "Skills":
       if ((key === "d" || key === "\x7f") && item?.name) {
         if (!project) { host.setMessage("Select a project first."); return; }
-        const skillPath = item.text!;
+        const skillPath = item.path;
+        if (!skillPath) { host.setMessage("  Could not resolve that skill's path."); return; }
         host.confirmThen(`Remove skill "${item.name}"?`, () => {
           try {
-            removeSkillPath(skillPath.split("·").slice(-1)[0].trim());
+            removeSkillPath(skillPath);
             host.setMessage(`  Removed ${item.name}`);
             host.setCursor(Math.max(0, cursor - 1));
           } catch (err: unknown) {
@@ -682,7 +743,10 @@ async function doViewAction(host: NavigationHost, key: string): Promise<void> {
       } else if (key === "t" && item?.name) {
         if (!project) { host.setMessage("Select a project first."); return; }
         const isEnabled = !item.text?.startsWith("disabled");
-        setSkillEnabledAndSync(host.phrenPath, project, item.name, !isEnabled);
+        // A global skill's enabled flag is recorded under the "global" scope;
+        // passing the project wrote a key that nothing ever reads back.
+        const scope = item.scopeType === "global" ? "global" : project;
+        setSkillEnabledAndSync(item.storePath ?? host.phrenPath, scope, item.name, !isEnabled);
         host.setMessage(`  ${!isEnabled ? "Enabled" : "Disabled"} ${item.name}`);
       } else if (key === "a") {
         if (!project) { host.setMessage("Select a project first."); return; }
@@ -725,12 +789,24 @@ export function applyViewShortcut(host: NavigationHost, key: string): boolean {
   if (key === "s") { if (!host.state.project) { host.setMessage(style.dim("  Select a project first (↵)")); return true; } host.setView("Skills"); host.setMessage(`  ${TAB_ICONS.Skills} Skills`); return true; }
   if (key === "k") { host.setView("Hooks"); host.setMessage(`  ${TAB_ICONS.Hooks} Hooks`); return true; }
   if (key === "h") { host.prevHealthView = host.state.view === "Health" ? host.prevHealthView : host.state.view; host.healthCache = undefined; host.setView("Health"); host.setMessage(`  ${TAB_ICONS.Health} Health  ${style.dim("(esc to return)")}`); return true; }
+  // No message: the bottom bar already says this, and in the Graph view a
+  // spare row is worth more than a reminder.
+  if (key === "g") { host.setView("Graph"); host.setMessage(""); return true; }
   return false;
 }
 
 // ── Navigate-mode key handler ─────────────────────────────────────────────────
 
-export async function handleNavigateKey(host: NavigationHost, key: string): Promise<boolean> {
+export async function handleNavigateKey(host: NavigationHost, rawKey: string): Promise<boolean> {
+  // Terminals in application-cursor mode send SS3 (ESC O A) instead of CSI
+  // (ESC [ A) for the arrow keys; normalise so both spellings navigate.
+  const key = /^\x1bO[A-D]$/.test(rawKey) ? `\x1b[${rawKey[2]}` : rawKey;
+  // The graph view owns arrows, Enter, /, Esc-layering and its own letters;
+  // anything it declines (q, :, ?, view shortcuts, a final Esc) falls through.
+  if (host.state.view === "Graph") {
+    const handled = host.graph().handleKey(key, host);
+    if (handled !== undefined) return handled;
+  }
   if (key === "\x1b[A") { host.moveCursor(-1); showCursorPosition(host); return true; }
   if (key === "\x1b[B") { host.moveCursor(1); showCursorPosition(host); return true; }
   if (key === "\x1b[D") { if (host.state.view === "Projects") { host.setMessage(`  ${style.dim("Projects is the dashboard landing screen")}`); } else { prevTab(host); } return true; }
@@ -743,7 +819,7 @@ export async function handleNavigateKey(host: NavigationHost, key: string): Prom
   if (key === "\x1b[Z") { prevTab(host); return true; }
   if (key === "q" || key === "Q") return false;
   if (key === "\r" || key === "\n") { await activateSelected(host); return true; }
-  if (key === "?") { host.showHelp = !host.showHelp; host.setMessage(host.showHelp ? "  Showing help — press any key to dismiss" : `  ${style.boldCyan("←→")} ${style.dim("tabs")}  ${style.boldCyan("↑↓")} ${style.dim("move")}  ${style.boldCyan("↵")} ${style.dim("activate")}  ${style.boldCyan("?")} ${style.dim("help")}`); return true; }
+  if (key === "?") { host.showHelp = !host.showHelp; host.setMessage(host.showHelp ? "  Showing help — ↑↓ to scroll, any other key to dismiss" : `  ${style.boldCyan("←→")} ${style.dim("tabs")}  ${style.boldCyan("↑↓")} ${style.dim("move")}  ${style.boldCyan("↵")} ${style.dim("activate")}  ${style.boldCyan("?")} ${style.dim("help")}`); return true; }
   if (key === "/") { host.startInput("filter", host.filter || ""); return true; }
   if (key === ":") { host.startInput("command", ""); return true; }
   if (key === "\x1b") {
@@ -761,6 +837,17 @@ export async function handleNavigateKey(host: NavigationHost, key: string): Prom
     host.setMessage(`  Intro mode: ${style.boldCyan(next)}`);
     return true;
   }
+  if (key === "E") {
+    const items = host.getListItems();
+    const item = items[host.currentCursor()];
+    const target = editTargetFor(host, item);
+    if (!target) { host.setMessage(`  ${style.dim("nothing to edit here")}`); return true; }
+    const scope = target.kind === "skill" ? (item?.scopeType === "global" ? "global" : host.state.project) : undefined;
+    if (host.openEditor(target.path, target.label, target.kind, scope)) {
+      host.setMessage(`  ${style.dim("i insert · :w write · :q quit")}`);
+    }
+    return true;
+  }
   if (["a", "d", "e", "t", "\x7f"].includes(key)) { await doViewAction(host, key); return true; }
   return true;
 }
@@ -768,15 +855,17 @@ export async function handleNavigateKey(host: NavigationHost, key: string): Prom
 // ── Tab switching ─────────────────────────────────────────────────────────────
 
 function nextTab(host: NavigationHost): void {
-  if (host.state.view === "Projects" || host.state.view === "Health") return;
-  const idx = SUB_VIEWS.indexOf(host.state.view as typeof SUB_VIEWS[number]);
-  const next = SUB_VIEWS[(idx + 1) % SUB_VIEWS.length];
+  if (host.state.view === "Projects" || host.state.view === "Health" || host.state.view === "Graph") return;
+  const views = enabledSubViews(host.phrenPath, host.profile);
+  const idx = views.indexOf(host.state.view as typeof SUB_VIEWS[number]);
+  const next = views[(idx + 1) % views.length];
   if (next) { host.setView(next); host.setMessage(`  ${TAB_ICONS[next]} ${next}`); }
 }
 
 function prevTab(host: NavigationHost): void {
-  if (host.state.view === "Projects" || host.state.view === "Health") return;
-  const idx = SUB_VIEWS.indexOf(host.state.view as typeof SUB_VIEWS[number]);
-  const prev = SUB_VIEWS[(idx - 1 + SUB_VIEWS.length) % SUB_VIEWS.length];
+  if (host.state.view === "Projects" || host.state.view === "Health" || host.state.view === "Graph") return;
+  const views = enabledSubViews(host.phrenPath, host.profile);
+  const idx = views.indexOf(host.state.view as typeof SUB_VIEWS[number]);
+  const prev = views[(idx - 1 + views.length) % views.length];
   if (prev) { host.setView(prev); host.setMessage(`  ${TAB_ICONS[prev]} ${prev}`); }
 }

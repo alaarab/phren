@@ -6,10 +6,18 @@ on:
   pull_request:
     branches: [main]
 
+# Superseded commits should not keep consuming runners.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-and-test:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
     strategy:
+      # One OS failing must not cancel the others and hide their results.
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         node-version: [20, 22]
@@ -28,6 +36,7 @@ jobs:
 
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
@@ -40,8 +49,26 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
 
+  agent-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # turbo's test task depends on build -> ^build, which produces the
+      # packages/cli dist output the agent's tests import at runtime.
+      - run: pnpm exec turbo run test --filter=@phren/agent
+
   validate-docs:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:

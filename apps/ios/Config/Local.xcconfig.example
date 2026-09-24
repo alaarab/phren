@@ -1,0 +1,4 @@
+// Copy to Local.xcconfig. Register a GitHub OAuth App with Device Flow enabled.
+PHREN_GITHUB_CLIENT_ID = YOUR_PUBLIC_OAUTH_CLIENT_ID
+DEVELOPMENT_TEAM = YOUR_APPLE_TEAM_ID
+CODE_SIGN_STYLE = Automatic

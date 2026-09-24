@@ -2,104 +2,100 @@ import Foundation
 import WidgetKit
 import PhrenKit
 
-/// The JSON contract between the app and the `PhrenWidgets` extension.
-///
-/// Mirrors `WidgetSnapshot` in `PhrenWidgets/WidgetSnapshot.swift`
-/// field-for-field — the widget target can't link PhrenKit or this app
-/// target, so a hand-kept duplicate struct plus the JSON file written to the
-/// shared App Group container is the entire contract. If you add a field
-/// here, add it there too.
-struct WidgetSnapshot: Codable, Equatable {
-    struct StoreCount: Codable, Equatable {
-        var storeName: String
-        var count: Int
-    }
-
-    struct TopTask: Codable, Equatable {
-        var text: String
-        var project: String
-    }
-
-    var totalReviewCount: Int
-    var storeBreakdown: [StoreCount]
-    var topTask: TopTask?
-    var lastSyncedAt: Date?
-
-    /// The subset that matters for deciding whether the widget's on-screen
-    /// content actually needs to change. `lastSyncedAt` ticks forward on
-    /// almost every live poll — `SyncEngine.setStatus` calls `notify()` (and
-    /// hence `AppModel.refresh()`) on every status mutation, not just
-    /// content changes, so it moves roughly every ~7s while the app is
-    /// foregrounded. Comparing full snapshot bytes including it would make
-    /// change-detection a no-op and spam `WidgetCenter.reloadAllTimelines()`
-    /// well past its daily budget.
-    struct Content: Codable, Equatable {
-        var totalReviewCount: Int
-        var storeBreakdown: [StoreCount]
-        var topTask: TopTask?
-    }
-
-    var content: Content {
-        Content(totalReviewCount: totalReviewCount, storeBreakdown: storeBreakdown, topTask: topTask)
-    }
-}
-
 /// Writes `WidgetSnapshot` to the `group.com.phren.ios` shared container so
 /// the WidgetKit extension — which reads only this JSON file, never GitHub
-/// or PhrenKit directly — can render review count / top task without the
+/// or PhrenKit directly — can render memory count / top task without the
 /// app being open.
 ///
 /// Called from `AppModel.refresh()`, the same place the store-health data
 /// (`syncStatus`, per-store `status`) settles each cycle: live-mode polling
 /// re-runs `refresh()` roughly every ~7s per store while foregrounded, so
 /// the snapshot file is always written with this cycle's freshest counts.
-/// The disk write is unconditional (cheap, local); the widget-visible
-/// `reloadAllTimelines()` call is gated on `Content` actually changing so a
-/// quiet poll (nothing approved, nothing new) never touches the widget
-/// refresh budget.
+/// The disk write is gated on `Content` changing or `lastSyncedAt` moving by
+/// a minute; the widget-visible `reloadAllTimelines()` call is gated on
+/// `Content` alone, so a quiet poll (nothing approved, nothing new) never
+/// touches the disk or the widget refresh budget.
 @MainActor
 enum WidgetBridge {
     static let appGroupID = "group.com.phren.ios"
-    private static let snapshotFilename = "widget-snapshot.json"
 
-    private static let encoder: JSONEncoder = {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = [.sortedKeys]
-        return encoder
-    }()
+    private static let writer = WidgetSnapshotWriter()
+    private static let controlWriter = SessionControlSnapshotWriter()
+    private static var sessionsByHost: [UUID: [LiveAgentSession]] = [:]
 
-    /// Encoded `Content` bytes from the last publish that changed the
-    /// widget-visible picture — `nil` at launch, so the first refresh of
-    /// every cold start always reloads once (cheap, and it's exactly the
-    /// case the "app-side reload keeps it fresher" story is for).
-    private static var lastPublishedContent: Data?
-
-    private static var containerURL: URL? {
-        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupID)
+    static func publish(from model: AppModel) async {
+        let snapshot = buildSnapshot(from: model)
+        await writer.publish(snapshot)
     }
 
-    static func publish(from model: AppModel) {
-        guard let url = containerURL?.appendingPathComponent(snapshotFilename) else { return }
-        let snapshot = buildSnapshot(from: model)
+    /// Live-session monitors call this after each successful host refresh.
+    /// Keeping the last successful result for every saved host lets the
+    /// control choose across computers without treating an offline host as an
+    /// empty response.
+    static func publishSessions(_ sessions: [LiveAgentSession], on host: LiveHost) async {
+        sessionsByHost[host.id] = sessions.filter { $0.tab.agent != nil }
+        await publishCurrentSessions()
+        let projects = await SpotlightProjects.current()
+        let preferences = try? LiveSessionPreferences.read(AppRuntime.defaults.data(forKey: "sessions.live.preferences.v1") ?? Data())
+        await SessionWorkingActivityController.shared.reconcile(sessions, on: host,
+                                                                 projects: projects, preferences: preferences)
+    }
 
-        guard let fullData = try? encoder.encode(snapshot) else { return }
-        try? fullData.write(to: url, options: .atomic)
+    static func reconcileSessionHosts(_ hosts: [LiveHost]) async {
+        let hadCachedSessions = !sessionsByHost.isEmpty
+        sessionsByHost = sessionsByHost.filter { id, _ in hosts.contains { $0.id == id } }
+        await SessionWorkingActivityController.shared.reconcileHosts(hosts)
+        // On a cold app launch, keep the last good control until at least one
+        // saved host answers. An explicit removal after this process observed
+        // sessions still clears its route immediately.
+        guard hadCachedSessions || hosts.isEmpty else { return }
+        await publishCurrentSessions()
+    }
 
-        guard let contentData = try? encoder.encode(snapshot.content), contentData != lastPublishedContent else {
-            return
+    private static func publishCurrentSessions() async {
+        let all = sessionsByHost.values.flatMap { $0 }
+        let projects = await SpotlightProjects.current()
+        let preferences = try? LiveSessionPreferences.read(AppRuntime.defaults.data(forKey: "sessions.live.preferences.v1") ?? Data())
+        let reports = SessionStatusService.reports(for: all, projects: projects, preferences: preferences)
+        let selected = SessionAttentionSelector.select(all)
+        let entity = selected.flatMap { session in reports.first { $0.entity.id == AgentSessionEntity(session).id }?.entity }
+        await controlWriter.publish(entity.map(SessionControlSnapshot.init))
+    }
+
+    static func openAttentionSession() throws {
+        guard let url = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupID)?
+                .appendingPathComponent(SessionControlSnapshot.filename),
+              let data = try? Data(contentsOf: url),
+              let snapshot = try? JSONDecoder().decode(SessionControlSnapshot.self, from: data),
+              let host = AgentSessions.hosts.first(where: { $0.id == snapshot.hostID && $0.muxID == snapshot.muxID }) else {
+            throw PhrenKitError.validation("No waiting or working session is available.")
         }
-        lastPublishedContent = contentData
-        WidgetCenter.shared.reloadAllTimelines()
+        let session = try AgentLaunch.session(host: host, workspaceID: snapshot.workspaceID, tabID: snapshot.tabID,
+                                              label: snapshot.label, agent: snapshot.agent,
+                                              agentStatus: snapshot.state, cwd: snapshot.cwd)
+        AgentLaunch.setPending(session)
+    }
+
+    /// "Talk to my conductor": the running conductor's chat in talk mode, or
+    /// the conductor launch when none is running. Returns what Siri says.
+    static func talkToConductor() async -> String {
+        guard let conductor = await ConductorSession.current() else {
+            AgentLaunch.setPendingAction(.startConductor)
+            return "No conductor is running. Start one in phren, then talk to it."
+        }
+        AgentLaunch.setPending(conductor, destination: .talk)
+        return "Talking to your conductor on \(conductor.host.name)."
+    }
+
+    /// The pause control: the Agents list confirms before anything stops.
+    static func requestPauseAll() {
+        AgentLaunch.setPendingAction(.pauseAll)
     }
 
     private static func buildSnapshot(from model: AppModel) -> WidgetSnapshot {
-        let breakdown = model.storeContexts
-            .map { WidgetSnapshot.StoreCount(storeName: $0.descriptor.displayName, count: $0.snapshot.reviewQueue.count) }
-            .sorted { $0.storeName < $1.storeName }
-        return WidgetSnapshot(
-            totalReviewCount: model.totalReviewCount,
-            storeBreakdown: breakdown,
+        WidgetSnapshot(
+            memoryCount: model.storeContexts.reduce(0) { $0 + $1.snapshot.projects.reduce(0) { $0 + $1.totalFindingCount } },
+            projectCount: model.storeContexts.reduce(0) { $0 + $1.snapshot.projects.filter { $0.name != "global" }.count },
             topTask: topActiveTask(model: model),
             lastSyncedAt: model.syncStatus.lastSyncedAt
         )
@@ -133,5 +129,90 @@ enum WidgetBridge {
         let bRank = b.rank ?? Int.max
         if aRank != bRank { return aRank < bRank }
         return aProject < bProject
+    }
+}
+
+enum SessionAttentionSelector {
+    static func select(_ sessions: [LiveAgentSession]) -> LiveAgentSession? {
+        sessions.filter { [.waiting, .working].contains($0.tab.activity) }.sorted { left, right in
+            let leftTier = tier(left), rightTier = tier(right)
+            if leftTier != rightTier { return leftTier < rightTier }
+            let leftSequence = left.tab.changedSeq ?? Int.min
+            let rightSequence = right.tab.changedSeq ?? Int.min
+            if leftSequence != rightSequence { return leftSequence > rightSequence }
+            return AgentSessionEntity(left).id < AgentSessionEntity(right).id
+        }.first
+    }
+
+    private static func tier(_ session: LiveAgentSession) -> Int {
+        if session.tab.approvalPending == true { return 0 }
+        return session.tab.activity == .waiting ? 1 : 2
+    }
+}
+
+private extension SessionControlSnapshot {
+    init(_ entity: AgentSessionEntity) {
+        self.init(sessionID: entity.id,
+                  displayName: "\(entity.project ?? entity.workspace) · \(entity.harnessName ?? "Agent") on \(entity.computer)",
+                  computer: entity.computer, state: entity.state?.lowercased() == "permission needed" ? "waiting" : entity.state?.lowercased() ?? "working",
+                  hostID: entity.hostID, muxID: entity.muxID,
+                  workspaceID: entity.workspaceID ?? "", tabID: entity.tabID ?? "",
+                  label: entity.title, agent: entity.agent ?? "codex", cwd: entity.folder ?? "/")
+    }
+}
+
+/// Serialize writes off the main actor. The file is rewritten when the
+/// visible content changes or the sync stamp has moved by at least a minute
+/// — not on every ~7s poll, which the widget would never read anyway; only
+/// changed visible content spends WidgetKit's refresh budget.
+private actor WidgetSnapshotWriter {
+    private static let stampInterval: TimeInterval = 60
+
+    private var lastSnapshot: WidgetSnapshot?
+
+    func publish(_ snapshot: WidgetSnapshot) {
+        let contentChanged = snapshot.content != lastSnapshot?.content
+        guard contentChanged || stampMoved(to: snapshot.lastSyncedAt),
+              let url = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.com.phren.ios")?
+                .appendingPathComponent("widget-snapshot.json") else { return }
+        let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601; encoder.outputFormatting = [.sortedKeys]
+        do {
+            try encoder.encode(snapshot).write(to: url, options: .atomic)
+            lastSnapshot = snapshot
+            if contentChanged { WidgetCenter.shared.reloadAllTimelines() }
+        } catch { /* Keep the previous good snapshot and retry on the next refresh. */ }
+    }
+
+    private func stampMoved(to stamp: Date?) -> Bool {
+        switch (lastSnapshot?.lastSyncedAt, stamp) {
+        case (nil, nil): return lastSnapshot == nil
+        case (nil, .some), (.some, nil): return true
+        case let (.some(previous), .some(current)):
+            return abs(current.timeIntervalSince(previous)) >= Self.stampInterval
+        }
+    }
+}
+
+private actor SessionControlSnapshotWriter {
+    private var lastSnapshot: SessionControlSnapshot?
+    private var hasPublished = false
+
+    func publish(_ snapshot: SessionControlSnapshot?) {
+        guard (!hasPublished || snapshot != lastSnapshot),
+              let url = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.com.phren.ios")?
+                .appendingPathComponent(SessionControlSnapshot.filename) else { return }
+        do {
+            if let snapshot {
+                let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+                try encoder.encode(snapshot).write(to: url, options: .atomic)
+            } else if FileManager.default.fileExists(atPath: url.path) {
+                try FileManager.default.removeItem(at: url)
+            }
+            lastSnapshot = snapshot
+            hasPublished = true
+            if #available(iOS 18.0, *) {
+                ControlCenter.shared.reloadControls(ofKind: "com.phren.ios.widgets.session-attention")
+            }
+        } catch { /* Keep the previous control snapshot and retry on the next successful refresh. */ }
     }
 }

@@ -1,18 +1,16 @@
 import * as fs from "fs";
 import {
   addTask,
-  completeTask,
   readTasks,
   resolveTaskItem,
   updateTask,
   type TaskItem,
 } from "../data/access.js";
 import { parseGithubIssueUrl, resolveProjectGithubRepo } from "./github.js";
-import { getProactivityLevelForTask, shouldAutoCaptureTaskForLevel, hasExecutionIntent, hasDiscoveryIntent, hasSuppressTaskIntent, hasCodeChangeContext, type ProactivityLevel } from "../proactivity.js";
+import { getProactivityLevelForTask, shouldAutoCaptureTaskForLevel, hasExecutionIntent, hasDiscoveryIntent, hasExplicitTaskSignal, hasSuppressTaskIntent, hasCodeChangeContext, type ProactivityLevel } from "../proactivity.js";
 import { getWorkflowPolicy } from "../shared/governance.js";
 import { debugLog, sessionMarker } from "../shared.js";
 import { errorMessage } from "../utils.js";
-import { incrementSessionTasksCompleted } from "../tools/session.js";
 
 export type TaskMode = "off" | "manual" | "suggest" | "auto";
 
@@ -66,6 +64,41 @@ const PASTED_CONTENT_RE = new RegExp([
 // because the observed echoes wrap filler around an incidental verb — "Its literally just the
 // start of the day LMAO" clears the substance floor on "start" but is not a task.
 const CONVERSATIONAL_FILLER_RE = /\b(?:lmao|lmfao|rofl|lol+|haha+|idk|idc|tbh|ngl|smh|wtf|meh|yolo)\b/i;
+// Claude Code wraps bracketed-paste input as <pasted_content id="…">…</pasted_content id="…">:
+// any multi-line paste, every message typed in from the phone, and every message another
+// agent relays into the pane. The text inside cannot be told apart from someone else's
+// words (a relayed conductor message rewrote a task's Context three times), so it never
+// files or touches a task; only what was typed outside the wrapper counts.
+const PASTED_CONTENT_WRAPPER_RE = /<pasted_content\b[^>]*>[\s\S]*?<\/pasted_content\b[^>]*>/g;
+// A message relayed from another agent: "From the conductor, a correction: …",
+// "From tidy-phren: …". One name (optionally after "the"), then a comma or colon.
+const RELAYED_MESSAGE_RE = /^\s*from\s+(?:the\s+)?(?!(?:now|here|there|then|scratch|today|tomorrow)\b)[\w.-]+\s*[,:]/i;
+// Frames another agent or the harness put in the prompt: a cross-session message, a
+// sub-agent hand-back, a delivery/idle notice, a task or system notification, a system
+// reminder. Not the person's request. Matched anywhere, since a harness may put the
+// person's own words inside or after one of these, and a frame is never worth a task.
+const AGENT_FRAME_RE = /<\/?(?:agent-message|cross-session-message|task-notification|system-reminder|system-notification|phren-notice|command-name|command-message)\b|\[(?:SYSTEM NOTIFICATION|Cross-session (?:delivery|idle) notice)\b/i;
+// A reply to the agent — "Yep /herdr the phren agent is there" — starts with an
+// acknowledgement and asks for nothing; a question ends with one.
+const REPLY_OPENER_RE = /^(?:yep|yeah|yes|yup|ya|nah|no|nope|ok|okay|right|correct|exactly|indeed|true|sure|fine|agreed|(?:just\s+)?curious|(?:i(?:'|’)?m\s+)?wondering|i wonder)\b/i;
+const QUESTION_RE = /\?\s*$/;
+
+/** What the person typed: the prompt without pasted blocks. */
+export function typedPromptText(prompt: string): string {
+  return prompt.includes("<pasted_content") ? prompt.replace(PASTED_CONTENT_WRAPPER_RE, " ").trim() : prompt;
+}
+
+/** A frame from another agent or the harness, or a message relayed from one,
+ *  rather than something the person asked. */
+export function isAgentFramePrompt(prompt: string): boolean {
+  return AGENT_FRAME_RE.test(prompt) || RELAYED_MESSAGE_RE.test(prompt);
+}
+
+/** A reply or a question: conversation with the agent, not a request for work. */
+function isConversationalTurn(prompt: string): boolean {
+  if (QUESTION_RE.test(prompt)) return true;
+  return REPLY_OPENER_RE.test(prompt) && !hasExplicitTaskSignal(prompt) && !hasExecutionIntent(prompt);
+}
 const ACTIONABLE_RE = /\b(add|build|change|complete|continue|create|delete|fix|implement|improve|investigate|make|move|refactor|remove|rename|repair|ship|start|update|wire)\b/i;
 const CONTINUE_RE = /\b(continue|keep going|finish|resume|pick up|work on that|that task)\b/i;
 const GITHUB_URL_RE = /https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/issues\/\d+(?:[?#][^\s]*)?/g;
@@ -171,6 +204,8 @@ function isActionablePrompt(prompt: string, intent: string): boolean {
   // not a request becomes a permanent task. Pasted pages/terminals and chat filler never are.
   if (PASTED_CONTENT_RE.test(normalized)) return false;
   if (CONVERSATIONAL_FILLER_RE.test(normalized)) return false;
+  if (isAgentFramePrompt(normalized)) return false;
+  if (isConversationalTurn(normalized)) return false;
   // Substance floor — independent of intent / proactivity. Short utterances without
   // any actionable signal are conversational fragments, not tasks.
   if (!hasMinimumTaskSubstance(normalized)) return false;
@@ -301,16 +336,23 @@ export function handleTaskPromptLifecycle(args: {
   if (mode === "off" || mode === "manual" || !args.project || !args.sessionId) {
     return { mode, noticeLines: [] };
   }
+  // A sub-agent hand-back, a system notification or a harness reminder arrives as a
+  // prompt but nobody typed it: it never creates, moves or reuses a task.
+  if (isAgentFramePrompt(args.prompt)) {
+    debugLog(`task lifecycle skipped ${args.project}: machine-originated prompt`);
+    return { mode, noticeLines: [] };
+  }
+  const prompt = typedPromptText(args.prompt);
   // Suppression takes absolute priority — user explicitly said not to create a task.
-  if (hasSuppressTaskIntent(args.prompt)) {
+  if (hasSuppressTaskIntent(prompt)) {
     debugLog(`task lifecycle suppressed ${args.project}: suppress-task intent detected`);
     return { mode, noticeLines: [] };
   }
-  if (!isActionablePrompt(args.prompt, args.intent)) {
+  if (!isActionablePrompt(prompt, args.intent)) {
     return { mode, noticeLines: [] };
   }
   const taskLevel = args.taskLevel ?? getProactivityLevelForTask(args.phrenPath);
-  if (mode === "auto" && !shouldAutoCaptureTaskForLevel(taskLevel, args.prompt)) {
+  if (mode === "auto" && !shouldAutoCaptureTaskForLevel(taskLevel, prompt)) {
     debugLog(`task lifecycle skipped ${args.project}: task proactivity=${taskLevel}`);
     return { mode, noticeLines: [] };
   }
@@ -318,8 +360,8 @@ export function handleTaskPromptLifecycle(args: {
   const parsed = readTasks(args.phrenPath, args.project);
   if (!parsed.ok) return { mode, noticeLines: [] };
 
-  const summary = normalizeTaskSummary(args.prompt);
-  const issueMeta = extractGithubMetadata(args.phrenPath, args.project, args.prompt);
+  const summary = normalizeTaskSummary(prompt);
+  const issueMeta = extractGithubMetadata(args.phrenPath, args.project, prompt);
   const trackedState = readTaskSessionState(args.phrenPath, args.sessionId);
   const trackedItem = trackedState && trackedState.project === args.project
     ? resolveTrackedSessionTask(args.phrenPath, trackedState)
@@ -327,7 +369,7 @@ export function handleTaskPromptLifecycle(args: {
   const activeItems = parsed.data.items.Active;
   const reusable = trackedItem && trackedItem.section === "Active"
     ? trackedItem
-    : matchExistingActiveTask(args.prompt, activeItems);
+    : matchExistingActiveTask(prompt, activeItems);
 
   if (mode === "suggest") {
     const line = reusable?.line || summary;
@@ -340,7 +382,7 @@ export function handleTaskPromptLifecycle(args: {
   // Intent-aware auto mode: if the user is in discovery mode (brainstorming,
   // exploring ideas) and NOT in execution mode (approving, committing to work,
   // or performing code changes), create a speculative task and surface a suggestion.
-  if (mode === "auto" && !hasExecutionIntent(args.prompt) && !hasCodeChangeContext(args.prompt) && hasDiscoveryIntent(args.prompt)) {
+  if (mode === "auto" && !hasExecutionIntent(prompt) && !hasCodeChangeContext(prompt) && hasDiscoveryIntent(prompt)) {
     const line = reusable?.line || summary;
     debugLog(`task lifecycle auto→speculative ${args.project}: discovery intent detected`);
     if (!reusable) {
@@ -368,12 +410,15 @@ export function handleTaskPromptLifecycle(args: {
     }
   }
 
-  const update = updateTask(args.phrenPath, args.project, targetMatch || summary, {
-    section: "active",
-    context: summary,
-    replace_context: true,
-    ...issueMeta,
-  });
+  // Something the person asked to track ("add this to task") goes to Active, as does
+  // a match on a task that is already there. What the hook picked up on its own is a
+  // guess about the work: it waits in Queue until someone takes it up.
+  // An existing task keeps its own Context and GitHub link: a later prompt that
+  // matches it is not a better description of the work.
+  const section = reusable || hasExplicitTaskSignal(prompt) ? "active" : "queue";
+  const update = updateTask(args.phrenPath, args.project, targetMatch || summary, reusable
+    ? { section }
+    : { section, context: summary, replace_context: true, ...issueMeta });
   if (!update.ok) {
     debugLog(`task lifecycle update ${args.project}: ${update.error}`);
     return { mode, noticeLines: [] };
@@ -390,7 +435,7 @@ export function handleTaskPromptLifecycle(args: {
     mode,
     noticeLines: [
       "<phren-notice>",
-      `Active task (${args.project}): ${resolved.data.line}`,
+      `${section === "active" ? "Active" : "Queued"} task (${args.project}): ${resolved.data.line}`,
       "<phren-notice>",
     ],
   };
@@ -408,12 +453,10 @@ export function finalizeTaskSession(args: {
 
   const match = state.stableId ? `bid:${state.stableId}` : state.item;
   if (args.status === "saved-local" || args.status === "saved-pushed" || args.status === "no-upstream") {
-    const completed = completeTask(args.phrenPath, state.project, match);
-    if (!completed.ok) {
-      debugLog(`task lifecycle complete ${state.project}: ${completed.error}`);
-      return;
-    }
-    incrementSessionTasksCompleted(args.phrenPath, 1, state.sessionId, state.project);
+    // A saved turn is not finished work. The Stop hook runs after every turn, so
+    // completing here marked real work Done as soon as the next prompt came in.
+    // The task stays where it is; completion is explicit. Detaching it keeps the
+    // next prompt from rewriting its context unless that prompt matches it.
     clearTaskSessionState(args.phrenPath, args.sessionId);
     return;
   }

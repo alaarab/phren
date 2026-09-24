@@ -1,49 +1,122 @@
 import SwiftUI
 
-/// The phren visual identity, blending the two canonical sources:
-/// - the `phren web-ui` deep-void theme (packages/cli/src/ui/deep-void.ts) —
-///   near-black navy base, violet accent, lavender-tinted borders, glows
-/// - the site (docs/style.css) — cyan highlights, monospace data, pixel mascot
-/// The brand is dark-only.
+/// Semantic colors follow the saved appearance without resetting view state.
 enum PhrenTheme {
-    // Surfaces — deep-void.ts:19-23
-    static let bg = Color(hex: 0x0A0A1A)            // --bg
-    static let bgSunken = Color(hex: 0x0D0D22)      // --surface-sunken
-    static let surface = Color(hex: 0x12122A)       // --surface-solid
-    static let surfaceRaised = Color(hex: 0x1A1A3E) // site --bg-2 (cards)
+    typealias Font = PhrenTypography
+    enum Radius {
+        static let small: CGFloat = 10
+        static let questionOption: CGFloat = 12
+        static let medium: CGFloat = 14
+        static let large: CGFloat = 18
+        static let pill: CGFloat = 1_000
+    }
+    enum Space {
+        static let xs: CGFloat = 4
+        static let small: CGFloat = 8
+        static let medium: CGFloat = 12
+        static let large: CGFloat = 16
+        static let section: CGFloat = 24
+    }
+    private static var palette: PhrenPalette { PhrenAppearance.shared.palette }
+    static var bg: Color { Color(hex: palette.background) }
+    static var bgSunken: Color { Color(hex: palette.sunken) }
+    static var surface: Color { Color(hex: palette.surface) }
+    static var surfaceRaised: Color { Color(hex: palette.raised) }
 
-    // Ink — deep-void.ts:25-27
-    static let text = Color(hex: 0xECE9F5)          // --ink
-    static let textSecondary = Color(hex: 0xC8C3E3) // --ink-secondary
-    static let textMuted = Color(hex: 0xECE9F5).opacity(0.55) // --muted
-    static let textDim = Color(hex: 0x7A7570)       // site --text-dim
+    // Chat uses quieter surfaces so the transcript carries the hierarchy.
+    static var chatCanvas: Color { Color(hex: palette.chatCanvas) }
+    static var chatPanel: Color { Color(hex: palette.chatPanel) }
+    static var toolPanel: Color { Color(hex: palette.toolPanel ?? palette.chatPanel) }
+    static var phrenCardSurface: Color { Color(hex: palette.resolvedPhrenCardSurface) }
+    static var phrenCardBorder: Color { Color(hex: palette.resolvedPhrenCardBorder) }
+    static var phrenCardAccent: Color { Color(hex: palette.resolvedPhrenCardAccent) }
+    static var link: Color { Color(hex: palette.link ?? palette.action) }
+    /// Inline code in chat is mostly paths and identifiers: the path color
+    /// unless the theme sets its own.
+    static var chatInlineCode: Color { Color(hex: palette.chatInlineCode ?? chatPathHex(palette)) }
 
-    // Accents — violet is THE interactive accent (deep-void.ts:29-40),
-    // cyan is the live/glow highlight shared by both sources.
-    static let accent = Color(hex: 0x9058F0)        // --accent
-    static let accentHover = Color(hex: 0xB07AFF)   // --accent-hover
-    static let accentSolid = Color(hex: 0x7C3AED)   // --accent-solid
-    static let cyan = Color(hex: 0x28D3F2)          // --cyan
-    static let lavender = Color(hex: 0x9B8DC8)      // site --copper
+    static var text: Color { Color(hex: palette.text) }
+    static var textSecondary: Color { Color(hex: palette.secondary) }
+    static var textMuted: Color { Color(hex: palette.muted) }
+    static var textDim: Color { Color(hex: palette.dim) }
 
-    // Borders — deep-void.ts:42-44 (lavender-tinted)
-    static let border = Color(hex: 0x9C8FF8).opacity(0.18)
-    static let borderStrong = Color(hex: 0x9C8FF8).opacity(0.32)
+    static var navigation: Color { Color(hex: palette.navigation) }
+    static var accent: Color { Color(hex: palette.accent) }
+    static var accentHover: Color { Color(hex: palette.hover) }
+    static var accentSolid: Color { Color(hex: palette.solid) }
+    static var cyan: Color { Color(hex: palette.action) }
+    static var sessionProject: Color { Color(hex: palette.sessionProject ?? palette.link ?? palette.action) }
+    static var sessionTitle: Color { Color(hex: palette.sessionTitle ?? palette.secondary) }
+    static var sessionMeta: Color { Color(hex: palette.sessionMeta ?? palette.muted) }
+    /// A project's own name colour, chosen per store+project on this phone,
+    /// falling back to the theme's project colour.
+    static func projectColor(storeId: String, project: String) -> Color {
+        ProjectNameColor.stored(storeId: storeId, project: project).color
+    }
+    static func hostColor(_ hex: String?) -> Color {
+        guard let hex, hex.range(of: #"^#[0-9A-Fa-f]{6}$"#, options: .regularExpression) != nil,
+              let value = UInt32(hex.dropFirst(), radix: 16) else { return textMuted }
+        return Color(hex: value)
+    }
+    static var stateWorking: Color { Color(hex: palette.stateWorking ?? palette.action) }
+    static var stateWaiting: Color { Color(hex: palette.stateWaiting ?? 0xE0BC7F) }
+    static var stateDone: Color { Color(hex: palette.stateDone ?? 0x8AC8AC) }
+    static var lavender: Color { accent }
 
-    // Status — deep-void.ts:46-51
-    static let success = Color(hex: 0x4ADE80)
-    static let warning = Color(hex: 0xFBBF24)
-    static let danger = Color(hex: 0xF87171)
+    static let onAccent = Color.white
+    static let border = Color.white.opacity(0.07)
+    static let borderStrong = Color.white.opacity(0.14)
+    static var cardNeedsBorder: Bool { similarValue(palette.surface, palette.background) }
+    static var toolNeedsBorder: Bool { similarValue(palette.toolPanel ?? palette.chatPanel, palette.chatCanvas) }
+    static var panelNeedsBorder: Bool { similarValue(palette.raised, palette.background) }
+    private static func similarValue(_ lhs: UInt32, _ rhs: UInt32) -> Bool {
+        func value(_ hex: UInt32) -> Double {
+            (Double((hex >> 16) & 255) * 0.2126 + Double((hex >> 8) & 255) * 0.7152 + Double(hex & 255) * 0.0722) / 255
+        }
+        return abs(value(lhs) - value(rhs)) < 0.025
+    }
+
+    static let success = Color(hex: 0x8AC8AC)
+    static let warning = Color(hex: 0xE0BC7F)
+    static let danger = Color(hex: 0xEF9898)
+
+    /// The transcript reads in plain white and grey whatever the theme's
+    /// tinted text tokens are — Amethyst and Graphite cast their muted greys
+    /// lavender, which is right for chrome and wrong for a wall of prose and
+    /// shell commands. The theme's accent stays on Send and Stop.
+    static let chatText = Color.white
+    static let chatNeutral = Color(hex: 0xA9AEB6)
+    static let chatNeutralDim = Color(hex: 0x868B93)
+    static let chatUserBubble = Color.white.opacity(0.08)
+
+    /// Colors that carry meaning in the transcript, one per kind of thing, so
+    /// phren purple stays the brand accent: a file path or link, a git
+    /// branch, a call still running, a call that finished. A light custom
+    /// theme gets the darker value of each for contrast.
+    static var chatPath: Color { Color(hex: chatPathHex(palette)) }
+    static func chatPathHex(_ palette: PhrenPalette) -> UInt32 { isLight(palette.chatCanvas) ? 0x1C62A8 : 0x7FB6F0 }
+    static var chatBranch: Color { adaptive(dark: 0xF0A06E, light: 0xA4501C) }
+    static var chatRunning: Color { adaptive(dark: 0xE8C07A, light: 0x8A5C00) }
+    static var chatFinished: Color { adaptive(dark: 0x8AC8AC, light: 0x2B7552) }
+    /// Past-tense notes: the finished turn line and Claude's narration.
+    static var chatNote: Color { adaptive(dark: 0x8B9098, light: 0x6B7079) }
+    private static var lightCanvas: Bool { isLight(palette.chatCanvas) }
+    private static func isLight(_ hex: UInt32) -> Bool {
+        let value = (Double((hex >> 16) & 255) * 0.2126 + Double((hex >> 8) & 255) * 0.7152 + Double(hex & 255) * 0.0722) / 255
+        return value > 0.55
+    }
+    private static func adaptive(dark: UInt32, light: UInt32) -> Color { Color(hex: lightCanvas ? light : dark) }
 
     // Aliases kept for call-site readability
     static let green = success
     static let amber = warning
     static let red = danger
-    static let violet = Color(hex: 0x7C3AED)
+    static var violet: Color { accentSolid }
 
-    /// Chip color roles, mapped to the deep-void conventions.
+    /// Semantic chip colors shared across screens.
     static func chipColor(_ role: ChipRole) -> Color {
         switch role {
+        case .host: return textSecondary
         case .project: return cyan
         case .store: return lavender
         case .type: return accent
@@ -56,7 +129,7 @@ enum PhrenTheme {
     }
 
     enum ChipRole {
-        case project, store, type, status, scope, good, warn, bad
+        case host, project, store, type, status, scope, good, warn, bad
     }
 }
 
@@ -74,33 +147,107 @@ extension Color {
 // MARK: - Screen scaffolding
 
 extension View {
-    /// Deep-void screen background behind system list/scroll content.
     func phrenScreen() -> some View {
         self
             .scrollContentBackground(.hidden)
             .background(PhrenTheme.bg)
     }
 
-    /// Web-UI card: solid navy surface, lavender border, soft violet shadow
-    /// (deep-void --surface + --border + --shadow).
-    func phrenCard() -> some View {
+    func phrenCard(radius: CGFloat = PhrenTheme.Radius.large) -> some View {
         self
-            .background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(PhrenTheme.border, lineWidth: 1))
-            .shadow(color: PhrenTheme.accentSolid.opacity(0.18), radius: 10, y: 4)
+            .background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous)
+                .strokeBorder(PhrenTheme.cardNeedsBorder ? PhrenTheme.border : .clear, lineWidth: 0.5))
     }
-}
 
-/// List row background matching the web UI's raised surface.
-struct PhrenRowBackground: ViewModifier {
-    func body(content: Content) -> some View {
-        content.listRowBackground(PhrenTheme.surface)
+    /// Raised panels get a quiet inner top edge. Tool cards use their own
+    /// surface, with a hairline only when it meets a similarly valued canvas.
+    func phrenPanel(tool: Bool = false, radius: CGFloat = PhrenTheme.Radius.medium) -> some View {
+        self.background(tool ? PhrenTheme.toolPanel : PhrenTheme.surfaceRaised,
+                        in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous)
+                .strokeBorder((tool ? PhrenTheme.toolNeedsBorder : PhrenTheme.panelNeedsBorder) ? PhrenTheme.border : .clear, lineWidth: 0.5))
+            .overlay(alignment: .top) {
+                if !tool { Rectangle().fill(PhrenTheme.border).frame(height: 0.5).padding(.horizontal, radius) }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
     }
-}
 
-extension View {
+    func phrenElevation() -> some View {
+        shadow(color: .black.opacity(0.3), radius: PhrenTheme.Radius.large, x: 4, y: 4)
+    }
+
     func phrenRow() -> some View {
-        modifier(PhrenRowBackground())
+        self.listRowBackground(PhrenTheme.surface)
+            .listRowSeparatorTint(PhrenTheme.border)
+    }
+}
+
+/// Apply row styling inside the builder: a background on List alone leaves
+/// the system gray cells in place. Keep native scrolling, selection and forms.
+struct PhrenList<Content: View>: View {
+    /// `plain` drops the grouped section chrome so rows can draw their own
+    /// standalone cards (the sessions list); the default keeps grouped boxes.
+    var plain = false
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        Group {
+            if plain {
+                List { content.phrenRow() }.listStyle(.plain)
+            } else {
+                List { content.phrenRow() }.listStyle(.insetGrouped)
+            }
+        }
+        .phrenScreen()
+    }
+}
+
+struct PhrenForm<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        Form { content.phrenRow() }
+            .phrenScreen()
+    }
+}
+
+/// A shared silhouette makes menus feel related without coloring every row.
+struct PhrenMenuRow: View {
+    let title: String
+    var subtitle: String? = nil
+    let icon: String
+    var color: Color = PhrenTheme.textSecondary
+    var titleColor: Color = PhrenTheme.text
+    var compact = false
+
+    var body: some View {
+        HStack(spacing: PhrenTheme.Space.medium) {
+            Image(systemName: icon)
+                .font(.system(size: 18, weight: .medium))
+                .foregroundStyle(color)
+                .frame(width: 40, height: 40)
+                .background(color.opacity(0.08), in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.small, style: .continuous))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.body.weight(.medium)).foregroundStyle(titleColor)
+                if let subtitle {
+                    Text(subtitle).font(.caption).foregroundStyle(PhrenTheme.textMuted)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.vertical, compact ? 2 : 6)
+    }
+}
+
+/// Counts are metadata, so avoid the full-size icon column used by list rows.
+struct PhrenMetadataLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 4) {
+            configuration.icon.imageScale(.small)
+            configuration.title
+        }
     }
 }
 
@@ -112,6 +259,7 @@ struct PhrenMascotView: View {
     var bobbing = true
     var glow = true
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var up = false
 
     var body: some View {
@@ -121,86 +269,12 @@ struct PhrenMascotView: View {
             .scaledToFit()
             .frame(width: size, height: size)
             .shadow(color: glow ? PhrenTheme.cyan.opacity(0.25) : .clear, radius: size / 6)
-            .offset(y: up ? -6 : 0)
+            .offset(y: up && !reduceMotion ? -6 : 0)
             .animation(
-                bobbing ? .easeInOut(duration: 1.4).repeatForever(autoreverses: true) : nil,
+                bobbing && !reduceMotion ? .easeInOut(duration: 1.4).repeatForever(autoreverses: true) : nil,
                 value: up
             )
             .onAppear { if bobbing { up = true } }
             .accessibilityHidden(true)
-    }
-}
-
-/// The site's tilted white "finding card" with a typewriter line
-/// (docs/index.html .mini-card / .mini-line) — the cute signature moment
-/// on the sign-in screen.
-struct TypewriterFindingCard: View {
-    private static let lines = [
-        "[pattern] always validate JWT expiry before refresh",
-        "[decision] chose FTS5 over embeddings for v1 search",
-        "[pitfall] session hooks fire twice in mixed mode",
-        "[architecture] git is the sync layer — no server",
-    ]
-
-    @State private var lineIndex = 0
-    @State private var visibleCount = 0
-    @State private var caretOn = true
-
-    private let typeTimer = Timer.publish(every: 0.055, on: .main, in: .common).autoconnect()
-    private let caretTimer = Timer.publish(every: 0.7, on: .main, in: .common).autoconnect()
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("FINDING")
-                .font(.system(size: 9, design: .monospaced).weight(.bold))
-                .tracking(1.5)
-                .foregroundStyle(PhrenTheme.accentSolid)
-            HStack(spacing: 0) {
-                Text(typedText)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(Color(hex: 0x12122A))
-                    .lineLimit(1)
-                Rectangle()
-                    .fill(caretOn ? Color(hex: 0x12122A) : .clear)
-                    .frame(width: 2, height: 12)
-            }
-            Text("~/.phren · synced")
-                .font(.system(size: 9, design: .monospaced))
-                .tracking(1)
-                .foregroundStyle(Color(hex: 0x5A4A7A))
-        }
-        .padding(EdgeInsets(top: 10, leading: 12, bottom: 12, trailing: 12))
-        .frame(width: 260, alignment: .leading)
-        .background(.white, in: RoundedRectangle(cornerRadius: 3))
-        .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(hex: 0x12122A), lineWidth: 1))
-        // The site's hard offset shadow (box-shadow: 4px 4px 0)
-        .background(
-            RoundedRectangle(cornerRadius: 3)
-                .fill(.black.opacity(0.35))
-                .offset(x: 4, y: 4)
-        )
-        .rotationEffect(.degrees(-1.2))
-        .onReceive(typeTimer) { _ in advance() }
-        .onReceive(caretTimer) { _ in caretOn.toggle() }
-        .accessibilityHidden(true)
-    }
-
-    private var currentLine: String { Self.lines[lineIndex] }
-
-    private var typedText: String {
-        String(currentLine.prefix(visibleCount))
-    }
-
-    private func advance() {
-        if visibleCount < currentLine.count {
-            visibleCount += 1
-        } else {
-            // Pause at the full line, then move to the next one.
-            visibleCount += 1
-            if visibleCount > currentLine.count + 24 {
-                visibleCount = 0
-                lineIndex = (lineIndex + 1) % Self.lines.count
-            }
-        }
     }
 }

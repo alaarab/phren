@@ -4,6 +4,8 @@ MCP server that indexes your personal phren and exposes it to AI agents via full
 
 On startup it walks your phren directory, reads all `.md` files, and builds an in-memory SQLite FTS5 index.
 
+Periodic remote checks are off by default. Enable them with `phren config pull-interval 60` to check shared Git stores every minute while running, coordinated across MCP clients using the same store. Changed refs are fetched and applied only as clean fast-forwards; dirty or diverged stores are deferred. Pulled changes refresh the index and existing managed skill/instruction mirrors. Configure this machine with `phren config pull-interval 600` (ten minutes) or `phren config pull-interval off`. Periodic checks are disabled for project-local stores and the manual preset; existing lifecycle hooks are configured separately.
+
 Public surface: 59 MCP tools across 13 modules (search, tasks, findings, notes, memory, data, graph, sessions, ops/review, skills, hooks, config, extraction).
 
 Notable shipped capabilities:
@@ -39,6 +41,7 @@ claude mcp add phren -- phren ~/.phren
 |----------|---------|-------------|
 | `PHREN_PATH` | `~/.phren` | Path to your phren instance |
 | `PHREN_PROFILE` | *(none)* | Active profile name. When unset, phren uses `machines.yaml` when available and otherwise falls back to an unscoped view |
+| `PHREN_PULL_INTERVAL_SECONDS` | `0` (off) | Overrides the machine-local pull interval. Whole seconds from 30–86400, or `0`/`off` to disable periodic MCP checks. |
 | `PHREN_ACTOR` | OS user / env | Actor identity used in governance/audit RBAC checks |
 
 ## Tools
@@ -74,7 +77,7 @@ synthesize?: boolean       - Generate a synthesis paragraph from top results usi
 
 ### get_project_summary
 
-Returns a project's summary.md content, path to its CLAUDE.md, and a list of indexed files.
+Returns a project's summary.md content, path to its AGENTS.md, and a list of indexed files.
 
 ```
 name: string      - Project name (e.g. "my-app", "backend")
@@ -95,7 +98,7 @@ No parameters.
 5. Builds an in-memory SQLite FTS5 index with Porter stemming
 6. Serves tools over stdio using the MCP protocol
 
-File types are derived from filenames and directories: `CLAUDE.md` -> "claude", `summary.md` -> "summary", `FINDINGS.md` -> "findings", `tasks.md` -> "task", files under `notes/` -> "notes", files under `reference/` -> "reference", files under `skills/` -> "skill".
+File types are derived from filenames and directories: `AGENTS.md` -> "claude", `summary.md` -> "summary", `FINDINGS.md` -> "findings", `tasks.md` -> "task", files under `notes/` -> "notes", files under `reference/` -> "reference", files under `skills/` -> "skill".
 
 ## Development
 

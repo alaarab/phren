@@ -99,7 +99,7 @@ struct ArchiveBrowserView: View {
     @State private var loaded = false
 
     var body: some View {
-        List {
+        PhrenList {
             Section {
                 ForEach(topics) { topic in
                     NavigationLink(value: ArchiveTopicRoute(storeId: storeId, topic: topic)) {
@@ -158,7 +158,7 @@ struct ArchiveTopicView: View {
     var body: some View {
         Group {
             if let document {
-                List {
+                PhrenList {
                     ForEach(document.groupedByDate, id: \.date) { group in
                         Section("Archived \(group.date)") {
                             ForEach(group.entries) { entry in

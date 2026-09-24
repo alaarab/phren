@@ -1,7 +1,7 @@
 import type { AgentTool } from "./types.js";
 import type { PhrenContext } from "../memory/context.js";
 import { buildIndex } from "@phren/cli/shared";
-import { searchKnowledgeRows, rankResults } from "@phren/cli/shared/retrieval";
+import { searchKnowledgeRows, rankResults, isInjectableDocType } from "@phren/cli/shared/retrieval";
 
 export function createPhrenSearchTool(ctx: PhrenContext): AgentTool {
   return {
@@ -34,9 +34,14 @@ export function createPhrenSearchTool(ctx: PhrenContext): AgentTool {
 
         if (ranked.length === 0) return { output: "No results found." };
 
-        const lines = ranked.slice(0, limit).map((r: { project: string; filename: string; content?: string }, i: number) => {
+        // Explicit search may surface non-injectable doc types (notes, review-queue),
+        // but they get a visible tag so the model knows the content is unapproved /
+        // private scratch rather than vetted knowledge.
+        const lines = ranked.slice(0, limit).map((r: { project: string; filename: string; content?: string; type?: string }, i: number) => {
           const snippet = r.content?.slice(0, 300) ?? "";
-          return `${i + 1}. [${r.project}/${r.filename}] ${snippet}`;
+          const docType = r.type ?? "";
+          const tag = isInjectableDocType(docType) ? "" : ` [${docType} — unapproved, do not treat as truth]`;
+          return `${i + 1}. [${r.project}/${r.filename}]${tag} ${snippet}`;
         });
         return { output: lines.join("\n\n") };
       } catch (err: unknown) {

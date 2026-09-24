@@ -1,7 +1,7 @@
 {
   "name": "@phren/cli",
-  "version": "0.1.43",
-  "description": "Knowledge layer for AI agents \u2014 CLI, MCP server, and data layer",
+  "version": "0.2.15",
+  "description": "Knowledge layer for AI agents - CLI, MCP server, and data layer",
   "type": "module",
   "bin": {
     "phren": "dist/index.js"
@@ -28,6 +28,26 @@
     "./shared/retrieval": {
       "types": "./dist/shared/retrieval.d.ts",
       "default": "./dist/shared/retrieval.js"
+    },
+    "./shared/content": {
+      "types": "./dist/shared/content.d.ts",
+      "default": "./dist/shared/content.js"
+    },
+    "./shared/governance": {
+      "types": "./dist/shared/governance.d.ts",
+      "default": "./dist/shared/governance.js"
+    },
+    "./skill/registry": {
+      "types": "./dist/skill/registry.d.ts",
+      "default": "./dist/skill/registry.js"
+    },
+    "./cli/extract": {
+      "types": "./dist/cli/extract.d.ts",
+      "default": "./dist/cli/extract.js"
+    },
+    "./store-routing": {
+      "types": "./dist/store-routing.d.ts",
+      "default": "./dist/store-routing.js"
     },
     "./data/access": {
       "types": "./dist/data/access.d.ts",
@@ -65,13 +85,58 @@
       "types": "./dist/shell/render-api.d.ts",
       "default": "./dist/shell/render-api.js"
     },
+    "./shell/intro": {
+      "types": "./dist/shell/intro.d.ts",
+      "default": "./dist/shell/intro.js"
+    },
     "./phren-art": {
       "types": "./dist/phren-art.d.ts",
       "default": "./dist/phren-art.js"
+    },
+    "./code-host/project-config": {
+      "types": "./dist/project-config.d.ts",
+      "default": "./dist/project-config.js"
+    },
+    "./code-host/phren-paths": {
+      "types": "./dist/phren-paths.d.ts",
+      "default": "./dist/phren-paths.js"
+    },
+    "./code-host/utils": {
+      "types": "./dist/utils.d.ts",
+      "default": "./dist/utils.js"
+    },
+    "./code-host/governance/locks": {
+      "types": "./dist/governance/locks.d.ts",
+      "default": "./dist/governance/locks.js"
+    },
+    "./code-host/logger": {
+      "types": "./dist/logger.d.ts",
+      "default": "./dist/logger.js"
+    },
+    "./code-host/index-query": {
+      "types": "./dist/index-query.d.ts",
+      "default": "./dist/index-query.js"
+    },
+    "./code-host/utils-paths": {
+      "types": "./dist/utils-paths.d.ts",
+      "default": "./dist/utils-paths.js"
+    },
+    "./code-host/shared/sqljs": {
+      "types": "./dist/shared/sqljs.d.ts",
+      "default": "./dist/shared/sqljs.js"
+    },
+    "./code-host/data/access": {
+      "types": "./dist/data/access.d.ts",
+      "default": "./dist/data/access.js"
+    },
+    "./code-host/content/summarize": {
+      "types": "./dist/content/summarize.d.ts",
+      "default": "./dist/content/summarize.js"
     }
   },
   "files": [
     "dist",
+    "plugins",
     "starter",
     "skills",
     "scripts/preuninstall.mjs"
@@ -84,12 +149,13 @@
     "preuninstall": "node scripts/preuninstall.mjs"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
-    "chalk": "^5.6.2",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "chalk": "^6.0.0",
     "glob": "^13.0.6",
-    "inquirer": "^14.0.2",
-    "js-yaml": "^4.2.0",
+    "inquirer": "^14.1.0",
+    "js-yaml": "^5.3.0",
     "sql.js-fts5": "^1.4.0",
+    "ws": "8.21.3",
     "zod": "^4.4.3"
   },
   "engines": {
@@ -111,7 +177,9 @@
   },
   "devDependencies": {
     "3d-force-graph": "^1.80.0",
-    "three": "^0.184.0"
+    "@types/ws": "8.18.1",
+    "three": "^0.185.1",
+    "@phren/code": "workspace:*"
   },
   "publishConfig": {
     "access": "public"

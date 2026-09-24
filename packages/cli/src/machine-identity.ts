@@ -29,6 +29,13 @@ export function getMachineName(): string {
   return (cachedMachineName = defaultMachineName());
 }
 
+/** A store commit's subject with this machine's name, so `git log` on a synced
+ *  store shows which computer wrote each change. */
+export function storeCommitMessage(message: string): string {
+  const machine = getMachineName().replace(/[\r\n\]]/g, " ").trim();
+  return machine ? `${message} [${machine}]` : message;
+}
+
 export function persistMachineName(machine: string): void {
   const normalized = machine.trim();
   if (!normalized) return;

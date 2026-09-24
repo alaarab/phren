@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 /// A trimmed copy of `Phren/DesignSystem/PhrenTheme.swift` for the widget
@@ -10,12 +11,29 @@ import SwiftUI
 /// them through its own vibrant/monochrome material — so those widgets stick
 /// to default text styles plus `.widgetAccentable()`.
 enum WidgetTheme {
+    typealias Font = PhrenTypography
+    static let activityBackground = Color.black
+    static let activityText = Color.white
+    static let activitySecondary = Color.secondary
+    static let warning = Color(widgetHex: 0xE0BC7F)
     static let bg = Color(widgetHex: 0x0A0A1A)          // --bg
     static let text = Color(widgetHex: 0xECE9F5)        // --ink
     static let textMuted = Color(widgetHex: 0xECE9F5).opacity(0.55) // --muted
     static let accent = Color(widgetHex: 0x9058F0)      // --accent
     static let cyan = Color(widgetHex: 0x28D3F2)        // --cyan
+    static let green = Color(widgetHex: 0x8AC8AC)       // stateDone
     static let border = Color(widgetHex: 0x9C8FF8).opacity(0.18)    // --border
+    /// The project name's default colour when an activity carries no resolved
+    /// hex (a live activity from before this field existed).
+    static let projectFallback = Color(widgetHex: 0xC2AAFF)
+
+    /// A `#RRGGBB` string the app resolved for a project's name; falls back to
+    /// the default project colour when absent or malformed.
+    static func projectNameColor(_ hex: String?) -> Color {
+        guard let hex, hex.range(of: #"^#[0-9A-Fa-f]{6}$"#, options: .regularExpression) != nil,
+              let value = UInt32(hex.dropFirst(), radix: 16) else { return projectFallback }
+        return Color(widgetHex: value)
+    }
 }
 
 extension Color {

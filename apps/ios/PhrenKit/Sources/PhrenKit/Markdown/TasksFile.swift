@@ -357,7 +357,7 @@ public struct TasksFile: Sendable {
             line: line,
             checked: false,
             priority: Self.normalizePriority(line),
-            createdAt: createdAt,
+            createdAt: createdAt ?? Date().ISO8601Format(.init(includingFractionalSeconds: true)),
             sessionId: sessionId
         )
         doc.queue.append(newItem)

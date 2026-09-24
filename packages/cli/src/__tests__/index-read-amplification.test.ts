@@ -28,6 +28,7 @@ let cleanups: Array<() => void> = [];
 function makeStore(prefix: string, referenceDocs: number): string {
   const tmp = makeTempDir(prefix);
   cleanups.push(tmp.cleanup);
+  writeFile(path.join(tmp.path, ".config", "modules.yaml"), "version: 1\nenabled:\n  tasks: true\n");
   writeFile(
     path.join(tmp.path, "phren.root.yaml"),
     yaml.dump({ version: 1, installMode: "shared", syncMode: "managed-git" }, { lineWidth: 1000 })
@@ -39,7 +40,7 @@ function makeStore(prefix: string, referenceDocs: number): string {
   );
   writeFile(path.join(projectDir, "summary.md"), "# demo\n\nRetrieval cache summary text.\n");
   writeFile(path.join(projectDir, "tasks.md"), "# tasks\n\n- [ ] wire the retrieval cache\n");
-  writeFile(path.join(projectDir, "CLAUDE.md"), "# demo\n\nInstructions about the retrieval cache.\n");
+  writeFile(path.join(projectDir, "AGENTS.md"), "# demo\n\nInstructions about the retrieval cache.\n");
   writeFile(
     path.join(projectDir, "FINDINGS.md"),
     "# findings\n\n- `sql.js` caches the retrieval index between rebuilds.\n"
@@ -86,11 +87,11 @@ describe("buildIndex file-read amplification", () => {
     expect(at("tasks.md")).toBe(1);
 
     // The remaining reads are a single project-wide pass by readProjectTopics()
-    // (project-topics.ts), which derives adaptive topics from CLAUDE.md +
+    // (project-topics.ts), which derives adaptive topics from AGENTS.md +
     // FINDINGS.md + reference/*.md. It runs once per project per build.
     expect(at("FINDINGS.md")).toBe(2);
-    // CLAUDE.md additionally seeds the per-project user-fragment cache.
-    expect(at("CLAUDE.md")).toBe(3);
+    // AGENTS.md additionally seeds the per-project user-fragment cache.
+    expect(at("AGENTS.md")).toBe(3);
     for (let i = 0; i < 6; i++) {
       expect(at(path.join("reference", `ref-${i}.md`))).toBe(2);
     }

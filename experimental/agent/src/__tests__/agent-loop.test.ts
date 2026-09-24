@@ -33,7 +33,6 @@ vi.mock("../plan.js", () => ({
 vi.mock("../tools/lint-test.js", () => ({
   detectLintCommand: () => null,
   detectTestCommand: () => null,
-  runPostEditCheck: () => ({ passed: true, output: "" }),
 }));
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -286,6 +285,42 @@ describe("agent-loop", () => {
     expect(result.turns).toBe(1);
   });
 
+  it("preserves streamed reasoning in history, stamped with the provider", async () => {
+    const { runAgent } = await import("../agent-loop.js");
+
+    const reasoningSeen: string[] = [];
+    const provider: LlmProvider = {
+      name: "mock-stream",
+      contextWindow: 200_000,
+      async chat(): Promise<LlmResponse> {
+        throw new Error("should not be called");
+      },
+      async *chatStream() {
+        yield { type: "reasoning_delta" as const, text: "let me think" };
+        yield { type: "reasoning_end" as const, signature: "SIG" };
+        yield { type: "text_delta" as const, text: "the answer" };
+        yield { type: "done" as const, stop_reason: "end_turn" as const };
+      },
+    };
+
+    const config = makeConfig({ provider });
+    config.hooks = {
+      onTextDelta: () => {},
+      onReasoningDelta: (t: string) => reasoningSeen.push(t),
+    };
+    const result = await runAgent("reasoning test", config);
+
+    expect(reasoningSeen).toEqual(["let me think"]);
+    expect(result.finalText).toBe("the answer");
+    const assistant = result.messages.find((m) => m.role === "assistant");
+    expect(assistant && Array.isArray(assistant.content) && assistant.content[0]).toEqual({
+      type: "reasoning",
+      text: "let me think",
+      provider: "mock-stream",
+      signature: "SIG",
+    });
+  });
+
   // --- 9. Tool error triggers anti-pattern recording ─────────────────────
   it("records tool errors for anti-pattern tracking", async () => {
     const { createSession, runTurn } = await import("../agent-loop.js");
@@ -343,5 +378,143 @@ describe("agent-loop", () => {
 
     // Messages from both turns are in the session
     expect(session.messages.length).toBe(4); // user1 + assistant1 + user2 + assistant2
+  });
+});
+
+// ── LLM compaction wiring in runTurn ─────────────────────────────────────────
+
+describe("runTurn compaction", () => {
+  beforeEach(() => {
+    vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+  });
+
+  it("trips the LLM checkpoint at the prune threshold and lands it as a log replace", async () => {
+    const { createSession, runTurn } = await import("../agent-loop.js");
+    const { seedFromMessages } = await import("../session/log.js");
+
+    const checkpoint = `## Checkpoint Summary\nThe task was a long refactor; steps 0-9 landed; next step is verification. ${"pad ".repeat(20)}\n\n## Knowledge\n\`\`\`json\n{"items":[]}\n\`\`\``;
+
+    const compactionCalls: LlmMessage[][] = [];
+    const provider: LlmProvider = {
+      name: "mock",
+      contextWindow: 4_000, // 75% threshold = 3k tokens ≈ 12k chars
+      async chat(_system, messages): Promise<LlmResponse> {
+        const last = messages[messages.length - 1];
+        if (typeof last.content === "string" && last.content.includes("Context checkpoint")) {
+          compactionCalls.push(messages);
+          return { content: [{ type: "text", text: checkpoint }], stop_reason: "end_turn" };
+        }
+        return { content: [{ type: "text", text: "done" }], stop_reason: "end_turn" };
+      },
+    };
+
+    const session = createSession(4_000);
+    const history: LlmMessage[] = [{ role: "user", content: "original task" }];
+    for (let i = 0; i < 10; i++) {
+      history.push({ role: "user", content: `step ${i}: ${"x".repeat(1500)}` });
+      history.push({ role: "assistant", content: `did step ${i}` });
+    }
+    seedFromMessages(session.log, history);
+
+    const config = makeConfig({
+      provider,
+      compaction: { minPrunedTokens: 0 }, // config plumbing: always try the LLM
+    });
+    const result = await runTurn("continue", session, config);
+
+    expect(result.text).toBe("done");
+    expect(compactionCalls).toHaveLength(1);
+    // The compaction call carried no tools and ended with the instruction.
+    const compacted = session.messages.find(
+      (m) => typeof m.content === "string" && m.content.includes("[Context compacted:"),
+    );
+    expect(compacted).toBeDefined();
+    expect(String(compacted!.content)).toContain("long refactor");
+    // The event log recorded the replace durably and still reconstructs.
+    session.log.assertReconstructs();
+  });
+
+  it("degrades to the regex summary when the checkpoint call fails", async () => {
+    const { createSession, runTurn } = await import("../agent-loop.js");
+    const { seedFromMessages } = await import("../session/log.js");
+
+    const provider: LlmProvider = {
+      name: "mock",
+      contextWindow: 4_000,
+      async chat(_system, messages): Promise<LlmResponse> {
+        const last = messages[messages.length - 1];
+        if (typeof last.content === "string" && last.content.includes("Context checkpoint")) {
+          throw new Error("summarizer down");
+        }
+        return { content: [{ type: "text", text: "done" }], stop_reason: "end_turn" };
+      },
+    };
+
+    const session = createSession(4_000);
+    const history: LlmMessage[] = [{ role: "user", content: "original task" }];
+    for (let i = 0; i < 10; i++) {
+      history.push({ role: "user", content: `step ${i}: ${"x".repeat(1500)}` });
+      history.push({ role: "assistant", content: `did step ${i}` });
+    }
+    seedFromMessages(session.log, history);
+
+    const config = makeConfig({ provider, compaction: { minPrunedTokens: 0 } });
+    const result = await runTurn("continue", session, config);
+
+    expect(result.text).toBe("done");
+    const compacted = session.messages.find(
+      (m) => typeof m.content === "string" && m.content.includes("[Context compacted:"),
+    );
+    expect(compacted).toBeDefined(); // regex fallback still pruned
+    session.log.assertReconstructs();
+  });
+});
+
+describe("plan approval gates", () => {
+  it("keeps tools disabled and requests approval again after revision feedback", async () => {
+    const { runAgent } = await import("../agent-loop.js");
+    const execute = vi.fn().mockResolvedValue({ output: "done" });
+    const registry = new ToolRegistry();
+    registry.setPermissions({ mode: "full-auto", projectRoot: process.cwd(), allowedPaths: [] });
+    registry.register({ name: "marker", description: "marker", input_schema: {}, execute });
+    const provider = mockProvider([
+      textResponse("Initial plan"), textResponse("Revised plan"),
+      toolCallResponse("marker", {}), textResponse("Complete"),
+    ]);
+    const chat = vi.spyOn(provider, "chat");
+    const approval = vi.fn()
+      .mockResolvedValueOnce({ approved: false, feedback: "Use a safer approach" })
+      .mockResolvedValueOnce({ approved: true });
+    await runAgent("make a change", makeConfig({ provider, registry, plan: true, hooks: { onPlanApproval: approval } }));
+    expect(approval).toHaveBeenCalledTimes(2);
+    expect(chat.mock.calls.map((call) => call[2].map((tool) => tool.name))).toEqual([[], [], ["marker"], ["marker"]]);
+    expect(chat.mock.calls[0][0]).toContain("## Plan mode");
+    expect(chat.mock.calls[1][0]).toContain("## Plan mode");
+    expect(chat.mock.calls[2][0]).not.toContain("## Plan mode");
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+  it("stops when a revised plan is rejected without feedback", async () => {
+    const { runAgent } = await import("../agent-loop.js");
+    const provider = mockProvider([textResponse("Initial plan"), textResponse("Revised plan")]);
+    const chat = vi.spyOn(provider, "chat");
+    const approval = vi.fn()
+      .mockResolvedValueOnce({ approved: false, feedback: "Revise" })
+      .mockResolvedValueOnce({ approved: false });
+    const result = await runAgent("make a change", makeConfig({ provider, plan: true, hooks: { onPlanApproval: approval } }));
+    expect(chat).toHaveBeenCalledTimes(2);
+    expect(approval).toHaveBeenCalledTimes(2);
+    expect(result.toolCalls).toBe(0);
+    expect(result.messages.some((message) => message.content === "Plan approved. Proceed with execution.")).toBe(false);
+  });
+  it("does not record a plan approval that arrives after cancellation", async () => {
+    const { runAgent } = await import("../agent-loop.js");
+    const controller = new AbortController();
+    const result = await runAgent("make a change", makeConfig({ plan: true, hooks: {
+      signal: controller.signal,
+      onPlanApproval: async () => { controller.abort(); return { approved: true }; },
+    } }));
+    expect(result.turns).toBe(1);
+    expect(result.messages.some((message) => message.content === "Plan approved. Proceed with execution.")).toBe(false);
   });
 });

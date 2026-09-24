@@ -73,20 +73,20 @@ describe("getProjectGlobBoost", () => {
     fs.rmSync(projDir, { recursive: true, force: true });
   });
 
-  it("returns 1.0 when no CLAUDE.md exists", () => {
+  it("returns 1.0 when no AGENTS.md exists", () => {
     const boost = getProjectGlobBoost(tmpPhren, "glob-proj", "/some/dir", undefined);
     expect(boost).toBe(1.0);
   });
 
-  it("returns 1.0 when CLAUDE.md has no frontmatter", () => {
-    fs.writeFileSync(path.join(projDir, "CLAUDE.md"), "# Project\n\nNo frontmatter here.\n");
+  it("returns 1.0 when AGENTS.md has no frontmatter", () => {
+    fs.writeFileSync(path.join(projDir, "AGENTS.md"), "# Project\n\nNo frontmatter here.\n");
     const boost = getProjectGlobBoost(tmpPhren, "glob-proj", "/some/dir", undefined);
     expect(boost).toBe(1.0);
   });
 
   it("returns 1.3 when cwd matches a glob pattern", () => {
     fs.writeFileSync(
-      path.join(projDir, "CLAUDE.md"),
+      path.join(projDir, "AGENTS.md"),
       '---\nglobs:\n  - "src/**/*.ts"\n---\n# Project\n'
     );
     const boost = getProjectGlobBoost(tmpPhren, "glob-proj", "src/foo/bar.ts", undefined);
@@ -95,7 +95,7 @@ describe("getProjectGlobBoost", () => {
 
   it("returns 0.7 when globs defined but nothing matches", () => {
     fs.writeFileSync(
-      path.join(projDir, "CLAUDE.md"),
+      path.join(projDir, "AGENTS.md"),
       '---\nglobs:\n  - "lib/**/*.py"\n---\n# Project\n'
     );
     const boost = getProjectGlobBoost(tmpPhren, "glob-proj", "src/foo.ts", undefined);
@@ -104,7 +104,7 @@ describe("getProjectGlobBoost", () => {
 
   it("returns 1.3 when a changedFile matches a glob", () => {
     fs.writeFileSync(
-      path.join(projDir, "CLAUDE.md"),
+      path.join(projDir, "AGENTS.md"),
       '---\nglobs:\n  - "*.ts"\n---\n# Project\n'
     );
     const boost = getProjectGlobBoost(tmpPhren, "glob-proj", "/unrelated", new Set(["foo.ts"]));
@@ -113,7 +113,7 @@ describe("getProjectGlobBoost", () => {
 
   it("supports inline YAML array globs", () => {
     fs.writeFileSync(
-      path.join(projDir, "CLAUDE.md"),
+      path.join(projDir, "AGENTS.md"),
       '---\nglobs: ["src/**", "lib/**"]\n---\n# Project\n'
     );
     const boost = getProjectGlobBoost(tmpPhren, "glob-proj", "src/index.ts", undefined);

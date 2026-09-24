@@ -1,9 +1,9 @@
-import React from "react";
+
 import { Box, Text, useStdout } from "ink";
-import { PhrenInput } from "./PhrenInput.js";
-import { PERMISSION_LABELS, PERMISSION_ICONS } from "../ansi.js";
 import type { PermissionMode } from "../../permissions/types.js";
+import { PERMISSION_ICONS, PERMISSION_LABELS } from "../ansi.js";
 import type { Theme } from "../themes.js";
+import { PhrenInput } from "./PhrenInput.js";
 
 export interface InputAreaProps {
   value: string;
@@ -13,12 +13,13 @@ export interface InputAreaProps {
   focus: boolean;
   separatorColor?: string;
   theme?: Theme;
+  completionOpen?: boolean;
 }
 
-export function InputArea({ value, onChange, onSubmit, bashMode, focus, separatorColor, theme }: InputAreaProps) {
+export function InputArea({ value, onChange, onSubmit, bashMode, focus, separatorColor, theme, completionOpen }: InputAreaProps) {
   const { stdout } = useStdout();
   const columns = stdout?.columns || 80;
-  const sep = "\u2500".repeat(columns);
+  const _sep = "\u2500".repeat(columns);
   const sepColor = theme?.input.separator ?? separatorColor ?? "gray";
   const promptColor = theme?.input.prompt ?? undefined;
   const bashPromptColor = theme?.input.bashPrompt ?? "yellow";
@@ -44,6 +45,7 @@ export function InputArea({ value, onChange, onSubmit, bashMode, focus, separato
         onChange={onChange}
         onSubmit={onSubmit}
         focus={focus}
+        completionOpen={completionOpen}
       />
     </Box>
   );
@@ -105,9 +107,9 @@ export function PermissionsLine({ mode, theme, running, agents, selectedAgentId,
   return (
     <Box>
       {showPerm ? (
-        <Text>{"  "}<Text color={color}>{icon} {label}</Text><Text dimColor> (shift+tab to cycle){running ? " \u00b7 esc to interrupt" : ""}</Text></Text>
+        <Text>{"  "}<Text color={color}>{icon} {label}</Text><Text dimColor> (shift+tab to cycle) · ?/F1 help{running ? " \u00b7 esc to interrupt" : ""}</Text></Text>
       ) : (
-        <Text>{"  "}{running ? <Text dimColor>esc to interrupt</Text> : null}</Text>
+        <Text>{"  "}<Text dimColor>?/F1 help · shift+tab permissions · ctrl+o tools · ctrl+f find · ctrl+t plan{running ? " · esc to interrupt" : ""}</Text></Text>
       )}
       {hasAgents ? (
         <Text>

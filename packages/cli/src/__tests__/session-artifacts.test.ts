@@ -8,13 +8,13 @@ import {
 import {
   readSessionStateFile,
   scanSessionFiles,
-  sessionsDir,
+  runtimeSessionsDir,
   type SessionState,
 } from "../session/utils.js";
 import { makeTempDir } from "../test-helpers.js";
 
 function writeSession(phrenPath: string, state: SessionState): void {
-  const dir = sessionsDir(phrenPath);
+  const dir = runtimeSessionsDir(phrenPath);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, `session-${state.sessionId}.json`), JSON.stringify(state, null, 2));
 }
@@ -24,7 +24,7 @@ function writeMessageSnapshot(phrenPath: string, sessionId: string, data: {
   savedAt: string;
   messages: Array<{ role: string; content: unknown }>;
 }): void {
-  const dir = sessionsDir(phrenPath);
+  const dir = runtimeSessionsDir(phrenPath);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(
     path.join(dir, `session-${sessionId}-messages.json`),
@@ -64,7 +64,7 @@ describe("session artifacts", () => {
       tasksCompleted: 1,
     });
     fs.writeFileSync(
-      path.join(sessionsDir(tmp.path), "last-summary.json"),
+      path.join(runtimeSessionsDir(tmp.path), "last-summary.json"),
       JSON.stringify({
         summary: "beta summary",
         sessionId: "beta-1",
@@ -110,7 +110,7 @@ describe("session artifacts", () => {
     });
 
     const scanned = scanSessionFiles(
-      sessionsDir(tmp.path),
+      runtimeSessionsDir(tmp.path),
       readSessionStateFile,
       () => true,
     );

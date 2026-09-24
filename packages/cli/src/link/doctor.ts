@@ -1,3 +1,4 @@
+import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import * as fs from "fs";
 import * as path from "path";
 import { execFileSync } from "child_process";
@@ -20,7 +21,7 @@ import { validateGovernanceJson } from "../shared/governance.js";
 import { errorMessage } from "../utils.js";
 import { buildIndex, queryRows } from "../shared/index.js";
 import { validateTaskFormat, validateFindingsFormat } from "../shared/content.js";
-import { detectInstalledTools, isEphemeralNpxPath, findStaleHookEntrypoints } from "../hooks.js";
+import { commandExists, detectInstalledTools, isEphemeralNpxPath, findStaleHookEntrypoints } from "../hooks.js";
 import { validateSkillFrontmatter, validateSkillsDir } from "./skills.js";
 import { verifyFileChecksums, updateFileChecksums } from "./checksums.js";
 import { buildSkillManifest } from "../skill/registry.js";
@@ -41,34 +42,90 @@ import type { DoctorResult } from "./link.js";
 import { getProjectOwnershipMode, readProjectConfig } from "../project-config.js";
 import { readInstallPreferences } from "../init/preferences.js";
 import { logger } from "../logger.js";
+import { CONTEXT_COST_LIMITS, medianHookInjectionTokens, storeWeight } from "../store-weight.js";
+import { resolveMcpProfile } from "../mcp/profile.js";
+import { activeStoreAuthFailure, isGitAuthFailure, recordStoreAuthFailure, storeAuthDetail, storeSyncRemote } from "../sync/auth.js";
+import { storeCredentialCheck, type ConfirmStoreRemoval } from "../sync/auth-doctor.js";
+import { describeAutoSave } from "../sync/outcome.js";
 
 // ── Doctor ──────────────────────────────────────────────────────────────────
 
-function isWrapperActive(tool: string): boolean {
+/**
+ * Where `tool` stands relative to its ~/.local/bin wrapper, as far as this
+ * process can tell. Doctor often runs without the user's shell setup (over
+ * SSH, from a hook or a LaunchAgent), where ~/.local/bin is added only by
+ * .zshrc; then PATH says nothing about what the user's shell runs, and an
+ * installed wrapper is reported as unconfirmed rather than missing.
+ */
+export type WrapperState =
+  | { state: "active" | "missing" | "off-path" }
+  | { state: "shadowed"; by: string };
+
+export function wrapperState(
+  tool: string,
+  env: NodeJS.ProcessEnv = process.env,
+  resolve: (tool: string) => string = resolveOnPath,
+): WrapperState {
   const isWindows = process.platform === "win32";
-  const wrapperName = isWindows ? `${tool}.cmd` : tool;
-  const wrapperPath = homePath(".local", "bin", wrapperName);
-  if (!fs.existsSync(wrapperPath)) return false;
+  const wrapperPath = homePath(".local", "bin", isWindows ? `${tool}.cmd` : tool);
+  if (!fs.existsSync(wrapperPath)) return { state: "missing" };
+  const same = (a: string, b: string) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
+  const dirs = (env.PATH ?? env.Path ?? "").split(path.delimiter).filter(Boolean);
+  if (!dirs.some((dir) => same(dir, path.dirname(wrapperPath)))) return { state: "off-path" };
+  const first = resolve(tool);
+  return first && same(first, wrapperPath) ? { state: "active" } : { state: "shadowed", by: first };
+}
+
+function resolveOnPath(tool: string): string {
   try {
-    const whichCmd = isWindows ? "where.exe" : "which";
-    const whichArgs = isWindows ? [tool] : [tool];
-    const raw = execFileSync(whichCmd, whichArgs, {
+    const raw = execFileSync(process.platform === "win32" ? "where.exe" : "which", [tool], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: EXEC_TIMEOUT_QUICK_MS,
     }).trim();
     // `where.exe` can print multiple paths, one per line; check the first hit.
-    const first = raw.split(/\r?\n/).map((line) => line.trim()).find(Boolean) ?? "";
-    return path.resolve(first).toLowerCase() === path.resolve(wrapperPath).toLowerCase();
+    return raw.split(/\r?\n/).map((line) => line.trim()).find(Boolean) ?? "";
   } catch (err: unknown) {
-    debugLog(`isWrapperActive: resolve ${tool} failed: ${errorMessage(err)}`);
-    return false;
+    debugLog(`wrapperState: resolve ${tool} failed: ${errorMessage(err)}`);
+    return "";
+  }
+}
+
+/** One doctor line per wrapper. The phren wrapper works off PATH too: hooks call it by its full path. */
+export function wrapperCheck(tool: string, state: WrapperState): { name: string; ok: boolean; detail: string } {
+  const where = `~/.local/bin/${tool}${process.platform === "win32" ? ".cmd" : ""}`;
+  const name = tool === "phren" ? "wrapper:phren-cli" : `wrapper:${tool}`;
+  const label = tool === "phren" ? "phren CLI" : tool;
+  switch (state.state) {
+    case "active":
+      return { name, ok: true, detail: `${label} wrapper active via ${where}` };
+    case "off-path":
+      return {
+        name, ok: true,
+        detail: `${label} wrapper installed at ${where}; ~/.local/bin is not on this process's PATH ` +
+          `(shell startup files such as .zshrc add it only to interactive shells), so doctor cannot confirm it comes first there`,
+      };
+    case "shadowed":
+      return {
+        name, ok: false,
+        detail: state.by
+          ? `${tool} resolves to ${state.by} before the wrapper at ${where}; move ~/.local/bin earlier in PATH`
+          : `${label} wrapper at ${where} is on PATH but does not run; check that it is executable`,
+      };
+    case "missing":
+      return {
+        name, ok: false,
+        detail: tool === "phren" ? "phren CLI wrapper missing — run 'npx @phren/cli init' to install" : `${tool} wrapper missing`,
+      };
   }
 }
 
 function gitRemoteStatus(phrenPath: string, syncIntent?: "sync" | "local"): { ok: boolean; detail: string } {
+  const auth = activeStoreAuthFailure(phrenPath);
+  if (auth) return { ok: false, detail: storeAuthDetail(auth) };
   try {
     execFileSync("git", ["-C", phrenPath, "rev-parse", "--is-inside-work-tree"], {
+      env: nonInteractiveGitEnv(),
       stdio: ["ignore", "ignore", "ignore"],
       timeout: EXEC_TIMEOUT_QUICK_MS,
     });
@@ -77,8 +134,10 @@ function gitRemoteStatus(phrenPath: string, syncIntent?: "sync" | "local"): { ok
   }
 
   let remote: string | undefined;
+  const remoteName = storeSyncRemote(phrenPath)?.remoteName || "origin";
   try {
-    remote = execFileSync("git", ["-C", phrenPath, "remote", "get-url", "origin"], {
+    remote = execFileSync("git", ["-C", phrenPath, "remote", "get-url", "--", remoteName], {
+      env: nonInteractiveGitEnv(),
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: EXEC_TIMEOUT_QUICK_MS,
@@ -99,16 +158,20 @@ function gitRemoteStatus(phrenPath: string, syncIntent?: "sync" | "local"): { ok
 
   // Remote exists — verify it's reachable
   try {
-    execFileSync("git", ["-C", phrenPath, "ls-remote", "--exit-code", "origin"], {
-      stdio: ["ignore", "ignore", "ignore"],
+    execFileSync("git", ["-C", phrenPath, "ls-remote", "--exit-code", "--", remoteName], {
+      env: nonInteractiveGitEnv(),
+      stdio: ["ignore", "ignore", "pipe"],
       timeout: 10_000,
     });
-    return { ok: true, detail: `origin=${remote}` };
-  } catch {
-    if (syncIntent === "sync") {
-      return { ok: false, detail: `origin=${remote} (unreachable) — check your network or SSH keys` };
+    return { ok: true, detail: `${remoteName}=${remote}` };
+  } catch (err: unknown) {
+    if (isGitAuthFailure(err)) {
+      return { ok: false, detail: storeAuthDetail(recordStoreAuthFailure(phrenPath, remoteName, remote)) };
     }
-    return { ok: true, detail: `origin=${remote} (unreachable, local-only mode)` };
+    if (syncIntent === "sync") {
+      return { ok: false, detail: `${remoteName}=${remote} (unreachable); check your network or SSH keys` };
+    }
+    return { ok: true, detail: `${remoteName}=${remote} (unreachable, local-only mode)` };
   }
 }
 
@@ -127,6 +190,7 @@ function rootConfigStatus(
   }
   try {
     execFileSync("git", ["cat-file", "-e", `HEAD:${filename}`], {
+      env: nonInteractiveGitEnv(),
       cwd: phrenPath,
       stdio: "ignore",
       timeout: EXEC_TIMEOUT_QUICK_MS,
@@ -141,6 +205,7 @@ function rootConfigStatus(
 function materializeRootConfig(phrenPath: string, filename: string): boolean {
   try {
     execFileSync("git", ["sparse-checkout", "add", `/${filename}`], {
+      env: nonInteractiveGitEnv(),
       cwd: phrenPath,
       stdio: "ignore",
       timeout: EXEC_TIMEOUT_QUICK_MS,
@@ -199,7 +264,7 @@ function pushSkillMirrorChecks(
   }
 }
 
-export async function runDoctor(phrenPath: string, fix: boolean = false, checkData: boolean = false): Promise<DoctorResult> {
+export async function runDoctor(phrenPath: string, fix: boolean = false, checkData: boolean = false, confirmStoreRemoval?: ConfirmStoreRemoval): Promise<DoctorResult> {
   // Import runLink lazily to avoid circular dependency at module load time
   const { runLink } = await import("./link.js");
   const checks: Array<{ name: string; ok: boolean; detail: string }> = [];
@@ -339,19 +404,19 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
   // Under presets that don't symlink into ~/.claude, the "missing" links are
   // expected — report them as ok with a preset note instead of failures.
   if (caps.linkGlobalClaudeMd) {
-    const globalClaudeSrc = path.join(phrenPath, "global", "CLAUDE.md");
+    const globalClaudeSrc = path.join(phrenPath, "global", "AGENTS.md");
     const globalClaudeDest = homePath(".claude", "CLAUDE.md");
     let globalLinkOk = false;
     try {
       globalLinkOk = fs.existsSync(globalClaudeDest) && fs.realpathSync(globalClaudeDest) === fs.realpathSync(globalClaudeSrc);
     } catch (err: unknown) {
-      debugLog(`doctor: global CLAUDE.md symlink check failed: ${errorMessage(err)}`);
+      debugLog(`doctor: global AGENTS.md symlink check failed: ${errorMessage(err)}`);
       globalLinkOk = false;
     }
     checks.push({
       name: "global-link",
       ok: globalLinkOk,
-      detail: globalLinkOk ? "global CLAUDE.md symlink ok" : "global CLAUDE.md link drifted/missing",
+      detail: globalLinkOk ? "global AGENTS.md symlink ok" : "global AGENTS.md link drifted/missing",
     });
   } else {
     checks.push({
@@ -396,7 +461,7 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
       checks.push({ name: `project-path:${project}`, ok: false, detail: "project directory not found on disk" });
       continue;
     }
-    for (const f of ["CLAUDE.md", "REFERENCE.md", FINDINGS_FILENAME]) {
+    for (const f of ["AGENTS.md", "REFERENCE.md", FINDINGS_FILENAME]) {
       const src = path.join(phrenPath, project, f);
       if (!fs.existsSync(src)) continue;
       const dest = path.join(target, f);
@@ -423,17 +488,28 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
 
   // Store registry health
   try {
-    const { resolveAllStores, storesFilePath, describeUnavailableStore } = await import("../store-registry.js");
-    const storesFile = storesFilePath(phrenPath);
-    if (fs.existsSync(storesFile)) {
+    const { resolveAllStores, storesFilePath, attachedStoresFilePath, describeUnavailableStore, ignoredSyncedStores } =
+      await import("../store-registry.js");
+    if (fs.existsSync(storesFilePath(phrenPath)) || fs.existsSync(attachedStoresFilePath(phrenPath))) {
       const stores = resolveAllStores(phrenPath);
       checks.push({
         name: "store-registry",
         ok: stores.length > 0,
         detail: stores.length > 0
-          ? `${stores.length} stores configured`
+          ? `${stores.length} stores on this machine`
           : "stores.yaml exists but no stores parsed",
       });
+      // Only this machine's attachments are checked. Team stores another
+      // machine joined with an older phren still sit in the synced file.
+      const ignored = ignoredSyncedStores(phrenPath);
+      if (ignored.length > 0) {
+        checks.push({
+          name: "store-registry-synced",
+          ok: true,
+          detail: `ignoring ${ignored.map((s) => s.name).join(", ")} in the synced ${path.basename(storesFilePath(phrenPath))}: ` +
+            `team stores are attached per machine (${attachedStoresFilePath(phrenPath)}); remove them from stores.yaml once every machine runs this phren`,
+        });
+      }
       // Projects claimed by a store that is not attached here cannot be written
       // at all — phren refuses rather than diverting them to the primary store.
       const orphanedClaims = stores
@@ -447,6 +523,11 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
           : `projects claimed by unattached stores (writes to them will fail): ${orphanedClaims.join("; ")}`,
       });
       for (const store of stores) {
+        const credentials = await storeCredentialCheck(phrenPath, store, fix, confirmStoreRemoval);
+        if (credentials) {
+          checks.push(credentials);
+          continue;
+        }
         const pathExists = store.available !== false;
         const gitExists = pathExists && fs.existsSync(path.join(store.path, ".git"));
         if (!pathExists) {
@@ -587,6 +668,27 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
       runtime = null;
     }
   }
+  // What an agent pays before it says a word, and per prompt after. None of
+  // the tidying stays done unless this is visible.
+  try {
+    const weight = storeWeight(phrenPath);
+    const profile = resolveMcpProfile(phrenPath);
+    const injection = medianHookInjectionTokens(phrenPath);
+    const problems: string[] = [];
+    if (weight.globalClaude > CONTEXT_COST_LIMITS.globalClaudeWords) problems.push(`global AGENTS.md is ${weight.globalClaude} words (aim under ${CONTEXT_COST_LIMITS.globalClaudeWords})`);
+    if (profile === "full") problems.push("MCP profile is full (61 tools, ~53k chars of schema per session); `phren config mcp-profile core` is ~17k");
+    if (injection.medianTokens > CONTEXT_COST_LIMITS.medianInjectionTokens) problems.push(`median hook injection is ${injection.medianTokens} tokens over the last ${injection.prompts} prompts`);
+    checks.push({
+      name: "context-cost",
+      ok: problems.length === 0,
+      detail: problems.length
+        ? problems.join("; ")
+        : `global AGENTS.md ${weight.globalClaude} words · MCP profile ${profile} (${profile === "core" ? "10 tools, ~17k chars" : "61 tools, ~53k chars"})${injection.prompts ? ` · median injection ${injection.medianTokens} tokens over ${injection.prompts} prompts` : ""} · store: findings ${weight.findings.toLocaleString("en-US")} words, archive ${weight.reference.toLocaleString("en-US")}, tasks ${weight.tasks.toLocaleString("en-US")}, skills ${weight.skills.toLocaleString("en-US")}`,
+    });
+  } catch (err: unknown) {
+    logger.debug("doctor", `context-cost: ${errorMessage(err)}`);
+  }
+
   checks.push({
     name: "runtime-health-file",
     ok: Boolean(runtime),
@@ -599,9 +701,10 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
   checks.push({
     name: "runtime-auto-save",
     ok: autoSaveStatus === "saved-pushed" || autoSaveStatus === "saved-local" || autoSaveStatus === "clean",
-    detail: autoSaveStatus
-      ? `last auto-save: ${autoSaveStatus}${autoSaveAt ? ` @ ${autoSaveAt}` : ""}`
-      : "no auto-save runtime record yet",
+    detail: describeAutoSave(
+      { status: autoSaveStatus, at: autoSaveAt, detail: typeof autoSaveObj?.["detail"] === "string" ? autoSaveObj["detail"] : undefined },
+      isRecord(runtime?.["lastSync"]) ? runtime["lastSync"] as { ahead?: number; behind?: number } : undefined,
+    ),
   });
   checks.push({
     name: "runtime-prompt",
@@ -669,28 +772,13 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
       detail: codexWritable ? `writable: ${codexHooks}` : `not writable: ${codexHooks}`,
     });
   }
-  const wrapperSuffix = process.platform === "win32" ? ".cmd" : "";
   for (const tool of ["copilot", "cursor", "codex"]) {
-    if (!detected.has(tool)) continue;
-    const active = isWrapperActive(tool);
-    checks.push({
-      name: `wrapper:${tool}`,
-      ok: active,
-      detail: active
-        ? `${tool} wrapper active via ~/.local/bin/${tool}${wrapperSuffix}`
-        : `${tool} wrapper missing or not first in PATH`,
-    });
+    // A tool can count as detected from its config folder alone (Copilot's
+    // ~/.copilot, say); a wrapper only makes sense around a binary on PATH.
+    if (!detected.has(tool) || !commandExists(tool)) continue;
+    checks.push(wrapperCheck(tool, wrapperState(tool)));
   }
-
-  // Check phren CLI wrapper
-  const phrenCliActive = isWrapperActive("phren");
-  checks.push({
-    name: "wrapper:phren-cli",
-    ok: phrenCliActive,
-    detail: phrenCliActive
-      ? `phren CLI wrapper active via ~/.local/bin/phren${wrapperSuffix}`
-      : "phren CLI wrapper missing — run 'npx @phren/cli init' to install",
-  });
+  checks.push(wrapperCheck("phren", wrapperState("phren")));
 
   if (fix) {
     const repaired = repairPreexistingInstall(phrenPath);
@@ -811,7 +899,7 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
       const projectName = path.basename(projectDir);
       if (projectName === "global") continue;
 
-      for (const mdFile of [FINDINGS_FILENAME, ...TASK_FILE_ALIASES, "review.md", "CLAUDE.md", "REFERENCE.md"]) {
+      for (const mdFile of [FINDINGS_FILENAME, ...TASK_FILE_ALIASES, "review.md", "AGENTS.md", "REFERENCE.md"]) {
         const filePath = path.join(projectDir, mdFile);
         if (!fs.existsSync(filePath)) continue;
         const content = fs.readFileSync(filePath, "utf8");

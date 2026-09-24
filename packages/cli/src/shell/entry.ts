@@ -4,12 +4,21 @@
  */
 
 import { PhrenShell } from "./shell.js";
-import { style, clearScreen, clearToEnd, shellStartupFrames, gradient, badge } from "./render.js";
-import { createPhrenAnimator } from "../phren-art.js";
+import { MOUSE_OFF, MOUSE_ON } from "./graph/orbit.js";
+import {
+  style,
+  clearScreen,
+  paintFrame,
+  enterFullscreen,
+  exitFullscreen,
+} from "./render.js";
+import { KeyDecoder, ESC_FLUSH_MS } from "./keys.js";
+import { playSplash, type KeypressWaiter } from "./intro.js";
 import { errorMessage } from "../utils.js";
 import { computePhrenLiveStateToken } from "../shared.js";
 import { VERSION } from "../init/shared.js";
 import { loadShellState, saveShellState } from "./state-store.js";
+import type { ShellStartup } from "./startup.js";
 
 const LIVE_STATE_POLL_MS = 2000;
 
@@ -26,25 +35,16 @@ interface StartupIntroPlan {
   markSeen: boolean;
 }
 
-function renderIntroFrame(frame: string, footer?: string): void {
-  clearScreen();
-  process.stdout.write(footer ? `${frame}\n${footer}\n` : `${frame}\n`);
-  clearToEnd();
-}
+/**
+ * The intro used to attach its own stdin listener while the shell's key handler
+ * was already live, so the keypress that dismissed the splash was *also* fed to
+ * the shell (pressing "q" at the splash quit phren outright) and the intro's
+ * animation frames raced the first dashboard repaint. Key delivery is now owned
+ * by startShell, which hands the intro a one-shot waiter that consumes the key.
+ */
+export type { KeypressWaiter } from "./intro.js";
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function waitForAnyKeypress(): Promise<void> {
-  await new Promise<void>((resolve) => {
-    const onData = () => {
-      process.stdin.removeListener("data", onData);
-      resolve();
-    };
-    process.stdin.on("data", onData);
-  });
-}
+const noopWaiter: KeypressWaiter = () => Promise.resolve();
 
 export function resolveStartupIntroPlan(phrenPath: string, version = VERSION): StartupIntroPlan {
   const state = loadShellState(phrenPath);
@@ -68,71 +68,24 @@ function markStartupIntroSeen(phrenPath: string, version = VERSION): void {
   saveShellState(phrenPath, { ...state, introSeenVersion: version });
 }
 
-async function playStartupIntro(phrenPath: string, plan = resolveStartupIntroPlan(phrenPath)): Promise<void> {
+async function playStartupIntro(
+  phrenPath: string,
+  plan = resolveStartupIntroPlan(phrenPath),
+  waitForAnyKeypress: KeypressWaiter = noopWaiter,
+): Promise<void> {
   if (!process.stdout.isTTY || plan.variant === "skip") return;
 
-  const frames = shellStartupFrames(VERSION);
-  const renderHint = plan.holdForKeypress
-    ? `${style.dim("Press any key to enter")}`
-    : `${style.dim("Loading shell…")}`;
-
-  if (plan.variant === "full") {
-    for (const frame of frames.slice(0, -1)) {
-      renderIntroFrame(frame);
-      await sleep(160);
-    }
-  }
-
-  // Start animated phren during loading
-  const animator = createPhrenAnimator({ facing: "right" });
-  animator.start();
-
-  const _cols = process.stdout.columns || 80;
-  const tagline = style.dim("local memory for working agents");
-  const versionBadge = badge(`v${VERSION}`, style.boldBlue);
-  const logoLines = [
-    "██████╗ ██╗  ██╗██████╗ ███████╗███╗   ██╗",
-    "██╔══██╗██║  ██║██╔══██╗██╔════╝████╗  ██║",
-    "██████╔╝███████║██████╔╝█████╗  ██╔██╗ ██║",
-    "██╔═══╝ ██╔══██║██╔══██╗██╔══╝  ██║╚██╗██║",
-    "██║     ██║  ██║██║  ██║███████╗██║ ╚████║",
-    "╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═══╝",
-  ].map(l => gradient(l));
-  const infoLine = `${gradient("◆")} ${style.bold("phren")}  ${versionBadge}  ${tagline}`;
-
-  function renderAnimatedFrame(hint?: string): void {
-    const phrenLines = animator.getFrame();
-    const rightSide = ["", "", ...logoLines, "", infoLine];
-    const charWidth = 26;
-    const maxLines = Math.max(phrenLines.length, rightSide.length);
-    const merged: string[] = [""];
-    for (let i = 0; i < maxLines; i++) {
-      const left = (i < phrenLines.length ? phrenLines[i] : "").padEnd(charWidth);
-      const right = i < rightSide.length ? rightSide[i] : "";
-      merged.push(left + right);
-    }
-    if (hint) merged.push("", `  ${hint}`);
-    merged.push("");
-    renderIntroFrame(merged.join("\n"));
-  }
-
-  // Animate during dwell/loading period
-  if (plan.holdForKeypress) {
-    const animInterval = setInterval(() => renderAnimatedFrame(renderHint), 200);
-    renderAnimatedFrame(renderHint);
-    await waitForAnyKeypress();
-    clearInterval(animInterval);
-  } else if (plan.dwellMs > 0) {
-    const startTime = Date.now();
-    while (Date.now() - startTime < plan.dwellMs) {
-      renderAnimatedFrame(renderHint);
-      await sleep(200);
-    }
-  } else {
-    renderAnimatedFrame(renderHint);
-  }
-
-  animator.stop();
+  // The shell is already on the alternate screen; the splash paints in place.
+  // A full intro plays the wordmark reveal, a repeat launch opens on the
+  // finished wordmark, and either way the shimmer runs until dismissed.
+  await playSplash({
+    version: VERSION,
+    hint: plan.holdForKeypress ? "Press any key to enter" : "Loading shell…",
+    reveal: plan.variant === "full",
+    dwellMs: plan.dwellMs,
+    waitForKeypress: plan.holdForKeypress ? waitForAnyKeypress : undefined,
+    fullscreen: false,
+  });
 
   if (plan.markSeen) {
     markStartupIntroSeen(phrenPath);
@@ -184,8 +137,8 @@ export function startLiveStatePoller({
   };
 }
 
-export async function startShell(phrenPath: string, profile: string): Promise<void> {
-  const shell = new PhrenShell(phrenPath, profile);
+export async function startShell(phrenPath: string, profile: string, startup: ShellStartup = {}): Promise<void> {
+  const shell = new PhrenShell(phrenPath, profile, undefined, startup);
 
   if (!process.stdin.isTTY) {
     const { createInterface } = await import("readline");
@@ -204,32 +157,119 @@ export async function startShell(phrenPath: string, profile: string): Promise<vo
     return;
   }
 
-  process.stdin.setRawMode(true);
-  process.stdin.resume();
-  process.stdin.setEncoding("utf8");
-  process.stdout.write("\x1b[?1049h");
+  // Taking and releasing the terminal is written once and used twice: at
+  // startup and shutdown, and again either side of handing the terminal to an
+  // editor. Two copies of this would drift.
+  const grabTerminal = () => {
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.setEncoding("utf8");
+    enterFullscreen();
+  };
+  grabTerminal();
   let exiting = false;
   let cleanedUp = false;
-  const repaint = async () => { clearScreen(); process.stdout.write(await shell.render()); clearToEnd(); };
+
+  // ── Painting ────────────────────────────────────────────────────────────
+  // render() is async (the Health view awaits a doctor snapshot) and repaints
+  // are triggered from three independent sources — keys, resize, and the live
+  // store poller — none of which await each other. Serialising them keeps two
+  // renders from interleaving their writes; a repaint requested mid-render is
+  // coalesced into a single trailing repaint instead of queueing up.
+  let painting = false;
+  let repaintQueued = false;
+  const repaint = async () => {
+    if (painting) { repaintQueued = true; return; }
+    painting = true;
+    try {
+      do {
+        repaintQueued = false;
+        const frame = await shell.render();
+        if (exiting) return;
+        paintFrame(frame);
+      } while (repaintQueued);
+    } finally {
+      painting = false;
+    }
+  };
+  // The graph view animates (layout settle, fly-to) and finishes builds off
+  // the key path; give the shell a way to repaint without a keypress.
+  shell.setRepaintHandler(() => { if (!exiting && !introActive) void repaint(); });
+
   let done!: () => void;
   const exitPromise = new Promise<void>((resolve) => { done = resolve; });
 
   const restoreTerminal = () => {
     // Shutdown cleanup is intentionally silent: terminal restoration is best-effort
     // cleanup, not a user-requested write path.
+    try { process.stdout.write(MOUSE_OFF); } catch {}
     try { process.stdin.setRawMode(false); } catch {}
     try { process.stdin.pause(); } catch {}
-    try { process.stdout.write("\x1b[?1049l"); } catch {}
+    try { exitFullscreen(); } catch {}
   };
 
-  const onData = async (key: string) => {
-    if (exiting) return;
-    try {
-      const keep = await shell.handleRawKey(key);
-      if (!keep) { exiting = true; finish(); return; }
-      await repaint();
-    } catch (err: unknown) { shell.setMessage(`Error: ${errorMessage(err)}`); await repaint(); }
+  // ── Key delivery ────────────────────────────────────────────────────────
+  // stdin hands us whatever arrived in one read, which is often several keys
+  // (autorepeat, fast typing, paste). Decode the chunk into discrete keys, then
+  // drain them through one sequential pump so handlers never run concurrently,
+  // and repaint once per burst rather than once per key.
+  const decoder = new KeyDecoder();
+  const keyQueue: string[] = [];
+  let escTimer: NodeJS.Timeout | undefined;
+  let introKeyWaiter: (() => void) | undefined;
+  // Keys pressed while the splash is on screen queue up rather than repainting
+  // the dashboard underneath a frame the intro is still animating over.
+  let introActive = true;
+
+  const dispatch = (keys: string[]) => {
+    if (!keys.length) return;
+    if (introKeyWaiter) {
+      // The splash consumes the key that dismisses it; the rest still count.
+      const resolveIntro = introKeyWaiter;
+      introKeyWaiter = undefined;
+      keys = keys.slice(1);
+      resolveIntro();
+    }
+    keyQueue.push(...keys);
+    void pump();
   };
+
+  let pumping = false;
+  const pump = async () => {
+    if (pumping || introActive) return;
+    pumping = true;
+    try {
+      while (!exiting && keyQueue.length) {
+        while (!exiting && keyQueue.length) {
+          const key = keyQueue.shift()!;
+          try {
+            const keep = await shell.handleRawKey(key);
+            if (!keep) { exiting = true; keyQueue.length = 0; finish(); return; }
+          } catch (err: unknown) {
+            shell.setMessage(`Error: ${errorMessage(err)}`);
+          }
+        }
+        if (!exiting) await repaint();
+      }
+    } finally {
+      pumping = false;
+    }
+  };
+
+  const onData = (chunk: string) => {
+    if (exiting) return;
+    if (escTimer) { clearTimeout(escTimer); escTimer = undefined; }
+    dispatch(decoder.push(chunk));
+    if (decoder.hasPending()) {
+      // A trailing ESC is either the Escape key or the head of a sequence split
+      // across reads. Wait briefly for the rest before treating it as Escape.
+      escTimer = setTimeout(() => { escTimer = undefined; dispatch(decoder.flush()); }, ESC_FLUSH_MS);
+      escTimer.unref?.();
+    }
+  };
+
+  const waitForIntroKeypress = () => new Promise<void>((resolve) => { introKeyWaiter = resolve; });
+
   const onResize = async () => { if (!exiting) await repaint(); };
   const onSignal = () => {
     if (exiting) return;
@@ -243,6 +283,9 @@ export async function startShell(phrenPath: string, profile: string): Promise<vo
     if (cleanedUp) return;
     cleanedUp = true;
     stopPoll();
+    if (escTimer) { clearTimeout(escTimer); escTimer = undefined; }
+    introKeyWaiter?.();
+    introKeyWaiter = undefined;
     process.stdin.removeListener("data", onData);
     process.stdout.removeListener("resize", onResize);
     process.removeListener("SIGINT", onSignal);
@@ -259,9 +302,37 @@ export async function startShell(phrenPath: string, profile: string): Promise<vo
   process.once("SIGTERM", onSignal);
   process.once("exit", onProcessExit);
 
+  // Hand the terminal to a child process (an editor) and take it back. The
+  // shell owns raw mode, the alternate screen and the stdin listener, so all
+  // three have to be unwound or the child and the key pump fight over input.
+  // Mouse reporting is switched on only while the Graph view is showing;
+  // elsewhere the terminal keeps its own click-and-drag text selection.
+  shell.setMouseHandler((on) => { try { process.stdout.write(on ? MOUSE_ON : MOUSE_OFF); } catch {} });
+  shell.syncMouse();
+  shell.setSuspendHandler(async (run) => {
+    if (exiting) return;
+    process.stdin.removeListener("data", onData);
+    restoreTerminal();
+    try {
+      await run();
+    } finally {
+      if (!exiting) {
+        grabTerminal();
+        shell.syncMouse();
+        process.stdin.on("data", onData);
+        // Anything typed at the child after it exited is not for us.
+        decoder.flush();
+        await repaint();
+      }
+    }
+  });
+
   try {
-    await playStartupIntro(phrenPath);
-    await repaint();
+    await playStartupIntro(phrenPath, resolveStartupIntroPlan(phrenPath), waitForIntroKeypress);
+    introKeyWaiter = undefined;
+    introActive = false;
+    if (!exiting) await repaint();
+    void pump();
     await exitPromise;
   } finally {
     finish();

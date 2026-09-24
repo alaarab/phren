@@ -1328,7 +1328,7 @@ export function renderTasksAndSettingsScript(authToken: string): string {
             if (pi.hasFindings) files.push('FINDINGS.md');
             if (pi.hasTasks) files.push('tasks.md');
             if (pi.hasSummary) files.push('summary.md');
-            if (pi.hasClaudeMd) files.push('CLAUDE.md');
+            if (pi.hasClaudeMd) files.push('AGENTS.md');
             if (files.length) {
               infoHtml += '<div style="margin-top:10px;font-size:var(--text-xs);color:var(--muted)">Files: ' + files.map(function(f) { return '<span class="badge" style="margin-right:4px">' + esc(f) + '</span>'; }).join('') + '</div>';
             }
@@ -2293,15 +2293,6 @@ export function renderGraphHostScript(): string {
     }).sort(function(a, b) { return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; });
   }
 
-  function findingNav(node) {
-    var list = findingSiblings(node);
-    var index = -1;
-    for (var i = 0; i < list.length; i++) {
-      if (list[i].id === node.id) { index = i; break; }
-    }
-    return { list: list, index: index, total: list.length };
-  }
-
   function relatedFindings(node) {
     return findingSiblings(node).filter(function(candidate) {
       return candidate.id !== node.id && candidate.topicSlug && candidate.topicSlug === node.topicSlug;
@@ -2370,7 +2361,29 @@ export function renderGraphHostScript(): string {
     return '<div style="display:flex;flex-wrap:wrap;gap:8px">' + docs.slice(0, 12).map(function(doc) { return docChip(doc); }).join('') + '</div>';
   }
 
-  function renderView(node) {
+  // Icon paths for the dossier header's icon buttons: pencil, trash,
+  // previous/next chevrons, close. Stroke follows currentColor.
+  var DOSSIER_ICONS = {
+    edit: '<path d="M4 16l3.4-.8L16 6.6a1.8 1.8 0 0 0-2.6-2.6l-8.6 8.6L4 16Z"></path><path d="m12.3 5.1 2.6 2.6M4.8 12.6l2.6 2.6"></path>',
+    delete: '<path d="M3.5 5.5h13M8 5.5V3.8h4v1.7M5.5 5.5l.7 10.7h7.6l.7-10.7M8 8.5v4.8M12 8.5v4.8"></path>',
+    'prev-node': '<path d="m12.5 5-5 5 5 5"></path>',
+    'next-node': '<path d="m7.5 5 5 5-5 5"></path>',
+    close: '<path d="m5 5 10 10M15 5 5 15"></path>'
+  };
+
+  function dossierIconBtn(action, label, opts) {
+    opts = opts || {};
+    return '<button type="button" class="phren-dossier-iconbtn' + (opts.danger ? ' danger' : '') + '"'
+      + (opts.id ? ' id="' + opts.id + '"' : '')
+      + ' data-graph-action="' + action + '" aria-label="' + label + '" title="' + label + '"'
+      + ' style="width:44px;height:44px">'
+      + '<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">' + DOSSIER_ICONS[action] + '</svg></button>';
+  }
+
+  // The header row: kind/title/chips on the left, icon buttons on the right
+  // beside Close. Prev/Next walk the ranked list the list mode shows; Edit
+  // and Delete replace the old text buttons in the actions row.
+  function dossierHeader(node) {
     var title = node.displayLabel || node.label || node.tooltipLabel || node.id;
     var meta = [kindLabel(node)];
     if (node.projectName) meta.push(node.projectName);
@@ -2379,7 +2392,34 @@ export function renderGraphHostScript(): string {
     if (node.kind === 'finding' && node.topicLabel) meta.push(node.topicLabel);
     if (node.kind === 'finding' && node.date) meta.push(node.date);
 
-    var header = '<div style="display:flex;flex-direction:column;gap:8px;padding-right:44px"><div class="phren-dossier-kind" style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">' + esc(kindLabel(node)) + '</div><div style="font-size:var(--text-lg);font-weight:600;line-height:1.2">' + esc(title) + '</div><div style="display:flex;flex-wrap:wrap;gap:8px">' + meta.filter(Boolean).map(function(item, index) { return chip(item, index === 0); }).join('') + scoreLine(node) + '</div></div>';
+    var api = graphApi();
+    var pos = api && api.dossierPosition ? api.dossierPosition(node.id) : null;
+    var editable = node.kind === 'finding' || node.kind === 'task';
+    var tools = [];
+    if (pos) {
+      tools.push(dossierIconBtn('prev-node', 'Previous node'));
+      tools.push(dossierIconBtn('next-node', 'Next node'));
+      tools.push('<span class="phren-dossier-count">' + (pos.index + 1) + ' of ' + pos.total + '</span>');
+    }
+    if (editable) {
+      tools.push(dossierIconBtn('edit', 'Edit'));
+      tools.push(dossierIconBtn('delete', 'Delete', { danger: true }));
+    }
+    tools.push(dossierIconBtn('close', 'Close selected node', { id: 'graph-node-close' }));
+
+    return '<div class="phren-dossier-head">'
+      + '<div style="display:flex;flex-direction:column;gap:8px;flex:1 1 auto;min-width:0">'
+      + '<div class="phren-dossier-kind" style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">' + esc(kindLabel(node)) + '</div>'
+      + '<div style="font-size:var(--text-lg);font-weight:600;line-height:1.2">' + esc(title) + '</div>'
+      + '<div style="display:flex;flex-wrap:wrap;gap:8px">' + meta.filter(Boolean).map(function(item, index) { return chip(item, index === 0); }).join('') + scoreLine(node) + '</div>'
+      + '</div>'
+      + '<div class="phren-dossier-tools">' + tools.join('') + '</div>'
+      + '</div>';
+  }
+
+  function renderView(node) {
+    var title = node.displayLabel || node.label || node.tooltipLabel || node.id;
+    var header = dossierHeader(node);
 
     var body = '';
     var actions = [];
@@ -2422,23 +2462,15 @@ export function renderGraphHostScript(): string {
         body += '<div class="phren-dossier-section">Community</div>';
         body += '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px">' + gotoChip(node.projectName, node.projectName, true) + '</div>';
       }
-      var nav = findingNav(node);
-      if (nav.total > 1 && nav.index !== -1) {
-        actions.push('<span class="phren-dossier-nav"><button type="button" data-graph-action="prev-finding" title="Previous finding in project">‹</button><span>' + (nav.index + 1) + ' of ' + nav.total + '</span><button type="button" data-graph-action="next-finding" title="Next finding in project">›</button></span>');
-      }
-      actions.push('<button type="button" class="btn btn-sm" data-graph-action="edit">Edit</button>');
-      actions.push('<button type="button" class="btn btn-sm" data-graph-action="delete" style="border-color:var(--danger);color:var(--danger)">Delete</button>');
     } else if (node.kind === 'task') {
       body += '<div id="graph-node-text" style="white-space:pre-wrap;line-height:1.65;font-size:var(--text-base)">' + esc(node.tooltipLabel || node.fullLabel || title) + '</div>';
       body += '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px">';
       body += chip('Status ' + (node.section || 'Queue'), true);
       if (node.priority) body += chip('Priority ' + node.priority, false);
       body += '</div>';
-      actions.push('<button type="button" class="btn btn-sm" data-graph-action="edit">Edit</button>');
       if ((node.section || '').toLowerCase() !== 'done') actions.push('<button type="button" class="btn btn-sm" data-graph-action="complete">Done</button>');
       if ((node.section || '').toLowerCase() !== 'active') actions.push('<button type="button" class="btn btn-sm" data-graph-action="move-active">Move to Active</button>');
       if ((node.section || '').toLowerCase() !== 'queue') actions.push('<button type="button" class="btn btn-sm" data-graph-action="move-queue">Move to Queue</button>');
-      actions.push('<button type="button" class="btn btn-sm" data-graph-action="delete" style="border-color:var(--danger);color:var(--danger)">Delete</button>');
     } else if (node.kind === 'entity') {
       if (node.connectedProjects && node.connectedProjects.length) {
         body += '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px">' + node.connectedProjects.map(function(project) { return chip(project, true); }).join('') + '</div>';
@@ -2467,7 +2499,13 @@ export function renderGraphHostScript(): string {
       sectionControls = '<label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--muted)">Status<select id="graph-task-section" style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:var(--surface);color:var(--ink)"><option value="Queue"' + (section === 'Queue' ? ' selected' : '') + '>Queue</option><option value="Active"' + (section === 'Active' ? ' selected' : '') + '>Active</option><option value="Done"' + (section === 'Done' ? ' selected' : '') + '>Done</option></select></label>';
       priorityControls = '<label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--muted)">Priority<select id="graph-task-priority" style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:var(--surface);color:var(--ink)"><option value=""' + (!priority ? ' selected' : '') + '>None</option><option value="high"' + (priority === 'high' ? ' selected' : '') + '>High</option><option value="medium"' + (priority === 'medium' ? ' selected' : '') + '>Medium</option><option value="low"' + (priority === 'low' ? ' selected' : '') + '>Low</option></select></label>';
     }
-    return '<div style="display:flex;flex-direction:column;gap:8px;padding-right:44px"><div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">' + esc(title) + '</div><div style="font-size:var(--text-md);font-weight:600">' + esc(node.projectName || kindLabel(node)) + '</div></div>'
+    return '<div class="phren-dossier-head">'
+      + '<div style="display:flex;flex-direction:column;gap:8px;flex:1 1 auto;min-width:0">'
+      + '<div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">' + esc(title) + '</div>'
+      + '<div style="font-size:var(--text-md);font-weight:600">' + esc(node.projectName || kindLabel(node)) + '</div>'
+      + '</div>'
+      + '<div class="phren-dossier-tools">' + dossierIconBtn('close', 'Close selected node', { id: 'graph-node-close' }) + '</div>'
+      + '</div>'
       + '<div style="display:flex;flex-direction:column;gap:12px;margin-top:16px">'
       + '<textarea id="graph-node-editor" style="min-height:180px;width:100%;border:1px solid var(--border);border-radius:12px;padding:12px 14px;background:var(--surface-sunken);color:var(--ink);font:inherit;line-height:1.55;resize:vertical">' + esc(text) + '</textarea>'
       + (node.kind === 'task' ? '<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px">' + sectionControls + priorityControls + '</div>' : '')
@@ -2761,9 +2799,6 @@ export function renderGraphHostScript(): string {
   }
 
   function bindPopoverActions() {
-    var closeBtn = document.getElementById('graph-node-close');
-    if (closeBtn) closeBtn.onclick = hidePopover;
-
     // Doc reference chips — click to search for the document
     document.querySelectorAll('[data-doc-click]').forEach(function(chip) {
       chip.addEventListener('click', function() {
@@ -2790,14 +2825,16 @@ export function renderGraphHostScript(): string {
     document.querySelectorAll('[data-graph-action]').forEach(function(button) {
       button.addEventListener('click', function() {
         var action = button.getAttribute('data-graph-action');
-        if (action === 'prev-finding' || action === 'next-finding') {
+        if (action === 'prev-node' || action === 'next-node') {
           if (!currentNode) return;
-          var nav = findingNav(currentNode);
-          if (nav.total < 2 || nav.index === -1) return;
-          var step = action === 'next-finding' ? 1 : -1;
-          var nextIndex = (nav.index + step + nav.total) % nav.total;
           var api = graphApi();
-          if (api && api.focusNode) api.focusNode(nav.list[nextIndex].id);
+          if (!api || !api.stepDossier) return;
+          var nextId = api.stepDossier(currentNode.id, action === 'next-node' ? 1 : -1);
+          if (nextId && api.focusNode) api.focusNode(nextId);
+          return;
+        }
+        if (action === 'close') {
+          hidePopover();
           return;
         }
         if (action === 'edit') {

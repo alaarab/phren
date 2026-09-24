@@ -10,6 +10,7 @@ import {
   recomputeSearchMatches,
   seeded,
   state,
+  stepDossier,
 } from "./state.js";
 import {
   applyHighlight,
@@ -28,10 +29,12 @@ import {
   fitCameraToGraph,
   notifyClear,
   notifySelection,
+  followLayoutChange,
   onHover,
-  onNodeClick,
+  onCanvasClick,
   onNodeRightClick,
   runIntro,
+  selectNode,
   tickIdleResume,
 } from "./interactions.js";
 import { createLabelRenderer, injectLabelCss, labelTick } from "./labels.js";
@@ -41,6 +44,7 @@ import { buildProjectNav, stepProject } from "./project-nav.js";
 import { refreshProjectPanel } from "./project-panel.js";
 import { computeHierarchicalLayout } from "./layout.js";
 import { buildCages, disposeCages, setCageResolution } from "./cages.js";
+import { beginCameraInteraction, endCameraInteraction, recenterSelection, disposeSelectionCamera } from "./selection-camera.js";
 
 let starfield: THREE.Points | null = null;
 let nebula: THREE.Group | null = null;
@@ -155,6 +159,7 @@ export function pushGraphData(): void {
   // node is pinned via fx/fy/fz so the force sim leaves the positions alone.
   const cageSpecs = computeHierarchicalLayout(nodes);
   state.fg.graphData({ nodes, links });
+  followLayoutChange();
   if (state.fg.scene) {
     cageScene = state.fg.scene();
     buildCages(cageScene!, cageSpecs, containerSize());
@@ -196,7 +201,11 @@ export function applyFilters(options: { resetCamera?: boolean; emitSelection?: b
     // immediate fit would frame the stale (larger) bbox and leave the subset
     // tiny. A short delay lets the new pinned layout settle first.
     const fg = state.fg;
-    setTimeout(() => { if (state.fg === fg) fitCameraToGraph(600); }, 180);
+    const interactionAt = state.lastInteractionAt;
+    setTimeout(() => {
+      if (state.fg === fg && !state.selectedNodeId && !state.focusedProjectId
+        && state.lastInteractionAt === interactionAt) fitCameraToGraph(600);
+    }, 180);
   }
 }
 
@@ -231,16 +240,14 @@ export function setupForceGraph(): void {
     .cooldownTicks(0)
     .d3AlphaDecay(1)
     .onNodeHover((node: FGNode | null) => onHover(node))
-    .onNodeClick((node: FGNode) => onNodeClick(node))
+    .onNodeClick((node: FGNode, event: MouseEvent) => onCanvasClick(event, node))
     .onNodeRightClick((node: FGNode, event: MouseEvent) => onNodeRightClick(node, event))
     .onNodeDragEnd((node: FGNode) => {
       node.fx = node.x;
       node.fy = node.y;
       node.fz = node.z;
     })
-    .onBackgroundClick(() => {
-      if (state.selectedNodeId || state.focusedProjectId) clearSelection();
-    });
+    .onBackgroundClick((event: MouseEvent) => onCanvasClick(event, null));
 
   state.fg = fg;
 
@@ -257,6 +264,14 @@ export function setupForceGraph(): void {
   // camera into the cluster before the fit finished.
   fg.controls().autoRotate = false;
   fg.controls().autoRotateSpeed = 0.22;
+  const controls = fg.controls();
+  const startInteraction = () => { noteInteraction(); beginCameraInteraction(); };
+  controls.addEventListener("start", startInteraction);
+  controls.addEventListener("end", endCameraInteraction);
+  state.cleanupFns.push(() => {
+    controls.removeEventListener("start", startInteraction);
+    controls.removeEventListener("end", endCameraInteraction);
+  });
   const pauseRotate = () => noteInteraction();
   state.container.addEventListener("pointerdown", pauseRotate);
   state.container.addEventListener("wheel", pauseRotate, { passive: true });
@@ -304,14 +319,10 @@ export function setupForceGraph(): void {
   state.container.appendChild(overlay);
   state.cleanupFns.push(() => overlay.remove());
 
-  // Mouse tracking for tooltip placement.
+  // Track the pointer so selection notifications have a fallback anchor.
   const onMouseMove = (event: MouseEvent) => {
     const rect = state.container!.getBoundingClientRect();
     state.lastMouse = { x: event.clientX - rect.left, y: event.clientY - rect.top };
-    if (state.tooltip && state.tooltip.style.opacity === "1") {
-      state.tooltip.style.left = state.lastMouse.x + 14 + "px";
-      state.tooltip.style.top = state.lastMouse.y + 14 + "px";
-    }
   };
   state.container.addEventListener("mousemove", onMouseMove);
   state.cleanupFns.push(() => state.container?.removeEventListener("mousemove", onMouseMove));
@@ -326,9 +337,18 @@ export function setupForceGraph(): void {
       clearSelection();
       return;
     }
-    // ←/→ step through projects via the navigator dock (Alt/Ctrl/Meta reserved).
+    // ←/→ with a node dossier open walk that dossier's ranked list (the order
+    // the list mode shows, wrapping at the ends); otherwise they step projects
+    // through the navigator dock (Alt/Ctrl/Meta reserved).
     if ((event.key === "ArrowLeft" || event.key === "ArrowRight") && !event.altKey && !event.ctrlKey && !event.metaKey) {
-      stepProject(event.key === "ArrowRight" ? 1 : -1);
+      const delta = event.key === "ArrowRight" ? 1 : -1;
+      if (state.selectedNodeId) {
+        const next = stepDossier(state.selectedNodeId, delta);
+        if (next) selectNode(next);
+        event.preventDefault();
+        return;
+      }
+      stepProject(delta);
       event.preventDefault();
     }
   };
@@ -340,6 +360,7 @@ export function setupForceGraph(): void {
     state.fg?.width(next.w).height(next.h);
     labelRenderer?.setSize(next.w, next.h);
     setCageResolution(next.w, next.h);
+    recenterSelection();
   };
   if (typeof ResizeObserver === "function") {
     state.resizeObserver = new ResizeObserver(onResize);
@@ -392,6 +413,7 @@ export function setupForceGraph(): void {
 
 /** Dispose everything setupForceGraph created (called from destroy()). */
 export function disposeScene(): void {
+  disposeSelectionCamera();
   if (starfield) {
     starfield.geometry.dispose();
     (starfield.material as THREE.Material).dispose();
