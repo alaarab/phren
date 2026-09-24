@@ -8,6 +8,11 @@ public enum AgentSlashCommand {
         public let detail: String
         public var id: String { name }
     }
+    /// /clear and /new replace the conversation and draw no menu.
+    public static func startsFreshConversation(_ text: String) -> Bool {
+        ["/clear", "/new"].contains(text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+    }
+
     public static func isCommand(_ text: String) -> Bool {
         text.hasPrefix("/")
     }

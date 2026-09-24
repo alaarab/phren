@@ -597,12 +597,15 @@ struct AgentChatView: View {
         sendTask = Task {
             if dictating { dictation.session.updateDraft(model.draft) }
             // A /btw side question answers on its own card; it opens no terminal.
+            let sentCommand = model.draft
             let isCommand = AgentSlashCommand.isCommand(model.draft)
                 && AgentSideAnswer.question(source: model.target?.source ?? "", text: model.draft) == nil, pane = model.target?.paneID
             await model.send(session, consumeDraft: dictating ? { [dictation, model] in dictation.restartSegment(model: model) } : nil)
             if model.deliveryError == nil, !isCommand { PhrenAppShortcuts.donateMessage(to: session) }
             if isCommand, handoffCommands, model.deliveryError == nil, let pane {
-                commandDestination = .init(paneID: pane, menu: false)
+                // /clear and /new draw no menu: stay in the chat, which follows
+                // the pane's fresh conversation. Others open the terminal.
+                if !AgentSlashCommand.startsFreshConversation(sentCommand) { commandDestination = .init(paneID: pane, menu: false) }
                 // /new, /clear and /resume may change the session ID.
                 model.chooseAnother()
             }

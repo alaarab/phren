@@ -11,10 +11,14 @@ final class AgentChatTranscriptTests: AgentChatUITestCase {
         XCTAssertTrue(app.scrollViews["chat-transcript"].waitForExistence(timeout: 8))
         let field = app.textViews["chat-composer"]
         XCTAssertTrue(field.waitForExistence(timeout: 5))
-        field.tap(); field.typeText("/clear")
+        // The fixture pane runs Codex, whose fresh-conversation command is /new.
+        field.tap(); field.typeText("/new")
         app.buttons["chat-send"].tap()
         let fresh = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "A fresh conversation after clear")).firstMatch
-        XCTAssertTrue(fresh.waitForExistence(timeout: 12), "The chat follows the pane's new conversation")
+        let followed = fresh.waitForExistence(timeout: 12)
+        capture(app, "Chat after a fresh-conversation command")
+        XCTAssertTrue(followed, "The chat follows the pane's new conversation")
+        XCTAssertFalse(app.buttons["terminal-close"].exists, "/clear draws no menu: no terminal opens")
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Delivery wasn't confirmed")).firstMatch.exists)
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "conversation changed")).firstMatch.exists)
         capture(app, "Chat after clear")

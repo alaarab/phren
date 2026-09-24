@@ -397,7 +397,10 @@ import UniformTypeIdentifiers
     static func transcript(_ target: AgentChatTarget) throws -> AgentChatTranscript {
         hasReadTranscript = true
         if target.sessionID.hasSuffix("-cleared") {
-            let raw: [String: Any] = ["type": "assistant", "message": ["role": "assistant", "content": [["type": "text", "text": "A fresh conversation after clear."]]]]
+            let text = "A fresh conversation after clear."
+            let raw: [String: Any] = target.source == "codex"
+                ? ["type": "response_item", "payload": ["type": "message", "role": "assistant", "content": [["type": "output_text", "text": text]]]]
+                : ["type": "assistant", "message": ["role": "assistant", "content": [["type": "text", "text": text]]]]
             return try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: ["type": "backlog", "source": target.source,
                 "entries": [["line": 0, "raw": raw]], "startLine": 0, "totalLines": 1, "hasMore": false]), source: target.source)
         }
@@ -942,7 +945,7 @@ import UniformTypeIdentifiers
         }
         if flag("--chat-send-fails") { throw LiveConnectionError.disconnected }
         // Claude runs /clear without a submitted prompt: never confirmed.
-        if flag("--chat-clear-fixture"), text.trimmingCharacters(in: .whitespacesAndNewlines) == "/clear" {
+        if flag("--chat-clear-fixture"), AgentSlashCommand.startsFreshConversation(text) {
             clearedAt = .now
             throw LiveConnectionError.deliveryUnconfirmed
         }

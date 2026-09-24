@@ -505,6 +505,17 @@ final class AgentChatModel {
             if lease != .invalid { UIApplication.shared.endBackgroundTask(lease) }
         }
     }
+    /// A slash command can replace the pane's conversation (/clear, /new):
+    /// read the pane again shortly instead of at the next quiet poll.
+    private func recheckPaneAfterCommand() {
+        Task { [connection] in
+            for delay in [1, 3] {
+                try? await Task.sleep(for: .seconds(delay == 1 ? 1 : 2))
+                connection.wakePanes()
+            }
+        }
+    }
+
     func chooseAnother() {
         deferredModel = nil; deferredModelSession = nil; modelSwitchNotice = nil; modelBeforeSwitch = nil
         pendingPreview = nil; replyPreview = nil; harnessVerb = nil
@@ -907,7 +918,7 @@ final class AgentChatModel {
             #else
             try await PhrenConnection.sendChat(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, text: text)
             #endif
-            if AgentSlashCommand.isCommand(submitted) { awaitingReply = false; sentAt = nil }
+            if AgentSlashCommand.isCommand(submitted) { awaitingReply = false; sentAt = nil; recheckPaneAfterCommand() }
             // Keep small local previews, not full uploaded files, in the conversation.
             let previews = await Task.detached(priority: .userInitiated) {
                 sent.filter { $0.attachment.isImage }.compactMap { item in
@@ -925,6 +936,7 @@ final class AgentChatModel {
             // conversation). Unconfirmed is the expected outcome there.
             if AgentSlashCommand.isCommand(submitted), case LiveConnectionError.deliveryUnconfirmed = error {
                 sentAt = nil
+                recheckPaneAfterCommand()
                 return (true, sent, false)
             }
             let rejected: Bool
