@@ -177,7 +177,7 @@ fun ProjectsView() {
             model.mergedProjects.firstOrNull { it.project.name == project }?.let { navigator.popToRoot(); open(it) }
         }
     }
-    if (showVoiceCapture) PhrenSheet({ showVoiceCapture = false }) { LiveBridge.VoiceCaptureView(voiceTargets) }
+    if (showVoiceCapture) PhrenSheet({ showVoiceCapture = false }) { VoiceCaptureView(model, voiceTargets.voiceTargets()) }
 }
 
 @Composable

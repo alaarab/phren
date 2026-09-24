@@ -48,10 +48,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.phren.android.ui.IosType
-import com.phren.android.ui.PhrenMaterialTheme
-import com.phren.android.ui.PhrenTheme
-import com.phren.android.ui.ProminentButton
+import com.phren.android.design.PhrenType
+import com.phren.android.design.PhrenMaterialTheme
+import com.phren.android.design.PhrenTheme
+import com.phren.android.features.ProminentButton
 import com.phren.kit.LocalStore
 import com.phren.kit.PendingOp
 import kotlinx.coroutines.delay
@@ -147,15 +147,15 @@ class CaptureActivity : ComponentActivity() {
                 Modifier.fillMaxWidth().padding(12.dp).background(PhrenTheme.surfaceRaised, RoundedCornerShape(22.dp))
                     .border(1.dp, PhrenTheme.border, RoundedCornerShape(22.dp)).clickable(interactionSource = null, indication = null) {}.padding(18.dp),
             ) {
-                Text("PHREN", style = IosType.caption2.copy(fontWeight = FontWeight.Bold), color = PhrenTheme.accent)
+                Text("PHREN", style = PhrenType.caption2.copy(fontWeight = FontWeight.Bold), color = PhrenTheme.accent)
                 Spacer(Modifier.height(10.dp))
                 when (val s = stage) {
-                    Stage.Listening -> Text(kind.prompt, style = IosType.headline, color = PhrenTheme.text)
+                    Stage.Listening -> Text(kind.prompt, style = PhrenType.headline, color = PhrenTheme.text)
                     is Stage.Typing -> TypingStage(s.prompt)
                     is Stage.Choose -> ChooseStage(s)
                     is Stage.Done -> DoneStage(s)
                     is Stage.Failed -> {
-                        Text(s.message, style = IosType.body, color = PhrenTheme.text)
+                        Text(s.message, style = PhrenType.body, color = PhrenTheme.text)
                         Spacer(Modifier.height(14.dp))
                         ProminentButton("OK") { finish() }
                     }
@@ -167,27 +167,27 @@ class CaptureActivity : ComponentActivity() {
     @Composable
     private fun TypingStage(prompt: String) {
         var text by remember { mutableStateOf("") }
-        Text(prompt, style = IosType.headline, color = PhrenTheme.text)
+        Text(prompt, style = PhrenType.headline, color = PhrenTheme.text)
         Spacer(Modifier.height(10.dp))
         Box(Modifier.fillMaxWidth().heightIn(min = 80.dp).background(PhrenTheme.surface, RoundedCornerShape(10.dp)).border(1.dp, PhrenTheme.border, RoundedCornerShape(10.dp)).padding(12.dp)) {
-            BasicTextField(text, { text = it }, textStyle = IosType.body.copy(color = PhrenTheme.text), cursorBrush = SolidColor(PhrenTheme.accent), modifier = Modifier.fillMaxWidth())
+            BasicTextField(text, { text = it }, textStyle = PhrenType.body.copy(color = PhrenTheme.text), cursorBrush = SolidColor(PhrenTheme.accent), modifier = Modifier.fillMaxWidth())
         }
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Dictate", style = IosType.body, color = PhrenTheme.accent, modifier = Modifier.clickable { listen() })
+            Text("Dictate", style = PhrenType.body, color = PhrenTheme.accent, modifier = Modifier.clickable { listen() })
             Spacer(Modifier.weight(1f))
-            Text("Cancel", style = IosType.body, color = PhrenTheme.accent, modifier = Modifier.clickable { finish() })
-            ProminentButton("Add", fill = false) { if (text.isNotBlank()) submit(text.trim()) }
+            Text("Cancel", style = PhrenType.body, color = PhrenTheme.accent, modifier = Modifier.clickable { finish() })
+            ProminentButton("Add") { if (text.isNotBlank()) submit(text.trim()) }
         }
     }
 
     @Composable
     private fun ChooseStage(s: Stage.Choose) {
-        Text(s.prompt, style = IosType.headline, color = PhrenTheme.text)
+        Text(s.prompt, style = PhrenType.headline, color = PhrenTheme.text)
         Spacer(Modifier.height(8.dp))
         LazyColumn(Modifier.heightIn(max = 320.dp)) {
             items(s.targets, key = { it.entityId }) { t ->
-                Text(t.displayName, style = IosType.body, color = PhrenTheme.text, modifier = Modifier.fillMaxWidth().clickable { submit(s.text, t) }.padding(vertical = 12.dp))
+                Text(t.displayName, style = PhrenType.body, color = PhrenTheme.text, modifier = Modifier.fillMaxWidth().clickable { submit(s.text, t) }.padding(vertical = 12.dp))
             }
         }
     }
@@ -196,16 +196,16 @@ class CaptureActivity : ComponentActivity() {
     private fun DoneStage(s: Stage.Done) {
         // CaptureSnippetView: kind, text, destination.
         LaunchedEffect(Unit) { delay(2200); finish() }
-        Text("Added to ${s.spoken}.", style = IosType.headline, color = PhrenTheme.text)
+        Text("Added to ${s.spoken}.", style = PhrenType.headline, color = PhrenTheme.text)
         Spacer(Modifier.height(12.dp))
-        Text(kind.label.uppercase(), style = IosType.caption2.copy(fontWeight = FontWeight.SemiBold), color = PhrenTheme.secondaryLabel)
+        Text(kind.label.uppercase(), style = PhrenType.caption2.copy(fontWeight = FontWeight.SemiBold), color = PhrenTheme.textSecondary)
         Spacer(Modifier.height(8.dp))
-        Text(s.text, style = IosType.body, color = PhrenTheme.text, maxLines = 4)
+        Text(s.text, style = PhrenType.body, color = PhrenTheme.text, maxLines = 4)
         Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Outlined.Folder, null, tint = PhrenTheme.secondaryLabel, modifier = Modifier.size(14.dp))
+            Icon(Icons.Outlined.Folder, null, tint = PhrenTheme.textSecondary, modifier = Modifier.size(14.dp))
             Spacer(Modifier.width(4.dp))
-            Text(s.destination, style = IosType.footnote.copy(fontWeight = FontWeight.Medium), color = PhrenTheme.secondaryLabel, maxLines = 1)
+            Text(s.destination, style = PhrenType.footnote.copy(fontWeight = FontWeight.Medium), color = PhrenTheme.textSecondary, maxLines = 1)
         }
     }
 

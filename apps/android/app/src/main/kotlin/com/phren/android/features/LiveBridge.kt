@@ -25,7 +25,6 @@ object LiveBridge {
     fun connectComputer(navigator: PhrenNavigator) = navigator.push("connect-computer") { Pending("Add computer") }
 
     @Composable fun AddProjectView(onAdded: (String) -> Unit) = Pending("Add project")
-    @Composable fun VoiceCaptureView(targets: List<StoreProject>) = Pending("Capture")
     @Composable fun ProjectComputerRows(storeId: String, project: String) {}
     @Composable fun TaskListView(storeId: String, project: String) = com.phren.android.features.TaskListView(storeId, project)
     @Composable fun LaunchSessionView(storeId: String, project: String, request: TaskAgentRequest) = Pending("Start agent")

@@ -502,6 +502,7 @@ class AppModel(private val context: Context) {
                 if (revisions != indexedSnapshots) {
                     searchIndex = withContext(Dispatchers.Default) { SearchIndex.of(snapshots) }
                     indexedSnapshots = revisions
+                    com.phren.android.features.SpeechSettings.rememberProjects(prefs, snapshots.flatMap { it.second.projects.map { p -> p.name } })
                     searchRevision += 1
                 }
                 syncStatus = aggregateStatus()
