@@ -59,6 +59,16 @@ final class ToolPresentationTests: XCTestCase {
         XCTAssertEqual(agent.title, "Agent"); XCTAssertEqual(agent.preview, "Audit the sync loop")
     }
 
+    /// A Bash call's one line says what it is for, as the terminal prints
+    /// it; the command itself stays in the card's body.
+    func testShellPreviewUsesTheCallsDescription() {
+        let described = ToolPresentation(title: "Bash", text: json(["command": "cd ~/Projects/phren && sed -n 955,982p bridge.test.ts", "description": "Reading the failing test"]))
+        XCTAssertEqual(described.title, "Shell"); XCTAssertEqual(described.preview, "Reading the failing test")
+        XCTAssertEqual(described.body, "cd ~/Projects/phren && sed -n 955,982p bridge.test.ts")
+        let bare = ToolPresentation(title: "Bash", text: json(["command": "swift build"]))
+        XCTAssertEqual(bare.preview, "swift build")
+    }
+
     func testUnknownJSONInputNeverPreviewsABareBrace() {
         let send = ToolPresentation(title: "SendMessage", text: json(["to": "researcher", "summary": "Check the build", "message": "Long body…"]))
         XCTAssertEqual(send.preview, "Check the build")

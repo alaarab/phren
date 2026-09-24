@@ -54,6 +54,9 @@ struct ToolPresentation {
 
     var preview: String {
         if let previewOverride { return previewOverride }
+        // What the command is for, as the terminal prints it above the call
+        // ("Reading the failing test"); the command stays in the card.
+        if title == "Shell", let description { return String(description.prefix(180).prefix { !$0.isNewline }) }
         // The file, not its whole absolute path: the last two components
         // read like VS Code's "folder/file" and leave room for the counts.
         if let path { return Self.short(path) + (note.map { " · " + $0 } ?? "") }
