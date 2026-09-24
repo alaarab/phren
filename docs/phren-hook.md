@@ -206,7 +206,8 @@ Settings → Notifications says "Instant approval alerts need an APNs key on the
 computer" with the computer's name.
 
 The transcript socket also carries live reply previews. Claude reads pane text
-after the current prompt; Codex and OpenCode supply delta text. Updates are capped at
+after the current prompt, with its styles, and turns Claude's bold back into
+Markdown `**bold**`; Codex and OpenCode supply delta text. Updates are capped at
 twice a second, stay out of history, and give way to the completed entry. Chat
 sends steering to working harnesses immediately and reads their queued state
 from transcripts. Local pending bubbles identify a connection, startup or held

@@ -16,7 +16,11 @@ const MAX_PREVIEW_BYTES = MAX_TEXT * 6 + 1_024;
 /** Only the last Claude reply after the current prompt is eligible. A missing
  * prompt anchor is deliberately silent: scrollback could belong to an old turn. */
 export function claudePanePreview(rendered: string, prompt: string, previous = ""): string {
-  const raw = stripTerminal(rendered).split("\n");
+  const screen = rendered.split("\n");
+  const raw = screen.map(stripTerminal);
+  // What the phone shows: the line with Claude's bold as Markdown. Detection
+  // below reads the plain line.
+  const marked = screen.map(line => claudeBoldMarkdown(line).replace(/[\u2500-\u257f]/g, "").trimEnd());
   // The rule above the input box can carry the session title
   // ("───── Claude sesh ─"); it ends the reply, it is never part of it.
   // A narrow pane leaves the titled rule a single dash ("…title… ─"), so a
@@ -35,9 +39,9 @@ export function claudePanePreview(rendered: string, prompt: string, previous = "
   // through a matching text overlap; unrelated terminal lines cannot replace it.
   const scrolled = start < 0;
   if (scrolled && !previous) return "";
-  const reply: string[] = [];
+  const reply: string[] = [], shown: string[] = [];
   let writing = scrolled;
-  const body = lines.slice(Math.max(0, start)), rawBody = raw.slice(Math.max(0, start));
+  const body = lines.slice(Math.max(0, start)), rawBody = raw.slice(Math.max(0, start)), markedBody = marked.slice(Math.max(0, start));
   // A "⏺" block whose next line is a "⎿" result is a tool call, collapsed
   // ("⏺ Running 1 shell command…") or not; it lands as its own entry.
   const toolBlock = (index: number) => {
@@ -64,13 +68,16 @@ export function claudePanePreview(rendered: string, prompt: string, previous = "
     // text; it lands as its own entry a moment later.
     if (/^\s*[⏺●]\s*[\w.:-]+(?: - [\w.:-]+)?(?: \(MCP\))?\(/.test(line) || (/^\s*[⏺●]/.test(line) && toolBlock(index))
       || /^\s*[⏺●]\s*(?:Running|Calling|Reading|Searching|Writing|Editing|Fetching|Updating|Listing|Creating)\b[^.!?]*(?:…|\.\.\.)/.test(line)) { writing = false; continue; }
-    if (/^\s*[⏺●]/.test(line)) { reply.length = 0; writing = true; }
+    if (/^\s*[⏺●]/.test(line)) { reply.length = 0; shown.length = 0; writing = true; }
     if (!writing) continue;
-    const clean = line.replace(/^\s*[⏺●]\s?/, "").replace(/[⠁-⣿✻✽✶✢✳]/gu, "");
+    const tidy = (value: string) => value.replace(/^\s*[⏺●]\s?/, "").replace(/[⠁-⣿✻✽✶✢✳]/gu, "");
+    const clean = tidy(line);
     if (/^\s*(?:↳|⎿|ctrl\+|shift\+|\? for shortcuts)/i.test(clean) || claudeChrome(clean)) continue;
     reply.push(clean.replace(/^ {2}/, ""));
+    // A rule line has no marked twin: it never reaches here.
+    shown.push(tidy(markedBody[index] ?? line).replace(/^ {2}/, ""));
   }
-  const text = unwrapTerminalLines(reply).trim().slice(0, MAX_TEXT);
+  const text = unwrapTerminalLines(reply, shown).trim().slice(0, MAX_TEXT);
   if (!scrolled) return text;
   if (text.startsWith(previous)) return text;
   const overlap = previous.lastIndexOf(text.split("\n", 1)[0].slice(0, 80));
@@ -107,12 +114,13 @@ const BLOCK_START = /^\s*(?:[-*+•]\s|\d+[.)]\s|#{1,6}\s|>|\||```|~~~)/;
  * joined to the next when the next line's first word would not have fitted
  * on it, which is exactly what a soft wrap looks like; the widest line
  * stands in for the pane width, and below 40 columns nothing is joined. Blank lines, block starts and fenced code
- * keep their breaks.
+ * keep their breaks. `display` is what is joined, line for line: the text
+ * with Markdown put back, measured by its plain twin.
  */
-export function unwrapTerminalLines(lines: readonly string[]): string {
+export function unwrapTerminalLines(lines: readonly string[], display: readonly string[] = lines): string {
   const width = Math.max(0, ...lines.map(line => line.length));
   // Too narrow to be a pane's wrap: short replies keep their own lines.
-  if (width < MIN_WRAP_WIDTH) return lines.join("\n");
+  if (width < MIN_WRAP_WIDTH) return display.join("\n");
   const out: string[] = [];
   let fenced = false;
   lines.forEach((line, index) => {
@@ -122,8 +130,8 @@ export function unwrapTerminalLines(lines: readonly string[]): string {
     const wrapped = !fenced && !fence && before !== undefined && out.length > 0
       && before.trim() !== "" && line.trim() !== "" && !BLOCK_START.test(line)
       && before.trimEnd().length + 1 + firstWord.length > width;
-    if (wrapped) out[out.length - 1] += " " + line.trim();
-    else out.push(line);
+    if (wrapped) out[out.length - 1] += " " + display[index].trim();
+    else out.push(display[index]);
     if (fence) fenced = !fenced;
   });
   return out.join("\n");
@@ -191,8 +199,48 @@ export function claudeSpinnerVerb(rendered: string): string | undefined {
 }
 
 export function readPreviewPane(target: Target): Promise<string> {
+  // With its styles: Claude's bold becomes Markdown; everything else strips.
   return readPaneText(target.server, target.pane,
-    { method: "agent.read", source: "visible", lines: 80, timeoutMs: 2_000, what: "Preview pane read" });
+    { method: "agent.read", source: "visible", lines: 80, stripAnsi: false, format: "ansi", timeoutMs: 2_000, what: "Preview pane read" });
+}
+
+// An SGR sequence (captured) or any other control sequence stripTerminal removes.
+const PANE_CONTROL = /\x1b\[([0-?]*)[ -/]*([@-~])|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\r/g;
+
+/**
+ * One pane line as Markdown bold. Claude draws a reply's **bold** with SGR 1
+ * and drops the asterisks, so a plain read loses it and the phone's preview
+ * would gain it only when the reply lands. Whitespace stays outside the
+ * markers (Markdown does not close `**a **`); other styles are dropped.
+ */
+export function claudeBoldMarkdown(line: string): string {
+  const runs: { text: string; bold: boolean }[] = [];
+  let bold = false, last = 0;
+  const take = (text: string) => {
+    if (!text) return;
+    const previous = runs[runs.length - 1];
+    if (previous?.bold === bold) previous.text += text; else runs.push({ text, bold });
+  };
+  for (const match of line.matchAll(PANE_CONTROL)) {
+    take(line.slice(last, match.index));
+    last = match.index + match[0].length;
+    if (match[2] !== "m") continue;
+    const params = (match[1] || "0").split(/[;:]/);
+    for (let i = 0; i < params.length; i++) {
+      const code = Number(params[i] || 0);
+      // Extended colors carry their own numbers: 38;5;1 is not bold.
+      if (code === 38 || code === 48 || code === 58) { i += params[i + 1] === "5" ? 2 : params[i + 1] === "2" ? 4 : 0; continue; }
+      if (code === 1) bold = true;
+      else if (code === 0 || code === 22) bold = false;
+    }
+  }
+  take(line.slice(last));
+  return runs.map(({ text, bold }) => {
+    const core = text.trim();
+    if (!bold || !core) return text;
+    const lead = text.slice(0, text.length - text.trimStart().length), trail = text.slice(text.trimEnd().length);
+    return `${lead}**${core}**${trail}`;
+  }).join("");
 }
 
 /** Older Codex rollouts may carry public text deltas between response items.
