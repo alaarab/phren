@@ -111,10 +111,10 @@ declaration's file-qualified dossier. A missing index leaves the ordinary tree
 usable. An unchanged or ignored text file opens in the same code viewer, read
 from the pane's repository.
 
-A computer's Files page (Project files) and the Memory tab's Files list open a
-project into the same browser, on the checkout that computer located; with more
-than one checkout they list them first. Without the code module the browser
-still lists and opens every file, without search, Usage or Recent.
+The project page's Code cell is the one way into a project's files. It starts
+on a computer with the code index and a line under the title chooses any saved
+computer's located checkout instead. Without the code module the browser still
+lists and opens every file, without search, Usage or Recent.
 
 ## Findings linked to code
 
