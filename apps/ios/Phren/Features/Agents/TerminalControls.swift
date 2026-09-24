@@ -288,32 +288,35 @@ private struct TerminalShortcutMenu: View {
     }
 
     private func shortcutTile(_ shortcut: TerminalShortcut) -> some View {
-        HStack(spacing: 0) {
-            Button { run(shortcut) } label: {
-                VStack(spacing: 3) {
-                    HStack(spacing: 4) {
-                        if !shortcut.symbol.isEmpty { Image(systemName: shortcut.symbol).font(.caption).foregroundStyle(PhrenTheme.cyan) }
-                        Text(shortcut.displayLabel).font(.system(size: 13, weight: .medium, design: .monospaced)).lineLimit(1).minimumScaleFactor(0.7)
-                    }
-                    if !shortcut.hint.isEmpty {
-                        Text(Self.shortHint(shortcut.hint, command: shortcut.displayLabel)).font(.caption2).foregroundStyle(PhrenTheme.textMuted).lineLimit(1)
-                    }
-                }
-                .padding(.horizontal, 4).padding(.vertical, 6)
-                .frame(minWidth: 44, maxWidth: .infinity, minHeight: 62)
-                .background(PhrenTheme.surface.opacity(0.45), in: RoundedRectangle(cornerRadius: 12))
-                .contentShape(Rectangle())
+        let hint = shortcut.hint.isEmpty ? "" : Self.shortHint(shortcut.hint, command: shortcut.displayLabel)
+        let disabled = !enabled || sequenceTask != nil || storage.saved == nil
+            || (shortcut.kind == .action && shortcut.value == "camera" && !UIImagePickerController.isSourceTypeAvailable(.camera))
+        // A tap runs it; a hold opens its actions (edit, favorite). No "…"
+        // button beside every tile: the grid stays one dense block.
+        return VStack(spacing: 1) {
+            HStack(spacing: 4) {
+                if !shortcut.symbol.isEmpty { Image(systemName: shortcut.symbol).font(.caption).foregroundStyle(PhrenTheme.cyan) }
+                Text(shortcut.displayLabel).font(.system(size: 13, weight: .medium, design: .monospaced)).lineLimit(1).minimumScaleFactor(0.7)
             }
-            .accessibilityIdentifier(shortcut.id.contains(":/") ? "terminal-command:" + shortcut.id : "terminal-shortcut:" + shortcut.id)
-            .accessibilityLabel(shortcut.kind == .action && ["photos", "camera", "files"].contains(shortcut.value)
-                                ? "Attach from " + shortcut.displayLabel
-                                : shortcut.displayLabel + (shortcut.hint.isEmpty ? "" : ", " + shortcut.hint))
-            .disabled(!enabled || sequenceTask != nil || (shortcut.kind == .action && shortcut.value == "camera" && !UIImagePickerController.isSourceTypeAvailable(.camera)))
-            .disabled(storage.saved == nil)
-            PhrenIconButton(icon: "ellipsis", label: "Shortcut actions") { actionShortcut = shortcut }
-                .phrenIdentifier(shortcut.id.contains(":/") ? "terminal-command-actions:" + shortcut.id : "terminal-shortcut-actions:" + shortcut.id)
-                .disabled(storage.saved == nil)
+            if !hint.isEmpty {
+                Text(hint).font(.caption2).foregroundStyle(PhrenTheme.textMuted).lineLimit(1)
+            }
         }
+        .padding(.horizontal, 4).padding(.vertical, 4)
+        .frame(minWidth: 44, maxWidth: .infinity, minHeight: 44)
+        .background(PhrenTheme.surface.opacity(0.45), in: RoundedRectangle(cornerRadius: 10))
+        .opacity(disabled ? 0.45 : 1)
+        .contentShape(Rectangle())
+        .onTapGesture { if !disabled { run(shortcut) } }
+        .onLongPressGesture(minimumDuration: 0.45) { if storage.saved != nil { actionShortcut = shortcut } }
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier(shortcut.id.contains(":/") ? "terminal-command:" + shortcut.id : "terminal-shortcut:" + shortcut.id)
+        .accessibilityLabel(shortcut.kind == .action && ["photos", "camera", "files"].contains(shortcut.value)
+                            ? "Attach from " + shortcut.displayLabel
+                            : shortcut.displayLabel + (shortcut.hint.isEmpty ? "" : ", " + shortcut.hint))
+        .accessibilityHint("Hold for shortcut actions")
+        .accessibilityAction(named: "Shortcut actions") { if storage.saved != nil { actionShortcut = shortcut } }
     }
 
     private var shortcutActions: [PhrenControlAction] {
@@ -361,8 +364,9 @@ private struct TerminalShortcutMenu: View {
         // "Choose an agent" for /agent leaves only articles: fall back to
         // the command's own name rather than "an".
         let real = words.filter { $0.count > 2 }
-        if let pick = real.last(where: { $0 != name }) ?? real.last { return pick }
-        return name
+        // "/model" over "model" says nothing: a hint that only repeats the
+        // command is left off and the tile stays one line.
+        return real.last(where: { $0 != name }) ?? ""
     }
 
     private func run(_ shortcut: TerminalShortcut) {
