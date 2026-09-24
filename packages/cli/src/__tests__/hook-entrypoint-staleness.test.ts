@@ -49,6 +49,8 @@ describe("findStaleHookEntrypoints", () => {
     ["a Windows wrapper command", `set "PHREN_PATH=C:\\Users\\u\\.phren" && "C:\\Users\\u\\.local\\bin\\phren.cmd" hook-tool`, ["C:\\Users\\u\\.local\\bin\\phren.cmd"]],
     ["npx, which re-resolves every run", "npx -y @phren/cli hook-stop", []],
     ["pinned npx", "npx -y @phren/cli@0.1.40 hook-prompt", []],
+    // npx re-resolves each run, so even a path-like argument is never reported.
+    ["npx with a path-like argument", "npx -y /nonexistent/phren/dist/index.js hook-stop", []],
     ["a bare command with no path", "phren hook-stop", []],
     ["an empty command", "", []],
   ])("handles %s", (_label, command, expected) => {
