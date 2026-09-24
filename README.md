@@ -139,7 +139,7 @@ A project's `schedules.yaml` runs an agent on an assigned computer at a local ti
 One conversation reads the project's tasks and sends independent briefs to enrolled computers with `phren dispatch`, which places a first prompt over pinned SSH and returns a durable receipt instead of a completion claim ([docs/conductor.md](docs/conductor.md)).
 
 ### iOS app
-[`apps/ios`](apps/ios) is a SwiftUI app for project memory and running agents. GitHub sync keeps findings, notes, tasks and skills on your phone. Phren Hook adds Codex, Claude Code, Copilot and OpenCode chat, terminals, repository changes, the Code index and local app previews over pinned SSH/Tailscale. Steer working agents, send notes from symbol dossiers, and reach a conductor through Siri or the Action button. Memory offers map and list views; local schedule and approval notifications need no relay. [Set up Phren Hook](https://alaarab.github.io/phren/phren-hook.html) on each computer with `npx --yes @phren/cli@0.2.14 bridge install`.
+[`apps/ios`](apps/ios) is a SwiftUI app for project memory and running agents. GitHub sync keeps findings, notes, tasks and skills on your phone. Phren Hook adds Codex, Claude Code, Copilot and OpenCode chat, terminals, repository changes, the Code index and local app previews over pinned SSH/Tailscale. Steer working agents, send notes from symbol dossiers, and reach a conductor through Siri or the Action button. Memory offers map and list views; local schedule and approval notifications need no relay. [Set up Phren Hook](https://alaarab.github.io/phren/phren-hook.html) on each computer with `npx --yes @phren/cli@0.2.16 bridge install`.
 
 ---
 

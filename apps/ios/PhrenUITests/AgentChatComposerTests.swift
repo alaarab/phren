@@ -414,7 +414,6 @@ final class AgentChatComposerTests: AgentChatUITestCase {
         let backdrop = any["chat-message-menu-backdrop"]
         XCTAssertTrue(backdrop.waitForExistence(timeout: 5))
         XCTAssertTrue(backdrop.frame.contains(composerFrame), "The backdrop covers the entire composer")
-        XCTAssertFalse(composer.exists && composer.isHittable, "Input is blocked behind the menu")
         for id in ["copy-paragraph", "select-text", "copy-message"] {
             let action = app.buttons["chat-message-menu:" + id]
             XCTAssertTrue(action.isHittable)
@@ -422,8 +421,13 @@ final class AgentChatComposerTests: AgentChatUITestCase {
         }
         XCTAssertFalse(app.buttons["chat-message-menu:share"].exists)
         capture(app, "Message menu beside the pressed paragraph")
-        backdrop.tap()
+        // Input is blocked behind the menu: a tap where the composer sits lands
+        // on the backdrop, closes the menu and starts no typing. (iOS 27 reports
+        // a covered view as hittable, so the test taps instead of asking.)
+        app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: composerFrame.midX, dy: composerFrame.midY)).tap()
         XCTAssertTrue(backdrop.waitForNonExistence(timeout: 5))
+        XCTAssertFalse((composer.value(forKey: "hasKeyboardFocus") as? Bool) ?? false, "Input is blocked behind the menu")
         XCTAssertTrue(composer.isHittable)
         XCTAssertTrue(paragraph.exists)
         // The chat sits under the menu while it is open (hidden from

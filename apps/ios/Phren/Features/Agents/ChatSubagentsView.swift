@@ -129,7 +129,9 @@ struct ChatSubagentsView: View {
                     next.dismissed.insert(scope + "/" + row.agent.navigationID)
                     historyData = (try? JSONEncoder().encode(next)) ?? historyData
                 } label: {
-                    Image(systemName: "xmark").frame(width: 44, height: 44)
+                    // The whole 44 pt square takes the tap: it sits over the
+                    // row's own button, which the glyph's gaps would open.
+                    Image(systemName: "xmark").frame(width: 44, height: 44).contentShape(Rectangle())
                 }.buttonStyle(.plain).foregroundStyle(PhrenTheme.textMuted)
                     .accessibilityLabel("Dismiss failed worker")
                     .accessibilityIdentifier("dismiss-child-agent:\(row.agent.id)")

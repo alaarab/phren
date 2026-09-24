@@ -17,20 +17,19 @@ final class AllSessionsTests: XCTestCase {
     }
 
     @MainActor
-    func testInitialOverviewRevealsTogetherAfterTheSlowerComputerResponds() {
+    func testLastKnownOverviewShowsAtOnceWhileTheSlowerComputerResponds() {
+        // A saved overview under a day old opens at once, greyed and
+        // connecting, instead of a spinner until every computer answers
+        // (owner, 2026-09-24: the blank page lasted ~25 s on a cold launch).
         let app = launch(extra: ["--all-sessions-delayed", "--overview-disk-cache", "--overview-cache-expired"])
-        let loading = app.descendants(matching: .any).matching(identifier: "agents-loading").firstMatch
-        XCTAssertTrue(loading.exists)
-        XCTAssertFalse(row(app, host: mac).exists, "The fast host must not appear as a partial page")
-        XCTAssertFalse(section(app, title: "Computers").exists, "Computer management must join the same first reveal")
-        XCTAssertFalse(section(app, title: "Working").exists, "No session section may appear before the batch is ready")
-        XCTAssertFalse(app.staticTexts["Connecting your sessions"].exists)
-        XCTAssertFalse(app.buttons["Add computer"].exists)
+        XCTAssertTrue(row(app, host: mac).waitForExistence(timeout: 2), "Last known sessions show before any computer answers")
+        XCTAssertTrue(row(app, host: linux).exists)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label ==[c] %@", "Computers")).firstMatch.exists, "Computers show with the cards")
+        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "agents-loading").firstMatch.exists, "No spinner over a last known page")
+        // Both computers answer; the same rows stay, now live.
         XCTAssertTrue(row(app, host: mac).waitForExistence(timeout: 8))
         XCTAssertTrue(row(app, host: linux).exists)
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label ==[c] %@", "Computers")).firstMatch.exists, "Computers must appear in the same reveal as the cards")
-        XCTAssertFalse(loading.exists)
-        capture(app, "Complete overview after coordinated loading")
+        capture(app, "Last known overview while computers reconnect")
     }
 
     @MainActor
