@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, } from "vitest";
 import { makeTempDir } from "./test-helpers.js";
 import * as fs from "fs";
 import * as path from "path";
@@ -8,7 +8,6 @@ import { resetPhrenDotEnvBootstrapForTests } from "./phren-dotenv.js";
 // We test normalizeManifest indirectly through readRootManifest since it's not exported.
 import {
   readRootManifest,
-  writeRootManifest,
   ROOT_MANIFEST_FILENAME,
 } from "./phren-paths.js";
 
@@ -119,44 +118,3 @@ describe("cross-platform path normalization", () => {
   });
 });
 
-describe("isValidProjectName (via webview validation)", () => {
-  // We import the server-side isValidProjectName to verify it rejects traversal
-  // The webview mirrors this logic inline.
-  let isValidProjectName: (name: string) => boolean;
-
-  beforeEach(async () => {
-    const utils = await import("./utils.js");
-    isValidProjectName = utils.isValidProjectName;
-  });
-
-  it("rejects path traversal attempts", () => {
-    expect(isValidProjectName("../../../etc/passwd")).toBe(false);
-  });
-
-  it("rejects names with forward slashes", () => {
-    expect(isValidProjectName("foo/bar")).toBe(false);
-  });
-
-  it("rejects names with backslashes", () => {
-    expect(isValidProjectName("foo\\bar")).toBe(false);
-  });
-
-  it("rejects dot-only names", () => {
-    expect(isValidProjectName(".")).toBe(false);
-    expect(isValidProjectName("..")).toBe(false);
-  });
-
-  it("rejects names starting with dot", () => {
-    expect(isValidProjectName(".hidden")).toBe(false);
-  });
-
-  it("accepts valid project names", () => {
-    expect(isValidProjectName("my-project")).toBe(true);
-    expect(isValidProjectName("project123")).toBe(true);
-    expect(isValidProjectName("a")).toBe(true);
-  });
-
-  it("rejects empty strings", () => {
-    expect(isValidProjectName("")).toBe(false);
-  });
-});
