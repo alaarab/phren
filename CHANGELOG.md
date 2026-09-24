@@ -7,7 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
-- Init: the setup walkthrough works with Inquirer 13 and later. It asked for the `list` prompt type, which Inquirer 13 removed (now `select`), so `phren init` on a fresh install failed at its first choice. A test checks that every prompt type the walkthrough uses is registered in the installed Inquirer.
+- iOS: Memory no longer drops to Connect project memory after the phone restarts. Before the first unlock after a restart the Keychain refuses every read, and iOS can launch phren in the background then (background refresh, a notification action, a Live Activity); the app read that refusal as "no token" and stayed signed out until it was quit. It now waits for the unlock and reads the token again. The token was never deleted.
 - Stores: joining a team store attaches it on this machine only. Team and readonly stores are listed in `.runtime/attached-stores.yaml`, which never syncs; the synced `stores.yaml` keeps only the primary store's entry. Before, `phren team join` wrote the team store into the synced `stores.yaml`, so every machine on the same personal store inherited it and `phren doctor` failed there forever ("declared but not attached", "needs credentials"). On first run a machine moves the synced team entries whose folder exists there into its own file and ignores the rest; the synced file is left for machines on older versions, and doctor names the entries it ignores. `phren team join` and `team init` say the store is attached on this machine only.
 - Doctor: the phren, Cursor, Codex and Copilot wrapper checks no longer report an installed wrapper as missing when doctor runs without the user's shell setup (over SSH, from a hook or a LaunchAgent) and `~/.local/bin` is added only by `.zshrc`. Such a wrapper is reported as installed but unconfirmed. Doctor fails only when the wrapper file is missing, or when another binary runs before it on a PATH that includes `~/.local/bin`, and then names that binary.
 
@@ -525,6 +525,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   `<task-notification>`, `<system-reminder>`) are skipped, and the
   `<pasted_content>` wrapper Claude Code puts around pasted or phone input is
   read through instead of landing verbatim in the task.
+
+## [0.2.15] - 2026-09-24
+
+Released from `release/0.2.15`: 0.2.14 plus this fix only.
+
+### Fixed
+
+- `phren init`: the setup walkthrough works with Inquirer 13 and later. It asked for the `list` prompt type, which Inquirer 13 removed (now `select`), so `phren init` on a fresh install failed at its first choice with `Prompt type "list" is not registered`.
 
 ## [0.2.14] - 2026-09-10
 
