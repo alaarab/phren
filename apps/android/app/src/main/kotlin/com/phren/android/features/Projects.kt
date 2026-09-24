@@ -271,7 +271,8 @@ fun ProjectDetailView(storeId: String, project: String) {
         ActionErrorBanner()
         LiveBridge.ProjectComputerRows(storeId, project)
         ControlBand(storeId, project, openSkills = {
-            navigator.push("skills:$storeId:$project") { LiveBridge.SkillsView(project, storeId) }
+            val depth = navigator.depth
+            navigator.push("skills:$storeId:$project") { SkillsView(project, storeId) { while (navigator.depth > depth) navigator.pop() } }
         }, openKnobs = { showingKnobs = true })
         Box(Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 4.dp)) {
             PhrenChipRow(ProjectTab.entries.map { PhrenOption(id = it.title, value = it, title = it.title) }, tab, { tab = it }, identifier = "project-section")
@@ -285,7 +286,7 @@ fun ProjectDetailView(storeId: String, project: String) {
             }
         }
     }
-    if (showingKnobs) PhrenSheet({ showingKnobs = false }) { LiveBridge.ProjectKnobsView(storeId, project) }
+    if (showingKnobs) PhrenSheet({ showingKnobs = false }) { ProjectKnobsView(storeId, project) }
 }
 
 /** Equal columns keep four destinations readable on a narrow phone. */

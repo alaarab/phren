@@ -888,3 +888,36 @@ fun PhrenDisclosure(title: String, initiallyExpanded: Boolean = false, content: 
 /** A handled system back closes an open overlay first. */
 @Composable
 fun BackCloses(enabled: Boolean, onBack: () -> Unit) = BackHandler(enabled, onBack)
+
+/** A color swatch that opens the shared color editor (PhrenColorButton). */
+@Composable
+fun PhrenColorButton(title: String, color: Color, identifier: String, action: () -> Unit) {
+    Row(
+        Modifier.heightIn(min = 44.dp).widthIn(min = 44.dp).plainClickable(onClick = action).phrenIdentifier(identifier),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(PhrenTheme.Space.small),
+    ) {
+        Box(Modifier.size(28.dp).background(color, CircleShape).border(1.dp, PhrenTheme.border, CircleShape))
+        Text(title, style = PhrenType.body, color = PhrenTheme.text)
+    }
+}
+
+/**
+ * RGB channels that apply immediately, like the adjacent hex field
+ * (phrenColorSheet): the single-select card with only its footer.
+ */
+@Composable
+fun PhrenColorSheet(title: String, selection: Color, onChange: (Color) -> Unit, identifier: String, onDismiss: () -> Unit) {
+    val channels = listOf(selection.red, selection.green, selection.blue).map { (it.coerceIn(0f, 1f) * 255).roundToInt() }
+    fun set(index: Int, value: Int) {
+        val next = channels.toMutableList().also { it[index] = value.coerceIn(0, 255) }
+        onChange(Color(next[0], next[1], next[2]))
+    }
+    PhrenSingleSelectSheet(title, emptyList<PhrenOption<Int>>(), 0, {}, rowPrefix = identifier, footer = {
+        Column(verticalArrangement = Arrangement.spacedBy(PhrenTheme.Space.medium)) {
+            Box(Modifier.fillMaxWidth().height(44.dp).background(selection, RoundedCornerShape(PhrenTheme.Radius.small)))
+            PhrenStepperField("Red", channels[0], { set(0, it) }, 0..255, "$identifier:red")
+            PhrenStepperField("Green", channels[1], { set(1, it) }, 0..255, "$identifier:green")
+            PhrenStepperField("Blue", channels[2], { set(2, it) }, 0..255, "$identifier:blue")
+        }
+    }, onDismiss = onDismiss)
+}
