@@ -24,6 +24,9 @@ final class TalkModeController {
         var pause: TalkPause = .current()
         /// The words heard so far, shown where a typed message would be.
         var showHeard: (@MainActor (String) -> Void)? = nil
+        /// What is read aloud for a finished reply. The reply itself by
+        /// default; an on-device summarizer can fill `TalkReplySpeech.shared`.
+        var spoken: @MainActor (String) async -> String = { await TalkReplySpeech.shared.spoken($0) }
         var tick: Duration = .milliseconds(200)
     }
 
@@ -51,6 +54,7 @@ final class TalkModeController {
     @ObservationIgnored private var startTask: Task<Void, Never>?
     @ObservationIgnored private var sendTask: Task<Void, Never>?
     @ObservationIgnored private var speakTask: Task<Void, Never>?
+    @ObservationIgnored private var speechTask: Task<Void, Never>?
     @ObservationIgnored private var sentAfterLine: Int?
     @ObservationIgnored private var replySeen: String?
 
@@ -132,7 +136,14 @@ final class TalkModeController {
         }
         replySeen = nil
         sentAfterLine = nil
-        handle(.agentFinished(reply: SpokenReply.text(fromMarkdown: reply)))
+        let text = SpokenReply.text(fromMarkdown: reply)
+        speechTask?.cancel()
+        speechTask = Task { [weak self] in
+            guard let spoken = await self?.environment?.spoken(text) else { return }
+            // Talking over the reply while it was being prepared wins.
+            guard let self, !Task.isCancelled, self.phase == .thinking else { return }
+            self.handle(.agentFinished(reply: spoken.isEmpty ? text : spoken))
+        }
     }
 
     private func fail(_ reason: String) {
@@ -167,6 +178,7 @@ final class TalkModeController {
             ticker = nil
             sendTask?.cancel()
             speakTask?.cancel()
+            speechTask?.cancel()
             voice?.stop()
             session.stop()
             heard = ""
@@ -197,4 +209,31 @@ final class TalkModeController {
             voice?.stop()
         }
     }
+}
+
+/// Whether talk mode keeps running with the screen locked or phren in the
+/// background. It does whenever it is on and the app declares the `audio`
+/// background mode, which keeps the microphone, the recognizer and the voice
+/// alive: a walkie-talkie with the phone in a pocket.
+enum TalkBackground {
+    static let declared: Bool = {
+        (Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") as? [String])?.contains("audio") == true
+    }()
+    static func continues(_ talking: Bool, declared: Bool = TalkBackground.declared) -> Bool { talking && declared }
+}
+
+/// Turns a finished reply into what is read aloud. The default reads the
+/// reply as it is; an on-device summarizer (Apple Foundation Models) sets
+/// `TalkReplySpeech.shared` to one that speaks a sentence or two instead.
+@MainActor
+protocol TalkReplySpeaking {
+    func spoken(_ reply: String) async -> String
+}
+
+@MainActor
+enum TalkReplySpeech {
+    struct Verbatim: TalkReplySpeaking {
+        func spoken(_ reply: String) async -> String { reply }
+    }
+    static var shared: any TalkReplySpeaking = Verbatim()
 }

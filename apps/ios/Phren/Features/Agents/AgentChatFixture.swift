@@ -45,6 +45,8 @@ import UniformTypeIdentifiers
     }
     static let streamingReply = "The reply is arriving word by word. " + String(repeating: "You can follow the changes as they arrive without losing your place in the conversation. ", count: 8)
     static var stopped = false
+    /// Targets "Pause all agents" interrupted, for the confirm-sheet test.
+    static var pausedTargets: [String] = []
     /// A Markdown reply for `--chat-markdown-stream`: a bold phrase and a
     /// list, previewed as it grows and then landing as the transcript row.
     static let markdownReply = "Here is what changed on the chat screen:\n\n- **Bold phrase** opens the first item\n- A second item long enough to wrap onto another line\n\nThat is **all** for now."

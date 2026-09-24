@@ -198,11 +198,14 @@ enum AgentLaunch {
     /// `dictate` is the chat with the microphone already listening — the
     /// Action button's "talk to the last session".
     /// `details` is the session's details page, led by a permission it waits on.
-    enum Destination: String, Codable { case chat, terminal, dictate, details }
+    /// `talk` is the chat in talk mode, hands-free: "talk to my conductor".
+    enum Destination: String, Codable { case chat, terminal, dictate, details, talk }
     struct Pending: Codable {
         var hostID: UUID, workspaceID: String, tabID: String, label: String, agent: String, cwd: String
         var muxID: String? = nil
         var destination: Destination? = nil
+        /// The conductor's chat must reopen as the conductor's (its header, no Changes).
+        var role: String? = nil
     }
     struct PendingProject: Codable, Hashable {
         let storeID: String
@@ -224,25 +227,44 @@ enum AgentLaunch {
         writePending(session, destination: destination)
     }
     private static func writePending(_ session: LiveAgentSession, destination: Destination) {
-        let pending = Pending(hostID: session.host.id, workspaceID: session.workspaceID, tabID: session.tab.id, label: session.tab.displayTitle, agent: session.tab.agent ?? "codex", cwd: session.tab.cwd ?? "/", muxID: session.host.muxID, destination: destination)
+        let pending = Pending(hostID: session.host.id, workspaceID: session.workspaceID, tabID: session.tab.id, label: session.tab.displayTitle, agent: session.tab.agent ?? "codex", cwd: session.tab.cwd ?? "/", muxID: session.host.muxID, destination: destination,
+                              role: session.tab.role)
         AppRuntime.defaults.removeObject(forKey: pendingProjectKey)
+        AppRuntime.defaults.removeObject(forKey: pendingActionKey)
         AppRuntime.defaults.set(try? JSONEncoder().encode(pending), forKey: pendingKey)
         restorePendingNavigation()
     }
     static func setPendingProject(storeID: String, project: String) {
         clearPendingContent()
         AppRuntime.defaults.removeObject(forKey: pendingKey)
+        AppRuntime.defaults.removeObject(forKey: pendingActionKey)
         AppRuntime.defaults.set(try? JSONEncoder().encode(PendingProject(storeID: storeID, project: project)), forKey: pendingProjectKey)
         restorePendingNavigation()
     }
     static func restorePendingNavigation() {
-        if AppRuntime.defaults.data(forKey: pendingKey) != nil {
+        if AppRuntime.defaults.data(forKey: pendingKey) != nil || AppRuntime.defaults.string(forKey: pendingActionKey) != nil {
             AppModel.current?.selectedTab = .agents
             AppModel.current?.pendingChatVersion += 1
         } else if AppRuntime.defaults.data(forKey: pendingProjectKey) != nil {
             AppModel.current?.selectedTab = .projects
             AppModel.current?.pendingProjectVersion += 1
         }
+    }
+    /// Something the Agents list should do on open rather than a chat: start
+    /// a conductor when Siri found none, or confirm pausing every agent.
+    enum PendingAction: String, Codable { case startConductor, pauseAll }
+    static let pendingActionKey = "agents.pendingAction.v1"
+    static func setPendingAction(_ action: PendingAction) {
+        clearPendingContent()
+        AppRuntime.defaults.removeObject(forKey: pendingKey)
+        AppRuntime.defaults.removeObject(forKey: pendingProjectKey)
+        AppRuntime.defaults.set(action.rawValue, forKey: pendingActionKey)
+        restorePendingNavigation()
+    }
+    static func takePendingAction() -> PendingAction? {
+        guard let raw = AppRuntime.defaults.string(forKey: pendingActionKey) else { return nil }
+        AppRuntime.defaults.removeObject(forKey: pendingActionKey)
+        return PendingAction(rawValue: raw)
     }
     static func takePendingProject() -> PendingProject? {
         guard let data = AppRuntime.defaults.data(forKey: pendingProjectKey) else { return nil }
@@ -266,7 +288,8 @@ enum AgentLaunch {
         guard let pending = try? JSONDecoder().decode(Pending.self, from: data),
               let host = AgentSessions.hosts.first(where: { $0.id == pending.hostID && (pending.muxID == nil || $0.muxID == pending.muxID) }),
               let live = try? session(host: host, workspaceID: pending.workspaceID, tabID: pending.tabID,
-                                      label: pending.label, agent: pending.agent, agentStatus: nil, cwd: pending.cwd) else {
+                                      label: pending.label, agent: pending.agent, agentStatus: nil, cwd: pending.cwd,
+                                      role: pending.role.flatMap(PhrenConnection.LaunchRole.init(rawValue:)) ?? .agent) else {
             clearPendingContent()
             return nil
         }
