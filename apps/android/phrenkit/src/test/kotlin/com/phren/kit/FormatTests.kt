@@ -71,6 +71,23 @@ class FindingsFileTests {
         assertTrue(lines[idx + 1].startsWith("  <!-- phren:cite {\"created_at\":"))
     }
 
+    /**
+     * core/finding.ts `applyFindingTypePrefix`: the tag test is anchored and any
+     * bracketed tag counts. The unanchored, decay-types-only `extractFindingType`
+     * broke this both ways.
+     */
+    @Test fun findingTypePrefixMatchesCLI() {
+        // Already tagged: must not accumulate. `tradeoff` is a FindingType but not a decay type.
+        val tagged = FindingsFile("").also { it.add("myproj", "[tradeoff] Prefer X over Y", FindingsFile.AddOptions(type = FindingType.TRADEOFF)) }
+        assertEquals(1, tagged.content.split("[tradeoff]").size - 1, "type prefix accumulated on an already-tagged finding")
+        // A bracketed tag mid-sentence must not suppress the caller's type.
+        val midSentence = FindingsFile("").also { it.add("myproj", "Reproduce with [bug] in the title", FindingsFile.AddOptions(type = FindingType.PATTERN)) }
+        assertTrue(midSentence.content.contains("- [pattern] Reproduce with [bug] in the title"), "chosen finding type was dropped")
+        // Untagged text still gets the prefix; no type still means no prefix.
+        assertTrue(FindingsFile("").also { it.add("myproj", "Plain finding", FindingsFile.AddOptions(type = FindingType.PITFALL)) }.content.contains("- [pitfall] Plain finding"))
+        assertTrue(FindingsFile("").also { it.add("myproj", "No type given") }.content.contains("- No type given"))
+    }
+
     @Test fun addRejectsSecrets() {
         assertFailsWith<PhrenKitError.SecretDetected> { FindingsFile("").add("myproj", "token ghp_" + "a".repeat(36)) }
     }

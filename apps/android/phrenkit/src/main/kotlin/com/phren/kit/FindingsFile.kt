@@ -129,6 +129,8 @@ class FindingsFile(content: String) {
         val type: FindingType? = null,
         val scope: String? = null,
         val provenance: FindingProvenance? = null,
+        /** Set when promoting a review-queue item: the date it was queued. */
+        val queuedDate: String? = null,
         val now: Instant = Instant.now(),
     )
 
@@ -147,7 +149,10 @@ class FindingsFile(content: String) {
         val today = nowIso.take(10)
 
         var normalizedLearning = learning
-        if (extractFindingType("- $normalizedLearning") == null && options.type != null) {
+        // core/finding.ts `applyFindingTypePrefix`: the test is anchored and accepts any
+        // bracketed tag. `extractFindingType` is unanchored and knows only the decay types,
+        // so a `[bug]` mid-sentence dropped the caller's type and `[tradeoff]` was tagged twice.
+        if (options.type != null && !FINDING_TAG_PREFIX.test(normalizedLearning)) {
             normalizedLearning = "[${options.type.rawValue}] $normalizedLearning"
         }
 
@@ -160,6 +165,9 @@ class FindingsFile(content: String) {
             val sourceComment = buildSourceComment(it)
             if (sourceComment.isNotEmpty()) bullet += " $sourceComment"
         }
+        // A promoted queue item is written today but was captured earlier: learning.ts
+        // places approveQueueItemDetailed's extra annotation after scope and source.
+        if (!options.queuedDate.isNullOrEmpty()) bullet += " <!-- phren:queued \"${options.queuedDate}\" -->"
 
         if (isDuplicate(bullet)) {
             throw PhrenKitError.Duplicate("Skipped duplicate finding for \"$project\": already exists with similar wording.")
@@ -267,6 +275,17 @@ class FindingsFile(content: String) {
         data object NotFound : MatchResult
     }
 
+    /**
+     * access.ts `existsAsLiveFinding`: does this text already exist as a live
+     * (non-archived) bullet? Ambiguous counts as present: approve must not write another copy.
+     */
+    fun existsAsLiveFinding(text: String): Boolean {
+        val needle = normalizeFindingText(text)
+        if (needle.isEmpty()) return false
+        val active = collectBulletLines(content.split("\n")).filter { !it.archived }
+        return matchIn(active, needle, text) != MatchResult.NotFound
+    }
+
     private fun matchIn(bullets: List<BulletLine>, needle: String, match: String): MatchResult {
         val fidNeedle = if (needle.startsWith("fid:")) needle.drop(4) else needle
         if (FID_NEEDLE.test(fidNeedle)) {
@@ -290,6 +309,9 @@ class FindingsFile(content: String) {
     }
 
     companion object {
+        /** core/finding.ts `FINDING_TAG_PREFIX_RE` */
+        internal val FINDING_TAG_PREFIX = JSRegex("""^\s*\[[^\]]+\]\s*""")
+
         private val H2_TAG = JSRegex("""^##\s+([a-z_-]+)\s*$""", caseInsensitive = true)
         private val H2_YEAR = JSRegex("""^##\s+\d{4}""")
         private val H3 = JSRegex("""^###\s+(.+)$""")
