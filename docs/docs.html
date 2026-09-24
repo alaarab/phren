@@ -973,12 +973,7 @@ flowchart LR
         <pre><code>phren add ~/frontend-app
 phren add ~/backend-api
 phren add ~/shared-lib</code></pre>
-        <p>Projects support ownership modes:</p>
-        <ul>
-          <li><code>owned</code> &mdash; full read/write, hooks active (default)</li>
-          <li><code>observed</code> &mdash; read-only context injection, no writes</li>
-          <li><code>archived</code> &mdash; excluded from active profile, data preserved</li>
-        </ul>
+        <p>Each project has an ownership mode that decides who owns its instruction files. Set it with <code>phren add --ownership &lt;mode&gt;</code>, or change the default with <code>phren config project-ownership &lt;mode&gt;</code>. See <a href="#project-ownership">Project Ownership</a>.</p>
 
         <h2 id="gs-profiles">Profiles &amp; Machines <a href="#gs-profiles" class="anchor-link">#</a></h2>
         <p>Profiles map sets of projects to machine roles:</p>
@@ -2809,9 +2804,9 @@ phren team join git@github.com:qualus/phren-arc.git
         <div class="table-scroll"><table class="docs-table">
           <thead><tr><th>Mode</th><th>Behavior</th></tr></thead>
           <tbody>
-            <tr><td><code>phren-managed</code></td><td>Default. phren symlinks <code>AGENTS.md</code>, <code>FINDINGS.md</code>, skills into the project directory.</td></tr>
-            <tr><td><code>repo-owned</code></td><td>The project's repo owns its own <code>AGENTS.md</code>. phren stores findings and tasks but does not symlink.</td></tr>
-            <tr><td><code>read-only</code></td><td>phren indexes and searches the project but does not write to it.</td></tr>
+            <tr><td><code>detached</code></td><td>Default. phren keeps its own docs in the store and writes nothing into the repo.</td></tr>
+            <tr><td><code>phren-managed</code></td><td>phren may mirror <code>AGENTS.md</code> and agent compatibility files into the repo. Only under the <code>managed</code> preset.</td></tr>
+            <tr><td><code>repo-managed</code></td><td>The repo's own <code>AGENTS.md</code> and <code>CLAUDE.md</code> stay canonical. phren writes nothing into the repo.</td></tr>
           </tbody>
         </table></div>
       </section>
