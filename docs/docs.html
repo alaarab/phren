@@ -466,7 +466,7 @@
       display: block;
     }
 
-    /* On desktop, groups are still collapsed by default — only .open groups expand */
+    /* On desktop, groups are still collapsed by default; only .open groups expand */
 
     @media (max-width: 900px) {
       /* minmax(0, 1fr): a plain 1fr column grows to its widest code block or table */
@@ -786,8 +786,8 @@
       <section class="docs-section" id="overview">
         <div class="docs-overview">
           <div class="docs-kicker">Docs, Setup, Teams, and Internals</div>
-          <h1>Everything for phren lives here now.</h1>
-          <p>This page is the full manual: install and first run, CLI and MCP reference, shell and VS Code workflows, team sharing, security, FAQ, contributing, and architecture. No split docs island, no separate community page to hunt through.</p>
+          <h1>phren documentation</h1>
+          <p>Install, use, and extend phren. This page covers setup, the CLI and MCP tools, the iPhone app, the shell and VS Code, teams, security, and how phren works inside.</p>
 
           <div class="docs-overview-grid">
             <a href="#getting-started" class="docs-overview-card">
@@ -807,7 +807,7 @@
             </a>
             <a href="#contributing" class="docs-overview-card">
               <span class="docs-overview-card-label">Build on phren</span>
-              <div class="docs-overview-card-title">Contribute without spelunking</div>
+              <div class="docs-overview-card-title">Contribute to phren</div>
               <p>Dev setup, testing, style rules, PR expectations, and architecture notes are part of the same docs flow.</p>
             </a>
           </div>
@@ -885,10 +885,10 @@ phren add
 phren add ~/my-project</code></pre>
             <p>This creates <code>~/.phren/my-project/</code> with:</p>
             <ul>
-              <li><code>AGENTS.md</code> &mdash; project-specific agent instructions</li>
-              <li><code>FINDINGS.md</code> &mdash; captured insights and patterns</li>
-              <li><code>tasks.md</code> &mdash; task queue (active, queued, done)</li>
-              <li><code>summary.md</code> &mdash; project summary for context injection</li>
+              <li><code>AGENTS.md</code>: project-specific agent instructions</li>
+              <li><code>FINDINGS.md</code>: captured insights and patterns</li>
+              <li><code>tasks.md</code>: task queue (active, queued, done)</li>
+              <li><code>summary.md</code>: project summary for context injection</li>
             </ul>
           </div>
         </div>
@@ -928,23 +928,23 @@ phren add ~/my-project</code></pre>
         </div>
 
         <h2 id="gs-quickstart">Quickstart <a href="#gs-quickstart" class="anchor-link">#</a></h2>
-        <p>The fastest path from zero to working memory &mdash; combines all five steps above:</p>
+        <p>The fastest path from zero to working memory. It combines the steps above:</p>
         <pre><code>phren quickstart</code></pre>
         <p>This runs <code>phren init</code> followed by an interactive project scaffolding wizard.</p>
 
         <h2 id="gs-how-it-works">How It Works <a href="#gs-how-it-works" class="anchor-link">#</a></h2>
         <p>phren operates on three paths during every prompt cycle:</p>
         <ol>
-          <li><strong>Retrieval</strong> &mdash; keyword extraction from your prompt, synonym expansion, FTS5 search, and snippet injection into agent context.</li>
-          <li><strong>Governance</strong> &mdash; citation validity checks, confidence decay, policy thresholds to filter low-quality memories.</li>
-          <li><strong>Persistence</strong> &mdash; MCP tools write findings/tasks, the Stop hook auto-commits and pushes to git.</li>
+          <li><strong>Retrieval</strong>: keyword extraction from your prompt, synonym expansion, FTS5 search, and snippet injection into agent context.</li>
+          <li><strong>Governance</strong>: citation validity checks, confidence decay, policy thresholds to filter low-quality memories.</li>
+          <li><strong>Persistence</strong>: MCP tools write findings/tasks, the Stop hook auto-commits and pushes to git.</li>
         </ol>
         <p>Hooks run at lifecycle points:</p>
         <ul>
-          <li><code>SessionStart</code> &mdash; git pull on <code>~/.phren</code>, project context injection</li>
-          <li><code>UserPromptSubmit</code> &mdash; search + inject relevant context on every prompt</li>
-          <li><code>PostToolUse</code> &mdash; queue review candidates and capture follow-up context after tool calls</li>
-          <li><code>Stop</code> &mdash; auto-commit and push after every response</li>
+          <li><code>SessionStart</code>: git pull on <code>~/.phren</code>, project context injection</li>
+          <li><code>UserPromptSubmit</code>: search + inject relevant context on every prompt</li>
+          <li><code>PostToolUse</code>: queue review candidates and capture follow-up context after tool calls</li>
+          <li><code>Stop</code>: auto-commit and push after every response</li>
         </ul>
 
         <h3 id="gs-lifecycle">First-Run Lifecycle</h3>
@@ -1007,10 +1007,10 @@ phren store sync</code></pre>
         <h2 id="gs-agents">Agent Setup <a href="#gs-agents" class="anchor-link">#</a></h2>
         <p><code>phren init</code> auto-configures all detected agents:</p>
         <ul>
-          <li><strong>Claude Code</strong> &mdash; MCP server + hooks for SessionStart, UserPromptSubmit, PostToolUse, Stop</li>
-          <li><strong>Copilot</strong> &mdash; MCP server config for chat mode</li>
-          <li><strong>Cursor</strong> &mdash; MCP settings for agent/composer mode</li>
-          <li><strong>Codex</strong> &mdash; MCP server registration</li>
+          <li><strong>Claude Code</strong>: MCP server + hooks for SessionStart, UserPromptSubmit, PostToolUse, Stop</li>
+          <li><strong>Copilot</strong>: MCP server config for chat mode</li>
+          <li><strong>Cursor</strong>: MCP settings for agent/composer mode</li>
+          <li><strong>Codex</strong>: MCP server registration</li>
         </ul>
         <p>Verify with <code>phren doctor --agents</code>.</p>
 
@@ -1090,7 +1090,7 @@ npx --yes @phren/cli@0.2.16 bridge doctor</code></pre>
         </div>
 
         <h3 id="c-finding-types">Finding Types</h3>
-        <p>Phren recognises six finding types. <code>decision</code>, <code>pattern</code>, <code>pitfall</code>, and <code>bug</code> can be set explicitly (the <code>findingType</code> param, or a manual <code>[tag]</code> prefix); <code>workaround</code> and <code>context</code> are written only by phren's own auto-tagging, but decay and search filtering treat all six the same way.</p>
+        <p>Phren recognizes six finding types. <code>decision</code>, <code>pattern</code>, <code>pitfall</code>, and <code>bug</code> can be set explicitly (the <code>findingType</code> param, or a manual <code>[tag]</code> prefix); <code>workaround</code> and <code>context</code> are written only by phren's own auto-tagging, but decay and search filtering treat all six the same way.</p>
         <div class="tag-list">
           <span class="tag-pill special">[decision]</span>
           <span class="tag-pill">[pattern]</span>
@@ -1225,7 +1225,7 @@ graph LR
     style F3 fill:#1a1a3e,stroke:#00E5FF,color:#E8E4D9
         </pre>
 
-        <p>Use <code>cross_project_fragments()</code> to discover which fragments span multiple projects &mdash; these often reveal shared dependencies or recurring pitfalls.</p>
+        <p>Use <code>cross_project_fragments()</code> to find fragments that span several projects. These often point to shared dependencies or repeated pitfalls.</p>
 
         <h2 id="c-sessions">Session Continuity <a href="#c-sessions" class="anchor-link">#</a></h2>
         <p><span class="kw-session">Sessions</span> track continuity across agent restarts. When a session starts, phren provides the prior summary, recent findings, the active task, and pending review items.</p>
@@ -1253,7 +1253,7 @@ sequenceDiagram
         </pre>
 
         <h3 id="c-checkpoints">Task Checkpoints</h3>
-        <p>Checkpoints record the state of in-progress work so agents can resume seamlessly. Each captures the task ID, edited files, failing tests, and next-step hints. Stored in <code>.sessions/</code> and cleared on task completion.</p>
+        <p>Checkpoints record the state of in-progress work so an agent can pick up where the last one stopped. Each captures the task ID, edited files, failing tests, and next-step hints. Stored in <code>.sessions/</code> and cleared on task completion.</p>
       </section>
 
       <!-- ============================================================ -->
@@ -1270,11 +1270,11 @@ sequenceDiagram
         <div class="table-scroll"><table class="docs-table">
           <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
           <tbody>
-            <tr><td><code>PHREN_CONTEXT_TOKEN_BUDGET</code></td><td>550</td><td>Max tokens injected per hook-prompt call (180--10000)</td></tr>
+            <tr><td><code>PHREN_CONTEXT_TOKEN_BUDGET</code></td><td>550</td><td>Max tokens injected per hook-prompt call (180 to 10000)</td></tr>
             <tr><td><code>PHREN_PULL_INTERVAL_SECONDS</code></td><td>0 (off)</td><td>Overrides the machine-local interval for periodic MCP remote checks. Whole seconds from 30 to 86400; 0 or off disables.</td></tr>
-            <tr><td><code>PHREN_CONTEXT_SNIPPET_LINES</code></td><td>6</td><td>Max lines per snippet (2--100)</td></tr>
-            <tr><td><code>PHREN_CONTEXT_SNIPPET_CHARS</code></td><td>520</td><td>Max characters per snippet (120--10000)</td></tr>
-            <tr><td><code>PHREN_MAX_INJECT_TOKENS</code></td><td>2000</td><td>Hard cap on total injected tokens (200--20000)</td></tr>
+            <tr><td><code>PHREN_CONTEXT_SNIPPET_LINES</code></td><td>6</td><td>Max lines per snippet (2 to 100)</td></tr>
+            <tr><td><code>PHREN_CONTEXT_SNIPPET_CHARS</code></td><td>520</td><td>Max characters per snippet (120 to 10000)</td></tr>
+            <tr><td><code>PHREN_MAX_INJECT_TOKENS</code></td><td>2000</td><td>Hard cap on total injected tokens (200 to 20000)</td></tr>
             <tr><td><code>PHREN_TASK_PRIORITY</code></td><td>high,medium</td><td>Priorities to include in hook context injection</td></tr>
             <tr><td><code>PHREN_MEMORY_TTL_DAYS</code></td><td>policy</td><td>Override memory TTL for trust filtering</td></tr>
           </tbody>
@@ -1286,7 +1286,7 @@ sequenceDiagram
           <tbody>
             <tr><td><code>PHREN_OLLAMA_URL</code></td><td>http://localhost:11434</td><td>Ollama base URL. Set to <code>off</code> to disable.</td></tr>
             <tr><td><code>PHREN_EMBEDDING_MODEL</code></td><td>nomic-embed-text</td><td>Embedding model for Ollama or API</td></tr>
-            <tr><td><code>PHREN_EMBEDDING_API_URL</code></td><td>&mdash;</td><td>OpenAI-compatible embeddings endpoint</td></tr>
+            <tr><td><code>PHREN_EMBEDDING_API_URL</code></td><td>unset</td><td>OpenAI-compatible embeddings endpoint</td></tr>
             <tr><td><code>PHREN_FEATURE_SEMANTIC_DEDUP</code></td><td>disabled</td><td>LLM-based semantic deduplication on add_finding</td></tr>
             <tr><td><code>PHREN_FEATURE_SEMANTIC_CONFLICT</code></td><td>disabled</td><td>LLM-based conflict detection on add_finding</td></tr>
             <tr><td><code>PHREN_LLM_MODEL</code></td><td>gpt-4o-mini</td><td>LLM model for dedup/conflict detection</td></tr>
@@ -1297,7 +1297,7 @@ sequenceDiagram
         <div class="table-scroll"><table class="docs-table">
           <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
           <tbody>
-            <tr><td><code>PHREN_FEATURE_TOOL_HOOK</code></td><td>enabled</td><td>Spawns a subprocess after every tool call (PostToolUse hook) — the flag most likely to affect performance; see <code>feature-flags.md</code></td></tr>
+            <tr><td><code>PHREN_FEATURE_TOOL_HOOK</code></td><td>enabled</td><td>Spawns a subprocess after every tool call (PostToolUse hook). This is the flag most likely to affect performance; see <a href="https://github.com/alaarab/phren/blob/main/docs/feature-flags.md"><code>feature-flags.md</code></a></td></tr>
             <tr><td><code>PHREN_FEATURE_AUTO_EXTRACT</code></td><td>enabled</td><td>Auto memory extraction from project context on each prompt</td></tr>
             <tr><td><code>PHREN_FEATURE_DAILY_MAINTENANCE</code></td><td>enabled</td><td>Daily background pruning and lock-enforcement job</td></tr>
             <tr><td><code>PHREN_FEATURE_AUTO_CAPTURE</code></td><td>disabled</td><td>Extract insights from transcripts at session end</td></tr>
@@ -1340,7 +1340,7 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
           <tbody>
             <tr><td><code>high</code></td><td>Always auto-capture findings and tasks</td></tr>
             <tr><td><code>medium</code></td><td>Capture only on explicit signals</td></tr>
-            <tr><td><code>low</code></td><td>Fully manual &mdash; agent never captures on its own</td></tr>
+            <tr><td><code>low</code></td><td>Fully manual. The agent never captures on its own.</td></tr>
             <tr><td><code>off</code></td><td>Passive MCP server only</td></tr>
           </tbody>
         </table></div>
@@ -1893,10 +1893,10 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
         <h2 id="sk-what">What Are Skills <a href="#sk-what" class="anchor-link">#</a></h2>
         <p>A skill is a markdown file with YAML frontmatter that defines a reusable procedure. Type <code>/skill-name</code> in an agent session and the agent reads the skill file and follows its instructions.</p>
         <ul>
-          <li><strong>Portable</strong> &mdash; skills live in <code>~/.phren</code> and sync via git</li>
-          <li><strong>Scoped</strong> &mdash; global skills apply everywhere; project skills override globals</li>
-          <li><strong>Versioned</strong> &mdash; full git history and rollback</li>
-          <li><strong>Agent-agnostic</strong> &mdash; any agent with MCP access can execute skills</li>
+          <li><strong>Portable</strong>: skills live in <code>~/.phren</code> and sync via git</li>
+          <li><strong>Scoped</strong>: global skills apply everywhere; project skills override globals</li>
+          <li><strong>Versioned</strong>: full git history and rollback</li>
+          <li><strong>Agent-agnostic</strong>: any agent with MCP access can execute skills</li>
         </ul>
 
         <h2 id="sk-anatomy">Anatomy of a Skill <a href="#sk-anatomy" class="anchor-link">#</a></h2>
@@ -1932,8 +1932,8 @@ tags: [devops, deploy]
 
         <h2 id="sk-resolution">Resolution Order <a href="#sk-resolution" class="anchor-link">#</a></h2>
         <ol>
-          <li><strong>Project skills</strong> &mdash; <code>~/.phren/&lt;project&gt;/skills/</code></li>
-          <li><strong>Global skills</strong> &mdash; <code>~/.phren/global/skills/</code></li>
+          <li><strong>Project skills</strong>: <code>~/.phren/&lt;project&gt;/skills/</code></li>
+          <li><strong>Global skills</strong>: <code>~/.phren/global/skills/</code></li>
         </ol>
         <p>If a project skill has the same name as a global skill, the project skill wins.</p>
 
@@ -2143,9 +2143,9 @@ pnpm --filter phren-vscode run compile</code></pre>
         <h2 id="arch-overview">System Overview <a href="#arch-overview" class="anchor-link">#</a></h2>
         <p>phren operates on three paths during every prompt cycle:</p>
         <ol>
-          <li><strong>Retrieval</strong> &mdash; keyword extraction, synonym expansion, FTS5 search, snippet injection</li>
-          <li><strong>Governance</strong> &mdash; citation validity, confidence decay, policy thresholds</li>
-          <li><strong>Persistence</strong> &mdash; MCP writes + Stop hook git commit/push</li>
+          <li><strong>Retrieval</strong>: keyword extraction, synonym expansion, FTS5 search, snippet injection</li>
+          <li><strong>Governance</strong>: citation validity, confidence decay, policy thresholds</li>
+          <li><strong>Persistence</strong>: MCP writes + Stop hook git commit/push</li>
         </ol>
 
         <pre class="mermaid">
@@ -2199,10 +2199,10 @@ flowchart TB
         <h2 id="arch-governance">Governance <a href="#arch-governance" class="anchor-link">#</a></h2>
         <p>Governance ensures memory quality through policy-driven checks:</p>
         <ul>
-          <li><strong>Retention policy</strong> &mdash; TTLs, decay multipliers, prune thresholds</li>
-          <li><strong>Workflow policy</strong> &mdash; approval gates for risky operations, finding sensitivity</li>
-          <li><strong>Access control</strong> &mdash; RBAC via <code>PHREN_ACTOR</code> and access-control files</li>
-          <li><strong>Audit log</strong> &mdash; all mutations logged to <code>.runtime/audit.log</code></li>
+          <li><strong>Retention policy</strong>: TTLs, decay multipliers, prune thresholds</li>
+          <li><strong>Workflow policy</strong>: approval gates for risky operations, finding sensitivity</li>
+          <li><strong>Access control</strong>: RBAC via <code>PHREN_ACTOR</code> and access-control files</li>
+          <li><strong>Audit log</strong>: all mutations logged to <code>.runtime/audit.log</code></li>
         </ul>
 
         <h2 id="arch-hooks">Hook Lifecycle <a href="#arch-hooks" class="anchor-link">#</a></h2>
@@ -2767,9 +2767,9 @@ phren init              # machine: bob-desktop, profile: fullstack
         <h3>Write Routing</h3>
         <p>When you add a finding or task, phren resolves which store receives the write:</p>
         <ol>
-          <li>If store-qualified (e.g. <code>arc-team/arc</code>) — use the explicit store</li>
-          <li>If a team store claims the project in its registry — route to that store</li>
-          <li>Otherwise — default to the primary (personal) store</li>
+          <li>If store-qualified (e.g. <code>arc-team/arc</code>), use the explicit store</li>
+          <li>If a team store claims the project in its registry, route to that store</li>
+          <li>Otherwise, use the primary (personal) store</li>
         </ol>
         <pre><code># Finding goes to arc-team store (project claimed)
 phren add-finding arc "Always validate JWT expiry"
@@ -2790,12 +2790,12 @@ phren add-finding my-side-project "Use pnpm for this one"</code></pre>
 
         <h3>Example: Setting Up a Team</h3>
         <pre><code># Alice creates the team store
-phren team init arc-team --remote git@github.com:qualus/phren-arc.git
+phren team init arc-team --remote git@github.com:example-org/phren-arc.git
 phren team add-project arc-team arc
 phren team add-project arc-team arc-api
 
 # Bob joins
-phren team join git@github.com:qualus/phren-arc.git
+phren team join git@github.com:example-org/phren-arc.git
 
 # Both now share findings for arc and arc-api
 # Personal findings for other projects stay in ~/.phren</code></pre>
