@@ -623,3 +623,50 @@ appear in every shard (a shared fixture) is declared with `describeAll`.
 The iOS graph bundle phase already runs only when an input changes
 (`graph-inputs.xcfilelist`), and a run costs 0.34 s; `release.py` already
 generates the project once per checkout.
+
+## Chat open journey, 2026-09-23 (phone)
+
+**Method.** `ChatJourney` times one journey by the app's own clock: from the
+tap that opens a chat (a session row's button or link, else the chat
+screen's appearance) to the screen's appearance (`journey.chat-view-ms`) and
+to its first transcript row (`journey.chat-first-row-ms`), both counted in
+`PerformanceCounters` and read through the probe. `testChatOpenJourney` opens
+the heavy chat from its computer's page once and then five more times;
+`testChatOpenFromAgentsJourney` opens Agents' top session once. `--chat-latency`
+adds a 300 ms round trip before the pane list and before the transcript's
+first frame (and before a prefetch's snapshot), about one tailnet request;
+without it the fixture answers at once. `--chat-fresh-models` restores the
+old behavior of building the chat's model on every open. iPhone 17 Pro
+simulator, debug build, means in ms.
+
+| Heavy chat, computer page | Screen, before | after | First row, before | after |
+|---|---:|---:|---:|---:|
+| First open | 143 | 158 | 679 | 709 |
+| Reopen (mean of 5) | 23 | 90 | 226 | 95 |
+| First open, 300 ms round trip | 148 | 150 | 1,274 | 1,268 |
+| Reopen, 300 ms round trip | 24 | 89 | 878 | 94 |
+
+| Agents' top session, 300 ms round trip | Screen | First row |
+|---|---:|---:|
+| First open, no prefetch | 261 | 1,474 |
+| First open, prefetched | 151 | 456 |
+
+**What changed.** A reopened chat keeps its model (`AgentChatModels`, the six
+most recent), so its prepared rows, measured row heights and question and
+progress state are there on the first frame, and its stream resumes after
+the last line it holds, as a reconnect does. The rows' measured heights let
+far rows draw as placeholders from the start; without them a kept model laid
+out the whole heavy transcript before the push, and the screen took 389 ms.
+Agents and a chat's drawer warm their first three reachable sessions with
+one pane read and one transcript snapshot each (`AgentChatPrefetch`, skipped
+in Low Power Mode); rows prepared that way but never measured are laid out
+just after the push starts, so the screen still answers the tap first.
+`testChatFrameStaysStillWhileLoading` checks that the header, conversation and
+composer keep their frames while a chat loads, when its rows land and when
+it is reopened.
+
+The screen appears about 65 ms later on a reopen because the kept rows are
+there to lay out; the first row comes 130 ms (no round trip) to 780 ms
+(one round trip) sooner. A live reply preview parses only its unsettled
+tail: settled paragraphs, up to the last blank line outside a fence, parse
+once (`ChatRichTextDocumentCache.streaming`).

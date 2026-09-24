@@ -115,6 +115,41 @@ final class AgentChatTranscriptTests: AgentChatUITestCase {
         XCTAssertFalse(spinner.exists)
     }
 
+    /// Loading never moves the chat's frame: the header, the conversation
+    /// and the composer sit where they first appear while the pane list and
+    /// transcript load, and stay there once the rows land, and again when
+    /// the kept conversation is reopened.
+    @MainActor
+    func testChatFrameStaysStillWhileLoading() {
+        let app = launch(extra: ["--chat-opening-slow"])
+        let header = app.descendants(matching: .any).matching(identifier: "chat-header").firstMatch
+        let transcript = app.scrollViews["chat-transcript"]
+        let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
+        let loaded = app.staticTexts["The project screen is ready. What would you like to change?"]
+        func frames() -> [CGRect] { [header.frame, transcript.frame, composer.frame] }
+        func assertStill(_ expected: [CGRect], _ moment: String) {
+            for (name, pair) in zip(["header", "conversation", "composer"], zip(expected, frames())) {
+                XCTAssertEqual(pair.0.minY, pair.1.minY, accuracy: 0.5, "\(name) moved \(moment)")
+                XCTAssertEqual(pair.0.height, pair.1.height, accuracy: 0.5, "\(name) resized \(moment)")
+            }
+        }
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        XCTAssertTrue(app.activityIndicators["chat-opening-spinner"].waitForExistence(timeout: 3))
+        XCTAssertTrue(header.exists && transcript.exists && composer.exists)
+        let opening = frames()
+        Thread.sleep(forTimeInterval: 1.5)
+        assertStill(opening, "while the conversation loads")
+        XCTAssertTrue(loaded.waitForExistence(timeout: 10))
+        assertStill(opening, "when the rows landed")
+        app.buttons["chat-close"].tap()
+        XCTAssertTrue(app.buttons["live-chat:w7:w7:t9"].waitForExistence(timeout: 5))
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        XCTAssertTrue(loaded.waitForExistence(timeout: 5), "A reopened conversation shows its kept rows")
+        assertStill(opening, "on reopening")
+        Thread.sleep(forTimeInterval: 1)
+        assertStill(opening, "after reopening")
+    }
+
     @MainActor
     func testTranscriptLinkStillOpensWhileKeyboardIsVisible() {
         let app = launch(extra: ["--chat-link", "--capture-chat-links"])

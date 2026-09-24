@@ -12,6 +12,7 @@ struct AgentConversationLink<LabelContent: View>: View {
         Group {
             if let onOpenInPhren {
                 Button {
+                    ChatJourney.begin()
                     PhrenAppShortcuts.donateOpen(session)
                     onOpenInPhren()
                 } label: { label }
@@ -19,6 +20,7 @@ struct AgentConversationLink<LabelContent: View>: View {
                 NavigationLink {
                     AgentSessionDestination(session: session).onAppear { PhrenAppShortcuts.donateOpen(session) }
                 } label: { label }
+                .simultaneousGesture(TapGesture().onEnded { ChatJourney.begin() })
             }
         }
     }
@@ -66,6 +68,8 @@ struct AgentChatSheet: View {
                       initialTarget: session.id == initialSessionID ? initialTarget : nil,
                       incomingAttachments: $incomingAttachments, incomingDraft: $incomingDraft,
                       requestedChild: $requestedChild,
-                      startsDictation: startsDictation && session.id == initialSessionID).id(session.id)
+                      startsDictation: startsDictation && session.id == initialSessionID,
+                      model: AgentChatModels.model(for: session.id, pane: session.id == initialSessionID
+                                                   ? initialTarget?.id ?? initialPane?.id : nil)).id(session.id)
     }
 }

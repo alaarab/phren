@@ -230,6 +230,7 @@ struct LiveSessionsView: View {
             guard ready else { return }
             let revealed = overview.computers.flatMap { computer in computer.monitor.snapshot?.sessions(on: computer.host) ?? [] }
             PhrenAppShortcuts.donateSessions(revealed)
+            AgentChatPrefetch.warm(overview.screen)
             SessionPullRequestCache.shared.refreshOnReveal(revealed)
         }
         .onChange(of: sessions.hookAssociations, initial: true) { _, associations in

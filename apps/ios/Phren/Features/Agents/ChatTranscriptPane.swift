@@ -33,7 +33,13 @@ struct ChatTranscriptPane: View {
 
     @Environment(\.scenePhase) private var scenePhase
     @Environment(ChatMessageMenu.self) private var messageMenu: ChatMessageMenu?
-    @State private var rowLayout = ChatRowLayout()
+    /// The model's, so a reopened conversation keeps its measured rows and
+    /// draws the far ones as placeholders from its first frame.
+    private var rowLayout: ChatRowLayout { model.rowLayout }
+    /// Rows prepared before this screen opened (a prefetch) and never
+    /// measured are laid out just after the push starts, so the screen
+    /// answers the tap first. Measured rows fold far ones and need no wait.
+    @State private var rowsReady = false
     @State private var historyTask: Task<Void, Never>?
     @State private var atBottom = true
     @State private var nearHistoryTop = false
@@ -62,6 +68,8 @@ struct ChatTranscriptPane: View {
         .environment(\.chatChildAgents, model.target.flatMap { target in
             childAgents.isEmpty ? nil : ChatChildAgents(session: session, target: target, agents: childAgents)
         })
+        .onAppear { rowLayout.resumeAtEnd() }
+        .task { rowsReady = true }
         .onDisappear { cancelHistory() }
         .onChange(of: scenePhase) { _, phase in if phase != .active { cancelHistory() } }
         .onChange(of: hostMatches) { _, _ in cancelHistory() }
@@ -198,9 +206,11 @@ struct ChatTranscriptPane: View {
                 requestedHistoryLine = nil
                 loadHistoryIfNeeded(proxy)
             }
-            ChatLiveTranscriptRows(timeline: model.timelineState, reveal: model.reveal, layout: rowLayout,
-                                   session: session, target: model.target, active: active,
-                                   preview: actions.preview).equatable()
+            if rowsReady || rowLayout.measured {
+                ChatLiveTranscriptRows(timeline: model.timelineState, reveal: model.reveal, layout: rowLayout,
+                                       session: session, target: model.target, active: active,
+                                       preview: actions.preview).equatable()
+            }
             ChatTranscriptFooter(model: model, session: session, project: project)
         }
     }

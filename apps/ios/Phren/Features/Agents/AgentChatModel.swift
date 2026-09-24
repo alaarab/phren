@@ -26,6 +26,53 @@ struct QueuedMessage: Identifiable, Equatable {
     static var reconciledRows: [String: Set<String>] = [:]
 }
 
+/// Recently opened conversations keep their model, so reopening one shows
+/// its prepared transcript at once and resumes the stream after its last
+/// line, the way a reconnect does. A few at most; the oldest is dropped.
+/// A chat opened on one pane of a tab (a sub-agent's own session) keeps a
+/// model apart from the tab's, so the two never show each other's rows.
+@MainActor enum AgentChatModels {
+    private struct Key: Hashable { let session: LiveAgentSession.ID; let pane: String? }
+    private static var models: [Key: AgentChatModel] = [:]
+    private static var order: [Key] = []
+    static let limit = 6
+    static func model(for session: LiveAgentSession.ID, pane: String? = nil) -> AgentChatModel {
+        let id = Key(session: session, pane: pane)
+        #if DEBUG
+        // The open journey's baseline: every open builds its model afresh.
+        if ProcessInfo.processInfo.arguments.contains("--chat-fresh-models") { return AgentChatModel() }
+        #endif
+        if let found = models[id] {
+            if order.last != id { order.removeAll { $0 == id }; order.append(id) }
+            return found
+        }
+        let model = AgentChatModel()
+        models[id] = model; order.append(id)
+        while order.count > limit { models.removeValue(forKey: order.removeFirst()) }
+        return model
+    }
+}
+
+/// Warms the conversations a person is likeliest to open next: the first
+/// few reachable sessions as Agents lists them (working and waiting sort
+/// first), when Agents or a chat's drawer opens. Low Power Mode skips it.
+@MainActor enum AgentChatPrefetch {
+    static let count = 3
+    static func warm(_ screen: SessionOverviewMonitor.Screen, excluding current: LiveAgentSession.ID? = nil) {
+        guard !ProcessInfo.processInfo.isLowPowerModeEnabled else { return }
+        #if DEBUG && targetEnvironment(simulator)
+        // Fixture reads are counted by other tests; only the journey measures this.
+        if AgentChatFixture.enabled && !ProcessInfo.processInfo.arguments.contains("--chat-prefetch") { return }
+        #endif
+        let sessions = screen.groups.filter(\.fresh).flatMap(\.sessions)
+            .filter { $0.id != current && ($0.tab.agent != nil || ($0.tab.agentPaneCount ?? 0) > 0) }
+        for session in sessions.prefix(count) {
+            let model = AgentChatModels.model(for: session.id)
+            Task { await model.prefetch(session) }
+        }
+    }
+}
+
 @MainActor enum AgentChatDrafts {
     static var text: [String: String] = [:]
     static var attachments: [String: [ChatAttachmentDraft]] = [:]
@@ -76,6 +123,8 @@ final class AgentChatModel {
     let timelineState = AgentChatTimelineState()
     /// The draft and its delivery; only the composer observes it.
     let composer = AgentChatComposerState()
+    /// Where the transcript's rows were last measured; see `AgentChatModels`.
+    let rowLayout = ChatRowLayout()
 
     init() {
         outbox.onChange = { [weak self] items in
@@ -132,6 +181,7 @@ final class AgentChatModel {
     /// the activity row observes it, so token updates redraw that row alone.
     let turnControl = ChatTurnControl()
     @ObservationIgnored private var pendingPreview: AgentChatPreview?
+    @ObservationIgnored private var quietFirstFrame = false
     private(set) var backgroundJobs: [ChatBackgroundJob] {
         get { timelineState.backgroundJobs } set { if timelineState.backgroundJobs != newValue { timelineState.backgroundJobs = newValue } }
     }
@@ -477,6 +527,12 @@ final class AgentChatModel {
     func run(_ session: LiveAgentSession) async {
         connection.lastSession = session
         connection.rejectedStreamTarget = nil
+        // A reopened conversation keeps its rows; what arrived while it was
+        // closed lands without the word-by-word reveal, and a notice from
+        // the last visit is not current.
+        quietFirstFrame = hasTranscript
+        var reopened = target != nil
+        if error != nil { error = nil }
         let run = UUID(); connection.generation = run; loading = true
         // A new appearance can start before the cancelled run unwinds. Its
         // streams carry the old generation and must not suppress new streams
@@ -497,6 +553,10 @@ final class AgentChatModel {
                 guard connection.generation == run else { return }
                 // A poll that changed nothing must not redraw anything.
                 if panes != list.panes { panes = list.panes }
+                // The conversation kept from the last visit may have been
+                // replaced in its pane since; pick again as a first open does.
+                if reopened, let kept = target, !kept.isStarting, (try? list.validate(kept)) == nil { chooseAnother() }
+                reopened = false
                 if target == nil {
                     let supported = panes.filter { (try? $0.target(hostID: session.host.id, workspaceID: session.workspaceID, tabID: session.tab.id, muxID: session.host.muxID)) != nil }
                     if supported.count == 1 { choose(supported[0], session: session) }
@@ -526,6 +586,31 @@ final class AgentChatModel {
             if Task.isCancelled { return }
         }
     }
+
+    /// Loads a conversation's recent rows before it is opened: one pane
+    /// read and one snapshot, no stream. Opening it then resumes after the
+    /// snapshot's last line as a reopen does. Only a model never opened and
+    /// holding nothing is warmed; a failure is silent, the open reads again.
+    func prefetch(_ session: LiveAgentSession) async {
+        guard !prefetching, target == nil, !hasTranscript, connection.lastSession == nil else { return }
+        prefetching = true; defer { prefetching = false }
+        do {
+            let list = try await Self.fetchPanes(session)
+            guard target == nil, connection.lastSession == nil else { return }
+            panes = list.panes
+            let supported = panes.compactMap { try? $0.target(hostID: session.host.id, workspaceID: session.workspaceID, tabID: session.tab.id, muxID: session.host.muxID) }
+            guard supported.count == 1, let chosen = supported.first, !chosen.isStarting else { return }
+            select(chosen)
+            // A held message would be sent by the drain; that waits for the open.
+            guard queue.isEmpty else { return }
+            let frame = try await Self.snapshot(session, target: chosen)
+            guard target == chosen, connection.lastSession == nil, frame.kind == .backlog else { return }
+            accept(frame)
+            // Rows, not a connection: the open's run connects.
+            connected = false
+        } catch {}
+    }
+    @ObservationIgnored private var prefetching = false
 
     /// Preserve the first optimistic bubble and current composer when the
     /// transcript appears. `choose` would discard both and reload an empty draft.
@@ -577,6 +662,7 @@ final class AgentChatModel {
                 #if DEBUG && targetEnvironment(simulator)
                 if AgentChatFixture.enabled {
                     AgentChatFixture.beginStream(target)
+                    if AgentChatFixture.latency { try await Task.sleep(for: .milliseconds(300)) }
                     while !Task.isCancelled {
                         guard self.target == target, connection.generation == run else { return }
                         let frame = try AgentChatFixture.transcript(target)
@@ -622,7 +708,8 @@ final class AgentChatModel {
         // that page. A full snapshot or replacement carries the current
         // question lifecycle; a reconnect delta is partial and leaves it alone.
         if frame.kind != .older { questionState.receive(frame.questionEvents, reset: frame.replacesConversation) }
-        reveal.receive(frame, previous: messages, animated: animateReplies && hasTranscript && !hadPreview)
+        reveal.receive(frame, previous: messages, animated: animateReplies && hasTranscript && !hadPreview && !quietFirstFrame)
+        quietFirstFrame = false
         // phren's own hook output lands with the person's turn, not as the reply.
         if awaitingReply, frame.messages.contains(where: { $0.line > submittedAfterLine && $0.role != .user && !$0.isHookContext }) { awaitingReply = false }
         if !connection.progressConnected, !frame.progressEvents.isEmpty || frame.replacesConversation { acceptProgress(frame) }
@@ -835,12 +922,22 @@ final class AgentChatModel {
             return (false, sent, rejected)
         }
     }
+    static func snapshot(_ session: LiveAgentSession, target: AgentChatTarget) async throws -> AgentChatTranscript {
+        #if DEBUG && targetEnvironment(simulator)
+        if AgentChatFixture.enabled {
+            if AgentChatFixture.latency { try await Task.sleep(for: .milliseconds(300)) }
+            return try AgentChatFixture.transcript(target)
+        }
+        #endif
+        return try await PhrenConnection.chatTranscript(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target)
+    }
     static func fetchPanes(_ session: LiveAgentSession) async throws -> AgentChatPanes {
         #if DEBUG && targetEnvironment(simulator)
         if AgentChatFixture.enabled {
             if ProcessInfo.processInfo.arguments.contains("--chat-opening-slow"), AgentChatFixture.reads == 0 {
                 try await Task.sleep(for: .seconds(6))
             }
+            if AgentChatFixture.latency { try await Task.sleep(for: .milliseconds(300)) }
             return try AgentChatFixture.panes(session)
         }
         #endif

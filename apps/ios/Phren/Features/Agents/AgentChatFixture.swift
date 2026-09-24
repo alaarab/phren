@@ -34,6 +34,10 @@ import UniformTypeIdentifiers
             UIPasteboard.general.string = "clipboard fixture text"
         }
     }
+    /// `--chat-latency`: a computer's round trip (about 300 ms over a
+    /// tailnet) before the pane list and before the transcript's first frame,
+    /// so the open journey measures what a real chat waits for.
+    static var latency: Bool { flag("--chat-latency") }
     static func beginStream(_ target: AgentChatTarget) {
         prepareClipboard()
         streamed.remove(target.id)

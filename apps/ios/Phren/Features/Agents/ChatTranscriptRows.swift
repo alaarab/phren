@@ -31,6 +31,16 @@ final class ChatRowLayout {
         scheduleRevision()
     }
 
+    var measured: Bool { !frames.isEmpty }
+
+    /// A conversation opens at its end: the band of the last measured row,
+    /// wherever the last visit left the scroll.
+    func resumeAtEnd() {
+        guard viewport > 0.5, let end = frames.values.map(\.maxY).max() else { return }
+        let band = Int((max(0, end - viewport) / viewport).rounded(.down))
+        if band != self.band { self.band = band }
+    }
+
     /// Rows more than two screens from the band that have a measured frame.
     /// A row never measured is drawn in full first.
     func distant(_ entries: [ChatTimelineEntry]) -> [String: CGFloat] {
@@ -102,6 +112,7 @@ struct ChatLiveTranscriptRows: View, Equatable {
                            active: active, distant: layout.distant(entries), layout: layout,
                            preview: preview).equatable()
             .onChange(of: timeline.revision) { _, _ in layout.retain(entries) }
+            .background { if !entries.isEmpty { Color.clear.onAppear { ChatJourney.firstRow() } } }
     }
 }
 

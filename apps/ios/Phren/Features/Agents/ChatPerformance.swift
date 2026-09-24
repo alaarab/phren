@@ -25,3 +25,33 @@ enum ChatPerformance {
         let start = begin(); defer { end(name, start) }; return content()
     }
 }
+
+/// The chat-open journey for `PerformanceCounters`: from the tap that opens
+/// a conversation to its first transcript row on screen. Each completed open
+/// adds its milliseconds to `journey.chat-first-row-ms` and one to
+/// `journey.chat-opens`, so a test reads the mean over the opens it made.
+@MainActor enum ChatJourney {
+    private static var startedAt: CFAbsoluteTime?
+    private static var endedAt: CFAbsoluteTime = 0
+    static func begin() {
+        guard PerformanceCounters.enabled else { return }
+        startedAt = CFAbsoluteTimeGetCurrent()
+    }
+    /// For an open that no tap started (Siri, a notification, the drawer).
+    static func beginIfIdle() { if startedAt == nil, CFAbsoluteTimeGetCurrent() - endedAt > 1 { begin() } }
+    static func cancel() { startedAt = nil }
+    /// The chat screen itself is up (`journey.chat-view-ms`), rows or not.
+    static func appeared() {
+        guard let started = startedAt else { return }
+        PerformanceCounters.bump("journey.chat-view-ms", by: Int(((CFAbsoluteTimeGetCurrent() - started) * 1_000).rounded()))
+        PerformanceCounters.bump("journey.chat-views")
+    }
+    static func firstRow() {
+        guard let started = startedAt else { return }
+        startedAt = nil; endedAt = CFAbsoluteTimeGetCurrent()
+        let milliseconds = Int(((CFAbsoluteTimeGetCurrent() - started) * 1_000).rounded())
+        PerformanceCounters.bump("journey.chat-first-row-ms", by: milliseconds)
+        PerformanceCounters.bump("journey.chat-opens")
+        print("[PhrenPerformance] chat first row after \(milliseconds)ms")
+    }
+}

@@ -25,7 +25,8 @@ struct AgentChatView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
     @Environment(\.liveSessionPreferences) private var preferencesStore
-    @State private var model = AgentChatModel()
+    /// From `AgentChatModels`: a conversation opened again keeps its rows.
+    @State var model: AgentChatModel
     @State private var sendTask: Task<Void, Never>?
     @State private var visible = false
     @State private var refresh = UUID()
@@ -265,10 +266,13 @@ struct AgentChatView: View {
             }
         }
         .onAppear {
+            ChatJourney.appeared(); ChatJourney.beginIfIdle()
             if !initialized {
                 initialized = true
-                if let initialTarget { model.choose(initialTarget, session: session) }
-                else if let initialPane { model.choose(initialPane, session: session) }
+                if let initialTarget, model.target != initialTarget { model.choose(initialTarget, session: session) }
+                else if let initialPane, model.target == nil || model.target != (try? initialPane.target(hostID: session.host.id, workspaceID: session.workspaceID, tabID: session.tab.id, muxID: session.host.muxID)) {
+                    model.choose(initialPane, session: session)
+                }
                 if startsDictation {
                     // Let the push finish first; the microphone prompt and the
                     // keyboard both fight a screen that is still sliding in.
@@ -296,7 +300,7 @@ struct AgentChatView: View {
                                stop: { sendTask = Task { await model.stop(session) } })
         }
         .onChange(of: requestedChild, initial: true) { _, _ in openRequestedChildIfReady() }
-        .onDisappear { visible = false; sendTask?.cancel(); dictation.cancelCleanupTask(); model.flushDrafts() }
+        .onDisappear { visible = false; ChatJourney.cancel(); sendTask?.cancel(); dictation.cancelCleanupTask(); model.flushDrafts() }
         .onChange(of: scenePhase) { _, phase in if phase != .active { sendTask?.cancel(); model.flushDrafts() } }
         .onChange(of: currentHost) { _, _ in sendTask?.cancel() }
         .onChange(of: reduceMotion || voiceOver, initial: true) { _, instant in

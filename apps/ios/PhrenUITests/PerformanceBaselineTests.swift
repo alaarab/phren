@@ -48,6 +48,77 @@ final class PerformanceBaselineTests: XCTestCase {
         }
     }
 
+    /// Tap to first transcript row by the app's own clock (`ChatJourney`,
+    /// read through the counters probe): the first open, then five reopens,
+    /// with each open building its model afresh (`--chat-fresh-models`, the
+    /// old behavior) or keeping it, without and with a simulated computer
+    /// round trip (`--chat-latency`).
+    @MainActor
+    func testChatOpenJourney() {
+        let configurations = [("fresh", ["--chat-heavy", "--chat-fresh-models"]), ("kept", ["--chat-heavy"]),
+                              ("fresh-latency", ["--chat-heavy", "--chat-latency", "--chat-fresh-models"]), ("kept-latency", ["--chat-heavy", "--chat-latency"])]
+        for (name, extra) in configurations {
+            let app = launchToComputer(extra: extra)
+            let row = app.buttons[chatRow], close = app.buttons["chat-close"]
+            var before = counters(app)
+            row.tap()
+            XCTAssertTrue(message(app).waitForExistence(timeout: 20))
+            reportJourney(name + "-first", before, counters(app))
+            close.tap()
+            XCTAssertTrue(row.waitForExistence(timeout: 10))
+            before = counters(app)
+            for _ in 0..<5 {
+                row.tap()
+                XCTAssertTrue(message(app).waitForExistence(timeout: 20))
+                close.tap()
+                XCTAssertTrue(row.waitForExistence(timeout: 10))
+            }
+            reportJourney(name + "-reopen", before, counters(app))
+            app.terminate()
+        }
+    }
+
+    /// The first open of Agents' top session, with and without the
+    /// prefetch Agents starts for its first few sessions (`--chat-prefetch`
+    /// lets it run against the fixture), over a simulated round trip.
+    @MainActor
+    func testChatOpenFromAgentsJourney() {
+        for (name, extra) in [("agents-cold", [String]()), ("agents-prefetched", ["--chat-prefetch"])] {
+            let app = XCUIApplication()
+            app.launchEnvironment["PHREN_PERFORMANCE_LOG"] = "1"
+            app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--all-sessions-fixture", "--native-chat-fixture",
+                                   "--session-pins-reset", "--chat-heavy", "--chat-latency"] + extra
+            let card = app.buttons["overview-chat:\(mac):herdr:default:w1:w1:t1"]
+            // The first launch after an install can open on the introduction.
+            for attempt in 0..<2 {
+                app.launch()
+                let agents = app.tabBars.buttons["Agents"]
+                XCTAssertTrue(agents.waitForExistence(timeout: 10))
+                agents.tap()
+                if card.waitForExistence(timeout: attempt == 0 ? 12 : 25) { break }
+                app.terminate()
+            }
+            XCTAssertTrue(card.exists)
+            // Time for the prefetch's two round trips; the cold run waits the same.
+            sleep(3)
+            let before = counters(app)
+            card.tap()
+            XCTAssertTrue(message(app).waitForExistence(timeout: 20))
+            reportJourney(name, before, counters(app))
+            app.terminate()
+        }
+    }
+
+    private func reportJourney(_ name: String, _ before: [String: Int], _ after: [String: Int]) {
+        let opens = (after["journey.chat-opens"] ?? 0) - (before["journey.chat-opens"] ?? 0)
+        let total = (after["journey.chat-first-row-ms"] ?? 0) - (before["journey.chat-first-row-ms"] ?? 0)
+        XCTAssertGreaterThan(opens, 0, "Each open records its first row")
+        let view = (after["journey.chat-view-ms"] ?? 0) - (before["journey.chat-view-ms"] ?? 0)
+        let views = (after["journey.chat-views"] ?? 0) - (before["journey.chat-views"] ?? 0)
+        print(String(format: "PHREN_JOURNEY %@ opens=%d screen_ms=%.0f first_row_ms=%.0f", name, opens,
+                     Double(view) / Double(max(views, 1)), Double(total) / Double(max(opens, 1))))
+    }
+
     /// Three swipes down into the heavy transcript's history and three back up.
     @MainActor
     func testHeavyChatSwipes() {

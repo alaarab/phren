@@ -104,6 +104,9 @@ struct ChatAgentSwitcher: View {
             // was reached without it (Spotlight, Siri), start it here.
             if scenePhase == .active { overview.ensureRunning(hosts: hosts) }
         }
+        .onChange(of: overview.ready, initial: true) { _, ready in
+            if ready { AgentChatPrefetch.warm(overview.screen, excluding: session?.id) }
+        }
     }
 
     private var iconGroup: some View {
