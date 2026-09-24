@@ -8,7 +8,7 @@ let package = Package(
     dependencies: [
         .package(path: "../PhrenKit"),
         .package(url: "https://github.com/apple/swift-nio-ssh.git", exact: "0.15.0"),
-        .package(url: "https://github.com/apple/swift-nio.git", exact: "2.102.0"),
+        .package(url: "https://github.com/apple/swift-nio.git", exact: "2.103.0"),
         .package(url: "https://github.com/apple/swift-crypto.git", exact: "4.5.2"),
     ],
     targets: [
