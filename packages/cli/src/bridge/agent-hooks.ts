@@ -95,7 +95,7 @@ export class AgentHooks {
    * from the pane's own numbered lines, whose answers gain an Enter, and
    * `questions` carries a released AskUserQuestion's normalized question set
    * with the index currently being answered. */
-  private terminalPrompts = new Map<string, { tool: string; message: string; choice?: TerminalChoice; questions?: TerminalQuestion[]; questionIndex?: number; dialog?: boolean; at: number }>();
+  private terminalPrompts = new Map<string, { tool: string; message: string; choice?: TerminalChoice; questions?: TerminalQuestion[]; questionIndex?: number; dialog?: boolean; released?: boolean; at: number }>();
   /** The last time each pane's terminal lines were read for a dialog, so a
    * status tick reads them at most once per three seconds per pane. */
   private dialogReads = new Map<string, number>();
@@ -114,6 +114,10 @@ export class AgentHooks {
   readonly overview = new ApprovalWatchLeases();
   private server?: Server;
   private pushBindings = new PushBindingStore();
+  /** Held asks that were pushed: action -> when the notification expires. */
+  private pushedHolds = new Map<string, number>();
+  /** Pushed asks whose hold ended with the request left in the terminal. */
+  private releasedHolds = new Map<string, { action: string; expiresAt: number }>();
   /** Terminal dialogs pushed to phones: by pane, the dialog last pushed; by
    * action, what an answer from the notification types. */
   private dialogPushes = new Map<string, { action: string; title: string }>();
@@ -361,7 +365,9 @@ export class AgentHooks {
     // by the pane's numbered lines; it is cleared only when the pane stops
     // waiting for it.
     if (entry?.questions?.length) { if (!active) { this.terminalPrompts.delete(key); this.passwords.delete(key); } return; }
-    if (entry && !entry.dialog) return;
+    // A released permission request that carried its own choices keeps them;
+    // one without (a Bash or MCP call) reads the pane's rows below.
+    if (entry && !entry.dialog && entry.choice && !entry.released) return;
     if (!active) {
       if (entry) this.terminalPrompts.delete(key);
       this.passwords.delete(key);
@@ -374,10 +380,19 @@ export class AgentHooks {
     const text = await this.paneLines(target);
     this.passwords.set(key, passwordLine(text));
     while (this.passwords.size > 128) this.passwords.delete(this.passwords.keys().next().value!);
-    if (entry && !entry.dialog) return;
     // Codex draws "> 1. Yes, proceed (y)" rows; the other fallbacks number
     // rows without a key in the label.
     const dialog = target.source === "codex" ? visibleTerminalChoice(text) : numberedDialog(text);
+    if (entry && !entry.dialog) {
+      // The permission the pane still shows after its hook let go: keep the
+      // request's own details and answer it with the dialog's rows, so the
+      // phone can approve it long after the hold ended, as Moshi does. Not a
+      // `dialog`: Claude takes a row's digit at once, and an Enter after it
+      // could land on the next permission.
+      if (dialog?.title) { entry.choice = dialog; entry.released = true; }
+      else if (entry.released) { delete entry.choice; delete entry.released; }
+      return;
+    }
     if (!dialog?.title) { if (entry) this.terminalPrompts.delete(key); return; }
     this.terminalPrompts.set(key, { tool: "Question", message: dialog.title, choice: dialog, dialog: true, at: now });
     while (this.terminalPrompts.size > 64) this.terminalPrompts.delete(this.terminalPrompts.keys().next().value!);
@@ -540,6 +555,14 @@ export class AgentHooks {
       const reported = object(pane.agent_session);
       return reported.kind !== "id" || (reported.agent === p.target.source && reported.value === p.target.session);
     })).map(p => p.target.pane));
+    // A permission or dialog the pane still draws after its hook let go.
+    for (const [key, entry] of this.terminalPrompts) {
+      if (!entry.choice || entry.questions?.length || Date.now() - entry.at > 900_000) continue;
+      const target = JSON.parse(key) as Target;
+      if (target.server !== server) continue;
+      if (panes.some(pane => pane.pane_id === target.pane && pane.workspace_id === target.workspace && pane.tab_id === target.tab
+        && pane.agent === target.source && ["waiting", "blocked"].includes(String(pane.agent_status)))) pending.add(target.pane);
+    }
     for (const pane of panes) {
       if (pane.agent !== "opencode") continue;
       const reported = object(pane.agent_session);
@@ -623,6 +646,14 @@ export class AgentHooks {
     if (!linked) throw new BridgeError(409, "This approval is no longer pending.");
     const pending = this.pending.get(linked.action);
     if (pending) { await this.answer(pending.target, linked.action, decision); return; }
+    const released = [...this.releasedHolds].find(([, hold]) => hold.action === linked.action);
+    if (released && !this.dialogActions.has(linked.action)) {
+      // The hold just ended: read the pane now rather than wait for the tick.
+      const target = JSON.parse(released[0]) as Target;
+      await this.syncTerminalDialog(target, true).catch(() => {});
+      const entry = this.terminalPrompts.get(released[0]);
+      if (entry?.choice?.title) this.adoptReleasedHold(released[0], target, entry.choice, entry.choice.title);
+    }
     if (this.dialogActions.has(linked.action)) { await this.answerDialog(linked.action, decision as "approve" | "deny"); return; }
     const held = this.opencode.get(linked.action);
     // The binding is the single-use proof for a worker's ask, whose parent
@@ -631,6 +662,16 @@ export class AgentHooks {
     if (held?.target) { await this.answer(held.target, linked.action, decision); return; }
     throw new BridgeError(409, "This approval is no longer pending.");
   }
+  /** Where a pushed ask lives, without answering it: the phone opens that
+   * session's details when the notification itself is tapped. */
+  pushTarget(binding: string): Target | undefined {
+    const action = this.pushBindings.peek(binding)?.action;
+    if (!action) return undefined;
+    const held = this.pending.get(action)?.target ?? this.dialogActions.get(action)?.target ?? this.opencode.get(action)?.target;
+    if (held) return held;
+    const released = [...this.releasedHolds].find(([, hold]) => hold.action === action);
+    return released ? JSON.parse(released[0]) as Target : undefined;
+  }
   /** Every waiting pane on this computer, each Hook tick, whether or not a
    * phone watches: an approval an agent draws as a numbered dialog in its
    * terminal (Claude's fallback prompts, Codex, OpenCode, Copilot) has no
@@ -638,33 +679,50 @@ export class AgentHooks {
    * closed. Each dialog is pushed once; a pane that stops waiting drops it. */
   async observeWaitingPanes(server: string, panes: Json[], resolve: (pane: Json) => Promise<Target | undefined>): Promise<void> {
     const waiting = new Set<string>();
-    if (this.push.available) {
-      for (const pane of panes) {
-        if (!pane.agent || !["waiting", "blocked"].includes(String(pane.agent_status))) continue;
-        const target = await resolve(pane).catch(() => undefined);
-        if (!target) continue;
-        const key = JSON.stringify(target);
-        waiting.add(key);
-        // A request its own hook already holds was pushed on arrival.
-        if ([...this.pending.values()].some(held => JSON.stringify(held.target) === key)) continue;
-        await this.syncTerminalDialog(target, true).catch(() => {});
-        const entry = this.terminalPrompts.get(key);
-        const title = entry?.dialog ? entry.choice?.title : undefined;
-        if (!entry?.choice || !title) { this.dropDialogPush(key); continue; }
-        if (this.dialogPushes.get(key)?.title === title) continue;
-        this.dropDialogPush(key);
-        const action = `dialog-${randomUUID()}`, binding = randomUUID(), expiresAt = Date.now() + DIALOG_PUSH_MS;
-        this.dialogPushes.set(key, { action, title });
-        this.dialogActions.set(action, { target, choice: entry.choice, expiresAt });
-        this.pushBindings.add(binding, { action, expiresAt });
-        void this.push.notify({ binding, provider: target.source, question: false, expiresAt: new Date(expiresAt).toISOString(),
-          title: `${AGENT_NAMES[target.source] ?? "An agent"} needs your approval`, message: title.slice(0, 1_000) })
-          .then(delivered => { if (!delivered) this.dropDialogPush(key); }).catch(() => this.dropDialogPush(key));
+    for (const pane of panes) {
+      if (!pane.agent || !["waiting", "blocked"].includes(String(pane.agent_status))) continue;
+      const target = await resolve(pane).catch(() => undefined);
+      if (!target) continue;
+      const key = JSON.stringify(target);
+      waiting.add(key);
+      // A request its own hook already holds was pushed on arrival.
+      if ([...this.pending.values()].some(held => JSON.stringify(held.target) === key)) continue;
+      // Read the dialog even with no push device: the overview marks the
+      // tab as needing permission from it, and the phone answers it there.
+      await this.syncTerminalDialog(target, true).catch(() => {});
+      if (!this.push.available) continue;
+      const entry = this.terminalPrompts.get(key);
+      const title = entry?.dialog || entry?.released ? entry.choice?.title : undefined;
+      if (!entry?.choice || !title) { this.dropDialogPush(key); continue; }
+      if (this.dialogPushes.get(key)?.title === title) continue;
+      this.dropDialogPush(key);
+      // Its own notification is already on the phone: answer that one.
+      if (this.adoptReleasedHold(key, target, entry.choice, title)) continue;
+      const action = `dialog-${randomUUID()}`, binding = randomUUID(), expiresAt = Date.now() + DIALOG_PUSH_MS;
+      this.dialogPushes.set(key, { action, title });
+      this.dialogActions.set(action, { target, choice: entry.choice, expiresAt });
+      this.pushBindings.add(binding, { action, expiresAt });
+      void this.push.notify({ binding, provider: target.source, question: false, expiresAt: new Date(expiresAt).toISOString(),
+        title: `${AGENT_NAMES[target.source] ?? "An agent"} needs your approval`, message: title.slice(0, 1_000) })
+        .then(delivered => { if (!delivered) this.dropDialogPush(key); }).catch(() => this.dropDialogPush(key));
+    }
+    for (const [key, hold] of this.releasedHolds) {
+      // Answered in the terminal, or expired: the notification can no longer act.
+      if ((!waiting.has(key) && JSON.parse(key).server === server) || hold.expiresAt <= Date.now()) {
+        this.dropPushBindings(hold.action); this.releasedHolds.delete(key);
       }
     }
     for (const [key, pushed] of this.dialogPushes) {
       if (!waiting.has(key) && JSON.parse(key).server === server) { this.dialogActions.delete(pushed.action); this.dropPushBindings(pushed.action); this.dialogPushes.delete(key); }
     }
+  }
+  private adoptReleasedHold(key: string, target: Target, choice: TerminalChoice, title: string): boolean {
+    const hold = this.releasedHolds.get(key);
+    this.releasedHolds.delete(key);
+    if (!hold || hold.expiresAt <= Date.now()) return false;
+    this.dialogPushes.set(key, { action: hold.action, title });
+    this.dialogActions.set(hold.action, { target, choice, expiresAt: hold.expiresAt });
+    return true;
   }
   private dropDialogPush(key: string) {
     const pushed = this.dialogPushes.get(key);
@@ -759,19 +817,30 @@ export class AgentHooks {
         this.dialogReads.delete(JSON.stringify(target));
         const conductor = body.event === "PermissionRequest" ? conductorCall(String(body.tool || "action"), body.input) : undefined;
         const locallyWatched = this.watching.has(JSON.stringify(target)) || this.overview.has(target.server);
-        const timer = setTimeout(() => { this.pending.delete(action); this.dropPushBindings(action); this.rememberTerminalPrompt(target, body); res.end("{}"); }, APPROVAL_HOLD_MS);
+        // When the hold ends the request stays in the terminal. A pushed
+        // notification keeps working: its binding waits for the pane's dialog
+        // and then answers that, instead of going dead with the hold.
+        let released = false;
+        const timer = setTimeout(() => {
+          released = true; this.pending.delete(action); this.rememberTerminalPrompt(target, body);
+          if (this.pushedHolds.has(action)) this.releasedHolds.set(JSON.stringify(target), { action, expiresAt: this.pushedHolds.get(action)! });
+          this.pushedHolds.delete(action);
+          res.end("{}");
+        }, APPROVAL_HOLD_MS);
         const expiresAt = new Date(Date.now() + APPROVAL_HOLD_MS).toISOString();
         const { choice, title } = permissionPrompt(String(body.tool || "action"), body.input);
         this.pending.set(action, { target, response: res, tool: String(body.tool || "action").slice(0, 200), input: body.input, title,
           message: JSON.stringify(body.input || {}, null, 2).slice(0, 32_768), ...(choice ? { choice } : {}), expiresAt, timer,
           ...(conductor ? { conductor } : {}) });
-        res.on("close", () => { clearTimeout(timer); this.pending.delete(action); this.dropPushBindings(action); });
+        res.on("close", () => { clearTimeout(timer); this.pending.delete(action); this.pushedHolds.delete(action); if (!released) this.dropPushBindings(action); });
         if (this.push.available) {
-          const binding = randomUUID();
-          this.pushBindings.add(binding, { action, expiresAt: Date.parse(expiresAt) });
-          void this.push.notify({ binding, provider: target.source, question: body.tool === "AskUserQuestion", expiresAt }).catch(() => false).then(delivered => {
+          const binding = randomUUID(), pushExpiresAt = Date.now() + DIALOG_PUSH_MS;
+          this.pushBindings.add(binding, { action, expiresAt: pushExpiresAt });
+          this.pushedHolds.set(action, pushExpiresAt);
+          void this.push.notify({ binding, provider: target.source, question: body.tool === "AskUserQuestion",
+            expiresAt: new Date(pushExpiresAt).toISOString() }).catch(() => false).then(delivered => {
             if (!delivered) {
-              this.pushBindings.consume(binding);
+              this.pushBindings.consume(binding); this.pushedHolds.delete(action);
               const pending = this.pending.get(action);
               if (!locallyWatched && pending) { clearTimeout(pending.timer); this.pending.delete(action); res.end("{}"); }
             }
