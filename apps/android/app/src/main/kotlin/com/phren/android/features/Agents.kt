@@ -451,8 +451,9 @@ private fun ComputerRow(computer: SessionOverviewMonitor.ComputerRow) {
             PhrenMenuRow(computer.host.name, SF("desktopcomputer"), subtitle = if (computer.connecting) "Connecting…" else computer.host.address,
                 titleColor = hostColor(computer.host))
         }
-        if (computer.message != null || computer.slow) {
-            val label = if (computer.needsVerification) "Verify" else if (computer.message != null) "Offline" else "Slow"
+        if (computer.message != null || computer.slow || computer.busy) {
+            // Busy: the Hook answers but its overview lags. Its sessions stay usable.
+            val label = if (computer.needsVerification) "Verify" else if (computer.message != null) "Offline" else if (computer.busy) "Busy" else "Slow"
             Row(Modifier.padding(start = 6.dp).phrenIdentifier("computer-status:${computer.host.id}"), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                 Box(Modifier.size(7.dp).background(if (computer.message != null) PhrenTheme.warning else PhrenTheme.textMuted, CircleShape))

@@ -286,6 +286,50 @@ final class SessionOverviewTests: XCTestCase {
         run.cancel(); await run.value
     }
 
+    /// Seen 2026-09-24: a saturated Mac mini answered /v1/health in under a
+    /// second while /v1/workspaces outlasted the phone's 20 s wait. The phone
+    /// called it offline and disabled every tile, though chat and terminal
+    /// would both have worked. A computer whose Hook answers is busy, not gone.
+    func testBusyComputerKeepsItsSessionsUsableUntilTheOverviewCatchesUp() async throws {
+        let first = try host("Mini")
+        let working = try snapshot("working")
+        var overloaded = false, healthAnswers = true
+        let model = SessionOverviewMonitor {
+            LiveHostMonitor(pollInterval: .milliseconds(20), fetch: { _, _ in
+                if overloaded { throw LiveConnectionError.timeout }
+                return working
+            }, stream: nil, probe: { _ in if !healthAnswers { throw LiveConnectionError.disconnected } })
+        }
+        let run = Task { await model.run(hosts: [first]) }
+        await eventually { model.connectedCount(at: .now) == 1 }
+        overloaded = true
+        let monitor = model.computers[0].monitor
+        await eventually { monitor.busy }
+        // Long past the answer's freshness: only the Hook's health keeps it live.
+        monitor.lastUpdated = .now.addingTimeInterval(-91)
+        XCTAssertNil(monitor.message, "a computer whose Hook answers is not offline")
+        XCTAssertTrue(monitor.isLive(at: .now), "its last known sessions stay tappable")
+        XCTAssertFalse(monitor.isStale(at: .now))
+        XCTAssertEqual(groups(model).map(\.title), ["Working"], "its sessions keep their place instead of dropping to Last seen")
+        XCTAssertTrue(groups(model).first?.fresh == true)
+        await eventually { model.screen.computers.first?.busy == true }
+        XCTAssertNil(model.screen.computers.first?.message)
+        XCTAssertFalse(model.screen.computers.first?.connecting ?? true, "busy, not connecting")
+
+        // A computer that doesn't answer at all is still offline.
+        healthAnswers = false
+        await eventually { monitor.message != nil }
+        XCTAssertFalse(monitor.busy)
+        XCTAssertFalse(monitor.isLive(at: .now))
+        XCTAssertEqual(groups(model).map(\.title), ["Last seen"])
+
+        // The overview catches up: live again, details and all.
+        overloaded = false; healthAnswers = true
+        await eventually { monitor.message == nil && !monitor.busy && monitor.isFresh(at: .now) }
+        XCTAssertEqual(groups(model).map(\.title), ["Working"])
+        run.cancel(); await run.value
+    }
+
     func testRemovingAndReconfiguringAComputerDropsItsPreviousDestination() async throws {
         let first = try host("Mac"), second = try host("Linux")
         let working = try snapshot("working")
