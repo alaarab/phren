@@ -12,7 +12,7 @@ vi.mock("node:fs/promises", async importOriginal => {
   return { ...fs, copyFile: async (src: string, dst: string) => src.endsWith("bridge-hook.mjs") ? fs.writeFile(dst, "bundle fixture") : fs.copyFile(src, dst) };
 });
 vi.mock("./transport.js", () => ({ health: async () => ({ version: "0.2.14" }) }));
-import { install, OPENCODE_PLUGIN_MARKER, opencodePluginNeedsWrite } from "./install.js";
+import { install, launchDomain, OPENCODE_PLUGIN_MARKER, opencodePluginNeedsWrite } from "./install.js";
 
 beforeEach(async () => {
   state.home = await mkdtemp("/tmp/phren-install-");
@@ -101,4 +101,41 @@ it("replaces the OpenCode plugin copies it wrote and leaves a user's own copy al
   expect(opencodePluginNeedsWrite(shipped, shipped)).toBe(false);
   expect(opencodePluginNeedsWrite(`${OPENCODE_PLUGIN_MARKER} and replaced on every update.\nexport const v = 1;\n`, shipped)).toBe(true);
   expect(opencodePluginNeedsWrite("export const mine = true;\n", shipped)).toBe(false);
+});
+
+it("names the launchd domain for a session", () => {
+  expect(launchDomain(501, true)).toBe("gui/501");
+  expect(launchDomain(501, false)).toBe("user/501");
+});
+
+it("bootstraps into gui/<uid> when someone is logged in at the screen", async () => {
+  const uid = process.getuid!();
+  await install("0.2.14");
+  const calls = state.exec.mock.calls.filter(([file]) => file === "launchctl").map(([, args]) => (args as string[]).slice(0, 2).join(" "));
+  expect(calls).toEqual([`bootout gui/${uid}/com.phren.hook`, `bootout user/${uid}/com.phren.hook`, `print gui/${uid}`,
+    `bootstrap gui/${uid}`, `kickstart gui/${uid}/com.phren.hook`]);
+});
+
+it("falls back to user/<uid> over an SSH login with no GUI session and says how to move it", async () => {
+  const uid = process.getuid!();
+  state.exec.mockImplementation(async (file: string, args: string[]) => {
+    if (file === "launchctl" && args[0] === "print") throw Object.assign(new Error("Could not find domain"), { stderr: "Bad request.\n" });
+    return { stdout: "", stderr: "" };
+  });
+  const log = vi.spyOn(console, "log").mockImplementation(() => {});
+  await install("0.2.14");
+  expect(state.exec.mock.calls.some(([file, args]) => file === "launchctl" && (args as string[])[0] === "bootstrap" && (args as string[])[1] === `user/${uid}`)).toBe(true);
+  expect(log.mock.calls.flat().join("\n")).toContain(`runs in user/${uid}. After a screen login, run phren bridge install again`);
+});
+
+it("prints the exact launchctl commands when bootstrap fails", async () => {
+  const uid = process.getuid!();
+  state.exec.mockImplementation(async (file: string, args: string[]) => {
+    if (file === "launchctl" && args[0] === "bootstrap") throw Object.assign(new Error("failed"), { stderr: "Bootstrap failed: 125: Domain does not support specified action\n" });
+    return { stdout: "", stderr: "" };
+  });
+  const error = await install("0.2.14").catch((failure: Error) => failure);
+  expect(String(error)).toContain(`launchctl could not start the Phren Hook in gui/${uid}: Bootstrap failed: 125`);
+  expect(String(error)).toContain(`launchctl kickstart -k gui/${uid}/com.phren.hook`);
+  expect(String(error)).toContain(`launchctl bootstrap gui/${uid} '${path.join(state.home, "Library/LaunchAgents/com.phren.hook.plist")}'`);
 });

@@ -109,23 +109,48 @@ async function activate(version: string) {
   await rename(next, path.join(root, "current"));
 }
 
+/** The launchd domain for the LaunchAgent: the GUI session when someone is
+ *  logged in at the screen, else the per-user background domain an SSH login
+ *  has (gui/<uid> does not exist there, so a bootstrap into it fails). */
+export function launchDomain(uid: number, guiSession: boolean): string {
+  return guiSession ? `gui/${uid}` : `user/${uid}`;
+}
+
+/** The commands that restart the Hook in `domain`, printed when launchd refuses. */
+export function launchCommands(domain: string, plist: string): string[] {
+  return [`launchctl bootout ${domain}/${label}`, `launchctl bootstrap ${domain} ${quote(plist)}`, `launchctl kickstart -k ${domain}/${label}`];
+}
+
+const launchAgentPlist = () => path.join(homedir(), "Library/LaunchAgents", `${label}.plist`);
+async function guiSession(uid: number): Promise<boolean> {
+  return exec("launchctl", ["print", `gui/${uid}`]).then(() => true, () => false);
+}
+
 async function stopService() {
-  if (process.platform === "darwin") await exec("launchctl", ["bootout", `gui/${process.getuid!()}/${label}`]).catch(() => {});
+  if (process.platform === "darwin") {
+    // Either domain may hold the job from an earlier install.
+    for (const gui of [true, false]) await exec("launchctl", ["bootout", `${launchDomain(process.getuid!(), gui)}/${label}`]).catch(() => {});
+  }
   else await exec("systemctl", ["--user", "stop", unit]).catch(() => {});
 }
 async function startService() {
   if (process.platform === "darwin") {
+    const uid = process.getuid!(), gui = await guiSession(uid), domain = launchDomain(uid, gui);
     // bootout returns before launchd finishes releasing the old job. A valid
     // immediate bootstrap can transiently fail with EIO during an update.
     for (let attempt = 0; ; attempt++) {
       try {
-        await exec("launchctl", ["bootstrap", `gui/${process.getuid!()}`, path.join(homedir(), "Library/LaunchAgents", `${label}.plist`)]);
+        await exec("launchctl", ["bootstrap", domain, launchAgentPlist()]);
         break;
       } catch (error) {
-        if (attempt >= 5 || !String((error as { stderr?: string }).stderr).includes("Bootstrap failed: 5:")) throw error;
-        await new Promise(resolve => setTimeout(resolve, 200 * (attempt + 1)));
+        const stderr = String((error as { stderr?: string }).stderr ?? "");
+        if (attempt < 5 && stderr.includes("Bootstrap failed: 5:")) { await new Promise(resolve => setTimeout(resolve, 200 * (attempt + 1))); continue; }
+        throw new Error(`launchctl could not start the Phren Hook in ${domain}: ${stderr.trim() || (error as Error).message}\nTo start it by hand:\n  ${launchCommands(domain, launchAgentPlist()).join("\n  ")}`);
       }
     }
+    // RunAtLoad does not always fire for a job bootstrapped from an SSH login.
+    await exec("launchctl", ["kickstart", `${domain}/${label}`]).catch(() => {});
+    if (!gui) console.log(`No one is logged in at this Mac's screen, so the Phren Hook runs in ${domain}. After a screen login, run phren bridge install again to move it into gui/${uid}.`);
   }
   else { await exec("systemctl", ["--user", "daemon-reload"]); await exec("systemctl", ["--user", "enable", "--now", unit]); }
 }
@@ -177,7 +202,12 @@ export async function install(version: string, noService = false): Promise<void>
         if (ready) break;
         await new Promise(resolve => setTimeout(resolve, 200));
       }
-      if (!ready) throw new Error("The new Phren Hook did not become ready.");
+      if (!ready) {
+        const uid = process.getuid!(), domain = process.platform === "darwin" ? launchDomain(uid, await guiSession(uid)) : undefined;
+        throw new Error(`The new Phren Hook did not become ready. See ${serviceLog}. ` + (domain
+          ? `To start it by hand:\n  ${launchCommands(domain, launchAgentPlist()).join("\n  ")}`
+          : `Check systemctl --user status ${unit}.`));
+      }
     }
     await applyAgentHooks(hookEdits);
     if (await applyOpencodePlugin()) {
@@ -214,7 +244,7 @@ export async function install(version: string, noService = false): Promise<void>
 
 export async function uninstall() {
   await stopService();
-  if (process.platform === "darwin") await unlink(path.join(homedir(), "Library/LaunchAgents", `${label}.plist`)).catch(() => {});
+  if (process.platform === "darwin") await unlink(launchAgentPlist()).catch(() => {});
   else { await exec("systemctl", ["--user", "disable", unit]).catch(() => {}); await unlink(path.join(homedir(), ".config/systemd/user", unit)).catch(() => {}); await exec("systemctl", ["--user", "daemon-reload"]).catch(() => {}); }
   await applyAgentHooks(await planAgentHooks(path.join(bridgeRoot(), "current/bridge-hook.mjs"), true));
   await applyOpencodePlugin(true);

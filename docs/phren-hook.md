@@ -29,6 +29,14 @@ inaccessible through SSH forwarding. Update the helper and authorization lines
 on every computer before installing the updated phone app, then reconnect SSH.
 An older helper produces an explicit update instruction in the app.
 
+On macOS the installer loads the LaunchAgent into `gui/<uid>` when someone is
+logged in at the screen. Over an SSH login with no screen session that domain
+does not exist, so it loads into `user/<uid>` instead and says so; run
+`bridge install` again after a screen login to move it into `gui/<uid>`. When
+launchd refuses the job or the Hook does not become ready, the error prints the
+`launchctl bootout`, `bootstrap` and `kickstart -k` lines for the domain it
+used.
+
 The forced command is a small POSIX shell gateway. For the phone's byte pipe it
 hands off to `socat - UNIX-CONNECT:<socket>` when socat is installed, or to
 `nc -U <socket>` when that nc understands Unix sockets, and only otherwise
