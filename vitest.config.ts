@@ -32,6 +32,7 @@ export default defineConfig({
     include: [
       "packages/cli/src/**/*.test.ts",
       "packages/code/src/**/*.test.ts",
+      "packages/push-relay/src/**/*.test.ts",
       "packages/vscode/test/**/*.test.ts",
       // experimental/agent is a private, unshipped R&D package (21.4K LOC,
       // 3 commits in 3.5 months) — its 331 tests are intentionally excluded

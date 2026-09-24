@@ -1,0 +1,7 @@
+# Caddy obtains and renews the TLS certificate for this name by itself.
+push.example.com {
+	reverse_proxy 127.0.0.1:8787
+	request_body {
+		max_size 16KB
+	}
+}

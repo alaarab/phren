@@ -1,0 +1,22 @@
+[Unit]
+Description=phren push relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=phren-relay
+# PHREN_RELAY_SECRET, APNS_KEY_ID, APNS_TEAM_ID, APNS_KEY_FILE, APNS_TOPIC, PORT
+EnvironmentFile=/etc/phren-push-relay.env
+ExecStart=/usr/bin/node /opt/phren-push-relay/dist/server.js
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadOnlyPaths=/opt/phren-push-relay /etc/phren-push-relay
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target
