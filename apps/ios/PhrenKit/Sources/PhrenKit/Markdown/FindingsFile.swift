@@ -189,7 +189,11 @@ public struct FindingsFile: Sendable {
         let today = String(nowIso.prefix(10))
 
         var normalizedLearning = learning
-        if extractFindingType("- " + normalizedLearning) == nil, let type = options.type {
+        // core/finding.ts:16-28 `applyFindingTypePrefix`: the test is anchored
+        // and accepts any bracketed tag. `extractFindingType` is unanchored, so a
+        // `[bug]` mid-sentence suppressed the caller's type, and it knows only the
+        // decay types, so `[tradeoff]`/`[architecture]` were tagged twice.
+        if let type = options.type, !Self.findingTagPrefix.test(normalizedLearning) {
             normalizedLearning = "[\(type.rawValue)] \(normalizedLearning)"
         }
 
@@ -391,6 +395,9 @@ public struct FindingsFile: Sendable {
     static func normalizeContent(_ joined: String) -> String {
         trimEnd(JSRegex(#"\n{3,}"#).replaceAll(joined, with: "\n\n")) + "\n"
     }
+
+    /// core/finding.ts:16 `FINDING_TAG_PREFIX_RE`.
+    static let findingTagPrefix = JSRegex(#"^\s*\[[^\]]+\]\s*"#)
 
     static func randomHexId() -> String {
         // crypto.randomBytes(4).toString("hex")
