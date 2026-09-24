@@ -541,6 +541,38 @@ describe("pruneDeadMemories TTL promotion", () => {
     expect(queue).not.toContain("Still current retry budget note");
   });
 
+  // The prune resolved the policy once against the global config, so a project's
+  // own retentionDays / ttlDays override was ignored by nightly maintenance.
+  it("honors a per-project retention override instead of the global window", async () => {
+    const { writeProjectConfig } = await import("../project-config.js");
+    const LONG = "long-retention";
+    const oldDate = new Date(Date.now() - 400 * 86_400_000).toISOString().slice(0, 10);
+    fs.mkdirSync(path.join(phrenPath, LONG), { recursive: true });
+    fs.writeFileSync(
+      path.join(phrenPath, LONG, "FINDINGS.md"),
+      [`# ${LONG} Findings`, "", `## ${oldDate}`, "", "- Archival decision worth keeping for years", ""].join("\n"),
+    );
+    // Global default is 365 days; this project keeps findings for ten years.
+    writeProjectConfig(phrenPath, LONG, { config: { retentionPolicy: { retentionDays: 3650 } } });
+
+    const result = pruneDeadMemories(phrenPath, LONG);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.pruned).toBe(0);
+    expect(fs.readFileSync(path.join(phrenPath, LONG, "FINDINGS.md"), "utf8")).toContain("Archival decision worth keeping for years");
+  });
+
+  it("honors a per-project ttlDays override", async () => {
+    const { writeProjectConfig } = await import("../project-config.js");
+    seedExpiredFinding();
+    writeProjectConfig(phrenPath, PROJECT, { config: { retentionPolicy: { ttlDays: 100_000 } } });
+
+    const result = pruneDeadMemories(phrenPath, PROJECT);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.ttlExpired).toBe(0);
+  });
+
   it("reports but does not write in dry-run", () => {
     seedExpiredFinding();
     const result = pruneDeadMemories(phrenPath, PROJECT, true);

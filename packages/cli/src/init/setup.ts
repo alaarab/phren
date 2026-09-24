@@ -82,8 +82,15 @@ function normalizeProjects(raw: unknown): string[] {
   return raw.map((entry) => String(entry));
 }
 
-function profileLooksRealProject(project: string): boolean {
-  return project === "global" || !LEGACY_SAMPLE_PROJECTS.has(project);
+/**
+ * The sample names are also ordinary repo names, so the name alone is not
+ * evidence. phren stopped shipping the sample directories: an entry with no
+ * project directory in the store is the leftover sample, one with a directory
+ * is a real project.
+ */
+function profileLooksRealProject(phrenPath: string, project: string): boolean {
+  if (project === "global" || !LEGACY_SAMPLE_PROJECTS.has(project)) return true;
+  return fs.existsSync(path.join(phrenPath, project));
 }
 
 function pruneLegacySampleProjectsFromProfiles(phrenPath: string): { filesUpdated: number; removed: number } {
@@ -99,7 +106,7 @@ function pruneLegacySampleProjectsFromProfiles(phrenPath: string): { filesUpdate
       const parsed = loadYamlDocument(fs.readFileSync(fullPath, "utf8"), (text) => yaml.load(text, { schema: yaml.CORE_SCHEMA }));
       if (!isRecord(parsed)) continue;
       const originalProjects = normalizeProjects(parsed.projects);
-      const nextProjects = originalProjects.filter(profileLooksRealProject);
+      const nextProjects = originalProjects.filter((project) => profileLooksRealProject(phrenPath, project));
       if (nextProjects.length === originalProjects.length) continue;
       removed += originalProjects.length - nextProjects.length;
       const nextData = { ...parsed, projects: nextProjects };
@@ -419,8 +426,10 @@ export function repairPreexistingInstall(
   return {
     profileFilesUpdated: profileRepair.filesUpdated,
     removedLegacyProjects: profileRepair.removed,
-    createdContextFile: ensureGeneratedContextFile(preferredHome),
-    createdRootMemory: ensureGeneratedRootMemory(preferredHome),
+    // Both live in the user's home, so they are self-heal surfaces: `assisted`
+    // and `manual` do not re-create them.
+    createdContextFile: caps.selfHeal ? ensureGeneratedContextFile(preferredHome) : false,
+    createdRootMemory: caps.selfHeal ? ensureGeneratedRootMemory(preferredHome) : false,
     createdGlobalAssets,
     createdRuntimeAssets,
     createdFeatureDefaults,
@@ -811,7 +820,11 @@ export function updateMachinesYaml(phrenPath: string, machine?: string, profile?
       hasExistingMapping = Object.prototype.hasOwnProperty.call(loaded, machineName);
     }
   } catch (err: unknown) {
+    // Not "no existing mapping": setMachineProfile refuses to rewrite the file,
+    // and the user needs to hear why the mapping did not change.
     logger.debug("setup", `updateMachinesYaml parse: ${errorMessage(err)}`);
+    console.warn(`  ${machinesFile} could not be parsed; machine mappings left unchanged. Fix it by hand (check for git conflict markers), then run 'phren init' again.`);
+    return;
   }
 
   // Passive init/link refreshes should keep an existing mapping; explicit overrides can remap.

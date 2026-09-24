@@ -26,7 +26,7 @@ import {
   getPendingBootstrapTarget,
 } from "./init/init.js";
 import { configureHooksIfEnabled } from "./init/init-configure.js";
-import { applyStarterTemplateUpdates, applyTemplate, getHookEntrypointCheck } from "./init/setup.js";
+import { applyStarterTemplateUpdates, applyTemplate, getHookEntrypointCheck, repairPreexistingInstall } from "./init/setup.js";
 import { VERSION } from "./init/shared.js";
 import { collectNativeMemoryFiles } from "./shared.js";
 
@@ -597,6 +597,26 @@ describe("runInit walkthrough integration", () => {
 
     const manifest = JSON.parse(fs.readFileSync(path.join(homeDir, ".claude", "skill-manifest.json"), "utf8"));
     expect(manifest.scope).toBe("global");
+  });
+
+  // my-api and my-frontend are ordinary repo names. Only a profile entry with no
+  // project directory in the store is the abandoned starter sample.
+  it("keeps a real project named like a legacy sample", async () => {
+    const phrenPath = path.join(tmpRoot, "phren-real-my-api");
+    process.env.PHREN_PATH = phrenPath;
+    fs.mkdirSync(path.join(phrenPath, "profiles"), { recursive: true });
+    fs.mkdirSync(path.join(phrenPath, "my-api"), { recursive: true });
+    fs.writeFileSync(path.join(phrenPath, "my-api", "FINDINGS.md"), "# my-api Findings\n");
+    fs.writeFileSync(
+      path.join(phrenPath, "profiles", "default.yaml"),
+      "name: default\nprojects:\n  - global\n  - my-api\n  - my-frontend\n",
+    );
+
+    suppressOutput(() => repairPreexistingInstall(phrenPath));
+
+    const profileText = fs.readFileSync(path.join(phrenPath, "profiles", "default.yaml"), "utf8");
+    expect(profileText).toContain("my-api");
+    expect(profileText).not.toContain("my-frontend");
   });
 
   it("update flow removes legacy sample projects and recreates generated assets", async () => {

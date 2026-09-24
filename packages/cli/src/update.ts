@@ -1,18 +1,26 @@
 import * as fs from "fs";
 import * as path from "path";
 import { execFileSync } from "child_process";
-import { fileURLToPath } from "url";
 import { errorMessage } from "./utils.js";
-import { PACKAGE_NAME, PACKAGE_SPEC } from "./package-metadata.js";
+import { PACKAGE_NAME, PACKAGE_SPEC, ROOT } from "./package-metadata.js";
+import { resolveEntryScript } from "./init/shared.js";
+import { findPhrenPath } from "./shared.js";
 import { logger } from "./logger.js";
 
 function shellCommand(bin: "npm" | "npx"): string {
   return process.platform === "win32" ? `${bin}.cmd` : bin;
 }
 
-function packageRootFromRuntime(): string {
-  const current = fileURLToPath(import.meta.url);
-  return path.resolve(path.dirname(current), "..", "..");
+/**
+ * The source checkout this build runs from, or null for an installed package.
+ * The package root is packages/cli, so the monorepo root is two levels above it.
+ * An installed package (under node_modules) is never treated as a checkout, even
+ * if some directory above it happens to be a git repo.
+ */
+function sourceCheckoutRoot(): string | null {
+  if (ROOT.split(path.sep).includes("node_modules")) return null;
+  const repoRoot = path.resolve(ROOT, "..", "..");
+  return fs.existsSync(path.join(repoRoot, ".git")) ? repoRoot : null;
 }
 
 function run(cmd: string, args: string[], cwd?: string): string {
@@ -56,18 +64,20 @@ function maybeRefreshStarter(root: string, builtEntry: string, refreshStarter: b
     return " Run `phren update --refresh-starter` to refresh global starter assets.";
   }
   run(process.execPath, [builtEntry, "init", "--apply-starter-update", "-y"], root);
-  const cleaned = cleanupStarterRefreshArtifacts(root);
+  // The staged starter files live in the store, not the package.
+  const phrenPath = findPhrenPath();
+  const cleaned = phrenPath ? cleanupStarterRefreshArtifacts(phrenPath) : 0;
   return cleaned > 0
     ? ` Refreshed starter assets and cleaned ${cleaned} staged starter artifact(s).`
     : " Refreshed starter assets.";
 }
 
 export async function runPhrenUpdate(opts: RunPhrenUpdateOptions = {}): Promise<UpdateResult> {
-  const root = packageRootFromRuntime();
-  const hasGit = fs.existsSync(path.join(root, ".git"));
-  const builtEntry = path.join(root, "mcp", "dist", "index.js");
+  const checkout = sourceCheckoutRoot();
+  const root = checkout ?? ROOT;
+  const builtEntry = resolveEntryScript();
 
-  if (hasGit) {
+  if (checkout) {
     try {
       // Warn if working tree is dirty (autostash handles it, but good to know)
       try {

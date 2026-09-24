@@ -201,7 +201,14 @@ function filterAgentHooks(filePath: string, commandField: string): boolean {
 }
 
 async function promptUninstallConfirm(phrenPath: string): Promise<boolean> {
-  if (!process.stdin.isTTY || !process.stdout.isTTY) return true;
+  // No TTY is not consent: agent shells, CI steps and pipes all lack one, and
+  // they are exactly where an accidental `phren uninstall` must not delete the
+  // store. --yes is the explicit opt-in.
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    log(`\n  Refusing to delete ${phrenPath} without confirmation.`);
+    log("  This session is non-interactive; re-run with --yes to confirm.");
+    return false;
+  }
 
   // Show summary of what will be deleted
   try {
@@ -270,7 +277,11 @@ export async function runUninstall(opts: { yes?: boolean } = {}) {
             });
           });
         })()
-        : true);
+        : (() => {
+          log("\n  Refusing to remove phren config without confirmation.");
+          log("  This session is non-interactive; re-run with --yes to confirm.");
+          return false;
+        })());
     if (!confirmed) {
       log("Uninstall cancelled.");
       return;

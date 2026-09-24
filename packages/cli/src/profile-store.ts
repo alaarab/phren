@@ -144,6 +144,16 @@ export function setMachineProfile(phrenPath: string, machine: string, profile: s
   const machinesPath = path.join(phrenPath, "machines.yaml");
   return withSafeLock(machinesPath, () => {
     const current = listMachines(phrenPath);
+    // writeMachines rebuilds the whole file, so rewriting one phren cannot parse
+    // from an empty map would drop every other machine's mapping. The file is
+    // git-synced, so conflict markers are the likely cause. A comments-only file
+    // (the shipped starter) also fails to parse and is fine to write into.
+    if (!current.ok && current.code !== PhrenError.FILE_NOT_FOUND && hasMachineEntries(machinesPath)) {
+      return phrenErr(
+        `${machinesPath} could not be parsed, so phren will not rewrite it. Fix the file by hand (check for git conflict markers), then map again.`,
+        PhrenError.MALFORMED_YAML,
+      );
+    }
     const data = current.ok ? current.data : {};
     data[machine] = profile;
     writeMachines(phrenPath, data);
@@ -151,6 +161,14 @@ export function setMachineProfile(phrenPath: string, machine: string, profile: s
   });
 }
 
+/** Does machines.yaml hold anything besides comments and blank lines? */
+function hasMachineEntries(machinesPath: string): boolean {
+  try {
+    return loadYamlDocument(fs.readFileSync(machinesPath, "utf8"), () => true) === true;
+  } catch {
+    return false;
+  }
+}
 
 function pickEnumVal<T extends string>(value: unknown, allowed: readonly T[]): T | undefined {
   return typeof value === "string" && allowed.includes(value as T) ? value as T : undefined;
@@ -266,13 +284,32 @@ export function listProfiles(phrenPath: string): PhrenResult<ProfileInfo[]> {
   return phrenOk(profiles);
 }
 
+/**
+ * Rewrite a profile's projects, keeping every other key (the `defaults:` policy
+ * block included) and the file's leading comment, the way writeMachines does.
+ */
 function writeProfile(file: string, name: string, projects: string[], description?: string): void {
   const backup = `${file}.bak`;
-  if (fs.existsSync(file)) fs.copyFileSync(file, backup);
+  const existing = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
+  if (existing) fs.copyFileSync(file, backup);
+  // listProfiles already refused an unparsable file, so this parse succeeds.
+  const parsed = existing ? loadYamlDocument(existing, (text) => yaml.load(text, { schema: yaml.CORE_SCHEMA })) : undefined;
+  const rest: Record<string, unknown> = parsed && typeof parsed === "object" && !Array.isArray(parsed)
+    ? { ...(parsed as Record<string, unknown>) }
+    : {};
+  delete rest.name;
+  delete rest.description;
+  delete rest.projects;
+  const headerLines: string[] = [];
+  for (const line of existing.split("\n")) {
+    if (!line.startsWith("#") && line.trim() !== "") break;
+    headerLines.push(line);
+  }
+  const header = headerLines.length ? `${headerLines.join("\n").replace(/\n+$/, "")}\n` : "";
   const normalized = [...new Set(projects)].sort();
-  const out = yaml.dump({ name, ...(description ? { description } : {}), projects: normalized }, { lineWidth: 1000 });
+  const out = yaml.dump({ name, ...(description ? { description } : {}), projects: normalized, ...rest }, { lineWidth: 1000 });
   const tmpPath = `${file}.tmp-${crypto.randomUUID()}`;
-  fs.writeFileSync(tmpPath, out);
+  fs.writeFileSync(tmpPath, header + out);
   fs.renameSync(tmpPath, file);
 }
 

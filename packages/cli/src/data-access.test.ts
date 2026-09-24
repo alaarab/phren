@@ -868,6 +868,47 @@ describe("machines, profiles, and shell state", () => {
     if (!listed.ok) expect(listed.code).toBe(PhrenError.FILE_NOT_FOUND);
   });
 
+  // machines.yaml is git-synced, so conflict markers are the likely parse
+  // failure, and rebuilding it from an empty map dropped every other mapping.
+  it("refuses to rewrite a machines.yaml it cannot parse", () => {
+    const machinesPath = path.join(tmpDir, "machines.yaml");
+    const conflicted = "laptop: personal\n<<<<<<< HEAD\ndesktop: personal\n=======\ndesktop: work\n>>>>>>> origin/main\nserver: personal\n";
+    fs.writeFileSync(machinesPath, conflicted);
+
+    const result = setMachineProfile(tmpDir, "newbox", "personal");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe(PhrenError.MALFORMED_YAML);
+    expect(fs.readFileSync(machinesPath, "utf8")).toBe(conflicted);
+  });
+
+  // The shipped starter machines.yaml is all comments, which listMachines also
+  // reports as MALFORMED_YAML; `phren init --machine` must still write into it.
+  it("writes into a comments-only machines.yaml", () => {
+    fs.writeFileSync(path.join(tmpDir, "machines.yaml"), "# Map machine hostnames to profiles.\n#\n#   work-laptop: work\n\n");
+    expect(setMachineProfile(tmpDir, "test-box", "personal").ok).toBe(true);
+    const listed = listMachines(tmpDir);
+    expect(listed.ok && listed.data["test-box"]).toBe("personal");
+  });
+
+  // writeProfile re-dumped only name/description/projects, so every profile
+  // add/remove (and rename, which is remove-then-add) wiped the defaults block.
+  it("keeps a profile's defaults block and header comment across add and remove", () => {
+    const profilePath = path.join(tmpDir, "profiles", "personal.yaml");
+    fs.writeFileSync(
+      profilePath,
+      "# my personal profile\nname: personal\nprojects:\n  - testproject\ndefaults:\n  findingSensitivity: aggressive\n  retentionPolicy:\n    ttlDays: 400\n",
+    );
+
+    expect(addProjectToProfile(tmpDir, "personal", "another-proj").ok).toBe(true);
+    expect(removeProjectFromProfile(tmpDir, "personal", "another-proj").ok).toBe(true);
+
+    const profile = listProfiles(tmpDir);
+    const personal = profile.ok ? profile.data.find((entry) => entry.name === "personal") : undefined;
+    expect(personal?.projects).toEqual(["testproject"]);
+    expect(personal?.defaults).toEqual({ findingSensitivity: "aggressive", retentionPolicy: { ttlDays: 400 } });
+    expect(fs.readFileSync(profilePath, "utf8")).toMatch(/^# my personal profile\n/);
+  });
+
   it("returns MALFORMED_YAML for invalid machines.yaml", () => {
     fs.writeFileSync(path.join(tmpDir, "machines.yaml"), "machine-a: [\n");
     const listed = listMachines(tmpDir);

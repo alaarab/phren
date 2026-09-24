@@ -23,7 +23,7 @@ vi.mock("child_process", () => ({
 }));
 
 import { runPhrenUpdate } from "./update.js";
-import { PACKAGE_NAME, PACKAGE_SPEC } from "./package-metadata.js";
+import { PACKAGE_NAME, PACKAGE_SPEC, ROOT } from "./package-metadata.js";
 
 function npmExec(): string {
   return process.platform === "win32" ? "npm.cmd" : "npm";
@@ -51,7 +51,7 @@ describe("runPhrenUpdate", () => {
       if (cmd === "git" && args[0] === "pull") return "Already up to date.";
       if (cmd === npmExec() && args[0] === "install") return "";
       if (cmd === npmExec() && args[0] === "run" && args[1] === "build") return "";
-      if (cmd === process.execPath && /mcp[\\/]+dist[\\/]+index\.js$/.test(String(args[0])) && args[1] === "--health") return "";
+      if (cmd === process.execPath && /(?<!mcp[\\/])dist[\\/]index\.js$/.test(String(args[0])) && args[1] === "--health") return "";
       throw new Error(`Unexpected command: ${cmd} ${args.join(" ")}`);
     });
 
@@ -79,8 +79,26 @@ describe("runPhrenUpdate", () => {
     );
     expect(mockExecFileSync).toHaveBeenCalledWith(
       process.execPath,
-      [expect.stringMatching(/mcp[\\/]dist[\\/]index\.js$/), "--health"],
+      [expect.stringMatching(/(?<!mcp[\\/])dist[\\/]index\.js$/), "--health"],
       expect.objectContaining({ encoding: "utf8" })
+    );
+  });
+
+  // The package root is packages/cli; a source checkout's .git is the monorepo
+  // root two levels up, which a fixed "two levels up from this file" missed.
+  it("finds the monorepo checkout above the package root", async () => {
+    const repoRoot = path.resolve(ROOT, "..", "..");
+    mockExistsSync.mockImplementation((filePath: fs.PathLike) => String(filePath) === path.join(repoRoot, ".git"));
+    mockExecFileSync.mockReturnValue("");
+
+    const result = await runPhrenUpdate();
+
+    expect(result.ok).toBe(true);
+    expect(result.message).toContain(`Updated local phren repo at ${repoRoot}`);
+    expect(mockExecFileSync).toHaveBeenCalledWith(
+      "git",
+      ["pull", "--ff-only", "--autostash"],
+      expect.objectContaining({ cwd: repoRoot })
     );
   });
 
@@ -186,8 +204,8 @@ describe("runPhrenUpdate", () => {
       if (cmd === "git" && args[0] === "pull") return "Fast-forward";
       if (cmd === npmExec() && args[0] === "install") return "";
       if (cmd === npmExec() && args[0] === "run" && args[1] === "build") return "";
-      if (cmd === process.execPath && /mcp[\\/]+dist[\\/]+index\.js$/.test(String(args[0])) && args[1] === "--health") return "";
-      if (cmd === process.execPath && /mcp[\\/]+dist[\\/]+index\.js$/.test(String(args[0])) && args[1] === "init") return "";
+      if (cmd === process.execPath && /(?<!mcp[\\/])dist[\\/]index\.js$/.test(String(args[0])) && args[1] === "--health") return "";
+      if (cmd === process.execPath && /(?<!mcp[\\/])dist[\\/]index\.js$/.test(String(args[0])) && args[1] === "init") return "";
       throw new Error(`Unexpected command: ${cmd} ${args.join(" ")}`);
     });
 
@@ -197,7 +215,7 @@ describe("runPhrenUpdate", () => {
     expect(result.message).toContain("Refreshed starter assets.");
     expect(mockExecFileSync).toHaveBeenCalledWith(
       process.execPath,
-      [expect.stringMatching(/mcp[\\/]dist[\\/]index\.js$/), "init", "--apply-starter-update", "-y"],
+      [expect.stringMatching(/(?<!mcp[\\/])dist[\\/]index\.js$/), "init", "--apply-starter-update", "-y"],
       expect.objectContaining({ encoding: "utf8" })
     );
   });

@@ -52,6 +52,8 @@ Set the preset at install (`phren init --preset <name>`), switch it anytime
 - `~/.github/copilot-instructions.md`, `~/.copilot/skills/`, when Copilot is detected.
 - `~/.local/bin/{phren,copilot,cursor,codex}`, CLI and session wrappers.
 - `~/.phren-context.md`, the machine-alias file.
+- `~/.claude/projects/<home-key>/memory/MEMORY.md`, a generated root memory
+  pointing at `~/.phren-context.md`, inside Claude Code's own memory directory.
 - **Windows:** `%USERPROFILE%\.local\bin` may be added to your user PATH.
 
 These are re-created every SessionStart under `managed` (self-heal). Under
