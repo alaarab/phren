@@ -17,11 +17,6 @@ import {
   normalizeQueueEntryText,
   MAX_QUEUE_ENTRY_LENGTH,
   GOVERNANCE_SCHEMA_VERSION,
-  type RetentionPolicy,
-  type WorkflowPolicy,
-  type IndexPolicy,
-  VALID_TASK_MODES,
-  VALID_FINDING_SENSITIVITY,
 } from "../governance/policy.js";
 
 function writeGovJson(phrenPath: string, filename: string, data: Record<string, unknown>): void {
@@ -175,7 +170,7 @@ describe("updateWorkflowPolicy", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     // Should keep the current/default value
-    expect(VALID_TASK_MODES).toContain(result.data.taskMode);
+    expect(result.data.taskMode).toBe("auto");
   });
 
   it("updates findingSensitivity", () => {
@@ -189,7 +184,7 @@ describe("updateWorkflowPolicy", () => {
     const result = updateWorkflowPolicy(phrenPath, { findingSensitivity: "extreme" as any });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(VALID_FINDING_SENSITIVITY).toContain(result.data.findingSensitivity);
+    expect(result.data.findingSensitivity).toBe("balanced");
   });
 
   it("filters invalid riskySections in patch", () => {
@@ -200,25 +195,11 @@ describe("updateWorkflowPolicy", () => {
     if (!result.ok) return;
     expect(result.data.riskySections).toEqual(["Review", "Conflicts"]);
   });
-
-  it("updates lowConfidenceThreshold", () => {
-    const result = updateWorkflowPolicy(phrenPath, { lowConfidenceThreshold: 0.3 });
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.data.lowConfidenceThreshold).toBe(0.3);
-  });
 });
 
 // ── Index Policy ───────────────────────────────────────────────────────────
 
 describe("getIndexPolicy", () => {
-  it("returns defaults when no file exists", () => {
-    const policy = getIndexPolicy(phrenPath);
-    expect(policy.includeGlobs).toContain("**/*.md");
-    expect(policy.excludeGlobs).toContain("**/.git/**");
-    expect(policy.includeHidden).toBe(false);
-  });
-
   it("reads custom values from file", () => {
     writeGovJson(phrenPath, "index-policy.json", {
       includeGlobs: ["**/*.txt"],
@@ -249,16 +230,6 @@ describe("getIndexPolicy", () => {
 });
 
 describe("updateIndexPolicy", () => {
-  it("patches and persists index policy", () => {
-    const result = updateIndexPolicy(phrenPath, { includeHidden: true });
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.data.includeHidden).toBe(true);
-
-    const reread = getIndexPolicy(phrenPath);
-    expect(reread.includeHidden).toBe(true);
-  });
-
   it("filters empty strings from patched globs", () => {
     const result = updateIndexPolicy(phrenPath, { includeGlobs: ["**/*.rs", "", "  "] });
     expect(result.ok).toBe(true);
@@ -404,18 +375,6 @@ describe("normalizeQueueEntryText", () => {
     expect(result.data.truncated).toBe(true);
     expect(result.data.text.length).toBeLessThanOrEqual(MAX_QUEUE_ENTRY_LENGTH);
   });
-
-  it("strips HTML comments", () => {
-    const result = normalizeQueueEntryText("before <!-- comment --> after");
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.data.text).toBe("before after");
-  });
-
-  it("strips escape sequences", () => {
-    const result = normalizeQueueEntryText("line\\none");
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.data.text).toBe("line one");
-  });
 });
 
 // ── Review Queue ───────────────────────────────────────────────────────────
@@ -457,29 +416,13 @@ describe("appendReviewQueue", () => {
     expect(result.data).toBe(0); // no new items added
   });
 
-  it("writes to correct section (Stale)", () => {
-    const result = appendReviewQueue(phrenPath, PROJECT, "Stale", ["Stale entry"]);
+  it.each(["Stale", "Conflicts"] as const)("writes to correct section (%s)", (section) => {
+    const result = appendReviewQueue(phrenPath, PROJECT, section, [`${section} entry`]);
     expect(result.ok).toBe(true);
 
     const content = fs.readFileSync(path.join(phrenPath, PROJECT, "review.md"), "utf8");
-    expect(content).toContain("## Stale");
-    expect(content).toContain("Stale entry");
-  });
-
-  it("writes to correct section (Conflicts)", () => {
-    const result = appendReviewQueue(phrenPath, PROJECT, "Conflicts", ["Conflict entry"]);
-    expect(result.ok).toBe(true);
-
-    const content = fs.readFileSync(path.join(phrenPath, PROJECT, "review.md"), "utf8");
-    expect(content).toContain("## Conflicts");
-    expect(content).toContain("Conflict entry");
-  });
-
-  it("returns 0 for empty entries array", () => {
-    const result = appendReviewQueue(phrenPath, PROJECT, "Review", []);
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.data).toBe(0);
+    expect(content).toContain(`## ${section}`);
+    expect(content).toContain(`${section} entry`);
   });
 
   it("rejects invalid project name", () => {

@@ -330,6 +330,6 @@ describe("resolveCoref", () => {
 
   it("prepends context when text has vague pronouns and no concrete nouns", () => {
     const result = resolveCoref("it handles them correctly", { project: "phren" });
-    expect(result).toContain("phren");
+    expect(result).toContain("[phren]");
   });
 });
