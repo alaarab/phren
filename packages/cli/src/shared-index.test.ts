@@ -68,24 +68,14 @@ afterEach(() => {
 // ── porterStem ───────────────────────────────────────────────────────────────
 
 describe("porterStem", () => {
-  it("stems 'running' to 'run'", () => {
-    expect(porterStem("running")).toBe("run");
-  });
-
-  it("stems 'argued' to 'argu'", () => {
-    expect(porterStem("argued")).toBe("argu");
-  });
-
-  it("stems 'generalization' to 'general'", () => {
-    expect(porterStem("generalization")).toBe("general");
-  });
-
-  it("stems 'relational' to 'relat'", () => {
-    expect(porterStem("relational")).toBe("relat");
-  });
-
-  it("stems 'conditional' to 'condit'", () => {
-    expect(porterStem("conditional")).toBe("condit");
+  it.each([
+    ["running", "run"],
+    ["argued", "argu"],
+    ["generalization", "general"],
+    ["relational", "relat"],
+    ["conditional", "condit"],
+  ])("stems '%s' to '%s'", (word, stem) => {
+    expect(porterStem(word)).toBe(stem);
   });
 });
 
@@ -222,11 +212,8 @@ describe("extractSnippet", () => {
     const lines = snippet.split("\n");
     expect(lines.length).toBeLessThanOrEqual(5);
     expect(lines[0]).toBe("# Project");
-  });
-
-  it("returns first N lines for empty effective query", () => {
-    const snippet = extractSnippet("some content\nmore lines", "");
-    expect(snippet).toContain("some content");
+    // An empty effective query takes the same first-lines path.
+    expect(extractSnippet("some content\nmore lines", "")).toContain("some content");
   });
 
   it("finds the best matching section", () => {

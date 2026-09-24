@@ -14,39 +14,20 @@ import { REGISTRY } from "./cli-registry.js";
 describe("formatCheatSheet", () => {
   const out = formatCheatSheet();
 
-  it("contains the phren title and the bare `phren` line", () => {
+  it("shows the title, featured commands, aliases and topics, and nothing hidden or retired", () => {
     expect(out).toContain("phren - persistent memory for AI agents");
     expect(out).toContain("Interactive memory shell");
-  });
-
-  it("contains the manage/mem alias footer (asserted by cli.test.ts)", () => {
+    // manage/mem alias footer (asserted by cli.test.ts)
     expect(out).toContain("phren manage <command>");
     expect(out).toContain("phren mem <command>");
-  });
-
-  it("contains featured commands", () => {
-    expect(out).toContain("phren init");
-    expect(out).toContain("phren search");
-    expect(out).toContain("phren add");
-  });
-
-  it("does not contain forbidden tokens (asserted by cli.test.ts)", () => {
-    expect(out).not.toContain("projects add");
-    expect(out).not.toContain("phren link");
-    expect(out).not.toContain("--from-existing");
-  });
-
-  it("excludes hidden commands", () => {
-    expect(out).not.toContain("hook-prompt");
-    expect(out).not.toContain("background-sync");
-    expect(out).not.toContain("inspect-index");
-    expect(out).not.toContain("debug-injection");
-  });
-
-  it("lists topics including doc topics and `all`", () => {
+    for (const featured of ["phren init", "phren search", "phren add"]) expect(out).toContain(featured);
     expect(out).toContain("Topics:");
     expect(out).toContain("env");
     expect(out).toContain("all");
+    // Retired forms (asserted by cli.test.ts) and hidden commands stay out.
+    for (const absent of ["projects add", "phren link", "--from-existing", "hook-prompt", "background-sync", "inspect-index", "debug-injection"]) {
+      expect(out).not.toContain(absent);
+    }
   });
 });
 
@@ -56,13 +37,10 @@ describe("formatTopic", () => {
     expect(out).toContain("phren add");
     expect(out).toContain("phren projects list");
     expect(out).toContain("phren projects remove <name>");
-  });
-
-  it("skills topic includes the skills namespace and detect-skills", () => {
-    const out = formatTopic("skills");
-    expect(out).toContain("phren skills list");
-    expect(out).toContain("phren skills add <project> <path>");
-    expect(out).toContain("phren detect-skills");
+    const skills = formatTopic("skills");
+    expect(skills).toContain("phren skills list");
+    expect(skills).toContain("phren skills add <project> <path>");
+    expect(skills).toContain("phren detect-skills");
   });
 
   it("hides hidden commands within topics", () => {
@@ -85,9 +63,6 @@ describe("formatCommand", () => {
   it("returns content for hidden commands so operators can read their help", () => {
     expect(formatCommand("hook-prompt")).not.toBeNull();
     expect(formatCommand("link")).not.toBeNull();
-  });
-
-  it("returns null for unknown commands", () => {
     expect(formatCommand("absolutely-not-a-command")).toBeNull();
   });
 });
@@ -98,9 +73,6 @@ describe("formatDocTopic", () => {
     expect(out).not.toBeNull();
     expect(out!).toContain("PHREN_PATH");
     expect(out!).toContain("Environment variables");
-  });
-
-  it("returns null for non-doc names", () => {
     expect(formatDocTopic("projects")).toBeNull();
     expect(formatDocTopic("nonsense")).toBeNull();
   });
@@ -114,6 +86,8 @@ describe("formatFullHelp", () => {
       if (cmd.hidden) continue;
       expect(out, `missing ${cmd.name}`).toContain(cmd.usage);
     }
+    // The env doc topic body is part of full help.
+    expect(out).toContain("PHREN_PATH");
   });
 
   it("excludes hidden commands' usage lines", () => {
@@ -124,10 +98,6 @@ describe("formatFullHelp", () => {
       const topicLine = `  ${cmd.usage}`;
       expect(out, `${cmd.name} should not appear in full help as a command line`).not.toContain(topicLine);
     }
-  });
-
-  it("includes the env doc topic body", () => {
-    expect(out).toContain("PHREN_PATH");
   });
 });
 
