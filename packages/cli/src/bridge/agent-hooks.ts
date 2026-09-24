@@ -64,7 +64,7 @@ export function conductorCall(tool: string, input: unknown): Pending["conductor"
 interface OpencodeHeld { target: Target; request: Json; expiresAt: number }
 
 export type DeliveryOutcome = "delivered" | "blocked" | "pending";
-interface Delivery { source: Provider; session: string; settle: (outcome: DeliveryOutcome) => void; timer: ReturnType<typeof setTimeout> }
+interface Delivery { source: Provider; session: string; settle: (outcome: DeliveryOutcome) => void; timer: ReturnType<typeof setTimeout>; late?: (outcome: DeliveryOutcome) => void }
 
 /** What the agent hands its UserPromptSubmit hook is the terminal's pasted
  * form of what Phren typed; compare the words, not the wrapping. */
@@ -259,12 +259,26 @@ export class AgentHooks {
       let settled = false;
       const list = this.deliveries.get(key) ?? [];
       const remove = () => { const current = this.deliveries.get(key) ?? []; const index = current.indexOf(delivery); if (index >= 0) current.splice(index, 1); if (!current.length) this.deliveries.delete(key); };
-      const settle = (outcome: DeliveryOutcome) => { if (!settled) { settled = true; resolve(outcome); } if (outcome !== "pending") { clearTimeout(delivery.timer); remove(); } };
+      const settle = (outcome: DeliveryOutcome) => {
+        if (!settled) { settled = true; resolve(outcome); } else if (outcome !== "pending") delivery.late?.(outcome);
+        if (outcome !== "pending") { clearTimeout(delivery.timer); remove(); }
+      };
       const delivery: Delivery = { source: target.source, session: target.session, settle, timer: setTimeout(() => settle("pending"), waitMs) };
       delivery.timer.unref?.();
       const expiry = setTimeout(remove, 600_000); expiry.unref?.();
       list.push(delivery); this.deliveries.set(key, list);
       while (this.deliveries.size > 256) this.deliveries.delete(this.deliveries.keys().next().value!);
+    });
+  }
+  /** Wait again for a delivery `expectDelivery` already reported pending,
+   * after the Hook pressed Enter a second time. */
+  awaitLateDelivery(target: Target, text: string, waitMs = 2_500): Promise<DeliveryOutcome> {
+    const delivery = this.deliveries.get(promptKey(text))?.find(entry => entry.source === target.source && entry.session === target.session);
+    if (!delivery) return Promise.resolve("pending");
+    return new Promise<DeliveryOutcome>(resolve => {
+      const timer = setTimeout(() => { delivery.late = undefined; resolve("pending"); }, waitMs);
+      timer.unref?.();
+      delivery.late = outcome => { clearTimeout(timer); delivery.late = undefined; resolve(outcome); };
     });
   }
   /** The conversation `target` just submitted `prompt`. Nothing Phren typed

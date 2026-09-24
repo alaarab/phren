@@ -1139,6 +1139,34 @@ schedules:
       expect(await submit(session, "queued while busy")).toEqual({ status: 200 });
     }, 15_000);
 
+    // Seen on the phone: an idle Claude Code redrawing (an update notice)
+    // dropped the Enter, and the text sat in its input line.
+    it("presses Enter once more when an idle agent has not taken the prompt, and says so when it still has not", async () => {
+      const submit = (prompt: string) => new Promise<any>((resolve, reject) => {
+        const payload = JSON.stringify({ target: claude, event: "UserPromptSubmit", prompt });
+        const req = request({ socketPath: path.join(root, "bridge/agent.sock"), path: "/hook", method: "POST",
+          headers: { "Content-Length": Buffer.byteLength(payload) } }, res => {
+          let data = ""; res.on("data", bytes => data += bytes); res.on("end", () => resolve({ status: res.statusCode, ...JSON.parse(data) }));
+        }); req.on("error", reject); req.end(payload);
+      });
+      paneAgent = "claude"; agentStatus = "idle";
+      const claude = { ...target, source: "claude" as const };
+      const enters = () => commands.filter(c => c.method === "agent.send_keys" && JSON.stringify(c.params.keys) === '["enter"]').length;
+      const before = enters();
+      const retried = api("/v1/prompt", { target: claude, text: "commit it when the soak passes" });
+      await waitFor(() => enters() > before, 4_000);
+      expect(await submit("commit it when the soak passes")).toEqual({ status: 200 });
+      expect(await retried).toEqual({ status: 200, data: { ok: true, delivered: true } });
+      expect(enters()).toBe(before + 1);
+      // Nothing takes it even after the second Enter: not sent, never a third.
+      expect((await api("/v1/prompt", { target: claude, text: "keep going with the phone layout" })).data)
+        .toEqual({ ok: true, deliveryUncertain: true, unsubmitted: true });
+      expect(enters()).toBe(before + 2);
+      // A slash command opens a menu a second Enter would answer: never retried.
+      await api("/v1/prompt", { target: claude, text: "/model" });
+      expect(enters()).toBe(before + 2);
+    }, 15_000);
+
     it("reports a compacting conversation and clears it when the new context starts", async () => {
       const post = (event: string) => new Promise<any>((resolve, reject) => {
         const payload = JSON.stringify({ target, event, source: "compact" });
