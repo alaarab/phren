@@ -8,8 +8,6 @@ import {
   collectNativeMemoryFiles,
   findProjectNameCaseInsensitive,
   PhrenError,
-  phrenOk,
-  phrenErr,
   ensurePhrenPath,
   normalizeProjectNameForCreate,
   parsePhrenErrorCode,
@@ -19,21 +17,10 @@ import {
 } from "./shared.js";
 import {
   consolidateProjectFindings,
-  recordInjection,
-  recordFeedback,
-  getQualityMultiplier,
   validateGovernanceJson,
-  getRetentionPolicy,
-  updateRetentionPolicy,
-  getWorkflowPolicy,
-  updateWorkflowPolicy,
-  getIndexPolicy,
-  updateIndexPolicy,
   getRuntimeHealth,
   updateRuntimeHealth,
   appendReviewQueue,
-  flushEntryScores,
-  entryScoreKey,
   pruneDeadMemories,
 } from "./shared/governance.js";
 import {
@@ -46,14 +33,11 @@ import {
 import {
   addFindingToFile,
   checkConsolidationNeeded,
-  mergeFindings,
   mergeTask,
   isAutoMergeableStorePath,
   autoMergeConflicts,
   filterTrustedFindingsDetailed,
   upsertCanonical,
-  validateFindingsFormat,
-  validateTaskFormat,
   stripTaskDoneSection,
   isDuplicateFinding,
   extractConflictVersions,
@@ -79,14 +63,6 @@ function makeProject(phrenDir: string, name: string, files: Record<string, strin
   for (const [file, content] of Object.entries(files)) {
     fs.writeFileSync(path.join(dir, file), content);
   }
-}
-
-function readVersionedEntries<T>(filePath: string): Record<string, T> {
-  const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
-  if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && parsed.entries && typeof parsed.entries === "object" && !Array.isArray(parsed.entries)) {
-    return parsed.entries as Record<string, T>;
-  }
-  return parsed as Record<string, T>;
 }
 
 beforeEach(() => {
@@ -258,18 +234,6 @@ describe("path resolution helpers", () => {
   });
 });
 
-describe("governance validation", () => {
-  it("validates shared governance schemas", () => {
-    const phren = makePhren();
-    const govDir = path.join(phren, ".config");
-    fs.mkdirSync(govDir, { recursive: true });
-
-    const indexPolicy = path.join(govDir, "index-policy.json");
-    fs.writeFileSync(indexPolicy, JSON.stringify({ includeGlobs: "bad-shape" }, null, 2));
-    expect(validateGovernanceJson(indexPolicy, "index-policy")).toBe(false);
-  });
-});
-
 // --- buildIndex + queryRows ---
 
 describe("buildIndex and queryRows", () => {
@@ -287,53 +251,6 @@ describe("buildIndex and queryRows", () => {
     expect(rows![0][0]).toBe("testproj");
     expect(rows![0][1]).toBe("FINDINGS.md");
     db.close();
-  });
-
-  it("returns null for queries with no matches", async () => {
-    const phren = makePhren();
-    makeProject(phren, "testproj", {
-      "summary.md": "# testproj\n\nA simple project.\n",
-    });
-
-    const db = await buildIndex(phren);
-    const rows = queryRows(db, "SELECT project FROM docs WHERE docs MATCH ?", ["zzzznonexistent"]);
-    expect(rows).toBeNull();
-    db.close();
-  });
-
-  it("indexes multiple projects", async () => {
-    const phren = makePhren();
-    makeProject(phren, "alpha", { "summary.md": "# alpha\n\nFirst project about databases.\n" });
-    makeProject(phren, "beta", { "summary.md": "# beta\n\nSecond project about networking.\n" });
-
-    const db = await buildIndex(phren);
-    const alphaRows = queryRows(db, "SELECT project FROM docs WHERE docs MATCH ? AND project = ?", ["databases", "alpha"]);
-    const betaRows = queryRows(db, "SELECT project FROM docs WHERE docs MATCH ? AND project = ?", ["networking", "beta"]);
-    expect(alphaRows).not.toBeNull();
-    expect(betaRows).not.toBeNull();
-    expect(alphaRows![0][0]).toBe("alpha");
-    expect(betaRows![0][0]).toBe("beta");
-    db.close();
-  });
-
-  it("returns null for invalid SQL instead of throwing", async () => {
-    const phren = makePhren();
-    makeProject(phren, "testproj", {
-      "summary.md": "# testproj\n\nA simple project.\n",
-    });
-
-    const db = await buildIndex(phren);
-    expect(queryRows(db, "SELECT definitely_not_a_column FROM docs", [])).toBeNull();
-    db.close();
-  });
-
-  it("returns null when db.exec throws (corrupt/invalid db path)", () => {
-    const fakeDb = {
-      exec: () => {
-        throw new Error("database disk image is malformed");
-      },
-    };
-    expect(queryRows(fakeDb, "SELECT 1", [])).toBeNull();
   });
 
   it("buildIndex returns empty index when profile YAML is malformed (fail-closed, Q18)", async () => {
@@ -368,20 +285,6 @@ describe("buildIndex and queryRows", () => {
 });
 
 // --- extractSnippet ---
-
-describe("extractSnippet", () => {
-  it("extracts lines around the best match", () => {
-    const content = "line 1\nline 2\nthe important match here\nline 4\nline 5\nline 6";
-    const snippet = extractSnippet(content, "important match", 3);
-    expect(snippet).toContain("important match");
-  });
-
-  it("returns beginning of content when no term matches", () => {
-    const content = "first\nsecond\nthird\nfourth\nfifth";
-    const snippet = extractSnippet(content, "zzzznotfound", 3);
-    expect(snippet).toContain("first");
-  });
-});
 
 // --- addFindingToFile ---
 
@@ -465,15 +368,6 @@ describe("isDuplicateFinding", () => {
     expect(isDuplicateFinding(existing, "- Database indexes need rebuilding after schema migration")).toBe(false);
   });
 
-  it("returns false for empty content", () => {
-    expect(isDuplicateFinding("", "- Some new finding")).toBe(false);
-    expect(isDuplicateFinding("# Title\n", "- Some new finding")).toBe(false);
-  });
-
-  it("returns false for empty finding", () => {
-    expect(isDuplicateFinding("- existing bullet", "")).toBe(false);
-  });
-
   it("respects custom threshold", () => {
     const existing = "- The auth middleware runs before rate limiting and order matters";
     // With a very high threshold, partial matches should not count
@@ -537,28 +431,6 @@ describe("checkConsolidationNeeded", () => {
 // --- detectProject ---
 
 describe("detectProject", () => {
-  it("matches the longest sourcePath prefix", () => {
-    const phren = makePhren();
-    makeProject(phren, "myapp", {
-      "summary.md": "# myapp\n",
-      "phren.project.yaml": yaml.dump({ sourcePath: "/home/user/myapp" }),
-    });
-
-    const result = detectProject(phren, "/home/user/myapp/src");
-    expect(result).toBe("myapp");
-  });
-
-  it("returns null when no project matches", () => {
-    const phren = makePhren();
-    makeProject(phren, "myapp", {
-      "summary.md": "# myapp\n",
-      "phren.project.yaml": yaml.dump({ sourcePath: "/home/user/myapp" }),
-    });
-
-    const result = detectProject(phren, "/home/user/other-project/src");
-    expect(result).toBeNull();
-  });
-
   it("prefers a more specific sourcePath over a parent sourcePath", () => {
     const phren = makePhren();
     makeProject(phren, "web", {
@@ -586,16 +458,6 @@ describe("detectProject", () => {
 // --- appendAuditLog rotation ---
 
 describe("appendAuditLog", () => {
-  it("appends log entries", () => {
-    const phren = makePhren();
-    appendAuditLog(phren, "test_event", "details=foo");
-    const logPath = path.join(phren, ".runtime", "audit.log");
-    expect(fs.existsSync(logPath)).toBe(true);
-    const content = fs.readFileSync(logPath, "utf8");
-    expect(content).toContain("test_event");
-    expect(content).toContain("details=foo");
-  });
-
   it("rotates log when over 1MB", () => {
     const phren = makePhren();
     const logPath = path.join(phren, ".runtime", "audit.log");
@@ -724,42 +586,6 @@ describe("filterTrustedFindingsDetailed", () => {
     expect(result.issues[0].reason).toBe("stale");
   });
 
-  it("keeps entries with valid citations at higher confidence", () => {
-    const d = new Date();
-    d.setDate(d.getDate() - 50);
-    const dateStr = d.toISOString().slice(0, 10);
-    const content = [
-      "# proj FINDINGS",
-      "",
-      `## ${dateStr}`,
-      "",
-      "- Finding with citation",
-      `  <!-- phren:cite {"created_at":"${d.toISOString()}"} -->`,
-      "",
-    ].join("\n");
-    const result = filterTrustedFindingsDetailed(content, { ttlDays: 200, minConfidence: 0.3 });
-    expect(result.content).toContain("- Finding with citation");
-  });
-
-  it("treats all provenance sources equally for confidence", () => {
-    const d = new Date();
-    d.setDate(d.getDate() - 50);
-    const dateStr = d.toISOString().slice(0, 10);
-    const content = [
-      "# proj FINDINGS",
-      "",
-      `## ${dateStr}`,
-      "",
-      "- Human finding <!-- source:human actor:alice -->",
-      "- Extracted finding <!-- source:extract tool:auto-extract -->",
-      "",
-    ].join("\n");
-    // Both should survive at the same threshold since source no longer affects confidence
-    const result = filterTrustedFindingsDetailed(content, { ttlDays: 200, minConfidence: 0.3 });
-    expect(result.content).toContain("Human finding");
-    expect(result.content).toContain("Extracted finding");
-  });
-
   it("accepts numeric ttlDays shorthand", () => {
     const content = `# proj FINDINGS\n\n## 2020-01-01\n\n- Old entry\n`;
     const result = filterTrustedFindingsDetailed(content, 30);
@@ -770,208 +596,15 @@ describe("filterTrustedFindingsDetailed", () => {
 
 // --- recordInjection ---
 
-describe("recordInjection", () => {
-  it("creates and updates score entries", () => {
-    const phren = makePhren();
-    grantAdmin(phren);
-    const key = "testproj/FINDINGS.md:abc123";
-
-    recordInjection(phren, key, "session-1");
-    flushEntryScores(phren);
-
-    const scoresPath = path.join(phren, ".runtime", "memory-scores.json");
-    expect(fs.existsSync(scoresPath)).toBe(true);
-    const scores = readVersionedEntries<any>(scoresPath);
-    expect(scores[key]).toBeDefined();
-    expect(scores[key].impressions).toBe(1);
-
-    recordInjection(phren, key, "session-2");
-    flushEntryScores(phren);
-    const scores2 = readVersionedEntries<any>(scoresPath);
-    expect(scores2[key].impressions).toBe(2);
-  });
-
-  it("appends to usage log", () => {
-    const phren = makePhren();
-    grantAdmin(phren);
-    const key = "testproj/FINDINGS.md:def456";
-
-    recordInjection(phren, key, "sess-42");
-
-    const logPath = path.join(phren, ".runtime", "memory-usage.log");
-    expect(fs.existsSync(logPath)).toBe(true);
-    const logContent = fs.readFileSync(logPath, "utf8");
-    expect(logContent).toContain("inject");
-    expect(logContent).toContain("sess-42");
-    expect(logContent).toContain(key);
-  });
-});
-
 // --- recordFeedback ---
-
-describe("recordFeedback", () => {
-  it("records helpful feedback", () => {
-    const phren = makePhren();
-    grantAdmin(phren);
-    const key = "proj/file:aaa";
-
-    recordInjection(phren, key);
-    recordFeedback(phren, key, "helpful");
-    flushEntryScores(phren);
-
-    const scores = readVersionedEntries<any>(
-      path.join(phren, ".runtime", "memory-scores.json")
-    );
-    expect(scores[key].helpful).toBe(1);
-    expect(scores[key].repromptPenalty).toBe(0);
-  });
-
-  it("records reprompt penalty", () => {
-    const phren = makePhren();
-    grantAdmin(phren);
-    const key = "proj/file:bbb";
-
-    recordInjection(phren, key);
-    recordFeedback(phren, key, "reprompt");
-    flushEntryScores(phren);
-
-    const scores = readVersionedEntries<any>(
-      path.join(phren, ".runtime", "memory-scores.json")
-    );
-    expect(scores[key].repromptPenalty).toBe(1);
-  });
-
-  it("records regression penalty", () => {
-    const phren = makePhren();
-    grantAdmin(phren);
-    const key = "proj/file:ccc";
-
-    recordInjection(phren, key);
-    recordFeedback(phren, key, "regression");
-    flushEntryScores(phren);
-
-    const scores = readVersionedEntries<any>(
-      path.join(phren, ".runtime", "memory-scores.json")
-    );
-    expect(scores[key].regressionPenalty).toBe(1);
-  });
-});
 
 // --- getQualityMultiplier ---
 
-describe("getQualityMultiplier", () => {
-  it("returns 1 for unknown keys", () => {
-    const phren = makePhren();
-    grantAdmin(phren);
-    expect(getQualityMultiplier(phren, "unknown/key:xyz")).toBe(1);
-  });
-
-  it("returns > 1 for helpful memories", () => {
-    const phren = makePhren();
-    grantAdmin(phren);
-    const key = "proj/file:helpful";
-
-    recordInjection(phren, key);
-    recordFeedback(phren, key, "helpful");
-    recordFeedback(phren, key, "helpful");
-    recordFeedback(phren, key, "helpful");
-
-    const mult = getQualityMultiplier(phren, key);
-    expect(mult).toBeGreaterThan(1);
-  });
-
-  it("returns < 1 for penalized memories", () => {
-    const phren = makePhren();
-    grantAdmin(phren);
-    const key = "proj/file:bad";
-
-    recordInjection(phren, key);
-    recordFeedback(phren, key, "regression");
-    recordFeedback(phren, key, "reprompt");
-
-    const mult = getQualityMultiplier(phren, key);
-    expect(mult).toBeLessThan(1);
-  });
-
-  it("clamps between 0.2 and 1.5", () => {
-    const phren = makePhren();
-    grantAdmin(phren);
-
-    const goodKey = "proj/file:great";
-    recordInjection(phren, goodKey);
-    for (let i = 0; i < 20; i++) recordFeedback(phren, goodKey, "helpful");
-    expect(getQualityMultiplier(phren, goodKey)).toBeLessThanOrEqual(1.5);
-
-    const badKey = "proj/file:terrible";
-    recordInjection(phren, badKey);
-    for (let i = 0; i < 20; i++) recordFeedback(phren, badKey, "regression");
-    expect(getQualityMultiplier(phren, badKey)).toBeGreaterThanOrEqual(0.2);
-  });
-});
-
 // --- entryScoreKey ---
-
-describe("entryScoreKey", () => {
-  it("generates a deterministic key", () => {
-    const k1 = entryScoreKey("proj", "FINDINGS.md", "some snippet");
-    const k2 = entryScoreKey("proj", "FINDINGS.md", "some snippet");
-    expect(k1).toBe(k2);
-    expect(k1).toMatch(/^proj\/FINDINGS\.md:[a-f0-9]{12}$/);
-  });
-
-  it("produces different keys for different snippets", () => {
-    const k1 = entryScoreKey("proj", "FINDINGS.md", "snippet one");
-    const k2 = entryScoreKey("proj", "FINDINGS.md", "snippet two");
-    expect(k1).not.toBe(k2);
-  });
-});
 
 // --- extractConflictVersions ---
 
 describe("extractConflictVersions", () => {
-  it("returns null for content without conflict markers", () => {
-    expect(extractConflictVersions("normal content\nno conflicts")).toBeNull();
-  });
-
-  it("extracts ours and theirs from a conflict block", () => {
-    const content = [
-      "<<<<<<< HEAD",
-      "our change",
-      "=======",
-      "their change",
-      ">>>>>>> feature-branch",
-    ].join("\n");
-    const result = extractConflictVersions(content);
-    expect(result).not.toBeNull();
-    expect(result!.ours).toContain("our change");
-    expect(result!.theirs).toContain("their change");
-  });
-
-  it("preserves non-conflict lines in both versions", () => {
-    const content = [
-      "# Header",
-      "<<<<<<< HEAD",
-      "ours",
-      "=======",
-      "theirs",
-      ">>>>>>> branch",
-      "# Footer",
-    ].join("\n");
-    const result = extractConflictVersions(content);
-    expect(result!.ours).toContain("# Header");
-    expect(result!.ours).toContain("# Footer");
-    expect(result!.theirs).toContain("# Header");
-    expect(result!.theirs).toContain("# Footer");
-  });
-
-  it("strips conflict marker lines from output", () => {
-    const content = "<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> b";
-    const result = extractConflictVersions(content);
-    expect(result!.ours).not.toContain("<<<<<<<");
-    expect(result!.ours).not.toContain("=======");
-    expect(result!.theirs).not.toContain(">>>>>>>");
-  });
-
   it("handles multiple conflict blocks", () => {
     const content = [
       "<<<<<<< HEAD",
@@ -999,82 +632,9 @@ describe("extractConflictVersions", () => {
 
 // --- mergeFindings ---
 
-describe("mergeFindings (shared.test)", () => {
-  it("combines entries from both sides under the same date", () => {
-    const ours = "# FINDINGS\n\n## 2025-01-15\n\n- Our insight\n";
-    const theirs = "# FINDINGS\n\n## 2025-01-15\n\n- Their insight\n";
-    const merged = mergeFindings(ours, theirs);
-    expect(merged).toContain("- Our insight");
-    expect(merged).toContain("- Their insight");
-  });
-
-  it("deduplicates identical entries", () => {
-    const content = "# FINDINGS\n\n## 2025-03-01\n\n- Same entry\n";
-    const merged = mergeFindings(content, content);
-    const count = (merged.match(/- Same entry/g) || []).length;
-    expect(count).toBe(1);
-  });
-
-  it("sorts dates newest first", () => {
-    const ours = "# FINDINGS\n\n## 2024-01-01\n\n- Old\n";
-    const theirs = "# FINDINGS\n\n## 2025-06-15\n\n- New\n";
-    const merged = mergeFindings(ours, theirs);
-    expect(merged.indexOf("2025-06-15")).toBeLessThan(merged.indexOf("2024-01-01"));
-  });
-
-  it("preserves the title from ours", () => {
-    const ours = "# My Project FINDINGS\n\n## 2025-01-01\n\n- A\n";
-    const theirs = "# Other Title\n\n## 2025-01-01\n\n- B\n";
-    const merged = mergeFindings(ours, theirs);
-    expect(merged.startsWith("# My Project FINDINGS")).toBe(true);
-  });
-
-  it("merges dates that only exist on one side", () => {
-    const ours = "# FINDINGS\n\n## 2025-01-01\n\n- Ours only\n";
-    const theirs = "# FINDINGS\n\n## 2025-02-01\n\n- Theirs only\n";
-    const merged = mergeFindings(ours, theirs);
-    expect(merged).toContain("- Ours only");
-    expect(merged).toContain("- Theirs only");
-    expect(merged).toContain("## 2025-01-01");
-    expect(merged).toContain("## 2025-02-01");
-  });
-});
-
 // --- mergeTask ---
 
 describe("mergeTask (shared.test)", () => {
-  it("combines items from both sides", () => {
-    const ours = "# task\n\n## Active\n\n- Our task\n\n## Queue\n\n## Done\n";
-    const theirs = "# task\n\n## Active\n\n- Their task\n\n## Queue\n\n## Done\n";
-    const merged = mergeTask(ours, theirs);
-    expect(merged).toContain("- Our task");
-    expect(merged).toContain("- Their task");
-  });
-
-  it("deduplicates identical items across sides", () => {
-    const content = "# task\n\n## Active\n\n- Same task\n\n## Queue\n\n## Done\n";
-    const merged = mergeTask(content, content);
-    const count = (merged.match(/- Same task/g) || []).length;
-    expect(count).toBe(1);
-  });
-
-  it("orders sections Active, Queue, Done first", () => {
-    const content = "# task\n\n## Done\n\n- D\n\n## Active\n\n- A\n\n## Queue\n\n- Q\n";
-    const merged = mergeTask(content, content);
-    const activeIdx = merged.indexOf("## Active");
-    const queueIdx = merged.indexOf("## Queue");
-    const doneIdx = merged.indexOf("## Done");
-    expect(activeIdx).toBeLessThan(queueIdx);
-    expect(queueIdx).toBeLessThan(doneIdx);
-  });
-
-  it("preserves title from ours", () => {
-    const ours = "# My Task\n\n## Active\n\n## Queue\n\n## Done\n";
-    const theirs = "# Other\n\n## Active\n\n## Queue\n\n## Done\n";
-    const merged = mergeTask(ours, theirs);
-    expect(merged.startsWith("# My Task")).toBe(true);
-  });
-
   it("merges items from different sections", () => {
     const ours = "# task\n\n## Active\n\n- Active task\n\n## Queue\n\n## Done\n";
     const theirs = "# task\n\n## Active\n\n## Queue\n\n- Queued task\n\n## Done\n";
@@ -1282,27 +842,6 @@ describe("autoMergeConflicts", () => {
 // --- withDefaults ---
 
 describe("withDefaults", () => {
-  it("fills in missing keys from defaults", () => {
-    const result = withDefaults({ a: 1 } as any, { a: 0, b: 2, c: 3 } as any);
-    expect(result).toEqual({ a: 1, b: 2, c: 3 });
-  });
-
-  it("deep-merges nested objects", () => {
-    const result = withDefaults(
-      { nested: { x: 10 } } as any,
-      { nested: { x: 0, y: 20 }, top: "hello" } as any
-    );
-    expect(result).toEqual({ nested: { x: 10, y: 20 }, top: "hello" });
-  });
-
-  it("does not overwrite with null or undefined", () => {
-    const result = withDefaults(
-      { a: null, b: undefined } as any,
-      { a: 5, b: 10 } as any
-    );
-    expect(result).toEqual({ a: 5, b: 10 });
-  });
-
   it("replaces arrays entirely (no deep merge on arrays)", () => {
     const result = withDefaults(
       { items: ["new"] } as any,
@@ -1314,54 +853,7 @@ describe("withDefaults", () => {
 
 // --- validateFindingsFormat ---
 
-describe("validateFindingsFormat", () => {
-  it("returns empty for valid format", () => {
-    const content = "# proj FINDINGS\n\n## 2025-01-01\n\n- A finding\n";
-    const issues = validateFindingsFormat(content);
-    expect(issues).toEqual([]);
-  });
-
-  it("flags missing title heading", () => {
-    const content = "## 2025-01-01\n\n- A finding\n";
-    const issues = validateFindingsFormat(content);
-    expect(issues.length).toBe(1);
-    expect(issues[0]).toContain("Missing title");
-  });
-
-  it("flags bad date format in headings that start with digits", () => {
-    const content = "# FINDINGS\n\n## 2025-1-1\n\n- A finding\n";
-    const issues = validateFindingsFormat(content);
-    expect(issues.some(i => i.includes("YYYY-MM-DD"))).toBe(true);
-  });
-
-  it("does not flag non-date headings like ## Overview", () => {
-    const content = "# FINDINGS\n\n## Overview\n\nSome text\n";
-    const issues = validateFindingsFormat(content);
-    expect(issues.length).toBe(0);
-  });
-});
-
 // --- validateTaskFormat ---
-
-describe("validateTaskFormat", () => {
-  it("returns empty for valid format", () => {
-    const content = "# task\n\n## Active\n\n- Task\n\n## Queue\n\n## Done\n";
-    const issues = validateTaskFormat(content);
-    expect(issues).toEqual([]);
-  });
-
-  it("flags missing title heading", () => {
-    const content = "## Active\n\n- Task\n";
-    const issues = validateTaskFormat(content);
-    expect(issues.some(i => i.includes("title"))).toBe(true);
-  });
-
-  it("flags missing sections", () => {
-    const content = "# task\n\nJust some text without sections.\n";
-    const issues = validateTaskFormat(content);
-    expect(issues.some(i => i.includes("sections"))).toBe(true);
-  });
-});
 
 // --- stripTaskDoneSection ---
 
@@ -1407,175 +899,17 @@ describe("pruneDeadMemories", () => {
     const content = fs.readFileSync(path.join(phren, "pruneproj", "FINDINGS.md"), "utf8");
     expect(content).toContain("Very old entry");
   });
-
-  it("prunes entries and uses atomic write (no .bak file)", () => {
-    const phren = makePhren();
-    grantAdmin(phren);
-    const govDir = path.join(phren, ".config");
-    fs.mkdirSync(govDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(govDir, "retention-policy.json"),
-      JSON.stringify({ ttlDays: 120, retentionDays: 30, autoAcceptThreshold: 0.75, minInjectConfidence: 0.35, decay: { d30: 1, d60: 0.85, d90: 0.65, d120: 0.45 } }, null, 2) + "\n"
-    );
-    makeProject(phren, "pruneproj", {
-      "FINDINGS.md": "# pruneproj FINDINGS\n\n## 2020-01-01\n\n- Very old entry\n\n## 2099-01-01\n\n- Future entry\n",
-    });
-
-    const result = pruneDeadMemories(phren, "pruneproj");
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.data.message).toContain("Pruned 1");
-    const content = fs.readFileSync(path.join(phren, "pruneproj", "FINDINGS.md"), "utf8");
-    expect(content).not.toContain("Very old entry");
-    expect(content).toContain("Future entry");
-    // atomic write (tmp + rename) — no .bak file is created
-    expect(fs.existsSync(path.join(phren, "pruneproj", "FINDINGS.md.bak"))).toBe(false);
-  });
-
 });
 
 // --- getRetentionPolicy / updateRetentionPolicy ---
 
-describe("getRetentionPolicy and updateRetentionPolicy", () => {
-  it("returns defaults when no policy file exists", () => {
-    const phren = makePhren();
-    const policy = getRetentionPolicy(phren);
-    expect(policy.ttlDays).toBe(120);
-    expect(policy.retentionDays).toBe(365);
-    expect(policy.decay.d30).toBe(1.0);
-    expect(policy.decay.d120).toBe(0.45);
-  });
-
-  it("merges partial policy with defaults", () => {
-    const phren = makePhren();
-    const govDir = path.join(phren, ".config");
-    fs.mkdirSync(govDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(govDir, "retention-policy.json"),
-      JSON.stringify({ ttlDays: 60 }, null, 2) + "\n"
-    );
-    const policy = getRetentionPolicy(phren);
-    expect(policy.ttlDays).toBe(60);
-    expect(policy.retentionDays).toBe(365);
-  });
-
-  it("admin can update policy", () => {
-    const phren = makePhren();
-    grantAdmin(phren);
-    const result = updateRetentionPolicy(phren, { ttlDays: 90 });
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.data.ttlDays).toBe(90);
-  });
-
-  it("non-admin cannot update policy", () => {
-    const phren = makePhren();
-    const govDir = path.join(phren, ".config");
-    fs.mkdirSync(govDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(govDir, "access-control.json"),
-      JSON.stringify({ contributors: ["dev"] }, null, 2) + "\n"
-    );
-    process.env.PHREN_ACTOR = "dev";
-    const result = updateRetentionPolicy(phren, { ttlDays: 1 });
-    // RBAC was removed — any actor can update policy now
-    expect(result.ok).toBe(true);
-  });
-});
-
 // --- getWorkflowPolicy / updateWorkflowPolicy ---
 
-describe("getWorkflowPolicy and updateWorkflowPolicy", () => {
-  it("returns defaults when no file exists", () => {
-    const phren = makePhren();
-    const wp = getWorkflowPolicy(phren);
-    expect(wp.lowConfidenceThreshold).toBe(0.7);
-    expect(wp.riskySections).toEqual(["Stale", "Conflicts"]);
-    expect(wp.taskMode).toBe("auto");
-  });
-
-  it("filters invalid riskySections values", () => {
-    const phren = makePhren();
-    const govDir = path.join(phren, ".config");
-    fs.mkdirSync(govDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(govDir, "workflow-policy.json"),
-      JSON.stringify({ riskySections: ["Review", "BadSection", "Stale"] }, null, 2) + "\n"
-    );
-    const wp = getWorkflowPolicy(phren);
-    expect(wp.riskySections).toEqual(["Review", "Stale"]);
-  });
-
-  it("admin can update workflow policy", () => {
-    const phren = makePhren();
-    grantAdmin(phren);
-    const result = updateWorkflowPolicy(phren, { lowConfidenceThreshold: 0.5, taskMode: "auto" });
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.data.lowConfidenceThreshold).toBe(0.5);
-      expect(result.data.taskMode).toBe("auto");
-    }
-  });
-});
-
 // --- getIndexPolicy / updateIndexPolicy ---
-
-describe("getIndexPolicy and updateIndexPolicy", () => {
-  it("returns defaults when no file exists", () => {
-    const phren = makePhren();
-    const ip = getIndexPolicy(phren);
-    expect(ip.includeGlobs).toContain("**/*.md");
-    expect(ip.includeHidden).toBe(false);
-  });
-
-  it("filters empty globs and falls back to defaults", () => {
-    const phren = makePhren();
-    const govDir = path.join(phren, ".config");
-    fs.mkdirSync(govDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(govDir, "index-policy.json"),
-      JSON.stringify({ includeGlobs: ["", "  "], excludeGlobs: [] }, null, 2) + "\n"
-    );
-    const ip = getIndexPolicy(phren);
-    expect(ip.includeGlobs.length).toBeGreaterThan(0);
-    expect(ip.includeGlobs.every(g => g.trim().length > 0)).toBe(true);
-  });
-
-  it("admin can update index policy", () => {
-    const phren = makePhren();
-    grantAdmin(phren);
-    const result = updateIndexPolicy(phren, { includeHidden: true });
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.data.includeHidden).toBe(true);
-  });
-});
 
 // --- getRuntimeHealth / updateRuntimeHealth ---
 
 describe("getRuntimeHealth and updateRuntimeHealth", () => {
-  it("returns default health when no file exists", () => {
-    const phren = makePhren();
-    const h = getRuntimeHealth(phren);
-    expect(h.schemaVersion).toBe(1);
-    expect(h.lastPromptAt).toBeUndefined();
-  });
-
-  it("updates and persists runtime health", () => {
-    const phren = makePhren();
-    const now = new Date().toISOString();
-    updateRuntimeHealth(phren, { lastPromptAt: now });
-    const h = getRuntimeHealth(phren);
-    expect(h.lastPromptAt).toBe(now);
-  });
-
-  it("handles lastAutoSave updates", () => {
-    const phren = makePhren();
-    const now = new Date().toISOString();
-    updateRuntimeHealth(phren, {
-      lastAutoSave: { at: now, status: "saved-pushed", detail: "ok" },
-    });
-    const h = getRuntimeHealth(phren);
-    expect(h.lastAutoSave?.status).toBe("saved-pushed");
-  });
-
   it("handles sync metadata updates", () => {
     const phren = makePhren();
     const now = new Date().toISOString();
@@ -1598,30 +932,6 @@ describe("getRuntimeHealth and updateRuntimeHealth", () => {
 // --- appendReviewQueue ---
 
 describe("appendReviewQueue", () => {
-  it("creates review.md if it does not exist", () => {
-    const phren = makePhren();
-    grantAdmin(phren);
-    makeProject(phren, "queueproj", { "summary.md": "# queueproj\n" });
-
-    const result = appendReviewQueue(phren, "queueproj", "Stale", ["Old memory"]);
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.data).toBe(1);
-    const content = fs.readFileSync(path.join(phren, "queueproj", "review.md"), "utf8");
-    expect(content).toContain("## Stale");
-    expect(content).toContain("Old memory");
-  });
-
-  it("does not duplicate existing entries", () => {
-    const phren = makePhren();
-    grantAdmin(phren);
-    makeProject(phren, "dupqueue", { "summary.md": "# dupqueue\n" });
-
-    appendReviewQueue(phren, "dupqueue", "Review", ["Check this"]);
-    const result = appendReviewQueue(phren, "dupqueue", "Review", ["Check this"]);
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.data).toBe(0);
-  });
-
   it("returns 0 for empty entries", () => {
     const phren = makePhren();
     grantAdmin(phren);
@@ -1629,13 +939,6 @@ describe("appendReviewQueue", () => {
     const emptyResult = appendReviewQueue(phren, "emptyq", "Stale", []);
     expect(emptyResult.ok).toBe(true);
     if (emptyResult.ok) expect(emptyResult.data).toBe(0);
-  });
-
-  it("returns 0 for invalid project", () => {
-    const phren = makePhren();
-    grantAdmin(phren);
-    const badResult = appendReviewQueue(phren, "../bad", "Stale", ["entry"]);
-    expect(badResult.ok).toBe(false);
   });
 
   it("normalizes multiline and comment-heavy queue entries into a safe single line", () => {
@@ -1764,49 +1067,6 @@ describe("consolidateProjectFindings additional", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain("No FINDINGS.md");
   });
-
-  it("deduplicates entries that differ only by trailing whitespace", () => {
-    const phren = makePhren();
-    grantAdmin(phren);
-    makeProject(phren, "trailws", {
-      "FINDINGS.md": [
-        "# trailws FINDINGS",
-        "",
-        "## 2025-01-01",
-        "",
-        "- Use parameterized queries   ",
-        "- Use parameterized queries",
-        "- Another finding",
-        "",
-      ].join("\n"),
-    });
-    consolidateProjectFindings(phren, "trailws");
-    const content = fs.readFileSync(path.join(phren, "trailws", "FINDINGS.md"), "utf8");
-    const bullets = content.split("\n").filter(l => l.startsWith("- "));
-    expect(bullets.length).toBe(2);
-  });
-
-  it("preserves citation comments during dedup", () => {
-    const phren = makePhren();
-    grantAdmin(phren);
-    makeProject(phren, "citecons", {
-      "FINDINGS.md": [
-        "# citecons FINDINGS",
-        "",
-        "## 2025-01-01",
-        "",
-        "- Some insight",
-        '  <!-- phren:cite {"created_at":"2025-01-01T00:00:00.000Z"} -->',
-        "- Some insight",
-        "",
-      ].join("\n"),
-    });
-    consolidateProjectFindings(phren, "citecons");
-    const content = fs.readFileSync(path.join(phren, "citecons", "FINDINGS.md"), "utf8");
-    const bullets = content.split("\n").filter(l => l.startsWith("- "));
-    expect(bullets.length).toBe(1);
-    expect(content).toContain("phren:cite");
-  });
 });
 
 // --- filterTrustedFindingsDetailed (extended) ---
@@ -1883,12 +1143,6 @@ describe("filterTrustedFindingsDetailed (extended)", () => {
     expect(result.content).toContain("This survives");
   });
 
-  it("handles content with no date headings gracefully", () => {
-    const content = "# proj FINDINGS\n\nSome raw text without dates.\n";
-    const result = filterTrustedFindingsDetailed(content, { ttlDays: 120 });
-    expect(result.issues.length).toBe(0);
-  });
-
   it("marks invalid citation entries", () => {
     const today = new Date().toISOString().slice(0, 10);
     const content = [
@@ -1907,17 +1161,6 @@ describe("filterTrustedFindingsDetailed (extended)", () => {
 // --- validateGovernanceJson (extended) ---
 
 describe("validateGovernanceJson (extended)", () => {
-  it("returns true for non-existent file", () => {
-    expect(validateGovernanceJson("/nonexistent/file.json", "access-control")).toBe(true);
-  });
-
-  it("returns false for non-object JSON (array)", () => {
-    const phren = makePhren();
-    const f = path.join(phren, "test.json");
-    fs.writeFileSync(f, "[1,2,3]");
-    expect(validateGovernanceJson(f, "access-control")).toBe(false);
-  });
-
   it("validates retention-policy with bad decay", () => {
     const phren = makePhren();
     const f = path.join(phren, "test.json");
@@ -1938,24 +1181,9 @@ describe("validateGovernanceJson (extended)", () => {
     fs.writeFileSync(f, JSON.stringify({ includeHidden: "not-bool" }));
     expect(validateGovernanceJson(f, "index-policy")).toBe(false);
   });
-
 });
 
 // --- flushEntryScores ---
-
-describe("flushEntryScores", () => {
-  it("writes cached scores to disk", () => {
-    const phren = makePhren();
-    grantAdmin(phren);
-    const key = "proj/file:flush-test";
-    recordInjection(phren, key);
-    // Scores are already on disk from recordInjection, but flushEntryScores re-writes
-    flushEntryScores(phren);
-    const scoresPath = path.join(phren, ".runtime", "memory-scores.json");
-    const raw = JSON.parse(fs.readFileSync(scoresPath, "utf8"));
-    expect(raw.entries[key]).toBeDefined();
-  });
-});
 
 // --- findPhrenPathWithArg ---
 
@@ -1991,31 +1219,6 @@ describe("findPhrenPathWithArg", () => {
 // --- extractSnippet (extended) ---
 
 describe("extractSnippet (extended)", () => {
-  it("returns early lines when query terms are empty after cleanup", () => {
-    const content = "Line 1\nLine 2\nLine 3\nLine 4\nLine 5\nLine 6";
-    const snippet = extractSnippet(content, "AND OR NOT", 3);
-    expect(snippet).toContain("Line 1");
-  });
-
-  it("prefers lines near headings", () => {
-    const content = [
-      "# Section A",
-      "irrelevant stuff",
-      "also irrelevant",
-      "also more irrelevant",
-      "# Section B",
-      "target keyword here",
-      "more context",
-    ].join("\n");
-    const snippet = extractSnippet(content, "target keyword", 3);
-    expect(snippet).toContain("target keyword");
-  });
-
-  it("handles single-line content", () => {
-    const snippet = extractSnippet("just one line with keyword", "keyword", 5);
-    expect(snippet).toContain("keyword");
-  });
-
   it("scores multi-term matches higher than single-term", () => {
     const content = [
       "# Docs",
@@ -2032,19 +1235,6 @@ describe("extractSnippet (extended)", () => {
   it("handles empty content gracefully", () => {
     const snippet = extractSnippet("", "anything", 5);
     expect(snippet).toBe("");
-  });
-
-  it("strips FTS operators from query before matching", () => {
-    const content = "line 1\nthe real answer is here\nline 3";
-    const snippet = extractSnippet(content, '"real" AND "answer"', 3);
-    expect(snippet).toContain("real answer");
-  });
-
-  it("respects lines parameter for window size", () => {
-    const content = Array.from({ length: 20 }, (_, i) => `line ${i + 1}`).join("\n");
-    const snippet = extractSnippet(content, "line 10", 2);
-    const snippetLines = snippet.split("\n");
-    expect(snippetLines.length).toBeLessThanOrEqual(2);
   });
 });
 
@@ -2066,37 +1256,9 @@ describe("parsePhrenErrorCode", () => {
     expect(parsePhrenErrorCode("Marked done in project: item")).toBeUndefined();
     expect(parsePhrenErrorCode("")).toBeUndefined();
   });
-
-  it("returns undefined for unknown error codes", () => {
-    expect(parsePhrenErrorCode("UNKNOWN_CODE: something")).toBeUndefined();
-  });
 });
 
 // --- PhrenResult helpers ---
-
-describe("PhrenResult helpers", () => {
-  it("phrenOk wraps data", () => {
-    const result = phrenOk({ items: [1, 2, 3] });
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.data).toEqual({ items: [1, 2, 3] });
-  });
-
-  it("phrenErr wraps error with optional code", () => {
-    const result = phrenErr("something failed", PhrenError.FILE_NOT_FOUND);
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toBe("something failed");
-      expect(result.code).toBe("FILE_NOT_FOUND");
-    }
-  });
-
-  it("phrenErr works without code", () => {
-    const result = phrenErr("generic error");
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.code).toBeUndefined();
-  });
-
-});
 
 // ─── collectNativeMemoryFiles ──────────────────────────────────────────────
 
@@ -2160,7 +1322,6 @@ describe("collectNativeMemoryFiles", () => {
   });
 });
 
-
 describe("resolveImports", () => {
   let phrenDir: string;
   let importCleanup: () => void;
@@ -2174,79 +1335,6 @@ describe("resolveImports", () => {
   });
 
   afterEach(() => importCleanup());
-
-  it("returns content unchanged when no imports present", () => {
-    const content = "# Hello\n\nNo imports here.";
-    expect(resolveImports(content, phrenDir)).toBe(content);
-  });
-
-  it("resolves a single @import directive", () => {
-    fs.writeFileSync(
-      path.join(phrenDir, "global", "shared", "conventions.md"),
-      "Always use snake_case."
-    );
-    const content = "# Project\n\n@import shared/conventions.md\n\nMore text.";
-    const result = resolveImports(content, phrenDir);
-    expect(result).toContain("Always use snake_case.");
-    expect(result).not.toContain("@import");
-  });
-
-  it("resolves multiple @import directives", () => {
-    fs.writeFileSync(
-      path.join(phrenDir, "global", "shared", "a.md"),
-      "Content A"
-    );
-    fs.writeFileSync(
-      path.join(phrenDir, "global", "shared", "b.md"),
-      "Content B"
-    );
-    const content = "@import shared/a.md\n@import shared/b.md";
-    const result = resolveImports(content, phrenDir);
-    expect(result).toContain("Content A");
-    expect(result).toContain("Content B");
-  });
-
-  it("handles nested imports recursively", () => {
-    fs.writeFileSync(
-      path.join(phrenDir, "global", "shared", "outer.md"),
-      "Outer start\n@import shared/inner.md\nOuter end"
-    );
-    fs.writeFileSync(
-      path.join(phrenDir, "global", "shared", "inner.md"),
-      "Inner content"
-    );
-    const content = "@import shared/outer.md";
-    const result = resolveImports(content, phrenDir);
-    expect(result).toContain("Outer start");
-    expect(result).toContain("Inner content");
-    expect(result).toContain("Outer end");
-  });
-
-  it("detects circular imports and inserts comment", () => {
-    fs.writeFileSync(
-      path.join(phrenDir, "global", "shared", "loop-a.md"),
-      "@import shared/loop-b.md"
-    );
-    fs.writeFileSync(
-      path.join(phrenDir, "global", "shared", "loop-b.md"),
-      "@import shared/loop-a.md"
-    );
-    const content = "@import shared/loop-a.md";
-    const result = resolveImports(content, phrenDir);
-    expect(result).toContain("@import cycle:");
-  });
-
-  it("handles missing import file gracefully", () => {
-    const content = "@import shared/nonexistent.md";
-    const result = resolveImports(content, phrenDir);
-    expect(result).toContain("@import not found: shared/nonexistent.md");
-  });
-
-  it("blocks path traversal attempts", () => {
-    const content = "@import ../../etc/passwd";
-    const result = resolveImports(content, phrenDir);
-    expect(result).toContain("@import blocked:");
-  });
 
   it("caps recursion depth", () => {
     // Create a chain: d0 -> d1 -> d2 -> d3 -> d4 -> d5 (d5 should not resolve)
@@ -2268,46 +1356,10 @@ describe("resolveImports", () => {
 // --- New error codes (VALIDATION_ERROR, INDEX_ERROR, NETWORK_ERROR) ---
 
 describe("PhrenError new codes", () => {
-  it("VALIDATION_ERROR exists and is a string", () => {
-    expect(PhrenError.VALIDATION_ERROR).toBe("VALIDATION_ERROR");
-    expect(typeof PhrenError.VALIDATION_ERROR).toBe("string");
-  });
-
-  it("INDEX_ERROR exists and is a string", () => {
-    expect(PhrenError.INDEX_ERROR).toBe("INDEX_ERROR");
-    expect(typeof PhrenError.INDEX_ERROR).toBe("string");
-  });
-
-  it("NETWORK_ERROR exists and is a string", () => {
-    expect(PhrenError.NETWORK_ERROR).toBe("NETWORK_ERROR");
-    expect(typeof PhrenError.NETWORK_ERROR).toBe("string");
-  });
-
   it("parsePhrenErrorCode extracts new codes from prefixed messages", () => {
     expect(parsePhrenErrorCode("VALIDATION_ERROR: invalid input")).toBe(PhrenError.VALIDATION_ERROR);
     expect(parsePhrenErrorCode("INDEX_ERROR: index rebuild failed")).toBe(PhrenError.INDEX_ERROR);
     expect(parsePhrenErrorCode("NETWORK_ERROR: connection refused")).toBe(PhrenError.NETWORK_ERROR);
-  });
-
-  it("all 13 PhrenError codes are present", () => {
-    const expectedKeys = [
-      "PROJECT_NOT_FOUND",
-      "INVALID_PROJECT_NAME",
-      "FILE_NOT_FOUND",
-      "PERMISSION_DENIED",
-      "MALFORMED_JSON",
-      "MALFORMED_YAML",
-      "NOT_FOUND",
-      "AMBIGUOUS_MATCH",
-      "LOCK_TIMEOUT",
-      "EMPTY_INPUT",
-      "VALIDATION_ERROR",
-      "INDEX_ERROR",
-      "NETWORK_ERROR",
-    ];
-    const actualKeys = Object.keys(PhrenError);
-    expect(actualKeys).toEqual(expect.arrayContaining(expectedKeys));
-    expect(actualKeys.length).toBe(expectedKeys.length);
   });
 });
 

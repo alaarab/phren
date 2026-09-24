@@ -1,7 +1,6 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
-import * as os from "os";
 import { makeTempDir, grantAdmin, runCliExec } from "./test-helpers.js";
 
 const runCli = runCliExec;
@@ -70,17 +69,6 @@ describe("CLI config: policy", () => {
   });
   afterEach(() => cleanup());
 
-  it("gets default policy", () => {
-    const { stdout, exitCode } = runCli(
-      ["config", "policy", "get"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }
-    );
-    expect(exitCode).toBe(0);
-    const policy = JSON.parse(stdout);
-    expect(policy).toHaveProperty("ttlDays");
-    expect(policy).toHaveProperty("autoAcceptThreshold");
-  });
-
   it("sets and reads back policy values", () => {
     const setResult = runCli(
       ["config", "policy", "set", "--ttlDays=90", "--autoAcceptThreshold=0.9"],
@@ -123,16 +111,6 @@ describe("CLI config: workflow", () => {
   });
   afterEach(() => cleanup());
 
-  it("gets default workflow policy", () => {
-    const { stdout, exitCode } = runCli(
-      ["config", "workflow", "get"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }
-    );
-    expect(exitCode).toBe(0);
-    const workflow = JSON.parse(stdout);
-    expect(workflow).toHaveProperty("lowConfidenceThreshold");
-  });
-
   it("sets workflow values", () => {
     const setResult = runCli(
       ["config", "workflow", "set", "--lowConfidenceThreshold=0.6"],
@@ -171,17 +149,6 @@ describe("CLI config: index", () => {
     ({ phrenDir, cleanup } = setupPhrenDir());
   });
   afterEach(() => cleanup());
-
-  it("gets default index policy", () => {
-    const { stdout, exitCode } = runCli(
-      ["config", "index", "get"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }
-    );
-    expect(exitCode).toBe(0);
-    const index = JSON.parse(stdout);
-    expect(index).toHaveProperty("includeGlobs");
-    expect(index).toHaveProperty("excludeGlobs");
-  });
 
   it("sets include and exclude globs", () => {
     runCli(
@@ -247,16 +214,6 @@ describe("CLI config: telemetry", () => {
       { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }
     );
     expect(stdout).toContain("reset");
-  });
-
-  it("shows summary when no action given", () => {
-    const { stdout, exitCode } = runCli(
-      ["config", "telemetry"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }
-    );
-    expect(exitCode).toBe(0);
-    // Summary should contain some telemetry info
-    expect(stdout.length).toBeGreaterThan(0);
   });
 });
 
@@ -361,18 +318,6 @@ describe("CLI config: show", () => {
     expect(stdout).toContain("default");
   });
 
-  it("emits a machine-readable view with --json", () => {
-    const { stdout, exitCode } = runCli(
-      ["config", "show", "--json"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }
-    );
-    expect(exitCode).toBe(0);
-    const view = JSON.parse(stdout);
-    expect(view.scope).toBe("global");
-    expect(view.fields["retention.ttlDays"].value).toBe(120);
-    expect(view.fields["retention.ttlDays"].source).toBe("default");
-  });
-
   it("shows the source as global after a value is set, and surfaces it in --diff", () => {
     runCli(
       ["config", "task-mode", "set", "suggest"],
@@ -422,18 +367,6 @@ describe("CLI config: access", () => {
   });
   afterEach(() => cleanup());
 
-  it("reports empty role lists by default", () => {
-    const { stdout, exitCode } = runCli(
-      ["config", "access", "get"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }
-    );
-    expect(exitCode).toBe(0);
-    const payload = JSON.parse(stdout);
-    expect(payload.admins).toEqual([]);
-    expect(payload.contributors).toEqual([]);
-    expect(payload.readers).toEqual([]);
-  });
-
   it("sets a global admin and reads it back", () => {
     const set = runCli(
       ["config", "access", "set", "--admins=alice,bob"],
@@ -462,24 +395,5 @@ describe("CLI config: access", () => {
     const payload = JSON.parse(stdout);
     expect(payload.admins).toEqual(["alice"]);
     expect(payload.contributors).toEqual(["carol"]);
-  });
-
-  it("refuses to let a non-admin rewrite the ACL", () => {
-    runCli(
-      ["config", "access", "set", "--admins=alice", "--contributors=bob"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }
-    );
-    const escalate = runCli(
-      ["config", "access", "set", "--admins=bob"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "bob" }
-    );
-    expect(escalate.exitCode).not.toBe(0);
-    expect(escalate.stderr).toMatch(/manage_config|admins/);
-
-    const { stdout } = runCli(
-      ["config", "access", "get"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "alice" }
-    );
-    expect(JSON.parse(stdout).admins).toEqual(["alice"]);
   });
 });

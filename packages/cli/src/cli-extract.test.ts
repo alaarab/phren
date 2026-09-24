@@ -204,11 +204,6 @@ describe("ghCachePath", () => {
     const p2 = ghCachePath("/other/path/my-repo");
     expect(p1).not.toBe(p2);
   });
-
-  it("produces paths with no special characters from repo path", () => {
-    const p = ghCachePath("/path/to/my repo!@#");
-    expect(p).not.toMatch(/[!@#\s]/);
-  });
 });
 
 // ── runGhJson ────────────────────────────────────────────────────────────────

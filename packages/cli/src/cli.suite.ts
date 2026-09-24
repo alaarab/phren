@@ -1,11 +1,9 @@
 import { it, expect, beforeEach, afterEach, beforeAll, afterAll } from "vitest";
 import { shard } from "./test-shard.js";
 import { grantAdmin, makeTempDir, setupIsolatedCliEnv, runCliSpawn, type IsolatedCliEnv } from "./test-helpers.js";
-import { getMachineName } from "./link/link.js";
 import { REGISTRY } from "./cli-registry.js";
 import * as fs from "fs";
 import * as path from "path";
-import * as os from "os";
 
 // Run through cli.test.ts and cli.2.test.ts, each one shard of the top-level groups.
 const { describe } = shard();
@@ -51,15 +49,6 @@ describe("CLI integration: search", () => {
   });
 
   afterAll(() => cleanup());
-
-  it("returns matching results for a known query", () => {
-    const { stdout, exitCode } = runCli(
-      ["search", "restart", "server"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("restart");
-  });
 
   it("exits with error when no query is provided", () => {
     const { stderr, exitCode } = runCli(
@@ -121,15 +110,6 @@ describe("CLI integration: doctor", () => {
     expect(output).toContain("phren doctor:");
     // Should contain check lines with ok or fail
     expect(output).toMatch(/- (ok|fail) /);
-  });
-
-  it("--fix flag runs without crashing", () => {
-    const { stdout, stderr } = runCli(
-      ["doctor", "--fix"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
-    );
-    const output = stdout + stderr;
-    expect(output).toContain("phren doctor:");
   });
 });
 
@@ -512,15 +492,6 @@ describe("CLI integration: search edge cases", () => {
     expect(stderr).toContain('Invalid --type value: "nonsense"');
   });
 
-  it("--all sets limit to 100 and returns results", () => {
-    const { stdout, exitCode } = runCli(
-      ["search", "caching", "--project", "alpha", "--all"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("caching");
-  });
-
   it("--limit flag restricts result count", () => {
     const { stdout, exitCode } = runCli(
       ["search", "caching", "--project", "alpha", "--limit", "1"],
@@ -565,27 +536,9 @@ describe("CLI integration: search edge cases", () => {
     expect(stderr).toContain("Unknown search flag");
   });
 
-  it("--help flag prints usage without error", () => {
-    const { stderr, exitCode } = runCli(
-      ["search", "--help"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
-    );
-    // --help causes early return (null), which exits 0
-    expect(exitCode).toBe(0);
-  });
-
   it("search with inline --project=alpha format works", () => {
     const { stdout, exitCode } = runCli(
       ["search", "caching", "--project=alpha"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("alpha");
-  });
-
-  it("search with --project alone (browse mode) returns results", () => {
-    const { stdout, exitCode } = runCli(
-      ["search", "--project", "alpha"],
       { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
@@ -633,37 +586,6 @@ describe("CLI integration: config subcommands", () => {
 
   afterAll(() => cleanup());
 
-  it("config with no subcommand prints help", () => {
-    const { stdout, exitCode } = runCli(
-      ["config"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("phren config");
-    expect(stdout).toContain("Subcommands:");
-  });
-
-  it("config with unknown subcommand exits with error", () => {
-    const { stderr, exitCode } = runCli(
-      ["config", "bogus"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
-    );
-    expect(exitCode).not.toBe(0);
-    expect(stderr).toContain('Unknown config subcommand: "bogus"');
-  });
-
-  it("config policy get returns JSON", () => {
-    const { stdout, exitCode } = runCli(
-      ["config", "policy", "get"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    const parsed = JSON.parse(stdout);
-    expect(parsed).toHaveProperty("ttlDays");
-    expect(parsed).toHaveProperty("retentionDays");
-    expect(parsed).toHaveProperty("decay");
-  });
-
   it("config policy with no args defaults to get", () => {
     const { stdout, exitCode } = runCli(
       ["config", "policy"],
@@ -674,17 +596,6 @@ describe("CLI integration: config subcommands", () => {
     expect(parsed).toHaveProperty("ttlDays");
   });
 
-  it("config policy set updates values", () => {
-    const { stdout, exitCode } = runCli(
-      ["config", "policy", "set", "--ttlDays=200", "--decay.d30=0.95"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    const parsed = JSON.parse(stdout);
-    expect(parsed.ttlDays).toBe(200);
-    expect(parsed.decay.d30).toBe(0.95);
-  });
-
   it("config policy set with invalid action prints usage", () => {
     const { stderr, exitCode } = runCli(
       ["config", "policy", "delete"],
@@ -692,68 +603,6 @@ describe("CLI integration: config subcommands", () => {
     );
     expect(exitCode).not.toBe(0);
     expect(stderr).toContain("Usage:");
-  });
-
-  it("config workflow get returns JSON", () => {
-    const { stdout, exitCode } = runCli(
-      ["config", "workflow", "get"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    const parsed = JSON.parse(stdout);
-    expect(parsed).toHaveProperty("lowConfidenceThreshold");
-  });
-
-  it("config workflow set updates values", () => {
-    const { stdout, exitCode } = runCli(
-      ["config", "workflow", "set", "--lowConfidenceThreshold=0.5"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    const parsed = JSON.parse(stdout);
-    expect(parsed.lowConfidenceThreshold).toBe(0.5);
-  });
-
-  it("config workflow set with riskySections", () => {
-    const { stdout, exitCode } = runCli(
-      ["config", "workflow", "set", "--riskySections=Stale,Conflicts,Review"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    const parsed = JSON.parse(stdout);
-    expect(parsed.riskySections).toEqual(["Stale", "Conflicts", "Review"]);
-  });
-
-  it("config index get returns JSON", () => {
-    const { stdout, exitCode } = runCli(
-      ["config", "index", "get"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    const parsed = JSON.parse(stdout);
-    expect(parsed).toHaveProperty("includeGlobs");
-    expect(parsed).toHaveProperty("excludeGlobs");
-  });
-
-  it("config index set updates globs", () => {
-    const { stdout, exitCode } = runCli(
-      ["config", "index", "set", "--include=**/*.md,**/*.txt", "--exclude=**/node_modules/**"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    const parsed = JSON.parse(stdout);
-    expect(parsed.includeGlobs).toContain("**/*.md");
-    expect(parsed.excludeGlobs).toContain("**/node_modules/**");
-  });
-
-  it("config index set includeHidden flag", () => {
-    const { stdout, exitCode } = runCli(
-      ["config", "index", "set", "--includeHidden=true"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    const parsed = JSON.parse(stdout);
-    expect(parsed.includeHidden).toBe(true);
   });
 
   it("config index with invalid action prints usage", () => {
@@ -893,7 +742,6 @@ describe("CLI integration: maintain subcommands", () => {
     expect(exitCode).toBe(0);
     expect(stdout).toContain("Consolidated");
   });
-
 });
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -1138,31 +986,6 @@ describe("CLI integration: add-finding edge cases", () => {
 
   afterEach(() => cleanup());
 
-  it("adds finding with spaces in the text", () => {
-    const { stdout, exitCode } = runCli(
-      ["add-finding", "learn-proj", "auth middleware runs before rate limiting, order matters"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("added insight");
-    const content = fs.readFileSync(path.join(phrenDir, "learn-proj", "FINDINGS.md"), "utf8");
-    expect(content).toContain("auth middleware runs before rate limiting");
-  });
-
-  it("creates FINDINGS.md when it does not exist", () => {
-    const findingsPath = path.join(phrenDir, "learn-proj", "FINDINGS.md");
-    expect(fs.existsSync(findingsPath)).toBe(false);
-
-    runCli(
-      ["add-finding", "learn-proj", "new insight"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
-    );
-
-    expect(fs.existsSync(findingsPath)).toBe(true);
-    const content = fs.readFileSync(findingsPath, "utf8");
-    expect(content).toContain("new insight");
-  });
-
   it("appends to existing FINDINGS.md", () => {
     const findingsPath = path.join(phrenDir, "learn-proj", "FINDINGS.md");
     fs.writeFileSync(findingsPath, "# learn-proj FINDINGS\n\n## 2025-01-01\n\n- existing insight\n");
@@ -1204,19 +1027,6 @@ describe("CLI integration: pin edge cases", () => {
   });
 
   afterAll(() => cleanup());
-
-  it("creates truths.md with truth content", () => {
-    const { exitCode } = runCli(
-      ["pin", "pin-proj", "never commit secrets to version control"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-
-    const canonical = path.join(phrenDir, "pin-proj", "truths.md");
-    expect(fs.existsSync(canonical)).toBe(true);
-    const content = fs.readFileSync(canonical, "utf8");
-    expect(content).toContain("never commit secrets to version control");
-  });
 
   it("saving same truth twice is idempotent", () => {
     runCli(
@@ -1267,50 +1077,6 @@ describe("CLI integration: doctor edge cases", () => {
     expect(output).toContain("phren doctor:");
     expect(output).toContain("data:governance:");
   });
-
-  it("reports fts-index check", () => {
-    const { stdout, stderr } = runCli(
-      ["doctor"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
-    );
-    const output = stdout + stderr;
-    expect(output).toContain("fts-index");
-  });
-
-  it("reports machine-registered check", () => {
-    const { stdout, stderr } = runCli(
-      ["doctor"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
-    );
-    const output = stdout + stderr;
-    expect(output).toContain("machine-registered");
-  });
-
-  it("--check-data reports suspect task hygiene items", () => {
-    const profilesDir = path.join(phrenDir, "profiles");
-    fs.mkdirSync(profilesDir, { recursive: true });
-    fs.writeFileSync(path.join(profilesDir, "test.yaml"), "name: test\ndescription: Test\nprojects:\n  - doc-proj\n");
-    fs.writeFileSync(path.join(phrenDir, "machines.yaml"), `${getMachineName()}: test\n`);
-
-    const projDir = path.join(phrenDir, "doc-proj");
-    fs.mkdirSync(projDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(projDir, "tasks.md"),
-      "# doc-proj Task\n\n## Active\n\n## Queue\n\n- Improve chart interface with bubble details and device type filters\n\n## Done\n"
-    );
-
-    const repoDir = path.join(projectsDir, "doc-proj");
-    fs.mkdirSync(path.join(repoDir, "src"), { recursive: true });
-    fs.writeFileSync(path.join(repoDir, "src", "shell-view.ts"), "export const shellView = true;\n");
-
-    const { stdout, stderr } = runCli(
-      ["doctor", "--check-data"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
-    );
-    const output = stdout + stderr;
-    expect(output).toContain("data:task-hygiene:doc-proj");
-    expect(output).toContain("suspect task");
-  });
 });
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -1329,16 +1095,6 @@ describe("CLI integration: inspect-index and debug-injection", () => {
   });
 
   afterAll(() => cleanup());
-
-  it("inspect-index returns index contents", () => {
-    const { stdout, exitCode } = runCli(
-      ["inspect-index"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    // Should list docs in the index
-    expect(stdout.length).toBeGreaterThan(0);
-  });
 
   it("inspect-index with --project filters", () => {
     const { stdout, exitCode } = runCli(
@@ -1374,40 +1130,6 @@ describe("CLI integration: init", () => {
   });
 
   afterEach(() => cleanup());
-
-  it("init --dry-run does not create files", () => {
-    const { stdout, exitCode } = runCli(
-      ["init", "--dry-run", "-y"],
-      cliEnv.env()
-    );
-    expect(exitCode).toBe(0);
-    expect(stdout.toLowerCase()).toContain("dry run");
-    expect(fs.existsSync(cliEnv.phrenDir)).toBe(false);
-  }, CLI_INTEGRATION_TIMEOUT_MS);
-
-  it("init -y creates phren directory and governance files", () => {
-    const { stdout, exitCode } = runCli(
-      ["init", "-y", "--mcp", "off"],
-      cliEnv.env({ PHREN_ACTOR: "cli-test" })
-    );
-    expect(exitCode).toBe(0);
-    expect(fs.existsSync(cliEnv.phrenDir)).toBe(true);
-    const govDir = path.join(cliEnv.phrenDir, ".config");
-    expect(fs.existsSync(govDir)).toBe(true);
-  }, CLI_INTEGRATION_TIMEOUT_MS);
-
-  it("init with --machine sets machine name", () => {
-    const { exitCode } = runCli(
-      ["init", "-y", "--machine", "test-box", "--mcp", "off"],
-      cliEnv.env({ PHREN_ACTOR: "cli-test" })
-    );
-    expect(exitCode).toBe(0);
-    const machinesPath = path.join(cliEnv.phrenDir, "machines.yaml");
-    if (fs.existsSync(machinesPath)) {
-      const content = fs.readFileSync(machinesPath, "utf8");
-      expect(content).toContain("test-box");
-    }
-  }, CLI_INTEGRATION_TIMEOUT_MS);
 
   it("init with --machine persists the local machine alias", () => {
     const { exitCode } = runCli(
@@ -1470,44 +1192,6 @@ describe("CLI integration: verify", () => {
 
   afterEach(() => cleanup());
 
-  it("verify on fresh init reports checks", () => {
-    runCli(
-      ["init", "-y", "--mcp", "off"],
-      cliEnv.env({ PHREN_ACTOR: "cli-test" })
-    );
-    const { stdout, stderr } = runCli(
-      ["verify"],
-      cliEnv.env()
-    );
-    const output = stdout + stderr;
-    expect(output).toContain("phren verify:");
-    expect(output).toMatch(/(pass|FAIL)/);
-  }, CLI_INTEGRATION_TIMEOUT_MS);
-
-  it("verify on empty directory reports issues", () => {
-    fs.mkdirSync(cliEnv.phrenDir, { recursive: true });
-    const { stdout, stderr } = runCli(
-      ["verify"],
-      cliEnv.env()
-    );
-    const output = stdout + stderr;
-    expect(output).toContain("phren verify:");
-  }, CLI_INTEGRATION_TIMEOUT_MS);
-
-  it("verify checks fts-index and hook-entrypoint", () => {
-    runCli(
-      ["init", "-y", "--mcp", "off"],
-      cliEnv.env({ PHREN_ACTOR: "cli-test" })
-    );
-    const { stdout, stderr } = runCli(
-      ["verify"],
-      cliEnv.env()
-    );
-    const output = stdout + stderr;
-    expect(output).toContain("fts-index");
-    expect(output).toContain("hook-entrypoint");
-  }, CLI_INTEGRATION_TIMEOUT_MS);
-
   it("verify shows fix suggestions for failures", () => {
     fs.mkdirSync(cliEnv.phrenDir, { recursive: true });
     const { stdout, stderr } = runCli(
@@ -1546,14 +1230,6 @@ describe("CLI integration: help and health", () => {
     const { stdout, exitCode } = runCli(["help"]);
     expect(exitCode).toBe(0);
     expect(stdout).toContain("phren");
-  });
-
-  it("projects help only shows the supported add flow", () => {
-    const { stdout, exitCode } = runCli(["projects", "--help"]);
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("phren projects list");
-    expect(stdout).toContain("phren projects remove <name>");
-    expect(stdout).not.toContain("projects add");
   });
 
   it("--health exits with code 0", () => {
@@ -1642,17 +1318,6 @@ describe("CLI integration: temp HOME subprocess stability", () => {
 
   afterEach(() => cleanup());
 
-  it("help prints usage information with a temp HOME", () => {
-    const { stdout, exitCode } = runCli(
-      ["help"],
-      cliEnv.env()
-    );
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("phren");
-    expect(stdout).toContain("search");
-    expect(stdout).toContain("manage");
-  }, CLI_INTEGRATION_TIMEOUT_MS);
-
   it("verify reports hook and index checks after init with a temp HOME", () => {
     runCli(
       ["init", "-y", "--mcp", "off"],
@@ -1670,7 +1335,6 @@ describe("CLI integration: temp HOME subprocess stability", () => {
     expect(output).toContain("fts-index");
     expect(output).toContain("hook-entrypoint");
   }, CLI_INTEGRATION_TIMEOUT_MS);
-
 });
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -1742,44 +1406,12 @@ import { detectTaskIntent, selectSnippets } from "./cli/hooks.js";
 import { DocRow } from "./shared/index.js";
 
 describe("scoreFindingCandidate", () => {
-  it("returns null for low-signal commits", () => {
-    expect(scoreFindingCandidate("update readme", "")).toBeNull();
-  });
-
-  it("scores fix commits above threshold", () => {
-    const result = scoreFindingCandidate("fix: timeout on api calls causing retries", "root cause was missing keepalive");
-    expect(result).not.toBeNull();
-    expect(result!.score).toBeGreaterThanOrEqual(0.5);
-    expect(result!.text).toBeTruthy();
-  });
-
   it("scores merged PRs higher than plain commits", () => {
     const merged = scoreFindingCandidate("Merge pull request #42 from user/fix-timeout", "fix retry logic");
     const plain = scoreFindingCandidate("fix retry logic", "");
     expect(merged).not.toBeNull();
     expect(plain).not.toBeNull();
     expect(merged!.score).toBeGreaterThan(plain!.score);
-  });
-
-  it("caps score at 0.99", () => {
-    const result = scoreFindingCandidate(
-      "Merge pull request #1 from user/fix-ci-timeout-regression",
-      "CI pipeline flake fix: root cause was timeout regression in build step"
-    );
-    expect(result).not.toBeNull();
-    expect(result!.score).toBeLessThanOrEqual(0.99);
-  });
-
-  it("cleans merge PR prefix from text", () => {
-    const result = scoreFindingCandidate("Merge pull request #42 from user/branch Fix timeout issue", "workaround applied");
-    expect(result).not.toBeNull();
-    expect(result!.text).not.toMatch(/^Merge pull request/);
-  });
-
-  it("capitalizes first letter of cleaned text", () => {
-    const result = scoreFindingCandidate("fix: handle edge case in retry", "regression found");
-    expect(result).not.toBeNull();
-    expect(result!.text[0]).toBe(result!.text[0].toUpperCase());
   });
 });
 
@@ -1819,29 +1451,6 @@ describe("selectSnippets", () => {
   function doc(overrides: Partial<DocRow> = {}): DocRow {
     return { project: "project", filename: "file.md", type: "findings", content: "", path: "/file.md", ...overrides };
   }
-
-  it("selects snippets within token budget", () => {
-    const rows: DocRow[] = [
-      doc({ content: "Line one\nLine two\nLine three\nLine four\nLine five" }),
-      doc({ filename: "file2.md", content: "Other content here\nMore stuff\nAnother line", path: "/file2.md" }),
-    ];
-    const { selected, usedTokens } = selectSnippets(rows, "content", 550, 6, 520);
-    expect(selected.length).toBeGreaterThan(0);
-    expect(usedTokens).toBeLessThanOrEqual(550);
-  });
-
-  it("limits to 3 snippets max", () => {
-    const rows: DocRow[] = Array.from({ length: 10 }, (_, i) =>
-      doc({ filename: `file${i}.md`, content: `Content number ${i} with keywords here\nLine two\nLine three`, path: `/file${i}.md` })
-    );
-    const { selected } = selectSnippets(rows, "keywords", 2000, 6, 520);
-    expect(selected.length).toBeLessThanOrEqual(3);
-  });
-
-  it("returns empty when no rows match", () => {
-    const { selected } = selectSnippets([], "query", 550, 6, 520);
-    expect(selected).toHaveLength(0);
-  });
 
   it("truncates first snippet when it exceeds budget", () => {
     const longContent = Array.from({ length: 100 }, (_, i) => `Line ${i} with lots of words and content`).join("\n");

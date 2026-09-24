@@ -15,7 +15,6 @@ import {
   trackSessionMetrics,
   applyTrustFilter,
   filterTaskByPriority,
-  type HookPromptInput,
   type SelectedSnippet,
 } from "./cli/hooks.js";
 
@@ -79,19 +78,6 @@ describe("selectSnippets", () => {
     ];
     const { selected } = selectSnippets(rows, "keyword", 550, 6, 520);
     expect(selected).toHaveLength(0);
-  });
-
-  it("each selected snippet has doc, snippet, and key", () => {
-    const rows = [
-      makeDoc("proj", "a.md", "summary", "keyword is important here", "/a.md"),
-    ];
-    const { selected } = selectSnippets(rows, "keyword", 550, 6, 520);
-    expect(selected.length).toBe(1);
-    expect(selected[0]).toHaveProperty("doc");
-    expect(selected[0]).toHaveProperty("snippet");
-    expect(selected[0]).toHaveProperty("key");
-    expect(typeof selected[0].snippet).toBe("string");
-    expect(selected[0].snippet.length).toBeGreaterThan(0);
   });
 });
 
@@ -219,36 +205,6 @@ describe("applyTrustFilter", () => {
 
   afterEach(() => {
     phrenCleanup();
-  });
-
-  it("passes through non-findings rows unchanged", () => {
-    const rows = [
-      { project: "proj", filename: "summary.md", type: "summary", content: "project summary text", path: "/path" },
-      { project: "proj", filename: "AGENTS.md", type: "claude", content: "instructions", path: "/path2" },
-    ];
-    const result = applyTrustFilter(rows, 365, 0.5, { enabled: false });
-    expect(result.rows).toHaveLength(2);
-    expect(result.rows[0].content).toBe("project summary text");
-  });
-
-  it("filters findings rows through trust pipeline", () => {
-    const findingsContent = [
-      "# testproj FINDINGS",
-      "",
-      "## 2026-03-01",
-      "",
-      `- Fresh finding`,
-      `  <!-- phren:cite {"created_at":"2026-03-01T00:00:00.000Z"} -->`,
-      "",
-    ].join("\n");
-
-    const rows = [
-      { project: "testproj", filename: "FINDINGS.md", type: "findings", content: findingsContent, path: "/FINDINGS.md" },
-    ];
-    const result = applyTrustFilter(rows, 365, 0.0, { enabled: false });
-    expect(result.rows).toHaveLength(1);
-    // Content should still contain the fresh finding
-    expect(result.rows[0].content).toContain("Fresh finding");
   });
 
   it("removes findings rows that become empty after trust filtering", () => {

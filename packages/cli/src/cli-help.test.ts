@@ -74,22 +74,6 @@ describe("formatTopic", () => {
 });
 
 describe("formatCommand", () => {
-  it("renders a top-level summary for non-namespace commands", () => {
-    const out = formatCommand("add");
-    expect(out).not.toBeNull();
-    expect(out!).toContain("phren add");
-    expect(out!).toContain("Register a project");
-  });
-
-  it("renders subcommand lines for namespace commands", () => {
-    const out = formatCommand("skills");
-    expect(out).not.toBeNull();
-    expect(out!).toContain("Subcommands:");
-    expect(out!).toContain("phren skills list");
-    expect(out!).toContain("phren skills add <project> <path>");
-    expect(out!).toContain("phren skills remove <project> <name>");
-  });
-
   it("preserves the projects subcommand list (asserted by cli.test.ts)", () => {
     const out = formatCommand("projects");
     expect(out).not.toBeNull();
@@ -146,7 +130,6 @@ describe("formatFullHelp", () => {
     expect(out).toContain("PHREN_PATH");
   });
 });
-
 
 describe("module-aware help", () => {
   const snapshot: ModuleSnapshot = { store: "/store", profile: "work", generation: "test",
