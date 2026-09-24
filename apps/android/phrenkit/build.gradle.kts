@@ -13,6 +13,9 @@ dependencies {
     api(libs.coroutines.core)
     api(libs.serialization.json)
     api(libs.okhttp)
+    // PhrenLive: SSH to each computer's Phren Hook (swift-nio-ssh on iOS).
+    api(libs.sshj)
+    api(libs.bouncycastle.prov)
     testImplementation(kotlin("test"))
     testImplementation(libs.junit)
     testImplementation(libs.coroutines.test)

@@ -11,6 +11,8 @@ lifecycle = "2.9.4"
 glance = "1.2.0"
 workManager = "2.10.4"
 junit = "4.13.2"
+sshj = "0.40.0"
+bouncycastle = "1.82"
 
 [libraries]
 coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
@@ -35,6 +37,8 @@ glance-appwidget = { module = "androidx.glance:glance-appwidget", version.ref = 
 glance-material3 = { module = "androidx.glance:glance-material3", version.ref = "glance" }
 work-runtime = { module = "androidx.work:work-runtime-ktx", version.ref = "workManager" }
 junit = { module = "junit:junit", version.ref = "junit" }
+sshj = { module = "com.hierynomus:sshj", version.ref = "sshj" }
+bouncycastle-prov = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bouncycastle" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
