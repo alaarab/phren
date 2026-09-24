@@ -1881,7 +1881,7 @@ describe("CLI integration: uninstall", () => {
   // escape cannot come back unnoticed.
   it("does not touch the machine's global npm package", () => {
     const { stdout, exitCode } = runCli(
-      ["uninstall"],
+      ["uninstall", "-y"],
       { PHREN_PATH: phrenDir, HOME: homeDir, USERPROFILE: homeDir }
     );
     expect(exitCode).toBe(0);
@@ -1902,7 +1902,7 @@ describe("CLI integration: uninstall", () => {
     expect(before.mcpServers?.phren).toBeDefined();
 
     const { stdout, exitCode } = runCli(
-      ["uninstall"],
+      ["uninstall", "-y"],
       { PHREN_PATH: phrenDir, HOME: homeDir, USERPROFILE: homeDir }
     );
     expect(exitCode).toBe(0);
@@ -1934,7 +1934,7 @@ describe("CLI integration: uninstall", () => {
     fs.writeFileSync(machineFile, "uninstall-box\n");
 
     const { exitCode, stdout } = runCli(
-      ["uninstall"],
+      ["uninstall", "-y"],
       { PHREN_PATH: phrenDir, HOME: homeDir, USERPROFILE: homeDir }
     );
     expect(exitCode).toBe(0);
@@ -1945,7 +1945,7 @@ describe("CLI integration: uninstall", () => {
 
   it("handles missing settings file gracefully", () => {
     const { stdout, exitCode } = runCli(
-      ["uninstall"],
+      ["uninstall", "-y"],
       { PHREN_PATH: phrenDir, HOME: homeDir, USERPROFILE: homeDir }
     );
     expect(exitCode).toBe(0);
@@ -1961,7 +1961,7 @@ describe("CLI integration: uninstall", () => {
     );
 
     const { stdout, exitCode } = runCli(
-      ["uninstall"],
+      ["uninstall", "-y"],
       { PHREN_PATH: phrenDir, HOME: homeDir, USERPROFILE: homeDir }
     );
     expect(exitCode).toBe(0);
@@ -1980,7 +1980,7 @@ describe("CLI integration: uninstall", () => {
     );
 
     const { stdout, exitCode } = runCli(
-      ["uninstall"],
+      ["uninstall", "-y"],
       { PHREN_PATH: phrenDir, HOME: homeDir, USERPROFILE: homeDir }
     );
     expect(exitCode).toBe(0);
@@ -2006,7 +2006,7 @@ describe("CLI integration: uninstall", () => {
     fs.symlinkSync(path.join(globalDir, "AGENTS.md"), path.join(githubDir, "copilot-instructions.md"));
 
     const { exitCode, stdout } = runCli(
-      ["uninstall"],
+      ["uninstall", "-y"],
       { PHREN_PATH: phrenDir, HOME: homeDir, USERPROFILE: homeDir }
     );
     expect(exitCode).toBe(0);

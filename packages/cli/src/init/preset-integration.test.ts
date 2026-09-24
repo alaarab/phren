@@ -109,6 +109,32 @@ describe("management preset init integration", () => {
     expect(fs.existsSync(homeClaude)).toBe(false);
   });
 
+  // selfHeal was declared per preset but never checked, so assisted and manual
+  // still re-created ~/.phren-context.md and a MEMORY.md inside Claude Code's
+  // own memory directory on every SessionStart.
+  it("self-heal recreates the generated home files under managed but not assisted", async () => {
+    const phrenPath = path.join(tmpRoot, "homefiles");
+    process.env.PHREN_PATH = phrenPath;
+    await suppressOutput(() => runInit({ yes: true, managementPreset: "managed" }));
+
+    const contextFile = path.join(homeDir, ".phren-context.md");
+    const memoryKey = homeDir.replace(/[/\\:]/g, "-").replace(/^-/, "");
+    const memoryFile = path.join(homeDir, ".claude", "projects", memoryKey, "memory", "MEMORY.md");
+
+    fs.rmSync(contextFile, { force: true });
+    fs.rmSync(memoryFile, { force: true });
+    suppressOutput(() => repairPreexistingInstall(phrenPath));
+    expect(fs.existsSync(contextFile)).toBe(true);
+    expect(fs.existsSync(memoryFile)).toBe(true);
+
+    writeInstallPreferences(phrenPath, { managementPreset: "assisted" });
+    fs.rmSync(contextFile, { force: true });
+    fs.rmSync(memoryFile, { force: true });
+    suppressOutput(() => repairPreexistingInstall(phrenPath));
+    expect(fs.existsSync(contextFile)).toBe(false);
+    expect(fs.existsSync(memoryFile)).toBe(false);
+  });
+
   it("phren preset managed -> assisted tears down home symlink, and back restores it", async () => {
     const phrenPath = path.join(tmpRoot, "switch");
     process.env.PHREN_PATH = phrenPath;

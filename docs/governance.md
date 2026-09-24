@@ -61,20 +61,26 @@ When the cited file changes significantly or disappears, phren penalizes the fin
 
 ### Role-based access control
 
-Four roles with six action types:
+Three roles, enforced on mutating operations:
 
-| Role | Read | Write | Delete | Approve | Admin | Export |
-|------|------|-------|--------|---------|-------|--------|
-| admin | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| maintainer | ✓ | ✓ | ✓ | ✓ | — | ✓ |
-| contributor | ✓ | ✓ | — | — | — | — |
-| viewer | ✓ | — | — | — | — | — |
+| Role | Add / edit findings, tasks, notes | Delete findings, tasks, notes | Change config |
+|------|-----------------------------------|-------------------------------|---------------|
+| `admin` | ✓ | ✓ | ✓ |
+| `contributor` | ✓ | ✓ | — |
+| `reader` | — | — | — |
 
-Configure with `phren config access`.
+Configure with `phren config access set --admins=… --contributors=… --readers=…`.
+When every list is empty (the default), the store is in open mode and every
+action is permitted.
 
-### Approval workflows
+Contributors can delete: `remove_finding`, `remove_task` and `remove_note` are
+contributor actions, so granting contributor on a shared store also grants
+permanent deletion. Only config changes are admin-only.
 
-High-risk operations (bulk delete, policy changes, imports from untrusted sources) can require human approval before executing. Configure thresholds via `phren config workflow`.
+Roles are checked in the MCP tool layer, which is how agents reach the store.
+Reads are not gated, and the actor is self-declared through the `PHREN_ACTOR`
+environment variable. Treat this as a coordination boundary between cooperating
+teammates, not a security boundary against a local user.
 
 ### The review queue: what approve and reject actually do
 
@@ -143,32 +149,36 @@ A human can inspect every finding, see its confidence score, view its git histor
 | Audit trail | Git commits (forever) | Service-specific logs/documentation | 7-day API logs ($475/mo) | Platform-managed history |
 | Trust decay | Graduated curve | Not surfaced in reviewed materials | Temporal graph | 28-day hard delete |
 | Citation validation | File:line + penalty | Not surfaced in reviewed materials | Not surfaced in reviewed materials | File:line, no penalty |
-| RBAC | 4 roles, built-in | Enterprise only | Enterprise only | GitHub permissions |
-| Approval workflows | Built-in | Not surfaced in reviewed materials | Not surfaced in reviewed materials | Not surfaced in reviewed materials |
+| RBAC | 3 roles, built-in | Enterprise only | Enterprise only | GitHub permissions |
+| Human review queue | Built-in | Not surfaced in reviewed materials | Not surfaced in reviewed materials | Not surfaced in reviewed materials |
 | Human web UI | CLI shell (offline) | Cloud dashboard | Not surfaced in reviewed materials | Not surfaced in reviewed materials |
 | Data location | Your git repo | Cloud or Docker | Cloud only | GitHub cloud |
 | Cost for governance | $0 | $249+/mo | $475+/mo | Copilot subscription |
 
 ## Configuration reference
 
+Every `set` value is passed as `--key=value`. Anything else (`set ttlDays 90`,
+`set --ttlDays 90`) is rejected with exit 1 and nothing is written. Add
+`--project <name>` to a `get` or `set` to read or write one project's override.
+
 ```bash
 # Policy (decay, TTL, retention)
 phren config policy get
-phren config policy set ttlDays 90
-phren config policy set retentionDays 365
-phren config policy set minInjectConfidence 0.35
+phren config policy set --ttlDays=90 --retentionDays=365 --minInjectConfidence=0.35
+phren config policy set --project my-app --retentionDays=3650   # per-project override
+phren config policy set --decay.d30=1 --decay.d60=0.85 --decay.d90=0.65
 
-# Access control
+# Access control: admins, contributors, readers
 phren config access get
-phren config access set role contributor
+phren config access set --admins=alice --contributors=bob,carol --readers=dave
 
-# Workflow (approval gates)
+# Workflow (review-queue routing)
 phren config workflow get
-phren config workflow set requireApproval true
+phren config workflow set --lowConfidenceThreshold=0.7 --riskySections=Stale,Conflicts
 
 # Index (what gets indexed)
 phren config index get
-phren config index set includeGlobs "**/*.md"
+phren config index set --include="**/*.md" --exclude="**/node_modules/**"
 ```
 
 ## Running the governance checks
