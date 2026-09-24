@@ -49,10 +49,23 @@ final class ApprovalActivityController {
             let live = Set(Activity<ApprovalActivityAttributes>.activities.map { $0.attributes.requestID })
             routes = routes.filter { $0.key == record.id || live.contains($0.key) }
             routes[record.id] = AgentSessionEntity(session)
+            let project = String(session.projectDisplayName(nil).prefix(80)), host = String(session.host.name.prefix(80))
+            let explanation = String((question?.questions.first?.question ?? approval.explanation ?? approval.title ?? "Allow this action?").prefix(500))
+            let fleet = SessionWorkingActivityController.shared
+            if fleet.carriesApprovals {
+                // One activity for the whole fleet: the request leads the
+                // agents activity instead of starting a second one beside it.
+                if IntegrationSettings.enabled(IntegrationSettings.liveActivityKey) {
+                    fleet.show(approval: .init(requestID: record.id, provider: target.providerName, project: project, host: host,
+                                               explanation: explanation, expiresAt: record.expiresAt, question: question != nil))
+                }
+                for separate in Activity<ApprovalActivityAttributes>.activities { await separate.end(nil, dismissalPolicy: .immediate) }
+                observed[target] = (approval.id, record.expiresAt)
+                return
+            }
             let content = ActivityContent(state: ApprovalActivityAttributes.ContentState(
-                provider: target.providerName, project: String(session.projectDisplayName(nil).prefix(80)), host: String(session.host.name.prefix(80)),
-                explanation: String((question?.questions.first?.question ?? approval.explanation ?? approval.title ?? "Allow this action?").prefix(500)),
-                expiresAt: record.expiresAt, question: question != nil),
+                provider: target.providerName, project: project, host: host,
+                explanation: explanation, expiresAt: record.expiresAt, question: question != nil),
                 // A permission request outranks the working summary for the
                 // island: the system shows the most relevant activity there.
                 staleDate: record.expiresAt, relevanceScore: 1)
@@ -74,6 +87,7 @@ final class ApprovalActivityController {
     func retireExpired(now: Date = .now) async {
         let expired = Activity<ApprovalActivityAttributes>.activities.filter { $0.content.state.expiresAt <= now }
         await end(expired.map { $0.attributes.requestID })
+        SessionWorkingActivityController.shared.clearApproval(requestIDs: [], now: now)
         observed = observed.filter { $0.value.expiresAt > now }
     }
 
@@ -145,13 +159,15 @@ final class ApprovalActivityController {
         LocalNotificationMonitor.shared.approvals.clear()
         generation = UUID(); observed.removeAll(); handled.removeAll(); routes.removeAll()
         _ = try? await store.remove()
-        await end(Activity<ApprovalActivityAttributes>.activities.map { $0.attributes.requestID })
+        await end(Activity<ApprovalActivityAttributes>.activities.map { $0.attributes.requestID }
+                  + SessionWorkingActivityController.shared.approvalRequestIDs)
     }
     private func key(_ target: AgentChatTarget, _ actionID: String) -> String { target.id + "/" + actionID }
     private func remove(target: AgentChatTarget, actionID: String? = nil) async {
         if let ids = try? await store.remove(target: target, actionID: actionID) { await end(ids) }
     }
     private func end(_ ids: [String]) async {
+        SessionWorkingActivityController.shared.clearApproval(requestIDs: ids)
         for activity in Activity<ApprovalActivityAttributes>.activities where ids.contains(activity.attributes.requestID) {
             await activity.end(nil, dismissalPolicy: .immediate)
         }

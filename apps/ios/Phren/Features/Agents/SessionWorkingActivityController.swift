@@ -25,12 +25,53 @@ final class SessionWorkingActivityController {
     private var roles: [String: String] = [:]
     private var leadComputers: [String: [String]] = [:]
     private var chat: (session: SessionWorkingActivityBuilder.Session, at: Date)?
+    /// Requests waiting on the owner, oldest first; the activity leads with
+    /// the newest, and answering it brings back the one before.
+    private var approvals: [SessionWorkingActivityAttributes.PendingApproval] = []
+    private var approval: SessionWorkingActivityAttributes.PendingApproval? { approvals.last }
+    /// What each session said when it last finished, summarized for its row.
+    private var replies: [String: String] = [:]
+    private var replyFetches: Set<String> = []
+    private let summarizer: any ReplySummarizing = ReplySummarizer.shared
     private var pinnedID: String?
     private var updateTask: Task<Void, Never>?
     private var endTask: Task<Void, Never>?
     private var quietSince: Date?
 
     private init() {}
+
+    /// Whether requests ride on this activity instead of starting their own:
+    /// whenever the agents activity is wanted and the system allows it, so
+    /// the island shows one activity for the whole fleet.
+    var carriesApprovals: Bool { enabled && ActivityAuthorizationInfo().areActivitiesEnabled }
+
+    /// Leads the activity with a permission request; the newest one wins.
+    func show(approval: SessionWorkingActivityAttributes.PendingApproval) {
+        guard approvals.last != approval else { return }
+        approvals = Self.queue(approvals, adding: approval)
+        scheduleUpdate()
+    }
+
+    /// Drops requests once they are answered, expired or gone.
+    func clearApproval(requestIDs: [String], now: Date = .now) {
+        let kept = Self.queue(approvals, removing: requestIDs, now: now)
+        guard kept != approvals else { return }
+        approvals = kept
+        scheduleUpdate()
+    }
+
+    var approvalRequestIDs: [String] { approvals.map(\.requestID) }
+
+    /// The queue's rules, pure for tests: one entry per request id, the
+    /// newest last, at most eight kept (the request store's own cap).
+    static func queue(_ current: [SessionWorkingActivityAttributes.PendingApproval],
+                      adding approval: SessionWorkingActivityAttributes.PendingApproval) -> [SessionWorkingActivityAttributes.PendingApproval] {
+        Array((current.filter { $0.requestID != approval.requestID } + [approval]).suffix(8))
+    }
+    static func queue(_ current: [SessionWorkingActivityAttributes.PendingApproval], removing ids: [String],
+                      now: Date) -> [SessionWorkingActivityAttributes.PendingApproval] {
+        current.filter { !ids.contains($0.requestID) && $0.expiresAt > now }
+    }
 
     /// The Control Center switch (and Settings) — off ends the activity now
     /// and keeps it off until switched back on.
@@ -100,7 +141,11 @@ final class SessionWorkingActivityController {
         sessionsByHost[host.id] = sessions.compactMap { session in
             guard let report = reportsByID[AgentSessionEntity(session).id] else { return nil }
             let branch = branchLine(session: session, entity: report.entity, sourceFolders: sourceFolders)
-            return input(report.entity, state: lockState(report.state), branch: branch, now: now)
+            let before = states[report.entity.id]
+            let built = input(report.entity, state: lockState(report.state), branch: branch, now: now)
+            if built.state == "working" { replies[report.entity.id] = nil }
+            if before == "working", built.state == "idle" { readReply(of: session, id: report.entity.id) }
+            return built
         }
         let retained = Set(sessionsByHost.values.flatMap { $0.map(\.entry.id) })
         starts = starts.filter { retained.contains($0.key) || chat?.session.entry.id == $0.key }
@@ -110,6 +155,7 @@ final class SessionWorkingActivityController {
         details = details.filter { retained.contains($0.key) || chat?.session.entry.id == $0.key }
         overviewSteps = overviewSteps.filter { retained.contains($0.key) }
         overviewModels = overviewModels.filter { retained.contains($0.key) }
+        replies = replies.filter { retained.contains($0.key) }
         subagents = subagents.filter { retained.contains($0.key) || chat?.session.entry.id == $0.key }
         childProviders = childProviders.filter { retained.contains($0.key) || chat?.session.entry.id == $0.key }
         roles = roles.filter { retained.contains($0.key) || chat?.session.entry.id == $0.key }
@@ -156,6 +202,24 @@ final class SessionWorkingActivityController {
     }
 
     private struct Route: Codable { let id: String; let entity: AgentSessionEntity }
+
+    /// A session just finished: read its last reply once and keep it as one
+    /// or two sentences for its row during the finishing grace.
+    private func readReply(of session: LiveAgentSession, id: String) {
+        guard !replyFetches.contains(id) else { return }
+        replyFetches.insert(id)
+        let summarizer = summarizer
+        Task { [weak self] in
+            let text = try? await SessionStatusService.conversation(for: session).transcript.messages
+                .last(where: { $0.role == .assistant })?.text
+            let line = await text.asyncMap { await summarizer.summarize($0) } ?? nil
+            guard let self else { return }
+            replyFetches.remove(id)
+            guard let line, states[id] == "idle" else { return }
+            replies[id] = String(line.prefix(240))
+            scheduleUpdate()
+        }
+    }
     private func normalized(_ state: String?) -> String {
         switch state?.lowercased() {
         case "working": "working"
@@ -200,7 +264,8 @@ final class SessionWorkingActivityController {
                                  step: presentation.step, branch: branch.map { String($0.prefix(80)) },
                                  projectColor: projectColorHex(entity), subagents: workers,
                                  childProviders: childProviders[entity.id] ?? [],
-                                 leadComputers: leadComputers[entity.id] ?? [], state: state, startedAt: began),
+                                 leadComputers: leadComputers[entity.id] ?? [], state: state, startedAt: began,
+                                 reply: state == "idle" ? replies[entity.id] : nil),
                      state: state, startedAt: began)
     }
 
@@ -243,7 +308,7 @@ final class SessionWorkingActivityController {
 
     /// Coalesces fast hosts and chat ticks without postponing publication forever.
     private func scheduleUpdate() {
-        if sessionsByHost.values.joined().contains(where: { $0.state == "working" || $0.state == "waiting" })
+        if approval != nil || sessionsByHost.values.joined().contains(where: { $0.state == "working" || $0.state == "waiting" })
             || (["working", "waiting"].contains(chat?.session.state ?? "") && Date.now.timeIntervalSince(chat?.at ?? .distantPast) < 6) {
             quietSince = nil; endTask?.cancel(); endTask = nil
         }
@@ -257,19 +322,25 @@ final class SessionWorkingActivityController {
     }
     private func publish(now: Date = .now) async {
         guard enabled else { return }
+        #if DEBUG && targetEnvironment(simulator)
+        // The fixture's activity is drawn as it was started, never republished.
+        if ProcessInfo.processInfo.arguments.contains("--fleet-activity-fixture") { return }
+        #endif
         var inputs = sessionsByHost.values.flatMap { $0 }
         // The next overview owns state again if the chat has stopped reporting.
         if let chat, now.timeIntervalSince(chat.at) < 6 { inputs.append(chat.session) }
         var state = SessionWorkingActivityBuilder.build(inputs, pinnedID: pinnedID, now: now)
+        approvals = Self.queue(approvals, removing: [], now: now)
+        state.approval = approval
         let activities = Activity<SessionWorkingActivityAttributes>.activities
         let current = activities.first
         for extra in activities.dropFirst() { await extra.end(nil, dismissalPolicy: .immediate) }
-        if state.working == 0 && state.waiting == 0 && state.entries.isEmpty {
+        if state.working == 0 && state.waiting == 0 && state.entries.isEmpty && state.approval == nil {
             guard let current else { return }
             // Preserve the last timer during the quiet period, so idle polls
             // don't keep changing content or restart the 30-second deadline.
             state = .init(working: 0, waiting: state.waiting, entries: state.entries, startedAt: current.content.state.startedAt,
-                          more: state.more, computers: state.computers)
+                          more: state.more, computers: state.computers, approval: nil)
             if quietSince == nil {
                 quietSince = now
                 endTask = Task { [weak self] in
@@ -282,15 +353,17 @@ final class SessionWorkingActivityController {
         } else {
             quietSince = nil; endTask?.cancel(); endTask = nil
         }
-        // Below a pending permission request (relevance 1), which must own
-        // the island while it waits for an answer.
-        let content = ActivityContent(state: state, staleDate: now.addingTimeInterval(90), relevanceScore: 0.5)
+        // A pending request raises the activity to the top of the island, and
+        // the request's expiry makes it stale so its buttons stop offering an
+        // answer the computer no longer takes.
+        let stale = min(now.addingTimeInterval(90), state.approval?.expiresAt ?? .distantFuture)
+        let content = ActivityContent(state: state, staleDate: stale, relevanceScore: state.approval == nil ? 0.5 : 1)
         let activity: Activity<SessionWorkingActivityAttributes>
         if let current {
             activity = current
             if current.content.state != state { await current.update(content) }
         } else {
-            guard state.working + state.waiting > 0, ActivityAuthorizationInfo().areActivitiesEnabled,
+            guard state.working + state.waiting > 0 || state.approval != nil, ActivityAuthorizationInfo().areActivitiesEnabled,
                   let created = try? Activity.request(attributes: SessionWorkingActivityAttributes(routeID: UUID().uuidString), content: content, pushType: nil) else { return }
             activity = created
         }
@@ -300,5 +373,12 @@ final class SessionWorkingActivityController {
         if let id = state.entries.first?.id, let entity = entities[id] {
             AppRuntime.defaults.set(try? JSONEncoder().encode(Route(id: activity.attributes.routeID, entity: entity)), forKey: Self.routeKey)
         } else { AppRuntime.defaults.removeObject(forKey: Self.routeKey) }
+    }
+}
+
+private extension Optional {
+    func asyncMap<T>(_ transform: (Wrapped) async -> T) async -> T? {
+        guard let value = self else { return nil }
+        return await transform(value)
     }
 }

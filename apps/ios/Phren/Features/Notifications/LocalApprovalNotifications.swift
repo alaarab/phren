@@ -47,7 +47,12 @@ final class LocalApprovalNotifications {
             let title = approval.choice?.title ?? approval.title ?? approval.toolName ?? "Allow this action?"
             var lines = [title]
             if let explanation = approval.explanation, explanation != approval.command,
-               explanation != title, explanation != approval.title { lines.append(explanation) }
+               explanation != title, explanation != approval.title {
+                // The title and command stay word for word; only a long prose
+                // explanation is shortened. Synchronously: an await here would
+                // let an answer land before this request is recorded.
+                lines.append(ReplySummary.needsSummary(explanation) ? ReplySummary.fallback(explanation) ?? explanation : explanation)
+            }
             if let command = approval.command, command != title { lines.append(command) }
             content.body = lines.joined(separator: "\n")
         }

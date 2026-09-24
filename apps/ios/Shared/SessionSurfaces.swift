@@ -115,19 +115,22 @@ struct SessionWorkingActivityAttributes: ActivityAttributes {
         /// When the agent's current turn or session began, so each row has its
         /// own timer; nil when the Hook never reported one.
         let startedAt: Date?
+        /// What a session that just finished said, in one or two plain
+        /// sentences (summarized on the phone); nil when none was read.
+        let reply: String?
 
         init(id: String, project: String, provider: String, role: String? = nil,
              tool: String? = nil, computer: String,
              model: String? = nil, step: String? = nil, branch: String? = nil, projectColor: String? = nil,
              subagents: Int = 0, childProviders: [String] = [], leadComputers: [String] = [], state: String? = nil,
-             startedAt: Date? = nil) {
+             startedAt: Date? = nil, reply: String? = nil) {
             self.id = id; self.project = project; self.provider = provider; self.role = role; self.tool = tool
             self.computer = computer; self.model = model; self.step = step; self.branch = branch
             self.projectColor = projectColor; self.subagents = subagents
             self.childProviders = childProviders; self.leadComputers = leadComputers
-            self.state = state; self.startedAt = startedAt
+            self.state = state; self.startedAt = startedAt; self.reply = reply
         }
-        private enum CodingKeys: String, CodingKey { case id, project, provider, role, tool, computer, model, step, branch, projectColor, subagents, childProviders, leadComputers, state, startedAt }
+        private enum CodingKeys: String, CodingKey { case id, project, provider, role, tool, computer, model, step, branch, projectColor, subagents, childProviders, leadComputers, state, startedAt, reply }
         /// Decode activities created before the step/subagent/model fields too,
         /// so an upgrade does not make an already-live activity undecodable.
         init(from decoder: Decoder) throws {
@@ -147,6 +150,29 @@ struct SessionWorkingActivityAttributes: ActivityAttributes {
             leadComputers = try values.decodeIfPresent([String].self, forKey: .leadComputers) ?? []
             state = try values.decodeIfPresent(String.self, forKey: .state)
             startedAt = try values.decodeIfPresent(Date.self, forKey: .startedAt)
+            reply = try values.decodeIfPresent(String.self, forKey: .reply)
+        }
+    }
+    /// The permission request the fleet activity leads with, so one activity
+    /// carries both the counts and the Approve / Deny that answers it. Display
+    /// text and an opaque local request id only, as `ApprovalActivityAttributes`.
+    struct PendingApproval: Codable, Hashable {
+        let requestID: String
+        let provider: String
+        let project: String
+        let host: String
+        let explanation: String
+        let expiresAt: Date
+        /// A question is answered in the app, where its choices are shown.
+        let question: Bool
+
+        var headline: String { question ? "\(provider) has a question" : "\(provider) needs approval" }
+        /// `phren://approval?request=`: the request's own conversation.
+        var openURL: URL? {
+            var components = URLComponents()
+            components.scheme = "phren"; components.host = "approval"
+            components.queryItems = [URLQueryItem(name: "request", value: requestID)]
+            return components.url
         }
     }
     struct ContentState: Codable, Hashable {
@@ -158,9 +184,19 @@ struct SessionWorkingActivityAttributes: ActivityAttributes {
         let more: Int
         /// Distinct computers the listed agents run on.
         let computers: Int
+        /// The permission request the activity leads with, if one waits.
+        var approval: PendingApproval?
+        /// Sessions that need the owner: those waiting, and at least the one
+        /// whose request the activity carries.
+        var needsYou: Int { max(waiting, approval == nil ? 0 : 1) }
+        /// "3 working · 1 needs you", the island's and lock screen's one line.
         var headline: String {
-            if waiting > 0 { return "\(working) working · \(waiting) waiting" }
-            return working == 1 ? "1 agent working" : "\(working) agents working"
+            var parts: [String] = []
+            if working > 0 { parts.append("\(working) working") }
+            if needsYou > 0 { parts.append("\(needsYou) needs you") }
+            if parts.isEmpty { parts.append(entries.count + more == 1 ? "1 agent" : "\(entries.count + more) agents") }
+            if computers > 1 { parts.append("\(computers) computers") }
+            return parts.joined(separator: " · ")
         }
         /// "N agents · M computers", the one line above the per-agent rows.
         /// N counts the listed rows plus those past the cap; M their computers.
@@ -169,11 +205,12 @@ struct SessionWorkingActivityAttributes: ActivityAttributes {
         /// one, otherwise the first row in waiting-first order.
         var primary: Entry? { entries.first }
 
-        init(working: Int, waiting: Int, entries: [Entry], startedAt: Date, more: Int = 0, computers: Int = 0) {
+        init(working: Int, waiting: Int, entries: [Entry], startedAt: Date, more: Int = 0, computers: Int = 0,
+             approval: PendingApproval? = nil) {
             self.working = working; self.waiting = waiting; self.entries = entries; self.startedAt = startedAt
-            self.more = more; self.computers = computers
+            self.more = more; self.computers = computers; self.approval = approval
         }
-        private enum CodingKeys: String, CodingKey { case working, waiting, entries, startedAt, more, computers }
+        private enum CodingKeys: String, CodingKey { case working, waiting, entries, startedAt, more, computers, approval }
         /// Decode activities created before the aggregate upgrade too, so the
         /// app can find and replace/end them instead of leaving an orphan.
         init(from decoder: Decoder) throws {
@@ -184,6 +221,7 @@ struct SessionWorkingActivityAttributes: ActivityAttributes {
             startedAt = try values.decode(Date.self, forKey: .startedAt)
             more = try values.decodeIfPresent(Int.self, forKey: .more) ?? 0
             computers = try values.decodeIfPresent(Int.self, forKey: .computers) ?? Set(entries.map(\.computer)).count
+            approval = try values.decodeIfPresent(PendingApproval.self, forKey: .approval)
         }
     }
     let routeID: String
