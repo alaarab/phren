@@ -56,7 +56,7 @@ uses the current pane or agent name. Upgrading to that release does not close
 this gap. Supplying an invented expected-session field is ineffective.
 
 Task `d78a0916` remains open. Its prompt and stop replacement-race cases in
-`packages/cli/src/bridge/bridge.test.ts` are executable expected failures: the
+`packages/cli/src/bridge/bridge.suite.ts` are executable expected failures: the
 fixture replaces the conversation when Herdr receives the mutation, after all
 snapshot checks, and records the actual recipient. An unexpected pass fails the
 suite so the case can become a normal regression when the limitation is fixed.
@@ -402,7 +402,8 @@ The preview proxy still requires authentication and carries remote traffic over 
 
 ## Verification
 
-Build the CLI before running `packages/cli/src/bridge/bridge.test.ts`. It starts
+Build the CLI before running `packages/cli/src/bridge/bridge.suite.ts` (through
+`bridge.test.ts`, `bridge.2.test.ts` and `bridge.3.test.ts`, one shard each). It starts
 the real bundled service with disposable Unix sockets and synthetic provider
 logs, checks strict target validation, stream append/rotation, image boundaries,
 private callback isolation, and stale approval rejection. No Moshi helper is used.

@@ -599,3 +599,27 @@ notification handlers) reads defaults directly.
 - Color code through `CodeHighlighting`, whose cache makes a repeat free.
 - Run `PerformanceBaselineTests` with `TEST_RUNNER_PHREN_RUN_PERF=1` before
   and after a change to these paths and compare the `PHREN_COUNT` lines.
+
+## CLI test suite, 2026-09-23
+
+`npx vitest run packages/cli` on the Mac mini (10 cores), 263 files and 3,930
+cases, after `pnpm build`:
+
+| | Wall | Slowest file |
+|---|---|---|
+| Before | 75.2 s | `bridge/bridge.test.ts`, 73.3 s |
+| After | 49.4 s | `bridge/bridge.2.test.ts`, 31.8 s |
+
+`bridge.test.ts` (124 cases, most of them starting or talking to a real Hook)
+and `cli.test.ts` (156 cases that spawn the CLI) ran start to finish in one
+worker each, so the suite could not end before them. Their cases now live in
+`bridge/bridge.suite.ts` and `cli.suite.ts`, and small entry files run one
+shard each (`bridge.test.ts`, `bridge.2.test.ts`, `bridge.3.test.ts`;
+`cli.test.ts`, `cli.2.test.ts`). `test-shard.ts` keeps every count-th unit, a
+unit being a case or a whole `describe` group, so a group's setup and case
+order stay in one shard. A new case goes in the suite file; a group that must
+appear in every shard (a shared fixture) is declared with `describeAll`.
+
+The iOS graph bundle phase already runs only when an input changes
+(`graph-inputs.xcfilelist`), and a run costs 0.34 s; `release.py` already
+generates the project once per checkout.
