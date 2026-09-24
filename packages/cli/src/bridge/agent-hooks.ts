@@ -291,6 +291,10 @@ export class AgentHooks {
       while (this.deliveries.size > 256) this.deliveries.delete(this.deliveries.keys().next().value!);
     });
   }
+  /** A prompt Phren typed into `target` that its conversation has not submitted yet. */
+  deliveryPending(target: Target, text: string): boolean {
+    return !!this.deliveries.get(promptKey(text))?.some(entry => entry.source === target.source && entry.session === target.session);
+  }
   /** Wait again for a delivery `expectDelivery` already reported pending,
    * after the Hook pressed Enter a second time. */
   awaitLateDelivery(target: Target, text: string, waitMs = 2_500): Promise<DeliveryOutcome> {

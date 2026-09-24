@@ -1172,6 +1172,54 @@ schedules:
       expect(enters()).toBe(before + 2);
     }, 15_000);
 
+    // Seen 2026-09-24: a hand-off pasted into a busy Claude Code showed "paste
+    // again to expand" and sat in its input line after the turn ended.
+    it("presses Enter once when a busy agent's turn ends with the prompt still unsubmitted, and never after it was taken", async () => {
+      const submit = (prompt: string) => new Promise<any>((resolve, reject) => {
+        const payload = JSON.stringify({ target: claude, event: "UserPromptSubmit", prompt });
+        const req = request({ socketPath: path.join(root, "bridge/agent.sock"), path: "/hook", method: "POST",
+          headers: { "Content-Length": Buffer.byteLength(payload) } }, res => {
+          let data = ""; res.on("data", bytes => data += bytes); res.on("end", () => resolve({ status: res.statusCode, ...JSON.parse(data) }));
+        }); req.on("error", reject); req.end(payload);
+      });
+      paneAgent = "claude"; agentStatus = "working";
+      const claude = { ...target, source: "claude" as const };
+      const enters = () => commands.filter(c => c.method === "agent.send_keys" && JSON.stringify(c.params.keys) === '["enter"]').length;
+      const before = enters();
+      expect((await api("/v1/prompt", { target: claude, text: "hand off the parser review" })).data).toEqual({ ok: true });
+      await sleep(2_500);
+      expect(enters()).toBe(before);
+      agentStatus = "idle";
+      await waitFor(() => enters() > before, 8_000);
+      expect(await submit("hand off the parser review")).toEqual({ status: 200 });
+      await sleep(2_500);
+      expect(enters()).toBe(before + 1);
+      // Taken when the turn ended: nothing more is pressed.
+      agentStatus = "working";
+      expect((await api("/v1/prompt", { target: claude, text: "then run the soak" })).data).toEqual({ ok: true });
+      expect(await submit("then run the soak")).toEqual({ status: 200 });
+      agentStatus = "idle";
+      await sleep(5_000);
+      expect(enters()).toBe(before + 1);
+    }, 30_000);
+
+    it("presses Enter once when a starting Claude Code stays idle after its first prompt, and says when it still has not started", async () => {
+      reportIdentity = false; paneAgent = "claude"; agentStatus = "idle";
+      const pane = (await api("/v1/workspaces/panes?groupId=w1&childId=w1:t1")).data.panes[0];
+      expect(pane).toMatchObject({ agent: "claude", starting: true });
+      const { session: _session, ...location } = target;
+      const starting = { ...location, source: "claude", starting: true, startingToken: pane.startingToken };
+      const enters = () => commands.filter(c => c.method === "agent.send_keys" && JSON.stringify(c.params.keys) === '["enter"]').length;
+      const before = enters();
+      expect((await api("/v1/prompt", { target: starting, text: "A long dispatched brief" })).data)
+        .toEqual({ ok: true, deliveryUncertain: true, unsubmitted: true });
+      expect(enters()).toBe(before + 1);
+      // A worker that started on its brief is never sent another Enter.
+      agentStatus = "working";
+      expect((await api("/v1/prompt", { target: starting, text: "Another brief" })).status).toBe(200);
+      expect(enters()).toBe(before + 1);
+    }, 20_000);
+
     it("reports a compacting conversation and clears it when the new context starts", async () => {
       const post = (event: string) => new Promise<any>((resolve, reject) => {
         const payload = JSON.stringify({ target, event, source: "compact" });
