@@ -30,7 +30,7 @@ Your tools, use these instead of exploring the CLI or the Hook's files:
 - `dispatch`: start a new worker on a computer (or `anywhere`).
 - `dispatch_returns` (CLI `phren dispatch returns`): what your workers sent
   back since you last asked: done with the final reply, needs-you with the
-  question, blocked, or gone. Reading them marks them read. In core use
+  question, failed with the error (a usage limit), blocked, or gone. Reading them marks them read. In core use
   `phren_admin(action: "dispatch_returns")`.
 - `phren dispatch status`: receipts of what you dispatched.
 - `get_tasks`, `get_project_summary`, `search_knowledge`: the store's memory.

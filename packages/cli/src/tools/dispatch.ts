@@ -22,7 +22,7 @@ export function register(server: McpServer): void {
   });
   server.registerTool("dispatch_returns", {
     title: "◆ phren · dispatch returns",
-    description: "List unread returns from dispatched workers and mark them read: the worker finished (done, with its final reply), finished by asking the owner something (needs-you, with the question), is blocked on terminal input, or its pane is gone. Each row has the dispatch id, computer, project, label and the worker's target for hand_off.",
+    description: "List unread returns from dispatched workers and mark them read: the worker finished (done, with its final reply), finished by asking the owner something (needs-you, with the question), failed (the harness ended the turn on an error such as a usage limit, with the error), is blocked on terminal input, or its pane is gone. Each row has the dispatch id, computer, project, label and the worker's target for hand_off.",
     inputSchema: {},
   }, async () => {
     try {

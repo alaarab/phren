@@ -189,6 +189,8 @@ unread returns, oldest first, and mark them read. A return is one of:
   its transcript and capped at 4000 bytes (`truncated` when cut).
 - `needs-you`: the worker finished by asking the owner something. `question`
   is the question line.
+- `failed`: the harness ended the turn on an error instead of a reply, such
+  as Codex's usage limit. `error` is its message.
 - `blocked`: the worker waits on terminal input, such as a permission prompt.
 - `gone`: its pane closed or another conversation took the pane over.
 
