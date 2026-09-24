@@ -530,6 +530,14 @@ try {
  * `phren` command works without a global npm install. The wrapper simply execs
  * `node <entry_script> "$@"`.
  */
+/** Whether a wrapper may be rewritten for `entry`: always, unless `entry` is
+ * an ephemeral npx copy and the wrapper already runs a lasting entry that exists. */
+export function keepsWrapperEntry(existing: string, entry: string, exists: (file: string) => boolean = fs.existsSync): boolean {
+  if (!isEphemeralNpxPath(entry)) return true;
+  const current = [...existing.matchAll(/exec node '([^']+)'/g)].map(match => match[1]);
+  return !current.some(file => !isEphemeralNpxPath(file) && exists(file));
+}
+
 export function installPhrenCliWrapper(phrenPath: string): boolean {
   const isWindows = process.platform === "win32";
   const entry = resolveCliEntryScript();
@@ -543,6 +551,10 @@ export function installPhrenCliWrapper(phrenPath: string): boolean {
     try {
       const existing = fs.readFileSync(wrapperPath, "utf8");
       if (!existing.includes("PHREN_CLI_WRAPPER")) return false;
+      // A one-off `npx @phren/cli` run must not repoint a wrapper that runs a
+      // lasting install (a checkout's build, a global package): the npx copy
+      // is older more often than not and its cache can vanish.
+      if (!keepsWrapperEntry(existing, entry)) return false;
     } catch {
       // File exists but unreadable — don't overwrite, could be a real binary
       return false;

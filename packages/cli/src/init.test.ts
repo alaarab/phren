@@ -1132,6 +1132,15 @@ describe("init edge cases", () => {
     expect(output).toContain("hooks-mode on");
   });
 
+  it("never lets an npx copy repoint a wrapper that runs a lasting install", async () => {
+    const { keepsWrapperEntry } = await import("./hooks.js");
+    const wrapper = "# PHREN_CLI_WRAPPER\nif [ -f '/home/sam/phren/packages/cli/dist/index.js' ]; then\n  exec node '/home/sam/phren/packages/cli/dist/index.js' \"$@\"\nfi\n";
+    const npx = "/home/sam/.npm/_npx/abc/node_modules/@phren/cli/dist/index.js";
+    expect(keepsWrapperEntry(wrapper, npx, () => true)).toBe(false);
+    expect(keepsWrapperEntry(wrapper, npx, () => false), "a checkout that is gone can be replaced").toBe(true);
+    expect(keepsWrapperEntry(wrapper, "/usr/local/lib/node_modules/@phren/cli/dist/index.js", () => true)).toBe(true);
+  });
+
   it("configureHooksIfEnabled logs wrapper note when installPhrenCliWrapper returns false", () => {
     // With a tmpdir phrenPath that has no entry script, wrapper install will return false
     const chunks: string[] = [];
