@@ -18,10 +18,10 @@ import { CodeReindexer, CodeRoutes } from "./code-routes.js";
 import { WorkspaceContextUsage } from "./context.js";
 import { DispatchService } from "./dispatch.js";
 import { DispatchReturns } from "./dispatch-returns.js";
-import { findPane, recentServers, sharedSnapshot, snapshot, validateTarget } from "./herdr.js";
+import { findPane, paneChatState, recentServers, sharedSnapshot, snapshot, validateTarget } from "./herdr.js";
 import { LaunchLimiter } from "./limits.js";
 import { locateProject } from "./locate.js";
-import { BridgeError, bridgeRoot, objects, PROTOCOL, provider, socketPath } from "./protocol.js";
+import { BridgeError, bridgeRoot, objects, PROTOCOL, provider, socketPath, targetSchema } from "./protocol.js";
 import { CodexQuestions } from "./questions.js";
 import { TabActivityStore } from "./tab-activity.js";
 import { childAgentTree } from "./transcripts.js";
@@ -178,6 +178,13 @@ export async function serve(version: string): Promise<void> {
           const name = String(server.session), current = await sharedSnapshot(name, 4000);
           await tabActivity.observe(name, current);
           await journal.record(name, objects(current.panes));
+          // Approvals drawn in a terminal reach a phone with phren closed.
+          await agentHooks.observeWaitingPanes(name, objects(current.panes), async pane => {
+            const state = await paneChatState(name, pane, { tokenWhenIdentified: false });
+            const parsed = targetSchema.safeParse({ server: name, workspace: pane.workspace_id, tab: pane.tab_id, pane: pane.pane_id,
+              source: pane.agent, session: state.sessionId });
+            return parsed.success ? parsed.data : undefined;
+          });
         }
         catch { /* A disconnected computer keeps its previous local activity. */ }
       }
