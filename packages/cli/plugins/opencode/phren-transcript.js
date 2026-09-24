@@ -267,6 +267,9 @@ export const PhrenTranscriptPlugin = async () => {
       // than waiting 50 seconds for an answer that never comes.
       if (process.env.PHREN_FANOUT_JOB) {
         if (fanoutAllowed(input)) { setStatus(output, "allow"); return; }
+        // A worker the launcher drives through `opencode serve` relays the
+        // ask to the phone and resumes on the owner's answer.
+        if (process.env.PHREN_FANOUT_APPROVALS === "1") { setStatus(output, "ask"); return; }
         setStatus(output, "deny");
         // A denied permission aborts the turn; record what was refused so the
         // Hook can report the worker as blocked rather than finished.

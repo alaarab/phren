@@ -55,8 +55,12 @@ export async function launch(options: JobOptions, reservation = createJob(option
   const { job, manifest } = reservation, adapter = adapters[options.provider];
   console.log(job);
   const out = fs.openSync(path.join(job, manifest.eventLog), "a"), err = fs.openSync(path.join(job, "stderr.log"), "a");
+  // A served harness answers only with this password, so another local
+  // process cannot approve the worker's permission asks.
+  const password = randomBytes(24).toString("hex");
   const child = spawn("nice", ["-n", "15", adapter.command, ...adapter.argv({ ...options, job })], {
-    cwd: manifest.worktree, env: { ...process.env, PHREN_FANOUT_JOB: manifest.id, PHREN_FANOUT_DIR: job },
+    cwd: manifest.worktree, env: { ...process.env, PHREN_FANOUT_JOB: manifest.id, PHREN_FANOUT_DIR: job,
+      ...(adapter.drive ? { PHREN_FANOUT_APPROVALS: "1", OPENCODE_SERVER_USERNAME: "opencode", OPENCODE_SERVER_PASSWORD: password } : {}) },
     stdio: ["pipe", "pipe", "pipe"], detached: process.platform !== "win32",
   });
   let pending = "", stderr = "", cancelled = false;
@@ -64,18 +68,21 @@ export async function launch(options: JobOptions, reservation = createJob(option
   const kill = () => { try { if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGTERM"); else child.kill("SIGTERM"); } catch { /* Already exited. */ } };
   const cancel = () => { cancelled = true; kill(); };
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.on(signal, cancel);
-  child.stdout?.on("data", (chunk: Buffer) => {
-    fs.writeSync(out, chunk); pending += chunk.toString("utf8");
+  const record = (session: string | undefined) => { if (session && !manifest.session) { manifest.session = session; writeManifest(job, manifest); } };
+  const events = (chunk: Buffer | string) => {
+    fs.writeSync(out, typeof chunk === "string" ? chunk : chunk.toString("utf8")); pending += chunk.toString();
     let newline: number;
     while ((newline = pending.indexOf("\n")) >= 0) {
       const line = pending.slice(0, newline); pending = pending.slice(newline + 1);
-      try { const event = JSON.parse(line); watchdog.observe(event); const session = adapter.session(event); if (session && !manifest.session) { manifest.session = session; writeManifest(job, manifest); } } catch { /* Partial or non-JSON provider output. */ }
+      try { const event = JSON.parse(line); watchdog.observe(event); record(adapter.session(event)); } catch { /* Partial or non-JSON provider output. */ }
     }
     if (pending.length > 1_048_576) pending = "";
-  });
+  };
+  if (!adapter.drive) child.stdout?.on("data", events);
   child.stderr?.on("data", (chunk: Buffer) => { fs.writeSync(err, chunk); stderr = (stderr + chunk.toString("utf8")).slice(-16_384); });
   child.stdin?.on("error", () => {});
-  child.stdin?.end(options.prompt);
+  child.stdin?.end(adapter.drive ? undefined : options.prompt);
+  const closed = new Promise<number>(resolve => { child.once("error", error => { fs.writeSync(err, `${error.message}\n`); resolve(127); }); child.once("close", code => resolve(cancelled ? 130 : code ?? 1)); });
   const timer = setInterval(() => {
     const reason = watchdog.reason();
     if (!reason) return;
@@ -83,7 +90,18 @@ export async function launch(options: JobOptions, reservation = createJob(option
     atomicWriteText(path.join(job, "blocked.json"), JSON.stringify({ type: "tool_loop", pattern: "", message: reason, at: new Date().toISOString() }));
     kill();
   }, 30_000);
-  const exitCode = await new Promise<number>(resolve => { child.once("error", error => { fs.writeSync(err, `${error.message}\n`); resolve(127); }); child.once("close", code => resolve(cancelled ? 130 : code ?? 1)); });
+  let exitCode: number;
+  if (adapter.drive) {
+    // The served harness never exits on its own: the driver's result is the
+    // worker's, and the server stops once the session is done.
+    const driven = await Promise.race([
+      adapter.drive(child, { ...options, worktree: manifest.worktree, job, jobId: manifest.id, password, emit: events, session: record })
+        .catch(error => { fs.writeSync(err, `${error instanceof Error ? error.message : String(error)}\n`); return 1; }),
+      closed.then(code => code === 0 ? 1 : code)]);
+    kill();
+    await closed;
+    exitCode = cancelled ? 130 : driven;
+  } else exitCode = await closed;
   clearInterval(timer);
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.off(signal, cancel);
   fs.closeSync(out); fs.closeSync(err);

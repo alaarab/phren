@@ -46,6 +46,8 @@ export async function runFanout(args: string[], ctx: CliContext): Promise<number
     const running = listJobs(store).filter(job => !fs.existsSync(path.join(jobsRoot(store), job.id, "exit.txt")));
     const chosen = pick({ policy, tier: tier as Tier, usage, errors, running, swiftBuilds: needsSwift ? swiftBuildCount() : 0, needsSwift,
       override: { provider: (flags.provider ?? previous?.provider) as Candidate["provider"] | undefined, model: flags.model ?? previous?.model } });
+    // An OpenCode worker is driven over HTTP; there is no command line to extend.
+    if (chosen.provider === "opencode" && extra.length) throw new Error("OpenCode workers take no --extra arguments.");
     console.log(chosen.reason);
     const options = { ...chosen, store, label, worktree, prompt, review: tier === "review", resume: previous?.session, variant: flags.variant, extra };
     return { options, reservation: createJob(options) };

@@ -8,6 +8,7 @@ import { z } from "zod";
 import type { ChangedFile } from "./changes.js";
 import { type Json, object, type Provider, sessionId } from "./protocol.js";
 import { countGit } from "./metrics.js";
+import { readOpencodeRequest } from "./opencode-approvals.js";
 
 const MAX_MANIFEST_BYTES = 64 * 1024;
 const MAX_EVENT_LOG_BYTES = 64 * 1024 * 1024;
@@ -220,13 +221,16 @@ export async function fanoutChildren(parentProvider: Provider, parentSession: st
       // A denied permission aborts the turn while the launcher still records a
       // zero exit; blocked.json is the only evidence the worker did not finish.
       const blocked = await readBlocked(jobRoot);
+      // A running worker waiting on the phone's answer to a permission ask.
+      const asking = !blocked && manifest.status === "running" && manifest.provider === "opencode" && manifest.session
+        ? await readOpencodeRequest(manifest.session, storeRoot(env)) : undefined;
       const finishedAt = manifest.finishedAt ?? blocked?.at
         ?? (ARCHIVED_STATUSES.has(manifest.status)
           ? (await stat(path.join(jobRoot, "exit.txt")).catch(() => undefined))?.mtime.toISOString() ?? manifest.updatedAt : undefined);
       children.push({ id, provider: manifest.provider, session: manifest.session, model: manifest.model, ...worktree, cwd: manifest.worktree,
         path: manifest.taskLabel, callId: `fanout:${id}`,
         state: blocked || manifest.status === "failed" || manifest.status === "cancelled" ? "failed" : ["queued", "running"].includes(manifest.status) ? "running" : "completed",
-        ...(blocked ? { reason: blockedReason(blocked) } : {}), ...(finishedAt ? { finishedAt } : {}), transcript,
+        ...(blocked ? { reason: blockedReason(blocked) } : asking ? { reason: `needs-you: ${String(asking.message ?? asking.type)}`.slice(0, 500) } : {}), ...(finishedAt ? { finishedAt } : {}), transcript,
         fanout: { resumable: ["codex", "opencode"].includes(manifest.provider) && manifest.session !== undefined }, children: [] });
     } catch { /* Torn, old, or untrusted manifests do not become child agents. */ }
   }
@@ -285,6 +289,24 @@ export async function blockedFanouts(env: NodeJS.ProcessEnv = process.env): Prom
     } catch { /* Torn or untrusted jobs are not pushed. */ }
   }
   return blocked;
+}
+
+/** The running OpenCode fan-out job a permission request names, when its own
+ * manifest confirms the worker session and a parent conversation: the parent
+ * is where the phone answers the ask. */
+export async function fanoutAsking(job: unknown, session: string, env: NodeJS.ProcessEnv = process.env): Promise<{ id: string; label: string; parent: NonNullable<FanoutManifest["parent"]> } | undefined> {
+  if (!jobID.safeParse(job).success) return undefined;
+  const root = await containedFanoutRoot(env);
+  if (!root) return undefined;
+  const jobRoot = await realpath(path.join(root, job as string)).catch(() => undefined);
+  if (!jobRoot || !jobRoot.startsWith(root + path.sep)) return undefined;
+  const file = await regularContainedFile(root, path.join(jobRoot, "manifest.json"), MAX_MANIFEST_BYTES);
+  if (!file) return undefined;
+  try {
+    const manifest = manifestSchema.parse(JSON.parse(await readFile(file, "utf8")));
+    if (manifest.id !== job || manifest.provider !== "opencode" || manifest.session !== session || manifest.status !== "running" || !manifest.parent) return undefined;
+    return { id: manifest.id, label: manifest.taskLabel, parent: manifest.parent };
+  } catch { return undefined; }
 }
 
 export interface FanoutArchiveResult {

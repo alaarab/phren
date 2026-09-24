@@ -93,4 +93,18 @@ describe("opencode fan-out permissions", () => {
     const blocked = JSON.parse(await readFile(path.join(store, ".runtime", "agent-fanouts", "job-store", "blocked.json"), "utf8"));
     expect(blocked.type).toBe("task");
   });
+
+  it("leaves an ask to the phone when the launcher relays approvals", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "phren-fanout-")); roots.push(directory);
+    process.env.PHREN_FANOUT_JOB = "job-relay";
+    process.env.PHREN_FANOUT_DIR = directory;
+    process.env.PHREN_FANOUT_APPROVALS = "1";
+    try {
+      const handlers = await loadPlugin();
+      const output: { status?: string } = {};
+      await handlers["permission.ask"]({ type: "external_directory", pattern: "/etc/ssh" }, output);
+      expect(output.status).toBe("ask");
+      await expect(readFile(path.join(directory, "blocked.json"), "utf8")).rejects.toThrow();
+    } finally { delete process.env.PHREN_FANOUT_APPROVALS; }
+  });
 });

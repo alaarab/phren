@@ -42,7 +42,32 @@ async function fixture(status: "running" | "completed" = "completed", provider: 
   // Real subprocess, fake harness: captures argv, cwd and stdin without contacting a provider.
   const bin = path.join(store, "bin"); await mkdir(bin);
   const executable = path.join(bin, provider);
-  await writeFile(executable, `#!/usr/bin/env node
+  // OpenCode is served: the brief arrives through prompt_async, not stdin.
+  await writeFile(executable, provider === "opencode" ? `#!/usr/bin/env node
+import fs from 'node:fs';
+import http from 'node:http';
+const clients = [];
+const send = (type, properties) => { for (const client of clients) client.write('data: ' + JSON.stringify({ type, properties }) + '\\n\\n'); };
+http.createServer((req, res) => {
+  let body = '';
+  req.on('data', chunk => body += chunk);
+  req.on('end', () => {
+    const url = new URL(req.url, 'http://fake');
+    if (url.pathname === '/event') { res.writeHead(200, { 'Content-Type': 'text/event-stream' }); res.write('\\n'); clients.push(res); return; }
+    if (url.pathname === '/session/ses_worker42') { res.end(JSON.stringify({ id: 'ses_worker42' })); return; }
+    if (url.pathname === '/session/ses_worker42/prompt_async') {
+      const data = JSON.parse(body);
+      fs.writeFileSync('invocation.json', JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd(), text: data.parts[0].text, model: data.model, agent: data.agent }));
+      res.writeHead(204); res.end();
+      send('session.status', { sessionID: 'ses_worker42', status: { type: 'busy' } });
+      send('message.part.updated', { part: { id: 'prt_1', sessionID: 'ses_worker42', type: 'text', text: 'Resumed reply', time: { start: 1, end: 2 } } });
+      send('session.status', { sessionID: 'ses_worker42', status: { type: 'idle' } });
+      return;
+    }
+    res.writeHead(404); res.end('{}');
+  });
+}).listen(0, '127.0.0.1', function () { console.log('opencode server listening on http://127.0.0.1:' + this.address().port); });
+` : `#!/usr/bin/env node
 import fs from 'node:fs';
 let text = '';
 process.stdin.on('data', chunk => text += chunk);
@@ -68,7 +93,8 @@ describe("POST /v1/subagents/resume", () => {
     expect(invocation).toMatchObject({ text, cwd: f.worktree });
     expect(invocation.argv).toEqual(provider === "codex"
       ? ["exec", "resume", "--json", "-o", path.join(f.directory, "final.txt"), "-m", "configured-model", thread, "-"]
-      : ["run", "--format", "json", "--dir", f.worktree, "--model", "configured-model", "--agent", "build", "--session", "ses_worker42"]);
+      : ["serve", "--hostname", "127.0.0.1", "--port", "0"]);
+    if (provider === "opencode") expect(invocation).toMatchObject({ model: { providerID: "configured-model", modelID: "" }, agent: "build" });
     const saved = JSON.parse(await readFile(path.join(f.directory, "manifest.json"), "utf8"));
     expect(saved).toMatchObject({ id: "job-1", session: f.manifest.session, resumes: f.manifest.session, status: "completed" });
     expect(await readFile(path.join(f.directory, "rounds", result.message.id, "prompt.txt"), "utf8")).toBe(text);

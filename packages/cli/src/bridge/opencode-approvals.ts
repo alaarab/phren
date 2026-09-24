@@ -8,9 +8,9 @@ import { phrenStoreRoot } from "./transcripts.js";
  * an opencode permission ask, under the store's `.runtime/approvals`. */
 
 const opencodeSession = /^ses_[0-9A-Za-z]{1,64}$/;
-export function opencodeApprovalFile(session: string, kind: "request" | "answer"): string | undefined {
+export function opencodeApprovalFile(session: string, kind: "request" | "answer", store = phrenStoreRoot()): string | undefined {
   if (!opencodeSession.test(session)) return undefined;
-  return path.join(phrenStoreRoot(), ".runtime", "approvals", `opencode-${session}.${kind}.json`);
+  return path.join(store, ".runtime", "approvals", `opencode-${session}.${kind}.json`);
 }
 export async function* directoryNames(directory: string, limit: number): AsyncGenerator<string> {
   const entries = await opendir(directory).catch(() => undefined);
@@ -39,8 +39,8 @@ export function opencodeRequest(session: string): Json | undefined {
 }
 
 /** `opencodeRequest` without blocking the event loop, for the background sweep. */
-export async function readOpencodeRequest(session: string): Promise<Json | undefined> {
-  const file = opencodeApprovalFile(session, "request");
+export async function readOpencodeRequest(session: string, store?: string): Promise<Json | undefined> {
+  const file = opencodeApprovalFile(session, "request", store);
   if (!file) return undefined;
   try {
     const info = await lstat(file);

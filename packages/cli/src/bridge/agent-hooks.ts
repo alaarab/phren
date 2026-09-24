@@ -12,7 +12,7 @@ import { findPane, herdrPaneFromEnv, knownPanes, rpc, servers, snapshot, trusted
 import { readPaneText } from "./pane-text.js";
 import { capturesChanges, ToolChanges } from "./changes.js";
 import { phrenStoreRoot, unwrapPastedContent } from "./transcripts.js";
-import { archiveFinishedFanouts, blockedFanouts } from "./fanouts.js";
+import { archiveFinishedFanouts, blockedFanouts, fanoutAsking } from "./fanouts.js";
 import { ensureGrant, listGrants, matchGrant, type Grant } from "./grants.js";
 import { ApprovalPushService } from "./push.js";
 import { intervalFromEnv } from "./limits.js";
@@ -60,8 +60,11 @@ export function conductorCall(tool: string, input: unknown): Pending["conductor"
 }
 
 /** An opencode permission ask the plugin wrote to disk, held here so it can be
- * pushed and answered by binding like a Claude request the Hook holds itself. */
-interface OpencodeHeld { target: Target; request: Json; expiresAt: number }
+ * pushed and answered by binding like a Claude request the Hook holds itself.
+ * A fan-out worker's ask is shown on its parent conversation under an action
+ * id of the parent's shape, and still answers the worker's own session; with
+ * no parent pane in reach it is answered from its push alone. */
+interface OpencodeHeld { target?: Target; request: Json; expiresAt: number; fanout?: { session: string; actionId: string } }
 
 export type DeliveryOutcome = "delivered" | "blocked" | "pending";
 interface Delivery { source: Provider; session: string; settle: (outcome: DeliveryOutcome) => void; timer: ReturnType<typeof setTimeout>; late?: (outcome: DeliveryOutcome) => void }
@@ -154,12 +157,19 @@ export class AgentHooks {
       const id = String(request.id);
       live.add(id);
       if (this.opencode.has(id)) continue;
-      const target = await this.resolveOpencodeTarget(match[1]);
+      // The launcher names the fan-out job; its manifest, not the request,
+      // says which worker session and parent conversation it belongs to.
+      const asking = request.fanout === undefined ? undefined : await fanoutAsking(request.fanout, match[1]);
+      if (request.fanout !== undefined && !asking) continue;
+      const target = asking ? await this.resolveTarget(asking.parent.provider, asking.parent.session) : await this.resolveTarget("opencode", match[1]);
       if (this.closed) return;
-      if (!target) continue;
+      if (!target && !asking) continue;
       const expiresAt = typeof request.expiresAt === "string" ? Date.parse(request.expiresAt) : NaN;
       if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) continue;
-      this.opencode.set(id, { target, request, expiresAt });
+      // The answer route checks an action id by the parent's source: a UUID
+      // for Claude and Codex, a plain token for opencode.
+      const fanout = asking ? { session: match[1], actionId: asking.parent.provider === "opencode" ? randomUUID().replaceAll("-", "") : randomUUID() } : undefined;
+      this.opencode.set(id, { ...(target ? { target } : {}), request, expiresAt, ...(fanout ? { fanout } : {}) });
       if (!this.push.available) continue;
       const binding = randomUUID();
       this.pushBindings.add(binding, { action: id, expiresAt });
@@ -176,8 +186,8 @@ export class AgentHooks {
     }
   }
   /** A session's exact pane. A recorded binding carries the full target; when
-   * there is none, Herdr's explicit `ses_` identity names the pane. */
-  private async resolveOpencodeTarget(session: string): Promise<Target | undefined> {
+   * there is none, Herdr's explicit session identity names the pane. */
+  private async resolveTarget(source: Provider, session: string): Promise<Target | undefined> {
     const root = path.join(bridgeRoot(), "bindings");
     for await (const folder of directoryNames(root, 64)) {
       for await (const name of directoryNames(path.join(root, folder), 1024)) {
@@ -188,10 +198,10 @@ export class AgentHooks {
           if (!info.isFile() || info.size > 65_536) continue;
           value = object(JSON.parse(await readFile(file, "utf8")));
         } catch { continue; }
-        if (value.source !== "opencode" || value.session !== session) continue;
+        if (value.source !== source || value.session !== session) continue;
         if (typeof value.workspace !== "string" || typeof value.tab !== "string") continue;
         const parsed = targetSchema.safeParse({ server: decodeURIComponent(folder), workspace: value.workspace, tab: value.tab,
-          pane: decodeURIComponent(name.slice(0, -".json".length)), source: "opencode", session });
+          pane: decodeURIComponent(name.slice(0, -".json".length)), source, session });
         if (parsed.success) return parsed.data;
       }
     }
@@ -201,11 +211,11 @@ export class AgentHooks {
       const state = await snapshot(server).catch(() => undefined);
       if (!state) continue;
       for (const pane of objects(state.panes)) {
-        if (pane.agent !== "opencode") continue;
+        if (pane.agent !== source) continue;
         const reported = object(pane.agent_session);
-        if (reported.kind !== "id" || reported.agent !== "opencode" || reported.value !== session) continue;
+        if (reported.kind !== "id" || reported.agent !== source || reported.value !== session) continue;
         const parsed = targetSchema.safeParse({ server, workspace: pane.workspace_id, tab: pane.tab_id,
-          pane: pane.pane_id, source: "opencode", session });
+          pane: pane.pane_id, source, session });
         if (parsed.success) return parsed.data;
       }
     }
@@ -497,11 +507,24 @@ export class AgentHooks {
       details: pending[1].message, terminalOnly: target.source === "codex" && !pending[1].choice,
       ...(pending[1].choice ? { choice: pending[1].choice } : {}), expiresAt: pending[1].expiresAt,
       ...(pending[1].conductor ? { conductor: pending[1].conductor } : {}) };
-    if (target.source !== "opencode") return undefined;
-    const held = [...this.opencode.values()].find(value => JSON.stringify(value.target) === JSON.stringify(target));
+    const own = target.source === "opencode" ? this.opencodeApproval(target) : undefined;
+    if (own) return own;
+    // A fan-out worker this conversation started is waiting on the owner.
+    const worker = this.fanoutHeld(target)[0];
+    return worker?.fanout ? { actionId: worker.fanout.actionId, toolName: worker.request.type, title: worker.request.title,
+      message: worker.request.message, expiresAt: worker.request.expiresAt } : undefined;
+  }
+  private opencodeApproval(target: Target): Json | undefined {
+    const held = [...this.opencode.values()].find(value => !value.fanout && JSON.stringify(value.target) === JSON.stringify(target));
     if (held) return { actionId: held.request.id, toolName: held.request.type, title: held.request.title, message: held.request.message, expiresAt: held.request.expiresAt };
     const request = opencodeRequest(target.session);
     return request ? { actionId: request.id, toolName: request.type, title: request.title, message: request.message, expiresAt: request.expiresAt } : undefined;
+  }
+  /** Live fan-out worker asks shown on this parent conversation, oldest first. */
+  private fanoutHeld(target: Target): OpencodeHeld[] {
+    const key = JSON.stringify(target);
+    return [...this.opencode.values()].filter(value => value.fanout && value.target && JSON.stringify(value.target) === key
+      && value.expiresAt > Date.now() && opencodeRequest(value.fanout.session)?.id === value.request.id);
   }
   pendingPanes(server: string, state: Json): Set<string> {
     const panes = objects(state.panes);
@@ -517,9 +540,30 @@ export class AgentHooks {
         pending.add(String(pane.pane_id));
       }
     }
+    for (const held of this.opencode.values()) {
+      const parent = held.target;
+      if (!held.fanout || !parent || parent.server !== server) continue;
+      if (panes.some(pane => pane.pane_id === parent.pane && pane.workspace_id === parent.workspace && pane.tab_id === parent.tab)
+          && this.fanoutHeld(parent).length) pending.add(parent.pane);
+    }
     return pending;
   }
+  /** Hands the owner's answer to the fan-out launcher waiting on the worker's session. */
+  private async answerFanout(id: string, held: OpencodeHeld, decision: unknown) {
+    if (!["approve", "deny"].includes(String(decision))) throw new BridgeError(400, "The approval answer is not valid.");
+    const file = held.fanout && opencodeApprovalFile(held.fanout.session, "answer");
+    if (!held.fanout || !file || opencodeRequest(held.fanout.session)?.id !== id) throw new BridgeError(409, "This approval is no longer pending.");
+    await atomicInPrivateDir(file, JSON.stringify({ id, decision }));
+    this.opencode.delete(id); this.pushBindings.dropAction(id);
+  }
   async answer(target: Target, id: string, decision: unknown, updatedInput?: unknown) {
+    const worker = [...this.opencode.entries()].find(([, held]) => held.fanout?.actionId === id && JSON.stringify(held.target) === JSON.stringify(target));
+    if (worker) {
+      if (updatedInput !== undefined) throw new BridgeError(400, "Answers go with an approval.");
+      await validateTarget(target);
+      await this.answerFanout(worker[0], worker[1], decision);
+      return;
+    }
     if (target.source === "opencode") {
       if (!["approve", "deny"].includes(String(decision))) throw new BridgeError(400, "The approval answer is not valid.");
       const file = opencodeApprovalFile(target.session, "answer");
@@ -573,7 +617,10 @@ export class AgentHooks {
     const pending = this.pending.get(linked.action);
     if (pending) { await this.answer(pending.target, linked.action, decision); return; }
     const held = this.opencode.get(linked.action);
-    if (held) { await this.answer(held.target, linked.action, decision); return; }
+    // The binding is the single-use proof for a worker's ask, whose parent
+    // may not be in any pane the Hook can see.
+    if (held?.fanout) { await this.answerFanout(linked.action, held, decision); return; }
+    if (held?.target) { await this.answer(held.target, linked.action, decision); return; }
     throw new BridgeError(409, "This approval is no longer pending.");
   }
   private dropPushBindings(action: string) {
