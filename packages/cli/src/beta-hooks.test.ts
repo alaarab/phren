@@ -104,11 +104,8 @@ describe("getProjectGlobBoost", () => {
 // ── Task #7: Citation validation ────────────────────────────────────────────
 
 describe("parseCitations", () => {
-  it("returns empty for no citations", () => {
+  it("parses multiple citations, and none from plain text", () => {
     expect(parseCitations("No citations here")).toEqual([]);
-  });
-
-  it("parses multiple citations", () => {
     const text = [
       'See <!-- phren:cite {"created_at":"2026-03-01T00:00:00.000Z","file":"/tmp/a.ts","line":1} -->',
       'and <!-- phren:cite {"created_at":"2026-03-01T00:00:00.000Z","file":"/tmp/b.ts","line":2} -->',
@@ -178,40 +175,29 @@ describe("annotateStale", () => {
     try { fs.unlinkSync(tmpFile); } catch { /* ok */ }
   });
 
-  it("returns snippet unchanged when no citations", () => {
-    expect(annotateStale("plain text")).toBe("plain text");
-  });
-
   it("marks phren citation comments stale when validation fails", () => {
     const result = annotateStale('insight <!-- phren:cite {"created_at":"2026-03-01T00:00:00.000Z","file":"/no/such/file.ts","line":1} -->');
     expect(result).toContain("[citation stale]");
+    // A snippet without citations passes through unchanged.
+    expect(annotateStale("plain text")).toBe("plain text");
   });
 });
 
 // ── Task #8: extractToolFindings ───────────────────────────────────────────
 
 describe("extractToolFindings", () => {
-  it("extracts explicit [pitfall] tag from tool output", () => {
-    const candidates = extractToolFindings(
-      "Read",
-      {},
-      "[pitfall] Always check null before accessing .value"
-    );
-    expect(candidates.length).toBeGreaterThanOrEqual(1);
-    const pitfallEntry = candidates.find((c) => c.text.includes("[pitfall]"));
-    expect(pitfallEntry).toBeDefined();
-    expect(pitfallEntry!.confidence).toBe(0.85);
+  it.each([
+    ["[pitfall]", "Read", {}, "[pitfall] Always check null before accessing .value"],
+    ["[decision]", "Bash", { command: "npm test" }, "All good. [decision] Use vitest over jest for speed"],
+    ["[bug]", "Grep", { pattern: "foo" }, "Some results found. [bug] Race condition in concurrent writes"],
+  ])("extracts an explicit %s tag from %s tool output", (tag, tool, input, output) => {
+    const entry = extractToolFindings(tool, input, output).find((c) => c.text.includes(tag));
+    expect(entry).toBeDefined();
+    expect(entry!.confidence).toBe(0.85);
   });
 
-  it("extracts explicit [decision] tag from tool output", () => {
-    const candidates = extractToolFindings(
-      "Bash",
-      { command: "npm test" },
-      "All good. [decision] Use vitest over jest for speed"
-    );
-    const decision = candidates.find((c) => c.text.includes("[decision]"));
-    expect(decision).toBeDefined();
-    expect(decision!.confidence).toBe(0.85);
+  it("returns empty for normal successful tool output", () => {
+    expect(extractToolFindings("Read", {}, "file content here without any signals")).toEqual([]);
   });
 
   it("extracts TODO/FIXME from Edit tool input", () => {
@@ -223,22 +209,6 @@ describe("extractToolFindings", () => {
     const todo = candidates.find((c) => c.text.includes("[pitfall]") && c.text.includes("TODO"));
     expect(todo).toBeDefined();
     expect(todo!.confidence).toBe(0.45);
-  });
-
-  it("returns empty for normal successful tool output", () => {
-    const candidates = extractToolFindings("Read", {}, "file content here without any signals");
-    expect(candidates).toEqual([]);
-  });
-
-  it("extracts [bug] tag from any tool output", () => {
-    const candidates = extractToolFindings(
-      "Grep",
-      { pattern: "foo" },
-      "Some results found. [bug] Race condition in concurrent writes"
-    );
-    const bug = candidates.find((c) => c.text.includes("[bug]"));
-    expect(bug).toBeDefined();
-    expect(bug!.confidence).toBe(0.85);
   });
 
   it("does NOT capture markdown TOC anchors as [pattern] (#pattern) entries", () => {
@@ -297,17 +267,11 @@ describe("filterToolFindingsForProactivity", () => {
     { text: "[bug] command 'npm test' failed: ENOENT", confidence: 0.55, explicit: false },
   ];
 
-  it("keeps explicit and heuristic candidates at high", () => {
-    expect(filterToolFindingsForProactivity(candidates, "high")).toEqual(candidates);
-  });
-
-  it("keeps only explicit candidates at medium", () => {
-    expect(filterToolFindingsForProactivity(candidates, "medium")).toEqual([
-      { text: "[decision] Use WAL mode for local reads", confidence: 0.85, explicit: true },
-    ]);
-  });
-
-  it("drops all hook-tool candidates at low", () => {
-    expect(filterToolFindingsForProactivity(candidates, "low")).toEqual([]);
+  it.each([
+    ["high", candidates],
+    ["medium", [candidates[0]]],
+    ["low", []],
+  ] as const)("keeps the right hook-tool candidates at %s", (level, kept) => {
+    expect(filterToolFindingsForProactivity(candidates, level)).toEqual(kept);
   });
 });

@@ -19,11 +19,8 @@ function writeInstallPrefs(phrenPath: string, content: string): void {
 
 describe("hooks", () => {
   describe("commandExists", () => {
-    it("returns true for a known command", () => {
+    it("returns true for a known command and false for a nonexistent one", () => {
       expect(commandExists("node")).toBe(true);
-    });
-
-    it("returns false for a nonexistent command", () => {
       expect(commandExists("definitely-not-a-real-command-xyz")).toBe(false);
     });
   });
@@ -199,6 +196,9 @@ describe("hooks", () => {
         // No bash-only syntax
         expect(content).not.toContain("${@:"); // bash array slicing
         expect(content).not.toContain("[[");    // bash double bracket
+        // Arguments are consumed with shift, and the timeout is parsed first.
+        expect(content).toContain("shift");
+        expect(content).toContain("_timeout_val");
       }
     });
 
@@ -221,17 +221,6 @@ describe("hooks", () => {
         expect(content).not.toContain("#!/bin/sh");
         expect(content).not.toContain("shift\n");
       }
-    });
-
-    it.skipIf(process.platform === "win32")("session wrappers use shift instead of bash array slicing", () => {
-      setupFakeBinaries();
-      configureAllHooks(phrenPath, { tools: new Set(["codex"]) });
-
-      const wrapper = wrapperFor("codex");
-      expect(fs.existsSync(wrapper)).toBe(true);
-      const content = fs.readFileSync(wrapper, "utf8");
-      expect(content).toContain("shift");
-      expect(content).toContain("_timeout_val");
     });
 
     it("skips wrapper installation when hooks are disabled", () => {
@@ -516,9 +505,7 @@ describe("hooks", () => {
     it("readCustomHooks returns empty array when no preferences file exists", () => {
       fs.rmSync(path.join(phrenPath, ".config"), { recursive: true, force: true });
       expect(readCustomHooks(phrenPath)).toEqual([]);
-    });
-
-    it("readCustomHooks returns empty array when customHooks is not set", () => {
+      // Preferences present but without customHooks.
       writeInstallPrefs(phrenPath, JSON.stringify({ hooksEnabled: true }));
       expect(readCustomHooks(phrenPath)).toEqual([]);
     });

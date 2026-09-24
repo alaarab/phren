@@ -78,21 +78,14 @@ describe("handleGovernMemories", () => {
       "- This is a proper finding about architecture patterns",
       "- wip",
       "- temp",
+      "- short",
+      "- also tiny",
     ].join("\n");
     makeProject(phren, "testproj", { "FINDINGS.md": findings });
     const { handleGovernMemories } = await importGovern(phren);
     const result = await handleGovernMemories("testproj", true);
-    // "fixed stuff", "wip", "temp" should be flagged
-    expect(result.reviewCount).toBeGreaterThanOrEqual(3);
-  });
-
-  it("detects short findings (<16 chars) for review", async () => {
-    const phren = makePhren();
-    grantAdmin(phren);
-    makeProject(phren, "proj", { "FINDINGS.md": "- short\n- also tiny\n" });
-    const { handleGovernMemories } = await importGovern(phren);
-    const result = await handleGovernMemories("proj", true);
-    expect(result.reviewCount).toBeGreaterThanOrEqual(1);
+    // "fixed stuff", "wip", "temp" and the two short (<16 chars) entries are flagged
+    expect(result.reviewCount).toBeGreaterThanOrEqual(5);
   });
 
   it("non-dry-run writes review queue and audit log", async () => {
@@ -125,17 +118,7 @@ describe("handleBackgroundMaintenance", () => {
     const health = JSON.parse(fs.readFileSync(healthPath, "utf8"));
     expect(health.lastGovernance).toBeDefined();
     expect(health.lastGovernance.status).toBe("ok");
-  });
-
-  it("writes audit log entry for background maintenance", async () => {
-    const phren = makePhren();
-    grantAdmin(phren);
-    makeProject(phren, "proj", { "FINDINGS.md": "- finding\n" });
-    const { handleBackgroundMaintenance } = await importGovern(phren);
-    await handleBackgroundMaintenance("proj");
-    const auditPath = path.join(phren, ".runtime", "audit.log");
-    const auditContent = fs.readFileSync(auditPath, "utf8");
-    expect(auditContent).toContain("background_maintenance");
+    expect(fs.readFileSync(path.join(phren, ".runtime", "audit.log"), "utf8")).toContain("background_maintenance");
   });
 
   it("promotes TTL-expired findings to the Stale queue", async () => {
