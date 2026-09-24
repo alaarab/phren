@@ -430,12 +430,38 @@ describe("task auto-capture prompt gate", () => {
     });
   }
 
-  it("reads the request inside a paste wrapper and records it without the wrapper", () => {
-    const result = capture('<pasted_content id="7f01">\nFix the retry backoff in the sync worker\n</pasted_content id="7f01">', "session-wrapped-request");
-    expect(result.noticeLines.join("\n")).toContain("Queued task (demo): Fix the retry backoff in the sync worker");
+  // Seen 2026-09-24: relayed messages pasted into a worker's pane rewrote an Active task's Context.
+  const relayed: Array<[string, string]> = [
+    ["pasted content", '<pasted_content id="7f01">\nFix the retry backoff in the sync worker\n</pasted_content id="7f01">'],
+    ["a relayed conductor message", "From the conductor, a correction: the owner wants test runs in parallel, fix the runner"],
+    ["a relayed agent message", "From tidy-phren: update the docs and fix the lint errors in src/index.ts"],
+    ["a pasted relay", '<pasted_content id="a1">\nFrom the conductor: fix the retry backoff in the sync worker\n</pasted_content id="a1">'],
+  ];
+  for (const [label, prompt] of relayed) {
+    it(`does not create a task from ${label}`, () => {
+      const result = capture(prompt, `session-${label.replace(/\s+/g, "-")}`);
+      expect(result.noticeLines).toEqual([]);
+      expect(taskCount()).toBe(0);
+    });
+  }
+
+  it("reads what was typed outside a paste, and a request that starts with 'From now on'", () => {
+    const typed = capture('Fix the retry backoff in the sync worker <pasted_content id="7f01">\nstack trace here\n</pasted_content id="7f01">', "session-typed");
+    expect(typed.noticeLines.join("\n")).toContain("Queued task (demo): Fix the retry backoff in the sync worker");
     const tasks = readTasks(tmp.path, project);
-    expect(tasks.ok && tasks.data.items.Queue[0].line).toBe("Fix the retry backoff in the sync worker");
-    expect((tasks.ok && tasks.data.items.Queue[0].context) || "").not.toContain("pasted_content");
+    expect((tasks.ok && tasks.data.items.Queue[0].context) || "").not.toContain("stack trace");
+    expect(capture("From now on, fix lint errors in src/index.ts before each commit", "session-from-now").noticeLines.join("\n")).toContain("Queued task");
+  });
+
+  it("never rewrites the Context of the session's tracked task or a matched task", () => {
+    capture("Add this to task: fix the retry backoff in the sync worker", "session-keep");
+    const context = () => { const tasks = readTasks(tmp.path, project); return tasks.ok ? tasks.data.items.Active[0].context : undefined; };
+    const before = context();
+    expect(before).toBe("Fix the retry backoff in the sync worker");
+    capture("Now update the docs for the release checklist in docs/release.md", "session-keep");
+    capture("Fix the retry backoff in the sync worker again after the rebase", "session-other");
+    expect(context()).toBe(before);
+    expect(taskCount()).toBe(1);
   });
 
   it("puts a request the person asked to track in Active, and a matched Active task stays there", () => {
