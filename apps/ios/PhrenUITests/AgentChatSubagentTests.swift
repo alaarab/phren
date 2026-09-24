@@ -16,6 +16,13 @@ final class AgentChatSubagentTests: AgentChatUITestCase {
         let tests = app.descendants(matching: .any).matching(identifier: "chat-agent-card:agent-tests").firstMatch
         XCTAssertTrue(tests.exists); XCTAssertTrue(tests.label.contains("tester")); XCTAssertTrue(tests.label.contains("running"))
         XCTAssertTrue(app.staticTexts["background"].exists)
+        // The tray opens as one line; its rows are behind a tap.
+        let tray = app.buttons["chat-background-toggle"]
+        XCTAssertTrue(tray.waitForExistence(timeout: 5))
+        XCTAssertTrue(tray.label.contains("Background"), tray.label)
+        XCTAssertFalse(app.buttons["chat-background-job:background-tests"].exists, "Jobs stay folded until the tray is opened")
+        capture(app, "Background tray folded")
+        tray.tap()
         let describedJob = app.buttons["chat-background-job:background-tests"]
         XCTAssertTrue(describedJob.waitForExistence(timeout: 5))
         XCTAssertTrue(describedJob.label.contains("Run the full test suite"), describedJob.label)
@@ -119,8 +126,10 @@ final class AgentChatSubagentTests: AgentChatUITestCase {
                                  "--agent-work-navigation", "--agent-work-unknown", "--chat-question"],
                          chat: "live-chat:w1:w1:t1")
         app.buttons["live-chat:w1:w1:t1"].tap()
-        XCTAssertTrue(app.buttons["chat-background-job:background-tests"].waitForExistence(timeout: 8),
-                      "Background work remains a Background row in the conductor chat")
+        let tray = app.buttons["chat-background-toggle"]
+        XCTAssertTrue(tray.waitForExistence(timeout: 8), "Background work remains a Background row in the conductor chat")
+        tray.tap()
+        XCTAssertTrue(app.buttons["chat-background-job:background-tests"].waitForExistence(timeout: 5))
 
         app.buttons["chat-switch-agent"].tap()
         let drawerLead = app.buttons["drawer-child-agent:c1000000-0000-0000-0000-000000000002/remote-parser-lead/lead"]

@@ -4,6 +4,8 @@ import SwiftUI
 struct ChatBackgroundJobsView: View {
     let jobs: [ChatBackgroundJob]
     @State private var expanded: Set<String> = []
+    /// The tray opens as one line ("Background · 2 running ⌄"); a tap lists the jobs.
+    @State private var open = false
     /// When finished jobs were last checked against their linger. Moved on by
     /// a one-shot timer at the next job's expiry, not by a clock.
     @State private var checkedAt = Date.now
@@ -27,13 +29,20 @@ struct ChatBackgroundJobsView: View {
         if !jobs.isEmpty {
             VStack(alignment: .leading, spacing: 5) {
                 let running = jobs.filter { $0.state == .running }.count
-                HStack {
-                    Label("Background", systemImage: "clock.arrow.circlepath").font(.caption.weight(.semibold))
-                    Spacer()
-                    Text(running > 0 ? "\(running) running" : "done").font(.caption.monospacedDigit()).foregroundStyle(PhrenTheme.chatNeutralDim)
-                        .accessibilityIdentifier("chat-background-count")
-                }
-                ForEach(jobs) { job in
+                Button { open.toggle() } label: {
+                    HStack(spacing: 6) {
+                        Label("Background", systemImage: "clock.arrow.circlepath").font(.caption.weight(.semibold))
+                        Spacer(minLength: 8)
+                        Text(running > 0 ? "\(running) running" : "done").font(.caption.monospacedDigit()).foregroundStyle(PhrenTheme.chatNeutralDim)
+                            .lineLimit(1).fixedSize()
+                            .accessibilityIdentifier("chat-background-count")
+                        Image(systemName: "chevron.down").font(.caption2.weight(.semibold)).foregroundStyle(PhrenTheme.chatNeutralDim)
+                            .rotationEffect(.degrees(open ? 180 : 0))
+                    }.contentShape(Rectangle())
+                }.buttonStyle(.plain)
+                    .accessibilityValue(open ? "Expanded" : "Collapsed")
+                    .accessibilityIdentifier("chat-background-toggle")
+                if open { ForEach(jobs) { job in
                     Button { if expanded.contains(job.id) { expanded.remove(job.id) } else { expanded.insert(job.id) } } label: {
                         VStack(alignment: .leading, spacing: 4) {
                             HStack(spacing: 6) {
@@ -42,9 +51,10 @@ struct ChatBackgroundJobsView: View {
                                 Text(job.title).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
                                 if job.state == .running {
                                     // Only a running job's duration ticks, from the shared clock.
-                                    ClockText { now in Text(status(job, at: now)).foregroundStyle(PhrenTheme.chatNeutralDim) }
+                                    ClockText { now in Text(status(job, at: now)).foregroundStyle(PhrenTheme.chatNeutralDim).lineLimit(1).fixedSize() }
                                 } else {
-                                    Text(status(job, at: job.finishedAt ?? job.startedAt)).foregroundStyle(PhrenTheme.chatNeutralDim)
+                                    // One line always: the title truncates, the status never wraps.
+                                    Text(status(job, at: job.finishedAt ?? job.startedAt)).foregroundStyle(PhrenTheme.chatNeutralDim).lineLimit(1).fixedSize()
                                 }
                                 Image(systemName: "chevron.down").rotationEffect(.degrees(expanded.contains(job.id) ? 180 : 0))
                             }
@@ -54,7 +64,7 @@ struct ChatBackgroundJobsView: View {
                             }
                         }.font(.system(.caption, design: .monospaced)).contentShape(Rectangle())
                     }.buttonStyle(.plain).accessibilityIdentifier("chat-background-job:\(job.id)")
-                }
+                } }
             }.padding(PhrenTheme.Space.medium).phrenPanel(tool: true)
                 .padding(.horizontal, 12).padding(.vertical, 4)
                 // A marker, not an identifier on the card: an identifier on the
