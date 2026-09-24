@@ -29,7 +29,26 @@ android {
         compose = true
         buildConfig = true
     }
+    sourceSets {
+        getByName("main") { assets.srcDir(file("build/generated/graphAssets")) }
+    }
 }
+
+// The memory graph is the shared renderer the iOS app, web UI and VS Code
+// webview run (packages/cli/browser/graph): the iOS bundler builds it, and the
+// app ships the same page and script, never a transcription.
+val iosGraph = rootProject.file("../ios/Phren/Resources/graph")
+val bundleGraph by tasks.registering(Exec::class) {
+    onlyIf { !File(iosGraph, "phren-graph.js").exists() }
+    workingDir = rootProject.file("../ios")
+    commandLine("node", "scripts/bundle-graph.mjs")
+}
+val copyGraphAssets by tasks.registering(Copy::class) {
+    dependsOn(bundleGraph)
+    from(iosGraph) { include("index.html", "phren-graph.js") }
+    into(layout.buildDirectory.dir("generated/graphAssets/graph"))
+}
+tasks.named("preBuild") { dependsOn(copyGraphAssets) }
 
 dependencies {
     implementation(project(":phrenkit"))

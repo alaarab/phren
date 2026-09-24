@@ -169,6 +169,12 @@ fun PhrenNavScreen(
     }
 }
 
+/** The floating tab bar's height plus its gap: content that must stay clear of it (the tab bar's safe area). */
+val TabBarClearance = 62.dp + 8.dp + 8.dp
+
+@Composable
+fun Modifier.tabBarSafeArea(): Modifier = this.windowInsetsPadding(WindowInsets.navigationBars).padding(bottom = TabBarClearance)
+
 data class PhrenTab<T>(val tab: T, val label: String, val icon: ImageVector, val badge: Int = 0, val identifier: String? = null)
 
 /** The floating capsule tab bar (iOS 26 TabView). */

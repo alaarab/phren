@@ -137,7 +137,7 @@ private fun MainTabView(model: AppModel) {
                     AppTab.PROJECTS -> if (ready) ProjectsView() else OnboardingFlow(model)
                     AppTab.AGENTS -> LiveBridge.Pending("Agents")
                     AppTab.TASKS -> if (ready) com.phren.android.features.TasksView() else MemoryConnectionPrompt("Tasks")
-                    AppTab.MEMORY -> if (ready) LiveBridge.Pending("Memory") else MemoryConnectionPrompt("Memory")
+                    AppTab.MEMORY -> if (ready) com.phren.android.features.MemoryView() else MemoryConnectionPrompt("Memory")
                     AppTab.SETTINGS -> LiveBridge.Pending("Settings")
                 }
             }
