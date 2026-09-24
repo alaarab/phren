@@ -1,4 +1,5 @@
 import PhrenKit
+import PhrenLive
 import SwiftUI
 
 /// Dictation writes straight into the composer: the words land in the
@@ -20,7 +21,7 @@ final class ChatDictationController {
     var audioLevel: Float { session.audioLevel }
 
     /// Starts recognising into the composer after whatever is already typed.
-    func start(model: AgentChatModel, isActive: @escaping @MainActor () -> Bool) {
+    func start(model: AgentChatModel, host: LiveHost? = nil, isActive: @escaping @MainActor () -> Bool) {
         startTask?.cancel()
         cleanupTask?.cancel()
         preview = nil
@@ -29,9 +30,11 @@ final class ChatDictationController {
                 model.deliveryError = "Allow microphone and speech recognition in iPhone Settings to dictate."; return
             }
             guard !Task.isCancelled, isActive() else { return }
-            let chosen = SpeechSettings.activeInput()
-            if chosen != engine, !session.isRecording {
-                session = DictationSession(recognizer: SpeechSettings.makeRecognizer(), transform: SpeechSettings.apply)
+            let chosen = SpeechSettings.activeInput(capabilities: model.capabilities)
+            // Scribe belongs to one computer: a new session per start keeps it on this chat's.
+            if (chosen != engine || chosen == .scribe), !session.isRecording {
+                session = DictationSession(recognizer: SpeechSettings.makeRecognizer(host: host, capabilities: model.capabilities),
+                                           transform: SpeechSettings.apply)
                 engine = chosen
             }
             base = model.draft + (model.draft.isEmpty || model.draft.hasSuffix(" ") || model.draft.hasSuffix("\n") ? "" : " ")

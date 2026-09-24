@@ -279,6 +279,8 @@ struct GatewayRequest: Sendable {
     var beforeLine: Int?
     var initialMessages: [Data] = []
     var terminalSocket: HerdrTerminalSocket?
+    /// Set for `/v1/speech/transcribe`: the socket the microphone's audio goes up.
+    var speechSocket: SpeechStreamSocket?
     var terminalRoute: TerminalRoute?
     var terminalColumns = 80
     var terminalRows = 24
@@ -395,7 +397,8 @@ func installTranscriptHandlers(channel: Channel, exchange: Exchange, request: Ga
     let handshake = TranscriptHandshake(exchange: exchange, path: request.path)
     let upgrader = NIOWebSocketClientUpgrader(maxFrameSize: 8_388_608, upgradePipelineHandler: { channel, _ in
         channel.pipeline.addHandler(TranscriptFrames(exchange: exchange, streaming: request.streaming, beforeLine: request.beforeLine,
-                                                    initialMessages: request.initialMessages, terminalSocket: request.terminalSocket))
+                                                    initialMessages: request.initialMessages, terminalSocket: request.terminalSocket,
+                                                    speechSocket: request.speechSocket))
     })
     let config: NIOHTTPClientUpgradeConfiguration = (upgraders: [upgrader], completionHandler: { context in
         context.pipeline.removeHandler(handshake, promise: nil)
@@ -438,13 +441,15 @@ final class TranscriptFrames: ChannelInboundHandler, @unchecked Sendable {
     private var lastReceived = NIODeadline.now()
     private let initialMessages: [Data]
     private let terminalSocket: HerdrTerminalSocket?
+    private let speechSocket: SpeechStreamSocket?
     init(exchange: Exchange, streaming: Bool = false, beforeLine: Int? = nil,
-         initialMessages: [Data] = [], terminalSocket: HerdrTerminalSocket? = nil) {
+         initialMessages: [Data] = [], terminalSocket: HerdrTerminalSocket? = nil, speechSocket: SpeechStreamSocket? = nil) {
         self.exchange = exchange; self.streaming = streaming; self.beforeLine = beforeLine
-        self.initialMessages = initialMessages; self.terminalSocket = terminalSocket
+        self.initialMessages = initialMessages; self.terminalSocket = terminalSocket; self.speechSocket = speechSocket
     }
     func handlerAdded(context: ChannelHandlerContext) {
         terminalSocket?.attach(context.channel)
+        speechSocket?.attach(context.channel)
         for data in initialMessages {
             context.writeAndFlush(wrapOutboundOut(WebSocketFrame(fin: true, opcode: .text, maskKey: .random(), data: ByteBuffer(bytes: data))), promise: nil)
         }

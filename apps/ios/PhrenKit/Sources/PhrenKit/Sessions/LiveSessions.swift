@@ -13,6 +13,8 @@ public struct LiveCapabilities: Codable, Equatable, Sendable {
     public let code: Bool?
     /// The Hook voices text for talk mode (`POST /v1/speech`).
     public let speech: Bool?
+    /// The Hook relays dictation to ElevenLabs Scribe (`WS /v1/speech/transcribe`).
+    public let transcribe: Bool?
     public let terminal: String?
     public let shell: String?
     public let webPreview: String?
@@ -21,7 +23,7 @@ public struct LiveCapabilities: Codable, Equatable, Sendable {
     /// The Hook pushes the overview over `/v1/overview` instead of being polled.
     public let overviewStream: Bool?
 
-    public enum Feature: String, Sendable { case tasks, schedules, changes, dispatch, codeMap, code, speech }
+    public enum Feature: String, Sendable { case tasks, schedules, changes, dispatch, codeMap, code, speech, transcribe }
     public func allows(_ feature: Feature) -> Bool {
         switch feature {
         case .tasks: tasks == true
@@ -31,6 +33,7 @@ public struct LiveCapabilities: Codable, Equatable, Sendable {
         case .codeMap: codeMap == true
         case .code: code == true
         case .speech: speech == true
+        case .transcribe: transcribe == true
         }
     }
 }

@@ -1,3 +1,4 @@
+import PhrenKit
 import Speech
 import SwiftUI
 
@@ -22,7 +23,7 @@ enum SpeechSettings {
     static let inputKey = "voice.input.v1"
     /// Who turns speech into words. Apple is built in; Whisper runs on the
     /// phone once its model is downloaded; Scribe runs through the computer.
-    enum Input: String, CaseIterable { case apple, whisper }
+    enum Input: String, CaseIterable { case apple, whisper, scribe }
 
     static func input(in defaults: UserDefaults = AppRuntime.defaults) -> Input {
         defaults.string(forKey: inputKey).flatMap(Input.init(rawValue:)) ?? .apple
@@ -36,13 +37,24 @@ enum SpeechSettings {
 
     /// The recogniser for the chosen engine, falling back to Apple's
     /// silently when the choice can't run yet (Whisper still downloading).
-    @MainActor static func makeRecognizer() -> any DictationRecognizing {
-        activeInput() == .whisper ? WhisperRecognizer() : SpeechTranscriber()
+    /// `host` is the computer the chat is on: Scribe runs through its Hook
+    /// when that Hook offers it.
+    @MainActor static func makeRecognizer(host: LiveHost? = nil, capabilities: LiveCapabilities? = nil) -> any DictationRecognizing {
+        switch activeInput(capabilities: capabilities) {
+        case .whisper: WhisperRecognizer()
+        case .scribe: host.map { ScribeRecognizer(host: $0) } ?? SpeechTranscriber()
+        case .apple: SpeechTranscriber()
+        }
     }
 
-    /// The engine that actually runs: the choice, or Apple while it can't.
-    @MainActor static func activeInput() -> Input {
-        input() == .whisper && WhisperModelStore.shared.isReady ? .whisper : .apple
+    /// The engine that actually runs: the choice, or Apple while it can't
+    /// (Whisper not downloaded, or a computer without Scribe).
+    @MainActor static func activeInput(capabilities: LiveCapabilities? = nil) -> Input {
+        switch input() {
+        case .whisper where WhisperModelStore.shared.isReady: .whisper
+        case .scribe where capabilities?.allows(.transcribe) == true: .scribe
+        default: .apple
+        }
     }
 
     static func micButton(in defaults: UserDefaults = AppRuntime.defaults) -> MicButton {
@@ -107,7 +119,8 @@ struct SpeechSettingsView: View {
     @State private var showingInput = false
     private var whisper: WhisperModelStore { .shared }
     private let inputOptions = [PhrenOption(id: "apple", value: "apple", title: "Apple · built in"),
-                                PhrenOption(id: "whisper", value: "whisper", title: "Whisper · on the phone, \(WhisperModelStore.sizeLabel) download")]
+                                PhrenOption(id: "whisper", value: "whisper", title: "Whisper · on the phone, \(WhisperModelStore.sizeLabel) download"),
+                                PhrenOption(id: "scribe", value: "scribe", title: "ElevenLabs Scribe · through your computer, paid")]
     @State private var showingMic = false
     @State private var showingReply = false
     @State private var showingPause = false
@@ -180,6 +193,8 @@ struct SpeechSettingsView: View {
             } header: { Text("Input") } footer: {
                 Text(input == SpeechSettings.Input.whisper.rawValue
                      ? "Whisper is better with technical words and stays on the phone. Until its model is downloaded, Apple's engine is used."
+                     : input == SpeechSettings.Input.scribe.rawValue
+                     ? "The most accurate. Your voice goes to ElevenLabs through the computer the chat is on, using its key; each use is billed to that account. Apple's engine is used when that computer can't."
                      : "Recognition runs on the phone with Apple's speech engine. Nothing leaves the device.")
             }
             Section {

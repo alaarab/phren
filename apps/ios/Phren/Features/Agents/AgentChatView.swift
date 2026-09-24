@@ -73,7 +73,7 @@ struct AgentChatView: View {
     @State private var textSelection = ChatTextSelection()
 
     private func startDictation() {
-        dictation.start(model: model) { scenePhase == .active }
+        dictation.start(model: model, host: session.host) { scenePhase == .active }
     }
     private func stopDictation() {
         dictation.stop(model: model) { sendDictationIfRequested() }
