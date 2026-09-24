@@ -51,6 +51,7 @@ import {
 import { spawnDetachedChild } from "../shared/process.js";
 import { resolveManagementCapabilities } from "../init/management-preset.js";
 import { aheadBehind, logSyncOutcome } from "../sync/outcome.js";
+import { storeCommitMessage } from "../machine-identity.js";
 
 // ── Utility ─────────────────────────────────────────────────────────────────
 
@@ -470,7 +471,7 @@ export async function handleHookStop() {
       }
     }
   }
-  const commit = add.ok ? await runBestEffortGit(["commit", "-m", commitMsg], phrenPath) : { ok: false, error: add.error };
+  const commit = add.ok ? await runBestEffortGit(["commit", "-m", storeCommitMessage(commitMsg)], phrenPath) : { ok: false, error: add.error };
   if (!add.ok || !commit.ok) {
     finalizeTaskSession({
       phrenPath,

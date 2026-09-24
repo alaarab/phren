@@ -7,6 +7,7 @@ import { tryFileLock } from "../governance/locks.js";
 import { getRuntimeHealth } from "../governance/policy.js";
 import { writeInstallPreferences } from "../init/preferences.js";
 import { runtimeFile } from "../phren-paths.js";
+import { getMachineName, storeCommitMessage } from "../machine-identity.js";
 import { initTestPhrenRoot, makeTempDir, writeFile } from "../test-helpers.js";
 import { describeAutoSave } from "./outcome.js";
 import { parsePullInterval, periodicPullEnabled, pollStore, readPollState, type RunGit, resolvePullInterval, runPollGit, startPullPolling } from "./pull.js";
@@ -123,6 +124,9 @@ describe("store polling with real Git repositories", () => {
     expect(fs.readFileSync(path.join(reader, "notes.md"), "utf8")).toBe("local draft\n");
     expect(git(reader, "show", "HEAD:notes.md")).toBe("local draft");
     expect(git(reader, "status", "--porcelain")).toBe("");
+    // The auto-save names the computer that wrote it.
+    expect(git(reader, "log", "--format=%s").split("\n")).toContain(storeCommitMessage("auto-save phren (periodic pull)"));
+    expect(storeCommitMessage("phren: demo(findings)")).toBe(`phren: demo(findings) [${getMachineName()}]`);
     const localHead = commit(reader, "local ahead\n");
     const run = vi.fn(runPollGit);
     expect((await pollStore(reader, 60, run, 220_000)).status).toBe("unchanged");

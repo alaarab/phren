@@ -71,6 +71,7 @@ import { logger } from "../logger.js";
 import { addNote, editNote, listNotes, removeNote } from "../data/notes.js";
 import { promoteNote } from "../core/note.js";
 import { FINDING_TYPES, type FindingType } from "../shared.js";
+import { storeCommitMessage } from "../machine-identity.js";
 
 export interface WebUiOptions {
   authToken?: string;
@@ -774,7 +775,7 @@ function handlePostSync(req: Req, res: Res, url: string, ctx: RouteCtx): void {
       runGit(["add", "--", "*.md", "*.json", "*.yaml", "*.yml", "*.jsonl", "*.txt"]);
       const stagedFiles = runGit(["diff", "--cached", "--name-only"]);
       if (!stagedFiles) return jsonOk(res, { ok: true, message: "Nothing to sync — no matching files to commit." });
-      runGit(["commit", "-m", message, "--only", "--", ...stagedFiles.split("\n").filter(Boolean)]);
+      runGit(["commit", "-m", storeCommitMessage(message), "--only", "--", ...stagedFiles.split("\n").filter(Boolean)]);
       let pushed = false;
       try { if (runGit(["remote"])) { runGit(["push"]); pushed = true; } } catch { /* no remote or push failed */ }
       const changedFiles = status.split("\n").filter(Boolean).length;

@@ -18,7 +18,7 @@ import {
   FINDING_TYPES,
   normalizeMemoryScope,
 } from "../shared.js";
-import { getCurrentActor, getMachineName } from "../machine-identity.js";
+import { getCurrentActor, getMachineName, storeCommitMessage } from "../machine-identity.js";
 import { type FindingProvenance } from "../content/citation.js";
 import { loadCodePackage } from "../modules/code-package.js";
 import { moduleEnabled } from "../modules/runtime.js";
@@ -639,7 +639,7 @@ async function handlePushChanges(
       // before it was gitignored, so a later token refresh doesn't get
       // re-staged and pushed. Failures here are non-fatal (files may not exist).
       try { runGit(["reset", "HEAD", "--", ".env", "**/.env", "*.pem", "*.key", ".config/auth-profiles.json"]); } catch { /* best effort */ }
-      runGit(["commit", "-m", commitMsg]);
+      runGit(["commit", "-m", storeCommitMessage(commitMsg)]);
 
       let hasRemote = false;
       try {
@@ -725,7 +725,7 @@ async function handlePushChanges(
             try { runStoreGit(["add", "--sparse", "--", spec]); } catch { /* best-effort */ }
           }
           const actor = process.env.PHREN_ACTOR || process.env.USER || "unknown";
-          runStoreGit(["commit", "-m", `phren: ${actor} team sync`]);
+          runStoreGit(["commit", "-m", storeCommitMessage(`phren: ${actor} team sync`)]);
 
           try {
             runStoreGit(["push"], { timeout: 15000 });
