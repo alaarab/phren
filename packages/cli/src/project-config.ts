@@ -8,6 +8,7 @@ import { debugLog } from "./shared.js";
 import { errorMessage } from "./utils.js";
 import { storeAwareProjectPath } from "./store-routing.js";
 import { withFileLock } from "./governance/locks.js";
+import { getMachineName } from "./machine-identity.js";
 import type { RetentionPolicyPatch } from "./governance/policy.js";
 
 export const PROJECT_OWNERSHIP_MODES = ["phren-managed", "detached", "repo-managed"] as const;
@@ -40,7 +41,14 @@ export interface ProjectAccessControl {
 
 export interface ProjectConfig {
   ownership?: ProjectOwnershipMode;
+  /**
+   * The folder the project was last added from, on whichever machine that was.
+   * Kept for older CLIs; a synced store shares it across every computer, so
+   * it is only authoritative on the machine that wrote it.
+   */
   sourcePath?: string;
+  /** Per-machine source folders, keyed by `getMachineName()`. Wins over `sourcePath`. */
+  sourcePaths?: Record<string, string>;
   skills?: boolean;
   hooks?: {
     enabled?: boolean;
@@ -165,9 +173,46 @@ export function updateProjectConfigOverrides(
   });
 }
 
-export function getProjectSourcePath(phrenPath: string, project: string, config?: ProjectConfig): string | undefined {
-  const raw = (config ?? readProjectConfig(phrenPath, project)).sourcePath;
+/**
+ * Where this project's source lives on this machine. The store syncs between
+ * computers, so the shared `sourcePath` is often another machine's folder:
+ * this machine's `sourcePaths` entry wins, and the shared value is only used
+ * when nothing more specific was recorded.
+ */
+export function getProjectSourcePath(
+  phrenPath: string,
+  project: string,
+  config?: ProjectConfig,
+  machine: string = getMachineName(),
+): string | undefined {
+  const resolved = config ?? readProjectConfig(phrenPath, project);
+  const perMachine = resolved.sourcePaths && typeof resolved.sourcePaths === "object" && !Array.isArray(resolved.sourcePaths)
+    ? resolved.sourcePaths[machine]
+    : undefined;
+  const raw = typeof perMachine === "string" && perMachine.trim() ? perMachine : resolved.sourcePath;
   return typeof raw === "string" && raw.trim() ? path.resolve(raw) : undefined;
+}
+
+/**
+ * Record `sourceRoot` as this machine's folder for the project, alongside the
+ * legacy shared `sourcePath` older CLIs read.
+ */
+export function recordProjectSourcePath(
+  phrenPath: string,
+  project: string,
+  sourceRoot: string,
+  patch: Partial<ProjectConfig> = {},
+  machine: string = getMachineName(),
+): ProjectConfig {
+  const current = readProjectConfig(phrenPath, project);
+  const existing = current.sourcePaths && typeof current.sourcePaths === "object" && !Array.isArray(current.sourcePaths)
+    ? current.sourcePaths
+    : {};
+  return writeProjectConfig(phrenPath, project, {
+    ...patch,
+    sourcePath: sourceRoot,
+    sourcePaths: { ...existing, [machine]: sourceRoot },
+  });
 }
 
 export function getProjectOwnershipDefault(phrenPath: string): ProjectOwnershipMode {
