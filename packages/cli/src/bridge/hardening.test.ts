@@ -26,7 +26,9 @@ async function repo(name: string) {
   const dir = path.join(home, name); await mkdir(dir, { recursive: true });
   await git(dir, "init", "-q", "-b", "main");
   await writeFile(path.join(dir, "plain.txt"), "before\n");
-  await git(dir, "add", "."); await git(dir, "commit", "-qm", "initial");
+  // No auto maintenance: Git 2.47+ detaches it after a commit, and its
+  // transient files in .git/objects race the object-count checks.
+  await git(dir, "add", "."); await git(dir, "-c", "maintenance.auto=false", "-c", "gc.auto=0", "commit", "-qm", "initial");
   return dir;
 }
 async function fileCount(dir: string): Promise<number> {
