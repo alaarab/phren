@@ -157,6 +157,27 @@ async function settledTarget(peer: DispatchHost, launched: Json, harness: string
   return undefined;
 }
 
+/**
+ * Sends the brief. A fresh agent can read `unknown` to Herdr for a while (long
+ * on a loaded machine), and the Hook refuses a prompt to such a pane before
+ * typing anything. So that refusal is retried while the pane is still
+ * unclassified; a pane that is blocked or waiting really needs its terminal,
+ * and that refusal stands.
+ */
+async function sendBrief(peer: DispatchHost, target: Json, text: string): Promise<Json> {
+  for (let attempt = 0; ; attempt++) {
+    try { return await peer.request("/v1/prompt", { target, text }); } catch (error) {
+      const unsettled = error instanceof BridgeError && error.status === 409 && /needs input in the terminal first/.test(error.message);
+      if (!unsettled || attempt >= 20) throw error;
+      const panes = await peer.request(`/v1/workspaces/panes?server=${encodeURIComponent(peer.server)}&groupId=${encodeURIComponent(String(target.workspace))}&childId=${encodeURIComponent(String(target.tab))}`).catch(() => undefined);
+      const pane = (Array.isArray(panes?.panes) ? panes.panes : []).find((p: Json) => p && typeof p === "object" && (p as Json).id === target.pane) as Json | undefined;
+      const status = pane?.agentStatus;
+      if (typeof status === "string" && ["blocked", "waiting"].includes(status)) throw error;
+      await new Promise(resolve => setTimeout(resolve, 1_000));
+    }
+  }
+}
+
 export interface DispatchIdentity {
   computerID: string;
   validateParentTarget: (target: Target) => Promise<unknown>;
@@ -224,7 +245,7 @@ export class DispatchService {
         if (target.source !== data.harness || target.server !== peer.server) throw new BridgeError(502, "The remote Hook returned a different launch target.");
         receipt.target = target;
         receipt.state = "sending"; receipt.updatedAt = new Date().toISOString(); await save(receipt);
-        const result = await peer.request("/v1/prompt", { target: receipt.target, text: prompt });
+        const result = await sendBrief(peer, receipt.target, prompt);
         receipt.state = result.ok === true && result.deliveryUncertain !== true ? "accepted" : "uncertain";
       } catch (error) {
         receipt.state = receipt.state === "launching" && error instanceof BridgeError && [400, 404, 429].includes(error.status) ? "failed" : "uncertain";
