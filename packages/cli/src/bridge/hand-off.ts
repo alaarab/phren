@@ -34,7 +34,22 @@ async function targetFromOverview(request: Request, session: string, server?: st
   throw new BridgeError(404, "No live session with that id appears in the workspace overview.");
 }
 
-export async function handOff(input: unknown): Promise<{ ok: boolean; delivered: boolean; target: Target; granted?: string }> {
+/** The target pane's project (its folder) or workspace label, for the
+ * conductor's card; best effort, never a reason to fail a delivery. */
+async function targetLabel(request: Request, target: Target, server?: string): Promise<string | undefined> {
+  try {
+    const overview = await request(server ? `/v1/workspaces?server=${encodeURIComponent(server)}` : "/v1/workspaces");
+    for (const group of objects(overview.groups)) for (const tab of objects(group.children)) {
+      const parsed = targetSchema.safeParse(tab.target);
+      if (!parsed.success || parsed.data.pane !== target.pane || parsed.data.session !== target.session) continue;
+      const folder = typeof tab.cwd === "string" && tab.role !== "conductor" ? tab.cwd.split("/").filter(Boolean).at(-1) : undefined;
+      return folder || (typeof group.label === "string" && group.label ? group.label : undefined);
+    }
+  } catch { /* the card falls back to the pane id */ }
+  return undefined;
+}
+
+export async function handOff(input: unknown): Promise<{ ok: boolean; delivered: boolean; target: Target; label?: string; granted?: string }> {
   const data = handOffSchema.parse(input);
   let request: Request;
   let peer: HookPeer | undefined;
@@ -49,7 +64,8 @@ export async function handOff(input: unknown): Promise<{ ok: boolean; delivered:
   const grant = matchGrant(await listGrants(), { action: "hand_off", project: data.project, computer: data.computer });
   const result = await request("/v1/prompt", { target, text: data.text });
   const delivered = result.ok === true && result.deliveryUncertain !== true;
-  return { ok: delivered, delivered, target, ...(grant ? { granted: grantLabel(grant) } : {}) };
+  const label = await targetLabel(request, target, peer?.server);
+  return { ok: delivered, delivered, target, ...(label ? { label } : {}), ...(grant ? { granted: grantLabel(grant) } : {}) };
 }
 
 /** One live agent pane, on this computer or an enrolled one. */
