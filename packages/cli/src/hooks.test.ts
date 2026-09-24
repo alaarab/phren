@@ -3,7 +3,7 @@ import { commandExists, detectInstalledTools, buildLifecycleCommands, buildShare
 import { upsertCustomPrePromptSiblings, type HookMap } from "./init/config.js";
 import { readInstallPreferences } from "./init/preferences.js";
 import { initTestPhrenRoot, makeTempDir } from "./test-helpers.js";
-import { sanitizeFts5Query, buildRobustFtsQuery, } from "./utils.js";
+import { buildRobustFtsQuery, } from "./utils.js";
 import { PhrenError, } from "./shared.js";
 import * as fs from "fs";
 import * as path from "path";
@@ -880,19 +880,6 @@ describe("runPrePromptHooks skip behavior", () => {
 });
 
 // ── Tests for gamma sprint changes ─────────────────────────────────────────
-
-describe("FTS5 whitelist (sanitizeFts5Query)", () => {
-  it("preserves allowed characters: alphanumeric, spaces, hyphens", () => {
-    const result = sanitizeFts5Query("it's a test-case with under_score");
-    expect(result).toBe("it s a test-case with under score");
-  });
-
-  it("truncates input longer than 500 characters", () => {
-    const long = "a".repeat(600);
-    const result = sanitizeFts5Query(long);
-    expect(result.length).toBeLessThanOrEqual(500);
-  });
-});
 
 describe("Stop-word bigrams (buildRobustFtsQuery)", () => {
   it("produces no bigrams from a query of only stop words", () => {

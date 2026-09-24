@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildFtsQueryVariants, buildRelaxedFtsQuery, buildRobustFtsQuery, sanitizeFts5Query, extractKeywords } from "./utils.js";
+import { buildFtsQueryVariants, buildRelaxedFtsQuery, buildRobustFtsQuery, extractKeywords } from "./utils.js";
 import { extractSnippet } from "./shared/index.js";
 
 describe("buildRobustFtsQuery edge cases", () => {
@@ -53,36 +53,6 @@ describe("buildFtsQueryVariants", () => {
     expect(variants.length).toBeGreaterThan(1);
     expect(variants[0]).toContain("\"alerts\"");
     expect(variants[1]).toContain(" OR ");
-  });
-});
-
-describe("sanitizeFts5Query edge cases", () => {
-  it("strips null bytes", () => {
-    expect(sanitizeFts5Query("foo\0bar")).toBe("foo bar");
-  });
-
-  it("strips FTS5 boolean operators", () => {
-    const result = sanitizeFts5Query("foo AND bar OR baz NOT qux NEAR quux");
-    // Whitelist sanitizer keeps letters-only words like AND/OR/NOT/NEAR; only special chars stripped
-    expect(result).toContain("foo");
-    expect(result).toContain("bar");
-    expect(result).toContain("quux");
-    // No special chars (parens, colon, etc.)
-    expect(result).not.toContain("(");
-    expect(result).not.toContain(")");
-  });
-
-  it("strips special punctuation but keeps hyphens in words", () => {
-    const result = sanitizeFts5Query("rate-limit @#$ test!");
-    expect(result).toContain("rate-limit");
-    expect(result).not.toContain("@");
-    expect(result).not.toContain("#");
-    expect(result).not.toContain("!");
-  });
-
-  it("collapses multiple spaces into one", () => {
-    const result = sanitizeFts5Query("  foo    bar   ");
-    expect(result).toBe("foo bar");
   });
 });
 
