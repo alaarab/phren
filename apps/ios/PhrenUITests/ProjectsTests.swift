@@ -15,7 +15,7 @@ final class ProjectsTests: XCTestCase {
         capture(app, "Projects grid")
 
         openMemoryGraph(from: app)
-        XCTAssertTrue(app.webViews.staticTexts["PHONE"].firstMatch.waitForExistence(timeout: 20))
+        XCTAssertTrue(graphProjectLabel("PHONE", in: app.webViews).waitForExistence(timeout: 20))
         XCTAssertTrue(app.buttons["memory-files"].exists)
         XCTAssertTrue(app.buttons["memory-maintenance"].exists)
         XCTAssertFalse(app.buttons["Skills"].exists)

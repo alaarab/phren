@@ -133,7 +133,7 @@ final class StoreTourTests: XCTestCase {
         capture(app, "10 Findings")
         app.navigationBars.buttons.element(boundBy: 0).tap()
         openMemoryGraph(from: app)
-        XCTAssertTrue(app.webViews.staticTexts["PHREN"].firstMatch.waitForExistence(timeout: 25))
+        XCTAssertTrue(graphProjectLabel("PHREN", in: app.webViews).waitForExistence(timeout: 25))
         settle(5)
         capture(app, "11 Graph")
     }
@@ -186,7 +186,7 @@ final class StoreTourTests: XCTestCase {
         app.navigationBars.buttons.element(boundBy: 0).tap()
         settle(1)
         openMemoryGraph(from: app)
-        XCTAssertTrue(app.webViews.staticTexts["PHREN"].firstMatch.waitForExistence(timeout: 25))
+        XCTAssertTrue(graphProjectLabel("PHREN", in: app.webViews).waitForExistence(timeout: 25))
         settle(6)
         app.tabBars.buttons["Projects"].tap()
         XCTAssertTrue(app.navigationBars["Projects"].waitForExistence(timeout: 5))

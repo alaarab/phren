@@ -57,7 +57,7 @@ final class SessionDetailsTests: XCTestCase {
         XCTAssertTrue(app.navigationBars["phone · brain"].waitForExistence(timeout: 5))
         app.navigationBars.buttons.element(boundBy: 0).tap()
         app.buttons["Explore graph"].tap()
-        XCTAssertTrue(app.webViews.staticTexts["PHONE"].firstMatch.waitForExistence(timeout: 20))
+        XCTAssertTrue(graphProjectLabel("PHONE", in: app.webViews).waitForExistence(timeout: 20))
         app.buttons["graph-back"].tap()
         XCTAssertTrue(title.waitForExistence(timeout: 5))
         let copy = app.buttons["Copy folder"]

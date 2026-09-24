@@ -35,6 +35,16 @@ extension XCTestCase {
         map.tap()
     }
 
+    /// A project's always-on label in the web graph, which proves the graph
+    /// rendered the store. The label draws the name and the finding count as
+    /// separate text runs: iOS 26's WebKit exposes them as two static texts
+    /// ("DEMO", "3"), iOS 27's merges them into one ("DEMO3"). Match the
+    /// name with or without the trailing count so both read the same.
+    func graphProjectLabel(_ name: String, in scope: some XCUIElementTypeQueryProvider) -> XCUIElement {
+        let pattern = NSRegularExpression.escapedPattern(for: name) + "[0-9]*"
+        return scope.staticTexts.matching(NSPredicate(format: "label MATCHES %@", pattern)).firstMatch
+    }
+
     /// The Sessions screen's former ••• items, where they live now: Schedules
     /// and Connect memory in its top bar, refresh as a pull, and Skills,
     /// Agent instructions and Add computer under Settings → Agents.

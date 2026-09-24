@@ -4,7 +4,7 @@ final class MemoryTests: XCTestCase {
     @MainActor
     func testMapSearchSelectsANodeAndOpensTheDossier() {
         let app = launch(mode: "map")
-        XCTAssertTrue(app.webViews.staticTexts["PHREN"].firstMatch.waitForExistence(timeout: 30),
+        XCTAssertTrue(graphProjectLabel("PHREN", in: app.webViews).waitForExistence(timeout: 30),
                       "the graph renders the store")
         capture(app, "Memory map")
 

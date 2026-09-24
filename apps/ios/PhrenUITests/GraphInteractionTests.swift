@@ -52,7 +52,7 @@ final class GraphInteractionTests: XCTestCase {
         app.launch()
         openMemoryGraph(from: app)
         let canvas = app.webViews.firstMatch
-        XCTAssertTrue(canvas.staticTexts["LEDGER"].firstMatch.waitForExistence(timeout: 20))
+        XCTAssertTrue(graphProjectLabel("LEDGER", in: canvas).waitForExistence(timeout: 20))
         app.buttons["memory-search-toggle"].tap()
         let field = app.textFields["memory-search"]
         XCTAssertTrue(field.waitForExistence(timeout: 5))
@@ -193,7 +193,7 @@ final class GraphInteractionTests: XCTestCase {
         XCTAssertFalse(app.buttons["More"].exists)
         capture(app, name: "Projects design")
         openMemoryGraph(from: app)
-        XCTAssertTrue(app.webViews.staticTexts["DEMO"].firstMatch.waitForExistence(timeout: 20))
+        XCTAssertTrue(graphProjectLabel("DEMO", in: app.webViews).waitForExistence(timeout: 20))
         let canvas = app.webViews.firstMatch
         let memory = app.navigationBars["Memory"]
         for (start, end) in [(0.05, 0.85), (0.85, 0.15), (0.35, 0.9)] {
@@ -236,7 +236,7 @@ final class GraphInteractionTests: XCTestCase {
     @MainActor
     private func openDossier(in app: XCUIApplication) -> XCUIElement {
         openMemoryGraph(from: app)
-        _ = app.webViews.staticTexts["DEMO"].firstMatch.waitForExistence(timeout: 20)
+        _ = graphProjectLabel("DEMO", in: app.webViews).waitForExistence(timeout: 20)
         app.buttons["memory-search-toggle"].tap()
         let field = app.textFields["memory-search"]
         XCTAssertTrue(field.waitForExistence(timeout: 5))
@@ -250,7 +250,7 @@ final class GraphInteractionTests: XCTestCase {
     @MainActor
     private func openProjectDossier(in app: XCUIApplication) -> XCUIElement {
         openMemoryGraph(from: app)
-        _ = app.webViews.staticTexts["DEMO"].firstMatch.waitForExistence(timeout: 20)
+        _ = graphProjectLabel("DEMO", in: app.webViews).waitForExistence(timeout: 20)
         app.buttons["memory-search-toggle"].tap()
         let field = app.textFields["memory-search"]
         XCTAssertTrue(field.waitForExistence(timeout: 5))
@@ -272,7 +272,7 @@ final class GraphInteractionTests: XCTestCase {
         openSessionProjectGraph(in: app)
         // The native search is available before WKWebView has mounted its
         // graph. Wait for rendered content before issuing camera commands.
-        XCTAssertTrue(app.webViews.staticTexts["DEMO"].firstMatch.waitForExistence(timeout: 20))
+        XCTAssertTrue(graphProjectLabel("DEMO", in: app.webViews).waitForExistence(timeout: 20))
         let search = app.buttons["Search graph"]
         XCTAssertTrue(search.waitForExistence(timeout: 10))
         search.tap()

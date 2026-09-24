@@ -107,7 +107,7 @@ final class TrailerTour: XCTestCase {
         settle(3.5)
         openMemoryGraph(from: app)
         // The graph has content once a project label is in the page.
-        XCTAssertTrue(app.webViews.staticTexts["LEDGER"].firstMatch.waitForExistence(timeout: 25))
+        XCTAssertTrue(graphProjectLabel("LEDGER", in: app.webViews).waitForExistence(timeout: 25))
         let canvas = app.webViews.firstMatch
         settle(2.5)
         drag(canvas, from: 0.3, to: 0.7, velocity: 260, horizontal: true)
