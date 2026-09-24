@@ -129,6 +129,19 @@
       font-size: 13px;
       font-weight: 700;
       flex-shrink: 0;
+      margin-bottom: 0;
+      letter-spacing: 0;
+    }
+
+    /* style.css draws a rule before the landing page's step labels; not here */
+    .step-num::before {
+      display: none;
+    }
+
+    /* Wide tables scroll inside their own box instead of widening the page */
+    .table-scroll {
+      max-width: 100%;
+      overflow-x: auto;
     }
 
     /* Config page: defaults grid */
@@ -498,8 +511,13 @@
     /* On desktop, groups are still collapsed by default — only .open groups expand */
 
     @media (max-width: 900px) {
+      /* minmax(0, 1fr): a plain 1fr column grows to its widest code block or table */
       body.docs-page .docs-layout.docs-consolidated {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .docs-content {
+        min-width: 0;
       }
 
       .docs-overview {
@@ -1094,7 +1112,7 @@ stateDiagram-v2
     }
         </pre>
 
-        <table class="docs-table">
+        <div class="table-scroll"><table class="docs-table">
           <thead>
             <tr><th>State</th><th>Retrieval Score</th><th>In FTS Index?</th></tr>
           </thead>
@@ -1106,12 +1124,12 @@ stateDiagram-v2
             <tr><td><code>stale</code></td><td>Confidence-based</td><td>Yes</td></tr>
             <tr><td><code>invalid_citation</code></td><td>0.5x</td><td>Yes</td></tr>
           </tbody>
-        </table>
+        </table></div>
 
         <h2 id="c-trust-decay">Trust &amp; Decay <a href="#c-trust-decay" class="anchor-link">#</a></h2>
         <p>Every finding starts with full confidence (1.0). As it ages, confidence decays through a stepped schedule:</p>
 
-        <table class="docs-table">
+        <div class="table-scroll"><table class="docs-table">
           <thead>
             <tr><th>Age</th><th>Multiplier</th><th>Effect</th></tr>
           </thead>
@@ -1122,7 +1140,7 @@ stateDiagram-v2
             <tr><td>90 -- 120 days</td><td>0.5</td><td>Low confidence</td></tr>
             <tr><td>120+ days</td><td>suppressed</td><td>Excluded from retrieval</td></tr>
           </tbody>
-        </table>
+        </table></div>
 
         <div class="decay-curve">
           <span class="decay-curve-label y-axis">Confidence</span>
@@ -1242,7 +1260,7 @@ sequenceDiagram
         <p>phren reads environment variables for runtime behavior. Set them in your shell profile or <code>~/.phren/.env</code>.</p>
 
         <h3>Core</h3>
-        <table class="docs-table">
+        <div class="table-scroll"><table class="docs-table">
           <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
           <tbody>
             <tr><td><code>PHREN_CONTEXT_TOKEN_BUDGET</code></td><td>550</td><td>Max tokens injected per hook-prompt call (180--10000)</td></tr>
@@ -1253,10 +1271,10 @@ sequenceDiagram
             <tr><td><code>PHREN_TASK_PRIORITY</code></td><td>high,medium</td><td>Priorities to include in hook context injection</td></tr>
             <tr><td><code>PHREN_MEMORY_TTL_DAYS</code></td><td>policy</td><td>Override memory TTL for trust filtering</td></tr>
           </tbody>
-        </table>
+        </table></div>
 
         <h3>Semantic / Embedding</h3>
-        <table class="docs-table">
+        <div class="table-scroll"><table class="docs-table">
           <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
           <tbody>
             <tr><td><code>PHREN_OLLAMA_URL</code></td><td>http://localhost:11434</td><td>Ollama base URL. Set to <code>off</code> to disable.</td></tr>
@@ -1266,10 +1284,10 @@ sequenceDiagram
             <tr><td><code>PHREN_FEATURE_SEMANTIC_CONFLICT</code></td><td>disabled</td><td>LLM-based conflict detection on add_finding</td></tr>
             <tr><td><code>PHREN_LLM_MODEL</code></td><td>gpt-4o-mini</td><td>LLM model for dedup/conflict detection</td></tr>
           </tbody>
-        </table>
+        </table></div>
 
         <h3>Feature Flags</h3>
-        <table class="docs-table">
+        <div class="table-scroll"><table class="docs-table">
           <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
           <tbody>
             <tr><td><code>PHREN_FEATURE_TOOL_HOOK</code></td><td>enabled</td><td>Spawns a subprocess after every tool call (PostToolUse hook) — the flag most likely to affect performance; see <code>feature-flags.md</code></td></tr>
@@ -1283,7 +1301,7 @@ sequenceDiagram
             <tr><td><code>PHREN_FEATURE_FACT_EXTRACT</code></td><td>disabled</td><td>LLM call per finding to extract a structured preference/fact</td></tr>
             <tr><td><code>PHREN_FEATURE_GH_MINING</code></td><td>disabled</td><td>Mine GitHub PRs/CI/issues in <code>phren maintain extract</code></td></tr>
           </tbody>
-        </table>
+        </table></div>
 
         <h2 id="cfg-governance">Governance Files <a href="#cfg-governance" class="anchor-link">#</a></h2>
         <p>Policy is configured via JSON files in <code>~/.phren/.config/</code>. Use <code>phren config</code> subcommands to read and write these safely.</p>
@@ -1293,7 +1311,7 @@ phren config workflow set taskMode=auto findingSensitivity=high</code></pre>
 
         <h2 id="cfg-hooks">Hook Configuration <a href="#cfg-hooks" class="anchor-link">#</a></h2>
         <p>Four built-in hooks fire automatically for Claude Code:</p>
-        <table class="docs-table">
+        <div class="table-scroll"><table class="docs-table">
           <thead><tr><th>Hook</th><th>When</th><th>What it does</th></tr></thead>
           <tbody>
             <tr><td><code>SessionStart</code></td><td>Session opens</td><td>git pull, project context injection</td></tr>
@@ -1301,7 +1319,7 @@ phren config workflow set taskMode=auto findingSensitivity=high</code></pre>
             <tr><td><code>PostToolUse</code></td><td>After tool calls</td><td>Queues review candidates and captures tool-level continuity hints</td></tr>
             <tr><td><code>Stop</code></td><td>After response</td><td>Auto-commit and push ~/.phren changes</td></tr>
           </tbody>
-        </table>
+        </table></div>
         <p>Manage hooks:</p>
         <pre><code>phren hooks list
 phren hooks enable claude
@@ -1310,7 +1328,7 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
 
         <h2 id="cfg-proactivity">Proactivity <a href="#cfg-proactivity" class="anchor-link">#</a></h2>
         <p>Controls how aggressively phren captures findings and tasks:</p>
-        <table class="docs-table">
+        <div class="table-scroll"><table class="docs-table">
           <thead><tr><th>Level</th><th>Behavior</th></tr></thead>
           <tbody>
             <tr><td><code>high</code></td><td>Always auto-capture findings and tasks</td></tr>
@@ -1318,7 +1336,7 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
             <tr><td><code>low</code></td><td>Fully manual &mdash; agent never captures on its own</td></tr>
             <tr><td><code>off</code></td><td>Passive MCP server only</td></tr>
           </tbody>
-        </table>
+        </table></div>
         <pre><code>phren config workflow set proactivity=medium</code></pre>
       </section>
 
@@ -1721,7 +1739,7 @@ tags: [devops, deploy]
 5. Report the deployment status.</code></pre>
 
         <h3 id="sk-frontmatter">Frontmatter Format</h3>
-        <table class="docs-table">
+        <div class="table-scroll"><table class="docs-table">
           <thead><tr><th>Field</th><th>Required</th><th>Description</th></tr></thead>
           <tbody>
             <tr><td><code>name</code></td><td>Yes</td><td>Unique identifier for the skill</td></tr>
@@ -1730,7 +1748,7 @@ tags: [devops, deploy]
             <tr><td><code>tags</code></td><td>No</td><td>Array of tags for categorization</td></tr>
             <tr><td><code>aliases</code></td><td>No</td><td>Alternative command names</td></tr>
           </tbody>
-        </table>
+        </table></div>
 
         <h2 id="sk-scoping">Global vs Project Skills <a href="#sk-scoping" class="anchor-link">#</a></h2>
         <p>Project always wins. Global skills live in <code>~/.phren/global/skills/</code>. Project skills live in <code>~/.phren/&lt;project&gt;/skills/</code>.</p>
@@ -1743,7 +1761,7 @@ tags: [devops, deploy]
         <p>If a project skill has the same name as a global skill, the project skill wins.</p>
 
         <h2 id="sk-built-in">Built-in Skills <a href="#sk-built-in" class="anchor-link">#</a></h2>
-        <table class="docs-table">
+        <div class="table-scroll"><table class="docs-table">
           <thead><tr><th>Command</th><th>What it does</th></tr></thead>
           <tbody>
             <tr><td><code>/phren-sync</code></td><td>Pull/push ~/.phren across machines</td></tr>
@@ -1751,7 +1769,7 @@ tags: [devops, deploy]
             <tr><td><code>/phren-discover</code></td><td>Research gaps and opportunities</td></tr>
             <tr><td><code>/phren-consolidate</code></td><td>Find patterns across FINDINGS.md files</td></tr>
           </tbody>
-        </table>
+        </table></div>
 
         <h2 id="sk-managing">Managing Skills <a href="#sk-managing" class="anchor-link">#</a></h2>
         <pre><code>phren skills list                            # List all
@@ -1838,7 +1856,7 @@ phren skills remove my-project deploy         # Delete</code></pre>
         </div>
 
         <h2 id="sh-palette">Palette Commands <a href="#sh-palette" class="anchor-link">#</a></h2>
-        <table class="docs-table">
+        <div class="table-scroll"><table class="docs-table">
           <thead><tr><th>Command</th><th>Description</th></tr></thead>
           <tbody>
             <tr><td><code>:open &lt;project&gt;</code></td><td>Set active project context</td></tr>
@@ -1851,7 +1869,7 @@ phren skills remove my-project deploy         # Delete</code></pre>
             <tr><td><code>:run fix</code></td><td>Run doctor --fix</td></tr>
             <tr><td><code>:help</code></td><td>Full keyboard map</td></tr>
           </tbody>
-        </table>
+        </table></div>
 
         <h2 id="sh-state">State Persistence <a href="#sh-state" class="anchor-link">#</a></h2>
         <p>The shell saves state to <code>.runtime/shell-state.json</code>: selected project, active filter, page, and rows per page. Use <code>:reset</code> to clear.</p>
@@ -1903,7 +1921,7 @@ npm install && npm run compile</code></pre>
         <p>Add, complete, update, pin, and remove tasks from the tree view. Right-click for GitHub integration: link issues or create new ones from tasks.</p>
 
         <h2 id="vs-settings">Settings <a href="#vs-settings" class="anchor-link">#</a></h2>
-        <table class="docs-table">
+        <div class="table-scroll"><table class="docs-table">
           <thead><tr><th>Setting</th><th>Default</th><th>Description</th></tr></thead>
           <tbody>
             <tr><td><code>phren.mcpServerPath</code></td><td>auto-detect</td><td>Path to phren MCP server index.js</td></tr>
@@ -1913,11 +1931,11 @@ npm install && npm run compile</code></pre>
             <tr><td><code>phren.taskMode</code></td><td>auto</td><td>Task mode: off, manual, suggest, auto</td></tr>
             <tr><td><code>phren.hooksEnabled</code></td><td>true</td><td>Master switch for phren hooks</td></tr>
           </tbody>
-        </table>
+        </table></div>
 
         <h2 id="vs-commands">All Commands <a href="#vs-commands" class="anchor-link">#</a></h2>
         <p>All commands accessible via <kbd>Ctrl+Shift+P</kbd> by typing "Phren":</p>
-        <table class="docs-table">
+        <div class="table-scroll"><table class="docs-table">
           <thead><tr><th>Command</th><th>Description</th></tr></thead>
           <tbody>
             <tr><td><code>Phren: Search Knowledge</code></td><td>FTS5 search quick pick</td></tr>
@@ -1931,7 +1949,7 @@ npm install && npm run compile</code></pre>
             <tr><td><code>Phren: Set Active Project</code></td><td>Switch project context</td></tr>
             <tr><td><code>Phren: Project Config</code></td><td>Per-project configuration panel</td></tr>
           </tbody>
-        </table>
+        </table></div>
       </section>
 
       <!-- ============================================================ -->
@@ -2030,7 +2048,7 @@ sequenceDiagram
         </pre>
 
         <h2 id="arch-directory">Directory Structure <a href="#arch-directory" class="anchor-link">#</a></h2>
-        <table class="docs-table">
+        <div class="table-scroll"><table class="docs-table">
           <thead><tr><th>Path</th><th>Contents</th></tr></thead>
           <tbody>
             <tr><td><code>~/.phren/</code></td><td>Root store (git repo)</td></tr>
@@ -2042,7 +2060,7 @@ sequenceDiagram
             <tr><td><code>~/.phren/.runtime/</code></td><td>Audit log, debug log, telemetry, search history, locks</td></tr>
             <tr><td><code>~/.phren/.sessions/</code></td><td>Session markers, extraction markers</td></tr>
           </tbody>
-        </table>
+        </table></div>
 
         <h2 id="arch-indexing">FTS5 Indexing <a href="#arch-indexing" class="anchor-link">#</a></h2>
         <p>phren builds an in-memory FTS5 index on startup from all markdown files in the store. Key behaviors:</p>
@@ -2086,7 +2104,7 @@ npm test</code></pre>
 
         <h2 id="project-structure">Project Structure <a href="#project-structure" class="anchor-link">#</a></h2>
         <p>Key files and what they do.</p>
-        <table class="docs-table">
+        <div class="table-scroll"><table class="docs-table">
           <thead>
             <tr><th>Path</th><th>What it does</th></tr>
           </thead>
@@ -2107,7 +2125,7 @@ npm test</code></pre>
             <tr><td><code>docs/</code></td><td>GitHub Pages site and documentation</td></tr>
             <tr><td><code>skills/</code></td><td>Phren slash command definitions</td></tr>
           </tbody>
-        </table>
+        </table></div>
 
         <h2 id="testing">Testing <a href="#testing" class="anchor-link">#</a></h2>
         <p>Running the test suite and filtering by pattern.</p>
@@ -2254,7 +2272,7 @@ refactor: extract keyword logic from hook-prompt</code></pre>
 
         <h3 id="credential-handling">Credential Handling</h3>
         <p>Phren reads credentials exclusively from environment variables. It never writes secrets to disk.</p>
-        <table class="docs-table">
+        <div class="table-scroll"><table class="docs-table">
           <thead>
             <tr><th>Variable</th><th>Purpose</th></tr>
           </thead>
@@ -2265,7 +2283,7 @@ refactor: extract keyword logic from hook-prompt</code></pre>
             <tr><td><code>ANTHROPIC_API_KEY</code></td><td>Fallback for LLM calls (Claude models)</td></tr>
             <tr><td><code>GITHUB_TOKEN</code></td><td>Used by <code>phren maintain extract</code> for GitHub API</td></tr>
           </tbody>
-        </table>
+        </table></div>
 
         <h3 id="secret-scanning">Secret Scanning</h3>
         <p>The finding quality filter rejects entries that match common secret patterns:</p>
@@ -2287,7 +2305,7 @@ refactor: extract keyword logic from hook-prompt</code></pre>
 
         <h3 id="role-based-access-control">Role-Based Access Control</h3>
         <p>Identity is resolved from <code>PHREN_ACTOR</code> (in trusted/test contexts) or the OS user identity.</p>
-        <table class="docs-table">
+        <div class="table-scroll"><table class="docs-table">
           <thead><tr><th>Role</th><th>Permissions</th></tr></thead>
           <tbody>
             <tr><td><code>admin</code></td><td>Full access: read, write, delete, policy changes</td></tr>
@@ -2295,7 +2313,7 @@ refactor: extract keyword logic from hook-prompt</code></pre>
             <tr><td><code>contributor</code></td><td>Read and write. No delete or policy changes.</td></tr>
             <tr><td><code>viewer</code></td><td>Read only</td></tr>
           </tbody>
-        </table>
+        </table></div>
         <p>All write, policy, and delete operations are checked against RBAC before mutation. Unauthorized attempts are logged in <code>.runtime/audit.log</code>.</p>
 
         <h3 id="web-ui-security">Web UI Security</h3>
@@ -2309,7 +2327,7 @@ refactor: extract keyword logic from hook-prompt</code></pre>
 
         <h2 id="network">Network Activity <a href="#network" class="anchor-link">#</a></h2>
         <p>Phren makes no network calls by default. All external calls are opt-in.</p>
-        <table class="docs-table">
+        <div class="table-scroll"><table class="docs-table">
           <thead><tr><th>Feature</th><th>Network call</th><th>Controlled by</th></tr></thead>
           <tbody>
             <tr><td>Core operation</td><td>None</td><td>Always local</td></tr>
@@ -2319,7 +2337,7 @@ refactor: extract keyword logic from hook-prompt</code></pre>
             <tr><td>Semantic dedup/conflict</td><td>Your configured LLM endpoint</td><td><code>PHREN_LLM_ENDPOINT</code></td></tr>
             <tr><td>GitHub extraction</td><td>api.github.com</td><td><code>phren maintain extract</code> (manual)</td></tr>
           </tbody>
-        </table>
+        </table></div>
 
         <h3 id="auto-extract-privacy">Auto-Extract Privacy</h3>
         <p>When <code>PHREN_FEATURE_AUTO_EXTRACT</code> is enabled, phren extracts insights from project context on each prompt. The extraction:</p>
@@ -2351,14 +2369,14 @@ refactor: extract keyword logic from hook-prompt</code></pre>
         </ul>
 
         <h3 id="security-timeline">Response Timeline</h3>
-        <table class="docs-table">
+        <div class="table-scroll"><table class="docs-table">
           <thead><tr><th>Stage</th><th>Timeline</th></tr></thead>
           <tbody>
             <tr><td>Acknowledgment</td><td>Within 48 hours</td></tr>
             <tr><td>Initial assessment</td><td>Within 1 week</td></tr>
             <tr><td>Fix or mitigation</td><td>30 days for critical issues</td></tr>
           </tbody>
-        </table>
+        </table></div>
         <p>Security fixes are applied to the latest release only. We follow coordinated disclosure and credit reporters in the changelog unless they prefer anonymity.</p>
       </section>
 
@@ -2390,7 +2408,7 @@ refactor: extract keyword logic from hook-prompt</code></pre>
 
         <h2 id="trust-decay">How does trust decay work? <a href="#trust-decay" class="anchor-link">#</a></h2>
         <p>Every finding has a confidence score. The score degrades over time:</p>
-        <table class="docs-table">
+        <div class="table-scroll"><table class="docs-table">
           <thead><tr><th>Age</th><th>Cited entry</th><th>Uncited entry</th></tr></thead>
           <tbody>
             <tr><td>0-30 days</td><td>1.00</td><td>0.80</td></tr>
@@ -2399,7 +2417,7 @@ refactor: extract keyword logic from hook-prompt</code></pre>
             <tr><td>91-120 days</td><td>0.65</td><td>0.52</td></tr>
             <tr><td>120+ days</td><td>0.45</td><td>0.36</td></tr>
           </tbody>
-        </table>
+        </table></div>
         <p>Entries below 0.35 are suppressed and move to the review queue. You can pin a truth with <code>pin_memory</code> to make it never decay.</p>
 
         <h2 id="auto-vs-manual">What gets saved automatically vs manually? <a href="#auto-vs-manual" class="anchor-link">#</a></h2>
@@ -2500,7 +2518,7 @@ phren graph link web-app "Turbo builds avoid dist races" "build-system"</code></
 
         <h2 id="rbac">RBAC Roles <a href="#rbac" class="anchor-link">#</a></h2>
         <p>Phren supports four role levels. The actor is identified by <code>PHREN_ACTOR</code> (defaults to <code>$USER</code>).</p>
-        <table class="docs-table">
+        <div class="table-scroll"><table class="docs-table">
           <thead><tr><th>Role</th><th>Permissions</th></tr></thead>
           <tbody>
             <tr><td><code>admin</code></td><td>Full access. Can modify governance, access control, workflow policies, and all project data.</td></tr>
@@ -2508,7 +2526,7 @@ phren graph link web-app "Turbo builds avoid dist races" "build-system"</code></
             <tr><td><code>contributor</code></td><td>Can add findings and tasks. Cannot remove or edit existing entries.</td></tr>
             <tr><td><code>viewer</code></td><td>Read-only access.</td></tr>
           </tbody>
-        </table>
+        </table></div>
         <p>Access control is configured in <code>~/.phren/.config/access-control.json</code>. If no file exists, all users have full access.</p>
 
         <h3 id="audit-log">Audit Log</h3>
@@ -2544,14 +2562,14 @@ phren init              # machine: bob-desktop, profile: fullstack
 
         <h3>How It Works</h3>
         <p>Phren maintains a <strong>store registry</strong> at <code>~/.phren/stores.yaml</code> that lists every store the user has access to. Each store has a role:</p>
-        <table class="docs-table">
+        <div class="table-scroll"><table class="docs-table">
           <thead><tr><th>Role</th><th>Read</th><th>Write</th><th>Git Sync</th><th>Use Case</th></tr></thead>
           <tbody>
             <tr><td><code>primary</code></td><td>Yes</td><td>Yes</td><td>Full</td><td>Your personal store (default write target)</td></tr>
             <tr><td><code>team</code></td><td>Yes</td><td>Yes</td><td>Full</td><td>Shared team store</td></tr>
             <tr><td><code>readonly</code></td><td>Yes</td><td>No</td><td>Pull only</td><td>Reference store (company-wide knowledge)</td></tr>
           </tbody>
-        </table>
+        </table></div>
 
         <h3>CLI Commands</h3>
         <div class="ref-card">
@@ -2608,14 +2626,14 @@ phren team join git@github.com:qualus/phren-arc.git
 # Personal findings for other projects stay in ~/.phren</code></pre>
 
         <h3 id="project-ownership">Project Ownership</h3>
-        <table class="docs-table">
+        <div class="table-scroll"><table class="docs-table">
           <thead><tr><th>Mode</th><th>Behavior</th></tr></thead>
           <tbody>
             <tr><td><code>phren-managed</code></td><td>Default. phren symlinks <code>AGENTS.md</code>, <code>FINDINGS.md</code>, skills into the project directory.</td></tr>
             <tr><td><code>repo-owned</code></td><td>The project's repo owns its own <code>AGENTS.md</code>. phren stores findings and tasks but does not symlink.</td></tr>
             <tr><td><code>read-only</code></td><td>phren indexes and searches the project but does not write to it.</td></tr>
           </tbody>
-        </table>
+        </table></div>
       </section>
 
     </main>
