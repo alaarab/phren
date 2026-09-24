@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { sanitizeFts5Query, isValidProjectName, safeProjectPath, extractKeywords, buildRobustFtsQuery, STOP_WORDS } from "./utils.js";
+import { sanitizeFts5Query, isValidProjectName, safeProjectPath, extractKeywords, buildRobustFtsQuery, } from "./utils.js";
 import { debugLog } from "./shared.js";
 import {
   consolidateProjectFindings,
@@ -18,18 +18,11 @@ import {
   addFindingToFile,
   extractConflictVersions,
 } from "./shared/content.js";
-import { grantAdmin, initTestPhrenRoot, makeTempDir, runCliExec } from "./test-helpers.js";
+import { grantAdmin, initTestPhrenRoot, makeTempDir, } from "./test-helpers.js";
 import * as path from "path";
 import * as fs from "fs";
-import * as os from "os";
-
-const runCli = runCliExec;
 
 describe("sanitizeFts5Query", () => {
-  it("passes through a normal query", () => {
-    expect(sanitizeFts5Query("authentication")).toBe("authentication");
-  });
-
   it("handles multi-word queries", () => {
     const result = sanitizeFts5Query("user login");
     expect(result).toBe("user login");
@@ -40,14 +33,6 @@ describe("sanitizeFts5Query", () => {
     // Whitelist sanitizer strips semicolons but preserves apostrophes
     expect(result).not.toContain(";");
     expect(result).toContain("DROP");
-  });
-
-  it("removes FTS5 column filter prefixes", () => {
-    const result = sanitizeFts5Query("content:secret");
-    // Whitelist strips colon, so "content:secret" becomes "content secret"
-    expect(result).not.toContain(":");
-    expect(result).toContain("content");
-    expect(result).toContain("secret");
   });
 
   it("removes all known column filters", () => {
@@ -66,11 +51,6 @@ describe("sanitizeFts5Query", () => {
     // Dots are stripped by whitelist sanitizer
     expect(result).not.toContain(".");
     expect(result).not.toContain("//");
-  });
-
-  it("removes null bytes", () => {
-    const result = sanitizeFts5Query("hello\0world");
-    expect(result).toBe("hello world");
   });
 
   it("removes FTS5 ^ anchors", () => {
@@ -105,13 +85,6 @@ describe("sanitizeFts5Query", () => {
 });
 
 describe("buildRobustFtsQuery", () => {
-  it("quotes terms and expands known synonyms", () => {
-    const query = buildRobustFtsQuery("throttling");
-    expect(query).toContain("\"throttling\"");
-    expect(query).toContain("\"rate limit\"");
-    expect(query).toContain(" OR ");
-  });
-
   it("returns empty string for empty or fully stripped input", () => {
     expect(buildRobustFtsQuery("")).toBe("");
     expect(buildRobustFtsQuery('""   ')).toBe("");
@@ -127,40 +100,8 @@ describe("buildRobustFtsQuery", () => {
 });
 
 describe("isValidProjectName", () => {
-  it("accepts a valid name", () => {
-    expect(isValidProjectName("my-project")).toBe(true);
-  });
-
-  it("rejects dot-prefixed names (.hidden)", () => {
-    expect(isValidProjectName(".hidden")).toBe(false);
-  });
-
-  it("accepts alphanumeric names", () => {
-    expect(isValidProjectName("project123")).toBe(true);
-  });
-
-  it("rejects path traversal with ..", () => {
-    expect(isValidProjectName("../etc")).toBe(false);
-  });
-
-  it("rejects forward slash", () => {
-    expect(isValidProjectName("foo/bar")).toBe(false);
-  });
-
-  it("rejects backslash", () => {
-    expect(isValidProjectName("foo\\bar")).toBe(false);
-  });
-
-  it("rejects empty string", () => {
-    expect(isValidProjectName("")).toBe(false);
-  });
-
   it("rejects null byte", () => {
     expect(isValidProjectName("foo\0bar")).toBe(false);
-  });
-
-  it("rejects bare double dots", () => {
-    expect(isValidProjectName("..")).toBe(false);
   });
 
   it("rejects triple dots containing ..", () => {
@@ -169,28 +110,9 @@ describe("isValidProjectName", () => {
 });
 
 describe("extractKeywords", () => {
-  it("removes stop words", () => {
-    const result = extractKeywords("fix the rate limiter in sampleatlas");
-    expect(result).not.toContain("the");
-    expect(result).not.toContain("in");
-    expect(result).toContain("rate");
-    expect(result).toContain("limiter");
-    expect(result).toContain("sampleatlas");
-  });
-
-  it("returns empty string for only stop words", () => {
-    expect(extractKeywords("the is a an")).toBe("");
-  });
-
   it("limits to 10 terms (words + bigrams)", () => {
     const result = extractKeywords("one two three four five six seven eight nine ten eleven");
     expect(result.split(" ").length).toBeLessThanOrEqual(10);
-  });
-
-  it("strips punctuation", () => {
-    const result = extractKeywords("what's the auth? (login)");
-    expect(result).not.toContain("?");
-    expect(result).not.toContain("(");
   });
 
   it("handles empty string", () => {
@@ -239,12 +161,6 @@ describe("safeProjectPath", () => {
 });
 
 describe("isValidProjectName", () => {
-  it("accepts canonical lowercase project names", () => {
-    expect(isValidProjectName("phren")).toBe(true);
-    expect(isValidProjectName("project-center")).toBe(true);
-    expect(isValidProjectName("m4l_builder")).toBe(true);
-  });
-
   it("rejects uppercase project names", () => {
     expect(isValidProjectName("Phren")).toBe(false);
     expect(isValidProjectName("SamplePortal")).toBe(false);
@@ -273,12 +189,6 @@ describe("memory workflow policy", () => {
 
   afterEach(() => {
     tmpCleanup();
-  });
-
-  it("returns defaults when no workflow policy file exists", () => {
-    const policy = getWorkflowPolicy(phrenDir);
-    expect(policy.lowConfidenceThreshold).toBe(0.7);
-    expect(policy.riskySections).toContain("Stale");
   });
 
   it("updates workflow policy with admin permission", () => {

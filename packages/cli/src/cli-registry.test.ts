@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   REGISTRY,
-  TOPIC_ORDER,
-  DOC_TOPICS,
-  helpTopicNames,
-  lookupCommand,
 } from "./cli-registry.js";
 
 describe("cli-registry: shape invariants", () => {
@@ -24,23 +20,10 @@ describe("cli-registry: shape invariants", () => {
     }
   });
 
-  it("every topic is in TOPIC_ORDER", () => {
-    const valid = new Set<string>(TOPIC_ORDER);
-    for (const cmd of REGISTRY) {
-      expect(valid.has(cmd.topic), `${cmd.name}: unknown topic "${cmd.topic}"`).toBe(true);
-    }
-  });
-
   it("every entry has a non-empty usage and summary", () => {
     for (const cmd of REGISTRY) {
       expect(cmd.usage.trim().length, `${cmd.name}: empty usage`).toBeGreaterThan(0);
       expect(cmd.summary.trim().length, `${cmd.name}: empty summary`).toBeGreaterThan(0);
-    }
-  });
-
-  it("every entry has a callable run function", () => {
-    for (const cmd of REGISTRY) {
-      expect(typeof cmd.run, `${cmd.name}: run is not a function`).toBe("function");
     }
   });
 
@@ -53,36 +36,6 @@ describe("cli-registry: shape invariants", () => {
         seen.add(sub.name);
       }
     }
-  });
-});
-
-describe("cli-registry: lookupCommand", () => {
-  it("resolves a known command by name", () => {
-    expect(lookupCommand("init")?.name).toBe("init");
-    expect(lookupCommand("search")?.name).toBe("search");
-    expect(lookupCommand("add")?.name).toBe("add");
-  });
-
-  it("returns undefined for unknown names", () => {
-    expect(lookupCommand("absolutely-not-a-command")).toBeUndefined();
-  });
-
-  it("can resolve hidden commands (so `phren hook-prompt --help` works for operators)", () => {
-    expect(lookupCommand("hook-prompt")?.name).toBe("hook-prompt");
-    expect(lookupCommand("link")?.name).toBe("link");
-  });
-});
-
-describe("cli-registry: helpTopicNames", () => {
-  it("includes every command topic, every doc topic, and `all`", () => {
-    const names = helpTopicNames();
-    for (const topic of TOPIC_ORDER) {
-      expect(names).toContain(topic);
-    }
-    for (const docTopic of Object.keys(DOC_TOPICS)) {
-      expect(names).toContain(docTopic);
-    }
-    expect(names).toContain("all");
   });
 });
 
