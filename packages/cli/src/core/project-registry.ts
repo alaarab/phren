@@ -20,9 +20,10 @@ import { STOP_WORDS, errorMessage } from "../utils.js";
 import { FINDINGS_FILENAME, TASKS_FILENAME } from "../filenames.js";
 import {
   getProjectOwnershipDefault,
+  getProjectSourcePath,
   parseProjectOwnershipMode,
   readProjectConfig,
-  writeProjectConfig,
+  recordProjectSourcePath,
   type ProjectOwnershipMode,
 } from "../project-config.js";
 import { getBuiltinTopicConfig, normalizeBuiltinTopicDomain, type BuiltinTopic } from "../project-topics.js";
@@ -529,9 +530,7 @@ function findExistingProjectForSource(
 
   const sourceOf = (project: string): string | null => {
     try {
-      return readProjectConfig(phrenPath, project).sourcePath
-        ? path.resolve(String(readProjectConfig(phrenPath, project).sourcePath))
-        : null;
+      return getProjectSourcePath(phrenPath, project) ?? null;
     } catch (err: unknown) {
       debugLog(`findExistingProjectForSource config ${project}: ${errorMessage(err)}`);
       return null;
@@ -699,7 +698,7 @@ export function bootstrapFromExisting(
     throw new Error(activeProfile.error);
   }
 
-  writeProjectConfig(phrenPath, projectName, { ownership, sourcePath: sourceRoot });
+  recordProjectSourcePath(phrenPath, projectName, sourceRoot, { ownership });
 
   return {
     project: projectName,

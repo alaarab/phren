@@ -20,6 +20,8 @@ import {
   porterStem,
 } from "./shared/index.js";
 import { getPersistentVectorIndex } from "./shared/vector-index.js";
+import { getMachineName } from "./machine-identity.js";
+import { getProjectSourcePath, readProjectConfig, recordProjectSourcePath } from "./project-config.js";
 
 let tmpDir: string;
 let tmpCleanup: (() => void) | undefined;
@@ -309,6 +311,77 @@ describe("detectProject", () => {
     writeFile(path.join(phren, "stored-name", "phren.project.yaml"), yaml.dump({ sourcePath: "/home/user/other-location" }, { lineWidth: 1000 }));
     const result = detectProject(phren, "/home/user/other-location/src");
     expect(result).toBe("stored-name");
+  });
+
+  it("prefers this machine's sourcePaths entry over the shared sourcePath", () => {
+    const phren = makePhren();
+    makeProject(phren, "shared", {
+      "phren.project.yaml": yaml.dump({
+        sourcePath: "/home/other/Projects/shared",
+        sourcePaths: { [getMachineName()]: "/Users/me/Sites/shared", "other-box": "/home/other/Projects/shared" },
+      }),
+    });
+    expect(detectProject(phren, "/Users/me/Sites/shared/src")).toBe("shared");
+    expect(detectProject(phren, "/home/other/Projects/shared")).toBeNull();
+  });
+
+  it("falls back to a local git checkout named after the project when the registered folder is another machine's", () => {
+    const phren = makePhren();
+    const { path: root, cleanup } = makeTempDir("phren-checkout-");
+    try {
+      const checkout = path.join(root, "Sites", "synced");
+      fs.mkdirSync(path.join(checkout, ".git"), { recursive: true });
+      fs.mkdirSync(path.join(checkout, "src"), { recursive: true });
+      makeProject(phren, "synced", {
+        "phren.project.yaml": yaml.dump({ sourcePath: "/home/squid/Projects/synced" }),
+      });
+      expect(detectProject(phren, path.join(checkout, "src"))).toBe("synced");
+      // An agent worktree of that checkout belongs to it too.
+      const worktree = path.join(checkout, ".claude", "worktrees", "some-codename");
+      fs.mkdirSync(worktree, { recursive: true });
+      expect(detectProject(phren, worktree)).toBe("synced");
+
+      // A plain folder that merely shares the name is not a checkout.
+      const plain = path.join(root, "elsewhere", "synced");
+      fs.mkdirSync(plain, { recursive: true });
+      expect(detectProject(phren, plain)).toBeNull();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("keeps the registered folder authoritative when it exists on this machine", () => {
+    const phren = makePhren();
+    const { path: root, cleanup } = makeTempDir("phren-checkout-");
+    try {
+      const registered = path.join(root, "real-home");
+      fs.mkdirSync(registered, { recursive: true });
+      const namesake = path.join(root, "copies", "owned");
+      fs.mkdirSync(path.join(namesake, ".git"), { recursive: true });
+      makeProject(phren, "owned", { "phren.project.yaml": yaml.dump({ sourcePath: registered }) });
+      expect(detectProject(phren, registered)).toBe("owned");
+      expect(detectProject(phren, namesake)).toBeNull();
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+describe("per-machine source paths", () => {
+  it("records this machine's folder without dropping other machines' entries", () => {
+    const phren = makePhren();
+    makeProject(phren, "multi", {
+      "phren.project.yaml": yaml.dump({ ownership: "repo-managed", sourcePaths: { "linux-box": "/home/me/multi" } }),
+    });
+    recordProjectSourcePath(phren, "multi", "/Users/me/Sites/multi", {}, "mac");
+    const config = readProjectConfig(phren, "multi");
+    expect(config.ownership).toBe("repo-managed");
+    expect(config.sourcePath).toBe("/Users/me/Sites/multi");
+    expect(config.sourcePaths).toEqual({ "linux-box": "/home/me/multi", mac: "/Users/me/Sites/multi" });
+    expect(getProjectSourcePath(phren, "multi", undefined, "linux-box")).toBe("/home/me/multi");
+    expect(getProjectSourcePath(phren, "multi", undefined, "mac")).toBe("/Users/me/Sites/multi");
+    // A machine with no entry of its own uses the shared value.
+    expect(getProjectSourcePath(phren, "multi", undefined, "new-box")).toBe("/Users/me/Sites/multi");
   });
 });
 
