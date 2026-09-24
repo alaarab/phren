@@ -60,7 +60,7 @@ struct ChatRichText: View, Equatable {
                     }
                     .padding(12).background(PhrenTheme.chatPanel, in: RoundedRectangle(cornerRadius: 14))
                     .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(PhrenTheme.border, lineWidth: 1))
-                    .onLongPressGesture(minimumDuration: 0.5) {
+                    .chatMessageMenuHold {
                         menuSource?.open(block.id, [
                             PhrenControlAction(id: "copy-table", title: "Copy table", icon: "tablecells") {
                                 ChatClipboard.copy(block.rows.map { $0.joined(separator: " | ") }.joined(separator: "\n"))
@@ -104,7 +104,7 @@ private struct ChatParagraph: View {
             .accessibilityHidden(selecting != nil)
             // A double-tap alone: single taps on links inside keep their speed.
             .onTapGesture(count: 2) { point in selection?.begin(owner: owner, block: block.id, at: point) }
-            .onLongPressGesture(minimumDuration: 0.5) { openMenu() }
+            .chatMessageMenuHold { openMenu() }
             .accessibilityAction(named: "Message actions") { openMenu() }
             .id(block.id)
             .overlay {

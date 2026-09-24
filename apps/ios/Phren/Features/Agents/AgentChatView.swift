@@ -214,8 +214,10 @@ struct AgentChatView: View {
         .chatAttachmentSources(source: $attachmentSource, canAdd: model.attachments.count < ChatAttachmentLimit.maximum,
                                add: { item in if model.target == attachmentTarget { model.add(item) } },
                                error: $attachmentError)
+        // Opening the menu leaves the keyboard and the composer alone:
+        // resigning here slid the whole transcript down under the card.
         .onChange(of: messageMenu.request?.id) { _, id in
-            if id != nil { composing = false; textSelection.end() }
+            if id != nil { textSelection.end() }
         }
         #if DEBUG && targetEnvironment(simulator)
         .overlay(alignment: .topLeading) { if AgentChatFixture.enabled { ChatFixtureReport() } }

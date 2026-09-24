@@ -433,6 +433,27 @@ final class AgentChatComposerTests: AgentChatUITestCase {
     }
 
     @MainActor
+    func testMessageMenuKeepsTheKeyboardAndClosesOnADrag() {
+        let app = launch(extra: ["--chat-paragraphs", "--chat-clear-drafts"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let any = app.descendants(matching: .any)
+        let paragraph = any["chat-paragraph:2:0:1"]
+        XCTAssertTrue(paragraph.waitForExistence(timeout: 8))
+        let composer = any.matching(identifier: "chat-composer").firstMatch
+        composer.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(paragraph.waitForExistence(timeout: 3))
+        paragraph.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 5, dy: 5)).press(forDuration: 0.7)
+        let backdrop = any["chat-message-menu-backdrop"]
+        XCTAssertTrue(backdrop.waitForExistence(timeout: 5))
+        capture(app, "Message menu open over the keyboard")
+        XCTAssertTrue(app.keyboards.firstMatch.exists, "Opening the menu leaves the keyboard up")
+        let start = backdrop.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.15))
+        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 120)))
+        XCTAssertTrue(backdrop.waitForNonExistence(timeout: 5), "A drag outside the card closes it")
+    }
+
+    @MainActor
     func testTranscriptRisesAndFallsWithTheKeyboard() {
         let app = launch(extra: ["--chat-long-history", "--chat-clear-drafts"])
         app.buttons["live-chat:w7:w7:t9"].tap()

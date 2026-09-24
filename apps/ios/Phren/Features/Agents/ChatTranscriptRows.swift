@@ -352,7 +352,7 @@ private struct ChatMessageRow<Historical: View>: View {
             .environment(\.chatMessageMenuSource, ChatMessageMenuSource { paragraph, actions in
                 openMenu(paragraph: paragraph, actions: actions)
             })
-            .onLongPressGesture(minimumDuration: 0.5) { openMenu(paragraph: nil, actions: messageActions) }
+            .chatMessageMenuHold { openMenu(paragraph: nil, actions: messageActions) }
             .accessibilityAction(named: "Message actions") { openMenu(paragraph: nil, actions: messageActions) }
     }
     private var messageActions: [PhrenControlAction] {
@@ -450,7 +450,7 @@ private struct LocalCommandRow: View {
                     .phrenIdentifier("chat-command:\(id):actions")
             }
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { menuAnchor.frame = $0 }
-            .onLongPressGesture(minimumDuration: 0.5, perform: openActions)
+            .chatMessageMenuHold(openActions)
             .accessibilityAction(named: "Command actions", openActions)
         }
     }

@@ -32,6 +32,7 @@ struct ChatTranscriptPane: View {
     let actions: ChatTranscriptActions
 
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(ChatMessageMenu.self) private var messageMenu: ChatMessageMenu?
     @State private var rowLayout = ChatRowLayout()
     @State private var historyTask: Task<Void, Never>?
     @State private var atBottom = true
@@ -92,8 +93,9 @@ struct ChatTranscriptPane: View {
                 textSelection.transcriptTapped()
                 return
             }
-            composing = false
             textSelection.transcriptTapped()
+            // A hold on a message ends in this tap too; that keeps the keyboard.
+            if messageMenu?.tapEndsAHold() != true { composing = false }
         })
         .modifier(ChatHistoryScrollObserver { near in
             if near && !nearHistoryTop && model.historyError != nil { requestedHistoryLine = nil }
@@ -124,7 +126,8 @@ struct ChatTranscriptPane: View {
         })
         .modifier(ChatFollowScroll(viewport: scrollHeight, contentHeight: transcriptContentHeight,
                                    following: atBottom, pinRequest: scrollPinRequest,
-                                   selectionActive: textSelection.preventsTranscriptScrolling) { _, new, userDriven in
+                                   selectionActive: textSelection.preventsTranscriptScrolling || messageMenu?.request != nil) { _, new, userDriven in
+            if userDriven { messageMenu?.noteUserScroll() }
             scrollMetrics = new
             rowLayout.scrolled(offsetY: new.offsetY, viewport: new.viewportHeight)
             textSelection.scrolled(to: new.offsetY)

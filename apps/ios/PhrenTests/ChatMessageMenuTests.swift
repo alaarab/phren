@@ -22,4 +22,30 @@ final class ChatMessageMenuTests: XCTestCase {
             }
         }
     }
+
+    @MainActor
+    func testHoldRightAfterAScrollDoesNotOpenTheMenu() {
+        let menu = ChatMessageMenu()
+        XCTAssertTrue(menu.acceptsHold())
+        menu.noteUserScroll()
+        XCTAssertFalse(menu.acceptsHold(), "A hold that began while scrolling is not a hold")
+        XCTAssertFalse(menu.acceptsHold(now: .now + ChatMessageMenu.holdDuration), "Nor one that began as the scroll stopped")
+        XCTAssertTrue(menu.acceptsHold(now: .now + ChatMessageMenu.holdDuration + 0.2))
+    }
+
+    @MainActor
+    func testTheTapThatEndsAHoldIsRecognised() {
+        let menu = ChatMessageMenu()
+        let start = Date()
+        XCTAssertFalse(menu.tapEndsAHold(now: start))
+        menu.notePress(true, now: start)
+        XCTAssertFalse(menu.tapEndsAHold(now: start + 0.1), "A short press is a tap")
+        XCTAssertTrue(menu.tapEndsAHold(now: start + 0.7), "Still pressing past the hold")
+        menu.notePress(false, now: start + 0.7)
+        XCTAssertTrue(menu.tapEndsAHold(now: start + 0.75), "Just lifted from a hold")
+        XCTAssertFalse(menu.tapEndsAHold(now: start + 2), "A later tap dismisses again")
+        menu.notePress(true, now: start + 3)
+        menu.notePress(false, now: start + 3.1)
+        XCTAssertFalse(menu.tapEndsAHold(now: start + 3.1))
+    }
 }

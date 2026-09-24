@@ -17,6 +17,37 @@ final class ChatMessageMenu {
     var request: Request?
     var sharedText: String?
     var reduceMotion = false
+    @ObservationIgnored private var lastUserScroll = Date.distantPast
+
+    /// A deliberate hold: long enough that reading is not one, and still.
+    static let holdDuration = 0.5
+    static let holdTolerance: CGFloat = 6
+
+    func noteUserScroll() { lastUserScroll = .now }
+
+    @ObservationIgnored private var pressStart: Date?
+    @ObservationIgnored private var lastHoldEnd = Date.distantPast
+
+    /// Where a message press is, as its hold gesture reports it.
+    func notePress(_ pressing: Bool, now: Date = .now) {
+        if pressing { pressStart = now; return }
+        if let start = pressStart, now.timeIntervalSince(start) >= Self.holdDuration { lastHoldEnd = now }
+        pressStart = nil
+    }
+
+    /// The transcript's tap also fires when a hold lifts, in no fixed order
+    /// with the hold's own action. Such a tap must not dismiss the keyboard.
+    func tapEndsAHold(now: Date = .now) -> Bool {
+        if request != nil { return true }
+        if let start = pressStart, now.timeIntervalSince(start) >= Self.holdDuration { return true }
+        return now.timeIntervalSince(lastHoldEnd) < 0.3
+    }
+
+    /// A hold counts only when the transcript stayed still for all of it and
+    /// a moment before, so the touch that stops a fling never opens a menu.
+    func acceptsHold(now: Date = .now) -> Bool {
+        request == nil && now.timeIntervalSince(lastUserScroll) >= Self.holdDuration + 0.15
+    }
 
     func present(_ request: Request) {
         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { self.request = request }
@@ -39,6 +70,29 @@ extension EnvironmentValues {
     var chatMessageMenuSource: ChatMessageMenuSource? {
         get { self[ChatMessageMenuSourceKey.self] }
         set { self[ChatMessageMenuSourceKey.self] = newValue }
+    }
+}
+
+/// Opens the message menu on a deliberate hold only: half a second, moving
+/// no more than a few points, with the transcript still, and never while
+/// native text selection is up.
+struct ChatMessageMenuHold: ViewModifier {
+    let open: () -> Void
+    @Environment(ChatMessageMenu.self) private var menu: ChatMessageMenu?
+    @Environment(ChatTextSelection.self) private var selection: ChatTextSelection?
+
+    func body(content: Content) -> some View {
+        content.onLongPressGesture(minimumDuration: ChatMessageMenu.holdDuration,
+                                   maximumDistance: ChatMessageMenu.holdTolerance) {
+            guard selection?.active == nil, selection?.preventsTranscriptScrolling != true,
+                  menu?.acceptsHold() ?? true else { return }
+            open()
+        } onPressingChanged: { menu?.notePress($0) }
+    }
+}
+extension View {
+    func chatMessageMenuHold(_ open: @escaping () -> Void) -> some View {
+        modifier(ChatMessageMenuHold(open: open))
     }
 }
 
@@ -92,7 +146,7 @@ struct ChatMessageMenuPresenter: ViewModifier {
 
 /// A pressed message's actions: the message stays exactly where it is,
 /// softly highlighted, and a compact card opens just above or below it.
-/// Nothing in the chat moves; a tap outside closes the card.
+/// Nothing in the chat moves; a tap or drag outside closes the card.
 private struct ChatMessageMenuOverlay: View {
     let menu: ChatMessageMenu
     let request: ChatMessageMenu.Request
@@ -109,8 +163,12 @@ private struct ChatMessageMenuOverlay: View {
             let y = below ? source.maxY + gap : max(bounds.minY, source.minY - gap - height)
             let x = min(max(source.minX, bounds.minX), bounds.maxX - width)
             ZStack(alignment: .topLeading) {
+                // A tap, or the start of a drag, anywhere outside closes the card.
                 Color.black.opacity(0.18).ignoresSafeArea()
                     .contentShape(Rectangle()).onTapGesture { menu.dismiss() }
+                    .gesture(DragGesture(minimumDistance: 12).onChanged { _ in
+                        if menu.request?.id == request.id { menu.dismiss() }
+                    })
                     .accessibilityElement()
                     .accessibilityLabel("Dismiss message actions")
                     .accessibilityAddTraits(.isButton)
