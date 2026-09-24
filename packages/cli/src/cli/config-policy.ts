@@ -15,6 +15,25 @@ import { updateProjectConfigOverrides } from "../project-config.js";
 import { isValidProjectName } from "../utils.js";
 import { parseProjectArg, warnIfUnregistered } from "./config-shared.js";
 
+/**
+ * Exit 1 unless every `set` token is a `--key=value` pair. The parsers below skip
+ * anything else, so `set ttlDays 90` or `set --ttlDays 90` used to write an
+ * unchanged config and print it as if the change had applied.
+ */
+function requireFlagPairs(setArgs: string[], usage: string): void {
+  const isPair = (arg: string) => {
+    if (!arg.startsWith("--")) return false;
+    const [k, v] = arg.slice(2).split("=");
+    return Boolean(k) && v !== undefined;
+  };
+  const bad = setArgs.filter((arg) => !isPair(arg));
+  if (setArgs.length > 0 && bad.length === 0) return;
+  console.error("No settings changed: every value must be given as --key=value.");
+  if (bad.length > 0) console.error(`  Not understood: ${bad.join(" ")}`);
+  console.error(`  Usage: ${usage}`);
+  process.exit(1);
+}
+
 // ── Finding sensitivity config ────────────────────────────────────────────────
 
 export const FINDING_SENSITIVITY_CONFIG: Record<FindingSensitivityLevel, {
@@ -224,6 +243,7 @@ export async function handleRetentionPolicy(args: string[]) {
         console.error(`Invalid project name: "${projectArg}"`);
         process.exit(1);
       }
+      requireFlagPairs(filteredArgs.slice(1), "phren config policy set --project <name> --ttlDays=90 --retentionDays=365");
       warnIfUnregistered(phrenPath, projectArg);
       updateProjectConfigOverrides(phrenPath, projectArg, (current) => {
         const existingRetention = current.retentionPolicy ?? {};
@@ -247,6 +267,7 @@ export async function handleRetentionPolicy(args: string[]) {
       console.log(JSON.stringify({ _project: projectArg, ...resolved.retentionPolicy }, null, 2));
       return;
     }
+    requireFlagPairs(filteredArgs.slice(1), "phren config policy set --ttlDays=90 --retentionDays=365");
     const patch: Record<string, unknown> = {};
     for (const arg of filteredArgs.slice(1)) {
       if (!arg.startsWith("--")) continue;
@@ -299,6 +320,7 @@ export async function handleWorkflowPolicy(args: string[]) {
         console.error(`Invalid project name: "${projectArg}"`);
         process.exit(1);
       }
+      requireFlagPairs(filteredArgs.slice(1), "phren config workflow set --project <name> --lowConfidenceThreshold=0.7");
       warnIfUnregistered(phrenPath, projectArg);
       updateProjectConfigOverrides(phrenPath, projectArg, (current) => {
         const nextConfig = { ...current };
@@ -328,6 +350,7 @@ export async function handleWorkflowPolicy(args: string[]) {
       console.log(JSON.stringify({ _project: projectArg, ...resolved.workflowPolicy }, null, 2));
       return;
     }
+    requireFlagPairs(filteredArgs.slice(1), "phren config workflow set --lowConfidenceThreshold=0.7 --riskySections=Stale,Conflicts");
     const patch: Record<string, unknown> = {};
     for (const arg of filteredArgs.slice(1)) {
       if (!arg.startsWith("--")) continue;

@@ -7,6 +7,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- `phren uninstall` without a terminal (an agent shell, a CI step, a pipe) no longer counts as consent: it refuses, deletes nothing and says to re-run with `--yes`. Before, a non-interactive run deleted the whole store with nothing to confirm.
+- Retention prune (`phren maintain prune` and background maintenance) reads `retentionDays` and `ttlDays` per project. It used the global window for every project, so a project's longer retention override was ignored and its findings were deleted on the global schedule.
+- `phren config policy set` and `phren config workflow set` take only `--key=value`. A bare value (`set ttlDays 90`) or a flag without `=` (`set --ttlDays 90`) now exits 1 and writes nothing; before, it wrote the config unchanged and printed it as if the change had applied. `docs/governance.md` shows the real flag form and the three real roles (admin, contributor, reader).
 - Hook: the live reply preview no longer shows Claude Code's tool summaries as reply text. Claude Code 2.1.x draws a tool group as an unbulleted line under the reply ("Ran 1 shell command", "Called phren, ran 1 shell command", "Running 1 shell command… <command>"); the preview now treats that line and its wrapped command as tool activity.
 
 ## [0.2.16] - 2026-09-24
