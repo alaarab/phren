@@ -36,7 +36,7 @@ export function upgradeKeys(text: string): { text: string; changed: number } {
   let changed = 0;
   const result = text.split(/(?<=\n)/).map(line => {
     const parsed = keyOptions(line);
-    if (!parsed || parsed.options[0] !== "restrict" || !/^\s+ssh-ed25519 [A-Za-z0-9+/=]+ phren-iphone\s*$/.test(parsed.rest)) return line;
+    if (!parsed || parsed.options[0] !== "restrict" || !/^\s+ssh-ed25519 [A-Za-z0-9+/=]+ phren-(?:iphone|android)\s*$/.test(parsed.rest)) return line;
     const old = /^command="(?:\/usr\/bin\/false|python3 ~\/\.local\/share\/phren\/chat-progress\.py|sh ~\/\.local\/share\/phren\/bridge\/dispatch)"$/;
     if (!parsed.options.some(option => old.test(option))) return line;
     // permitopen restricts TCP destinations only. Removing generic forwarding
@@ -249,7 +249,7 @@ export async function uninstall() {
   await applyAgentHooks(await planAgentHooks(path.join(bridgeRoot(), "current/bridge-hook.mjs"), true));
   await applyOpencodePlugin(true);
   // Preserve journal, settings, uploaded images, rollback version and SSH backups.
-  console.log("Phren Hook stopped and its background service removed. Remove phren-iphone and phren-computer keys from authorized_keys to revoke device access. Local data remains in " + bridgeRoot());
+  console.log("Phren Hook stopped and its background service removed. Remove phren-iphone, phren-android and phren-computer keys from authorized_keys to revoke device access. Local data remains in " + bridgeRoot());
 }
 
 interface SettingsEdit { file: string; before?: string; after: string }
