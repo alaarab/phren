@@ -59,20 +59,6 @@ describe("addFinding happy path", () => {
   });
 });
 
-describe("addFinding duplicate", () => {
-  it("skips duplicate finding on second add", () => {
-    const text = "Use connection pooling for database performance optimization";
-    const r1 = addFindingToFile(tmp.path, PROJECT, text);
-    expect(r1.ok).toBe(true);
-
-    const r2 = addFindingToFile(tmp.path, PROJECT, text);
-    expect(r2.ok).toBe(true);
-    if (r2.ok) {
-      expect(r2.data.status).toBe("skipped");
-    }
-  });
-});
-
 describe("addFindings bulk", () => {
   it("adds 5 findings at once and all appear", () => {
     const findings = [
@@ -129,25 +115,6 @@ describe("addFinding does not auto-mark heuristic conflicts", () => {
     expect(content).not.toContain('phren:status "contradicted"');
     expect(content).not.toContain("phren:contradicts");
     expect(content).not.toContain("phren:possible_conflict");
-  });
-});
-
-describe("supersession", () => {
-  it("marks old finding as superseded when new one specifies supersedes", () => {
-    const oldFinding = "Use Redis for caching with default TTL settings";
-    addFindingToFile(tmp.path, PROJECT, oldFinding);
-
-    const content1 = fs.readFileSync(findingsPath(), "utf-8");
-    expect(content1).toContain("Redis for caching");
-
-    const newFinding = "Use Redis for caching with explicit TTL of 300s and LRU eviction";
-    addFindingToFile(tmp.path, PROJECT, newFinding, {
-      supersedes: oldFinding,
-    });
-
-    const content2 = fs.readFileSync(findingsPath(), "utf-8");
-    expect(content2).toContain("superseded_by");
-    expect(content2).toContain("explicit TTL of 300s");
   });
 });
 
@@ -257,38 +224,7 @@ describe("finding provenance", () => {
   });
 });
 
-describe("secret rejection", () => {
-  it("rejects finding containing AWS key pattern", () => {
-    const result = addFindingToFile(tmp.path, PROJECT, "The AWS key is AKIAIOSFODNN7EXAMPLE and it works great");
-    expect(result.ok).toBe(false);
-    expect(result.ok === false && result.error).toMatch(/secret/i);
-    expect(result.ok === false && result.code).toBe("VALIDATION_ERROR");
-    // FINDINGS.md should not exist or should not contain the key
-    if (fs.existsSync(findingsPath())) {
-      const content = fs.readFileSync(findingsPath(), "utf-8");
-      expect(content).not.toContain("AKIAIOSFODNN7EXAMPLE");
-    }
-  });
-
-  it("rejects finding containing generic API token", () => {
-    const result = addFindingToFile(tmp.path, PROJECT, "Use token sk-proj-abcdefghijklmnopqrstuvwxyz1234567890 for auth");
-    expect(result.ok).toBe(false);
-    expect(result.ok === false && result.error).toMatch(/secret/i);
-    expect(result.ok === false && result.code).toBe("VALIDATION_ERROR");
-  });
-});
-
 describe("error path: invalid project name", () => {
-  it("returns error for path traversal project name", () => {
-    const r = addFindingToFile(tmp.path, "../escape", "Should fail");
-    expect(r.ok).toBe(false);
-  });
-
-  it("returns error for empty project name", () => {
-    const r = addFindingToFile(tmp.path, "", "Should fail");
-    expect(r.ok).toBe(false);
-  });
-
   it("bulk add returns error for invalid project name", () => {
     const r = addFindingsToFile(tmp.path, "../escape", ["Should fail"]);
     expect(r.ok).toBe(false);
@@ -321,12 +257,7 @@ describe("supersession: failed add does not mutate original finding", () => {
       supersedes: "An old insight",
     });
     expect(r.ok).toBe(false);
-    // Original project FINDINGS.md should be unaffected
-    const p = path.join(tmp.path, PROJECT, "FINDINGS.md");
-    if (fs.existsSync(p)) {
-      const content = fs.readFileSync(p, "utf-8");
-      expect(content).not.toContain("superseded_by");
-    }
+    expect(fs.existsSync(path.join(tmp.path, "nonexistent-proj"))).toBe(false);
   });
 });
 

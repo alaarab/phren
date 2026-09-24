@@ -422,6 +422,7 @@ describe("addFindingToFile", () => {
     const result = addFindingToFile(phren, "../etc", "bad");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain("Invalid project name");
+    expect(addFindingToFile(phren, "", "bad").ok).toBe(false);
   });
 
   it("skips duplicate findings with high word overlap", () => {
