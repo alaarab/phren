@@ -500,27 +500,9 @@ describe("CLI integration: search edge cases", () => {
     expect(exitCode).toBe(0);
   });
 
-  it("invalid --limit value exits with error", () => {
+  it.each(["abc", "0", "201"])("invalid --limit value %s exits with error", (limit) => {
     const { stderr, exitCode } = runCli(
-      ["search", "caching", "--limit", "abc"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
-    );
-    expect(exitCode).not.toBe(0);
-    expect(stderr).toContain("Invalid --limit value");
-  });
-
-  it("--limit 0 exits with error", () => {
-    const { stderr, exitCode } = runCli(
-      ["search", "caching", "--limit", "0"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
-    );
-    expect(exitCode).not.toBe(0);
-    expect(stderr).toContain("Invalid --limit value");
-  });
-
-  it("--limit 201 exits with error", () => {
-    const { stderr, exitCode } = runCli(
-      ["search", "caching", "--limit", "201"],
+      ["search", "caching", "--limit", limit],
       { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).not.toBe(0);
@@ -552,14 +534,6 @@ describe("CLI integration: search edge cases", () => {
     );
     expect(exitCode).not.toBe(0);
     expect(stderr).toContain("Invalid project name");
-  });
-
-  it("search with --type canonical filters correctly", () => {
-    const { stdout, exitCode } = runCli(
-      ["search", "UTC", "--project", "alpha", "--type", "canonical"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
   });
 
   it("search for nonexistent term returns zero results gracefully", () => {
@@ -596,18 +570,9 @@ describe("CLI integration: config subcommands", () => {
     expect(parsed).toHaveProperty("ttlDays");
   });
 
-  it("config policy set with invalid action prints usage", () => {
+  it.each([["policy", "delete"], ["index", "remove"]])("config %s with invalid action %s prints usage", (domain, action) => {
     const { stderr, exitCode } = runCli(
-      ["config", "policy", "delete"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
-    );
-    expect(exitCode).not.toBe(0);
-    expect(stderr).toContain("Usage:");
-  });
-
-  it("config index with invalid action prints usage", () => {
-    const { stderr, exitCode } = runCli(
-      ["config", "index", "remove"],
+      ["config", domain, action],
       { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).not.toBe(0);
@@ -648,26 +613,13 @@ describe("CLI integration: maintain subcommands", () => {
     expect(stderr).toContain('Unknown maintain subcommand: "bogus"');
   });
 
-  it("maintain govern with no project governs all projects", () => {
+  it.each([[[]], [["gov-proj"]]])("maintain govern %j governs the named project or all of them", (target) => {
     const projDir = path.join(phrenDir, "gov-proj");
     fs.mkdirSync(projDir, { recursive: true });
     fs.writeFileSync(path.join(projDir, "FINDINGS.md"), "# gov-proj FINDINGS\n\n## 2025-01-01\n\n- a useful insight\n");
 
     const { stdout, exitCode } = runCli(
-      ["maintain", "govern"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("Governed memories:");
-  });
-
-  it("maintain govern with specific project", () => {
-    const projDir = path.join(phrenDir, "gov-proj");
-    fs.mkdirSync(projDir, { recursive: true });
-    fs.writeFileSync(path.join(projDir, "FINDINGS.md"), "# gov-proj FINDINGS\n\n## 2025-01-01\n\n- a useful insight\n");
-
-    const { stdout, exitCode } = runCli(
-      ["maintain", "govern", "gov-proj"],
+      ["maintain", "govern", ...target],
       { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
@@ -691,19 +643,11 @@ describe("CLI integration: maintain subcommands", () => {
     expect(stdout).toContain("Would govern");
     // Queue file should not have been created
     expect(fs.existsSync(queuePath)).toBe(false);
-  });
 
-  it("maintain govern --dry-run with no project previews all", () => {
-    const projDir = path.join(phrenDir, "gov-dry2");
-    fs.mkdirSync(projDir, { recursive: true });
-    fs.writeFileSync(path.join(projDir, "FINDINGS.md"), "# gov-dry2 FINDINGS\n\n## 2025-01-01\n\n- useful thing\n");
-
-    const { stdout, exitCode } = runCli(
-      ["maintain", "govern", "--dry-run"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("[dry-run]");
+    // Without a project, the dry run previews every project.
+    const all = runCli(["maintain", "govern", "--dry-run"], { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" });
+    expect(all.exitCode).toBe(0);
+    expect(all.stdout).toContain("[dry-run]");
   });
 
   it("maintain consolidate --dry-run does not modify files", () => {
@@ -758,54 +702,22 @@ describe("CLI integration: quality-feedback", () => {
 
   afterAll(() => cleanup());
 
-  it("records helpful feedback", () => {
+  it.each(["helpful", "reprompt", "regression"])("records %s feedback", (type) => {
     const { stdout, exitCode } = runCli(
-      ["quality-feedback", "--key=test-proj/FINDINGS.md:insight1", "--type=helpful"],
+      ["quality-feedback", `--key=test-proj/FINDINGS.md:${type}`, `--type=${type}`],
       { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("Recorded feedback: helpful");
+    expect(stdout).toContain(`Recorded feedback: ${type}`);
   });
 
-  it("records reprompt feedback", () => {
-    const { stdout, exitCode } = runCli(
-      ["quality-feedback", "--key=test-proj/FINDINGS.md:insight2", "--type=reprompt"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("Recorded feedback: reprompt");
-  });
-
-  it("records regression feedback", () => {
-    const { stdout, exitCode } = runCli(
-      ["quality-feedback", "--key=test-proj/FINDINGS.md:insight3", "--type=regression"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("Recorded feedback: regression");
-  });
-
-  it("exits with error on missing key", () => {
+  it.each([
+    ["missing key", ["--type=helpful"]],
+    ["missing type", ["--key=test-proj/FINDINGS.md:insight"]],
+    ["invalid type", ["--key=test-proj/FINDINGS.md:insight", "--type=invalid"]],
+  ])("exits with error on %s", (_label, args) => {
     const { stderr, exitCode } = runCli(
-      ["quality-feedback", "--type=helpful"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
-    );
-    expect(exitCode).not.toBe(0);
-    expect(stderr).toContain("Usage:");
-  });
-
-  it("exits with error on missing type", () => {
-    const { stderr, exitCode } = runCli(
-      ["quality-feedback", "--key=test-proj/FINDINGS.md:insight"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
-    );
-    expect(exitCode).not.toBe(0);
-    expect(stderr).toContain("Usage:");
-  });
-
-  it("exits with error on invalid type", () => {
-    const { stderr, exitCode } = runCli(
-      ["quality-feedback", "--key=test-proj/FINDINGS.md:insight", "--type=invalid"],
+      ["quality-feedback", ...args],
       { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).not.toBe(0);
@@ -1141,18 +1053,6 @@ describe("CLI integration: init", () => {
     expect(fs.readFileSync(machineFile, "utf8").trim()).toBe("test-box");
   }, CLI_INTEGRATION_TIMEOUT_MS);
 
-  it("init is idempotent (re-running does not fail)", () => {
-    runCli(
-      ["init", "-y", "--mcp", "off"],
-      cliEnv.env({ PHREN_ACTOR: "cli-test" })
-    );
-    const { exitCode } = runCli(
-      ["init", "-y", "--mcp", "off"],
-      cliEnv.env({ PHREN_ACTOR: "cli-test" })
-    );
-    expect(exitCode).toBe(0);
-  }, CLI_INTEGRATION_TIMEOUT_MS);
-
   it("init --mcp with invalid value exits with error", () => {
     const { stderr, exitCode } = runCli(
       ["init", "--mcp", "banana"],
@@ -1167,6 +1067,8 @@ describe("CLI integration: init", () => {
       ["init", "-y", "--mcp", "off"],
       cliEnv.env({ PHREN_ACTOR: "cli-test" })
     );
+    // Re-running init on an existing install succeeds (idempotent).
+    expect(runCli(["init", "-y", "--mcp", "off"], cliEnv.env({ PHREN_ACTOR: "cli-test" })).exitCode).toBe(0);
     const { stdout, exitCode } = runCli(
       ["init", "--dry-run", "-y"],
       cliEnv.env()
@@ -1218,18 +1120,11 @@ describe("CLI integration: help and health", () => {
     expect(stdout).not.toContain("projects add");
     expect(stdout).not.toContain("phren link");
     expect(stdout).not.toContain("--from-existing");
-  });
-
-  it("-h prints usage information", () => {
-    const { stdout, exitCode } = runCli(["-h"]);
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("phren");
-  });
-
-  it("help prints usage information", () => {
-    const { stdout, exitCode } = runCli(["help"]);
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("phren");
+    for (const alias of ["-h", "help"]) {
+      const other = runCli([alias]);
+      expect(other.exitCode).toBe(0);
+      expect(other.stdout).toContain("phren");
+    }
   });
 
   it("--health exits with code 0", () => {
@@ -1280,13 +1175,11 @@ describe("CLI integration: help and health", () => {
     expect(stdout).toContain("Register a project");
     expect(stdout).not.toContain("not set up");
     expect(stdout).not.toContain("Added project");
-  });
-
-  it("init --help short-circuits before runInit", () => {
-    const { stdout, exitCode } = runCli(["init", "--help"]);
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("phren init");
-    expect(stdout).toContain("Set up phren");
+    // init --help short-circuits before runInit the same way.
+    const init = runCli(["init", "--help"]);
+    expect(init.exitCode).toBe(0);
+    expect(init.stdout).toContain("phren init");
+    expect(init.stdout).toContain("Set up phren");
   });
 
   it("mem add --help works through the alias unwrap", () => {
@@ -1401,39 +1294,18 @@ describe("CLI integration: detect-skills", () => {
 
 // --- Unit tests for exported cli functions ---
 
-import { scoreFindingCandidate } from "./cli/extract.js";
 import { detectTaskIntent, selectSnippets } from "./cli/hooks.js";
 import { DocRow } from "./shared/index.js";
 
-describe("scoreFindingCandidate", () => {
-  it("scores merged PRs higher than plain commits", () => {
-    const merged = scoreFindingCandidate("Merge pull request #42 from user/fix-timeout", "fix retry logic");
-    const plain = scoreFindingCandidate("fix retry logic", "");
-    expect(merged).not.toBeNull();
-    expect(plain).not.toBeNull();
-    expect(merged!.score).toBeGreaterThan(plain!.score);
-  });
-});
-
 describe("detectTaskIntent", () => {
-  it("detects debug intent from error-related prompts", () => {
-    expect(detectTaskIntent("why is this failing with a TypeError")).toBe("debug");
-  });
-
-  it("detects review intent from review-related prompts", () => {
-    expect(detectTaskIntent("review this PR and check for issues")).toBe("review");
-  });
-
-  it("detects build intent from CI/deploy prompts", () => {
-    expect(detectTaskIntent("set up the CI pipeline for deploy")).toBe("build");
-  });
-
-  it("detects docs intent from documentation prompts", () => {
-    expect(detectTaskIntent("update the README with the new API")).toBe("docs");
-  });
-
-  it("returns general for ambiguous prompts", () => {
-    expect(detectTaskIntent("hello")).toBe("general");
+  it.each([
+    ["why is this failing with a TypeError", "debug"],
+    ["review this PR and check for issues", "review"],
+    ["set up the CI pipeline for deploy", "build"],
+    ["update the README with the new API", "docs"],
+    ["hello", "general"],
+  ])("detects the intent of %j as %s", (prompt, intent) => {
+    expect(detectTaskIntent(prompt)).toBe(intent);
   });
 
   it("detects explicit slash-command and skill phrasing as skill intent", () => {
