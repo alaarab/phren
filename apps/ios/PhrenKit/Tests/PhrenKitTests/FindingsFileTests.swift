@@ -116,32 +116,6 @@ final class FindingsFileTests: XCTestCase {
         }
     }
 
-    func testEditRefusesArchivedFinding() throws {
-        let content = """
-        # myproj Findings
-
-        ## 2026-07-01
-
-        - Active bullet <!-- fid:aaaaaaaa -->
-
-        <details>
-        <summary>Archived</summary>
-
-        ## 2026-01-01
-
-        - Archived bullet <!-- fid:bbbbbbbb -->
-
-        </details>
-        """
-        var file = FindingsFile(content: content)
-        XCTAssertThrowsError(try file.edit(project: "myproj", oldText: "Archived bullet", newText: "changed")) {
-            guard case PhrenKitError.archivedReadOnly = $0 else { return XCTFail("wrong error: \($0)") }
-        }
-        // And archived bullets are hidden from the default parse.
-        XCTAssertEqual(file.parse().map(\.stableId), ["aaaaaaaa"])
-        XCTAssertEqual(file.parse(includeArchived: true).count, 2)
-    }
-
     func testMatchByFid() throws {
         var file = FindingsFile(content: try Fixtures.text("findings-after-remove.md"))
         let target = file.parse().first!

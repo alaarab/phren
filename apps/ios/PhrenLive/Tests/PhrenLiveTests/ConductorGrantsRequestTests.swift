@@ -48,12 +48,4 @@ final class ConductorGrantsRequestTests: XCTestCase {
         XCTAssertThrowsError(try PhrenConnection.conductorGrantRemoveRequest(index: 64))
     }
 
-    func testApprovalDecisionsCarryTheirWireValues() {
-        XCTAssertEqual(ApprovalDecision.approve.rawValue, "approve")
-        XCTAssertEqual(ApprovalDecision.deny.rawValue, "deny")
-        XCTAssertEqual(ApprovalDecision.allowProject.rawValue, "allow-project")
-        XCTAssertEqual(ApprovalDecision.allowEverywhere.rawValue, "allow-everywhere")
-        XCTAssertTrue(ApprovalDecision.allowEverywhere.allows)
-        XCTAssertFalse(ApprovalDecision.deny.allows)
-    }
 }

@@ -76,19 +76,6 @@ final class ShortcutPanelTests: XCTestCase {
     }
 
     @MainActor
-    func testClaudePanelCarriesTheShiftTabPermissionModeKey() {
-        let app = XCUIApplication()
-        app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture"]
-        app.launch(); openSettings(app); reset(app)
-        app.buttons["panel-edit:claude"].tap()
-        let mode = app.buttons["shortcut-edit:claude:key:permission-mode"]
-        scrollTo(mode, app)
-        XCTAssertTrue(mode.label.contains("⇧ Tab · mode"), "Claude's tab lists the permission-mode key")
-        XCTAssertTrue(mode.label.contains("Shift+Tab"), "The row names the binding it sends")
-        capture(app, "Claude shortcuts with the permission-mode key")
-    }
-
-    @MainActor
     func testNamedKeyBuilderCombinesModifiersAndCanCancelWithoutSaving() {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture"]

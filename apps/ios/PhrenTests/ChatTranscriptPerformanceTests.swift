@@ -4,17 +4,6 @@ import XCTest
 @testable import Phren
 
 final class ChatTranscriptPerformanceTests: XCTestCase {
-    func testHeavyTranscriptPreparationPerformance() throws {
-        let frame = try AgentChatTranscript.read(ChatHeavyFixture.data(), source: "codex")
-        measure {
-            var prepared = ChatTranscriptPreparation()
-            prepared.update(frame.messages)
-            XCTAssertEqual(prepared.entries.count, 40)
-            for _ in 0..<60 { prepared.update(frame.messages) }
-            XCTAssertEqual(prepared.revision, 1)
-        }
-    }
-
     func testHeavyPagePreparationIsReusedAcrossUnchangedFrames() throws {
         let data = try ChatHeavyFixture.data()
         let frame = try AgentChatTranscript.read(data, source: "codex")

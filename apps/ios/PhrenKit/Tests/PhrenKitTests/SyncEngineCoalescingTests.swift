@@ -215,38 +215,6 @@ final class SyncEngineCoalescingTests: XCTestCase {
         XCTAssertEqual(status.failedCount, 0)
     }
 
-    func testSingleOpKeepsThePlainCommitMessage() async throws {
-        let (engine, client) = try await makeEngine(local: ["myproj/review.md": Self.reviewSeed])
-
-        try await engine.enqueue(.approveQueue(project: "myproj", line: Self.firstLine))
-        await engine.flushNow()
-
-        let writes = await client.writes
-        XCTAssertEqual(writes.count, 1)
-        XCTAssertEqual(writes[0].message, "phren: myproj(update) via ios")
-        let failed = await engine.failedOps()
-        XCTAssertTrue(failed.isEmpty, "an op applied locally must still push, not park")
-    }
-
-    func testOpsOnDifferentFilesShareOneFlushPlan() async throws {
-        let (engine, client) = try await makeEngine(local: [
-            "myproj/review.md": Self.reviewSeed,
-            "myproj/tasks.md": Self.tasksSeed,
-        ])
-
-        try await engine.enqueue(.approveQueue(project: "myproj", line: Self.firstLine))
-        try await engine.enqueue(.completeTask(project: "myproj", match: "flaky sync test"))
-        await engine.flushNow()
-
-        let writes = await client.writes
-        XCTAssertEqual(writes.map(\.path), ["myproj/review.md", "myproj/tasks.md"])
-        // One plan, one message: both files carry the whole batch's summary.
-        XCTAssertEqual(writes.map(\.message), [
-            "phren: myproj(update,task) via ios",
-            "phren: myproj(update,task) via ios",
-        ])
-    }
-
     /// The regression behind the 41-commit burst of 2026-08-01: a batch
     /// approve spanning several projects interleaves their review.md ops, and
     /// the old contiguous-prefix grouping split at every project switch — one

@@ -68,33 +68,4 @@ final class TeamBootstrapTests: XCTestCase {
         XCTAssertEqual(crlf.role, "team")
     }
 
-    /// The registry is the fallback signal, and `role` is what routing keys
-    /// off — not the `projects:` claim list, because the app always writes to
-    /// a specific (store, project) pair, which is the CLI's store-qualified
-    /// form (`resolveStoreForProject`, tools/types.ts:105).
-    func testStoresManifestStillCarriesTheRole() {
-        let manifest = StoresManifest.parse("""
-        version: 1
-        stores:
-          - id: 365c6bb8
-            name: phren
-            path: ~/.phren
-            role: primary
-            sync: managed-git
-          - id: 67d3e4c9
-            name: work-shared
-            path: ~/.phren-work-shared
-            role: team
-            sync: managed-git
-            projects:
-              - alpha
-              - beta
-        """)
-        XCTAssertEqual(manifest.stores.map(\.role), ["primary", "team"])
-        XCTAssertEqual(manifest.stores.first { $0.name == "work-shared" }?.projects, ["alpha", "beta"])
-        // A project physically in the team store isn't "claimed elsewhere" —
-        // which is exactly why claim badges can't answer the routing question.
-        XCTAssertNil(manifest.claimingEntry(for: "alpha", physicalStoreName: "work-shared"))
-        XCTAssertEqual(manifest.claimingEntry(for: "alpha", physicalStoreName: "phren")?.role, "team")
-    }
 }

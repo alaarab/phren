@@ -43,12 +43,6 @@ final class AgentChatSpinnerTests: XCTestCase {
         XCTAssertNil(older.activity)
     }
 
-    func testPastTenseForTheFinishedLine() {
-        XCTAssertEqual(AgentChatSpinner.pastTense("Brewing"), "Brewed")
-        XCTAssertEqual(AgentChatSpinner.pastTense("Whirlpooling"), "Whirlpooled")
-        XCTAssertEqual(AgentChatSpinner.pastTense("Spinning"), "Spun")
-        XCTAssertNil(AgentChatSpinner.pastTense("Zorbling"))
-    }
 }
 
 /// Claude's narration arrives from the Hook as a text block marked

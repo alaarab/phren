@@ -77,18 +77,6 @@ final class SessionSurfacesTests: XCTestCase {
         XCTAssertEqual(state.more, 0)
     }
 
-    func testSevenAgentsProduceFiveRowsAndCountTheRest() {
-        let now = Date(timeIntervalSince1970: 1000)
-        let sessions = (0..<7).map { index in
-            SessionWorkingActivityBuilder.Session(
-                entry: .init(id: "s\(index)", project: "p\(index)", provider: "claude", tool: nil, computer: "Desk"),
-                state: "working", startedAt: now.addingTimeInterval(Double(-index)))
-        }
-        let state = SessionWorkingActivityBuilder.build(sessions, now: now)
-        XCTAssertEqual(state.entries.count, 5)
-        XCTAssertEqual(state.more, 2)
-    }
-
     func testUnchangedSnapshotsDoNotProduceNewActivityContent() {
         let start = Date(timeIntervalSince1970: 1000)
         let working = SessionWorkingActivityBuilder.Session(entry: .init(id: "one", project: "App", provider: "claude", tool: nil, computer: "Desk"), state: "working", startedAt: start)

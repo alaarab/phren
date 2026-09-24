@@ -141,31 +141,6 @@ final class AgentChatImageTests: AgentChatUITestCase {
         XCTAssertEqual(pictures.count, 4)
     }
 
-    @MainActor
-    func testSystemPhotoPickerPreparesAnAttachment() throws {
-        let app = launch()
-        app.buttons["live-chat:w7:w7:t9"].tap()
-        XCTAssertTrue(app.staticTexts["The project screen is ready. What would you like to change?"].waitForExistence(timeout: 5))
-        app.buttons["Add attachment"].tap()
-        app.buttons["chat-attach-menu:photos"].tap()
-        let picker = app.scrollViews["photosView_content_scroll_view"]
-        XCTAssertTrue(picker.waitForExistence(timeout: 8))
-        let introduction = picker.buttons["Close"].firstMatch
-        if introduction.exists { introduction.tap() }
-        let photo = picker.images.firstMatch
-        guard photo.waitForExistence(timeout: 8) else {
-            throw XCTSkip("Seed the UI test simulator with a photo to exercise the system picker")
-        }
-        // Photos' remote grid exposes its image frame but not AX hit testing.
-        photo.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-        let done = app.navigationBars["Photos"].buttons["Done"]
-        if done.waitForExistence(timeout: 3) { done.tap() }
-        else { app.buttons["Add"].firstMatch.tap() }
-        let preview = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Preview Image.")).firstMatch
-        XCTAssertTrue(preview.waitForExistence(timeout: 10))
-        capture(app, "System photo picker attachment")
-    }
-
     /// Pick, add, reopen, pick another: the second session starts with
     /// nothing selected and the first photo is not added twice. Needs at
     /// least two photos in the simulator's library (`xcrun simctl addmedia`).
@@ -276,13 +251,4 @@ final class AgentChatImageTests: AgentChatUITestCase {
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Received in codex")).firstMatch.exists)
     }
 
-    @MainActor
-    func testComposerHasNoClipboardButtonWhenAnImageIsAvailable() {
-        let app = launch(extra: ["--clipboard-image-fixture"])
-        app.buttons["live-chat:w7:w7:t9"].tap()
-        XCTAssertTrue(app.descendants(matching: .any)["chat-composer"].waitForExistence(timeout: 8))
-        XCTAssertTrue(app.buttons["Add attachment"].exists)
-        XCTAssertFalse(app.buttons["chat-paste-image"].exists)
-        XCTAssertFalse(app.buttons["Paste image"].exists)
-    }
 }

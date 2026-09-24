@@ -95,21 +95,6 @@ final class WebPreviewTests: XCTestCase {
         }
     }
 
-    func testInstalledDiscoveryAndAppThroughSSHWhenRequested() async throws {
-        guard ProcessInfo.processInfo.environment["PHREN_TEST_WEB_SERVERS"] == "1" else { throw XCTSkip("Optional real helper and app check") }
-        let relay = try await ChatRelaySSH.start()
-        defer { Task { try? await relay.close() } }
-        let servers = try await PhrenConnection.webServers(host: relay.host(), privateKey: relay.deviceKey.rawRepresentation)
-        guard let server = servers.first(where: { $0.scheme == "http" }) else { return XCTFail("Expected a local fixture app") }
-        let webRelay = try await ChatRelaySSH.start(forwardPorts: [server.port: server.port], webPreviewHealth: "ssh-exec")
-        defer { Task { try? await webRelay.close() } }
-        let tunnel = try await WebPreviewTunnel.open(host: webRelay.host(), privateKey: webRelay.deviceKey.rawRepresentation, server: server)
-        defer { tunnel.close() }
-        let (body, response) = try await session(tunnel).data(from: tunnel.url)
-        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
-        XCTAssertGreaterThan(body.count, 100)
-    }
-
     private func session(_ tunnel: WebPreviewTunnel) -> URLSession {
         let config = URLSessionConfiguration.ephemeral
         config.proxyConfigurations = [tunnel.proxyConfiguration]

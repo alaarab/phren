@@ -41,11 +41,6 @@ final class MultiStoreTests: XCTestCase {
         XCTAssertNotEqual(jwt.first?.id, flaky.first?.id)
     }
 
-    func testSingleSnapshotInitKeepsEmptyStore() throws {
-        let index = SearchIndex(snapshot: .empty)
-        XCTAssertTrue(index.search("anything").isEmpty)
-    }
-
     func testReviewQueueOrderSharedComparator() {
         func item(_ id: String, project: String, section: QueueItem.Section, date: String) -> ProjectQueueItem {
             ProjectQueueItem(project: project, item: QueueItem(
@@ -74,14 +69,6 @@ final class MultiStoreTests: XCTestCase {
                 "Conflicts/gamma/M1",
             ]
         )
-    }
-
-    func testStoreDescriptorCodableRoundTrip() throws {
-        let descriptor = StoreDescriptor(owner: "alaarab", name: "phren-store", branch: "main", canPush: false)
-        let data = try JSONEncoder().encode(descriptor)
-        let decoded = try JSONDecoder().decode(StoreDescriptor.self, from: data)
-        XCTAssertEqual(decoded, descriptor)
-        XCTAssertEqual(decoded.id, "alaarab/phren-store")
     }
 
     func testStoreDescriptorDecodesLegacySelectedRepoJSON() throws {

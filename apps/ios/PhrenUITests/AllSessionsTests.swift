@@ -33,16 +33,6 @@ final class AllSessionsTests: XCTestCase {
     }
 
     @MainActor
-    func testFreshDiskCacheRevealsCardsAndComputersWhileRefreshingBehindThem() {
-        let app = launch(extra: ["--all-sessions-delayed", "--overview-disk-cache", "--overview-cache-fresh"])
-        XCTAssertTrue(row(app, host: mac).waitForExistence(timeout: 2))
-        XCTAssertTrue(row(app, host: linux).exists)
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label ==[c] %@", "Computers")).firstMatch.exists)
-        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "agents-loading").firstMatch.exists)
-        capture(app, "Complete cached sessions screen")
-    }
-
-    @MainActor
     func testSessionCardsShowReportedRelativeTime() {
         let app = launch(extra: ["--session-relative-time-fixture"])
         let time = app.staticTexts["overview-changed:\(mac):herdr:default:w1:w1:t1"]

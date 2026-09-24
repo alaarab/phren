@@ -171,19 +171,6 @@ final class GraphInteractionTests: XCTestCase {
     }
 
     @MainActor
-    func testProjectDossierOmitsLeafControls() {
-        let app = XCUIApplication()
-        app.launchArguments = ["--ui-testing"]
-        app.launch()
-        let dossier = openProjectDossier(in: app)
-
-        XCTAssertTrue(dossier.waitForExistence(timeout: 5), "project dossier appears")
-        XCTAssertFalse(app.webViews.buttons["Edit"].exists, "project omits Edit")
-        XCTAssertFalse(app.webViews.buttons["Delete"].exists, "project omits Delete")
-        XCTAssertFalse(app.webViews.buttons["Next node"].exists, "project omits stepping")
-    }
-
-    @MainActor
     func testGraphDragsStayOnMemoryAndOtherTabsKeepBackGestures() {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing"]

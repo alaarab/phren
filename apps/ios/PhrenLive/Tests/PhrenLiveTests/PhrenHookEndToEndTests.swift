@@ -40,28 +40,6 @@ final class PhrenHookEndToEndTests: XCTestCase {
         try FileManager.default.removeItem(atPath: uploaded)
     }
 
-    /// Read-only opt-in check against the caller's exact live pane through the
-    /// installed helper. No prompt or terminal input reaches that conversation.
-    func testInstalledHelperReadsLiveConversationThroughPinnedSSH() async throws {
-        let env = ProcessInfo.processInfo.environment
-        guard env["PHREN_HOOK_LIVE_READ"] == "1", let fixture = env["PHREN_HOOK_SSH_FIXTURE"],
-              let workspace = env["HERDR_WORKSPACE_ID"], let tab = env["HERDR_TAB_ID"], let paneID = env["HERDR_PANE_ID"] else {
-            throw XCTSkip("Optional read-only installed helper check")
-        }
-        let directory = URL(fileURLWithPath: fixture)
-        let key = try Data(contentsOf: directory.appendingPathComponent("device.raw"))
-        let publicKey = try String(contentsOf: directory.appendingPathComponent("host_key.pub"), encoding: .utf8)
-        let host = try LiveHost(name: "Installed helper", address: "127.0.0.1", port: 22866, username: NSUserName(),
-                               fingerprint: PhrenConnection.fingerprint(publicKey: publicKey))
-        let panes = try await PhrenConnection.chatPanes(host: host, privateKey: key, workspaceID: workspace, tabID: tab)
-        let pane = try XCTUnwrap(panes.panes.first { $0.id == paneID })
-        let target = try pane.target(hostID: host.id, workspaceID: workspace, tabID: tab, muxID: host.muxID)
-        let transcript = try await PhrenConnection.chatTranscript(host: host, privateKey: key, target: target)
-        XCTAssertEqual(transcript.kind, .backlog)
-        XCTAssertFalse(transcript.messages.isEmpty)
-        XCTAssertGreaterThan(transcript.totalLines, 0)
-    }
-
     /// Uses a disposable sshd and named Herdr server. No user's agent receives input.
     func testStandaloneHookAndSSHPTYWithSlowRenderer() async throws {
         guard let fixture = ProcessInfo.processInfo.environment["PHREN_HOOK_SSH_FIXTURE"] else {

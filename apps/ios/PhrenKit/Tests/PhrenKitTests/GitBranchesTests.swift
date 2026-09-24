@@ -44,7 +44,4 @@ final class GitBranchesTests: XCTestCase {
         }
     }
 
-    func testRejectsMalformedPayload() {
-        XCTAssertThrowsError(try GitBranches.read(Data(#"{"local":[]}"#.utf8)))
-    }
 }

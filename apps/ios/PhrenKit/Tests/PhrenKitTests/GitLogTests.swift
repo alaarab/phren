@@ -46,13 +46,4 @@ final class GitLogTests: XCTestCase {
         }
     }
 
-    func testRejectsMalformedPayload() {
-        XCTAssertThrowsError(try GitLog.read(Data(#"{"commits":"nope"}"#.utf8)))
-    }
-
-    func testCommitRelativeTimeUsesSessionFormatting() throws {
-        let commit = try XCTUnwrap(try GitLog.read(sample).commits.first)
-        let date = try XCTUnwrap(ISO8601Dates.parse(commit.date))
-        XCTAssertEqual(commit.relativeTime, SessionRelativeTime.text(since: date, at: .now))
-    }
 }

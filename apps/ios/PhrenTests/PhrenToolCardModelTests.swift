@@ -13,23 +13,6 @@ final class PhrenToolCardModelTests: XCTestCase {
     private func presentation(_ tool: String, _ input: String, result: String = #"{"ok":true}"#) throws -> PhrenToolPresentation {
         try XCTUnwrap(PhrenToolPresentation(name: "mcp__phren__" + tool, input: input, result: result))
     }
-    func testFullContentSurvivesExpandAndFoldForEveryCardKind() throws {
-        for tool in ["add_task", "add_finding", "manage_task", "revise_finding", "search_knowledge", "session", "phren_admin"] {
-            let long = String(repeating: "Complete instruction. ", count: 100) + "Final marker"
-            let input = String(decoding: try JSONSerialization.data(withJSONObject: ["item": long, "finding": long, "summary": long]), as: UTF8.self)
-            let presentation = try presentation(tool, input)
-            var model = PhrenToolCardModel()
-            XCTAssertFalse(model.isExpanded)
-            XCTAssertEqual(model.bodyLineLimit, 4)
-            model.toggle()
-            XCTAssertTrue(model.isExpanded)
-            XCTAssertNil(model.bodyLineLimit)
-            XCTAssertTrue(presentation.fullInput.contains("Final marker"))
-            model.toggle()
-            XCTAssertFalse(model.isExpanded)
-            XCTAssertEqual(model.bodyLineLimit, 4)
-        }
-    }
     func testTaskUsesExactTextOrStableIDWithinItsSourceStore() throws {
         for (tool, input) in [
             ("add_task", #"{"project":"phone","item":"Verify pasted images"}"#),

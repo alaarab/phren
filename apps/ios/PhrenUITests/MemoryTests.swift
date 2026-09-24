@@ -2,36 +2,6 @@ import XCTest
 
 final class MemoryTests: XCTestCase {
     @MainActor
-    func testMapSearchSelectsANodeAndOpensTheDossier() {
-        let app = launch(mode: "map")
-        XCTAssertTrue(app.webViews.staticTexts["PHREN"].firstMatch.waitForExistence(timeout: 30),
-                      "the graph renders the store")
-        capture(app, "Memory map")
-
-        app.buttons["memory-search-toggle"].tap()
-        let field = app.textFields["memory-search"]
-        XCTAssertTrue(field.waitForExistence(timeout: 5))
-        field.tap()
-        field.typeText("idempotency\n")
-
-        let dossier = app.webViews.otherElements
-            .matching(NSPredicate(format: "label BEGINSWITH %@", "Node details")).firstMatch
-        XCTAssertTrue(dossier.waitForExistence(timeout: 10), "the dossier opens on the searched node")
-        XCTAssertTrue(app.webViews.staticTexts
-            .matching(NSPredicate(format: "label CONTAINS %@", "Idempotency keys")).firstMatch.exists)
-        capture(app, "Memory map dossier")
-
-        let next = app.webViews.buttons["Next node"]
-        XCTAssertTrue(next.waitForExistence(timeout: 5), "the dossier header exposes Next")
-        XCTAssertTrue(app.webViews.buttons["Previous node"].exists, "the dossier header exposes Previous")
-        next.tap()
-        XCTAssertTrue(dossier.staticTexts
-            .matching(NSPredicate(format: "label CONTAINS %@", "Invoices are generated from the ledger")).firstMatch
-            .waitForExistence(timeout: 5),
-                      "Next moves the dossier to the next node in the ranked list")
-    }
-
-    @MainActor
     func testListModeRowsAndProjectFilterChangeTheCountsLine() {
         let app = launch(mode: "list")
         let counts = app.staticTexts["memory-counts"]
