@@ -82,7 +82,10 @@ process.stdin.on('end', () => {
 }
 
 describe("POST /v1/subagents/resume", () => {
-  it.each(["codex", "opencode"] as const)("resumes a finished %s worker with stdin in its own worktree and keeps the same job", async provider => {
+  // Fan-out launches through `nice` and stops a served harness by its process
+  // group, both POSIX: on Windows the served OpenCode stays alive. The Hook
+  // that runs fan-out supports macOS and Linux only.
+  it.each((process.platform === "win32" ? ["codex"] : ["codex", "opencode"]) as ("codex" | "opencode")[])("resumes a finished %s worker with stdin in its own worktree and keeps the same job", async provider => {
     const f = await fixture("completed", provider);
     const text = "Review the fix\n`literal` $(also literal)";
     const result = await f.service.send({ target, child: f.child, text });
@@ -157,7 +160,7 @@ describe("POST /v1/subagents/resume", () => {
 
   it("uses the launcher resume arguments and lets OpenCode retain its configured model when absent", () => {
     const options = { job: "/home/sam/job", worktree: "/home/sam/project", model: "", resume: thread };
-    expect(codex.argv(options)).toEqual(["exec", "resume", "--json", "-o", "/home/sam/job/final.txt", thread, "-"]);
+    expect(codex.argv(options)).toEqual(["exec", "resume", "--json", "-o", path.join("/home/sam/job", "final.txt"), thread, "-"]);
     expect(opencode.argv({ ...options, resume: "ses_worker42" })).not.toContain("--model");
   });
 });

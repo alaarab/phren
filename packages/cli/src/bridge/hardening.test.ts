@@ -3,6 +3,9 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { appendFile, mkdir, mkdtemp, open, readdir, readFile, realpath, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { tmpdir } from "node:os";
+// /tmp keeps POSIX paths short; Windows has no /tmp.
+const scratchRoot = process.platform === "win32" ? tmpdir() : "/tmp";
 import { promisify } from "node:util";
 import { conversationNamedPaths, TranscriptReader, visibleEvent } from "./transcripts.js";
 import { ToolChanges, capturesChanges, pruneChanges, startChangeRetention } from "./changes.js";
@@ -13,7 +16,7 @@ import { serverName } from "./protocol.js";
 const exec = promisify(execFile);
 let home: string;
 beforeEach(async () => {
-  home = await realpath(await mkdtemp("/tmp/phren-hardening-"));
+  home = await realpath(await mkdtemp(path.join(scratchRoot, "phren-hardening-")));
   vi.stubEnv("HOME", home); vi.stubEnv("PHREN_BRIDGE_HOME", path.join(home, "bridge"));
   vi.stubEnv("PHREN_PATH", path.join(home, ".phren")); vi.stubEnv("PHREN_HERDR_HOME", path.join(home, "herdr"));
 });
@@ -200,7 +203,7 @@ describe("route scope and admission", () => {
     await expect(launchDirectory("/etc")).rejects.toMatchObject({ status: 403 });
     await symlink("/etc", path.join(home, "escape"));
     await expect(launchDirectory(path.join(home, "escape"))).rejects.toMatchObject({ status: 403 });
-    const outside = await realpath(await mkdtemp("/tmp/phren-located-"));
+    const outside = await realpath(await mkdtemp(path.join(scratchRoot, "phren-located-")));
     try {
       const project = path.join(outside, "project"); await mkdir(project);
       await expect(launchDirectory(project)).rejects.toMatchObject({ status: 403 });

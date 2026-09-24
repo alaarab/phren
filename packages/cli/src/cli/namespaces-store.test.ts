@@ -44,6 +44,9 @@ function commit(repo: string, rel: string, content: string, message: string): st
 function configure(repo: string): void {
   git(repo, "config", "user.email", "sam@example.com");
   git(repo, "config", "user.name", "sam");
+  // Windows runners default core.autocrlf to true, which rewrites LF files as
+  // CRLF when a sync checks them out again.
+  git(repo, "config", "core.autocrlf", "false");
 }
 
 function fixture(rel: string, initial: string) {

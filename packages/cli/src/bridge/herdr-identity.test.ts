@@ -14,7 +14,8 @@ it("accepts an opencode ses_ session reported by Herdr", async () => {
     agent_session: { kind: "id", agent: "opencode", source: "herdr:opencode", value: "ses_f4a6b5c11ffe6nZrRlGZbXXNli" } };
   expect(await paneIdentity("default", pane)).toBe("ses_f4a6b5c11ffe6nZrRlGZbXXNli");
 });
-it("caches identity per server, pane, terminal and PID set for two seconds, with fresh bypass", async () => {
+// Herdr is reached over a Unix domain socket, which Node cannot listen on at a file path on Windows.
+it.skipIf(process.platform === "win32")("caches identity per server, pane, terminal and PID set for two seconds, with fresh bypass", async () => {
   const root = await mkdtemp("/tmp/phren-identity-");
   vi.stubEnv("PHREN_HERDR_HOME", root); vi.stubEnv("PHREN_BRIDGE_HOME", root + "/bridge");
   vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
